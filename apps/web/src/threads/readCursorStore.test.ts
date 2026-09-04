@@ -231,6 +231,43 @@ describe("thread read cursors across windows", () => {
       restoreGlobalProperty("removeEventListener", originalRemove);
     }
   });
+
+  it("settles a pending read before the window stops being the one in front", () => {
+    const storage = memoryStorage();
+    const events = new EventTarget();
+    const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    const originalAdd = Object.getOwnPropertyDescriptor(globalThis, "addEventListener");
+    const originalRemove = Object.getOwnPropertyDescriptor(globalThis, "removeEventListener");
+    Object.defineProperties(globalThis, {
+      localStorage: { configurable: true, value: storage },
+      addEventListener: { configurable: true, value: events.addEventListener.bind(events) },
+      removeEventListener: {
+        configurable: true,
+        value: events.removeEventListener.bind(events),
+      },
+    });
+
+    try {
+      const store = createReadCursorStore<string>({ storageKey: "cursors" });
+      const unsubscribe = store.subscribe(() => undefined);
+      // A streaming thread marks deferred. Held only in memory, a host that
+      // tears its renderer down without a page lifecycle event loses the read
+      // and the thread comes back unread on the next launch.
+      store.markDeferred("thread-1", 42);
+      expect(createReadCursorStore<string>({ storageKey: "cursors" }).getSnapshot().size).toBe(0);
+
+      events.dispatchEvent(new Event("blur"));
+
+      expect(
+        createReadCursorStore<string>({ storageKey: "cursors" }).getSnapshot().get("thread-1"),
+      ).toBe(42);
+      unsubscribe();
+    } finally {
+      restoreGlobalProperty("localStorage", originalStorage);
+      restoreGlobalProperty("addEventListener", originalAdd);
+      restoreGlobalProperty("removeEventListener", originalRemove);
+    }
+  });
 });
 
 function restoreGlobalProperty(

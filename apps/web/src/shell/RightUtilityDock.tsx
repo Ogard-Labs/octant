@@ -2,6 +2,7 @@ import { MAX_CONTEXT_SIDEBAR_WIDTH, MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/co
 import { useRef, type ReactNode, type RefObject } from "react";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { RightUtilityDockSurface } from "./RightUtilityDockSurface";
+import type { DockUtilityLauncherReference } from "./DockUtilityLauncher";
 import { ShellResizeHandle } from "./ShellResizeHandle";
 import type {
   RightUtilityDockResolution,
@@ -22,6 +23,7 @@ export interface RightUtilityDockProps {
   readonly iosSimulator?: ReactNode;
   readonly isNarrow: boolean;
   readonly launchableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
+  readonly launchableReferences?: ReadonlyArray<DockUtilityLauncherReference>;
   readonly onClose: () => void;
   readonly onCloseTab: (tabId: string) => void;
   readonly onCommitWidth: (width: number) => void;
@@ -61,6 +63,9 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       {...(props.files === undefined ? {} : { files: props.files })}
       {...(props.iosSimulator === undefined ? {} : { iosSimulator: props.iosSimulator })}
       launchableSurfaces={props.launchableSurfaces}
+      {...(props.launchableReferences === undefined
+        ? {}
+        : { launchableReferences: props.launchableReferences })}
       onCloseTab={props.onCloseTab}
       onOpenTab={props.onOpenTab}
       onSelectSurface={props.onSelectSurface}

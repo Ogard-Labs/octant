@@ -12,6 +12,12 @@ export interface OctantTooltipProps {
   readonly label: ReactNode;
   readonly align?: "start" | "center" | "end";
   readonly side?: "top" | "right" | "bottom" | "left";
+  /**
+   * `"inverted"` is the compact label chip. `"card"` puts structured content
+   * on the ordinary raised surface instead: content that paints its own
+   * `--oct-fg` text disappears against the inverted ground.
+   */
+  readonly surface?: "inverted" | "card";
 }
 
 /** Opaque, collision-aware tooltip for compact shell controls. */
@@ -26,7 +32,12 @@ export function OctantTooltip(props: OctantTooltipProps) {
           side={props.side ?? "bottom"}
           sideOffset={8}
         >
-          <TooltipPopup className="octant-tooltip" role="tooltip">
+          <TooltipPopup
+            className={
+              props.surface === "card" ? "octant-tooltip octant-tooltip--card" : "octant-tooltip"
+            }
+            role="tooltip"
+          >
             {props.label}
           </TooltipPopup>
         </TooltipPositioner>

@@ -13,12 +13,22 @@ const mocks = vi.hoisted(() => ({
   terminalFocus: vi.fn(),
   terminal: vi.fn(),
   terminalOptions: { disableStdin: false },
+  webglDispose: vi.fn(),
+  webglOnContextLoss: vi.fn(),
+  webglConstruct: vi.fn(),
   write: vi.fn(),
 }));
 
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: vi.fn(function FitAddonMock() {
     return { fit: mocks.fit };
+  }),
+}));
+
+vi.mock("@xterm/addon-webgl", () => ({
+  WebglAddon: vi.fn(function WebglAddonMock() {
+    mocks.webglConstruct();
+    return { dispose: mocks.webglDispose, onContextLoss: mocks.webglOnContextLoss };
   }),
 }));
 
@@ -71,6 +81,37 @@ describe("Xterm runtime", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     clearThemeRoles();
+  });
+
+  it("paints on the GPU and releases it with the session", () => {
+    const session = mount(document.createElement("div"), {
+      interactive: false,
+      onData: vi.fn(),
+      onResize: vi.fn(),
+      output: "ready\n",
+    });
+
+    expect(mocks.webglConstruct).toHaveBeenCalledOnce();
+    expect(mocks.webglOnContextLoss).toHaveBeenCalledOnce();
+    session.dispose();
+    expect(mocks.webglDispose).toHaveBeenCalledOnce();
+  });
+
+  it("still opens a terminal on a machine that refuses a GPU context", () => {
+    mocks.webglConstruct.mockImplementationOnce(() => {
+      throw new Error("WebGL is unavailable.");
+    });
+
+    const session = mount(document.createElement("div"), {
+      interactive: false,
+      onData: vi.fn(),
+      onResize: vi.fn(),
+      output: "ready\n",
+    });
+
+    expect(mocks.write).toHaveBeenCalledWith("ready\n");
+    expect(() => session.dispose()).not.toThrow();
+    expect(mocks.terminalDispose).toHaveBeenCalledOnce();
   });
 
   it("appends replay deltas and resets only when retained history diverges", () => {

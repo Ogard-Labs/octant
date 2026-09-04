@@ -40,6 +40,7 @@ import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { CodeBranchSelector } from "./CodeBranchSelector";
 import { CodeComposerAccessMenu } from "./CodeComposerAccessMenu";
 import { CodeWorkspaceSelector } from "./CodeWorkspaceSelector";
+import { CodeDeliveryOutcomeSelector } from "./CodeDeliveryOutcomeSelector";
 import { CodeWorktreeSourceControl } from "./CodeWorktreeSourceControl";
 import { useCodeWorktreeSourcePreview } from "./useCodeWorktreeSourcePreview";
 import { clipboardHasImage } from "../../chat/composerImagePaste";
@@ -169,6 +170,13 @@ export interface CodeComposerSubmitInput {
   readonly linearIssueContext?: LinearIssueContextRequest;
 }
 
+/**
+ * Used only when the host could never name the base branch. Kept out of every
+ * visible surface so the tray never asserts a branch the repository may not
+ * have.
+ */
+const LAST_RESORT_BASE_BRANCH = "development";
+
 export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const [prompt, setPrompt] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -222,7 +230,10 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       ? crypto.randomUUID().slice(0, 8)
       : "new",
   );
-  const initialBaseBranch = props.baseBranch ?? props.branchName ?? "development";
+  // Unknown until the host says. Neither caller supplies a branch for a
+  // Project-bound composer, so seeding a literal here meant the tray asserted
+  // `development` for every repository, including the ones on `main`.
+  const initialBaseBranch = props.baseBranch ?? props.branchName ?? "";
   // The delivery target is derived from the tray, not typed into a form: the
   // base branch is the branch picker, the base repository is the connected
   // GitHub repository (or the local Project), and the remote is the one the
@@ -234,6 +245,10 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       ? "local/repository"
       : `local/${props.projectName}`);
   const [baseBranch, setBaseBranch] = useState(initialBaseBranch);
+  // Whether the branch on screen is the reader's own pick. A seeded prop is a
+  // starting value, not a decision: the checkout's actual head outranks it, and
+  // only a pick from the ref list outranks the head.
+  const baseBranchChosen = useRef(false);
   // F4: remote facts are server-authoritative. When the server has not
   // provided them, fail closed with no remotes so Start from origin is
   // disabled rather than fabricated.
@@ -258,6 +273,24 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     (preferredRemote.status === "selected"
       ? preferredRemote.remoteName
       : (props.remoteName ?? "origin"));
+  /**
+   * The base branch as a value, not a guess.
+   *
+   * `undefined` means the host has not said yet. Every caller below decides
+   * for itself what that means: the tray says "Default branch", the source
+   * preview stays off rather than previewing a branch nobody picked, and the
+   * delivery target is only proposed once there is something true to propose.
+   */
+  const resolvedBaseBranch = baseBranch.trim() === "" ? undefined : baseBranch.trim();
+  /**
+   * What a submitted delivery target names as its base.
+   *
+   * The contract requires a non-empty branch, so a host that cannot list refs
+   * still needs one. This is the only place a name is assumed rather than
+   * observed, and it is never shown: the tray says "Default branch" until the
+   * host has actually named the branch, so nothing on screen asserts it.
+   */
+  const submittedBaseBranch = resolvedBaseBranch ?? LAST_RESORT_BASE_BRANCH;
   const previewExecute = useCallback(
     async (command: CodeCommand, signal?: AbortSignal) =>
       props.execute === undefined ? undefined : props.execute(command, signal),
@@ -266,17 +299,24 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const sourcePreview = useCodeWorktreeSourcePreview({
     execute: previewExecute,
     ...(props.projectId === undefined ? {} : { projectId: props.projectId }),
-    branch: baseBranch.trim() || "development",
+    branch: resolvedBaseBranch ?? "",
     startFromOrigin,
     remoteName: resolvedWorktreeRemote,
-    enabled: props.projectId !== undefined && props.execute !== undefined,
+    enabled:
+      props.projectId !== undefined &&
+      props.execute !== undefined &&
+      resolvedBaseBranch !== undefined,
   });
-  // The delivery outcome follows the prompt; the thread board and overview
-  // show it once the thread exists.
-  const outcomeKind: CodeDeliveryOutcomeKind = useMemo(
+  // The outcome decides when this thread may be called Done (decision 0003), so
+  // it is the reader's to confirm. The prompt only proposes it: the reading
+  // stays live until the reader picks one, and their pick then stands however
+  // the prompt is edited afterwards.
+  const suggestedOutcome: CodeDeliveryOutcomeKind = useMemo(
     () => suggestCodeDeliveryOutcome(prompt),
     [prompt],
   );
+  const [outcomeOverride, setOutcomeOverride] = useState<CodeDeliveryOutcomeKind>();
+  const outcomeKind: CodeDeliveryOutcomeKind = outcomeOverride ?? suggestedOutcome;
   const trimmed = prompt.trim();
   // A Code thread belongs to a Project (decision 0037), so the first turn
   // cannot start until one is chosen.
@@ -301,7 +341,13 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     if (projectId === undefined || execute === undefined) return;
     const requestedProjectId = projectId;
     setRefsLoading(true);
-    void execute({ kind: "list-code-worktree-refs", projectId: requestedProjectId })
+    // A host may answer synchronously, and one that cannot list refs at all
+    // answers with nothing. Reading `.then` off that threw where the listing
+    // used to be reached only by opening the picker, and is now loaded for
+    // every bound Project.
+    void Promise.resolve(
+      execute({ kind: "list-code-worktree-refs", projectId: requestedProjectId }),
+    )
       .then((result) => {
         if (requestedProjectId !== projectIdRef.current) return;
         if (result?.kind === "worktree-refs-listed") setWorktreeRefs(result.refs);
@@ -311,8 +357,24 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         if (requestedProjectId === projectIdRef.current) setRefsLoading(false);
       });
   }, [projectId, execute]);
+  // The tray states the branch a new thread starts from, so it has to know it
+  // before the reader opens the picker. Loaded only on open, the tray showed
+  // its fallback until someone happened to look at the list.
+  useEffect(() => {
+    if (projectId === undefined) return;
+    loadWorktreeRefs();
+  }, [loadWorktreeRefs, projectId]);
+  useEffect(() => {
+    if (baseBranchChosen.current || worktreeRefs === undefined) return;
+    const current =
+      worktreeRefs.find((ref) => ref.isCurrent === true && ref.kind === "local") ??
+      worktreeRefs.find((ref) => ref.isCurrent === true);
+    if (current === undefined) return;
+    setBaseBranch(String(current.name));
+  }, [worktreeRefs]);
   const handleSelectRef = useCallback(
     (ref: CodeWorktreeRef) => {
+      baseBranchChosen.current = true;
       if (ref.kind === "remote" && ref.remoteName !== undefined) {
         const branch = ref.name.startsWith(`${ref.remoteName}/`)
           ? ref.name.slice(ref.remoteName.length + 1)
@@ -340,10 +402,10 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           executionPolicy,
           permissionPersistence,
           deliveryTarget: {
-            branchIntent: defaultDeliveryBranchIntent(baseBranch.trim() || "development", shortId),
+            branchIntent: defaultDeliveryBranchIntent(submittedBaseBranch, shortId),
             remoteName: resolvedWorktreeRemote,
             proposedBaseRepository: baseRepository,
-            proposedBaseBranch: baseBranch.trim() || "development",
+            proposedBaseBranch: submittedBaseBranch,
             outcomeKind,
           },
           workspace,
@@ -415,7 +477,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const branchControl = hasProject ? (
     <CodeBranchSelector
       key={String(props.projectId)}
-      branch={baseBranch.trim() || "development"}
+      branch={resolvedBaseBranch ?? "Default branch"}
       loading={refsLoading}
       onOpen={loadWorktreeRefs}
       onSelectRef={handleSelectRef}
@@ -596,6 +658,12 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   {environmentControl}
                 </div>
                 <div className="composer-tray__trailing">
+                  <CodeDeliveryOutcomeSelector
+                    onChange={setOutcomeOverride}
+                    suggested={outcomeOverride === undefined}
+                    value={outcomeKind}
+                    {...(props.creating === true ? { disabled: true } : {})}
+                  />
                   {hasProject ? (
                     <CodeWorkspaceSelector
                       onChange={setWorkspaceOverride}
@@ -615,7 +683,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               would be a lie rather than a choice. */}
         {props.projectId === undefined || workspace !== "managed-worktree" ? null : (
           <CodeWorktreeSourceControl
-            branch={baseBranch.trim() || "development"}
+            branch={resolvedBaseBranch ?? "Default branch"}
             {...(props.execute !== undefined ? { onRefresh: sourcePreview.refresh } : {})}
             onSelectRemote={setWorktreeRemote}
             onStartFromOriginChange={setStartFromOriginOverride}

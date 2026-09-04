@@ -22,6 +22,43 @@ describe("right sidebar tool launcher", () => {
     expect(screen.queryByRole("button", { name: "Add tool" })).not.toBeInTheDocument();
   });
 
+  it("offers the pull requests this task is already about, not just tool kinds", () => {
+    const onOpenPullRequest = vi.fn();
+    render(
+      <DockUtilityLauncher
+        onOpen={vi.fn()}
+        references={[
+          {
+            id: "https://github.com/acme/widget/pull/917",
+            label: "#917 Faster issue validation",
+            detail: "acme/widget",
+            onOpen: onOpenPullRequest,
+          },
+        ]}
+        surfaces={[{ id: "terminal", label: "Terminal" }]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add tool" }));
+    expect(screen.getByText("Relevant to this task")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: /#917 Faster issue validation/ }));
+    expect(onOpenPullRequest).toHaveBeenCalledOnce();
+    // The menu closes on choosing, the same as choosing a tool does.
+    expect(screen.queryByText("Relevant to this task")).not.toBeInTheDocument();
+  });
+
+  it("still offers references when every tool kind is already open", () => {
+    render(
+      <DockUtilityLauncher
+        onOpen={vi.fn()}
+        references={[{ id: "pr-1", label: "#1 A change", onOpen: vi.fn() }]}
+        surfaces={[]}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Add tool" })).toBeVisible();
+  });
+
   it("opens available tools and restores focus to the trigger", () => {
     const onOpen = vi.fn();
     render(

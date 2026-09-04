@@ -98,7 +98,7 @@ describe("WindowChrome", () => {
       onNewThread,
     });
 
-    const button = screen.getByRole("button", { name: "New thread" });
+    const button = screen.getByRole("button", { name: "New task" });
     expect(button).toHaveClass("window-chrome__new-thread");
     await user.click(button);
     expect(onNewThread).toHaveBeenCalledOnce();

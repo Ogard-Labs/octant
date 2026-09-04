@@ -1939,6 +1939,17 @@ input.switch:checked::after {
   font-size: var(--oct-text-sm);
   line-height: 1.25;
 }
+/* Structured content carries its own foreground tokens, so it needs the
+   ordinary raised ground rather than the label chip's inverted one. */
+.octant-tooltip--card {
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 10px 12px;
+  border-color: var(--oct-border);
+  background: var(--oct-surface);
+  color: var(--oct-fg);
+  border-radius: var(--oct-radius-md);
+  box-shadow: var(--oct-elev-overlay, var(--oct-elev-raised));
+}
 
 /* ─── modal ───────────────────────────────────────────────────────────
    Built on <dialog> so focus trapping, Esc, and inertness come from the
@@ -4096,6 +4107,31 @@ input.switch:checked::after {
   min-height: 32px;
   height: 32px;
   border-radius: var(--oct-radius-sm);
+}
+/* The composer is one raised object, so nothing riding its row draws a second
+   box inside it. Reset control by control, the rule kept coming undone: the
+   model picker was named and cleared while every control added after it — the
+   access menu, the pool control, whatever arrives next — still carried its
+   recipe's own border and 3px focus ring, and each of those read as an
+   outlined field nested in the prompt. State it once for the row instead. */
+.composer-row button,
+.composer-row [role="button"],
+.composer-row [role="combobox"],
+.composer-row input,
+.composer-row .composer-model-picker__trigger {
+  border-color: transparent;
+  box-shadow: none;
+}
+/* Suppressing the recipe's ring removes the only focus indicator those controls
+   had, so the row restores the system's own: one outline, at one width, drawn
+   outside the control rather than as a glow inside the composer's padding. */
+.composer-row button:focus-visible,
+.composer-row [role="button"]:focus-visible,
+.composer-row [role="combobox"]:focus-visible,
+.composer-row input:focus-visible,
+.composer-row .composer-model-picker__trigger:focus-visible {
+  outline: 2px solid var(--oct-accent-fg);
+  outline-offset: 1px;
 }
 /* The send control is the row's one filled affordance, so it stays a circle. */
 .composer-row button[data-size="icon"] {

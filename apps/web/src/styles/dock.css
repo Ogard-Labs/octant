@@ -114,9 +114,17 @@
   background: var(--oct-fg-soft);
 }
 
+/* The tab in front is a different thing from the tab under the pointer, so it
+   is a raised surface with an edge rather than a slightly stronger tint —
+   sharing one ground made hovering look like selecting. */
 .dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"]) {
   color: var(--oct-fg);
-  background: var(--octant-selection);
+  background: var(--oct-surface);
+  box-shadow: inset 0 0 0 1px var(--oct-border);
+}
+
+.dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"]):hover {
+  background: var(--oct-surface);
 }
 
 .dock-tool-strip__select {
@@ -148,6 +156,14 @@
 .dock-tool-strip__tab:hover .dock-tool-strip__close,
 .dock-tool-strip__tab:focus-within .dock-tool-strip__close,
 .dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"]) .dock-tool-strip__close {
+  opacity: 1;
+}
+
+/* In the overflow menu there is no tab to hover, so the control that closes a
+   tool has to be visible to be usable at all. */
+.dock-tool-strip__close--overflow {
+  width: 26px;
+  min-height: 26px;
   opacity: 1;
 }
 

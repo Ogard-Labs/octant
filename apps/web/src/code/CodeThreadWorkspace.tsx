@@ -1003,6 +1003,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                             {turnStatusLabel(message.status)}
                           </span>
                         )}
+                        {turnTimeLabel(message.at) === undefined ? null : (
+                          <time
+                            className="code-thread-workspace__turn-time"
+                            dateTime={message.at}
+                            title={turnTimeTitle(message.at)}
+                          >
+                            {turnTimeLabel(message.at)}
+                          </time>
+                        )}
                       </header>
                     ) : null}
                     {message.attachments === undefined ? null : (
@@ -1032,6 +1041,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     ) : (
                       <p>{busy ? "Thinking…" : ""}</p>
                     )}
+                    {message.role === "user" && turnTimeLabel(message.at) !== undefined ? (
+                      <time
+                        className="code-thread-workspace__turn-time code-thread-workspace__turn-time--user"
+                        dateTime={message.at}
+                        title={turnTimeTitle(message.at)}
+                      >
+                        {turnTimeLabel(message.at)}
+                      </time>
+                    ) : null}
                     {message.role === "user" &&
                     message.executionPolicy !== undefined &&
                     message.executionPolicy !== previousUserPolicy(messages, index) ? (
@@ -1568,6 +1586,31 @@ function providerIdentityChanged(
     previous.providerInstanceId !== current.providerInstanceId ||
     previous.modelId !== current.modelId
   );
+}
+
+/**
+ * Clock time for a turn from today, and a date for anything older: a bare
+ * "09:14" on a week-old message reads as if it just happened.
+ */
+function turnTimeLabel(at: string | undefined): string | undefined {
+  if (at === undefined) return undefined;
+  const date = new Date(at);
+  if (Number.isNaN(date.getTime())) return undefined;
+  const time = date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  const now = new Date();
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  if (sameDay) return time;
+  return `${date.toLocaleDateString(undefined, { day: "numeric", month: "short" })} ${time}`;
+}
+
+/** The full local timestamp, for the reader who needs the exact moment. */
+function turnTimeTitle(at: string | undefined): string | undefined {
+  if (at === undefined) return undefined;
+  const date = new Date(at);
+  return Number.isNaN(date.getTime()) ? undefined : date.toLocaleString();
 }
 
 function boundProviderModelLabel(

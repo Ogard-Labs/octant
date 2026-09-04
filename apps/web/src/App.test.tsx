@@ -2339,11 +2339,11 @@ describe("App", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "New thread" }));
+    await user.click(await screen.findByRole("button", { name: "New task" }));
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(await screen.findByRole("option", { name: /Octant/ }));
     expect(screen.getByRole("button", { name: "Project: Octant" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "New thread" }));
+    await user.click(screen.getByRole("button", { name: "New task" }));
 
     expect(await screen.findByRole("button", { name: "Project: Choose a Project" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "What should we build?" })).toBeVisible();
@@ -2362,7 +2362,7 @@ describe("App", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "New thread" }));
+    await user.click(await screen.findByRole("button", { name: "New task" }));
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(await screen.findByRole("option", { name: /Octant/ }));
     expect(screen.getByRole("button", { name: "Project: Octant" })).toBeVisible();
@@ -3020,7 +3020,7 @@ describe("App", () => {
       expect(button).toHaveClass("window-no-drag");
     }
     expect(await screen.findByRole("button", { name: "Project actions for Octant" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "New thread" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "New task" })).toBeVisible();
     await user.click(within(sidebar).getByRole("button", { name: "Account menu, Set your name" }));
     expect(await screen.findByRole("menuitem", { name: "Plugins" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Board" })).toBeVisible();
@@ -3054,7 +3054,7 @@ describe("App", () => {
         name: "Pull requests",
       }),
     ).toBeVisible();
-    expect(await screen.findByRole("button", { name: "New thread" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "New task" })).toBeVisible();
     expect(
       await screen.findByPlaceholderText("Ask for follow-up changes…", {}, { timeout: 5_000 }),
     ).toBeVisible();
@@ -3617,7 +3617,7 @@ describe("App", () => {
     );
   });
 
-  it("moves the active thread Terminal into a remembered bottom panel", async () => {
+  it("opens the thread Terminal in a remembered bottom panel and still offers another", async () => {
     window.localStorage.clear();
     const user = userEvent.setup();
     render(
@@ -3642,9 +3642,11 @@ describe("App", () => {
       "true",
     );
 
+    // A terminal in the bottom panel does not spend the reader's only terminal:
+    // a second one is a second shell, so the dock keeps offering it.
     await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(within(dock).queryByRole("button", { name: "Terminal" })).not.toBeInTheDocument();
+    expect(within(dock).getByRole("button", { name: "Terminal" })).toBeVisible();
 
     await user.click(within(panel).getByRole("button", { name: "Add tool" }));
     await user.click(within(panel).getByRole("button", { name: "Review" }));

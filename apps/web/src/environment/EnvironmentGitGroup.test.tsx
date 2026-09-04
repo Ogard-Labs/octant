@@ -144,14 +144,14 @@ describe("EnvironmentGitGroup way out", () => {
     const onClick = vi.fn();
     render(
       <EnvironmentGitGroup
-        action={{ label: "New thread in this Project", onClick }}
+        action={{ label: "New task in this Project", onClick }}
         errorMessage="The Code thread checkout is unavailable."
         status="error"
       />,
     );
 
     expect(screen.getByRole("alert")).toHaveTextContent("The Code thread checkout is unavailable.");
-    await userEvent.click(screen.getByRole("button", { name: "New thread in this Project" }));
+    await userEvent.click(screen.getByRole("button", { name: "New task in this Project" }));
 
     expect(onClick).toHaveBeenCalledTimes(1);
   });

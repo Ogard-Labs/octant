@@ -48,7 +48,7 @@ describe("SidebarNavigation", () => {
       />,
     );
 
-    for (const label of ["New thread", "Board", "Issues", "Pull requests"]) {
+    for (const label of ["New task", "Board", "Issues", "Pull requests"]) {
       await user.click(screen.getByRole("button", { name: label }));
     }
     expect(actions["new-code-thread"]).toHaveBeenCalledOnce();
@@ -57,7 +57,7 @@ describe("SidebarNavigation", () => {
     expect(actions["thread-board"]).toHaveBeenCalledOnce();
     expect(actions["github-issues"]).toHaveBeenCalledOnce();
     expect(actions["pull-requests"]).toHaveBeenCalledOnce();
-    expect(screen.getByRole("button", { name: "New thread" })).toHaveClass("sidebar-item");
+    expect(screen.getByRole("button", { name: "New task" })).toHaveClass("sidebar-item");
     // Search is a mode-switcher icon and thread rows nest under Projects, so
     // neither is a navigation row here.
     expect(screen.queryByRole("button", { name: "Search" })).not.toBeInTheDocument();

@@ -164,6 +164,7 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
                     <span>{tool.label}</span>
                   </OctantButton>
                   <IconButton
+                    className="dock-tool-strip__close dock-tool-strip__close--overflow"
                     icon={X}
                     label={`Hide ${tool.label}`}
                     onClick={() => props.onClose(tool.id)}

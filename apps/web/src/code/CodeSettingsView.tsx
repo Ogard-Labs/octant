@@ -1,7 +1,6 @@
 import type { CodeSettings } from "@octant/contracts/code";
 import { useState } from "react";
 import { SettingRow } from "../settings/primitives";
-import { OctantButton } from "../ui/base/OctantButton";
 import { OctantFieldError } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -12,6 +11,13 @@ export interface CodeSettingsUpdate {
   readonly defaultExecutionPolicy: CodeSettings["defaultExecutionPolicy"];
   readonly defaultPermissionPersistence: CodeSettings["defaultPermissionPersistence"];
   readonly externalEditor?: NonNullable<CodeSettings["externalEditor"]>;
+}
+
+interface CodeSettingsDraft {
+  readonly executionPolicy: CodeSettings["defaultExecutionPolicy"];
+  readonly permissionPersistence: CodeSettings["defaultPermissionPersistence"];
+  readonly executable: string;
+  readonly argumentsText: string;
 }
 
 export interface CodeSettingsViewProps {
@@ -40,12 +46,25 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   );
   const [message, setMessage] = useState<string>();
 
-  async function save() {
-    const arguments_ = argumentsText
+  /**
+   * Every page in Settings keeps what you change; a Save button here meant a
+   * choice could look made and not be. A pick commits as it is made, and free
+   * text commits when it is finished, because a path is not valid halfway
+   * through typing it.
+   */
+  async function commit(change: Partial<CodeSettingsDraft>) {
+    const draft: CodeSettingsDraft = {
+      executionPolicy,
+      permissionPersistence,
+      executable,
+      argumentsText,
+      ...change,
+    };
+    const arguments_ = draft.argumentsText
       .split("\n")
       .map((argument) => argument.trim())
       .filter((argument) => argument.length > 0);
-    const trimmedExecutable = executable.trim();
+    const trimmedExecutable = draft.executable.trim();
     if (trimmedExecutable !== "" && !trimmedExecutable.startsWith("/")) {
       setMessage("External editor executable must be an absolute path.");
       return;
@@ -55,8 +74,8 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       return;
     }
     const updated = await props.onUpdate({
-      defaultExecutionPolicy: executionPolicy,
-      defaultPermissionPersistence: permissionPersistence,
+      defaultExecutionPolicy: draft.executionPolicy,
+      defaultPermissionPersistence: draft.permissionPersistence,
       ...(trimmedExecutable === ""
         ? {}
         : {
@@ -66,7 +85,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
             },
           }),
     });
-    setMessage(updated ? "Code defaults saved." : "Code defaults could not be saved.");
+    setMessage(updated ? undefined : "Code defaults could not be saved.");
   }
 
   return (
@@ -89,7 +108,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               className="settings-view__select window-no-drag"
               onValueChange={(value) => {
                 const option = ACCESS_OPTIONS.find((candidate) => candidate.id === value);
-                if (option !== undefined) setExecutionPolicy(option.id);
+                if (option === undefined) return;
+                setExecutionPolicy(option.id);
+                void commit({ executionPolicy: option.id });
               }}
               options={ACCESS_OPTIONS}
               value={executionPolicy}
@@ -105,7 +126,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               aria-label="Default approval persistence"
               onValueChange={(value) => {
                 const selected = value[0];
-                if (selected !== undefined) setPermissionPersistence(selected);
+                if (selected === undefined) return;
+                setPermissionPersistence(selected);
+                void commit({ permissionPersistence: selected });
               }}
               value={[permissionPersistence]}
             >
@@ -128,6 +151,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               aria-label="External editor executable"
               className="settings-view__text-input"
               id="code-editor-executable"
+              onBlur={() => void commit({})}
               onChange={(event) => setExecutable(event.currentTarget.value)}
               placeholder="/usr/local/bin/code"
               type="text"
@@ -148,27 +172,14 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               aria-label="External editor arguments"
               className="settings-view__text-input"
               id="code-editor-arguments"
+              onBlur={() => void commit({})}
               onChange={(event) => setArgumentsText(event.currentTarget.value)}
               placeholder={"--goto\n{file}:{line}:{column}"}
               value={argumentsText}
             />
           </SettingRow>
-          <SettingRow
-            description="Threads created after saving use these defaults."
-            label="Save"
-            scope="app"
-            settingId="code-save"
-          >
-            <OctantButton onClick={() => void save()} size="sm" type="button" variant="secondary">
-              Save Code defaults
-            </OctantButton>
-          </SettingRow>
         </div>
-        {message === undefined ? null : message === "Code defaults saved." ? (
-          <p className="settings-section-line" role="status">
-            {message}
-          </p>
-        ) : (
+        {message === undefined ? null : (
           <OctantFieldError className="settings-section-line">{message}</OctantFieldError>
         )}
       </div>

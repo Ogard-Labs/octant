@@ -53,6 +53,10 @@ export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
     );
   }
   const content = gitContent(props.observation);
+  // A thread bound to the checkout itself worktrees nowhere, so the two rows
+  // carried the same repository name over the same path twice and read as a
+  // rendering fault. Only a checkout that really is somewhere else is a fact.
+  const separateWorktree = props.observation.worktreeRoot !== props.observation.repositoryRoot;
 
   return (
     <div className="environment-git-group">
@@ -60,7 +64,9 @@ export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
         <GitRow icon={GitCommitHorizontal} label="Changes" value={content.changes} />
         <GitRow icon={GitBranch} label="Branch" value={content.branch} />
         <GitRow icon={FolderGit2} label="Repository" value={content.repository} />
-        <GitRow icon={Files} label="Worktree" value={content.worktree} />
+        {separateWorktree ? (
+          <GitRow icon={Files} label="Worktree" value={content.worktree} />
+        ) : null}
       </dl>
     </div>
   );

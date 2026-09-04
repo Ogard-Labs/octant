@@ -1,4 +1,5 @@
 import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import type { XtermAdapterRuntime, XtermAdapterSession } from "./XtermTerminalAdapter";
@@ -24,6 +25,7 @@ export const mount: XtermAdapterRuntime["mount"] = (element, options) => {
   const fit = new FitAddon();
   terminal.loadAddon(fit);
   terminal.open(element);
+  const renderer = attachGpuRenderer(terminal);
   applyTerminalTypography(terminal, element, typography);
   terminal.write(options.output);
   const data = terminal.onData((value) => {
@@ -44,6 +46,7 @@ export const mount: XtermAdapterRuntime["mount"] = (element, options) => {
       observer?.disconnect();
       data.dispose();
       resize.dispose();
+      renderer?.dispose();
       terminal.dispose();
     },
     focus: () => terminal.focus(),
@@ -65,6 +68,29 @@ export const mount: XtermAdapterRuntime["mount"] = (element, options) => {
     setTypography: (next) => applyTerminalTypography(terminal, element, next),
   } satisfies XtermAdapterSession;
 };
+
+/**
+ * Moves painting onto the GPU, and gives up quietly when it cannot.
+ *
+ * The stock renderer draws every cell as DOM, which is what made a busy build
+ * log crawl. WebGL is the engine's own answer to that, but it fails for
+ * reasons the app does not control — a machine with no GPU context to give, a
+ * context lost while the tab sat in the background, a headless test document.
+ * Every one of those falls back to the DOM renderer, which is the behaviour
+ * this terminal already had, so the worst case is no slower than before.
+ */
+function attachGpuRenderer(terminal: Terminal): { readonly dispose: () => void } | undefined {
+  try {
+    const webgl = new WebglAddon();
+    // A lost context is not recoverable in place: dispose the addon and let
+    // xterm fall back, rather than leaving a terminal painting nothing.
+    webgl.onContextLoss(() => webgl.dispose());
+    terminal.loadAddon(webgl);
+    return webgl;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * The terminal wears the resolved theme instead of xterm's stock palette,

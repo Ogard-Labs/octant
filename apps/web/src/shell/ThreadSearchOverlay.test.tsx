@@ -64,7 +64,7 @@ describe("ThreadSearchOverlay", () => {
     expect(componentStyles).toMatch(
       /\.thread-search__quick-actions \.thread-search__quick-action\s*\{[^}]*display:\s*flex;[^}]*justify-content:\s*flex-start;/s,
     );
-    await user.click(screen.getByRole("button", { name: "New thread" }));
+    await user.click(screen.getByRole("button", { name: "New task" }));
     expect(onClose).toHaveBeenCalledOnce();
     expect(onNewThread).toHaveBeenCalledOnce();
 

@@ -41,6 +41,26 @@ function environmentClient(
 }
 
 describe("EnvironmentSubagents", () => {
+  it("says a task has delegated nothing rather than hiding the section", async () => {
+    render(
+      <EnvironmentSubagents
+        client={environmentClient({
+          conversation: unusedClientMethod,
+          parentSummary: async () => ({ parentThreadId, entries: [] }),
+        })}
+        threadId={String(parentThreadId)}
+      />,
+    );
+
+    // A section that vanishes when nothing has been delegated is
+    // indistinguishable from a missing feature.
+    expect(await screen.findByText("Subagents")).toBeVisible();
+    expect(await screen.findByText("0 active · 0 done")).toBeVisible();
+    expect(
+      await screen.findByText("This task has not delegated any work to a subagent."),
+    ).toBeVisible();
+  });
+
   it("shows active and completed runs with model and retained conversation", async () => {
     const user = userEvent.setup();
     const onOpenAgents = vi.fn();

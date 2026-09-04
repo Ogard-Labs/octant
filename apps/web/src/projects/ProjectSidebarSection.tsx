@@ -783,13 +783,13 @@ function ProjectGroup(props: {
                 <OctantButton
                   aria-label={
                     props.newThreadVerb === "thread"
-                      ? `New thread in ${project.name}`
+                      ? `New task in `
                       : `New chat in ${project.name}`
                   }
                   className="project-row__action project-row__action--icon project-row__new-thread window-no-drag"
                   onClick={() => props.onNewThreadInProject!(project.id)}
                   size="icon"
-                  title={props.newThreadVerb === "thread" ? "New thread" : "New chat"}
+                  title={props.newThreadVerb === "thread" ? "New task" : "New chat"}
                   type="button"
                   variant="ghost"
                 >

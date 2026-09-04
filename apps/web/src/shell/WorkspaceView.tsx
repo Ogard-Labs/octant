@@ -802,6 +802,9 @@ function renderCodeTab(
             ? {}
             : { environmentOpen: props.environmentDockOpen })}
           {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
+          {...(codeController.activeView?.thread.deliveryTarget.outcomeKind === undefined
+            ? {}
+            : { deliveryOutcome: codeController.activeView.thread.deliveryTarget.outcomeKind })}
           {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
           {...(props.openInApplications === undefined

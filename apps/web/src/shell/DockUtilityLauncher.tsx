@@ -1,4 +1,4 @@
-import { Plus } from "lucide-react";
+import { GitPullRequest, Plus } from "lucide-react";
 import { useEffect, useId, useRef, useState, type Ref } from "react";
 import { DockToolIcon } from "./dockToolIcons";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -9,9 +9,24 @@ export interface DockUtilityLauncherSurface {
   readonly label: string;
 }
 
+/**
+ * Something this thread is already about that can be opened as a tab.
+ *
+ * The tool list answers "what kind of tab"; this answers "which one", so the
+ * reader does not have to leave the dock, find the pull request on another
+ * surface, and come back.
+ */
+export interface DockUtilityLauncherReference {
+  readonly id: string;
+  readonly label: string;
+  readonly detail?: string;
+  readonly onOpen: () => void;
+}
+
 export interface DockUtilityLauncherProps {
   readonly onOpen: (surface: RightUtilityDockSurfaceId) => void;
   readonly surfaces: ReadonlyArray<DockUtilityLauncherSurface>;
+  readonly references?: ReadonlyArray<DockUtilityLauncherReference>;
 }
 
 export function DockUtilityLauncher(props: DockUtilityLauncherProps) {
@@ -32,7 +47,8 @@ export function DockUtilityLauncher(props: DockUtilityLauncherProps) {
   // A subject whose remaining tools are all gated away has nothing to offer,
   // and a permanently greyed-out plus reads as a broken control rather than as
   // an honest "nothing to add here". Absence is the honest state.
-  if (props.surfaces.length === 0) return null;
+  const references = props.references ?? [];
+  if (props.surfaces.length === 0 && references.length === 0) return null;
 
   return (
     <span className="dock-utility-launcher">
@@ -68,6 +84,33 @@ export function DockUtilityLauncher(props: DockUtilityLauncherProps) {
             }}
             surfaces={props.surfaces}
           />
+          {references.length === 0 ? null : (
+            <>
+              <span className="workspace-disclosure__caption">Relevant to this task</span>
+              {references.map((reference) => (
+                <OctantButton
+                  className="workspace-disclosure__action window-no-drag"
+                  key={reference.id}
+                  onClick={() => {
+                    reference.onOpen();
+                    close();
+                  }}
+                  type="button"
+                  variant="ghost"
+                >
+                  <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.7} />
+                  <span className="dock-utility-launcher__reference">
+                    <span>{reference.label}</span>
+                    {reference.detail === undefined ? null : (
+                      <span className="dock-utility-launcher__reference-detail">
+                        {reference.detail}
+                      </span>
+                    )}
+                  </span>
+                </OctantButton>
+              ))}
+            </>
+          )}
         </span>
       ) : null}
     </span>

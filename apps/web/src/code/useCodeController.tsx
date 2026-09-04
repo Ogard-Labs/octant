@@ -107,6 +107,12 @@ export interface CodeConversationMessage {
   readonly providerInstanceId?: CodeThread["providerInstanceId"];
   readonly modelId?: CodeThread["modelId"];
   readonly status?: "waiting" | "completed" | "interrupted" | "failed" | "incomplete";
+  /**
+   * When this message happened, as the journal recorded its turn: the turn's
+   * start for the prompt, its last update for the reply. Absent on a message
+   * still being composed locally, which has not been journaled yet.
+   */
+  readonly at?: string;
   /** Images this message carried, as the turn's start event recorded them. */
   readonly attachments?: ReadonlyArray<CodeAttachmentReference>;
   /**
@@ -1861,6 +1867,7 @@ export function useCodeController(options: CodeControllerOptions) {
         text: trimmed,
         providerInstanceId: view.thread.providerInstanceId,
         modelId: view.thread.modelId,
+        at: new Date().toISOString(),
         ...(attachments.length === 0 ? {} : { attachments }),
         ...(executionPolicy === undefined ? {} : { executionPolicy }),
       };
@@ -2346,6 +2353,7 @@ async function projectConversationTurns(
       providerInstanceId: turn.providerInstanceId,
       modelId: turn.modelId,
       status: turn.status,
+      at: String(turn.startedAt),
       ...(turn.attachments === undefined || turn.attachments.length === 0
         ? {}
         : { attachments: turn.attachments }),
@@ -2372,6 +2380,7 @@ async function projectConversationTurns(
       providerInstanceId: turn.providerInstanceId,
       modelId: turn.modelId,
       status: turn.status,
+      at: String(turn.updatedAt),
     });
     const steps = turn.steps ?? [];
     if (steps.length === 0 && turn.stepsTruncated !== true) continue;

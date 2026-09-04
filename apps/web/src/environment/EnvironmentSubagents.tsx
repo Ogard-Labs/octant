@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useChildRunStatus } from "../agents/useChildRunStatus";
 import { useAgentRunConversation } from "../agents/useAgentRunConversation";
 import { OctantButton } from "../ui/base/OctantButton";
+import { EnvironmentGroup } from "./EnvironmentGroup";
 
 const ACTIVE = new Set(["queued", "starting", "running", "waiting"]);
 
@@ -23,25 +24,40 @@ export function EnvironmentSubagents(props: {
     props.client,
     selectedRunId === undefined ? undefined : decodeAgentRunId(selectedRunId),
   );
-  if (controller.status !== "ready" || controller.entries.length === 0) return null;
   const active = controller.entries.filter((entry) => ACTIVE.has(entry.lifecycleStatus));
   const history = controller.entries.filter((entry) => !ACTIVE.has(entry.lifecycleStatus));
+  // A section that disappears when a thread has delegated nothing cannot be
+  // read as "nothing is running" — it reads as a missing feature, and the
+  // reader has no way to tell the two apart. It states the count instead.
+  const summary =
+    controller.status !== "ready"
+      ? "Reading"
+      : `${String(active.length)} active · ${String(history.length)} done`;
 
   return (
-    <section aria-label="Subagents" className="environment-subagents">
-      <header className="environment-subagents__header">
-        <div>
-          <h3>Subagents</h3>
-          <p>
-            {active.length} active · {history.length} done
-          </p>
-        </div>
-        {props.onOpenAgents === undefined ? null : (
-          <OctantButton onClick={props.onOpenAgents} size="sm" type="button" variant="ghost">
-            Open Agents
-          </OctantButton>
-        )}
-      </header>
+    <EnvironmentGroup
+      defaultOpen
+      summary={summary}
+      title="Subagents"
+      {...(props.onOpenAgents === undefined
+        ? {}
+        : {
+            action: (
+              <OctantButton onClick={props.onOpenAgents} size="sm" type="button" variant="ghost">
+                Open Agents
+              </OctantButton>
+            ),
+          })}
+    >
+      {controller.status !== "ready" ? (
+        <p className="environment-subagents__empty" role="status">
+          Reading delegated runs…
+        </p>
+      ) : controller.entries.length === 0 ? (
+        <p className="environment-subagents__empty">
+          This task has not delegated any work to a subagent.
+        </p>
+      ) : null}
       <AgentGroup
         entries={active}
         label="Active"
@@ -70,7 +86,7 @@ export function EnvironmentSubagents(props: {
         {...(selectedRunId === undefined ? {} : { selectedRunId })}
         onSelect={setSelectedRunId}
       />
-    </section>
+    </EnvironmentGroup>
   );
 }
 

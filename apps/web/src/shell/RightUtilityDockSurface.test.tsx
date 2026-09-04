@@ -18,14 +18,19 @@ function surface(id: "browser" | "terminal" | "files") {
 }
 
 describe("the right sidebar surface", () => {
-  it("keeps Add tool beside the visible tabs and gives the selected tab the selection fill", () => {
+  it("keeps Add tool beside the visible tabs and draws the tab in front as a raised one", () => {
     expect(ruleBody(dockStylesheet, ".dock-tool-strip")).toMatch(/flex:\s*0\s+1\s+auto/);
-    expect(
-      ruleBody(
-        dockStylesheet,
-        '.dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"])',
-      ),
-    ).toMatch(/background:\s*var\(--octant-selection\)/);
+    // Selected and hovered shared one tint, so pointing at a tab looked the
+    // same as being on it. The tab in front is a surface with an edge.
+    const selected = ruleBody(
+      dockStylesheet,
+      '.dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"])',
+    );
+    expect(selected).toMatch(/background:\s*var\(--oct-surface\)/);
+    expect(selected).toMatch(/box-shadow:\s*inset 0 0 0 1px var\(--oct-border\)/);
+    expect(ruleBody(dockStylesheet, ".dock-tool-strip__tab:hover")).not.toMatch(
+      /var\(--oct-surface\)/,
+    );
   });
   it("shows the active thread work map with no tool open", async () => {
     const user = userEvent.setup();
