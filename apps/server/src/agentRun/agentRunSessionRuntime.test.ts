@@ -239,7 +239,7 @@ function fakeProvider(options?: {
     await Effect.runPromise(Queue.offer(queue, event as never));
   };
   const connection = {
-    events: Stream.fromQueue(queue),
+    subscribe: Effect.succeed(Stream.fromQueue(queue)),
     start: (input: { readonly executionPolicy: ProviderExecutionPolicy }) => {
       executionPolicies.push(input.executionPolicy);
       return wedge === "start" ? Effect.never : Effect.succeed({ sessionId });

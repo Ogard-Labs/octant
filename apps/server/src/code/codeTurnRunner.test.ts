@@ -29,12 +29,10 @@ describe("CodeTurnRunner", () => {
     let subscribed = false;
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = fakeConnection({
-      events: Stream.unwrap(
-        Effect.sync(() => {
-          subscribed = true;
-          return Stream.fromQueue(queue);
-        }),
-      ),
+      subscribe: Effect.sync(() => {
+        subscribed = true;
+        return Stream.fromQueue(queue);
+      }),
       send: vi.fn(() =>
         Effect.gen(function* () {
           expect(subscribed).toBe(true);
@@ -82,7 +80,9 @@ describe("CodeTurnRunner", () => {
       event({ kind: "tool-success", toolCallId: "tool-1", summary: "Edited src/a.ts" }),
       event({ kind: "completed" }),
     ];
-    const connection = fakeConnection({ events: Stream.fromIterable(providerEvents) });
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(Stream.fromIterable(providerEvents)),
+    });
     const reconcileObservation = vi.fn(() =>
       Effect.succeed({ status: "confirmed" as const, summary: "Checkout rescan completed." }),
     );
@@ -116,10 +116,12 @@ describe("CodeTurnRunner", () => {
 
   it("keeps the turn waiting when provider completion follows unresolved reconciliation", async () => {
     const connection = fakeConnection({
-      events: Stream.fromIterable([
-        event({ kind: "file-change", path: "src/a.ts", change: "modified" }),
-        event({ kind: "completed" }),
-      ]),
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({ kind: "file-change", path: "src/a.ts", change: "modified" }),
+          event({ kind: "completed" }),
+        ]),
+      ),
     });
     const outcomes: CodeTurnOutcome[] = [];
     const observed: CodeTurnEvent[] = [];
@@ -145,15 +147,17 @@ describe("CodeTurnRunner", () => {
 
   it("bounds normalized provider payloads and fails closed at the discrete event budget", async () => {
     const connection = fakeConnection({
-      events: Stream.fromIterable([
-        event({ kind: "reasoning-delta", text: "x".repeat(MAX_CODE_TURN_EVENT_BYTES * 2) }),
-        // Streaming deltas are free; only discrete events consume the budget.
-        event({ kind: "text-delta", text: "still free" }),
-        event({ kind: "text-delta", text: "still free" }),
-        event({ kind: "task-progress", taskId: "task-1", status: "in-progress", summary: "ok" }),
-        event({ kind: "task-progress", taskId: "task-1", status: "in-progress", summary: "ok" }),
-        event({ kind: "task-progress", taskId: "task-1", status: "completed", summary: "over" }),
-      ]),
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({ kind: "reasoning-delta", text: "x".repeat(MAX_CODE_TURN_EVENT_BYTES * 2) }),
+          // Streaming deltas are free; only discrete events consume the budget.
+          event({ kind: "text-delta", text: "still free" }),
+          event({ kind: "text-delta", text: "still free" }),
+          event({ kind: "task-progress", taskId: "task-1", status: "in-progress", summary: "ok" }),
+          event({ kind: "task-progress", taskId: "task-1", status: "in-progress", summary: "ok" }),
+          event({ kind: "task-progress", taskId: "task-1", status: "completed", summary: "over" }),
+        ]),
+      ),
     });
     const observed: CodeTurnEvent[] = [];
     const outcomes: CodeTurnOutcome[] = [];
@@ -183,10 +187,9 @@ describe("CodeTurnRunner", () => {
     const upstreamLimit = MAX_CODE_TURN_EVENT_BYTES * 4;
     const rawDiff = "x".repeat(upstreamLimit * 2);
     const connection = fakeConnection({
-      events: Stream.fromIterable([
-        event({ kind: "diff", diff: rawDiff }),
-        event({ kind: "completed" }),
-      ]),
+      subscribe: Effect.succeed(
+        Stream.fromIterable([event({ kind: "diff", diff: rawDiff }), event({ kind: "completed" })]),
+      ),
     });
     const reconcileObservation = vi.fn(
       (_request: Parameters<CodeTurnRunnerInput["reconcileObservation"]>[0]) =>
@@ -233,7 +236,9 @@ describe("CodeTurnRunner", () => {
       }),
       event({ kind: "completed" }),
     ];
-    const connection = fakeConnection({ events: Stream.fromIterable(providerEvents) });
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(Stream.fromIterable(providerEvents)),
+    });
     const sanitizeProviderEvent = vi.fn(
       ({ event: providerEvent }: { readonly event: ProviderRuntimeEvent }) => {
         if (providerEvent.kind === "file-change") {
@@ -288,35 +293,37 @@ describe("CodeTurnRunner", () => {
 
   it("normalizes interactive and progress events under the immutable thread authority", async () => {
     const connection = fakeConnection({
-      events: Stream.fromIterable([
-        event({ kind: "tool-start", toolCallId: "tool-1", toolName: "shell" }),
-        event({
-          kind: "approval-request",
-          requestId: "approval-1",
-          action: "write",
-          description: "Modify src/a.ts",
-        }),
-        event({
-          kind: "user-input-request",
-          requestId: "question-1",
-          prompt: "Choose a target",
-          options: ["A", "B"],
-        }),
-        event({ kind: "usage", inputTokens: 10, outputTokens: 20 }),
-        event({
-          kind: "child-agent-activity",
-          childAgentId: "child-1",
-          status: "running",
-          summary: "Reviewing",
-        }),
-        event({
-          kind: "tool-request",
-          requestId: "app-tool-1",
-          toolName: "octant_test",
-          inputJson: "{}",
-        }),
-        event({ kind: "completed" }),
-      ]),
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({ kind: "tool-start", toolCallId: "tool-1", toolName: "shell" }),
+          event({
+            kind: "approval-request",
+            requestId: "approval-1",
+            action: "write",
+            description: "Modify src/a.ts",
+          }),
+          event({
+            kind: "user-input-request",
+            requestId: "question-1",
+            prompt: "Choose a target",
+            options: ["A", "B"],
+          }),
+          event({ kind: "usage", inputTokens: 10, outputTokens: 20 }),
+          event({
+            kind: "child-agent-activity",
+            childAgentId: "child-1",
+            status: "running",
+            summary: "Reviewing",
+          }),
+          event({
+            kind: "tool-request",
+            requestId: "app-tool-1",
+            toolName: "octant_test",
+            inputJson: "{}",
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
     });
     const observed: CodeTurnEvent[] = [];
     const authorityThread = thread({ executionPolicy: "plan" });
@@ -357,21 +364,23 @@ describe("CodeTurnRunner", () => {
 
   it("executes each declared app-managed tool request once and returns a bounded answer", async () => {
     const connection = fakeConnection({
-      events: Stream.fromIterable([
-        event({
-          kind: "tool-request",
-          requestId: "browser-request-1",
-          toolName: "octant_browser",
-          inputJson: JSON.stringify({ operation: "read-page" }),
-        }),
-        event({
-          kind: "tool-request",
-          requestId: "browser-request-1",
-          toolName: "octant_browser",
-          inputJson: JSON.stringify({ operation: "read-page" }),
-        }),
-        event({ kind: "completed" }),
-      ]),
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "tool-request",
+            requestId: "browser-request-1",
+            toolName: "octant_browser",
+            inputJson: JSON.stringify({ operation: "read-page" }),
+          }),
+          event({
+            kind: "tool-request",
+            requestId: "browser-request-1",
+            toolName: "octant_browser",
+            inputJson: JSON.stringify({ operation: "read-page" }),
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
     });
     const execute = vi.fn(async () => ({ result: { text: "Ready" } }));
     const observed: CodeTurnEvent[] = [];
@@ -416,12 +425,14 @@ describe("CodeTurnRunner", () => {
 
   it("normalizes provider failure and records the run as failed", async () => {
     const connection = fakeConnection({
-      events: Stream.fromIterable([
-        event({
-          kind: "failed",
-          failure: { category: "provider-failed", message: "Provider process died." },
-        }),
-      ]),
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "failed",
+            failure: { category: "provider-failed", message: "Provider process died." },
+          }),
+        ]),
+      ),
     });
     const observed: CodeTurnEvent[] = [];
     const outcomes: CodeTurnOutcome[] = [];
@@ -450,7 +461,7 @@ describe("CodeTurnRunner", () => {
     // well past 40ms of wall time, then die once the stream goes quiet.
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = fakeConnection({
-      events: Stream.fromQueue(queue),
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
       send: vi.fn(() =>
         Effect.gen(function* () {
           for (let index = 0; index < 6; index += 1) {
@@ -509,7 +520,7 @@ describe("CodeTurnRunner", () => {
   it("cleans up without starting or sending when cancellation arrives during acquisition", async () => {
     const controller = new AbortController();
     const acquired = Effect.runSync(Deferred.make<void>());
-    const connection = fakeConnection({ events: Stream.never });
+    const connection = fakeConnection({ subscribe: Effect.succeed(Stream.never) });
     const acquire = vi.fn(() => Deferred.await(acquired).pipe(Effect.as(connection)));
     const outcomes: CodeTurnOutcome[] = [];
     const fiber = Effect.runFork(
@@ -539,7 +550,9 @@ describe("CodeTurnRunner", () => {
   it("records a provider stream that dies without a terminal event as waiting", async () => {
     const outcomes: CodeTurnOutcome[] = [];
     const connection = fakeConnection({
-      events: Stream.fromIterable([event({ kind: "text-delta", text: "partial" })]),
+      subscribe: Effect.succeed(
+        Stream.fromIterable([event({ kind: "text-delta", text: "partial" })]),
+      ),
     });
 
     const exit = await Effect.runPromiseExit(
@@ -561,7 +574,7 @@ describe("CodeTurnRunner", () => {
   it("downgrades provider completion to waiting when session cleanup cannot be confirmed", async () => {
     const outcomes: CodeTurnOutcome[] = [];
     const connection = fakeConnection({
-      events: Stream.fromIterable([event({ kind: "completed" })]),
+      subscribe: Effect.succeed(Stream.fromIterable([event({ kind: "completed" })])),
       stop: vi.fn(() =>
         Effect.fail({ category: "provider-failed", message: "Provider stop failed." } as const),
       ),
@@ -629,11 +642,11 @@ function input(overrides: Partial<CodeTurnRunnerInput> = {}): CodeTurnRunnerInpu
 }
 
 function fakeConnection(
-  overrides: Partial<ProviderConnection> & Pick<ProviderConnection, "events">,
+  overrides: Partial<ProviderConnection> & Pick<ProviderConnection, "subscribe">,
 ): ProviderConnection {
-  const { events, ...methods } = overrides;
+  const { subscribe, ...methods } = overrides;
   return {
-    events,
+    subscribe,
     start: vi.fn(() => Effect.succeed({ sessionId })),
     resume: vi.fn(() => Effect.succeed({ sessionId })),
     send: vi.fn(() => Effect.void),

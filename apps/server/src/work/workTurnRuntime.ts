@@ -13,6 +13,7 @@ import {
 } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Effect, Fiber, Scope, Stream } from "effect";
+import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
   countsTowardTurnEventBudget,
   makeIdleTimeout,
@@ -144,40 +145,41 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         executionPolicy: "approval-gated",
       });
 
-      let handledEvents = 0;
-      let response = "";
-      let terminal: ProviderRuntimeEvent | undefined;
-      const events = yield* Effect.forkScoped(
-        connection.events.pipe(
-          Stream.filter((event) => event.sessionId === input.providerSessionId),
-          Stream.takeUntil((event) => isTerminalEvent(event) || handledEvents > MAX_EVENTS),
-          Stream.tap(() => idle.touch),
-          Stream.runForEach((event) =>
-            Effect.sync(() => {
-              if (countsTowardTurnEventBudget(event)) handledEvents += 1;
-              if (handledEvents > MAX_EVENTS) return;
-              if (event.kind === "text-delta") {
-                response = appendBoundedResponse(response, event.text);
-                input.onDelta?.(response);
-              }
-              if (isTerminalEvent(event)) terminal = event;
-            }),
-          ),
-        ),
-      );
-      yield* Effect.yieldNow();
       if (input.signal.aborted) {
         yield* connection
           .interrupt(input.providerSessionId)
           .pipe(Effect.catchAll(() => Effect.void));
         return { kind: "cancelled" };
       }
-      yield* connection.send({
-        sessionId: input.providerSessionId,
-        prompt: input.command.prompt,
-        context: [...(input.context ?? [])],
-        attachments: [...(input.attachments ?? [])],
-        tools: [],
+      let handledEvents = 0;
+      let response = "";
+      let terminal: ProviderRuntimeEvent | undefined;
+      const events = yield* subscribeThenSend({
+        connection,
+        consume: (runtimeEvents) =>
+          runtimeEvents.pipe(
+            Stream.filter((event) => event.sessionId === input.providerSessionId),
+            Stream.takeUntil((event) => isTerminalEvent(event) || handledEvents > MAX_EVENTS),
+            Stream.tap(() => idle.touch),
+            Stream.runForEach((event) =>
+              Effect.sync(() => {
+                if (countsTowardTurnEventBudget(event)) handledEvents += 1;
+                if (handledEvents > MAX_EVENTS) return;
+                if (event.kind === "text-delta") {
+                  response = appendBoundedResponse(response, event.text);
+                  input.onDelta?.(response);
+                }
+                if (isTerminalEvent(event)) terminal = event;
+              }),
+            ),
+          ),
+        send: connection.send({
+          sessionId: input.providerSessionId,
+          prompt: input.command.prompt,
+          context: [...(input.context ?? [])],
+          attachments: [...(input.attachments ?? [])],
+          tools: [],
+        }),
       });
       yield* Fiber.join(events);
 

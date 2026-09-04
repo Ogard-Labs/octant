@@ -470,8 +470,9 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const runtimeEvents = yield* connection.subscribe;
           const collected = yield* Effect.fork(
-            Effect.promise(() => collectTerminal(connection.events)),
+            Effect.promise(() => collectTerminal(runtimeEvents)),
           );
           yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
           const events = yield* Fiber.join(collected);
@@ -502,8 +503,9 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
             driverKind: profile.kind,
             value: "agent-session-1",
           });
+          const runtimeEvents = yield* connection.subscribe;
           const collected = yield* Effect.fork(
-            Effect.promise(() => collectTerminal(connection.events)),
+            Effect.promise(() => collectTerminal(runtimeEvents)),
           );
           yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
           const events = yield* Fiber.join(collected);
@@ -561,8 +563,9 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
           client.request(permissionRequest("permission-plan-failure", "tool-plan"));
           yield* Effect.sleep("1 millis");
           expect(catchRejection).toHaveBeenCalledOnce();
+          const runtimeEvents = yield* connection.subscribe;
           const collected = yield* Effect.fork(
-            Effect.promise(() => collectTerminal(connection.events)),
+            Effect.promise(() => collectTerminal(runtimeEvents)),
           );
           yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
           const events = yield* Fiber.join(collected);
@@ -762,8 +765,9 @@ describe("ACP provider driver profile quirks", () => {
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const runtimeEvents = yield* connection.subscribe;
           const collected = yield* Effect.fork(
-            Effect.promise(() => collectTerminal(connection.events)),
+            Effect.promise(() => collectTerminal(runtimeEvents)),
           );
           client.request({
             kind: "request",

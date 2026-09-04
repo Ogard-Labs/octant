@@ -1401,7 +1401,7 @@ function runtimeFixture(options: {
 
 function providerConnection(queue: Queue.Queue<ProviderRuntimeEvent>): ProviderConnection {
   return {
-    events: Stream.fromQueue(queue),
+    subscribe: Effect.succeed(Stream.fromQueue(queue)),
     start: vi.fn(() => Effect.succeed({ sessionId })),
     resume: vi.fn(() => Effect.succeed({ sessionId })),
     send: vi.fn(() => Effect.void),

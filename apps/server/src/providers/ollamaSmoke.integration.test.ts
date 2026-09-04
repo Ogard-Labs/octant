@@ -64,7 +64,7 @@ describe("installed Ollama service", () => {
               modelId,
               executionPolicy: "approval-gated",
             });
-            const completion = yield* Effect.fork(collectTerminal(connection.events));
+            const completion = yield* Effect.fork(collectTerminal(yield* connection.subscribe));
             yield* connection.send({
               sessionId,
               prompt: "Reply with exactly: octant-ollama-smoke",

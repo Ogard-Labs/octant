@@ -7,6 +7,7 @@ import type {
 import { decodeProviderSessionId } from "@octant/contracts/providers";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import { Effect, Fiber, Stream, type Scope } from "effect";
+import { subscribeThenSend } from "./providers/providerEventDelivery";
 import type { ThreadHandOffProviderPort } from "./threadHandOffService";
 
 /** Text deltas a document may arrive in; a provider that streams more is cut off, not trusted. */
@@ -94,28 +95,29 @@ function runCompletion(
       modelId: input.modelId,
       executionPolicy: "plan",
     });
-    const events = yield* Effect.forkScoped(
-      connection.events.pipe(
-        Stream.filter((event) => event.sessionId === input.sessionId),
-        Stream.take(MAX_EVENTS + 1),
-        Stream.takeUntil(isTerminal),
-        Stream.runForEach((event) =>
-          Effect.sync(() => {
-            state.handled += 1;
-            if (state.handled > MAX_EVENTS) return;
-            if (event.kind === "text-delta") state.text += event.text;
-            if (isTerminal(event)) state.terminal = event;
-          }),
+    const events = yield* subscribeThenSend({
+      connection,
+      consume: (runtimeEvents) =>
+        runtimeEvents.pipe(
+          Stream.filter((event) => event.sessionId === input.sessionId),
+          Stream.take(MAX_EVENTS + 1),
+          Stream.takeUntil(isTerminal),
+          Stream.runForEach((event) =>
+            Effect.sync(() => {
+              state.handled += 1;
+              if (state.handled > MAX_EVENTS) return;
+              if (event.kind === "text-delta") state.text += event.text;
+              if (isTerminal(event)) state.terminal = event;
+            }),
+          ),
         ),
-      ),
-    );
-    yield* Effect.yieldNow();
-    yield* connection.send({
-      sessionId: input.sessionId,
-      prompt: input.prompt,
-      context: [],
-      attachments: [],
-      tools: [],
+      send: connection.send({
+        sessionId: input.sessionId,
+        prompt: input.prompt,
+        context: [],
+        attachments: [],
+        tools: [],
+      }),
     });
     yield* Fiber.join(events);
     if (state.terminal?.kind !== "completed" || state.text.trim().length === 0) {

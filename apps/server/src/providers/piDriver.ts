@@ -515,7 +515,7 @@ function makeConnection(
       });
 
     return {
-      events: Stream.fromQueue(queue),
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
       start: (input) =>
         createState(input).pipe(
           Effect.map(() => ({

@@ -89,6 +89,7 @@ distilled successor of the earlier long-form design specifications.
 | [0079](0079-code-project-creation-may-initialize-git.md)                    | Code Project creation may initialize Git on request                                         | Accepted           |
 | [0080](0080-hand-off-writes-a-canvas-from-the-export-cut.md)                | Hand off writes a Canvas from the export cut                                                | Accepted           |
 | [0081](0081-image-generation-is-its-own-surface.md)                         | Image generation is its own surface                                                         | Accepted           |
+| [0082](0082-provider-events-are-subscribed-before-a-turn-is-sent.md)        | Provider events are subscribed before a turn is sent                                        | Accepted           |
 
 ## Adding an ADR
 

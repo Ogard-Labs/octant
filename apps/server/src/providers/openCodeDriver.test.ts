@@ -380,7 +380,11 @@ describe("OpenCode driver", () => {
             Effect.flatMap((connection) =>
               connection
                 .start({ sessionId, modelId, executionPolicy: "approval-gated" })
-                .pipe(Effect.flatMap(() => Stream.runCollect(connection.events))),
+                .pipe(
+                  Effect.flatMap(() =>
+                    Stream.runCollect(Stream.unwrapScoped(connection.subscribe)),
+                  ),
+                ),
             ),
           ),
       ),
@@ -490,7 +494,7 @@ describe("OpenCode driver", () => {
                     connection.send({ sessionId, prompt: "no", attachments: [], tools: [] }),
                   ),
                 ),
-                Effect.map((exit) => ({ exit, events: connection.events })),
+                Effect.map((exit) => ({ exit, events: Stream.unwrapScoped(connection.subscribe) })),
               ),
             ),
             Effect.flatMap(({ exit, events }) =>

@@ -30,30 +30,32 @@ describe("WorkRequestRuntime", () => {
       uuid: () => `00000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
     });
     const connection = {
-      events: Stream.fromIterable<ProviderRuntimeEvent>([
-        {
-          instanceId: providerInstanceId,
-          sequence: 1,
-          correlationId: decodeCorrelationId(String(projectId)),
-          occurredAt: decodeTimestamp("2026-08-10T08:00:00.000Z"),
-          kind: "approval-request",
-          sessionId,
-          requestId: "approval-1",
-          action: "run-terminal-command",
-          description: "Run a command",
-        },
-        {
-          instanceId: providerInstanceId,
-          sequence: 2,
-          correlationId: decodeCorrelationId(String(projectId)),
-          occurredAt: decodeTimestamp("2026-08-10T08:00:01.000Z"),
-          kind: "user-input-request",
-          sessionId,
-          requestId: "input-1",
-          prompt: "Choose a format",
-          options: ["PDF"],
-        },
-      ]),
+      subscribe: Effect.succeed(
+        Stream.fromIterable<ProviderRuntimeEvent>([
+          {
+            instanceId: providerInstanceId,
+            sequence: 1,
+            correlationId: decodeCorrelationId(String(projectId)),
+            occurredAt: decodeTimestamp("2026-08-10T08:00:00.000Z"),
+            kind: "approval-request",
+            sessionId,
+            requestId: "approval-1",
+            action: "run-terminal-command",
+            description: "Run a command",
+          },
+          {
+            instanceId: providerInstanceId,
+            sequence: 2,
+            correlationId: decodeCorrelationId(String(projectId)),
+            occurredAt: decodeTimestamp("2026-08-10T08:00:01.000Z"),
+            kind: "user-input-request",
+            sessionId,
+            requestId: "input-1",
+            prompt: "Choose a format",
+            options: ["PDF"],
+          },
+        ]),
+      ),
       answerApproval: () => Effect.void,
       answerUserInput: () => Effect.void,
       interrupt: () => Effect.void,
@@ -102,7 +104,7 @@ describe("WorkRequestRuntime", () => {
       uuid: () => "00000000-0000-4000-8000-000000000905",
     });
     const connection = {
-      events: Stream.empty,
+      subscribe: Effect.succeed(Stream.empty),
       answerApproval,
       answerUserInput,
       interrupt: () => Effect.void,
@@ -148,7 +150,7 @@ describe("WorkRequestRuntime", () => {
       description: "Run a command",
     };
     const connection = {
-      events: Stream.succeed(event),
+      subscribe: Effect.succeed(Stream.succeed(event)),
       answerApproval: () => Effect.void,
       answerUserInput: () => Effect.void,
       interrupt: () => Effect.void,
@@ -169,7 +171,9 @@ describe("WorkRequestRuntime", () => {
     );
     const received: ProviderRuntimeEvent[] = [];
     await Effect.runPromise(
-      acquired.events.pipe(Stream.runForEach((next) => Effect.sync(() => received.push(next)))),
+      Stream.unwrapScoped(acquired.subscribe).pipe(
+        Stream.runForEach((next) => Effect.sync(() => received.push(next))),
+      ),
     );
     expect(received).toEqual([event]);
     expect(record).toHaveBeenCalledOnce();
@@ -182,20 +186,22 @@ describe("WorkRequestRuntime", () => {
       uuid: () => "00000000-0000-4000-8000-000000000905",
     });
     const connection = {
-      events: Stream.succeed<ProviderRuntimeEvent>({
-        instanceId: providerInstanceId,
-        sequence: 1,
-        correlationId: decodeCorrelationId(String(projectId)),
-        occurredAt: decodeTimestamp("2026-08-10T08:00:00.000Z"),
-        kind: "user-input-request",
-        sessionId,
-        requestId: "input-1",
-        prompt: `Choose ${"x".repeat(2_100)} from https://example.test/path`,
-        options: [
-          "file:///Users/alice/secret",
-          ...Array.from({ length: 10 }, (_, i) => `opt/${i}`),
-        ],
-      }),
+      subscribe: Effect.succeed(
+        Stream.succeed<ProviderRuntimeEvent>({
+          instanceId: providerInstanceId,
+          sequence: 1,
+          correlationId: decodeCorrelationId(String(projectId)),
+          occurredAt: decodeTimestamp("2026-08-10T08:00:00.000Z"),
+          kind: "user-input-request",
+          sessionId,
+          requestId: "input-1",
+          prompt: `Choose ${"x".repeat(2_100)} from https://example.test/path`,
+          options: [
+            "file:///Users/alice/secret",
+            ...Array.from({ length: 10 }, (_, i) => `opt/${i}`),
+          ],
+        }),
+      ),
       answerApproval: () => Effect.void,
       answerUserInput: () => Effect.void,
       interrupt: () => Effect.void,
@@ -235,17 +241,19 @@ describe("WorkRequestRuntime", () => {
       uuid: () => "00000000-0000-4000-8000-000000000905",
     });
     const connection = {
-      events: Stream.succeed<ProviderRuntimeEvent>({
-        instanceId: providerInstanceId,
-        sequence: 1,
-        correlationId: decodeCorrelationId(String(projectId)),
-        occurredAt: decodeTimestamp("2026-08-10T08:00:00.000Z"),
-        kind: "approval-request",
-        sessionId,
-        requestId: "approval-1",
-        action: "Read /Users/alice/.ssh/id_rsa then C:\\Users\\alice\\secret.txt",
-        description: "Compare ./private/report.md with docs/guide.md",
-      }),
+      subscribe: Effect.succeed(
+        Stream.succeed<ProviderRuntimeEvent>({
+          instanceId: providerInstanceId,
+          sequence: 1,
+          correlationId: decodeCorrelationId(String(projectId)),
+          occurredAt: decodeTimestamp("2026-08-10T08:00:00.000Z"),
+          kind: "approval-request",
+          sessionId,
+          requestId: "approval-1",
+          action: "Read /Users/alice/.ssh/id_rsa then C:\\Users\\alice\\secret.txt",
+          description: "Compare ./private/report.md with docs/guide.md",
+        }),
+      ),
       answerApproval: () => Effect.void,
       answerUserInput: () => Effect.void,
       interrupt: () => Effect.void,
@@ -278,17 +286,19 @@ describe("WorkRequestRuntime", () => {
       uuid: () => "00000000-0000-4000-8000-000000000905",
     });
     const connection = {
-      events: Stream.succeed<ProviderRuntimeEvent>({
-        instanceId: providerInstanceId,
-        sequence: 1,
-        correlationId: decodeCorrelationId(String(projectId)),
-        occurredAt: decodeTimestamp("2026-08-10T08:00:00.000Z"),
-        kind: "approval-request",
-        sessionId,
-        requestId: "approval-1",
-        action: "Run report",
-        description: "Generate the report",
-      }),
+      subscribe: Effect.succeed(
+        Stream.succeed<ProviderRuntimeEvent>({
+          instanceId: providerInstanceId,
+          sequence: 1,
+          correlationId: decodeCorrelationId(String(projectId)),
+          occurredAt: decodeTimestamp("2026-08-10T08:00:00.000Z"),
+          kind: "approval-request",
+          sessionId,
+          requestId: "approval-1",
+          action: "Run report",
+          description: "Generate the report",
+        }),
+      ),
       answerApproval: () => Effect.void,
       answerUserInput: () => Effect.void,
       interrupt,
@@ -311,17 +321,19 @@ describe("WorkRequestRuntime", () => {
       uuid: () => "00000000-0000-4000-8000-000000000905",
     });
     const connection = {
-      events: Stream.succeed<ProviderRuntimeEvent>({
-        instanceId: providerInstanceId,
-        sequence: 1,
-        correlationId: decodeCorrelationId(String(projectId)),
-        occurredAt: decodeTimestamp("2026-08-10T08:00:00.000Z"),
-        kind: "approval-request",
-        sessionId,
-        requestId: "x".repeat(16_385),
-        action: "Run report",
-        description: "Generate the report",
-      }),
+      subscribe: Effect.succeed(
+        Stream.succeed<ProviderRuntimeEvent>({
+          instanceId: providerInstanceId,
+          sequence: 1,
+          correlationId: decodeCorrelationId(String(projectId)),
+          occurredAt: decodeTimestamp("2026-08-10T08:00:00.000Z"),
+          kind: "approval-request",
+          sessionId,
+          requestId: "x".repeat(16_385),
+          action: "Run report",
+          description: "Generate the report",
+        }),
+      ),
       answerApproval: () => Effect.void,
       answerUserInput: () => Effect.void,
       interrupt,
@@ -345,14 +357,16 @@ describe("WorkRequestRuntime", () => {
       uuid: () => "00000000-0000-4000-8000-000000000905",
     });
     const connection = {
-      events: Stream.succeed<ProviderRuntimeEvent>({
-        instanceId: providerInstanceId,
-        sequence: 1,
-        correlationId: decodeCorrelationId(String(projectId)),
-        occurredAt: decodeTimestamp("2026-08-10T08:00:00.000Z"),
-        kind: "completed",
-        sessionId,
-      }),
+      subscribe: Effect.succeed(
+        Stream.succeed<ProviderRuntimeEvent>({
+          instanceId: providerInstanceId,
+          sequence: 1,
+          correlationId: decodeCorrelationId(String(projectId)),
+          occurredAt: decodeTimestamp("2026-08-10T08:00:00.000Z"),
+          kind: "completed",
+          sessionId,
+        }),
+      ),
       answerApproval: () => Effect.void,
       answerUserInput: () => Effect.void,
       interrupt: () => Effect.void,
@@ -374,17 +388,19 @@ describe("WorkRequestRuntime", () => {
       uuid: () => "00000000-0000-4000-8000-000000000905",
     });
     const connection = {
-      events: Stream.fromIterable<ProviderRuntimeEvent>([
-        {
-          instanceId: providerInstanceId,
-          sequence: 1,
-          correlationId: decodeCorrelationId(String(projectId)),
-          occurredAt: decodeTimestamp("2026-08-10T08:00:00.000Z"),
-          kind: "waiting",
-          sessionId,
-          message: "retry",
-        },
-      ]),
+      subscribe: Effect.succeed(
+        Stream.fromIterable<ProviderRuntimeEvent>([
+          {
+            instanceId: providerInstanceId,
+            sequence: 1,
+            correlationId: decodeCorrelationId(String(projectId)),
+            occurredAt: decodeTimestamp("2026-08-10T08:00:00.000Z"),
+            kind: "waiting",
+            sessionId,
+            message: "retry",
+          },
+        ]),
+      ),
       answerApproval,
       answerUserInput: () => Effect.void,
       interrupt: () => Effect.void,

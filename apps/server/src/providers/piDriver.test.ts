@@ -232,7 +232,7 @@ describe("Pi provider driver", () => {
       executionPolicy: "approval-gated",
     });
 
-    const collected = terminal(connection.events);
+    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
     await Effect.runPromise(
       connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
     );
@@ -353,7 +353,7 @@ describe("Pi provider driver", () => {
     await Effect.runPromise(
       connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
     );
-    const collected = terminal(connection.events);
+    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
     await Effect.runPromise(
       connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
     );

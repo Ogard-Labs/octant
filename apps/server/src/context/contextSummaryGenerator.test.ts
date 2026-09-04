@@ -32,7 +32,7 @@ function fakeProvider(options?: {
   const stops: string[] = [];
   const queue = Effect.runSync(Queue.unbounded<never>());
   const connection = {
-    events: Stream.fromQueue(queue),
+    subscribe: Effect.succeed(Stream.fromQueue(queue)),
     start: (input: { readonly sessionId: string }) =>
       Effect.suspend(() => {
         starts.push(input.sessionId);

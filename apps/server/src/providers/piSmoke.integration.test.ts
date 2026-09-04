@@ -73,7 +73,7 @@ describe("installed Pi runtime", () => {
                 modelId,
                 executionPolicy: "full-access",
               });
-              const completion = yield* Effect.fork(collectTerminal(connection.events));
+              const completion = yield* Effect.fork(collectTerminal(yield* connection.subscribe));
               yield* connection.send({
                 sessionId,
                 prompt: "Reply with exactly: octant-pi-smoke",

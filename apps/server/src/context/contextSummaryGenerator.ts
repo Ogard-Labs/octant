@@ -6,6 +6,7 @@ import type {
 } from "@octant/contracts";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import { Effect, Fiber, Stream, type Scope } from "effect";
+import { subscribeThenSend } from "../providers/providerEventDelivery";
 import type {
   ContextMaintenanceMaterial,
   GenerateContextSummaryRequest,
@@ -167,35 +168,36 @@ function runSummaryTurn(
       executionPolicy: "approval-gated",
     });
 
-    const events = yield* Effect.forkScoped(
-      connection.events.pipe(
-        Stream.filter((event) => event.sessionId === options.sessionId),
-        Stream.take(MAX_EVENTS + 1),
-        Stream.takeUntil(isTerminal),
-        Stream.runForEach((event) =>
-          Effect.sync(() => {
-            state.handled += 1;
-            if (state.handled > MAX_EVENTS) return;
-            if (event.kind === "text-delta") state.summary += event.text;
-            if (event.kind === "usage") {
-              state.outputTokens = event.outputTokens;
-              options.observeUsage?.({
-                inputTokens: event.inputTokens,
-                outputTokens: event.outputTokens,
-              });
-            }
-            if (isTerminal(event)) state.terminal = event;
-          }),
+    const events = yield* subscribeThenSend({
+      connection,
+      consume: (runtimeEvents) =>
+        runtimeEvents.pipe(
+          Stream.filter((event) => event.sessionId === options.sessionId),
+          Stream.take(MAX_EVENTS + 1),
+          Stream.takeUntil(isTerminal),
+          Stream.runForEach((event) =>
+            Effect.sync(() => {
+              state.handled += 1;
+              if (state.handled > MAX_EVENTS) return;
+              if (event.kind === "text-delta") state.summary += event.text;
+              if (event.kind === "usage") {
+                state.outputTokens = event.outputTokens;
+                options.observeUsage?.({
+                  inputTokens: event.inputTokens,
+                  outputTokens: event.outputTokens,
+                });
+              }
+              if (isTerminal(event)) state.terminal = event;
+            }),
+          ),
         ),
-      ),
-    );
-    yield* Effect.yieldNow();
-    yield* connection.send({
-      sessionId: options.sessionId,
-      prompt: summaryPrompt(request.materials),
-      context: [],
-      attachments: [],
-      tools: [],
+      send: connection.send({
+        sessionId: options.sessionId,
+        prompt: summaryPrompt(request.materials),
+        context: [],
+        attachments: [],
+        tools: [],
+      }),
     });
     yield* Fiber.join(events);
     if (state.terminal?.kind !== "completed" || state.summary.trim().length === 0) {

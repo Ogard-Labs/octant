@@ -440,7 +440,7 @@ function makeConnection(
       streamFailure === undefined ? stateFor(sessionId) : Effect.fail(streamFailure);
 
     return {
-      events: Stream.fromQueue(queue).pipe(Stream.takeUntil(isTerminalEvent)),
+      subscribe: Effect.succeed(Stream.fromQueue(queue).pipe(Stream.takeUntil(isTerminalEvent))),
       start: (input) =>
         ensureSubscription().pipe(
           Effect.flatMap(() =>

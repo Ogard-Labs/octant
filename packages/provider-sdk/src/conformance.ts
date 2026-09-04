@@ -258,8 +258,9 @@ export async function runProviderConformance(
             started.sessionId === successful.sessionStart.sessionId,
             "successful start returned a different session",
           );
+          const successfulTurnEvents = yield* connection.subscribe;
           const collected = yield* Effect.fork(
-            collectSessionThroughTerminal(connection.events, successful.sessionStart.sessionId),
+            collectSessionThroughTerminal(successfulTurnEvents, successful.sessionStart.sessionId),
           );
           yield* connection.send(successful.turn);
           successfulEvents = Array.from(yield* Fiber.join(collected));
@@ -284,8 +285,9 @@ export async function runProviderConformance(
           started.sessionId === fixture.sessionStart.sessionId,
           "start returned a different session",
         );
+        const turnEvents = yield* connection.subscribe;
         const collected = yield* Effect.fork(
-          collectSessionThroughTerminal(connection.events, fixture.sessionStart.sessionId),
+          collectSessionThroughTerminal(turnEvents, fixture.sessionStart.sessionId),
         );
         yield* connection.send(fixture.turn);
 
