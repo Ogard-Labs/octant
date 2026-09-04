@@ -45,16 +45,7 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import { FolderOpen, GitBranch, ShieldCheck } from "lucide-react";
-import {
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { CodeHome, type CodeHomeProps } from "../code/CodeHome";
 import {
   CodeComposerAdapter,
@@ -67,6 +58,7 @@ import { ProjectCreateDialog } from "../projects/ProjectCreateDialog";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import {
   ComposerProjectSelector,
+  type ComposerProjectGithubSource,
   type ComposerProjectEntry,
 } from "../projects/ComposerProjectSelector";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -79,12 +71,6 @@ import type { OctantHostBridge } from "./hostBridge";
 
 // Cloning a repository from GitHub is a first-time step, not a start-screen
 // staple; its onboarding stays out of the first bundle.
-const GitHubRepositoryOnboarding = lazy(() =>
-  import("../code/GitHubRepositoryOnboarding").then((module) => ({
-    default: module.GitHubRepositoryOnboarding,
-  })),
-);
-
 /** One row of the start screen's recent-work list. */
 export type DraftRecentThread = RecentThreadListItem;
 
@@ -392,27 +378,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     ),
     { kind: "add-folder" },
   ];
-  const folderControl =
-    props.mode === "code" || props.mode === "work" ? (
-      <ComposerProjectSelector
-        {...(props.creating === undefined ? {} : { disabled: props.creating })}
-        entries={projectEntries}
-        onAddFolder={() => {
-          if (props.onCreateProject !== undefined) {
-            setAddFolderOpen(true);
-          } else {
-            props.onAttachFolder?.();
-          }
-        }}
-        onSelect={(entry) => {
-          if (entry.kind === "saved-project") {
-            selectProject(entry.projectId);
-            setSelectedProjectLabel(entry.displayName);
-          }
-        }}
-        {...(projectSelection === undefined ? {} : { selection: projectSelection })}
-      />
-    ) : null;
   const selectedProjectName =
     selectedProjectId === undefined ? undefined : (selectedProject?.name ?? selectedProjectLabel);
   const selectedProjectRoot =
@@ -440,35 +405,53 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
       props.mode === "code" && selectedProjectId !== undefined && props.codeExecute !== undefined,
   });
 
-  // The GitHub repository stays a distinct visible selection next to
-  // Host and Project. A successful onboarding creates one ordinary Code
-  // Project from the server-issued binding receipt and selects it here; an
-  // already-selected Project fixes its repository so the flow fails closed.
+  // A GitHub repository becomes a Project through the Project menu's "New
+  // Project from GitHub repository": a successful onboarding creates one
+  // ordinary Code Project from the server-issued binding receipt and selects
+  // it here, the same as a folder would.
   const githubHostName =
     props.hosts?.find((host) => host.hostId === (props.selectedHostId ?? LOCAL_HOST_ID))
       ?.displayName ?? localHostDisplayName();
   const onCreateProjectForGithub = props.onCreateProject;
-  const githubControl =
+  const githubProjectSource: ComposerProjectGithubSource | undefined =
     props.mode === "code" &&
     props.githubClient !== undefined &&
     props.githubCloneClient !== undefined &&
-    onCreateProjectForGithub !== undefined ? (
-      <Suspense fallback={null}>
-        <GitHubRepositoryOnboarding
-          client={props.githubClient}
-          cloneClient={props.githubCloneClient}
-          createProject={(name, receiptId) => onCreateProjectForGithub("code", name, receiptId)}
-          {...(props.creating === undefined ? {} : { disabled: props.creating })}
-          {...(selectedProjectName === undefined ? {} : { fixedProjectName: selectedProjectName })}
-          hostName={githubHostName}
-          onProjectCreated={(projectId, name) => {
+    onCreateProjectForGithub !== undefined
+      ? {
+          client: props.githubClient,
+          cloneClient: props.githubCloneClient,
+          createProject: (name, receiptId) => onCreateProjectForGithub("code", name, receiptId),
+          hostName: githubHostName,
+          onProjectCreated: (projectId, name) => {
             selectProject(decodeProjectId(projectId));
             setSelectedProjectLabel(name);
-          }}
-        />
-      </Suspense>
-    ) : null;
+          },
+        }
+      : undefined;
 
+  const folderControl =
+    props.mode === "code" || props.mode === "work" ? (
+      <ComposerProjectSelector
+        {...(props.creating === undefined ? {} : { disabled: props.creating })}
+        entries={projectEntries}
+        onAddFolder={() => {
+          if (props.onCreateProject !== undefined) {
+            setAddFolderOpen(true);
+          } else {
+            props.onAttachFolder?.();
+          }
+        }}
+        onSelect={(entry) => {
+          if (entry.kind === "saved-project") {
+            selectProject(entry.projectId);
+            setSelectedProjectLabel(entry.displayName);
+          }
+        }}
+        {...(projectSelection === undefined ? {} : { selection: projectSelection })}
+        {...(githubProjectSource === undefined ? {} : { github: githubProjectSource })}
+      />
+    ) : null;
   const addFolderDialog =
     addFolderOpen && props.onCreateProject !== undefined ? (
       <ProjectCreateDialog
@@ -580,7 +563,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ? {}
             : { onExecutionPolicyChange: props.onExecutionPolicyChange })}
           folderControl={folderControl}
-          {...(githubControl === null ? {} : { githubControl })}
           {...(createFromControl === null ? {} : { createFromControl })}
           {...(props.codeExecute === undefined ? {} : { execute: props.codeExecute })}
           providerGroups={props.providerGroups}

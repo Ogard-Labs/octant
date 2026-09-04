@@ -115,15 +115,12 @@ describe("CodeComposerAdapter", () => {
   });
 
   it("keeps repository context in the checkout bar", () => {
-    const { container } = render(
-      <CodeComposerAdapter {...defaultProps} githubControl={<span>GitHub control slot</span>} />,
-    );
+    const { container } = render(<CodeComposerAdapter {...defaultProps} />);
     const frame = container.querySelector(".composer");
     const dock = container.querySelector(".composer-tray");
     expect(frame).not.toBeNull();
     expect(dock).not.toBeNull();
     expect(frame?.contains(dock)).toBe(true);
-    expect(dock?.textContent).toContain("GitHub control slot");
     expect(dock?.textContent).toContain("development");
     expect(container.querySelector('[class*="context-strip"]')).toBeNull();
   });
@@ -183,21 +180,6 @@ describe("CodeComposerAdapter", () => {
   it("renders no pool control when the slot is not provided", () => {
     const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
     expect(html).not.toContain("Pool control slot");
-  });
-
-  it("renders the GitHub repository control slot as a distinct tray selection", () => {
-    const html = renderToStaticMarkup(
-      <CodeComposerAdapter {...defaultProps} githubControl={<span>GitHub control slot</span>} />,
-    );
-    // Host, Project, and GitHub repository stay distinct visible selections.
-    expect(html).toContain("host-selector");
-    expect(html).toContain("My Repo");
-    expect(html).toContain("GitHub control slot");
-  });
-
-  it("renders no GitHub control when the slot is not provided", () => {
-    const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
-    expect(html).not.toContain("GitHub control slot");
   });
 
   it("renders a default-enabled Start from origin control only when server-authoritative remote facts are provided", () => {

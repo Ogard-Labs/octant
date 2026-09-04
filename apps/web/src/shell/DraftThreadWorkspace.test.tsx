@@ -496,7 +496,7 @@ describe("DraftThreadWorkspace", () => {
     ["code", "Octant", "Knowledge"],
     ["work", "Knowledge", "Octant"],
   ] as const)(
-    "lists only compatible saved Projects and Add local folder for %s",
+    "lists only compatible saved Projects and New Project from folder for %s",
     async (mode, compatible, incompatible) => {
       const user = userEvent.setup();
       render(<DraftThreadWorkspace {...baseProps} mode={mode} projects={projects} />);
@@ -504,7 +504,7 @@ describe("DraftThreadWorkspace", () => {
       await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
       expect(screen.getByRole("option", { name: new RegExp(compatible) })).toBeVisible();
       expect(screen.queryByRole("option", { name: new RegExp(incompatible) })).toBeNull();
-      expect(screen.getByRole("option", { name: "Add local folder…" })).toBeVisible();
+      expect(screen.getByRole("option", { name: "New Project from folder…" })).toBeVisible();
       expect(screen.queryByRole("option", { name: "No folder" })).toBeNull();
     },
   );
@@ -687,7 +687,7 @@ describe("DraftThreadWorkspace", () => {
     await user.click(screen.getByRole("option", { name: /Full access/ }));
 
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
-    await user.click(screen.getByRole("option", { name: "Add local folder…" }));
+    await user.click(screen.getByRole("option", { name: "New Project from folder…" }));
     await user.click(await screen.findByRole("button", { name: "Select" }));
 
     expect(onCreateProject).toHaveBeenCalledWith("code", "new-repository", "R".repeat(43));
@@ -791,7 +791,8 @@ describe("DraftThreadWorkspace", () => {
     };
   }
 
-  it("keeps Host, Project, and GitHub repository distinct visible selections in the Code draft", async () => {
+  it("keeps Host and Project on the tray and offers GitHub inside the Project menu", async () => {
+    const user = userEvent.setup();
     render(
       <DraftThreadWorkspace
         {...baseProps}
@@ -804,9 +805,12 @@ describe("DraftThreadWorkspace", () => {
     );
 
     expect(screen.getByRole("status", { name: /Environment: This computer/ })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Project: Choose a Project" })).toBeVisible();
-    // The GitHub control loads on demand, so it lands a tick after the rest.
-    expect(await screen.findByRole("button", { name: "GitHub repository" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "GitHub repository" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
+    expect(screen.getByRole("option", { name: "New Project from folder…" })).toBeVisible();
+    expect(
+      screen.getByRole("option", { name: "New Project from GitHub repository…" }),
+    ).toBeVisible();
   });
 
   it("keeps another folder reachable from the Project control after Code creation is refused", async () => {
@@ -828,13 +832,18 @@ describe("DraftThreadWorkspace", () => {
     expect(project.closest(".composer-tray")).not.toBeNull();
 
     await user.click(project);
-    await user.click(screen.getByRole("option", { name: "Add local folder…" }));
+    await user.click(screen.getByRole("option", { name: "New Project from folder…" }));
     expect(screen.getByRole("dialog", { name: "Create Project" })).toBeVisible();
   });
 
-  it("omits the GitHub repository selection when the GitHub clients are unavailable", () => {
+  it("omits New Project from GitHub when the GitHub clients are unavailable", async () => {
+    const user = userEvent.setup();
     render(<DraftThreadWorkspace {...baseProps} mode="code" projects={projects} />);
-    expect(screen.queryByRole("button", { name: "GitHub repository" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
+    expect(screen.getByRole("option", { name: "New Project from folder…" })).toBeVisible();
+    expect(
+      screen.queryByRole("option", { name: "New Project from GitHub repository…" }),
+    ).toBeNull();
   });
 
   it("onboards a GitHub repository into a new bound Code Project selected in the composer", async () => {
@@ -853,7 +862,8 @@ describe("DraftThreadWorkspace", () => {
     );
 
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Keep this draft");
-    await user.click(screen.getByRole("button", { name: "GitHub repository" }));
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
+    await user.click(screen.getByRole("option", { name: "New Project from GitHub repository…" }));
     await user.click(await screen.findByText("octant/atlas-docs"));
     await user.click(await screen.findByRole("button", { name: "Clone repository" }));
 
@@ -971,26 +981,5 @@ describe("DraftThreadWorkspace", () => {
       undefined,
       { id: "11111111-1111-4111-8111-111111111111" },
     );
-  });
-
-  it("fails the GitHub flow closed while an existing Project fixes the repository", async () => {
-    const user = userEvent.setup();
-    render(
-      <DraftThreadWorkspace
-        {...baseProps}
-        githubClient={makeGithubClient()}
-        githubCloneClient={makeGithubCloneClient()}
-        mode="code"
-        onCreateProject={vi.fn(async () => codeProjectId)}
-        projects={projects}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
-    await user.click(screen.getByRole("option", { name: /Octant/ }));
-    await user.click(screen.getByRole("button", { name: "GitHub repository" }));
-
-    expect(await screen.findByText(/Octant.*already binds its repository/)).toBeInTheDocument();
-    expect(screen.queryByLabelText("Search GitHub repositories")).toBeNull();
   });
 });

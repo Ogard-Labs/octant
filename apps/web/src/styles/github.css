@@ -33,7 +33,7 @@
 }
 
 .github-issue-browser__search:focus-within {
-  border-color: var(--octant-focus-ring);
+  border-color: var(--oct-border-strong);
 }
 
 .github-issue-browser__search input[type="search"] {
