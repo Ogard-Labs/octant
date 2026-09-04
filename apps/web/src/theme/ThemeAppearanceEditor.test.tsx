@@ -65,26 +65,16 @@ describe("ThemeAppearanceEditor", () => {
     }
   });
 
-  it("keeps typography visible and theme transfer in an advanced disclosure", () => {
+  it("keeps every Appearance section open, JSON transfer included", () => {
     render(<ThemeAppearanceEditor controller={controller()} />);
 
-    expect(screen.getByText("Typography").closest("details")).toHaveAttribute("open");
-    expect(screen.getByText("Import or export theme").closest("details")).not.toHaveAttribute(
-      "open",
-    );
-  });
-
-  it("keeps visual and routine Appearance sections open while JSON transfer stays raised", () => {
-    render(<ThemeAppearanceEditor controller={controller()} />);
-
-    for (const name of ["Color scheme", "Typography", "Accessibility"]) {
-      expect(screen.getByText(name).closest(".settings-card-section")).toHaveClass(
-        "settings-card-section--open",
-      );
+    for (const name of ["Color scheme", "Typography", "Accessibility", "Import or export theme"]) {
+      const section = screen.getByText(name).closest(".settings-card-section");
+      expect(section).toHaveClass("settings-card-section--open");
+      // The open class is styling only. A disclosure also has to carry the
+      // native open state, or the section reads as raised while it is shut.
+      if (section instanceof HTMLDetailsElement) expect(section.open).toBe(true);
     }
-    expect(
-      screen.getByText("Import or export theme").closest(".settings-card-section"),
-    ).not.toHaveClass("settings-card-section--open");
   });
 
   it("searches friendly font names and keeps raw stacks behind an advanced disclosure", async () => {

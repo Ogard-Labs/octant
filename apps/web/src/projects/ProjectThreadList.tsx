@@ -383,6 +383,12 @@ export interface ProjectThreadRowsProps {
   /** Resolves the Project name for the thread; used only by the hover info card. */
   readonly projectNameForThread?: (thread: ChatThreadNavigationItem) => string | undefined;
   readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
+  /**
+   * Rows shown before the list folds behind Show more. Absent shows every
+   * row. The active thread always stays visible, so folding never hides the
+   * row the person is reading.
+   */
+  readonly collapsedLimit?: number;
 }
 
 const THREAD_VIRTUALIZATION_THRESHOLD = 40;
@@ -457,6 +463,8 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
     },
     [drag, props.thread, rowId],
   );
+  const activity = activityOf(props.thread);
+  const unread = activity === "unread" || props.thread.unread === true;
   if (props.isRenaming) {
     return (
       <ThreadRenameField
@@ -492,8 +500,10 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
     >
       {/* The dot leads the row from a gutter every row reserves, so a
           busy and an idle title start on the same edge. It is never
-          colour alone: the label says the state in words. */}
-      <ThreadStatusDot activity={activityOf(props.thread)} />
+          colour alone: the label says the state in words. Unread is the
+          one state that sits at the row's end instead, as a small dot,
+          so a quiet list reads as titles with a mark on what is new. */}
+      <ThreadStatusDot activity={activity === "unread" ? "idle" : activity} />
       {props.thread.provider === undefined ? null : (
         <span
           className="sidebar-navigation__thread-provider"
@@ -520,6 +530,15 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
           </span>
         )}
       </span>
+      {unread ? (
+        <span
+          aria-label={ACTIVITY_LABELS.unread}
+          className="sidebar-navigation__thread-unread-dot"
+          data-indicator="unread"
+          role="img"
+          title={ACTIVITY_LABELS.unread}
+        />
+      ) : null}
     </OctantButton>
   );
   const wrappedRow = (
@@ -582,14 +601,28 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
     }),
     [onStartRenameThread, props.actions, renameable],
   );
-  const virtualized = props.threads.length > THREAD_VIRTUALIZATION_THRESHOLD;
+  const [showingAll, setShowingAll] = useState(false);
+  const folded =
+    props.collapsedLimit !== undefined &&
+    !showingAll &&
+    props.threads.length > props.collapsedLimit;
+  const threads = useMemo(() => {
+    if (!folded || props.collapsedLimit === undefined) return props.threads;
+    const shown = props.threads.slice(0, props.collapsedLimit);
+    const active = props.threads.find(
+      (thread) => (thread.navigationId ?? thread.threadId) === props.activeThreadId,
+    );
+    return active !== undefined && !shown.includes(active) ? [...shown, active] : shown;
+  }, [folded, props.activeThreadId, props.collapsedLimit, props.threads]);
+  const foldedCount = props.threads.length - threads.length;
+  const virtualized = threads.length > THREAD_VIRTUALIZATION_THRESHOLD;
   const listRef = useRef<HTMLDivElement>(null);
   const [scrollMargin, setScrollMargin] = useState(0);
   const virtualizer = useVirtualizer({
-    count: virtualized ? props.threads.length : 0,
+    count: virtualized ? threads.length : 0,
     estimateSize: () => THREAD_ROW_ESTIMATE,
     getItemKey: (index) => {
-      const thread = props.threads[index];
+      const thread = threads[index];
       return thread === undefined ? String(index) : (thread.navigationId ?? thread.threadId);
     },
     getScrollElement: () => nearestScrollableAncestor(listRef.current),
@@ -600,7 +633,7 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
       const pinned = new Set(indexes);
       for (const id of [renamingThreadId, props.activeThreadId]) {
         if (id === undefined) continue;
-        const index = props.threads.findIndex(
+        const index = threads.findIndex(
           (thread) => (thread.navigationId ?? thread.threadId) === id,
         );
         if (index >= 0) pinned.add(index);
@@ -649,7 +682,7 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
       mutations?.disconnect();
       scrollElement.removeEventListener("scroll", update);
     };
-  }, [props.threads.length, virtualized]);
+  }, [threads.length, virtualized]);
 
   const row = (thread: ChatThreadNavigationItem) => (
     <ProjectThreadRow
@@ -668,36 +701,60 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
     />
   );
 
+  // Show more folds a long list behind one quiet row; Show less folds it back.
+  const fold =
+    props.collapsedLimit === undefined || props.threads.length <= props.collapsedLimit ? null : (
+      <OctantButton
+        aria-expanded={!folded}
+        className="project-threads__more justify-start window-no-drag"
+        onClick={() => setShowingAll((current) => !current)}
+        type="button"
+        variant="ghost"
+      >
+        {folded ? `Show more (${String(foldedCount)})` : "Show less"}
+      </OctantButton>
+    );
   if (!virtualized) {
-    return <>{props.threads.map((thread) => row(thread))}</>;
+    return (
+      <>
+        {threads.map((thread) => row(thread))}
+        {fold}
+      </>
+    );
   }
+  // The fold sits outside the measured list on this branch too: expanding a
+  // long list is what turns virtualization on, so leaving it to the unmeasured
+  // branch alone takes Show less away exactly when it is needed.
   return (
-    <div
-      className="project-threads__virtual-list"
-      ref={listRef}
-      style={{ height: virtualizer.getTotalSize() }}
-    >
-      {virtualizer.getVirtualItems().map((virtualItem) => {
-        const thread = props.threads[virtualItem.index];
-        if (thread === undefined) return null;
-        return (
-          <div
-            data-index={virtualItem.index}
-            key={virtualItem.key}
-            ref={virtualizer.measureElement}
-            style={{
-              left: 0,
-              position: "absolute",
-              top: 0,
-              transform: `translateY(${String(virtualItem.start - scrollMargin)}px)`,
-              width: "100%",
-            }}
-          >
-            {row(thread)}
-          </div>
-        );
-      })}
-    </div>
+    <>
+      <div
+        className="project-threads__virtual-list"
+        ref={listRef}
+        style={{ height: virtualizer.getTotalSize() }}
+      >
+        {virtualizer.getVirtualItems().map((virtualItem) => {
+          const thread = threads[virtualItem.index];
+          if (thread === undefined) return null;
+          return (
+            <div
+              data-index={virtualItem.index}
+              key={virtualItem.key}
+              ref={virtualizer.measureElement}
+              style={{
+                left: 0,
+                position: "absolute",
+                top: 0,
+                transform: `translateY(${String(virtualItem.start - scrollMargin)}px)`,
+                width: "100%",
+              }}
+            >
+              {row(thread)}
+            </div>
+          );
+        })}
+      </div>
+      {fold}
+    </>
   );
 }
 
@@ -734,6 +791,8 @@ function ThreadRowContextMenu(props: {
 }
 
 export interface ProjectThreadListProps {
+  /** Rows shown before the list folds behind Show more; absent shows every row. */
+  readonly collapsedLimit?: number;
   readonly actions?: ThreadRowActions;
   readonly activeThreadId?: string;
   readonly onRenameThread?: (threadId: string, title: string) => void;
@@ -786,6 +845,7 @@ export function ProjectThreadList(props: ProjectThreadListProps) {
           {...(props.projectNameForThread === undefined
             ? {}
             : { projectNameForThread: props.projectNameForThread })}
+          {...(props.collapsedLimit === undefined ? {} : { collapsedLimit: props.collapsedLimit })}
           threads={props.threads}
         />
       ) : status === "ready" && props.emptyMessage !== undefined ? (

@@ -278,7 +278,7 @@ describe("shell bootstrap contracts", () => {
       decodeShellSettings({ ...contextualSettings, contextSidebarWidth: 279 }),
     ).toThrow();
     expect(() =>
-      decodeShellSettings({ ...contextualSettings, contextSidebarWidth: 641 }),
+      decodeShellSettings({ ...contextualSettings, contextSidebarWidth: 961 }),
     ).toThrow();
     expect(() =>
       decodeShellSettings({ ...contextualSettings, lastContextSurface: "browser" }),

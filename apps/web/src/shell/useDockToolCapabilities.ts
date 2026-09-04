@@ -19,6 +19,7 @@ export interface UseDockToolCapabilitiesOptions {
   readonly addAgentInvoked: boolean;
   readonly canvasClient?: CanvasClient;
   readonly hasAppleSimulator: boolean;
+  readonly hasWrittenDocument: boolean;
   readonly mode: OctantMode;
   readonly planClient?: PlanClient;
   readonly projectId?: ProjectId;
@@ -168,6 +169,7 @@ export function useDockToolCapabilities(
       hasPlanArtifact: false,
       hasDelivery: false,
       hasCanvasDocument: false,
+      hasWrittenDocument: false,
       hasAppleSimulator: false,
       hasChildRuns: false,
       addAgentInvoked: false,
@@ -177,6 +179,7 @@ export function useDockToolCapabilities(
     hasPlanArtifact: plan.threadId === threadId ? plan.value : "unknown",
     hasDelivery: delivery.threadId === threadId ? delivery.value : "unknown",
     hasCanvasDocument: canvas.threadId === threadId ? canvas.value : "unknown",
+    hasWrittenDocument: options.hasWrittenDocument,
     hasAppleSimulator: options.hasAppleSimulator,
     hasChildRuns: childRuns.threadId === threadId ? childRuns.value : "unknown",
     addAgentInvoked: options.addAgentInvoked,

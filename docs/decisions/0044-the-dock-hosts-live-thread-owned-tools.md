@@ -35,9 +35,16 @@ or Project-wide surfaces.
   existing product meaning. Narrow windows keep the existing overlay drawer.
 - **Browser and Terminal are repeatable instances.** Add tool may create more
   than one isolated Browser context or Terminal session for the same thread.
-  Each instance has its own tab and presentation identity. Files, Review,
-  Agents, Canvas, Plan, Delivery, Simulator, and Side chat remain singleton
-  destinations and focus their existing tab when selected again.
+  Each instance has its own tab and presentation identity. Files, Document,
+  Review, Agents, Canvas, Plan, Delivery, Simulator, and Side chat remain
+  singleton destinations and focus their existing tab when selected again.
+- **Written documents open beside the transcript.** Document shows the
+  Markdown or text file a Code turn most recently created or rewrote, read
+  through the host-authorized file open. The renderer offers a written
+  document, or a Canvas a Chat turn authored, in the dock once per document:
+  a rewrite never reopens it, a tab the person closed stays closed, a document
+  the thread already had when it was opened is not offered, and the offer
+  never moves focus from the composer. This is presentation, not authority.
 - **Tooling opens on demand.** New windows start with both utility regions
   closed, so an empty dock never narrows the primary workspace. Selecting a
   tool opens its chosen region; an explicit per-window show or hide choice is

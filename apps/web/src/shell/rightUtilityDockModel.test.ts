@@ -49,6 +49,12 @@ describe("resolving what the right utility dock shows", () => {
         scope: "thread",
       },
       {
+        id: "document",
+        label: "Document",
+        modes: ["code"],
+        scope: "thread",
+      },
+      {
         id: "canvas",
         label: "Canvas",
         modes: ["chat", "work", "code"],

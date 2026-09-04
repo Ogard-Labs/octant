@@ -42,6 +42,7 @@ describe("which live tools the dock may offer", () => {
       hasDelivery: "unknown" as const,
       hasCanvasDocument: "unknown" as const,
       hasAppleSimulator: false,
+      hasWrittenDocument: false,
       hasChildRuns: "unknown" as const,
       addAgentInvoked: false,
     };
@@ -69,6 +70,7 @@ describe("which live tools the dock may offer", () => {
       hasDelivery: false,
       hasCanvasDocument: false,
       hasAppleSimulator: false,
+      hasWrittenDocument: false,
       hasChildRuns: false,
       addAgentInvoked: false,
     } as const;
@@ -84,6 +86,7 @@ describe("which live tools the dock may offer", () => {
       hasDelivery: false,
       hasCanvasDocument: false,
       hasAppleSimulator: false,
+      hasWrittenDocument: false,
       hasChildRuns: false,
       addAgentInvoked: false,
     } as const;

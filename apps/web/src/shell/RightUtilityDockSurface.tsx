@@ -25,6 +25,7 @@ export interface RightUtilityDockSurfaceProps {
   readonly review?: ReactNode;
   readonly closeButtonRef?: Ref<HTMLButtonElement>;
   readonly delivery?: ReactNode;
+  readonly document?: ReactNode;
   readonly environment?: ReactNode;
   readonly files?: ReactNode;
   readonly iosSimulator?: ReactNode;
@@ -58,6 +59,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     canvas: props.canvas,
     review: props.review,
     delivery: props.delivery,
+    document: props.document,
     environment: props.environment,
     files: props.files,
     "ios-simulator": props.iosSimulator,
@@ -176,6 +178,7 @@ function workMapDetail(surface: RightUtilityDockSurfaceId): string {
   if (surface === "review") return "Review checkout changes";
   if (surface === "delivery") return "Inspect the delivery target";
   if (surface === "files") return "Browse the active checkout";
+  if (surface === "document") return "Read the document this thread wrote";
   if (surface === "ios-simulator") return "Open the active Simulator";
   if (surface === "plan") return "Inspect the current plan";
   if (surface === "side-chat") return "Ask about this thread";

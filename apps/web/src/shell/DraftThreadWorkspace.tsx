@@ -157,6 +157,7 @@ export interface DraftThreadWorkspaceProps {
     mode: OctantMode,
     name: string,
     receiptId?: string,
+    initializeGit?: boolean,
   ) => Promise<ProjectId | undefined>;
   readonly onCancel: () => void;
   readonly serverUrl?: string;

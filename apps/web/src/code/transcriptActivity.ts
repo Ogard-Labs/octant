@@ -37,6 +37,12 @@ export interface CodeTurnActivity {
    * event by event and misses nothing.
    */
   readonly truncated?: boolean;
+  /**
+   * Paths the turn created or rewrote, in first-write order, from the host's
+   * file-change events. Only a live turn reports them; replayed history keeps
+   * tool and reasoning steps, so a reopened thread offers nothing here.
+   */
+  readonly writtenPaths?: ReadonlyArray<string>;
 }
 
 export const EMPTY_TURN_ACTIVITY: CodeTurnActivity = { rows: [], reasoning: "" };
@@ -107,7 +113,27 @@ export function applyActivityEvent(
       }),
     };
   }
+  if (event.kind === "file-change") {
+    const path = String(event.path);
+    if (event.change === "deleted") return forgetWrittenPath(activity, path);
+    const written = activity.writtenPaths ?? [];
+    if (written.includes(path)) return activity;
+    return { ...activity, writtenPaths: [...written, path] };
+  }
   return activity;
+}
+
+/**
+ * Takes a path out of a turn's written paths.
+ *
+ * A deletion is a fact about the thread's files, not about the turn that
+ * reported it: a later turn can remove the document an earlier turn wrote, so
+ * callers apply this to every turn rather than only the addressed one.
+ */
+export function forgetWrittenPath(activity: CodeTurnActivity, path: string): CodeTurnActivity {
+  const written = activity.writtenPaths;
+  if (written === undefined || !written.includes(path)) return activity;
+  return { ...activity, writtenPaths: written.filter((candidate) => candidate !== path) };
 }
 
 export function appendReasoning(activity: CodeTurnActivity, chunk: string): CodeTurnActivity {
