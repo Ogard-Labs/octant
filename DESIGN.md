@@ -357,11 +357,20 @@ remains in the bottom-left identity menu.
 
 The app has three server-enforced modes—Chat, Work, and Code. Mode switching is
 available as a labeled selector, compact list, or icon presentation according
-to the user's setting. Code and Work keep separate Project View sets. Project
-rows and thread rows share one hierarchy: folders/Projects first, then indented
-threads; provider marks are fixed-size inline and can be hidden without changing
-row height or indentation. Project View and Project Overview are real features,
-not decorative shortcuts.
+to the user's setting. Code and Work keep separate Project View sets. The
+sidebar reads as two flat groups parted by one hairline: Projects (each Project
+row with its threads nested beneath it, pinned Projects leading in their own
+labelled band that is absent when nothing is pinned), then Chats (threads filed
+in no Project; Work and Code call the group Recents). Rows are hairline rails, never
+cards; provider marks are fixed-size inline and can be hidden without changing
+row height or indentation. A thread with unread activity ends its row with a
+small filled dot labelled "New activity", driven by the read cursors the
+window already keeps, never by a poll; working and attention states keep the
+leading status dot. A list longer than eight rows folds behind one quiet "Show
+more (n)" row that becomes "Show less"; the active thread stays visible while
+folded. Keyboard focus is the one neutral ring, and the Project row keeps its
+context menu. Project View and Project Overview are real features, not
+decorative shortcuts.
 
 Primary sidebar destinations are New thread, Board, and Pull requests
 when valid for the active mode. The bottom-left identity menu owns Settings,

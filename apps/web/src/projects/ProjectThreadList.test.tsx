@@ -87,6 +87,66 @@ describe("ProjectThreadRows", () => {
     expect(provider?.compareDocumentPosition(title ?? row)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
+  it("marks an unread thread with a dot at the end of its row and clears it when read", () => {
+    const { rerender } = render(
+      <ProjectThreadRows onSelectThread={vi.fn()} threads={[{ ...thread, unread: true }]} />,
+    );
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    const dot = within(row).getByRole("img", { name: "New activity" });
+    expect(dot).toHaveClass("sidebar-navigation__thread-unread-dot");
+    // The mark ends the row: the title comes first, the dot last.
+    expect(row.lastElementChild).toBe(dot);
+    expect(row.querySelector('[data-activity="unread"]')).toBeNull();
+
+    rerender(
+      <ProjectThreadRows onSelectThread={vi.fn()} threads={[{ ...thread, unread: false }]} />,
+    );
+    expect(within(row).queryByRole("img", { name: "New activity" })).toBeNull();
+  });
+
+  it("folds a long list behind Show more, keeps the active thread visible, and unfolds on Show less", async () => {
+    const threads = Array.from({ length: 12 }, (_, index) => ({
+      threadId: `thread-${String(index)}`,
+      title: `Thread ${String(index)}`,
+    }));
+    render(
+      <ProjectThreadRows
+        activeThreadId="thread-11"
+        collapsedLimit={8}
+        onSelectThread={vi.fn()}
+        threads={threads}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /Thread 7/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Thread 8/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Thread 11/ })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Show more (3)" }));
+    expect(screen.getByRole("button", { name: /Thread 8/ })).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Show less" }));
+    expect(screen.queryByRole("button", { name: /Thread 8/ })).toBeNull();
+  });
+
+  it("can fold a list back up after unfolding it past the virtualization threshold", async () => {
+    // Unfolding is what pushes the list over the threshold, so the collapsed
+    // list is measured and the expanded one is virtualized.
+    const threads = Array.from({ length: 45 }, (_, index) => ({
+      threadId: `thread-${String(index)}`,
+      title: `Thread ${String(index)}`,
+    }));
+    render(<ProjectThreadRows collapsedLimit={8} onSelectThread={vi.fn()} threads={threads} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Show more (37)" }));
+    const collapse = screen.getByRole("button", { name: "Show less" });
+    expect(collapse).toBeVisible();
+
+    await userEvent.click(collapse);
+    expect(screen.getByRole("button", { name: "Show more (37)" })).toBeVisible();
+  });
+
   it("shows a compact worktree chip only when the host projected one", () => {
     const { rerender } = render(
       <ProjectThreadRows

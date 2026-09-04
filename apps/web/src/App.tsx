@@ -4460,8 +4460,9 @@ function LaunchedShell(
                         ? {
                             addProjectLabel: "chat-project" as const,
                             onAddProject: () => openProjectCreate(),
+                            unfiledLabel: "Chats" as const,
                           }
-                        : {}
+                        : { unfiledLabel: "Chats" as const }
                       : {
                           onAddProject: () => openProjectCreate(),
                           unfiledLabel: "Recents" as const,
