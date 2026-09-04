@@ -278,6 +278,30 @@
   gap: 8px;
 }
 
+.dock-document-tool {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.dock-document-tool__path {
+  margin: 0;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-document-tool__body {
+  height: auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--oct-space-3);
+}
+
 .dock-canvas-tool__list {
   display: grid;
   gap: 6px;
@@ -433,6 +457,7 @@
 .right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .code-file-explorer-panel),
 .right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .canvas-workspace-tab),
 .right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .dock-canvas-tool),
+.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .dock-document-tool),
 .right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .code-diff-pane),
 .right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) [data-code-tab-kind]) {
   padding: 0;

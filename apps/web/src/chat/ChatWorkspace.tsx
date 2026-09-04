@@ -84,6 +84,11 @@ export interface ChatWorkspaceProps {
   readonly imageGenerationClient?: ImageGenerationClient;
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
+  /** The Canvas cards the host lists for this thread, each time they are read. */
+  readonly onCanvasReferencesObserved?: (
+    threadId: string,
+    cards: ReadonlyArray<CanvasThreadReferenceCard>,
+  ) => void;
   /** Injected thread-mention client; otherwise built from serverUrl. */
   readonly threadMentionClient?: ThreadMentionClient;
   /** Called with the host's sidecar linkage so the shell can open its tab. */
@@ -178,6 +183,15 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   >([]);
   const [pendingQuotes, setPendingQuotes] = useState<ReadonlyArray<TranscriptQuoteChip>>([]);
   const [canvasRefreshKey, setCanvasRefreshKey] = useState(0);
+  const settledTurnCount =
+    view === undefined
+      ? 0
+      : view.turns.filter((turn) => {
+          const attempt = turn.attempts.at(-1);
+          return (
+            attempt !== undefined && attempt.outcome !== "queued" && attempt.outcome !== "streaming"
+          );
+        }).length;
   const [canvasPanelOpen, setCanvasPanelOpen] = useState(false);
   const [toolApprovals, setToolApprovals] = useState<ReadonlyArray<ExtensionToolApproval>>([]);
   const [toolApprovalBusy, setToolApprovalBusy] = useState(false);
@@ -882,8 +896,16 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               client={props.canvasClient}
               mode="chat"
               {...(props.onOpenCanvas === undefined ? {} : { onOpen: props.onOpenCanvas })}
+              {...(props.onCanvasReferencesObserved === undefined
+                ? {}
+                : {
+                    onCardsObserved: (cards: ReadonlyArray<CanvasThreadReferenceCard>) =>
+                      props.onCanvasReferencesObserved?.(String(thread.id), cards),
+                  })}
               projectId={thread.projectId ?? null}
-              refreshKey={canvasRefreshKey}
+              // A settled turn may have authored a Canvas; re-read the cards so
+              // the document appears without reopening the thread.
+              refreshKey={canvasRefreshKey + settledTurnCount}
               threadId={thread.id}
             />
           </section>
