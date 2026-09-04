@@ -846,6 +846,29 @@ describe("DraftThreadWorkspace", () => {
     ).toBeNull();
   });
 
+  it("omits New Project from GitHub when the GitHub plugin is not effective", async () => {
+    const user = userEvent.setup();
+    // The clients are present, so only the plugin gate can keep the managed
+    // clone flow out of the menu.
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        githubClient={makeGithubClient()}
+        githubCloneClient={makeGithubCloneClient()}
+        githubPluginEnabled={false}
+        mode="code"
+        onCreateProject={vi.fn(async () => codeProjectId)}
+        projects={projects}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
+    expect(screen.getByRole("option", { name: "New Project from folder…" })).toBeVisible();
+    expect(
+      screen.queryByRole("option", { name: "New Project from GitHub repository…" }),
+    ).toBeNull();
+  });
+
   it("onboards a GitHub repository into a new bound Code Project selected in the composer", async () => {
     const user = userEvent.setup();
     const createdProjectId = "00000000-0000-4000-8000-000000000115" as ProjectId;

@@ -145,7 +145,14 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
       } else if (event.key === "ArrowUp") {
         event.preventDefault();
         setActiveIndex((i) => (i - 1 < 0 ? flatEntries.length - 1 : i - 1));
-      } else if (event.key === "Enter" || event.key === " ") {
+      } else if (
+        event.key === "Enter" ||
+        // Space is a character in the search field, which is focused whenever
+        // the menu is open and whose keydown reaches this container. Only the
+        // list itself reads Space as activation; Project names and paths
+        // commonly contain spaces.
+        (event.key === " " && event.target !== searchRef.current)
+      ) {
         const entry = flatEntries[activeIndex];
         if (entry === undefined) return;
         event.preventDefault();

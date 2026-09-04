@@ -101,6 +101,25 @@ describe("ComposerProjectSelector", () => {
     expect(trigger).toHaveFocus();
   });
 
+  it("types a space into the search field after arrowing through the list", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    render(
+      <ComposerProjectSelector entries={entries} onSelect={onSelect} onAddFolder={() => {}} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
+    const search = screen.getByRole("combobox", { name: "Search Projects" });
+    // Arrowing leaves an option active, and the space then goes to the menu
+    // rather than the field it was typed into. Typing clears the active
+    // option, so it is the space straight after an arrow key that is lost.
+    await user.keyboard("{ArrowDown}");
+    await user.keyboard(" ");
+
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(search).toHaveValue(" ");
+  });
+
   it("offers a new Project from a GitHub repository inside the same menu and walks back to Projects", async () => {
     const user = userEvent.setup();
     const client: GithubClient = {

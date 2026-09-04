@@ -132,6 +132,20 @@ describe("the public-block visual language", () => {
     );
   });
 
+  it("keeps the keyboard focus halo on the Issues search its inner reset would swallow", () => {
+    const github = readFileSync(join(webRoot, "styles/github.css"), "utf8");
+    const input =
+      github.match(/\.github-issue-browser__search input\[type="search"\]\s*\{[^}]+\}/)?.[0] ?? "";
+
+    // The inner input clears box-shadow so no ring is drawn inside the 30px
+    // control. That also outranks the global :focus-visible halo, so the
+    // wrapper has to carry it or focus is only a border tint.
+    expect(input).toMatch(/box-shadow:\s*none/);
+    expect(github).toMatch(
+      /\.github-issue-browser__search:has\(input\[type="search"\]:focus-visible\)\s*\{\s*box-shadow:\s*var\(--oct-focus-ring\)/,
+    );
+  });
+
   it("keeps empty composer pickers as quiet toolbar items instead of nested fields", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const emptyPicker =

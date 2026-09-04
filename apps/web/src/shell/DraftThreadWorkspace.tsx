@@ -417,6 +417,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     props.mode === "code" &&
     props.githubClient !== undefined &&
     props.githubCloneClient !== undefined &&
+    props.githubPluginEnabled !== false &&
     onCreateProjectForGithub !== undefined
       ? {
           client: props.githubClient,
