@@ -271,6 +271,37 @@ describe("Codex stable 0.144.4 protocol", () => {
     }
   });
 
+  it("decodes the account rate-limit notification without keeping plan or credit details", () => {
+    const decoded = decodeCodexServerMessage({
+      method: "account/rateLimits/updated",
+      params: {
+        rateLimits: {
+          limitId: "codex",
+          limitName: null,
+          primary: { usedPercent: 42, windowDurationMins: 300, resetsAt: 1_784_000_000 },
+          secondary: { usedPercent: 7, windowDurationMins: 10_080, resetsAt: null },
+          credits: { hasCredits: true, unlimited: false, balance: "12.00" },
+          planType: "pro",
+          rateLimitReachedType: null,
+          spendControlReached: false,
+        },
+      },
+    });
+
+    expect(decoded).toMatchObject({
+      kind: "notification",
+      method: "account/rateLimits/updated",
+      params: {
+        rateLimits: {
+          primary: { usedPercent: 42, windowDurationMins: 300, resetsAt: 1_784_000_000 },
+          secondary: { usedPercent: 7, windowDurationMins: 10_080, resetsAt: null },
+        },
+      },
+    });
+    expect(decoded).not.toHaveProperty("params.rateLimits.credits");
+    expect(decoded).not.toHaveProperty("params.rateLimits.planType");
+  });
+
   it("does not forward raw tool results through item lifecycle messages", () => {
     expect(
       decodeCodexServerMessage({

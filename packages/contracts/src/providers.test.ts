@@ -1945,6 +1945,13 @@ describe("provider runtime contracts", () => {
     { kind: "tool-success", toolCallId: "tool-1", summary: "Read file" },
     { kind: "tool-failure", toolCallId: "tool-1", message: "Denied" },
     { kind: "usage", inputTokens: 10, outputTokens: 4 },
+    {
+      kind: "rate-limit-bucket",
+      bucket: "requests",
+      limit: 1000,
+      remaining: 999,
+      resetsAt: "2026-07-15T10:01:00.000Z",
+    },
     { kind: "file-change", path: "src/index.ts", change: "modified" },
     { kind: "diff", diff: "@@ -1 +1 @@" },
     { kind: "task-progress", taskId: "task-1", status: "in-progress", summary: "Working" },
@@ -2008,6 +2015,18 @@ describe("provider runtime contracts", () => {
     expect(decodeProviderRuntimeEvent({ ...common, ...event })).toMatchObject(event);
     expect(() =>
       decodeProviderRuntimeEvent({ ...common, ...event, providerPayload: { private: true } }),
+    ).toThrow();
+  });
+
+  it("refuses a rate-limit bucket whose remaining count exceeds its limit", () => {
+    expect(() =>
+      decodeProviderRuntimeEvent({
+        ...common,
+        kind: "rate-limit-bucket",
+        bucket: "tokens",
+        limit: 10,
+        remaining: 11,
+      }),
     ).toThrow();
   });
 

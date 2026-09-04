@@ -26,6 +26,7 @@ import {
 import { Cause, Effect, Exit, Option, PubSub, Stream } from "effect";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { sendChatCompletionsTurn, type ChatCompletionsTurnResult } from "./openAiChatCompletions";
+import type { ObservedRateLimitBucket } from "./rateLimitHeaders";
 import {
   makeOpenAiCompatibleEndpoint,
   markCompatibleModelVerified,
@@ -626,6 +627,11 @@ function finishSuccessfulTurn(
   offer: (event: ProviderRuntimeEvent) => void,
   clock: () => string,
 ): void {
+  // Header buckets go out first: they describe the account after this
+  // response, and a consumer that stops at the terminal event still sees them.
+  for (const bucket of result.rateLimitBuckets ?? []) {
+    offer(rateLimitBucketEvent(options.instanceId, state, bucket, clock));
+  }
   const current = options.runtimeRegistry.observedState(options.instanceId);
   const models = markCompatibleModelVerified(
     current?.models ?? manualModels(options.configuration.manualModelIds),
@@ -846,6 +852,23 @@ function terminalEvent(
 ): ProviderRuntimeEvent {
   return {
     ...terminal,
+    instanceId,
+    sessionId: state.sessionId,
+    sequence: state.nextSequence++,
+    correlationId: state.correlationId,
+    occurredAt: clock() as UtcTimestamp,
+  } as ProviderRuntimeEvent;
+}
+
+function rateLimitBucketEvent(
+  instanceId: ProviderInstanceId,
+  state: SessionState,
+  bucket: ObservedRateLimitBucket,
+  clock: () => string,
+): ProviderRuntimeEvent {
+  return {
+    kind: "rate-limit-bucket",
+    ...bucket,
     instanceId,
     sessionId: state.sessionId,
     sequence: state.nextSequence++,
