@@ -327,13 +327,19 @@ a titled menu on the prompt card, next to the model picker, and carries the
 "Remember for this Project" switch. The
 Under the Code composer the start screen reads like GitHub Copilot's and
 Cursor's agent homes: suggested prompts as small cards (a label and the
-sentence they fill in), then Up next (assigned GitHub issues and pull
-requests and Linear issues, in a hairline panel that says "You're all caught
-up" when empty), Start something new (open issues in recent repositories that
-nobody has picked up, with a way to the Issues surface), and Continue (the
-latest Board cards, each led by a tile naming its delivery state: Running,
-PR #n, Merged, Done, Waiting, with changed lines beneath). Picking an item
-fills the prompt and attaches the issue as the thread's Create from context.
+sentence they fill in), then three sections that share one card grid, two
+across at the composer's width. Each card opens with a badge naming what it
+is (Issue, Pull request, Review requested, Linear, or a thread's delivery
+state: Running, PR #n, Merged, Done, Waiting), the repository or identifier
+in mono, and the age at the trailing edge; then the title and one line of
+facts (author, or provider · Project · branch). Up next holds assigned GitHub
+work and Linear issues and says "You're all caught up" in a panel when
+empty, with Open Inbox at the section's trailing edge; Start something new
+holds open issues in recent repositories that nobody has picked up, with
+Browse all issues beside it; Continue holds the latest Board cards. Picking
+an item fills the prompt and attaches the issue as the thread's Create from
+context. The start screen has no image control: image generation lives on
+its own surface.
 The prompt itself is frameless:
 `OctantTextarea` drops the shadcn field recipe when it wears `.composer-input`.
 Composer-row selects drop the same field chrome. Feature CSS must not
