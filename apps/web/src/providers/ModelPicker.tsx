@@ -8,7 +8,6 @@ import type {
 } from "@octant/domain";
 import { useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { filterModelPickerGroups } from "@octant/domain";
-import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 
@@ -181,12 +180,14 @@ function SectionView(props: {
   readonly onSelect: (selection: ModelPickerSelection) => void;
 }) {
   if (props.section.models.length === 0) return null;
+  const shared = sharedBadgeKinds(props.section.models);
   return (
     <div className="model-picker__section" role="group" aria-label={props.section.label}>
       <span className="model-picker__section-label">{props.section.label}</span>
       <ul className="model-picker__options">
         {props.section.models.map((picker) => {
           const modelId = picker.model.id;
+          const capabilities = picker.badges.filter((badge) => !shared.has(badge.kind));
           const unavailable = picker.unavailableReason !== undefined;
           const selected =
             props.selectedModelId !== undefined &&
@@ -208,13 +209,9 @@ function SectionView(props: {
               >
                 <span className="model-picker__option-name">{picker.model.displayName}</span>
                 <span className="model-picker__option-id">{String(modelId)}</span>
-                {picker.badges.length > 0 ? (
-                  <span className="model-picker__badges">
-                    {picker.badges.map((badge) => (
-                      <OctantBadge key={badge.kind} variant={modelBadgeVariant(badge.kind)}>
-                        {badge.label}
-                      </OctantBadge>
-                    ))}
+                {capabilities.length > 0 ? (
+                  <span className="model-picker__capabilities">
+                    {capabilities.map((badge) => badge.label).join(" · ")}
                   </span>
                 ) : null}
                 {picker.unavailableReason !== undefined ? (
@@ -258,19 +255,21 @@ function readinessLabel(readiness: PickerGroup["readiness"]): string {
   }
 }
 
-/** Tools keeps its success-green emphasis; every other capability badge reads
- * as a neutral, bordered chip in the shadcn palette, matching the legacy
- * `.model-picker__badge--*` rules that only recolored the "tools" kind. */
-function modelBadgeVariant(kind: ModelBadge["kind"]): OctantBadgeProps["variant"] {
-  switch (kind) {
-    case "tools":
-      return "success";
-    case "vision":
-    case "reasoning":
-    case "local":
-    case "context-limit":
-      return "outline";
+/** A capability every model in the section carries says nothing about the
+ * choice between them, so the rows print only the ones that differ. A
+ * section of one model has nothing to differ from and keeps all of them. */
+function sharedBadgeKinds(models: ReadonlyArray<PickerModel>): ReadonlySet<ModelBadge["kind"]> {
+  if (models.length < 2) return new Set();
+  const [first, ...rest] = models;
+  if (first === undefined) return new Set();
+  const shared = new Set(first.badges.map((badge) => badge.kind));
+  for (const model of rest) {
+    const kinds = new Set(model.badges.map((badge) => badge.kind));
+    for (const kind of shared) {
+      if (!kinds.has(kind)) shared.delete(kind);
+    }
   }
+  return shared;
 }
 
 function flattenOptions(groups: ReadonlyArray<PickerGroup>): ReadonlyArray<FlatOption> {

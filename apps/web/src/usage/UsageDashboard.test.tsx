@@ -411,23 +411,23 @@ describe("UsageDashboard", () => {
     expect(client.retain).toHaveBeenCalled();
   });
 
-  it("keeps usage export an ordinary button and usage erasure in danger text", async () => {
+  it("keeps export and erasure as quiet ghost actions; only the confirm carries danger colour", async () => {
     const client = createMockClient(seededResponse());
     render(<UsageDashboard client={client} />);
     await screen.findByText("Total requests");
 
     expect(screen.getByRole("button", { name: /Export CSV/ })).toHaveAttribute(
       "data-variant",
-      "outline",
+      "ghost",
     );
     expect(screen.getByRole("button", { name: /Export JSON/ })).toHaveAttribute(
       "data-variant",
-      "outline",
+      "ghost",
     );
-    expect(screen.getByRole("button", { name: /Purge older than 30 days/ })).toHaveClass(
+    expect(screen.getByRole("button", { name: /Purge older than 30 days/ })).not.toHaveClass(
       "usage-dashboard__danger",
     );
-    expect(screen.getByRole("button", { name: /Reset all usage/ })).toHaveClass(
+    expect(screen.getByRole("button", { name: /Reset all usage/ })).not.toHaveClass(
       "usage-dashboard__danger",
     );
   });

@@ -406,9 +406,17 @@ floating in the middle of wide windows. Navigation groups use quiet separators
 rather than competing labels. Routine related rows stay open on the application
 ground with hairline separators. Keybindings have their own destination and raw
 JSON stays behind an advanced disclosure. Profiles, provider instances, install
-reviews, visual theme choices, destructive groups, and other discrete objects use raised cards
-(`--octant-shadow-sm`). Labels and descriptions align left, controls align
-right, and compound editors may expand below. Essential labels and explanatory
+reviews, visual theme choices, and other discrete objects use raised cards
+(`--octant-shadow-sm`). A destructive group is an open section at the end of
+its page, marked by that placement and by its confirm control, not by heading
+colour or a card. Labels and descriptions align left, controls align
+right, and compound editors may expand below. A section label may carry the
+ghost actions that act on the whole section on its own line; a primary never
+lives in a section head. A row's "more" (a custom font stack, network
+details, what an update check sends) sits behind one `.settings-disclosure`
+recipe: a 12px summary with the app's chevron, never the browser's marker.
+Loading and status lines are one quiet sentence; only an error keeps a box.
+Essential labels and explanatory
 text are at least 12px at the default interface scale. Every control uses the
 owned Octant/shadcn adapter, inherits the interface typography projection, and
 saves immediately.

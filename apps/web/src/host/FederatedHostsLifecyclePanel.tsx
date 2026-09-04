@@ -123,20 +123,15 @@ export function FederatedHostsLifecyclePanel(props: FederatedHostsLifecyclePanel
   return (
     <section
       aria-label="Federated hosts"
-      className="federated-hosts-lifecycle"
+      className="settings-card-section settings-card-section--open federated-hosts-lifecycle"
       id="settings-federated-hosts"
     >
-      <h2 className="host-settings__heading">Federated hosts</h2>
-      <p className="host-settings__note">
+      <h2>Federated hosts</h2>
+      <p className="settings-section-note">
         Each host keeps its own connection state. Device credential expiry, revoke, or failure on
         one host never blocks the local host or other healthy hosts. A spent session reconnects from
         the paired device key; only a lost, revoked, or expired credential needs a new pair.
       </p>
-      {message !== undefined ? (
-        <p className="federated-hosts-lifecycle__message" role="status">
-          {message}
-        </p>
-      ) : null}
       <ul className="federated-hosts-lifecycle__list">
         {snapshots.map((snapshot) => {
           const guidance = guidanceCopy(snapshot);
@@ -144,29 +139,31 @@ export function FederatedHostsLifecyclePanel(props: FederatedHostsLifecyclePanel
           const isLocal = snapshot.hostId === LOCAL_HOST_ID;
           return (
             <li
-              className="federated-hosts-lifecycle__item"
+              className="setrow federated-hosts-lifecycle__item"
               data-host-id={snapshot.hostId}
               data-host-state={snapshot.state}
               key={snapshot.hostId}
             >
-              <div className="federated-hosts-lifecycle__identity">
-                <strong>{snapshot.displayName}</strong>
+              <span className="setrow-label">{snapshot.displayName}</span>
+              <p className="setrow-hint">
                 <span className="federated-hosts-lifecycle__facts">{identityFacts(snapshot)}</span>
+                {" · "}
                 <span className="federated-hosts-lifecycle__state">
                   {STATE_LABELS[snapshot.state]}
                   {snapshot.reasonCode !== undefined ? ` · ${snapshot.reasonCode}` : ""}
                 </span>
-              </div>
-              {guidance !== undefined ? (
-                <p className="federated-hosts-lifecycle__guidance">{guidance}</p>
-              ) : snapshot.reason !== undefined ? (
-                <p className="federated-hosts-lifecycle__guidance">{snapshot.reason}</p>
-              ) : null}
-              <div className="federated-hosts-lifecycle__actions">
+                {guidance !== undefined ? (
+                  <span className="federated-hosts-lifecycle__guidance">{guidance}</span>
+                ) : snapshot.reason !== undefined ? (
+                  <span className="federated-hosts-lifecycle__guidance">{snapshot.reason}</span>
+                ) : null}
+              </p>
+              <div className="setrow-control federated-hosts-lifecycle__actions">
                 {snapshot.actions.canReconnect ? (
                   <OctantButton
                     disabled={busy}
                     onClick={() => void runAction(snapshot.hostId, "reconnect")}
+                    size="sm"
                     type="button"
                     variant="secondary"
                   >
@@ -177,6 +174,7 @@ export function FederatedHostsLifecyclePanel(props: FederatedHostsLifecyclePanel
                   <OctantButton
                     disabled={busy}
                     onClick={() => void runAction(snapshot.hostId, "revoke")}
+                    size="sm"
                     type="button"
                     variant="secondary"
                   >
@@ -187,6 +185,7 @@ export function FederatedHostsLifecyclePanel(props: FederatedHostsLifecyclePanel
                   <OctantButton
                     disabled={busy}
                     onClick={() => void runAction(snapshot.hostId, "remove")}
+                    size="sm"
                     type="button"
                     variant="secondary"
                   >
@@ -198,6 +197,11 @@ export function FederatedHostsLifecyclePanel(props: FederatedHostsLifecyclePanel
           );
         })}
       </ul>
+      {message !== undefined ? (
+        <p className="settings-section-line" role="status">
+          {message}
+        </p>
+      ) : null}
     </section>
   );
 }
