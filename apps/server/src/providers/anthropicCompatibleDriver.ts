@@ -37,6 +37,7 @@ import {
   type AnthropicTurnResult,
 } from "./anthropicMessages";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import type { ObservedRateLimitBucket } from "./rateLimitHeaders";
 
 const initialCapabilities: ProviderCapabilities = {
   streaming: "unavailable",
@@ -336,6 +337,11 @@ function finishSuccessfulTurn(
   offer: (event: ProviderRuntimeEvent) => void,
   clock: () => string,
 ): void {
+  // Header buckets go out first: they describe the account after this
+  // response, and a consumer that stops at the terminal event still sees them.
+  for (const bucket of result.rateLimitBuckets ?? []) {
+    offer(rateLimitBucketEvent(options.instanceId, state, bucket, clock));
+  }
   state.history.push({ role: "assistant", text: result.text });
   const current = options.runtimeRegistry.observedState(options.instanceId);
   const models = markAnthropicModelVerified(
@@ -408,6 +414,23 @@ function terminalEvent(
 ): ProviderRuntimeEvent {
   return {
     ...terminal,
+    instanceId,
+    sessionId: state.sessionId,
+    sequence: state.nextSequence++,
+    correlationId: state.correlationId,
+    occurredAt: clock() as UtcTimestamp,
+  } as ProviderRuntimeEvent;
+}
+
+function rateLimitBucketEvent(
+  instanceId: ProviderInstanceId,
+  state: SessionState,
+  bucket: ObservedRateLimitBucket,
+  clock: () => string,
+): ProviderRuntimeEvent {
+  return {
+    kind: "rate-limit-bucket",
+    ...bucket,
     instanceId,
     sessionId: state.sessionId,
     sequence: state.nextSequence++,
