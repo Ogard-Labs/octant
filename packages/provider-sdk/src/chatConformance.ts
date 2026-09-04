@@ -328,8 +328,9 @@ export async function runProviderChatConformance(
         const events: ProviderRuntimeEvent[] = [];
         const toolRequestObserved =
           yield* Deferred.make<Extract<ProviderRuntimeEvent, { readonly kind: "tool-request" }>>();
+        const runtimeEvents = yield* connection.subscribe;
         const collector = yield* Effect.fork(
-          connection.events.pipe(
+          runtimeEvents.pipe(
             Stream.filter((event) => event.sessionId === fixture.sessionStart.sessionId),
             Stream.takeUntil(
               (event) =>

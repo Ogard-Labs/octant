@@ -219,7 +219,7 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const events = connection.events;
+          const events = yield* connection.subscribe;
           yield* connection.send({
             sessionId,
             prompt: "echo hi",
@@ -268,7 +268,7 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const events = connection.events;
+          const events = yield* connection.subscribe;
           yield* connection.send({
             sessionId,
             prompt: "echo hi",
@@ -308,7 +308,7 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const events = connection.events;
+          const events = yield* connection.subscribe;
           yield* connection.send({
             sessionId,
             prompt: "echo hi",
@@ -380,7 +380,7 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const events = connection.events;
+          const events = yield* connection.subscribe;
           yield* connection.send({
             sessionId,
             prompt: "echo hi",
@@ -425,7 +425,7 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const events = connection.events;
+          const events = yield* connection.subscribe;
           yield* connection.send({
             sessionId,
             prompt: "use unknown tool",
@@ -566,7 +566,7 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const events = connection.events;
+          const events = yield* connection.subscribe;
           yield* connection.send({
             sessionId,
             prompt: "dup call",
@@ -611,7 +611,7 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const events = connection.events;
+          const events = yield* connection.subscribe;
           yield* connection.send({
             sessionId,
             prompt: "echo hi",
@@ -673,7 +673,7 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const events = connection.events;
+          const events = yield* connection.subscribe;
           yield* connection.send({
             sessionId,
             prompt: "echo hi",

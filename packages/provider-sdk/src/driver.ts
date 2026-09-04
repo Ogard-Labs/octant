@@ -115,7 +115,23 @@ export interface ProviderToolVerificationResult {
 }
 
 export interface ProviderConnection {
-  readonly events: Stream.Stream<ProviderRuntimeEvent, ProviderFailure>;
+  /**
+   * Establishes a subscription to this connection's runtime events and returns
+   * the stream reading from it. Each subscriber gets its own, and it lasts as
+   * long as the scope it was taken in.
+   *
+   * Subscribing is the effect, not the reading: a provider that answers
+   * immediately publishes from inside `send`, before the turn's consumer fiber
+   * has run, so a caller must be able to subscribe first and read afterwards.
+   * A stream that only subscribes when it is first pulled cannot offer that —
+   * it drops the turn's opening text, or the terminal event the caller is
+   * waiting for, depending on how the scheduler interleaved the two.
+   */
+  readonly subscribe: Effect.Effect<
+    Stream.Stream<ProviderRuntimeEvent, ProviderFailure>,
+    never,
+    Scope.Scope
+  >;
   readonly start: (
     input: ProviderSessionStart,
   ) => Effect.Effect<ProviderSessionHandle, ProviderFailure>;

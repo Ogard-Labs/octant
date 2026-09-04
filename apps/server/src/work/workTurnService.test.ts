@@ -420,7 +420,7 @@ function serviceFixture(
     acquire: (input) => {
       acquireInputs.push(input);
       return Effect.succeed({
-        events: Stream.empty,
+        subscribe: Effect.succeed(Stream.empty),
         start: () => Effect.void,
         send: () => Effect.void,
         resume: () => Effect.void,

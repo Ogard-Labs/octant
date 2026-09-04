@@ -18,7 +18,7 @@ import type { WorkRequestService, WorkRequestServiceResult } from "./workRequest
 
 type RequestConnection = Pick<
   ProviderConnection,
-  "events" | "answerApproval" | "answerUserInput" | "interrupt"
+  "subscribe" | "answerApproval" | "answerUserInput" | "interrupt"
 >;
 
 export interface WorkRequestRuntimeOptions {
@@ -53,9 +53,15 @@ export class WorkRequestRuntime {
 
   subscribe(input: WorkRequestSubscriptionInput): Effect.Effect<void, unknown> {
     this.register(input);
-    return input.connection.events.pipe(
-      Stream.tap((event) => this.observe(input, event)),
-      Stream.runDrain,
+    return Effect.scoped(
+      input.connection.subscribe.pipe(
+        Effect.flatMap((events) =>
+          events.pipe(
+            Stream.tap((event) => this.observe(input, event)),
+            Stream.runDrain,
+          ),
+        ),
+      ),
     );
   }
 
@@ -229,7 +235,11 @@ export function attachWorkRequestRuntime(
         yield* Effect.addFinalizer(() => Effect.sync(detach));
         return {
           ...connection,
-          events: connection.events.pipe(Stream.tap((event) => active.observe(context, event))),
+          subscribe: connection.subscribe.pipe(
+            Effect.map((events) =>
+              events.pipe(Stream.tap((event) => active.observe(context, event))),
+            ),
+          ),
         };
       }),
   };

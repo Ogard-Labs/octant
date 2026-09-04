@@ -223,7 +223,7 @@ async function runTurnAndCollectEvents(
           executionPolicy: "approval-gated",
         });
         const collector = yield* Effect.fork(
-          connection.events.pipe(
+          (yield* connection.subscribe).pipe(
             Stream.filter((event) => event.sessionId === sessionId),
             Stream.takeUntil(
               (event) =>

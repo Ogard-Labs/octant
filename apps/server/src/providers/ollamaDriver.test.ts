@@ -131,7 +131,7 @@ describe("Ollama provider driver", () => {
       connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
     );
     expect(handle.resumeCursor).toEqual({ driverKind: "ollama", value: sessionId });
-    const first = terminal(connection.events);
+    const first = terminal(Stream.unwrapScoped(connection.subscribe));
     await Effect.runPromise(
       connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
     );
@@ -159,7 +159,7 @@ describe("Ollama provider driver", () => {
         executionPolicy: "plan",
       }),
     );
-    const second = terminal(restartedConnection.events);
+    const second = terminal(Stream.unwrapScoped(restartedConnection.subscribe));
     await Effect.runPromise(
       restartedConnection.send({ sessionId, prompt: "second", attachments: [], tools: [] }),
     );
@@ -204,7 +204,7 @@ describe("Ollama provider driver", () => {
     await Effect.runPromise(
       connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
     );
-    const events = terminal(connection.events);
+    const events = terminal(Stream.unwrapScoped(connection.subscribe));
     await Effect.runPromise(
       connection.send({ sessionId, prompt: "use a tool", attachments: [], tools: [] }),
     );
@@ -242,7 +242,7 @@ describe("Ollama provider driver", () => {
       ),
     ).rejects.toThrow(/stale-resume/);
     await Effect.runPromise(connection.start({ sessionId, modelId, executionPolicy: "plan" }));
-    const collected = terminal(connection.events);
+    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
     await Effect.runPromise(
       connection.send({ sessionId, prompt: "wait", attachments: [], tools: [] }),
     );

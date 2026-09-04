@@ -57,7 +57,7 @@ describe("WorkTurnRuntime", () => {
       acquire: (input) => {
         acquireInputs.push(input);
         return Effect.succeed({
-          events: Stream.fromIterable(events),
+          subscribe: Effect.succeed(Stream.fromIterable(events)),
           start: () => Effect.void,
           send: () => Effect.void,
           resume: () => Effect.void,
@@ -126,7 +126,7 @@ describe("WorkTurnRuntime", () => {
       probe: () => Effect.die("unused"),
       acquire: () =>
         Effect.succeed({
-          events: Stream.fromIterable(events),
+          subscribe: Effect.succeed(Stream.fromIterable(events)),
           start: () => Effect.void,
           send: (input: unknown) => {
             sent.push(input);
@@ -194,7 +194,7 @@ describe("WorkTurnRuntime", () => {
       probe: () => Effect.die("unused"),
       acquire: () =>
         Effect.succeed({
-          events: Stream.fromIterable(events),
+          subscribe: Effect.succeed(Stream.fromIterable(events)),
           start: () => Effect.void,
           send: (input: unknown) => {
             sent.push(input);

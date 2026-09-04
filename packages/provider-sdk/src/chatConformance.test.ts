@@ -205,7 +205,7 @@ function makeChatFixture(options?: {
     : Stream.fromIterable(events);
 
   const connection: ProviderConnection = {
-    events: eventStream,
+    subscribe: Effect.succeed(eventStream),
     start: () => Effect.succeed({ sessionId }),
     resume: () => Effect.fail(failure("unsupported", "Resume is unsupported.")),
     send: (input) =>

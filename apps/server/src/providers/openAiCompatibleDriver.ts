@@ -262,7 +262,7 @@ function makeConnection(
     };
 
     return {
-      events: Stream.fromPubSub(events),
+      subscribe: Stream.fromPubSub(events, { scoped: true }),
       start: (input) =>
         Effect.tryPromise({
           try: async () => {

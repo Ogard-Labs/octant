@@ -111,19 +111,19 @@ describe("makeOpenAiCompatibleDriver", () => {
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
 
           const firstEvents = yield* Effect.fork(
-            collectSessionEvents(connection.events, sessionId),
+            collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({ sessionId, prompt: "first", attachments: [], tools: [] });
           expect(Array.from(yield* Fiber.join(firstEvents)).at(-1)?.kind).toBe("completed");
 
           const failedEvents = yield* Effect.fork(
-            collectSessionEvents(connection.events, sessionId),
+            collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({ sessionId, prompt: "second", attachments: [], tools: [] });
           expect(Array.from(yield* Fiber.join(failedEvents)).at(-1)?.kind).toBe("failed");
 
           const thirdEvents = yield* Effect.fork(
-            collectSessionEvents(connection.events, sessionId),
+            collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({ sessionId, prompt: "third", attachments: [], tools: [] });
           expect(Array.from(yield* Fiber.join(thirdEvents)).at(-1)?.kind).toBe("completed");
@@ -164,7 +164,7 @@ describe("makeOpenAiCompatibleDriver", () => {
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const first = yield* Effect.fork(
             Stream.runCollect(
-              connection.events.pipe(
+              (yield* connection.subscribe).pipe(
                 Stream.filter((event) => event.sessionId === sessionId),
                 Stream.take(1),
               ),
@@ -172,7 +172,7 @@ describe("makeOpenAiCompatibleDriver", () => {
           );
           const second = yield* Effect.fork(
             Stream.runCollect(
-              connection.events.pipe(
+              (yield* connection.subscribe).pipe(
                 Stream.filter((event) => event.sessionId === sessionId),
                 Stream.take(1),
               ),
@@ -204,18 +204,18 @@ describe("makeOpenAiCompatibleDriver", () => {
             executionPolicy: "approval-gated",
           });
           const firstSubscribers = [
-            yield* Effect.fork(firstSessionEvent(connection.events, sessionId)),
-            yield* Effect.fork(firstSessionEvent(connection.events, sessionId)),
+            yield* Effect.fork(firstSessionEvent(yield* connection.subscribe, sessionId)),
+            yield* Effect.fork(firstSessionEvent(yield* connection.subscribe, sessionId)),
           ];
           const secondSubscribers = [
-            yield* Effect.fork(firstSessionEvent(connection.events, otherSessionId)),
-            yield* Effect.fork(firstSessionEvent(connection.events, otherSessionId)),
+            yield* Effect.fork(firstSessionEvent(yield* connection.subscribe, otherSessionId)),
+            yield* Effect.fork(firstSessionEvent(yield* connection.subscribe, otherSessionId)),
           ];
           const firstTerminal = yield* Effect.fork(
-            collectSessionEvents(connection.events, sessionId),
+            collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           const secondTerminal = yield* Effect.fork(
-            collectSessionEvents(connection.events, otherSessionId),
+            collectSessionEvents(yield* connection.subscribe, otherSessionId),
           );
           yield* Effect.all([
             connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
@@ -239,9 +239,11 @@ describe("makeOpenAiCompatibleDriver", () => {
           yield* Fiber.join(firstTerminal);
           yield* Fiber.join(secondTerminal);
 
-          const first = yield* Effect.fork(collectSessionEvents(connection.events, sessionId));
+          const first = yield* Effect.fork(
+            collectSessionEvents(yield* connection.subscribe, sessionId),
+          );
           const second = yield* Effect.fork(
-            collectSessionEvents(connection.events, otherSessionId),
+            collectSessionEvents(yield* connection.subscribe, otherSessionId),
           );
           yield* Effect.all([
             connection.send({ sessionId, prompt: "first again", attachments: [], tools: [] }),
@@ -291,7 +293,9 @@ describe("makeOpenAiCompatibleDriver", () => {
             }),
           );
           expect(String(rejected)).toContain("invalid-configuration");
-          const accepted = yield* Effect.fork(collectSessionEvents(connection.events, sessionId));
+          const accepted = yield* Effect.fork(
+            collectSessionEvents(yield* connection.subscribe, sessionId),
+          );
           yield* connection.send({ sessionId, prompt: "small", attachments: [], tools: [] });
           yield* Fiber.join(accepted);
           yield* connection.stop(sessionId);
@@ -324,7 +328,9 @@ describe("makeOpenAiCompatibleDriver", () => {
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const collected = yield* Effect.fork(collectSessionEvents(connection.events, sessionId));
+          const collected = yield* Effect.fork(
+            collectSessionEvents(yield* connection.subscribe, sessionId),
+          );
           yield* connection.send({ sessionId, prompt: "first", attachments: [], tools: [] });
           const duplicate = yield* Effect.exit(
             connection.send({ sessionId, prompt: "second", attachments: [], tools: [] }),
@@ -374,7 +380,9 @@ describe("makeOpenAiCompatibleDriver", () => {
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const first = yield* Effect.fork(collectSessionEvents(connection.events, sessionId));
+          const first = yield* Effect.fork(
+            collectSessionEvents(yield* connection.subscribe, sessionId),
+          );
           yield* connection.send({
             sessionId,
             prompt: "private stopped prompt",
@@ -385,7 +393,9 @@ describe("makeOpenAiCompatibleDriver", () => {
           yield* connection.stop(sessionId);
 
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const second = yield* Effect.fork(collectSessionEvents(connection.events, sessionId));
+          const second = yield* Effect.fork(
+            collectSessionEvents(yield* connection.subscribe, sessionId),
+          );
           yield* connection.send({ sessionId, prompt: "fresh prompt", attachments: [], tools: [] });
           yield* Fiber.join(second);
           yield* connection.stop(sessionId);
@@ -393,7 +403,7 @@ describe("makeOpenAiCompatibleDriver", () => {
           hanging = true;
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const interrupted = yield* Effect.fork(
-            collectSessionEvents(connection.events, sessionId),
+            collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({
             sessionId,
@@ -440,7 +450,9 @@ describe("makeOpenAiCompatibleDriver", () => {
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const events = yield* Effect.fork(collectSessionEvents(connection.events, sessionId));
+          const events = yield* Effect.fork(
+            collectSessionEvents(yield* connection.subscribe, sessionId),
+          );
           yield* connection.send({ sessionId, prompt, attachments: [], tools: [] });
           expect(Array.from(yield* Fiber.join(events)).at(-1)?.kind).toBe("completed");
           yield* connection.stop(sessionId);

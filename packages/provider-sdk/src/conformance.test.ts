@@ -233,7 +233,7 @@ function makeFakeFixture(options?: {
     failure(support, `The capability is ${support}.`);
 
   const connection: ProviderConnection = {
-    events: Stream.fromIterable(events),
+    subscribe: Effect.succeed(Stream.fromIterable(events)),
     start: () => Effect.succeed({ sessionId, resumeCursor }),
     resume: (input) =>
       options?.resumeFailure !== undefined

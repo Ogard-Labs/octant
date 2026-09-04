@@ -56,7 +56,7 @@ describe("installed Kimi Code runtime", () => {
                 executionPolicy: "full-access",
               });
               const completion = yield* Effect.fork(
-                collectTerminal(connection.events, completionSessionId),
+                collectTerminal(yield* connection.subscribe, completionSessionId),
               );
               yield* connection.send({
                 sessionId: completionSessionId,
@@ -85,7 +85,7 @@ describe("installed Kimi Code runtime", () => {
                 executionPolicy: "full-access",
               });
               const interrupted = yield* Effect.fork(
-                collectTerminal(connection.events, interruptSessionId),
+                collectTerminal(yield* connection.subscribe, interruptSessionId),
               );
               yield* connection.send({
                 sessionId: interruptSessionId,

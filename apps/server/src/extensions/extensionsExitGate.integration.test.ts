@@ -629,7 +629,7 @@ async function sendSelectedSkillToGenericProvider(
         });
         const terminal = yield* Effect.fork(
           Stream.runCollect(
-            connection.events.pipe(
+            (yield* connection.subscribe).pipe(
               Stream.filter((event) => event.sessionId === providerSessionId),
               Stream.takeUntil(
                 (event) =>
@@ -1502,7 +1502,7 @@ describe("extensions marketplace integrated exit gate", () => {
           });
           const terminal = yield* Effect.fork(
             Stream.runCollect(
-              connection.events.pipe(
+              (yield* connection.subscribe).pipe(
                 Stream.filter((event) => event.sessionId === providerSessionId),
                 Stream.takeUntil(
                   (event) =>

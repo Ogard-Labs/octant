@@ -33,7 +33,9 @@ describe("attachProviderRuntimeUsageLimits", () => {
     const connection = await Effect.runPromise(
       Effect.scoped(attached.acquire({ instanceId, projectRoot: "/tmp/octant-test" })),
     );
-    const events = await Effect.runPromise(Stream.runCollect(connection.events));
+    const events = await Effect.runPromise(
+      Stream.runCollect(Stream.unwrapScoped(connection.subscribe)),
+    );
 
     expect(Array.from(events)).toEqual([event]);
     expect(store.windows(instanceId)).toEqual([
@@ -60,7 +62,7 @@ describe("attachProviderRuntimeUsageLimits", () => {
     const connection = await Effect.runPromise(
       Effect.scoped(attached.acquire({ instanceId, projectRoot: "/tmp/octant-test" })),
     );
-    await Effect.runPromise(Stream.runCollect(connection.events));
+    await Effect.runPromise(Stream.runCollect(Stream.unwrapScoped(connection.subscribe)));
 
     expect(store.windows(instanceId)).toEqual([]);
     expect(store.windows(otherInstanceId)).toEqual([]);
@@ -73,7 +75,7 @@ function fixture(event: ProviderRuntimeEvent): ProviderDriver {
     probe: () => Effect.fail({ category: "unavailable", message: "not used" }),
     acquire: () =>
       Effect.succeed({
-        events: Stream.succeed(event),
+        subscribe: Effect.succeed(Stream.succeed(event)),
         start: () => Effect.succeed({ sessionId }),
         resume: () => Effect.succeed({ sessionId }),
         send: () => Effect.void,

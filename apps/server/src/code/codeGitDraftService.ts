@@ -1,6 +1,7 @@
 import type { ProviderInstanceId, ProviderModelId, ProviderSessionId } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Effect, Fiber, Stream, type Scope } from "effect";
+import { subscribeThenSend } from "../providers/providerEventDelivery";
 
 /** Bound on the whole request: a draft is a convenience, never a wait. */
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -104,28 +105,29 @@ function runDraft(
       // in this prompt, so a model that decides to act cannot.
       executionPolicy: "plan",
     });
-    const events = yield* Effect.forkScoped(
-      connection.events.pipe(
-        Stream.filter((event) => event.sessionId === options.sessionId),
-        Stream.take(MAX_EVENTS + 1),
-        Stream.takeUntil(isTerminal),
-        Stream.runForEach((event) =>
-          Effect.sync(() => {
-            state.handled += 1;
-            if (state.handled > MAX_EVENTS) return;
-            if (event.kind === "text-delta") state.text += event.text;
-            if (event.kind === "completed") state.completed = true;
-          }),
+    const events = yield* subscribeThenSend({
+      connection,
+      consume: (runtimeEvents) =>
+        runtimeEvents.pipe(
+          Stream.filter((event) => event.sessionId === options.sessionId),
+          Stream.take(MAX_EVENTS + 1),
+          Stream.takeUntil(isTerminal),
+          Stream.runForEach((event) =>
+            Effect.sync(() => {
+              state.handled += 1;
+              if (state.handled > MAX_EVENTS) return;
+              if (event.kind === "text-delta") state.text += event.text;
+              if (event.kind === "completed") state.completed = true;
+            }),
+          ),
         ),
-      ),
-    );
-    yield* Effect.yieldNow();
-    yield* connection.send({
-      sessionId: options.sessionId,
-      prompt: draftPrompt(request),
-      context: [],
-      attachments: [],
-      tools: [],
+      send: connection.send({
+        sessionId: options.sessionId,
+        prompt: draftPrompt(request),
+        context: [],
+        attachments: [],
+        tools: [],
+      }),
     });
     yield* Fiber.join(events);
   });
