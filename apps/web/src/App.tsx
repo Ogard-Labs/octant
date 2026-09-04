@@ -66,6 +66,7 @@ import { markInteraction, markInteractionAfterPaint } from "./polling/interactio
 import { useMachineChangeFeed } from "./polling/useMachineChangeFeed";
 import type { CodeOperationId } from "@octant/contracts";
 import type {
+  CodeBoardQuery,
   CodeProjectPullRequestDetailQuery,
   CodeProjectPullRequestRow,
   ThreadBoardPullRequestIdentity,
@@ -1077,6 +1078,14 @@ function LaunchedShell(
   const loadAssignedLinearIssues = useCallback(
     () => fetchAssignedLinearIssues((input) => linearClient.listIssues(input)),
     [linearClient],
+  );
+  // The Code home reads the board when this identity changes. An inline
+  // callback changes on every App render, and a streaming turn renders often,
+  // so the board would be re-queried for reasons that have nothing to do with
+  // it.
+  const loadCodeBoard = useCallback(
+    (query: CodeBoardQuery) => codeClient.queryBoard(query),
+    [codeClient],
   );
   useEffect(() => {
     let cancelled = false;
@@ -4895,7 +4904,7 @@ function LaunchedShell(
                     }
                     linearClient={linearClient}
                     codeHome={{
-                      loadBoard: (query) => codeClient.queryBoard(query),
+                      loadBoard: loadCodeBoard,
                       ...(pendingIssue === undefined ? {} : { pendingIssue }),
                       onPendingIssueConsumed: () => setPendingIssue(undefined),
                       loadAssignedLinearIssues,

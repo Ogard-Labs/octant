@@ -251,6 +251,8 @@ export const GithubCatalogueReadRequest = Schema.Union(
     cursor: Schema.optional(GithubCatalogueCursor),
     state: Schema.optional(GithubIssueStateFilter),
     search: Schema.optional(safeText(160)),
+    /** Narrows the read to issues nobody has been assigned. */
+    assignee: Schema.optional(Schema.Literal("none")),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("issue"),
