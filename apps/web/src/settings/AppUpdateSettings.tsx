@@ -137,11 +137,19 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
               disabled={busy}
               onClick={() => {
                 setBusy(true);
+                setFailure(undefined);
                 void install()
                   .then((outcome) => {
                     // Never a countdown that expires: if work is running the app
                     // says what it is waiting for and stays where it is.
                     if (outcome.kind === "wait") setWaiting(outcome);
+                  })
+                  .catch((error: unknown) => {
+                    setFailure(
+                      error instanceof Error
+                        ? error.message
+                        : "Octant could not install the update.",
+                    );
                   })
                   .finally(() => setBusy(false));
               }}

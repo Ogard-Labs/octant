@@ -139,7 +139,8 @@
   display: grid;
   gap: 0;
   max-height: min(240px, 38vh);
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   outline: none;
 }
 
