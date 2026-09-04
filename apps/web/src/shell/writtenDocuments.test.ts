@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   NO_WRITTEN_DOCUMENTS,
+  forgetDeletedWrittenDocument,
   isDocumentPath,
   noteExistingDocuments,
   noteWrittenDocument,
@@ -43,5 +44,35 @@ describe("documents an agent turn writes", () => {
     expect(isDocumentPath("src/index.ts")).toBe(false);
     expect(isDocumentPath(".md")).toBe(false);
     expect(isDocumentPath("Makefile")).toBe(false);
+  });
+
+  it("stops showing a document the turn deleted after writing it", () => {
+    const handoff = { kind: "file" as const, path: "HANDOFF.md" };
+    const written = noteWrittenDocument(NO_WRITTEN_DOCUMENTS, handoff).offers;
+    expect(written.current).toEqual(handoff);
+
+    const deleted = forgetDeletedWrittenDocument(
+      written,
+      new Set(["HANDOFF.md"]),
+      new Set<string>(),
+    );
+    expect(deleted.current).toBeUndefined();
+    // The document was already offered, so writing it again does not reopen it.
+    expect(noteWrittenDocument(deleted, handoff).open).toBe(false);
+  });
+
+  it("keeps the document a reopened thread replays without written paths", () => {
+    const handoff = { kind: "file" as const, path: "HANDOFF.md" };
+    const written = noteWrittenDocument(NO_WRITTEN_DOCUMENTS, handoff).offers;
+
+    const replayed = forgetDeletedWrittenDocument(written, new Set<string>(), new Set<string>());
+    expect(replayed).toBe(written);
+
+    const stillWritten = forgetDeletedWrittenDocument(
+      written,
+      new Set(["HANDOFF.md"]),
+      new Set(["HANDOFF.md"]),
+    );
+    expect(stillWritten).toBe(written);
   });
 });

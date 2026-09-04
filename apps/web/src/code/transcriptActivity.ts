@@ -115,15 +115,25 @@ export function applyActivityEvent(
   }
   if (event.kind === "file-change") {
     const path = String(event.path);
+    if (event.change === "deleted") return forgetWrittenPath(activity, path);
     const written = activity.writtenPaths ?? [];
-    if (event.change === "deleted") {
-      if (!written.includes(path)) return activity;
-      return { ...activity, writtenPaths: written.filter((candidate) => candidate !== path) };
-    }
     if (written.includes(path)) return activity;
     return { ...activity, writtenPaths: [...written, path] };
   }
   return activity;
+}
+
+/**
+ * Takes a path out of a turn's written paths.
+ *
+ * A deletion is a fact about the thread's files, not about the turn that
+ * reported it: a later turn can remove the document an earlier turn wrote, so
+ * callers apply this to every turn rather than only the addressed one.
+ */
+export function forgetWrittenPath(activity: CodeTurnActivity, path: string): CodeTurnActivity {
+  const written = activity.writtenPaths;
+  if (written === undefined || !written.includes(path)) return activity;
+  return { ...activity, writtenPaths: written.filter((candidate) => candidate !== path) };
 }
 
 export function appendReasoning(activity: CodeTurnActivity, chunk: string): CodeTurnActivity {

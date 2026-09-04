@@ -66,3 +66,26 @@ export function noteExistingDocuments(
   for (const document of documents) offered.add(writtenDocumentId(document));
   return { ...offers, offered };
 }
+
+/**
+ * Drops the shown document when the turn deleted the file behind it.
+ *
+ * A turn can write a document and then remove it, which takes the path out of
+ * the turn's written paths. The dock must stop offering a file that is no
+ * longer there rather than hand the Document tool a path that cannot be read.
+ *
+ * The rule reads the move from written to gone, not absence alone: a reopened
+ * thread replays tool and reasoning steps without written paths, and that
+ * person has not lost a document. The document stays in `offered`, so a
+ * rewrite still does not reopen the tab.
+ */
+export function forgetDeletedWrittenDocument(
+  offers: WrittenDocumentOffers,
+  previousPaths: ReadonlySet<string>,
+  livePaths: ReadonlySet<string>,
+): WrittenDocumentOffers {
+  const current = offers.current;
+  if (current === undefined || current.kind !== "file") return offers;
+  if (!previousPaths.has(current.path) || livePaths.has(current.path)) return offers;
+  return { offered: offers.offered };
+}
