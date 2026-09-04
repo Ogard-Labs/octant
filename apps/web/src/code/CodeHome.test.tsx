@@ -216,6 +216,126 @@ describe("CodeHome", () => {
     });
   });
 
+  it("shows the newest unpicked issues across repositories, not the ones that answered first", async () => {
+    const requests: GithubCatalogueReadRequest[] = [];
+    const issue = (repository: string, number: number, updatedAt: string) => ({
+      number,
+      title: `Issue ${String(number)}`,
+      state: "open" as const,
+      author: "octocat",
+      updatedAt,
+      url: `https://github.com/octant/${repository}/issues/${String(number)}`,
+    });
+    // The slow repository holds the newest issues, and it answers last.
+    const pages: Record<string, ReadonlyArray<ReturnType<typeof issue>>> = {
+      app: [
+        issue("app", 1, "2026-08-01T09:00:00.000Z"),
+        issue("app", 2, "2026-08-02T09:00:00.000Z"),
+        issue("app", 3, "2026-08-03T09:00:00.000Z"),
+        issue("app", 4, "2026-08-04T09:00:00.000Z"),
+      ],
+      docs: [
+        issue("docs", 90, "2026-09-01T09:00:00.000Z"),
+        issue("docs", 91, "2026-09-02T09:00:00.000Z"),
+      ],
+    };
+    const client = githubClient(async (request) => {
+      requests.push(request);
+      if (request.kind === "assigned-work") {
+        return {
+          kind: "assigned-work",
+          page: { items: [], freshness: { status: "fresh" } },
+        } as never;
+      }
+      if (request.kind === "recent-repositories") {
+        const repository = (name: string) => ({
+          nodeId: `R_${name}`,
+          owner: "octant",
+          name,
+          visibility: "private",
+          defaultBranch: "main",
+          viewerPermission: "admin",
+          capabilities: [],
+        });
+        return {
+          kind: "recent-repositories",
+          rows: [repository("app"), repository("docs")],
+        } as never;
+      }
+      if (request.kind === "issues") {
+        if (request.name === "docs") await new Promise((resolve) => setTimeout(resolve, 20));
+        return {
+          kind: "issues",
+          page: {
+            rows: pages[request.name] ?? [],
+            sort: "updated-desc",
+            hasNextPage: false,
+            freshness: { status: "fresh" },
+          },
+        } as never;
+      }
+      throw new Error(`unexpected ${request.kind}`);
+    });
+
+    render(
+      <CodeHome
+        githubClient={client}
+        loadAssignedLinearIssues={async () => ({ rows: [] })}
+        onOpenThread={vi.fn()}
+        onPickGithub={vi.fn()}
+        onPickIssue={vi.fn()}
+        onPickLinear={vi.fn()}
+        projectNames={new Map()}
+        providerLabels={new Map()}
+      />,
+    );
+
+    const fresh = await screen.findByRole("region", { name: "Start something new" });
+    // Four slots, and the two newest belong to the repository that answered
+    // last: arrival order would have dropped them for the older four.
+    await waitFor(() => expect(within(fresh).getByText("Issue 91")).toBeVisible());
+    expect(within(fresh).getByText("Issue 90")).toBeVisible();
+    expect(within(fresh).queryByText("Issue 1")).not.toBeInTheDocument();
+
+    // The section promises issues nobody has picked up, so the read asks
+    // GitHub for unassigned issues rather than filtering afterwards.
+    const issueReads = requests.filter((request) => request.kind === "issues");
+    expect(issueReads).not.toHaveLength(0);
+    for (const read of issueReads) expect(read).toMatchObject({ assignee: "none" });
+  });
+
+  it("reads the board once while its loader keeps its identity across rerenders", async () => {
+    const loadBoard = vi.fn(
+      async () =>
+        ({
+          version: 1,
+          query: { version: 1 },
+          cards: [card({})],
+          generatedAt: "2026-08-06T03:00:00.000Z",
+        }) as unknown as CodeBoardView,
+    );
+    const props = {
+      loadAssignedLinearIssues: async () => ({ rows: [] }),
+      loadBoard,
+      onOpenThread: vi.fn(),
+      onPickGithub: vi.fn(),
+      onPickIssue: vi.fn(),
+      onPickLinear: vi.fn(),
+      projectNames: new Map([["20000000-0000-4000-8000-000000000001", "Octant"]]),
+      providerLabels: new Map([["40000000-0000-4000-8000-000000000001", "Claude Code"]]),
+    };
+
+    const view = render(<CodeHome {...props} />);
+    await screen.findByRole("region", { name: "Continue" });
+    expect(loadBoard).toHaveBeenCalledTimes(1);
+
+    // A rerender the board has nothing to do with must not re-query it. The
+    // shell renders on every streamed turn chunk.
+    view.rerender(<CodeHome {...props} />);
+    view.rerender(<CodeHome {...props} />);
+    await waitFor(() => expect(loadBoard).toHaveBeenCalledTimes(1));
+  });
+
   it("says you are caught up when nothing is assigned and hides sections without a source", async () => {
     const client = githubClient(async (request) => {
       if (request.kind === "assigned-work") {

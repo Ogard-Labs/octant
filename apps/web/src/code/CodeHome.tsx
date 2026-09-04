@@ -11,7 +11,9 @@ import type {
 } from "@octant/contracts";
 import { CircleCheck, CircleDot, GitPullRequest, ListTodo, type LucideIcon } from "lucide-react";
 import {
+  DEFAULT_ISSUE_SORT,
   readIssuesAcrossRepositories,
+  sortIssueRows,
   type RepositoryIssueRow,
 } from "../github/readIssuesAcrossRepositories";
 import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
@@ -117,9 +119,13 @@ export function CodeHome(props: CodeHomeProps) {
         if (cancelled || recents.kind !== "recent-repositories" || recents.rows.length === 0) {
           return;
         }
+        // "Nobody has picked up" is what the section promises, so the read
+        // asks GitHub for unassigned issues rather than dropping the ones
+        // assigned to this person after the fact.
         const result = await readIssuesAcrossRepositories(githubClient, recents.rows, {
           state: "open",
           pageSize: 10,
+          assignee: "none",
         });
         if (cancelled) return;
         setFresh({ kind: "ready", rows: result.rows });
@@ -164,11 +170,17 @@ export function CodeHome(props: CodeHomeProps) {
       ? upNext.github.map((item) => `${item.owner}/${item.name}#${String(item.number)}`)
       : [],
   );
+  // The reads land in whatever order the repositories answer, so the newest
+  // issues have to be chosen before the limit rather than after it: taking the
+  // first four as they arrive drops a slow repository's fresher issues.
   const freshRows =
     fresh.kind === "ready"
-      ? fresh.rows
-          .filter((row) => !assigned.has(`${row.owner}/${row.name}#${String(row.number)}`))
-          .slice(0, FRESH_ISSUE_LIMIT)
+      ? sortIssueRows(
+          fresh.rows.filter(
+            (row) => !assigned.has(`${row.owner}/${row.name}#${String(row.number)}`),
+          ),
+          DEFAULT_ISSUE_SORT,
+        ).slice(0, FRESH_ISSUE_LIMIT)
       : [];
   const upNextRows =
     upNext.kind === "ready"

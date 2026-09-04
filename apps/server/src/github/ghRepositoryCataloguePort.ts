@@ -200,6 +200,7 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
       readonly cursor?: string | undefined;
       readonly state: "open" | "closed" | "all";
       readonly search?: string | undefined;
+      readonly assignee?: "none" | undefined;
     },
     signal: AbortSignal,
   ): Promise<GhCatalogueResult<GhCataloguePageObservation<GhIssueObservationRow>>> {
@@ -212,11 +213,14 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
         name: request.name,
         state: request.state,
         search,
+        unassigned: request.assignee === "none",
       });
       if (query === undefined) return ok([], false);
       return this.#paginateRest({
         kind: "issues",
-        discriminator: `${repository}|${request.state}|${search}`,
+        discriminator: `${repository}|${request.state}|${search}${
+          request.assignee === "none" ? "|unassigned" : ""
+        }`,
         pageSize: request.pageSize,
         cursor: request.cursor,
         pathFor: (page) =>
@@ -228,13 +232,18 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
         signal,
       });
     }
+    // `assignee=none` is GitHub's own filter for unassigned issues. It joins
+    // the discriminator so a narrowed read never continues a page cursor that
+    // was opened for the unnarrowed one.
+    const unassigned = request.assignee === "none";
     return this.#paginateRest({
       kind: "issues",
-      discriminator: `${repository}|${request.state}`,
+      discriminator: `${repository}|${request.state}${unassigned ? "|unassigned" : ""}`,
       pageSize: request.pageSize,
       cursor: request.cursor,
       pathFor: (page) =>
         `repos/${repository}/issues?state=${request.state}` +
+        (unassigned ? "&assignee=none" : "") +
         `&sort=updated&direction=desc&per_page=${UPSTREAM_PAGE_SIZE}&page=${page}`,
       decodeItem: decodeIssueItem,
       matches: () => true,
@@ -755,6 +764,7 @@ function composeIssueSearchQuery(input: {
   readonly name: string;
   readonly state: "open" | "closed" | "all";
   readonly search: string;
+  readonly unassigned: boolean;
 }): string | undefined {
   const authors: string[] = [];
   const numbers: string[] = [];
@@ -781,6 +791,9 @@ function composeIssueSearchQuery(input: {
   const prefix = [`repo:${input.owner}/${input.name}`, "type:issue"];
   if (input.state === "open") prefix.push("is:open");
   if (input.state === "closed") prefix.push("is:closed");
+  // Search has its own vocabulary for the REST `assignee=none` filter, so a
+  // narrowed read stays narrowed when the caller also passes a search term.
+  if (input.unassigned) prefix.push("no:assignee");
   const userTerms: string[] = [];
   for (const author of authors) userTerms.push(`author:${author}`);
   for (const number of numbers) userTerms.push(number);
