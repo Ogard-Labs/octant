@@ -8,7 +8,7 @@ import type {
   GithubIssueStateFilter,
   GithubRepositoryRow,
 } from "@octant/contracts";
-import { ChevronDown, FolderGit2, Search } from "lucide-react";
+import { ChevronDown, CircleCheck, CircleDot, FolderGit2, Search, SquarePen } from "lucide-react";
 import { GitHubRepositoryPicker } from "../code/GitHubRepositoryPicker";
 import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
@@ -34,13 +34,16 @@ import {
 /**
  * Host-scoped, read-only GitHub issue browser. It opens on every repository
  * the host has recently used, merged into one sorted list, and narrows to a
- * single repository on request. Issue list and detail reads stay on the
- * existing catalogue client. The pane never renders markdown or followable
- * links.
+ * single repository from the one chooser on the toolbar. With no recent
+ * repository the page asks for one instead of listing the whole catalogue.
+ * Issue list and detail reads stay on the existing catalogue client. The
+ * pane never renders markdown or followable links.
  */
 export interface GitHubIssueBrowserProps {
   readonly client: GithubClient;
   readonly onClose?: () => void;
+  /** Hands the issue being read to a new Code thread as its context. */
+  readonly onStartThread?: (issue: RepositoryIssueRow) => void;
 }
 
 type IssueScope = "all" | "repository";
@@ -329,6 +332,14 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
   const selectRepository = (row: GithubRepositoryRow) => {
     clearSelection();
     setRepository(row);
+    changeScope("repository");
+    setRepositoryPickerOpen(false);
+  };
+
+  const selectAllRecent = () => {
+    clearSelection();
+    setRepository(undefined);
+    changeScope("all");
     setRepositoryPickerOpen(false);
   };
 
@@ -357,20 +368,54 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
     return [];
   }, [across, list, repository, scope, sort]);
 
-  const scopeControl =
-    recents !== undefined && recents.length > 0 && scope !== undefined ? (
-      <OctantToggleGroup<IssueScope>
-        aria-label="Issue scope"
-        onValueChange={(value) => {
-          const next = value[0];
-          if (next === "all" || next === "repository") changeScope(next);
-        }}
-        value={[scope]}
-      >
-        <OctantToggleGroupItem value="all">All repositories</OctantToggleGroupItem>
-        <OctantToggleGroupItem value="repository">One repository</OctantToggleGroupItem>
-      </OctantToggleGroup>
-    ) : null;
+  const hasRecents = recents !== undefined && recents.length > 0;
+  const browsing = scope === "all" || repository !== undefined;
+  const repositoryLabel =
+    repository !== undefined
+      ? `${repository.owner}/${repository.name}`
+      : hasRecents
+        ? "All recent repositories"
+        : "Choose a repository";
+  const chooser = (
+    <OctantPopover
+      align="start"
+      className="github-issue-browser__repository-popup"
+      onOpenChange={setRepositoryPickerOpen}
+      open={repositoryPickerOpen}
+      side="bottom"
+      sideOffset={6}
+      title="Choose a repository"
+      trigger={
+        <>
+          <FolderGit2 aria-hidden="true" size={14} strokeWidth={1.8} />
+          <span className="github-issue-browser__repository-name">{repositoryLabel}</span>
+          <ChevronDown aria-hidden="true" size={14} strokeWidth={1.8} />
+        </>
+      }
+      triggerClassName="github-issue-browser__repository"
+      triggerLabel={`Repository: ${repositoryLabel}`}
+      triggerVariant="outline"
+    >
+      {hasRecents ? (
+        <OctantButton
+          aria-pressed={scope === "all"}
+          className="github-issue-browser__all-recent"
+          onClick={selectAllRecent}
+          size="sm"
+          type="button"
+          variant={scope === "all" ? "secondary" : "ghost"}
+        >
+          All recent repositories
+          <span className="oct-meta">{recents.length}</span>
+        </OctantButton>
+      ) : null}
+      <GitHubRepositoryPicker
+        client={client}
+        onSelect={selectRepository}
+        {...(repository === undefined ? {} : { selectedNodeId: repository.nodeId })}
+      />
+    </OctantPopover>
+  );
 
   const listLoading =
     scope === undefined ||
@@ -399,53 +444,10 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
       />
 
-      {scope === "repository" && repository === undefined ? (
-        // Nothing to browse until a repository is chosen, so the picker is
-        // the page rather than a control on it.
-        <>
-          {scopeControl === null ? null : (
-            <div aria-label="Issue controls" className="surface-toolbar" role="group">
-              {scopeControl}
-            </div>
-          )}
-          <div className="github-issue-browser__choose">
-            <GitHubRepositoryPicker client={client} onSelect={selectRepository} />
-          </div>
-        </>
-      ) : (
-        <>
-          <div aria-label="Issue controls" className="surface-toolbar" role="group">
-            {scopeControl}
-            {scope === "repository" && repository !== undefined ? (
-              <OctantPopover
-                align="start"
-                className="github-issue-browser__repository-popup"
-                onOpenChange={setRepositoryPickerOpen}
-                open={repositoryPickerOpen}
-                side="bottom"
-                sideOffset={6}
-                title="Choose a repository"
-                trigger={
-                  <>
-                    <FolderGit2 aria-hidden="true" size={14} strokeWidth={1.8} />
-                    <span className="github-issue-browser__repository-name">
-                      {repository.owner}/{repository.name}
-                    </span>
-                    <ChevronDown aria-hidden="true" size={14} strokeWidth={1.8} />
-                  </>
-                }
-                triggerClassName="github-issue-browser__repository"
-                triggerLabel={`Repository: ${repository.owner}/${repository.name}`}
-                triggerVariant="outline"
-              >
-                <GitHubRepositoryPicker
-                  client={client}
-                  onSelect={selectRepository}
-                  selectedNodeId={repository.nodeId}
-                />
-              </OctantPopover>
-            ) : null}
-
+      <div aria-label="Issue controls" className="surface-toolbar" role="group">
+        {chooser}
+        {browsing ? (
+          <>
             <OctantToggleGroup<GithubIssueStateFilter>
               aria-label="Issue state"
               onValueChange={(value) => {
@@ -486,74 +488,89 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
                 value={search}
               />
             </label>
-          </div>
+          </>
+        ) : null}
+      </div>
 
-          <div className="github-issue-browser__body">
-            <div className="github-issue-browser__list-pane">
-              {listLoading ? (
-                <p className="github-issue-browser__note" role="status">
-                  Loading issues…
-                </p>
-              ) : null}
+      {scope !== undefined && !browsing ? (
+        // Nothing to list until a repository is chosen; the page says so in
+        // one panel rather than opening on the whole catalogue.
+        <div className="github-issue-browser__empty">
+          <FolderGit2 aria-hidden="true" size={22} strokeWidth={1.5} />
+          <p className="github-issue-browser__empty-title">Choose a repository</p>
+          <p className="github-issue-browser__note">
+            Issues are read from any repository this host can reach. Repositories a Code thread has
+            used are listed together here automatically.
+          </p>
+          <OctantButton
+            onClick={() => setRepositoryPickerOpen(true)}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            Choose a repository
+          </OctantButton>
+        </div>
+      ) : (
+        <div className="github-issue-browser__body">
+          <div className="github-issue-browser__list-pane">
+            {listLoading ? (
+              <p className="github-issue-browser__note github-issue-browser__pad" role="status">
+                Loading issues…
+              </p>
+            ) : null}
 
-              {scope === "repository" && list.kind === "error" ? (
-                <UnavailableNotice message={list.message} onRetry={reload} role="alert" />
-              ) : null}
-              {scope === "repository" && list.kind === "unavailable" ? (
-                <UnavailableNotice
-                  message={unavailableMessage(list)}
-                  onRetry={reload}
-                  role="alert"
-                />
-              ) : null}
+            {scope === "repository" && list.kind === "error" ? (
+              <UnavailableNotice message={list.message} onRetry={reload} role="alert" />
+            ) : null}
+            {scope === "repository" && list.kind === "unavailable" ? (
+              <UnavailableNotice message={unavailableMessage(list)} onRetry={reload} role="alert" />
+            ) : null}
 
-              {listReady ? (
-                <>
-                  {staleReason === undefined ? null : (
-                    <div className="github-issue-browser__stale" role="status">
-                      <span className="github-issue-browser__note">
-                        Results may be stale — {staleReason}
-                      </span>
-                      <OctantButton onClick={reload} size="sm" type="button" variant="ghost">
-                        Refresh issues
-                      </OctantButton>
-                    </div>
-                  )}
-                  {scope === "all" && across.kind === "ready" ? (
-                    <AcrossNotes result={across.result} onRetry={reload} />
-                  ) : null}
-                  {rows.length === 0 ? (
-                    <p className="github-issue-browser__note" role="status">
-                      No issues match.
-                    </p>
-                  ) : (
-                    <ul aria-label="GitHub issues" className="github-issue-browser__list">
-                      {rows.map((row) => {
-                        const current =
-                          selected !== undefined &&
-                          selected.owner === row.owner &&
-                          selected.name === row.name &&
-                          selected.number === row.number;
-                        return (
-                          <li key={`${row.owner}/${row.name}#${row.number}`}>
-                            <OctantButton
-                              aria-current={current ? "true" : undefined}
-                              className="github-issue-browser__row"
-                              onClick={() =>
-                                setSelected({
-                                  owner: row.owner,
-                                  name: row.name,
-                                  number: row.number,
-                                })
-                              }
-                              type="button"
-                              variant="ghost"
-                            >
-                              {scope === "all" ? (
-                                <span className="github-issue-browser__row-repository">
-                                  {row.owner}/{row.name}
-                                </span>
-                              ) : null}
+            {listReady ? (
+              <>
+                {staleReason === undefined ? null : (
+                  <div className="github-issue-browser__stale" role="status">
+                    <span className="github-issue-browser__note">
+                      Results may be stale — {staleReason}
+                    </span>
+                    <OctantButton onClick={reload} size="sm" type="button" variant="ghost">
+                      Refresh issues
+                    </OctantButton>
+                  </div>
+                )}
+                {scope === "all" && across.kind === "ready" ? (
+                  <AcrossNotes result={across.result} onRetry={reload} />
+                ) : null}
+                {rows.length === 0 ? (
+                  <p className="github-issue-browser__note github-issue-browser__pad" role="status">
+                    No issues match.
+                  </p>
+                ) : (
+                  <ul aria-label="GitHub issues" className="github-issue-browser__list">
+                    {rows.map((row) => {
+                      const current =
+                        selected !== undefined &&
+                        selected.owner === row.owner &&
+                        selected.name === row.name &&
+                        selected.number === row.number;
+                      return (
+                        <li key={`${row.owner}/${row.name}#${row.number}`}>
+                          <OctantButton
+                            aria-current={current ? "true" : undefined}
+                            className="github-issue-browser__row"
+                            onClick={() =>
+                              setSelected({
+                                owner: row.owner,
+                                name: row.name,
+                                number: row.number,
+                              })
+                            }
+                            type="button"
+                            variant="ghost"
+                          >
+                            <IssueStateIcon state={row.state} />
+                            <span className="github-issue-browser__row-copy">
                               <span className="github-issue-browser__row-title">
                                 <span className="github-issue-browser__row-number">
                                   #{row.number}
@@ -561,49 +578,55 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
                                 {row.title}
                               </span>
                               <span className="github-issue-browser__row-meta">
-                                <IssueStateBadge state={row.state} />
+                                {scope === "all" ? (
+                                  <span className="github-issue-browser__row-repository">
+                                    {row.owner}/{row.name}
+                                  </span>
+                                ) : null}
                                 <span>{row.author}</span>
                                 <span title={absoluteTimeFormatter.format(new Date(row.updatedAt))}>
                                   {relativeTimeLabel(row.updatedAt)}
                                 </span>
                               </span>
-                            </OctantButton>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                  {scope === "repository" && list.kind === "ready" && list.hasNextPage ? (
-                    <OctantButton
-                      className="github-issue-browser__more"
-                      disabled={loadingMore}
-                      onClick={() => void loadMore()}
-                      size="sm"
-                      type="button"
-                      variant="ghost"
-                    >
-                      {loadingMore ? "Loading more…" : "Load more issues"}
-                    </OctantButton>
-                  ) : null}
-                  {paginationFailure === undefined ? null : (
-                    <UnavailableNotice
-                      message={paginationFailureMessage(paginationFailure)}
-                      onRetry={() => void loadMore()}
-                      role="alert"
-                    />
-                  )}
-                </>
-              ) : null}
-            </div>
-
-            <div className="github-issue-browser__detail-pane">
-              <IssueDetailPane
-                detail={detail}
-                onRetry={() => setDetailEpoch((epoch) => epoch + 1)}
-              />
-            </div>
+                            </span>
+                          </OctantButton>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                {scope === "repository" && list.kind === "ready" && list.hasNextPage ? (
+                  <OctantButton
+                    className="github-issue-browser__more"
+                    disabled={loadingMore}
+                    onClick={() => void loadMore()}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    {loadingMore ? "Loading more…" : "Load more issues"}
+                  </OctantButton>
+                ) : null}
+                {paginationFailure === undefined ? null : (
+                  <UnavailableNotice
+                    message={paginationFailureMessage(paginationFailure)}
+                    onRetry={() => void loadMore()}
+                    role="alert"
+                  />
+                )}
+              </>
+            ) : null}
           </div>
-        </>
+
+          <div className="github-issue-browser__detail-pane">
+            <IssueDetailPane
+              detail={detail}
+              onRetry={() => setDetailEpoch((epoch) => epoch + 1)}
+              {...(props.onStartThread === undefined ? {} : { onStartThread: props.onStartThread })}
+              {...(selected === undefined ? {} : { selected })}
+            />
+          </div>
+        </div>
       )}
     </Surface>
   );
@@ -648,16 +671,33 @@ function IssueStateBadge(props: { readonly state: GithubIssueRow["state"] }) {
   );
 }
 
+function IssueStateIcon(props: { readonly state: GithubIssueRow["state"] }) {
+  const Icon = props.state === "open" ? CircleDot : CircleCheck;
+  return (
+    <Icon
+      aria-label={props.state === "open" ? "Open" : "Closed"}
+      className="github-issue-browser__row-state"
+      data-state={props.state}
+      role="img"
+      size={16}
+      strokeWidth={1.8}
+    />
+  );
+}
+
 function IssueDetailPane(props: {
   readonly detail: IssueDetailState;
+  readonly selected?: SelectedIssue;
   readonly onRetry: () => void;
+  readonly onStartThread?: (issue: RepositoryIssueRow) => void;
 }) {
-  const { detail } = props;
+  const { detail, selected } = props;
   if (detail.kind === "idle") {
     return (
-      <p className="github-issue-browser__note github-issue-browser__placeholder" role="status">
-        Select an issue to read it.
-      </p>
+      <div className="github-issue-browser__placeholder" role="status">
+        <CircleDot aria-hidden="true" size={20} strokeWidth={1.5} />
+        <p className="github-issue-browser__note">Select an issue to read it.</p>
+      </div>
     );
   }
   if (detail.kind === "loading") {
@@ -681,6 +721,7 @@ function IssueDetailPane(props: {
   }
 
   const { issue, freshness } = detail;
+  const startThread = props.onStartThread;
   return (
     <article aria-label={`Issue #${issue.number}`} className="github-issue-browser__detail">
       {freshness.status === "stale" ? (
@@ -691,14 +732,22 @@ function IssueDetailPane(props: {
         </p>
       ) : null}
       <header className="github-issue-browser__detail-header">
-        <h2 className="github-issue-browser__detail-title">
-          <span className="github-issue-browser__row-number">#{issue.number}</span> {issue.title}
-        </h2>
+        <p className="github-issue-browser__detail-kicker">
+          {selected === undefined ? null : (
+            <span className="github-issue-browser__row-repository">
+              {selected.owner}/{selected.name}
+            </span>
+          )}
+          <span className="github-issue-browser__row-number">#{issue.number}</span>
+        </p>
+        <h2 className="github-issue-browser__detail-title">{issue.title}</h2>
         <p className="github-issue-browser__row-meta">
           <IssueStateBadge state={issue.state} />
-          <span>{issue.author}</span>
-          <span title={absoluteTimeFormatter.format(new Date(issue.createdAt))}>
-            opened {relativeTimeLabel(issue.createdAt)}
+          <span>
+            {issue.author} opened{" "}
+            <span title={absoluteTimeFormatter.format(new Date(issue.createdAt))}>
+              {relativeTimeLabel(issue.createdAt)}
+            </span>
           </span>
           <span title={absoluteTimeFormatter.format(new Date(issue.updatedAt))}>
             updated {relativeTimeLabel(issue.updatedAt)}
@@ -713,18 +762,44 @@ function IssueDetailPane(props: {
             ))}
           </ul>
         )}
+        {startThread === undefined || selected === undefined ? null : (
+          <div className="github-issue-browser__detail-actions">
+            <OctantButton
+              onClick={() =>
+                startThread({
+                  owner: selected.owner,
+                  name: selected.name,
+                  number: issue.number,
+                  title: issue.title,
+                  state: issue.state,
+                  author: issue.author,
+                  updatedAt: issue.updatedAt,
+                  url: issue.url,
+                })
+              }
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              <SquarePen aria-hidden="true" size={14} strokeWidth={1.8} />
+              Start a Code thread
+            </OctantButton>
+          </div>
+        )}
+      </header>
+      <div className="github-issue-browser__reader">
+        <pre className="github-issue-browser__body-text">
+          {issue.body === "" ? "No description." : issue.body}
+        </pre>
+        {issue.bodyTruncated ? (
+          <p className="github-issue-browser__note" role="status">
+            Body truncated.
+          </p>
+        ) : null}
         {/* The address is shown, never followed: the pane reads GitHub, it
             does not send anyone there from inside a Code thread. */}
         <p className="github-issue-browser__url">{issue.url}</p>
-      </header>
-      <pre className="github-issue-browser__body-text">
-        {issue.body === "" ? "No description." : issue.body}
-      </pre>
-      {issue.bodyTruncated ? (
-        <p className="github-issue-browser__note" role="status">
-          Body truncated.
-        </p>
-      ) : null}
+      </div>
       <section aria-label="Comments" className="github-issue-browser__comments-section">
         <h3 className="oct-section-label github-issue-browser__comments-title">
           Comments
@@ -741,7 +816,7 @@ function IssueDetailPane(props: {
                 className="github-issue-browser__comment"
                 key={`${comment.author}-${comment.createdAt}-${index}`}
               >
-                <p className="github-issue-browser__row-meta">
+                <p className="github-issue-browser__row-meta github-issue-browser__comment-head">
                   <span className="github-issue-browser__comment-author">{comment.author}</span>
                   <span title={absoluteTimeFormatter.format(new Date(comment.createdAt))}>
                     {relativeTimeLabel(comment.createdAt)}

@@ -174,6 +174,7 @@ import {
   resolveWorkProviderChoice,
   UNRESOLVED_DRAFT_PROJECT_MESSAGE,
 } from "./shell/draftThreadResolution";
+import type { RepositoryIssueRow } from "./github/readIssuesAcrossRepositories";
 import {
   activeChatThreadTabId,
   activeCodeThreadTabId,
@@ -683,6 +684,7 @@ function LaunchedShell(
   // every mode, so the Inbox survives moving between them.
   const [inboxOpen, setInboxOpen] = useState(false);
   const [githubIssuesOpen, setGithubIssuesOpen] = useState(false);
+  const [pendingIssue, setPendingIssue] = useState<RepositoryIssueRow>();
   const [githubIssuesReadAvailable, setGithubIssuesReadAvailable] = useState(false);
   const [linearIssuesOpen, setLinearIssuesOpen] = useState(false);
   const [linearIssuesRead, setLinearIssuesRead] = useState(false);
@@ -4450,6 +4452,11 @@ function LaunchedShell(
                   setSelectedProjectPullRequest(undefined);
                 }}
                 onCloseGithubIssues={() => setGithubIssuesOpen(false)}
+                onStartThreadFromIssue={(issue) => {
+                  setPendingIssue(issue);
+                  setGithubIssuesOpen(false);
+                  openDraftInActiveProject("code");
+                }}
                 onSelectProjectPullRequest={selectProjectPullRequest}
                 onSelectBoardPullRequest={selectProjectPullRequestIdentity}
                 pullRequestBackgroundRefresh={{
@@ -4889,6 +4896,8 @@ function LaunchedShell(
                     linearClient={linearClient}
                     codeHome={{
                       loadBoard: (query) => codeClient.queryBoard(query),
+                      ...(pendingIssue === undefined ? {} : { pendingIssue }),
+                      onPendingIssueConsumed: () => setPendingIssue(undefined),
                       loadAssignedLinearIssues,
                       projectNames: new Map(
                         codeBoardProjects.map((project) => [String(project.id), project.name]),

@@ -54,6 +54,8 @@ const CodeProjectPullRequests = lazy(() =>
     default: module.CodeProjectPullRequests,
   })),
 );
+import type { RepositoryIssueRow } from "../github/readIssuesAcrossRepositories";
+
 const GitHubIssueBrowser = lazy(() =>
   import("../github/GitHubIssueBrowser").then((module) => ({
     default: module.GitHubIssueBrowser,
@@ -93,6 +95,8 @@ export interface WorkspaceRailLayersProps {
   readonly onCloseCodeBoard: () => void;
   readonly onCloseCodePullRequests: () => void;
   readonly onCloseGithubIssues: () => void;
+  /** Leaves the Issues surface with the issue attached to a new Code thread. */
+  readonly onStartThreadFromIssue?: (issue: RepositoryIssueRow) => void;
   readonly onCloseWorkBoard: () => void;
   readonly onOpenCodeBoardThread: (target: CodeThreadOpenTarget) => void;
   readonly onOpenWorkBoardThread: (target: WorkThreadOpenTarget) => void;
@@ -190,7 +194,13 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
       {props.githubIssuesOpen && props.activeMode === "code" ? (
         <div className="code-board-layer">
           <LazyRailSurface label="GitHub issues">
-            <GitHubIssueBrowser client={props.githubClient} onClose={props.onCloseGithubIssues} />
+            <GitHubIssueBrowser
+              client={props.githubClient}
+              onClose={props.onCloseGithubIssues}
+              {...(props.onStartThreadFromIssue === undefined
+                ? {}
+                : { onStartThread: props.onStartThreadFromIssue })}
+            />
           </LazyRailSurface>
         </div>
       ) : null}
