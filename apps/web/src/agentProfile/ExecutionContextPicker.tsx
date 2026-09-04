@@ -1,5 +1,4 @@
 import type { ExecutionContextPickerEntry } from "@octant/contracts/agent-profile";
-import { Shield, ShieldCheck, ShieldAlert, Monitor, Cpu, User } from "lucide-react";
 import { useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -109,25 +108,22 @@ export function ExecutionContextPicker(props: ExecutionContextPickerProps) {
                 variant="ghost"
               >
                 <span className="execution-context-picker__option-main">
-                  <Cpu aria-hidden="true" size={12} strokeWidth={1.8} />
                   <span className="execution-context-picker__provider">
                     {entry.providerDisplayName}
                   </span>
                   <span className="execution-context-picker__model">{entry.modelDisplayName}</span>
                   {entry.profileDisplayName !== undefined ? (
-                    <span className="chip execution-context-picker__profile">
-                      <User aria-hidden="true" size={12} strokeWidth={1.8} />
+                    <span className="execution-context-picker__profile">
                       {entry.profileDisplayName}
                     </span>
                   ) : null}
                 </span>
                 <span className="execution-context-picker__option-meta">
-                  <span className="chip execution-context-picker__host">
-                    <Monitor aria-hidden="true" size={12} strokeWidth={1.8} />
-                    {entry.hostLabel}
-                  </span>
-                  <PolicyBadge policy={entry.executionPolicy} />
-                  <PermissionSummary permissions={entry.effectivePermissions} />
+                  {[
+                    entry.hostLabel,
+                    policyLabel(entry.executionPolicy),
+                    permissionSummary(entry.effectivePermissions),
+                  ].join(" · ")}
                 </span>
                 {entry.unavailableReason !== undefined ? (
                   <span className="execution-context-picker__unavailable">
@@ -143,43 +139,25 @@ export function ExecutionContextPicker(props: ExecutionContextPickerProps) {
   );
 }
 
-function PolicyBadge(props: { readonly policy: string }) {
-  const icon =
-    props.policy === "plan" ? (
-      <Shield aria-hidden="true" size={12} />
-    ) : props.policy === "approval-gated" || props.policy === "auto-accept-edits" ? (
-      <ShieldCheck aria-hidden="true" size={12} />
-    ) : (
-      <ShieldAlert aria-hidden="true" size={12} />
-    );
-  const label =
-    props.policy === "plan"
-      ? "Plan"
-      : props.policy === "approval-gated"
-        ? "Approval"
-        : props.policy === "auto-accept-edits"
-          ? "Auto edits"
-          : "Full";
-  return (
-    <span className={`chip execution-context-picker__policy--${props.policy}`}>
-      {icon}
-      {label}
-    </span>
-  );
+function policyLabel(policy: string): string {
+  return policy === "plan"
+    ? "Plan"
+    : policy === "approval-gated"
+      ? "Approval"
+      : policy === "auto-accept-edits"
+        ? "Auto edits"
+        : "Full";
 }
 
-function PermissionSummary(props: {
-  readonly permissions: ExecutionContextPickerEntry["effectivePermissions"];
-}) {
+function permissionSummary(
+  permissions: ExecutionContextPickerEntry["effectivePermissions"],
+): string {
   const items: string[] = [];
-  if (props.permissions.filesystem) items.push("FS");
-  if (props.permissions.shell) items.push("Shell");
-  if (props.permissions.git) items.push("Git");
-  if (props.permissions.tools) items.push("Tools");
-  if (props.permissions.network) items.push("Net");
-  if (props.permissions.subagents) items.push("Sub");
-  if (items.length === 0) {
-    return <span className="chip execution-context-picker__perms">Read-only</span>;
-  }
-  return <span className="chip execution-context-picker__perms">{items.join(" · ")}</span>;
+  if (permissions.filesystem) items.push("FS");
+  if (permissions.shell) items.push("Shell");
+  if (permissions.git) items.push("Git");
+  if (permissions.tools) items.push("Tools");
+  if (permissions.network) items.push("Net");
+  if (permissions.subagents) items.push("Sub");
+  return items.length === 0 ? "Read-only" : items.join(" · ");
 }
