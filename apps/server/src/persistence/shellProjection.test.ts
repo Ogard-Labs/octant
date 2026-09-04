@@ -1202,7 +1202,7 @@ describe("ShellProjection", () => {
     ["a malformed legacy value", { ...legacySettings(), sidebarWidth: 999 }],
     [
       "a malformed current width",
-      { ...legacySettings(), contextSidebarWidth: 641, lastContextSurface: null },
+      { ...legacySettings(), contextSidebarWidth: 961, lastContextSurface: null },
     ],
     [
       "a fabricated current surface",
