@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type {
   GithubCatalogueReadResponse,
@@ -12,7 +11,7 @@ import type {
 } from "@octant/contracts";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { GithubCloneClient } from "@octant/client-runtime/github-clone-client";
-import { GitHubRepositoryOnboarding } from "./GitHubRepositoryOnboarding";
+import { GitHubRepositoryOnboardingFlow } from "./GitHubRepositoryOnboarding";
 
 const DIGEST = "a".repeat(64);
 const RECEIPT_ID = "R".repeat(43);
@@ -111,29 +110,30 @@ function makeCloneClient(overrides: CloneClientOverrides = {}): GithubCloneClien
 }
 
 function renderOnboarding(
-  overrides: Partial<Parameters<typeof GitHubRepositoryOnboarding>[0]> = {},
+  overrides: Partial<Parameters<typeof GitHubRepositoryOnboardingFlow>[0]> = {},
 ) {
   const createProject = vi.fn(async () => "project-1");
   const onProjectCreated = vi.fn();
+  const onDone = vi.fn();
   const props = {
     client: makeGithubClient(),
     cloneClient: makeCloneClient(),
     hostName: "This Mac",
     createProject,
     onProjectCreated,
+    onDone,
     pollIntervalMs: 20,
     ...overrides,
   };
-  const view = render(<GitHubRepositoryOnboarding {...props} />);
-  return { createProject, onProjectCreated, props, ...view };
+  const view = render(<GitHubRepositoryOnboardingFlow {...props} />);
+  return { createProject, onProjectCreated, onDone, props, ...view };
 }
 
 async function selectFirstRepository() {
-  fireEvent.click(screen.getByRole("button", { name: "GitHub repository" }));
   fireEvent.click(await screen.findByText("octant/repo-1"));
 }
 
-describe("GitHubRepositoryOnboarding", () => {
+describe("GitHubRepositoryOnboardingFlow", () => {
   it("requests the clone on selection and names host, repository, visibility, destination, branch, and approvals", async () => {
     const execute = vi.fn(async (command: GithubCloneCommand) => {
       expect(command).toMatchObject({
@@ -246,11 +246,16 @@ describe("GitHubRepositoryOnboarding", () => {
 
     expect(await screen.findByText(/clone was cancelled/i)).toBeInTheDocument();
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({ kind: "cancel-clone" }));
-    // Selection survives cancellation for a later retry: close the dialog and
-    // the trigger still names the chosen repository.
-    await userEvent.keyboard("{Escape}");
-    expect(await screen.findByRole("button", { name: "GitHub repository" })).toHaveTextContent(
-      "octant/repo-1",
+    // Selection survives cancellation for a later retry: Try again asks for
+    // the same repository without a second pick.
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() =>
+      expect(
+        execute.mock.calls.filter(([command]) => command.kind === "request-clone"),
+      ).toHaveLength(2),
+    );
+    expect(execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "request-clone", nodeId: "R_node1" }),
     );
   });
 
@@ -313,30 +318,6 @@ describe("GitHubRepositoryOnboarding", () => {
       }),
     );
     await waitFor(() => expect(createProject).toHaveBeenCalledWith("repo-1", RECEIPT_ID));
-  });
-
-  it("fails closed when an existing Project fixes the repository", async () => {
-    renderOnboarding({ fixedProjectName: "Existing Project" });
-
-    fireEvent.click(screen.getByRole("button", { name: "GitHub repository" }));
-
-    expect(
-      await screen.findByText(/Existing Project.*already binds its repository/),
-    ).toBeInTheDocument();
-    expect(screen.queryByLabelText("Search GitHub repositories")).not.toBeInTheDocument();
-  });
-
-  it("rejects the combination of a GitHub selection and a different existing Project", async () => {
-    const { props, rerender } = renderOnboarding();
-    await selectFirstRepository();
-    await screen.findByText("Confirm managed clone");
-
-    rerender(<GitHubRepositoryOnboarding {...props} fixedProjectName="Existing Project" />);
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      /conflicts with the selected Project/i,
-    );
-    expect(screen.queryByRole("button", { name: "Clone repository" })).not.toBeInTheDocument();
   });
 
   it("shows a terminal clone failure with remediation and retries through a fresh request", async () => {
@@ -419,15 +400,13 @@ describe("GitHubRepositoryOnboarding", () => {
   it("completes the full pick, confirm, clone, and bind walkthrough with zero console errors", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      const { onProjectCreated } = renderOnboarding();
+      const { onDone, onProjectCreated } = renderOnboarding();
       await selectFirstRepository();
       fireEvent.click(await screen.findByRole("button", { name: "Clone repository" }));
-      await waitFor(() => expect(onProjectCreated).toHaveBeenCalled());
+      await waitFor(() => expect(onProjectCreated).toHaveBeenCalledWith("project-1", "repo-1"));
       fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
-      expect(screen.getByRole("button", { name: "GitHub repository" })).toHaveTextContent(
-        "octant/repo-1",
-      );
+      expect(onDone).toHaveBeenCalledTimes(1);
       expect(consoleError).not.toHaveBeenCalled();
     } finally {
       consoleError.mockRestore();

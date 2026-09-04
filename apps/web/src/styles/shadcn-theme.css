@@ -25,7 +25,7 @@
   --destructive: var(--octant-danger-text);
   --border: var(--octant-border);
   --input: var(--octant-border-strong);
-  --ring: var(--octant-focus-ring);
+  --ring: color-mix(in srgb, var(--oct-fg) 62%, transparent);
   --sidebar: var(--octant-sidebar-opaque);
   --sidebar-foreground: var(--octant-text-primary);
   --sidebar-primary: var(--octant-accent);
@@ -33,7 +33,7 @@
   --sidebar-accent: var(--octant-surface-selected);
   --sidebar-accent-foreground: var(--octant-text-primary);
   --sidebar-border: var(--octant-border);
-  --sidebar-ring: var(--octant-focus-ring);
+  --sidebar-ring: color-mix(in srgb, var(--oct-fg) 62%, transparent);
 }
 
 html[data-octant-theme-mode="light"],
@@ -58,7 +58,7 @@ html[data-appearance="light"] :root,
   --destructive: var(--octant-danger-text);
   --border: var(--octant-border);
   --input: var(--octant-border-strong);
-  --ring: var(--octant-focus-ring);
+  --ring: color-mix(in srgb, var(--oct-fg) 62%, transparent);
   --sidebar: var(--octant-sidebar-opaque);
   --sidebar-foreground: var(--octant-text-primary);
   --sidebar-primary: var(--octant-accent);
@@ -66,5 +66,5 @@ html[data-appearance="light"] :root,
   --sidebar-accent: var(--octant-surface-selected);
   --sidebar-accent-foreground: var(--octant-text-primary);
   --sidebar-border: var(--octant-border);
-  --sidebar-ring: var(--octant-focus-ring);
+  --sidebar-ring: color-mix(in srgb, var(--oct-fg) 62%, transparent);
 }

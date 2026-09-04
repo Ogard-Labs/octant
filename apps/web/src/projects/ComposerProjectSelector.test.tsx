@@ -7,6 +7,8 @@ import {
   type ComposerProjectSelection,
 } from "./ComposerProjectSelector";
 import type { ProjectId } from "@octant/contracts/projects";
+import type { GithubClient } from "@octant/client-runtime/github-client";
+import type { GithubCloneClient } from "@octant/client-runtime/github-clone-client";
 
 const entries: ComposerProjectEntry[] = [
   {
@@ -76,7 +78,7 @@ describe("ComposerProjectSelector", () => {
     await user.type(search, "missing");
 
     expect(screen.queryByRole("option", { name: /My Project/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Add local folder…" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "New Project from folder…" })).toBeVisible();
     // Nothing offers a thread with no Project: the list can only ever name one
     // or create one.
     expect(screen.queryByRole("option", { name: /No folder/ })).not.toBeInTheDocument();
@@ -97,5 +99,100 @@ describe("ComposerProjectSelector", () => {
     await user.click(trigger);
     await user.keyboard("{Escape}");
     expect(trigger).toHaveFocus();
+  });
+
+  it("types a space into the search field after arrowing through the list", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    render(
+      <ComposerProjectSelector entries={entries} onSelect={onSelect} onAddFolder={() => {}} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
+    const search = screen.getByRole("combobox", { name: "Search Projects" });
+    // Arrowing leaves an option active, and the space then goes to the menu
+    // rather than the field it was typed into. Typing clears the active
+    // option, so it is the space straight after an arrow key that is lost.
+    await user.keyboard("{ArrowDown}");
+    await user.keyboard(" ");
+
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(search).toHaveValue(" ");
+  });
+
+  it("offers a new Project from a GitHub repository inside the same menu and walks back to Projects", async () => {
+    const user = userEvent.setup();
+    const client: GithubClient = {
+      authenticationSnapshot: async () => {
+        throw new Error("not used");
+      },
+      executeAuthenticationCommand: async () => {
+        throw new Error("not used");
+      },
+      readCatalogue: async (request) =>
+        request.kind === "recent-repositories"
+          ? ({ kind: "recent-repositories", rows: [] } as never)
+          : ({
+              kind: "repositories",
+              page: {
+                rows: [
+                  {
+                    nodeId: "R_node1",
+                    owner: "octant",
+                    name: "repo-1",
+                    visibility: "private",
+                    defaultBranch: "main",
+                    viewerPermission: "admin",
+                    capabilities: [],
+                  },
+                ],
+                sort: "pushed-desc",
+                hasNextPage: false,
+                freshness: { status: "fresh" },
+              },
+            } as never),
+      recordRecentRepository: async () => ({ kind: "recent-repositories", rows: [] }) as never,
+    };
+    const cloneClient: GithubCloneClient = {
+      execute: async () => {
+        throw new Error("not used");
+      },
+      listOperations: async () => ({ operations: [] }),
+    };
+    render(
+      <ComposerProjectSelector
+        entries={entries}
+        github={{
+          client,
+          cloneClient,
+          hostName: "This Mac",
+          createProject: async () => undefined,
+          onProjectCreated: () => {},
+        }}
+        onAddFolder={() => {}}
+        onSelect={() => {}}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
+    expect(screen.getByRole("option", { name: "New Project from folder…" })).toBeVisible();
+    await user.click(screen.getByRole("option", { name: "New Project from GitHub repository…" }));
+
+    expect(await screen.findByText("octant/repo-1")).toBeVisible();
+    expect(screen.queryByRole("combobox", { name: "Search Projects" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Back to Projects" }));
+    expect(screen.getByRole("combobox", { name: "Search Projects" })).toBeVisible();
+  });
+
+  it("keeps GitHub out of the menu when the host has no GitHub clients", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerProjectSelector entries={entries} onSelect={() => {}} onAddFolder={() => {}} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
+    expect(
+      screen.queryByRole("option", { name: "New Project from GitHub repository…" }),
+    ).not.toBeInTheDocument();
   });
 });
