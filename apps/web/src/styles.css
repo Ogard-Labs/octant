@@ -6538,107 +6538,102 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   height: 100%;
 }
 
+/* The model picker is an open hairline list (0072): a provider header in the
+   section-label role with its status as text, then one row per model. A row
+   is selected by a fill, not a border, and nothing in it is blue. */
 .model-picker {
   display: grid;
-  gap: 0.5rem;
+  gap: 0;
   container: model-picker / inline-size;
 }
 
 .model-picker__search {
   width: 100%;
-  padding: 0.4rem 0.6rem;
-  border-radius: 0.5rem;
-  border: 1px solid var(--octant-border, rgba(255, 255, 255, 0.12));
-  background: var(--octant-surface-raised, rgba(255, 255, 255, 0.04));
-  color: inherit;
+  height: var(--oct-settings-control-height, 32px);
+  margin-bottom: var(--oct-space-2);
 }
 
 .model-picker__listbox {
   display: grid;
-  gap: 0.75rem;
-  max-height: 24rem;
+  gap: 0;
+  max-height: 28rem;
   overflow-y: auto;
-  padding: 0.25rem;
-  border-radius: 0.5rem;
-  border: 1px solid var(--octant-border, rgba(255, 255, 255, 0.12));
-  background: var(--octant-surface, rgba(255, 255, 255, 0.02));
   outline: none;
 }
 
 .model-picker__listbox:focus-visible {
-  border-color: var(--octant-accent, #4c8bf5);
+  border-radius: var(--oct-radius-sm);
+  box-shadow: var(--oct-focus-ring);
 }
 
 .model-picker__group {
   display: grid;
-  gap: 0.35rem;
-  padding: 0.5rem;
-  border-radius: 0.5rem;
-  background: var(--octant-surface-raised, rgba(255, 255, 255, 0.03));
+  gap: 0;
 }
 
 .model-picker__group-header {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.4rem 0.6rem;
+  gap: 4px 10px;
+  padding: 10px 0 8px;
+  border-bottom: 1px solid var(--oct-hairline);
 }
 
 .model-picker__group-name {
-  font-weight: 600;
+  color: var(--octant-text-primary);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: var(--oct-tracking-snug);
+  line-height: 1.3;
 }
 
 .model-picker__group-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25rem 0.5rem;
-  color: var(--octant-text-muted, rgba(255, 255, 255, 0.6));
-  font-size: 0.8rem;
-}
-
-.model-picker__group-driver {
-  font-weight: 500;
-}
-
-.model-picker__group-host,
-.model-picker__group-execution {
-  opacity: 0.85;
+  gap: 4px 8px;
+  color: var(--octant-text-secondary);
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .model-picker__readiness {
   margin-left: auto;
-  font-size: 0.7rem;
-  text-transform: none;
-  letter-spacing: 0;
-  padding: 0.1rem 0.4rem;
-  border-radius: 0.4rem;
-  border: 1px solid var(--octant-border, rgba(255, 255, 255, 0.12));
+  color: var(--octant-text-secondary);
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .model-picker__readiness--ready {
-  color: var(--octant-success, #12b76a);
+  color: var(--octant-success-text);
 }
 
 .model-picker__readiness--degraded {
-  color: var(--octant-warning, #f79009);
+  color: var(--octant-warning-text);
 }
 
 .model-picker__readiness--unavailable,
 .model-picker__readiness--unauthenticated,
 .model-picker__readiness--incompatible {
-  color: var(--octant-danger, #b42318);
+  color: var(--octant-danger-text);
 }
 
 .model-picker__section {
   display: grid;
-  gap: 0.25rem;
+  gap: 0;
 }
 
+/* The section name only earns a line when a provider is split ("Tool-capable"
+   against "Chat and analysis only"); a lone "Models" would repeat the header. */
 .model-picker__section-label {
-  font-size: 0.7rem;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--octant-text-muted, rgba(255, 255, 255, 0.55));
+  padding: 8px 0 2px;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
+}
+
+.model-picker__section:last-child:not(.model-picker__section + .model-picker__section)
+  > .model-picker__section-label {
+  display: none;
 }
 
 .model-picker__options {
@@ -6646,110 +6641,106 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 0.15rem;
+  gap: 0;
 }
 
 /*
- * Both columns must be allowed to shrink. With a bare `1fr` the name column
- * kept its content's minimum width, so a long model id — `opencode-go/
- * deepseek-v4-flash` and its kin — pushed its row wider than the list and the
- * overflow painted over the row beneath it.
- */
-/*
- * The option is an OctantButton, and that recipe sets `whitespace-nowrap` for
- * the short labels a button usually carries. A model name or id is neither
- * short nor under our control, so wrapping is turned back on here — without it
- * `overflow-wrap` has nothing to break, and a long name overflows its track
- * instead of wrapping inside it.
+ * The option is an OctantButton, and that recipe sets `whitespace-nowrap` and
+ * `h-8` for the short labels a button usually carries. A model name or id is
+ * neither short nor under our control, so the row wraps and grows instead.
+ * Both columns must be allowed to shrink: with a bare `1fr` the name column
+ * kept its content's minimum width and a long id pushed the row wider than
+ * the list. The selection fill bleeds 8px past the text edge on each side so
+ * the text stays on the page's edge while the fill has a margin around it.
  */
 .model-picker__option {
   display: grid;
   white-space: normal;
-
-  /*
-   * The button recipe also fixes the row at `h-8`, which was right when the
-   * label could not wrap. Now that it can — and badges or an unavailable
-   * reason add their own rows — the option has to grow instead of painting
-   * over the option beneath it.
-   */
   height: auto;
-  min-height: 2rem;
-  /*
-   * The identifier is bounded so it cannot take the row from the name. Sized
-   * to its content it would, on a long id in a narrow picker, leave the name
-   * wrapping a character at a time.
-   */
+  min-height: 44px;
   grid-template-columns: minmax(0, 1fr) minmax(0, 40%);
   grid-template-areas:
     "name id"
-    "badges badges"
+    "capabilities capabilities"
     "reason reason";
-  gap: 0.2rem 0.5rem;
-  width: 100%;
+  gap: 2px 12px;
+  width: calc(100% + 16px);
   min-width: 0;
+  margin-inline: -8px;
   text-align: left;
-  padding: 0.4rem 0.5rem;
-  border-radius: 0.4rem;
-  border: 1px solid transparent;
+  padding: 10px 8px;
+  border: 0;
+  border-radius: var(--oct-radius-sm);
   background: transparent;
   color: inherit;
   cursor: pointer;
+  box-shadow: none;
+}
+
+.model-picker__options > li + li > .model-picker__option {
+  border-top: 1px solid var(--oct-hairline);
+  border-radius: 0;
 }
 
 .model-picker__option:hover,
 .model-picker__option--active {
-  border-color: var(--octant-accent, #4c8bf5);
-  background: var(--octant-surface-hover, rgba(76, 139, 245, 0.12));
+  background: var(--octant-surface-hover);
 }
 
 .model-picker__option[aria-selected="true"] {
-  border-color: var(--octant-accent, #4c8bf5);
-  background: var(--octant-surface-selected, rgba(76, 139, 245, 0.18));
+  background: var(--oct-fg-soft);
 }
 
 .model-picker__option-name {
   grid-area: name;
   min-width: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
   font-weight: 500;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
 .model-picker__option-id {
   grid-area: id;
   min-width: 0;
-  font-size: 0.75rem;
-  color: var(--octant-text-muted, rgba(255, 255, 255, 0.5));
+  color: var(--octant-text-secondary);
   font-family: var(--oct-font-mono);
+  font-size: calc(12 * var(--oct-text-step));
+  line-height: 1.45;
+  text-align: end;
   overflow-wrap: anywhere;
 }
 
-.model-picker__badges {
-  grid-area: badges;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
+.model-picker__capabilities {
+  grid-area: capabilities;
+  color: var(--octant-text-secondary);
+  font-size: calc(12 * var(--oct-text-step));
+  line-height: 1.45;
 }
 
 .model-picker__option-reason {
   grid-area: reason;
-  font-size: 0.75rem;
-  color: var(--octant-warning, #f79009);
+  color: var(--octant-warning-text);
+  font-size: calc(12 * var(--oct-text-step));
+  line-height: 1.45;
 }
 
 .model-picker__unavailable-current {
   display: grid;
-  gap: 0.2rem;
-  padding: 0.4rem 0.5rem;
-  border-radius: 0.4rem;
-  border: 1px dashed var(--octant-danger, #b42318);
-  color: var(--octant-text-muted, rgba(255, 255, 255, 0.7));
+  gap: 2px;
   margin: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--oct-hairline);
+  color: var(--octant-text-secondary);
 }
 
 .model-picker__empty {
-  padding: 1rem;
-  text-align: center;
-  color: var(--octant-text-muted, rgba(255, 255, 255, 0.55));
+  margin: 0;
+  padding: 8px 0;
+  color: var(--octant-text-secondary);
+  font-size: calc(12 * var(--oct-text-step));
+  line-height: 1.45;
 }
 
 @container model-picker (max-width: 28rem) {
@@ -6758,12 +6749,11 @@ html[data-octant-native-host="true"] .workspace-pane__header {
     grid-template-areas:
       "name"
       "id"
-      "badges"
+      "capabilities"
       "reason";
   }
-  .model-picker__group-header {
-    flex-direction: column;
-    align-items: flex-start;
+  .model-picker__option-id {
+    text-align: start;
   }
   .model-picker__readiness {
     margin-left: 0;
@@ -6775,13 +6765,12 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   grid-template-areas:
     "name"
     "id"
-    "badges"
+    "capabilities"
     "reason";
 }
 
-.model-picker--narrow .model-picker__group-header {
-  flex-direction: column;
-  align-items: flex-start;
+.model-picker--narrow .model-picker__option-id {
+  text-align: start;
 }
 
 .model-picker--narrow .model-picker__readiness {
