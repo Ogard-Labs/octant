@@ -26,6 +26,8 @@ describe("octant agent command line", () => {
       prompt: "hi",
       json: true,
       plain: false,
+      last: false,
+      quiet: false,
     });
     expect(resolveAgentCliCommand("agent", [], { theme: "neon" })).toBeUndefined();
     expect(resolveAgentCliCommand("agent", [], { theme: "octant", plain: true })).toMatchObject({
@@ -140,7 +142,7 @@ describe("octant agent command line", () => {
       questions: [],
     };
     const code = await runAgentCliCommand({
-      command: { action: "agent", threadId, json: false, plain: false },
+      command: { action: "agent", threadId, json: false, plain: false, last: false, quiet: false },
       session: session((request) => {
         seen.push(`${request.method} ${request.path}`);
         if (request.path.endsWith("/follow-ups/preview")) {

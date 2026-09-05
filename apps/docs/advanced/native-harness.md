@@ -139,8 +139,17 @@ Enter sends, Shift+Enter adds a line, `/next N`, `/pause`, and `/resume` work
 as in the app, and a pending question is answered by typing its number or an
 answer. `--plain` keeps the line-by-line mode, which is also what a pipe or
 `--json` (one JSON object per line) gets. `--thread <id>` attaches to an
-existing thread and `--project <name>` files the thread in a Project.
-`octant harness slots` prints the routing table.
+existing thread, `--last` to the one you used most recently, and
+`--project <name>` files a new thread in a Project. Inside the screen,
+`/threads` lists your threads and `/open N` switches; `/model` lists every
+model a harness endpoint offers and `/model N` switches the thread to it,
+with the header showing how much of that model's window the last turn used.
+Type `@` to attach a file from the working directory (images, PDFs, text)
+and `#` to bring another thread's transcript in as read-only context; both
+complete as you type. Ctrl+E opens each call's diff or output, Ctrl+R the
+model's reasoning, `?` the key list. A finished turn sends a desktop
+notification unless `--quiet`. `octant harness slots` prints the routing
+table.
 
 ## Honest limits
 

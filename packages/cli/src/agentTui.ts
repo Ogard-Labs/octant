@@ -1,17 +1,27 @@
 import type { ChatThreadView, NativeHarnessSessionView } from "@octant/contracts";
+import { readdir } from "node:fs/promises";
+import { join, relative } from "node:path";
 import {
   activateAgentFollowUp,
   answerAgentQuestion,
+  attachmentMediaType,
+  changeAgentModel,
   commandAgentSession,
+  contextPercent,
   decideAgentApproval,
   interruptAgentTurn,
   isAgentTurnRunning,
+  listAgentModels,
+  listAgentThreads,
   previewAgentFollowUp,
   readAgentSession,
   readAgentThread,
   sendAgentPrompt,
   steerAgent,
+  uploadAgentAttachment,
+  type AgentModelChoice,
 } from "./agentHost";
+import { notifyDesktop } from "./agentNotify";
 import {
   paletteFor,
   statusLineFrom,
@@ -22,6 +32,7 @@ import {
   type TuiToolLine,
   type TuiTranscriptEntry,
 } from "./agentTuiModel";
+import type { ChatNavigationThread } from "@octant/contracts";
 import type { OpenedLocalControlSession } from "./localControl";
 
 export interface RunAgentTuiInput {
@@ -32,7 +43,13 @@ export interface RunAgentTuiInput {
   readonly signal?: AbortSignal;
   /** Start with tool diffs and output expanded (what Ctrl+E toggles). */
   readonly verbose?: boolean;
+  /** No desktop notification when a turn ends. */
+  readonly quiet?: boolean;
 }
+
+const MAX_FILE_SUGGESTIONS = 8;
+const MAX_SCANNED_FILES = 4_000;
+const SKIPPED_DIRECTORIES = new Set(["node_modules", ".git", "dist", "build", ".cache"]);
 
 type OpenTui = typeof import("@opentui/core");
 
@@ -98,6 +115,15 @@ class AgentScreen {
   #verbose = false;
   #showReasoning = false;
   #showHelp = false;
+  #threadId: string;
+  #threads: ReadonlyArray<ChatNavigationThread> = [];
+  #models: ReadonlyArray<AgentModelChoice> = [];
+  #listing: "threads" | "models" | undefined;
+  #suggestions:
+    | { readonly kind: "file" | "thread"; readonly items: ReadonlyArray<string> }
+    | undefined;
+  #files: ReadonlyArray<string> | undefined;
+  #wasRunning = false;
   #pendingFollowUp:
     | { readonly suggestionId: string; readonly turnId: string; readonly prompt: string }
     | undefined;
@@ -124,6 +150,7 @@ class AgentScreen {
     this.#palette = palette;
     this.#input = input;
     this.#verbose = input.verbose === true;
+    this.#threadId = input.threadId;
     const { BoxRenderable, TextRenderable, ScrollBoxRenderable, TextareaRenderable } = tui;
     const root = new BoxRenderable(renderer, {
       width: "100%",
@@ -236,7 +263,14 @@ class AgentScreen {
           this.#transcript.scrollTo(0);
         } else if (key.name === "end" && key.ctrl) {
           this.#transcript.scrollTo(this.#transcript.scrollHeight);
+        } else if (!key.ctrl && !key.meta) {
+          // The composer has not taken the key yet; look after it has.
+          setTimeout(() => void this.#suggest(), 0);
         }
+      });
+      void listAgentModels(this.#input.session).then((models) => {
+        this.#models = models;
+        this.#draw();
       });
       this.#input.signal?.addEventListener("abort", () => resolve(1), { once: true });
       const interval = setInterval(() => void this.refresh(), this.#input.pollIntervalMs ?? 500);
@@ -249,13 +283,102 @@ class AgentScreen {
 
   async refresh(): Promise<void> {
     const [thread, session] = await Promise.all([
-      readAgentThread(this.#input.session, this.#input.threadId),
-      readAgentSession(this.#input.session, this.#input.threadId),
+      readAgentThread(this.#input.session, this.#threadId),
+      readAgentSession(this.#input.session, this.#threadId),
     ]);
     this.#thread = thread;
     this.#session = session === "unavailable" ? undefined : session;
+    const running = isAgentTurnRunning(thread);
+    if (this.#wasRunning && !running && this.#input.quiet !== true) {
+      const outcome = thread?.turns.at(-1)?.attempts.at(-1)?.outcome ?? "ended";
+      notifyDesktop(
+        "Octant",
+        `${thread?.thread.title ?? "Thread"} — turn ${outcome === "completed" ? "finished" : outcome}`,
+      );
+    }
+    this.#wasRunning = running;
     this.#draw();
     await this.#flushSteering();
+  }
+
+  /** Live matches for an `@file` or `#thread` token at the end of the composer. */
+  async #suggest(): Promise<void> {
+    const text = this.#composer.plainText;
+    const token = /(?:^|\s)([@#])([^\s@#]*)$/.exec(text);
+    if (token === null) {
+      if (this.#suggestions !== undefined) {
+        this.#suggestions = undefined;
+        this.#draw();
+      }
+      return;
+    }
+    const needle = (token[2] ?? "").toLowerCase();
+    if (token[1] === "#") {
+      if (this.#threads.length === 0) this.#threads = await listAgentThreads(this.#input.session);
+      const items = this.#threads
+        .filter((thread) => String(thread.id) !== this.#threadId)
+        .filter((thread) => thread.title.toLowerCase().includes(needle))
+        .slice(0, MAX_FILE_SUGGESTIONS)
+        .map((thread) => `#${thread.title}`);
+      this.#suggestions = { kind: "thread", items };
+    } else {
+      if (this.#files === undefined) this.#files = await scanFiles(process.cwd());
+      const items = this.#files
+        .filter((file) => file.toLowerCase().includes(needle))
+        .slice(0, MAX_FILE_SUGGESTIONS)
+        .map((file) => `@${file}`);
+      this.#suggestions = { kind: "file", items };
+    }
+    this.#draw();
+  }
+
+  /** `@file` tokens become attachments, `#thread` tokens become mentions; the prompt keeps the names. */
+  async #resolveMentions(text: string): Promise<{
+    readonly prompt: string;
+    readonly attachmentIds: string[];
+    readonly threadMentionIds: string[];
+    readonly refused: string[];
+  }> {
+    const attachmentIds: string[] = [];
+    const threadMentionIds: string[] = [];
+    const refused: string[] = [];
+    for (const match of text.matchAll(/(?:^|\s)@([^\s@#]+)/g)) {
+      const path = match[1] ?? "";
+      if (attachmentMediaType(path) === undefined) continue;
+      const uploaded = await uploadAgentAttachment(this.#input.session, this.#threadId, path);
+      if (uploaded.kind === "uploaded") attachmentIds.push(uploaded.attachmentId);
+      else refused.push(uploaded.message);
+    }
+    let prompt = text;
+    for (const match of text.matchAll(/(?:^|\s)#([^\s@#]+)/g)) {
+      const fragment = (match[1] ?? "").toLowerCase();
+      if (this.#threads.length === 0) this.#threads = await listAgentThreads(this.#input.session);
+      const byNumber = /^\d+$/.test(fragment) ? this.#threads[Number(fragment) - 1] : undefined;
+      const thread =
+        byNumber ??
+        this.#threads.find(
+          (entry) => entry.title.toLowerCase().replace(/\s+/g, "-") === fragment,
+        ) ??
+        this.#threads.find((entry) => entry.title.toLowerCase().includes(fragment));
+      if (thread === undefined) continue;
+      threadMentionIds.push(String(thread.id));
+      prompt = prompt.replace(match[0], `${match[0].startsWith(" ") ? " " : ""}${thread.title}`);
+    }
+    return {
+      prompt: prompt.replace(/(^|\s)@([^\s@#]+)/g, "$1$2"),
+      attachmentIds,
+      threadMentionIds,
+      refused,
+    };
+  }
+
+  async #switchThread(threadId: string): Promise<void> {
+    this.#threadId = threadId;
+    this.#drawn = "";
+    this.#listing = undefined;
+    this.#pendingFollowUp = undefined;
+    for (const child of this.#transcript.getChildren()) child.destroyRecursively();
+    await this.refresh();
   }
 
   /** A note the lead never reached during its turn becomes the next prompt. */
@@ -278,7 +401,7 @@ class AgentScreen {
         queued.map((note) => note.text).join("\n\n"),
       );
       if (sent.kind === "refused") this.#note = sent.message;
-      else await steerAgent(this.#input.session, this.#input.threadId, { kind: "clear" });
+      else await steerAgent(this.#input.session, this.#threadId, { kind: "clear" });
     } finally {
       this.#flushingSteering = false;
     }
@@ -313,7 +436,12 @@ class AgentScreen {
     this.#ticks += 1;
     const spinner = SPINNER[this.#ticks % SPINNER.length] ?? "";
     const mode = this.#thread === undefined ? "" : ` · ${session?.session.mode ?? "chat"}`;
-    this.#header.content = t`${fg(p.accent)(bold("◆ Octant"))} ${fg(p.muted)("·")} ${fg(p.text)(title)}${dim(fg(p.muted)(mode))}  ${fg(statusColor)(status === "running" ? `${spinner} running` : status)}`;
+    const percent = contextPercent(this.#thread, this.#models);
+    const context =
+      percent === undefined
+        ? ""
+        : `  ${"▰".repeat(Math.round(percent / 20))}${"▱".repeat(5 - Math.round(percent / 20))} ${percent}% context`;
+    this.#header.content = t`${fg(p.accent)(bold("◆ Octant"))} ${fg(p.muted)("·")} ${fg(p.text)(title)}${dim(fg(p.muted)(mode))}  ${fg(statusColor)(status === "running" ? `${spinner} running` : status)}${dim(fg(percent !== undefined && percent >= 80 ? p.warning : p.muted)(context))}`;
 
     const entries = transcriptFrom(this.#thread, session);
     const pending = session?.questions.find((question) => question.status === "pending");
@@ -342,7 +470,33 @@ class AgentScreen {
     }
 
     const approval = session?.approvals?.find((entry) => entry.status === "pending");
-    if (this.#showHelp) {
+    if (this.#suggestions !== undefined && this.#suggestions.items.length > 0) {
+      this.#panel.title = this.#suggestions.kind === "file" ? " Files " : " Threads ";
+      this.#panel.borderColor = p.border;
+      this.#panelText.content = t`${fg(p.textSecondary)(this.#suggestions.items.join("\n"))}\n${dim(fg(p.muted)(this.#suggestions.kind === "file" ? "Type the rest of the name; images, PDFs, and text files attach to the prompt." : "Type the rest of the title; the thread's transcript is read-only context for this turn."))}`;
+      this.#panel.visible = true;
+    } else if (this.#listing === "threads") {
+      this.#panel.title = " Threads ";
+      this.#panel.borderColor = p.border;
+      const lines = this.#threads.slice(0, 9).map((thread, index) => {
+        const here = String(thread.id) === this.#threadId;
+        return `${here ? "●" : "○"} ${index + 1}. ${thread.title}${thread.executing ? "  working" : ""}`;
+      });
+      this.#panelText.content = t`${fg(p.textSecondary)(lines.length === 0 ? "No threads yet." : lines.join("\n"))}\n${dim(fg(p.muted)("/open N switches to one."))}`;
+      this.#panel.visible = true;
+    } else if (this.#listing === "models") {
+      this.#panel.title = " Models ";
+      this.#panel.borderColor = p.border;
+      const lines = this.#models.slice(0, 9).map((model, index) => {
+        const here =
+          this.#thread !== undefined &&
+          model.instanceId === String(this.#thread.thread.providerInstanceId) &&
+          model.modelId === String(this.#thread.thread.modelId);
+        return `${here ? "●" : "○"} ${index + 1}. ${model.displayName}  ${model.endpoint}${model.contextLimit === undefined ? "" : `  ${Math.round(model.contextLimit / 1000)}k`}`;
+      });
+      this.#panelText.content = t`${fg(p.textSecondary)(lines.length === 0 ? "No harness endpoint offers a model yet. Add one in Settings → Providers." : lines.join("\n"))}\n${dim(fg(p.muted)("/model N switches the thread's model."))}`;
+      this.#panel.visible = true;
+    } else if (this.#showHelp) {
       this.#panel.title = " Keys ";
       this.#panel.borderColor = p.border;
       this.#panelText.content = t`${fg(p.textSecondary)(
@@ -673,6 +827,51 @@ class AgentScreen {
       await this.#pauseOrResume(text === "/pause" ? "pause" : "resume");
       return;
     }
+    this.#suggestions = undefined;
+    if (text === "/threads") {
+      this.#threads = await listAgentThreads(this.#input.session);
+      this.#listing = this.#listing === "threads" ? undefined : "threads";
+      this.#draw();
+      return;
+    }
+    if (text.startsWith("/open")) {
+      const index = Number(text.slice("/open".length).trim()) - 1;
+      const target = this.#threads[index];
+      if (target === undefined) {
+        this.#note = "Pick a thread by number from /threads: /open 2";
+        this.#draw();
+        return;
+      }
+      await this.#switchThread(String(target.id));
+      return;
+    }
+    if (text === "/model" || text.startsWith("/model ")) {
+      const argument = text.slice("/model".length).trim();
+      if (argument.length === 0) {
+        this.#models = await listAgentModels(this.#input.session);
+        this.#listing = this.#listing === "models" ? undefined : "models";
+        this.#draw();
+        return;
+      }
+      const choice = /^\d+$/.test(argument)
+        ? this.#models[Number(argument) - 1]
+        : this.#models.find(
+            (model) =>
+              model.modelId === argument ||
+              model.displayName.toLowerCase() === argument.toLowerCase(),
+          );
+      if (choice === undefined || this.#thread === undefined) {
+        this.#note = "Pick a model by number from /model: /model 2";
+        this.#draw();
+        return;
+      }
+      const changed = await changeAgentModel(this.#input.session, this.#thread, choice);
+      this.#note = changed.kind === "refused" ? changed.message : `Now on ${choice.displayName}.`;
+      this.#listing = undefined;
+      await this.refresh();
+      return;
+    }
+    this.#listing = undefined;
     if (this.#pendingFollowUp !== undefined) {
       const pending = this.#pendingFollowUp;
       this.#pendingFollowUp = undefined;
@@ -703,7 +902,7 @@ class AgentScreen {
       }
       const result = await decideAgentApproval(
         this.#input.session,
-        this.#input.threadId,
+        this.#threadId,
         String(approval.id),
         decision,
       );
@@ -716,7 +915,7 @@ class AgentScreen {
       const picked = /^\d+$/.test(text) ? question.options[Number(text) - 1] : undefined;
       const result = await answerAgentQuestion(
         this.#input.session,
-        this.#input.threadId,
+        this.#threadId,
         String(question.id),
         picked ?? text,
       );
@@ -731,7 +930,7 @@ class AgentScreen {
     }
     if (isAgentTurnRunning(this.#thread)) {
       // The lead is busy: the note lands at its next tool step, not as a turn.
-      const steered = await steerAgent(this.#input.session, this.#input.threadId, {
+      const steered = await steerAgent(this.#input.session, this.#threadId, {
         kind: "queue",
         text,
       });
@@ -739,7 +938,16 @@ class AgentScreen {
       await this.refresh();
       return;
     }
-    const sent = await sendAgentPrompt(this.#input.session, this.#thread, text);
+    const resolved = await this.#resolveMentions(text);
+    if (resolved.refused.length > 0) {
+      this.#note = resolved.refused.join(" ");
+      this.#draw();
+      return;
+    }
+    const sent = await sendAgentPrompt(this.#input.session, this.#thread, resolved.prompt, {
+      attachmentIds: resolved.attachmentIds,
+      threadMentionIds: resolved.threadMentionIds,
+    });
     if (sent.kind === "refused") this.#note = sent.message;
     await this.refresh();
   }
@@ -778,7 +986,7 @@ class AgentScreen {
     }
     const previewed = await previewAgentFollowUp(
       this.#input.session,
-      this.#input.threadId,
+      this.#threadId,
       String(suggestion.id),
     );
     if (previewed.kind === "refused") {
@@ -806,7 +1014,7 @@ class AgentScreen {
   }): Promise<void> {
     const result = await activateAgentFollowUp(
       this.#input.session,
-      this.#input.threadId,
+      this.#threadId,
       pending.turnId,
       pending.suggestionId,
     );
@@ -828,4 +1036,29 @@ class AgentScreen {
     }
     await this.refresh();
   }
+}
+
+/** Files under the working directory for `@` completion, bounded and without the usual noise. */
+async function scanFiles(root: string): Promise<ReadonlyArray<string>> {
+  const found: string[] = [];
+  const pending = [root];
+  while (pending.length > 0 && found.length < MAX_SCANNED_FILES) {
+    const directory = pending.shift()!;
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") && entry.name !== ".env.example") continue;
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (!SKIPPED_DIRECTORIES.has(entry.name)) pending.push(path);
+      } else if (found.length < MAX_SCANNED_FILES) {
+        found.push(relative(root, path));
+      }
+    }
+  }
+  return found.sort();
 }

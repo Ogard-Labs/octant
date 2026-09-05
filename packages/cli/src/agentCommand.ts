@@ -11,6 +11,7 @@ import {
   type ChatThreadView,
   type NativeHarnessSessionView,
 } from "@octant/contracts";
+import { listAgentThreads } from "./agentHost";
 import { runAgentTui } from "./agentTui";
 import { isTuiThemeId, type TuiThemeId } from "./agentTuiModel";
 import { failureMessage, type OpenedLocalControlSession } from "./localControl";
@@ -26,6 +27,10 @@ export type AgentCliCommand =
       /** Line mode even on a terminal that could draw the full screen. */
       readonly plain: boolean;
       readonly theme?: TuiThemeId;
+      /** Attach to the most recently used Chat thread instead of creating one. */
+      readonly last: boolean;
+      /** No desktop notification when a turn ends. */
+      readonly quiet: boolean;
     }
   | { readonly action: "harness-slots"; readonly json: boolean }
   | { readonly action: "harness-session"; readonly threadId: string; readonly json: boolean };
@@ -38,6 +43,8 @@ const AGENT_FLAGS: ReadonlyArray<string> = [
   "json",
   "plain",
   "theme",
+  "last",
+  "quiet",
 ];
 
 export function resolveAgentCliCommand(
@@ -64,6 +71,8 @@ export function resolveAgentCliCommand(
       ...(title === undefined ? {} : { title }),
       json: flags.json === true,
       plain: flags.plain === true,
+      last: flags.last === true,
+      quiet: flags.quiet === true,
       ...(theme === undefined ? {} : { theme }),
     };
   }
@@ -198,6 +207,7 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
       session: input.session,
       threadId,
       themeId: input.command.theme,
+      quiet: input.command.quiet,
       ...(input.pollIntervalMs === undefined ? {} : { pollIntervalMs: input.pollIntervalMs }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
@@ -433,6 +443,14 @@ async function readSession(
 async function resolveThread(input: RunAgentCliCommandInput): Promise<string | undefined> {
   if (input.command.action !== "agent") return undefined;
   if (input.command.threadId !== undefined) return input.command.threadId;
+  if (input.command.last) {
+    const latest = (await listAgentThreads(input.session))[0];
+    if (latest === undefined) {
+      input.stderr.write("There is no Chat thread to continue yet.\n");
+      return undefined;
+    }
+    return String(latest.id);
+  }
   let projectId: string | undefined;
   if (input.command.project !== undefined) {
     const bootstrap = await input.session.send({ path: "/api/projects/bootstrap", method: "GET" });
