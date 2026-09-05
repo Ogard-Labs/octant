@@ -1,10 +1,12 @@
 import {
   decodeNativeHarnessFollowUpActivationResult,
+  decodeNativeHarnessApprovalDecisionResult,
   decodeNativeHarnessQuestionAnswerResult,
   decodeNativeHarnessFollowUpPreview,
   decodeNativeHarnessSessionView,
   type NativeHarnessFollowUpActivationResult,
   type NativeHarnessFollowUpPreview,
+  type NativeHarnessApprovalDecisionResult,
   type NativeHarnessQuestionAnswerResult,
   type NativeHarnessSessionView,
 } from "@octant/contracts";
@@ -108,4 +110,23 @@ export async function commandMobileNativeHarnessSession(input: {
     contentType: "application/json",
   });
   return response.ok;
+}
+
+export async function decideMobileNativeHarnessApproval(input: {
+  readonly transport: MobileRemoteTransport;
+  readonly threadId: string;
+  readonly approvalId: string;
+  readonly decision: "approve" | "approve-always" | "deny";
+}): Promise<NativeHarnessApprovalDecisionResult | undefined> {
+  const response = await input.transport.authenticatedFetch({
+    method: "POST",
+    path: `/api/native-harness/sessions/${encodeURIComponent(input.threadId)}/approvals`,
+    body: JSON.stringify({ approvalId: input.approvalId, decision: input.decision }),
+    contentType: "application/json",
+  });
+  try {
+    return decodeNativeHarnessApprovalDecisionResult(await response.json());
+  } catch {
+    return undefined;
+  }
 }

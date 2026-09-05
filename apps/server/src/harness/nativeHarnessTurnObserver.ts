@@ -148,6 +148,8 @@ export class NativeHarnessTurnObserver {
     const turnId = decodeNativeHarnessTurnId(this.#options.uuid());
     const lead = this.#lead(input);
     const tools = this.#options.sessions.takeToolCalls(input.threadId);
+    // A note the lead already read is done; one still queued waits for the next prompt.
+    this.#options.sessions.clearSteering(input.threadId, "delivered");
     try {
       this.#options.sessions.recordTurn(
         input.threadId,

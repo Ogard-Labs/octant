@@ -552,6 +552,7 @@ import {
   createNativeHarnessFollowUp,
   type NativeHarnessFollowUpCreationDependencies,
 } from "./harness/nativeHarnessFollowUpCreation";
+import { NativeHarnessApprovalStore } from "./harness/nativeHarnessApprovals";
 import { NativeHarnessQuestionStore } from "./harness/nativeHarnessQuestions";
 import { createNativeHarnessSessionRouteHandler } from "./harness/nativeHarnessSessionRoutes";
 import { NativeHarnessTurnObserver } from "./harness/nativeHarnessTurnObserver";
@@ -3879,6 +3880,11 @@ export function startOctantServer(
       },
     });
     const nativeHarnessQuestionsLive = nativeHarnessQuestions;
+    const nativeHarnessApprovals = new NativeHarnessApprovalStore({
+      sessions: nativeHarnessSessionsLive,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
     const nativeHarnessRoutingRoutes = createNativeHarnessRoutingRouteHandler({
       windowAuthorityStore,
       store: nativeHarnessRoutingStore,
@@ -3900,6 +3906,20 @@ export function startOctantServer(
           : createNativeHarnessFollowUp(nativeHarnessFollowUpCreation.current, input),
       answerQuestion: ({ threadId, questionId, answer }) =>
         nativeHarnessQuestionsLive.answer(threadId, questionId, answer),
+      decideApproval: ({ threadId, approvalId, decision }) =>
+        nativeHarnessApprovals.decide(threadId, approvalId, decision),
+      steer: ({ threadId, command }) => {
+        if (command.kind === "clear") {
+          nativeHarnessSessionsLive.clearSteering(threadId, "all");
+          return true;
+        }
+        return nativeHarnessSessionsLive.queueSteering(threadId, {
+          id: randomUUID(),
+          text: command.text,
+          status: "queued",
+          at: new Date().toISOString() as never,
+        });
+      },
       authorizeThread: ({ threadId, windowId }) =>
         authorizeAgentRunParentThread({
           persistence,
@@ -3952,6 +3972,7 @@ export function startOctantServer(
     });
     nativeHarnessComposition = createNativeHarnessComposition({
       questions: nativeHarnessQuestionsLive,
+      approvals: nativeHarnessApprovals,
       activity: nativeHarnessSessionsLive,
       delegate: (scope) =>
         createNativeHarnessDelegatePort(

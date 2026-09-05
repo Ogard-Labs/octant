@@ -1,6 +1,10 @@
 import {
   decodeActivateNativeHarnessFollowUp,
   decodeAnswerNativeHarnessQuestion,
+  decodeDecideNativeHarnessApproval,
+  decodeSteerNativeHarnessSession,
+  type NativeHarnessApprovalDecisionResult,
+  type SteerNativeHarnessSession,
   decodeNativeHarnessFollowUpPreview,
   decodeNativeHarnessSessionCommand,
   type NativeHarnessFollowUpActivationResult,
@@ -46,6 +50,15 @@ export interface NativeHarnessSessionRouteDependencies {
     readonly view: NativeHarnessSessionView;
     readonly creation: NativeHarnessFollowUpCreation;
   }) => Promise<NativeHarnessFollowUpCreationOutcome>;
+  readonly decideApproval?: (input: {
+    readonly threadId: string;
+    readonly approvalId: string;
+    readonly decision: "approve" | "approve-always" | "deny";
+  }) => "decided" | "approval-not-found" | "already-settled";
+  readonly steer?: (input: {
+    readonly threadId: string;
+    readonly command: SteerNativeHarnessSession;
+  }) => boolean;
   /** Settles a pending question from any surface; the outcome says why it could not. */
   readonly answerQuestion?: (input: {
     readonly threadId: string;
@@ -157,6 +170,48 @@ export function createNativeHarnessSessionRouteHandler(
         session: (updated ?? view).session,
       };
       return json(result, 200, origin);
+    }
+
+    if (action === "approvals") {
+      let decision;
+      try {
+        decision = decodeDecideNativeHarnessApproval(body);
+      } catch {
+        return failure("Native harness approval decision is invalid.", 400, origin);
+      }
+      const outcome = dependencies.decideApproval?.({
+        threadId,
+        approvalId: String(decision.approvalId),
+        decision: decision.decision,
+      });
+      const settled = dependencies.store
+        .read(threadId)
+        ?.approvals?.find((approval) => String(approval.id) === String(decision.approvalId));
+      const result: NativeHarnessApprovalDecisionResult =
+        outcome === "decided" && settled !== undefined
+          ? { kind: "approval-decided", approval: settled }
+          : {
+              kind: "approval-refused",
+              approvalId: decision.approvalId,
+              reason: outcome === "already-settled" ? "already-settled" : "approval-not-found",
+              message:
+                outcome === "already-settled"
+                  ? "That approval was already decided."
+                  : "No pending approval has that id on this thread.",
+            };
+      return json(result, result.kind === "approval-decided" ? 200 : 409, origin);
+    }
+
+    if (action === "steering") {
+      let command;
+      try {
+        command = decodeSteerNativeHarnessSession(body);
+      } catch {
+        return failure("Native harness steering note is invalid.", 400, origin);
+      }
+      const accepted = dependencies.steer?.({ threadId, command }) ?? false;
+      if (!accepted) return failure("The steering queue is full.", 409, origin);
+      return json({ view: dependencies.store.read(threadId) ?? null }, 200, origin);
     }
 
     if (action === "questions") {

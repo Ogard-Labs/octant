@@ -151,3 +151,13 @@
   margin: 0;
   white-space: pre-wrap;
 }
+
+.native-harness-steering {
+  margin: 0;
+  padding: 0 0 0 1rem;
+  font-size: 0.85em;
+}
+
+.native-harness-steering__status {
+  color: color-mix(in srgb, CanvasText 55%, transparent);
+}

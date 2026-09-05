@@ -351,6 +351,34 @@ async function takeFollowUp(
   );
 }
 
+/** A gated tool call is allowed or refused from the terminal: y, a (always this session), or n. */
+async function decidePendingApproval(
+  input: RunAgentCliCommandInput,
+  threadId: string,
+  approval: NonNullable<NativeHarnessSessionView["approvals"]>[number],
+  lines: LineSource,
+): Promise<void> {
+  if (input.command.json) {
+    input.stdout.write(`${JSON.stringify({ kind: "approval", approval })}\n`);
+  } else {
+    input.stdout.write(
+      `\n! ${approval.toolName} wants to ${approval.summary} (${approval.approvalClass})\n  allow? [y]es / [a]lways this session / [n]o > `,
+    );
+  }
+  const line = (await lines.next())?.trim().toLowerCase() ?? "";
+  const decision =
+    line === "y" || line === "yes" || line === "approve"
+      ? "approve"
+      : line === "a" || line === "always" || line === "approve-always"
+        ? "approve-always"
+        : "deny";
+  await input.session.send({
+    path: `/api/native-harness/sessions/${encodeURIComponent(threadId)}/approvals`,
+    method: "POST",
+    body: { approvalId: String(approval.id), decision },
+  });
+}
+
 /**
  * A pending question is answered from the same terminal the prompt came
  * from: the options are numbered so a digit picks one, and any other line is
@@ -499,6 +527,16 @@ async function runTurn(
     if (pending !== undefined) {
       answered.add(String(pending.id));
       await answerPendingQuestion(input, threadId, pending, lines);
+    }
+    const approval =
+      session === null || session === "unavailable"
+        ? undefined
+        : session.approvals?.find(
+            (entry) => entry.status === "pending" && !answered.has(String(entry.id)),
+          );
+    if (approval !== undefined) {
+      answered.add(String(approval.id));
+      await decidePendingApproval(input, threadId, approval, lines);
     }
     const current = await readThread(input, threadId);
     if (current === undefined) continue;

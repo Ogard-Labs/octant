@@ -17,7 +17,12 @@ import "./native-harness.css";
 export interface NativeHarnessSessionCardProps {
   readonly client: Pick<
     NativeHarnessClient,
-    "session" | "command" | "previewFollowUp" | "activateFollowUp" | "answerQuestion"
+    | "session"
+    | "command"
+    | "previewFollowUp"
+    | "activateFollowUp"
+    | "answerQuestion"
+    | "decideApproval"
   >;
   readonly threadId: string;
   /** Called with the standalone prompt once a follow-up is confirmed. */
@@ -73,15 +78,35 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
   }, [props.client, props.threadId]);
 
   const pendingQuestion = view?.questions.find((question) => question.status === "pending");
+  const pendingApproval = view?.approvals?.find((approval) => approval.status === "pending");
   useEffect(() => {
     void load();
     // A pending question deserves a quicker refresh: the lead is blocked on it.
     const interval = setInterval(
       () => void load(),
-      props.refreshIntervalMs ?? (pendingQuestion === undefined ? 5_000 : 1_500),
+      props.refreshIntervalMs ??
+        (pendingQuestion === undefined && pendingApproval === undefined ? 5_000 : 1_500),
     );
     return () => clearInterval(interval);
-  }, [load, props.refreshIntervalMs, pendingQuestion === undefined]);
+  }, [load, props.refreshIntervalMs, pendingQuestion === undefined, pendingApproval === undefined]);
+
+  const decideApproval = useCallback(
+    async (decision: "approve" | "approve-always" | "deny") => {
+      if (pendingApproval === undefined || busy) return;
+      setBusy(true);
+      try {
+        const result = await props.client.decideApproval(props.threadId, {
+          approvalId: String(pendingApproval.id),
+          decision,
+        });
+        if (result.kind === "approval-refused") setError(result.message);
+        await load();
+      } finally {
+        setBusy(false);
+      }
+    },
+    [pendingApproval, busy, props.client, props.threadId, load],
+  );
 
   const answerQuestion = useCallback(
     async (answer: string) => {
@@ -178,6 +203,58 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
       </div>
       {view.session.detail === undefined ? null : (
         <p className="native-harness-card__detail">{view.session.detail}</p>
+      )}
+      {pendingApproval === undefined ? null : (
+        <section aria-label="Approval requested" className="native-harness-question">
+          <p className="native-harness-question__prompt">
+            <strong>{pendingApproval.toolName}</strong>{" "}
+            {pendingApproval.summary.replace(/^[a-z-]+: /, "")}
+          </p>
+          <p className="native-harness-card__detail">
+            Needs your say-so ({pendingApproval.approvalClass}).
+          </p>
+          <div className="native-harness-chips">
+            <OctantButton
+              disabled={busy}
+              onClick={() => void decideApproval("approve")}
+              size="sm"
+              type="button"
+              variant="default"
+            >
+              Allow
+            </OctantButton>
+            <OctantButton
+              disabled={busy}
+              onClick={() => void decideApproval("approve-always")}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Allow for this session
+            </OctantButton>
+            <OctantButton
+              disabled={busy}
+              onClick={() => void decideApproval("deny")}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Deny
+            </OctantButton>
+          </div>
+        </section>
+      )}
+      {view.steering === undefined || view.steering.length === 0 ? null : (
+        <ul aria-label="Notes for the running turn" className="native-harness-steering">
+          {view.steering.map((note) => (
+            <li key={note.id}>
+              <span className="native-harness-steering__status">
+                {note.status === "queued" ? "queued" : "delivered"}
+              </span>{" "}
+              {note.text}
+            </li>
+          ))}
+        </ul>
       )}
       {pendingQuestion === undefined ? null : (
         <form

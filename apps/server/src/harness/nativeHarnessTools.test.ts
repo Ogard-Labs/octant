@@ -216,4 +216,35 @@ describe("native harness tools", () => {
       { name: "bash", summary: "bash: ls", status: "refused" },
     ]);
   });
+
+  it("asks the person before a gated call and runs it only when they allow it", async () => {
+    const decisions: string[] = [];
+    const answers = ["approved", "denied"] as const;
+    let index = 0;
+    const gated = await fixture(
+      { executionPolicy: "approval-gated", approvalSatisfied: false },
+      {
+        approvals: async (input) => {
+          decisions.push(`${input.toolName}:${input.approvalClass}`);
+          return answers[index++] ?? "expired";
+        },
+      },
+    );
+    const allowed = await call(gated.tools, "write", { path: "b.ts", content: "x" });
+    expect(allowed.isError).toBe(false);
+    const denied = await call(gated.tools, "write", { path: "c.ts", content: "x" });
+    expect(denied.result).toMatchObject({ error: "approval-denied" });
+    expect(decisions).toEqual(["write:project-file-writes", "write:project-file-writes"]);
+  });
+
+  it("hands a queued note to the lead inside the next tool result", async () => {
+    const notes = ["Skip the docs."];
+    const steered = await fixture({}, { steering: () => notes.splice(0) });
+    expect((await call(steered.tools, "read", { path: "a.ts" })).result).toMatchObject({
+      note_from_person: ["Skip the docs."],
+    });
+    expect((await call(steered.tools, "read", { path: "a.ts" })).result).not.toHaveProperty(
+      "note_from_person",
+    );
+  });
 });

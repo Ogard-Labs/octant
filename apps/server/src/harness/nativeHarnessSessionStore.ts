@@ -26,6 +26,12 @@ import {
   type NativeHarnessSlotCandidate,
   type NativeHarnessToolCall,
   MAX_NATIVE_HARNESS_TOOL_CALLS_PER_TURN,
+  MAX_NATIVE_HARNESS_STEERING_NOTES,
+  decodeNativeHarnessApproval,
+  type NativeHarnessApproval,
+  type NativeHarnessApprovalId,
+  type NativeHarnessApprovalStatus,
+  type NativeHarnessSteeringNote,
   type NativeHarnessSlotId,
   type NativeHarnessTurnRecord,
   type OctantMode,
@@ -59,6 +65,7 @@ interface SessionRecord {
   followUps: NativeHarnessFollowUpSet | undefined;
   activated: NativeHarnessFollowUpId[];
   questions: NativeHarnessQuestion[];
+  approvals: NativeHarnessApproval[];
   version: number;
 }
 
@@ -76,6 +83,8 @@ export class NativeHarnessSessionStore {
   readonly #records = new Map<string, SessionRecord>();
   /** Calls of the turn running now, per thread; journaled with the turn when it ends. */
   readonly #activeTools = new Map<string, NativeHarnessToolCall[]>();
+  /** Notes typed during the running turn, per thread; delivered at the next tool step. */
+  readonly #steering = new Map<string, NativeHarnessSteeringNote[]>();
 
   constructor(options: NativeHarnessSessionStoreOptions) {
     this.#journal = options.journal;
@@ -97,6 +106,8 @@ export class NativeHarnessSessionStore {
       ...(record.followUps === undefined ? {} : { followUps: record.followUps }),
       activatedFollowUpIds: record.activated,
       questions: record.questions,
+      approvals: record.approvals,
+      steering: this.#steering.get(threadId) ?? [],
       activeTools: this.#activeTools.get(threadId) ?? [],
     });
   }
@@ -149,6 +160,7 @@ export class NativeHarnessSessionStore {
       followUps: undefined,
       activated: [],
       questions: [],
+      approvals: [],
       version: 0,
     };
     this.#records.set(input.threadId, record);
@@ -248,6 +260,81 @@ export class NativeHarnessSessionStore {
     });
     record.activated.push(suggestionId);
     return "activated";
+  }
+
+  askApproval(threadId: string, approval: NativeHarnessApproval): void {
+    const record = this.#records.get(threadId);
+    if (record === undefined) return;
+    this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.approvalAsked, approval);
+    push(record.approvals, approval);
+  }
+
+  settleApproval(
+    threadId: string,
+    approvalId: NativeHarnessApprovalId,
+    outcome: {
+      readonly status: Exclude<NativeHarnessApprovalStatus, "pending">;
+      readonly remembered?: boolean;
+    },
+  ): NativeHarnessApproval | "approval-not-found" | "already-settled" {
+    const record = this.#records.get(threadId);
+    const index = record?.approvals.findIndex((entry) => entry.id === approvalId) ?? -1;
+    if (record === undefined || index === -1) return "approval-not-found";
+    const current = record.approvals[index]!;
+    if (current.status !== "pending") return "already-settled";
+    const settledAt = decodeUtcTimestamp(this.#clock());
+    const settled = decodeNativeHarnessApproval({
+      ...current,
+      status: outcome.status,
+      ...(outcome.remembered === true ? { remembered: true } : {}),
+      settledAt,
+    });
+    this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.approvalSettled, {
+      sessionId: record.session.id,
+      approvalId,
+      status: outcome.status,
+      ...(outcome.remembered === true ? { remembered: true } : {}),
+      settledAt,
+    });
+    record.approvals[index] = settled;
+    return settled;
+  }
+
+  queueSteering(threadId: string, note: NativeHarnessSteeringNote): boolean {
+    const notes = this.#steering.get(threadId) ?? [];
+    if (
+      notes.filter((entry) => entry.status === "queued").length >= MAX_NATIVE_HARNESS_STEERING_NOTES
+    ) {
+      return false;
+    }
+    notes.push(note);
+    while (notes.length > MAX_NATIVE_HARNESS_STEERING_NOTES) notes.shift();
+    this.#steering.set(threadId, notes);
+    return true;
+  }
+
+  /** Queued notes, marked delivered, for the tool step that carries them to the lead. */
+  deliverSteering(threadId: string): ReadonlyArray<string> {
+    const notes = this.#steering.get(threadId) ?? [];
+    const queued = notes.filter((entry) => entry.status === "queued");
+    if (queued.length === 0) return [];
+    this.#steering.set(
+      threadId,
+      notes.map((entry) => (entry.status === "queued" ? { ...entry, status: "delivered" } : entry)),
+    );
+    return queued.map((entry) => entry.text);
+  }
+
+  clearSteering(threadId: string, which: "delivered" | "all"): void {
+    if (which === "all") {
+      this.#steering.delete(threadId);
+      return;
+    }
+    const remaining = (this.#steering.get(threadId) ?? []).filter(
+      (entry) => entry.status === "queued",
+    );
+    if (remaining.length === 0) this.#steering.delete(threadId);
+    else this.#steering.set(threadId, remaining);
   }
 
   askQuestion(threadId: string, question: NativeHarnessQuestion): void {
@@ -385,6 +472,7 @@ export class NativeHarnessSessionStore {
         followUps: undefined,
         activated: [],
         questions: [],
+        approvals: [],
         version: 1,
       });
       return;
@@ -411,6 +499,21 @@ export class NativeHarnessSessionStore {
       record.activated = [];
     } else if (eventName === names.followUpActivated) {
       record.activated.push(body.suggestionId as NativeHarnessFollowUpId);
+    } else if (eventName === names.approvalAsked) {
+      push(record.approvals, payload as NativeHarnessApproval);
+    } else if (eventName === names.approvalSettled) {
+      const index = record.approvals.findIndex(
+        (entry) => String(entry.id) === String(body.approvalId),
+      );
+      const current = record.approvals[index];
+      if (current !== undefined) {
+        record.approvals[index] = {
+          ...current,
+          status: body.status as NativeHarnessApprovalStatus,
+          ...(body.remembered === true ? { remembered: true } : {}),
+          settledAt: body.settledAt as NativeHarnessApproval["settledAt"],
+        };
+      }
     } else if (eventName === names.questionAsked) {
       push(record.questions, payload as NativeHarnessQuestion);
     } else if (eventName === names.questionSettled) {

@@ -24,6 +24,7 @@ import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import type { NativeHarnessAuthority } from "./nativeHarnessAuthority";
 import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
+import type { NativeHarnessApprovalStore } from "./nativeHarnessApprovals";
 import type { NativeHarnessQuestionStore } from "./nativeHarnessQuestions";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 import { createNativeHarnessTodoPort } from "./nativeHarnessTodo";
@@ -57,7 +58,8 @@ export interface NativeHarnessCompositionOptions {
   /** Questions to the person; absent on a host with no surface to answer them. */
   readonly questions?: Pick<NativeHarnessQuestionStore, "ask">;
   /** Where each lead tool call is noted while its turn runs. */
-  readonly activity?: Pick<NativeHarnessSessionStore, "noteToolCall">;
+  readonly activity?: Pick<NativeHarnessSessionStore, "noteToolCall" | "deliverSteering">;
+  readonly approvals?: Pick<NativeHarnessApprovalStore, "ask">;
   readonly recordExternalContentIngestion: (
     input: RecordExternalContentIngestionInput,
   ) => ExternalContentIngestionResult;
@@ -159,8 +161,8 @@ export function createNativeHarnessComposition(
     readonly mode: OctantMode;
     readonly projectId?: ProjectId | undefined;
     readonly lead: NativeHarnessSlotCandidate;
-  }): Pick<NativeHarnessToolPorts, "askUser"> =>
-    options.questions === undefined
+  }): Pick<NativeHarnessToolPorts, "askUser" | "approvals" | "steering"> => ({
+    ...(options.questions === undefined
       ? {}
       : {
           askUser: (input) =>
@@ -173,7 +175,26 @@ export function createNativeHarnessComposition(
               options: input.options,
               signal: input.signal,
             }),
-        };
+        }),
+    ...(options.approvals === undefined
+      ? {}
+      : {
+          approvals: (input) =>
+            options.approvals!.ask({
+              threadId: scope.parentThreadId,
+              mode: scope.mode,
+              projectId: scope.projectId,
+              lead: scope.lead,
+              toolName: input.toolName,
+              summary: input.summary,
+              approvalClass: input.approvalClass,
+              signal: input.signal,
+            }),
+        }),
+    ...(options.activity === undefined
+      ? {}
+      : { steering: () => options.activity!.deliverSteering(scope.parentThreadId) }),
+  });
   const delegateFor = (scope: {
     readonly parentThreadId: string;
     readonly windowId: string;

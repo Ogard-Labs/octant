@@ -5,6 +5,7 @@ import {
   activateMobileNativeHarnessFollowUp,
   answerMobileNativeHarnessQuestion,
   commandMobileNativeHarnessSession,
+  decideMobileNativeHarnessApproval,
   loadMobileNativeHarnessSession,
   previewMobileNativeHarnessFollowUp,
   type MobileRemoteTransport,
@@ -54,6 +55,23 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
 
   if (view === undefined || view === null) return null;
   const pendingQuestion = view.questions.find((question) => question.status === "pending");
+  const pendingApproval = view.approvals?.find((approval) => approval.status === "pending");
+  const decide = (decision: "approve" | "approve-always" | "deny") => {
+    if (pendingApproval === undefined) return;
+    void decideMobileNativeHarnessApproval({
+      transport: props.transport,
+      threadId: props.threadId,
+      approvalId: String(pendingApproval.id),
+      decision,
+    }).then((result) => {
+      setNote(
+        result?.kind === "approval-decided"
+          ? undefined
+          : (result?.message ?? "The decision was refused."),
+      );
+      void load();
+    });
+  };
   const sendAnswer = (text: string) => {
     if (pendingQuestion === undefined || text.trim().length === 0) return;
     void answerMobileNativeHarnessQuestion({
@@ -115,6 +133,28 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
         <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
           {view.session.detail}
         </Text>
+      )}
+      {pendingApproval === undefined ? null : (
+        <View
+          style={[styles.question, { borderColor: colors.border }]}
+          testID="mobile-native-harness-approval"
+        >
+          <Text style={[mobileTypography.body, { color: colors.textPrimary }]}>
+            {pendingApproval.toolName} · {pendingApproval.summary.replace(/^[a-z-]+: /, "")}
+          </Text>
+          <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
+            Needs your say-so ({pendingApproval.approvalClass}).
+          </Text>
+          <View style={styles.chips}>
+            <GlassChip active={false} label="Allow" onPress={() => decide("approve")} />
+            <GlassChip
+              active={false}
+              label="Allow this session"
+              onPress={() => decide("approve-always")}
+            />
+            <GlassChip active={false} label="Deny" onPress={() => decide("deny")} />
+          </View>
+        </View>
       )}
       {pendingQuestion === undefined ? null : (
         <View

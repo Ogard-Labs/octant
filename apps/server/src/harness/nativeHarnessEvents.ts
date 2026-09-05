@@ -7,6 +7,9 @@ import {
   NativeHarnessFollowUpId,
   NativeHarnessFollowUpSet,
   NativeHarnessProjectRoutingOverride,
+  NativeHarnessApproval,
+  NativeHarnessApprovalId,
+  NativeHarnessApprovalStatus,
   NativeHarnessQuestion,
   NativeHarnessQuestionId,
   NativeHarnessQuestionStatus,
@@ -45,6 +48,14 @@ export const NativeHarnessQuestionSettled = Schema.Struct({
   questionId: NativeHarnessQuestionId,
   status: NativeHarnessQuestionStatus,
   answer: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096))),
+  settledAt: UtcTimestamp,
+}).annotations(strict);
+
+export const NativeHarnessApprovalSettled = Schema.Struct({
+  sessionId: NativeHarnessSessionId,
+  approvalId: NativeHarnessApprovalId,
+  status: NativeHarnessApprovalStatus,
+  remembered: Schema.optional(Schema.Boolean),
   settledAt: UtcTimestamp,
 }).annotations(strict);
 
@@ -94,6 +105,8 @@ export function registerNativeHarnessEvents(registry: EventRegistry): EventRegis
     )
     .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.questionAsked, 1, NativeHarnessQuestion)
     .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.questionSettled, 1, NativeHarnessQuestionSettled)
+    .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.approvalAsked, 1, NativeHarnessApproval)
+    .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.approvalSettled, 1, NativeHarnessApprovalSettled)
     .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.paused, 1, NativeHarnessSessionPaused)
     .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.resumed, 1, NativeHarnessSessionResumed);
 }

@@ -130,6 +130,18 @@ export interface NativeHarnessToolPorts {
     readonly signal?: AbortSignal;
   }) => Promise<string | undefined>;
   readonly delegate?: NativeHarnessDelegatePort;
+  /**
+   * Asks the person to allow a call the policy would only allow with their
+   * say-so, and waits. Absent means such a call is refused outright.
+   */
+  readonly approvals?: (input: {
+    readonly toolName: NativeHarnessToolName;
+    readonly summary: string;
+    readonly approvalClass: string;
+    readonly signal?: AbortSignal;
+  }) => Promise<"approved" | "denied" | "expired" | "cancelled">;
+  /** Queued notes from the person, handed to the lead inside the next tool result. */
+  readonly steering?: () => ReadonlyArray<string>;
   /** Asks the person and waits; resolves with the answer or how the wait ended. */
   readonly askUser?: (input: {
     readonly prompt: string;
@@ -267,16 +279,41 @@ export function createNativeHarnessTools(
       return refused(decision.reason, `The ${name} tool was refused by policy.`);
     }
     if (decision.kind === "prompt") {
-      return refused(
-        "approval-required",
-        `The ${name} tool needs approval (${decision.policy.approvalClass}) under the thread's current access posture.`,
-      );
+      if (options.ports.approvals === undefined) {
+        return refused(
+          "approval-required",
+          `The ${name} tool needs approval (${decision.policy.approvalClass}) under the thread's current access posture.`,
+        );
+      }
+      const outcome = await options.ports.approvals({
+        toolName: name,
+        summary: request.intent,
+        approvalClass: decision.policy.approvalClass,
+        ...(signal === undefined ? {} : { signal }),
+      });
+      if (outcome !== "approved") {
+        return refused(
+          outcome === "denied" ? "approval-denied" : `approval-${outcome}`,
+          outcome === "denied"
+            ? `The person did not allow ${name} here. Do not retry it; say what you would have done.`
+            : outcome === "expired"
+              ? `Nobody answered the approval for ${name} in time. Continue without it and say so.`
+              : `The turn was cancelled while waiting for approval of ${name}.`,
+        );
+      }
     }
+    let outcome;
     try {
-      return await execute(name, args, options.ports, signal);
+      outcome = await execute(name, args, options.ports, signal);
     } catch {
       return { ...refused("tool-execution-failed"), refused: false };
     }
+    const notes = options.ports.steering?.() ?? [];
+    if (notes.length === 0 || typeof outcome.result !== "object" || outcome.result === null) {
+      return outcome;
+    }
+    // The person's note rides inside the tool result so it lands mid-turn.
+    return { ...outcome, result: { ...(outcome.result as object), note_from_person: notes } };
   }
 }
 

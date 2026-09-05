@@ -20,6 +20,7 @@ function observer(isHarness = true, session?: { status: string; detail?: string 
     sessions: {
       read: () => (session === undefined ? undefined : ({ session } as never)),
       takeToolCalls: () => [],
+      clearSteering: () => undefined,
       ensure: () =>
         ({
           id: "00000000-0000-4000-8000-000000000010",

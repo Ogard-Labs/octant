@@ -8,6 +8,9 @@ import {
   type NativeHarnessFollowUpActivationResult,
   type NativeHarnessFollowUpPreview,
   type NativeHarnessSessionView,
+  decodeNativeHarnessApprovalDecisionResult,
+  type NativeHarnessApprovalDecisionResult,
+  type SteerNativeHarnessSession,
 } from "@octant/contracts";
 import type { OpenedLocalControlSession } from "./localControl";
 
@@ -166,4 +169,72 @@ export function latestReplyText(view: ChatThreadView): string {
   if (attempt === undefined) return "";
   const bodies = new Map(view.contents.map((content) => [String(content.contentId), content.body]));
   return attempt.responseRefs.map((ref) => bodies.get(String(ref.contentId)) ?? "").join("");
+}
+
+/** Stops the turn in flight; a thread with nothing running is left alone. */
+export async function interruptAgentTurn(
+  session: OpenedLocalControlSession,
+  thread: ChatThreadView,
+): Promise<HostRefusal | { readonly kind: "interrupted" } | { readonly kind: "nothing-running" }> {
+  const turn = thread.turns.at(-1);
+  const attempt = turn?.attempts.at(-1);
+  if (
+    turn === undefined ||
+    attempt === undefined ||
+    (attempt.outcome !== "streaming" &&
+      attempt.outcome !== "queued" &&
+      attempt.outcome !== "waiting")
+  ) {
+    return { kind: "nothing-running" };
+  }
+  const response = await session.send({
+    path: "/api/chat/commands",
+    method: "POST",
+    body: {
+      kind: "interrupt-chat-turn",
+      threadId: String(thread.thread.id),
+      expectedVersion: thread.thread.version,
+      turnId: String(turn.id),
+      attemptId: String(attempt.id),
+    },
+  });
+  if (response.status !== 200) {
+    return { kind: "refused", message: refusalMessage(response, "The turn could not be stopped.") };
+  }
+  return { kind: "interrupted" };
+}
+
+export async function decideAgentApproval(
+  session: OpenedLocalControlSession,
+  threadId: string,
+  approvalId: string,
+  decision: "approve" | "approve-always" | "deny",
+): Promise<NativeHarnessApprovalDecisionResult> {
+  const response = await session.send({
+    path: `${sessionsPath(threadId)}/approvals`,
+    method: "POST",
+    body: { approvalId, decision },
+  });
+  return decodeNativeHarnessApprovalDecisionResult(response.body);
+}
+
+export async function steerAgent(
+  session: OpenedLocalControlSession,
+  threadId: string,
+  command: SteerNativeHarnessSession,
+): Promise<HostRefusal | { readonly kind: "steered" }> {
+  const response = await session.send({
+    path: `${sessionsPath(threadId)}/steering`,
+    method: "POST",
+    body: command,
+  });
+  if (response.status !== 200) {
+    return { kind: "refused", message: refusalMessage(response, "The note was not queued.") };
+  }
+  return { kind: "steered" };
+}
+
+export function isAgentTurnRunning(thread: ChatThreadView | undefined): boolean {
+  const outcome = thread?.turns.at(-1)?.attempts.at(-1)?.outcome;
+  return outcome === "streaming" || outcome === "queued" || outcome === "waiting";
 }

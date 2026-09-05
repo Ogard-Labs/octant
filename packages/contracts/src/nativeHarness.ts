@@ -899,6 +899,90 @@ export const NativeHarnessQuestion = Schema.Struct({
   );
 export type NativeHarnessQuestion = typeof NativeHarnessQuestion.Type;
 
+// ── Approvals ────────────────────────────────────────────────────────────────
+
+export const NativeHarnessApprovalId = brandedUuid("NativeHarnessApprovalId");
+export type NativeHarnessApprovalId = typeof NativeHarnessApprovalId.Type;
+
+export const NativeHarnessApprovalStatus = Schema.Literal(
+  "pending",
+  "approved",
+  "denied",
+  "expired",
+  "cancelled",
+);
+export type NativeHarnessApprovalStatus = typeof NativeHarnessApprovalStatus.Type;
+
+/**
+ * A tool call the policy would only allow with a person's say-so, asked
+ * inline where the turn is watched. Approving "always" remembers the class
+ * for the rest of this thread's session, never beyond it.
+ */
+export const NativeHarnessApproval = Schema.Struct({
+  id: NativeHarnessApprovalId,
+  toolName: NativeHarnessToolName,
+  summary: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(240)),
+  approvalClass: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  status: NativeHarnessApprovalStatus,
+  /** Set on an approval that also covers the class for the session. */
+  remembered: Schema.optional(Schema.Boolean),
+  askedAt: UtcTimestamp,
+  settledAt: Schema.optional(UtcTimestamp),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (approval) => (approval.status === "pending") === (approval.settledAt === undefined),
+    ),
+  );
+export type NativeHarnessApproval = typeof NativeHarnessApproval.Type;
+
+export const DecideNativeHarnessApproval = Schema.Struct({
+  approvalId: NativeHarnessApprovalId,
+  decision: Schema.Literal("approve", "approve-always", "deny"),
+}).annotations(strict);
+export type DecideNativeHarnessApproval = typeof DecideNativeHarnessApproval.Type;
+
+export const NativeHarnessApprovalDecisionResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("approval-decided"),
+    approval: NativeHarnessApproval,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("approval-refused"),
+    approvalId: NativeHarnessApprovalId,
+    reason: Schema.Literal("approval-not-found", "already-settled", "not-authorized"),
+    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  }).annotations(strict),
+);
+export type NativeHarnessApprovalDecisionResult = typeof NativeHarnessApprovalDecisionResult.Type;
+
+// ── Steering ─────────────────────────────────────────────────────────────────
+
+export const MAX_NATIVE_HARNESS_STEERING_NOTES = 16;
+
+/**
+ * A note typed while the lead works. It reaches the lead at its next tool
+ * step, inside that tool's result, so it lands mid-turn without a turn of
+ * its own; one still queued when the turn ends is sent as the next prompt.
+ */
+export const NativeHarnessSteeringNote = Schema.Struct({
+  id: Schema.UUID,
+  text: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096)),
+  status: Schema.Literal("queued", "delivered"),
+  at: UtcTimestamp,
+}).annotations(strict);
+export type NativeHarnessSteeringNote = typeof NativeHarnessSteeringNote.Type;
+
+export const SteerNativeHarnessSession = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("queue"),
+    text: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096)),
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("clear") }).annotations(strict),
+);
+export type SteerNativeHarnessSession = typeof SteerNativeHarnessSession.Type;
+
 export const AnswerNativeHarnessQuestion = Schema.Struct({
   questionId: NativeHarnessQuestionId,
   answer: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096)),
@@ -1030,6 +1114,15 @@ export const NativeHarnessSessionView = Schema.Struct({
   questions: Schema.Array(NativeHarnessQuestion).pipe(
     Schema.maxItems(MAX_NATIVE_HARNESS_VIEW_ENTRIES),
   ),
+  approvals: Schema.optional(
+    Schema.Array(NativeHarnessApproval).pipe(Schema.maxItems(MAX_NATIVE_HARNESS_VIEW_ENTRIES)),
+  ),
+  /** Notes typed during the running turn; not journaled. */
+  steering: Schema.optional(
+    Schema.Array(NativeHarnessSteeringNote).pipe(
+      Schema.maxItems(MAX_NATIVE_HARNESS_STEERING_NOTES),
+    ),
+  ),
   /** Calls of the turn running right now; not journaled, gone when the turn ends. */
   activeTools: Schema.optional(
     Schema.Array(NativeHarnessToolCall).pipe(
@@ -1051,6 +1144,8 @@ export const NATIVE_HARNESS_SESSION_EVENT_NAMES = {
   followUpActivated: "native-harness-follow-up-activated@1",
   questionAsked: "native-harness-question-asked@1",
   questionSettled: "native-harness-question-settled@1",
+  approvalAsked: "native-harness-approval-asked@1",
+  approvalSettled: "native-harness-approval-settled@1",
   paused: "native-harness-session-paused@1",
   resumed: "native-harness-session-resumed@1",
 } as const;
@@ -1092,6 +1187,15 @@ export const decodeNativeHarnessFollowUpActivationResult = Schema.decodeUnknownS
   NativeHarnessFollowUpActivationResult,
 );
 export const decodeNativeHarnessQuestionId = Schema.decodeUnknownSync(NativeHarnessQuestionId);
+export const decodeNativeHarnessApprovalId = Schema.decodeUnknownSync(NativeHarnessApprovalId);
+export const decodeNativeHarnessApproval = Schema.decodeUnknownSync(NativeHarnessApproval);
+export const decodeDecideNativeHarnessApproval = Schema.decodeUnknownSync(
+  DecideNativeHarnessApproval,
+);
+export const decodeNativeHarnessApprovalDecisionResult = Schema.decodeUnknownSync(
+  NativeHarnessApprovalDecisionResult,
+);
+export const decodeSteerNativeHarnessSession = Schema.decodeUnknownSync(SteerNativeHarnessSession);
 export const decodeNativeHarnessQuestion = Schema.decodeUnknownSync(NativeHarnessQuestion);
 export const decodeAnswerNativeHarnessQuestion = Schema.decodeUnknownSync(
   AnswerNativeHarnessQuestion,

@@ -3,10 +3,14 @@ import {
   activateAgentFollowUp,
   answerAgentQuestion,
   commandAgentSession,
+  decideAgentApproval,
+  interruptAgentTurn,
+  isAgentTurnRunning,
   previewAgentFollowUp,
   readAgentSession,
   readAgentThread,
   sendAgentPrompt,
+  steerAgent,
 } from "./agentHost";
 import {
   paletteFor,
@@ -30,7 +34,9 @@ export interface RunAgentTuiInput {
 
 type OpenTui = typeof import("@opentui/core");
 
-const HINT = "Enter sends · Shift+Enter newline · /next N · /pause · /resume · Ctrl+C quits";
+const HINT =
+  "Enter sends · while working, Enter queues a note · Esc stops the turn · /next N · /pause · Ctrl+C quits";
+const QUIT_WINDOW_MS = 1_500;
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 const SHOWN_TOOL_LINES = 4;
 const SHOWN_TASKS = 6;
@@ -84,6 +90,8 @@ class AgentScreen {
   #note = "";
   #drawn = "";
   #ticks = 0;
+  #lastCtrlC = 0;
+  #flushingSteering = false;
   #pendingFollowUp:
     | { readonly suggestionId: string; readonly turnId: string; readonly prompt: string }
     | undefined;
@@ -197,8 +205,18 @@ class AgentScreen {
     return new Promise((resolve) => {
       this.#resolveExit = resolve;
       this.#renderer.keyInput.on("keypress", (key) => {
-        if (key.ctrl && key.name === "c") resolve(0);
-        else if (key.ctrl && key.name === "p") void this.#pauseOrResume();
+        if (key.ctrl && key.name === "c") {
+          // Ctrl+C stops the turn first; a second press right after quits.
+          const now = Date.now();
+          const again = now - this.#lastCtrlC < QUIT_WINDOW_MS;
+          this.#lastCtrlC = now;
+          if (again || !isAgentTurnRunning(this.#thread)) resolve(0);
+          else void this.#interrupt();
+        } else if (key.name === "escape") {
+          void this.#interrupt();
+        } else if (key.ctrl && key.name === "p") {
+          void this.#pauseOrResume();
+        }
       });
       this.#input.signal?.addEventListener("abort", () => resolve(1), { once: true });
       const interval = setInterval(() => void this.refresh(), this.#input.pollIntervalMs ?? 500);
@@ -217,6 +235,45 @@ class AgentScreen {
     this.#thread = thread;
     this.#session = session === "unavailable" ? undefined : session;
     this.#draw();
+    await this.#flushSteering();
+  }
+
+  /** A note the lead never reached during its turn becomes the next prompt. */
+  async #flushSteering(): Promise<void> {
+    const queued = (this.#session?.steering ?? []).filter((note) => note.status === "queued");
+    if (
+      queued.length === 0 ||
+      this.#flushingSteering ||
+      this.#thread === undefined ||
+      isAgentTurnRunning(this.#thread) ||
+      this.#session?.session.status === "running"
+    ) {
+      return;
+    }
+    this.#flushingSteering = true;
+    try {
+      const sent = await sendAgentPrompt(
+        this.#input.session,
+        this.#thread,
+        queued.map((note) => note.text).join("\n\n"),
+      );
+      if (sent.kind === "refused") this.#note = sent.message;
+      else await steerAgent(this.#input.session, this.#input.threadId, { kind: "clear" });
+    } finally {
+      this.#flushingSteering = false;
+    }
+  }
+
+  async #interrupt(): Promise<void> {
+    if (this.#thread === undefined) return;
+    const result = await interruptAgentTurn(this.#input.session, this.#thread);
+    this.#note =
+      result.kind === "refused"
+        ? result.message
+        : result.kind === "interrupted"
+          ? "Stopping the turn…"
+          : "Nothing is running.";
+    await this.refresh();
   }
 
   #draw(): void {
@@ -240,7 +297,12 @@ class AgentScreen {
 
     const entries = transcriptFrom(this.#thread, session);
     const pending = session?.questions.find((question) => question.status === "pending");
-    const digest = JSON.stringify([entries, pending?.id, this.#pendingFollowUp?.suggestionId]);
+    const digest = JSON.stringify([
+      entries,
+      pending?.id,
+      this.#pendingFollowUp?.suggestionId,
+      session?.steering,
+    ]);
     const live = entries.some((entry) => entry.kind === "lead" && entry.live !== undefined);
     if (digest !== this.#drawn || live) {
       this.#drawn = digest;
@@ -257,7 +319,13 @@ class AgentScreen {
       this.#tasks.visible = false;
     }
 
-    if (pending !== undefined) {
+    const approval = session?.approvals?.find((entry) => entry.status === "pending");
+    if (approval !== undefined) {
+      this.#panel.title = " Approval ";
+      this.#panel.borderColor = p.warning;
+      this.#panelText.content = t`${fg(p.text)(bold(approval.toolName))} ${fg(p.textSecondary)(approval.summary.replace(/^[a-z-]+: /, ""))}\n${dim(fg(p.muted)(`needs your say-so (${approval.approvalClass})`))}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.accent)("a")}${fg(p.textSecondary)(" allow for this session · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`;
+      this.#panel.visible = true;
+    } else if (pending !== undefined) {
       this.#panel.title = " Question ";
       this.#panel.borderColor = p.accent;
       const options = pending.options.map((option, index) => `  ${index + 1}. ${option}`);
@@ -358,6 +426,15 @@ class AgentScreen {
       box.add(tree);
       this.#toolTree(tree, entry.live, entry.live.length, spinner);
     }
+    if (live) {
+      for (const note of this.#session?.steering ?? []) {
+        box.add(
+          new TextRenderable(this.#renderer, {
+            content: t`  ${fg(note.status === "queued" ? p.warning : p.success)(note.status === "queued" ? "⧖ queued" : "✓ delivered")} ${dim(fg(p.muted)("▸"))} ${fg(p.text)(note.text)}`,
+          }),
+        );
+      }
+    }
     return box;
   }
 
@@ -444,6 +521,32 @@ class AgentScreen {
       await this.#previewFollowUp(text.slice("/next".length).trim());
       return;
     }
+    const approval = this.#session?.approvals?.find((entry) => entry.status === "pending");
+    if (approval !== undefined) {
+      const lowered = text.toLowerCase();
+      const decision =
+        lowered === "y" || lowered === "yes"
+          ? "approve"
+          : lowered === "a" || lowered === "always"
+            ? "approve-always"
+            : lowered === "n" || lowered === "no"
+              ? "deny"
+              : undefined;
+      if (decision === undefined) {
+        this.#note = "Answer the approval first: y, a, or n.";
+        this.#draw();
+        return;
+      }
+      const result = await decideAgentApproval(
+        this.#input.session,
+        this.#input.threadId,
+        String(approval.id),
+        decision,
+      );
+      if (result.kind === "approval-refused") this.#note = result.message;
+      await this.refresh();
+      return;
+    }
     const question = this.#session?.questions.find((entry) => entry.status === "pending");
     if (question !== undefined) {
       const picked = /^\d+$/.test(text) ? question.options[Number(text) - 1] : undefined;
@@ -460,6 +563,16 @@ class AgentScreen {
     if (this.#thread === undefined) {
       this.#note = "The thread could not be read.";
       this.#draw();
+      return;
+    }
+    if (isAgentTurnRunning(this.#thread)) {
+      // The lead is busy: the note lands at its next tool step, not as a turn.
+      const steered = await steerAgent(this.#input.session, this.#input.threadId, {
+        kind: "queue",
+        text,
+      });
+      if (steered.kind === "refused") this.#note = steered.message;
+      await this.refresh();
       return;
     }
     const sent = await sendAgentPrompt(this.#input.session, this.#thread, text);

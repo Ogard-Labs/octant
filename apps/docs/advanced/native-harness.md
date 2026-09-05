@@ -88,6 +88,27 @@ worktree — under the lead's model, and the app opens it with the prompt
 waiting in the composer. Sending it is still your move. A Code follow-up
 starts approval-gated, because Full access is remembered per thread.
 
+## Approvals
+
+A tool call the thread's posture only allows with your say-so — a write or a
+command under approval-gated Code, for instance — no longer comes back to the
+lead as a refusal. The lead waits while the call is shown to you inline: on
+the harness card, the phone panel, the terminal UI's Approval panel, and as
+a `[y]es / [a]lways / [n]o` prompt in line mode. **Allow** runs it once;
+**Allow for this session** also covers that class of call (shell commands,
+project file writes, …) for the rest of the thread's session and nothing
+beyond it — the thread's posture is untouched, and a restart asks again.
+**Deny** tells the lead not to retry. Every approval and decision is
+journaled with the session.
+
+## Steering and stopping
+
+In the terminal UI, typing while the lead works queues a note instead of a
+turn. The note reaches the lead inside its next tool result, so it lands
+mid-turn; a note the lead never reached before the turn ended is sent as the
+next prompt. `Esc` stops the running turn; `Ctrl+C` stops it too, and a
+second press right after quits.
+
 ## Questions
 
 When the lead needs a decision it cannot make alone, it asks. The question

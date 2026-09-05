@@ -74,6 +74,7 @@ describe("NativeHarnessSessionCard", () => {
       previewFollowUp: vi.fn(),
       activateFollowUp: vi.fn(),
       answerQuestion: vi.fn(),
+      decideApproval: vi.fn(),
     };
     render(<NativeHarnessSessionCard client={client} threadId={threadId} />);
     await waitFor(() => expect(screen.getByText(/frontier-large/)).toBeVisible());
@@ -147,6 +148,37 @@ describe("NativeHarnessSessionCard", () => {
       expect(client.answerQuestion).toHaveBeenCalledWith(threadId, {
         questionId: question.id,
         answer: "sqlite",
+      }),
+    );
+  });
+
+  it("shows a gated tool call and sends the person's decision", async () => {
+    const approval = {
+      id: "00000000-0000-4000-8000-000000000061",
+      toolName: "bash",
+      summary: "bash: bun run test",
+      approvalClass: "shell-commands",
+      status: "pending",
+      askedAt: "2026-09-05T12:06:00.000Z",
+    };
+    const client = {
+      session: vi.fn(async () => ({ ...view(), approvals: [approval] })),
+      command: vi.fn(),
+      previewFollowUp: vi.fn(),
+      activateFollowUp: vi.fn(),
+      answerQuestion: vi.fn(),
+      decideApproval: vi.fn(async () => ({
+        kind: "approval-decided",
+        approval: { ...approval, status: "approved", settledAt: "2026-09-05T12:06:05.000Z" },
+      })),
+    };
+    render(<NativeHarnessSessionCard client={client as never} threadId={threadId} />);
+    await waitFor(() => expect(screen.getByText("bun run test")).toBeVisible());
+    await userEvent.click(screen.getByRole("button", { name: "Allow for this session" }));
+    await waitFor(() =>
+      expect(client.decideApproval).toHaveBeenCalledWith(threadId, {
+        approvalId: approval.id,
+        decision: "approve-always",
       }),
     );
   });

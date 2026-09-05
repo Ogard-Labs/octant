@@ -17,6 +17,7 @@ import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import { registerNativeHarnessEvents } from "./nativeHarnessEvents";
 import { NativeHarnessRoutingStore } from "./nativeHarnessRoutingStore";
+import { NativeHarnessApprovalStore } from "./nativeHarnessApprovals";
 import { NativeHarnessQuestionStore } from "./nativeHarnessQuestions";
 import { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 
@@ -316,5 +317,78 @@ describe("native harness session store", () => {
     expect(store.takeToolCalls(threadId)).toEqual([call]);
     expect(store.takeToolCalls(threadId)).toEqual([]);
     expect(store.read(threadId)?.activeTools).toEqual([]);
+  });
+
+  it("holds a tool call until a person allows it, and remembers an always for the session", async () => {
+    const threadId = "00000000-0000-4000-8000-000000000024";
+    const uuid = uuidFactory();
+    const sessions = new NativeHarnessSessionStore({
+      journal: journalFor(openConnection()),
+      uuid,
+      actor,
+      clock: () => now,
+    });
+    const approvals = new NativeHarnessApprovalStore({ sessions, uuid, clock: () => now });
+    const ask = () =>
+      approvals.ask({
+        threadId,
+        mode: "code",
+        lead: candidate("big") as never,
+        toolName: "bash",
+        summary: "bash: bun test",
+        approvalClass: "shell-commands",
+      });
+    const first = ask();
+    const pending = sessions.read(threadId)?.approvals?.[0];
+    expect(pending).toMatchObject({ status: "pending", toolName: "bash" });
+    expect(approvals.decide("other-thread", String(pending!.id), "approve")).toBe(
+      "approval-not-found",
+    );
+    expect(approvals.decide(threadId, String(pending!.id), "deny")).toBe("decided");
+    await expect(first).resolves.toBe("denied");
+    expect(approvals.decide(threadId, String(pending!.id), "approve")).toBe("already-settled");
+
+    const second = ask();
+    const again = sessions.read(threadId)?.approvals?.[1];
+    expect(approvals.decide(threadId, String(again!.id), "approve-always")).toBe("decided");
+    await expect(second).resolves.toBe("approved");
+    expect(sessions.read(threadId)?.approvals?.[1]).toMatchObject({
+      status: "approved",
+      remembered: true,
+    });
+    // The class is remembered: no third approval is journaled.
+    await expect(ask()).resolves.toBe("approved");
+    expect(sessions.read(threadId)?.approvals).toHaveLength(2);
+  });
+
+  it("queues a steering note, delivers it once to the next tool step, and drops it when the turn ends", () => {
+    const threadId = "00000000-0000-4000-8000-000000000025";
+    const store = new NativeHarnessSessionStore({
+      journal: journalFor(openConnection()),
+      uuid: uuidFactory(),
+      actor,
+      clock: () => now,
+    });
+    store.ensure({
+      threadId,
+      mode: "chat",
+      leadSlotId: "default" as never,
+      lead: candidate("big") as never,
+    });
+    const note = {
+      id: "00000000-0000-4000-8000-000000000091",
+      text: "Use sqlite.",
+      status: "queued",
+      at: now,
+    };
+    expect(store.queueSteering(threadId, note as never)).toBe(true);
+    expect(store.read(threadId)?.steering).toMatchObject([
+      { text: "Use sqlite.", status: "queued" },
+    ]);
+    expect(store.deliverSteering(threadId)).toEqual(["Use sqlite."]);
+    expect(store.deliverSteering(threadId)).toEqual([]);
+    expect(store.read(threadId)?.steering).toMatchObject([{ status: "delivered" }]);
+    store.clearSteering(threadId, "delivered");
+    expect(store.read(threadId)?.steering).toEqual([]);
   });
 });

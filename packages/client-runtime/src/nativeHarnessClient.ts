@@ -1,5 +1,6 @@
 import {
   decodeNativeHarnessFollowUpActivationResult,
+  decodeNativeHarnessApprovalDecisionResult,
   decodeNativeHarnessQuestionAnswerResult,
   decodeNativeHarnessFollowUpPreview,
   decodeNativeHarnessProjectRoutingOverride,
@@ -11,7 +12,9 @@ import {
   type NativeHarnessFollowUpActivationResult,
   type NativeHarnessFollowUpPreview,
   type NativeHarnessProjectRoutingOverride,
+  type NativeHarnessApprovalDecisionResult,
   type NativeHarnessQuestionAnswerResult,
+  type SteerNativeHarnessSession,
   type NativeHarnessRoutingCommandResult,
   type NativeHarnessRoutingConfiguration,
   type NativeHarnessRoutingSettings,
@@ -74,6 +77,19 @@ export interface NativeHarnessClient {
     input: { readonly questionId: string; readonly answer: string },
     signal?: AbortSignal,
   ): Promise<NativeHarnessQuestionAnswerResult>;
+  decideApproval(
+    threadId: string,
+    input: {
+      readonly approvalId: string;
+      readonly decision: "approve" | "approve-always" | "deny";
+    },
+    signal?: AbortSignal,
+  ): Promise<NativeHarnessApprovalDecisionResult>;
+  steer(
+    threadId: string,
+    command: SteerNativeHarnessSession,
+    signal?: AbortSignal,
+  ): Promise<NativeHarnessSessionView | null>;
 }
 
 export class NativeHarnessClientFailure extends Error {
@@ -187,6 +203,26 @@ export function createNativeHarnessClient(
         ? decodeNativeHarnessFollowUpActivationResult(body)
         : decodeNativeHarnessFollowUpPreview(preview);
     },
+    async decideApproval(threadId, input, signal) {
+      return decodeNativeHarnessApprovalDecisionResult(
+        await write(
+          "POST",
+          `${SESSIONS_PATH}/${encodeURIComponent(threadId)}/approvals`,
+          input,
+          signal,
+        ),
+      );
+    },
+    async steer(threadId, command, signal) {
+      const body = await write(
+        "POST",
+        `${SESSIONS_PATH}/${encodeURIComponent(threadId)}/steering`,
+        command,
+        signal,
+      );
+      const view = (body as { view?: unknown }).view;
+      return view === null || view === undefined ? null : decodeNativeHarnessSessionView(view);
+    },
     async answerQuestion(threadId, input, signal) {
       return decodeNativeHarnessQuestionAnswerResult(
         await write(
@@ -254,6 +290,7 @@ function isRefusal(body: unknown): boolean {
     kind === "routing-refused" ||
     kind === "native-harness-session-refused" ||
     kind === "follow-up-refused" ||
-    kind === "question-refused"
+    kind === "question-refused" ||
+    kind === "approval-refused"
   );
 }
