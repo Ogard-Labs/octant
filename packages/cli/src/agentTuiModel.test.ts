@@ -2,40 +2,33 @@ import { describe, expect, it } from "vitest";
 import { paletteFor, statusLineFrom, tasksFrom, toolLines, transcriptFrom } from "./agentTuiModel";
 
 const threadId = "00000000-0000-4000-8000-000000000020";
-const content = (id: string, body: string) => ({
-  contentId: id,
-  role: "user",
-  body,
-  digest: "d",
-  byteLength: body.length,
-});
-const attempt = (outcome: string, ref: string, at: string) => ({
-  id: "00000000-0000-4000-8000-0000000000a1",
-  outcome,
-  responseRefs: [{ contentId: ref }],
-  createdAt: at,
-});
 
 const thread = {
-  thread: { id: threadId, title: "Parser", modelId: "frontier-large", version: 3 },
+  id: threadId,
+  mode: "chat",
+  title: "Parser",
+  providerInstanceId: "00000000-0000-4000-8000-000000000001",
+  modelId: "frontier-large",
+  version: 3,
   turns: [
     {
-      createdAt: "2026-09-05T11:30:00.000Z",
-      userMessageRef: { contentId: "c1" },
-      attempts: [attempt("completed", "r1", "2026-09-05T11:30:05.000Z")],
+      id: "t1",
+      at: "2026-09-05T11:30:00.000Z",
+      prompt: "Fix the parser.",
+      reply: "Done.",
+      replyAt: "2026-09-05T11:30:05.000Z",
+      outcome: "completed",
     },
     {
-      createdAt: "2026-09-05T11:35:00.000Z",
-      userMessageRef: { contentId: "c2" },
-      attempts: [attempt("streaming", "r2", "2026-09-05T11:35:01.000Z")],
+      id: "t2",
+      at: "2026-09-05T11:35:00.000Z",
+      prompt: "Now add tests.",
+      reply: "Writing",
+      replyAt: "2026-09-05T11:35:01.000Z",
+      outcome: "streaming",
     },
   ],
-  contents: [
-    content("c1", "Fix the parser."),
-    content("r1", "Done."),
-    content("c2", "Now add tests."),
-    content("r2", "Writing"),
-  ],
+  workItems: [],
 } as never;
 
 const session = {

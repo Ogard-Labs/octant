@@ -392,16 +392,21 @@ export async function uploadAgentAttachment(
 
 /** How much of the model's window the last turn used, when the model says how big it is. */
 export function contextPercent(
-  thread: ChatThreadView | undefined,
+  thread:
+    | {
+        readonly providerInstanceId: string;
+        readonly modelId: string;
+        readonly turns: ReadonlyArray<{ readonly inputTokens?: number }>;
+      }
+    | undefined,
   models: ReadonlyArray<AgentModelChoice>,
 ): number | undefined {
   if (thread === undefined) return undefined;
   const limit = models.find(
     (choice) =>
-      choice.instanceId === String(thread.thread.providerInstanceId) &&
-      choice.modelId === String(thread.thread.modelId),
+      choice.instanceId === thread.providerInstanceId && choice.modelId === thread.modelId,
   )?.contextLimit;
-  const used = thread.turns.at(-1)?.attempts.at(-1)?.usage?.inputTokens;
+  const used = thread.turns.at(-1)?.inputTokens;
   if (limit === undefined || used === undefined || limit <= 0) return undefined;
   return Math.min(100, Math.round((used / limit) * 100));
 }

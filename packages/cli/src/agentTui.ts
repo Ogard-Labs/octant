@@ -1,4 +1,10 @@
-import type { ChatThreadView, NativeHarnessSessionView } from "@octant/contracts";
+import type { NativeHarnessSessionView } from "@octant/contracts";
+import {
+  agentThreadPort,
+  isAgentSnapshotRunning,
+  type AgentThreadPort,
+  type AgentThreadSnapshot,
+} from "./agentThread";
 import { readdir } from "node:fs/promises";
 import { join, relative } from "node:path";
 import {
@@ -9,14 +15,10 @@ import {
   commandAgentSession,
   contextPercent,
   decideAgentApproval,
-  interruptAgentTurn,
-  isAgentTurnRunning,
   listAgentModels,
   listAgentThreads,
   previewAgentFollowUp,
   readAgentSession,
-  readAgentThread,
-  sendAgentPrompt,
   steerAgent,
   uploadAgentAttachment,
   type AgentModelChoice,
@@ -38,6 +40,7 @@ import type { OpenedLocalControlSession } from "./localControl";
 export interface RunAgentTuiInput {
   readonly session: OpenedLocalControlSession;
   readonly threadId: string;
+  readonly mode?: "chat" | "work" | "code";
   readonly themeId?: TuiThemeId | undefined;
   readonly pollIntervalMs?: number;
   readonly signal?: AbortSignal;
@@ -105,7 +108,8 @@ class AgentScreen {
   readonly #renderer: Awaited<ReturnType<OpenTui["createCliRenderer"]>>;
   readonly #palette: TuiPalette;
   readonly #input: RunAgentTuiInput;
-  #thread: ChatThreadView | undefined;
+  #thread: AgentThreadSnapshot | undefined;
+  #port: AgentThreadPort;
   #session: NativeHarnessSessionView | null | undefined;
   #note = "";
   #drawn = "";
@@ -151,6 +155,7 @@ class AgentScreen {
     this.#input = input;
     this.#verbose = input.verbose === true;
     this.#threadId = input.threadId;
+    this.#port = agentThreadPort(input.session, input.mode ?? "chat", input.threadId);
     const { BoxRenderable, TextRenderable, ScrollBoxRenderable, TextareaRenderable } = tui;
     const root = new BoxRenderable(renderer, {
       width: "100%",
@@ -244,7 +249,7 @@ class AgentScreen {
           const now = Date.now();
           const again = now - this.#lastCtrlC < QUIT_WINDOW_MS;
           this.#lastCtrlC = now;
-          if (again || !isAgentTurnRunning(this.#thread)) resolve(0);
+          if (again || !isAgentSnapshotRunning(this.#thread)) resolve(0);
           else void this.#interrupt();
         } else if (key.name === "escape") {
           void this.#interrupt();
@@ -283,17 +288,17 @@ class AgentScreen {
 
   async refresh(): Promise<void> {
     const [thread, session] = await Promise.all([
-      readAgentThread(this.#input.session, this.#threadId),
+      this.#port.read(),
       readAgentSession(this.#input.session, this.#threadId),
     ]);
     this.#thread = thread;
     this.#session = session === "unavailable" ? undefined : session;
-    const running = isAgentTurnRunning(thread);
+    const running = isAgentSnapshotRunning(thread);
     if (this.#wasRunning && !running && this.#input.quiet !== true) {
-      const outcome = thread?.turns.at(-1)?.attempts.at(-1)?.outcome ?? "ended";
+      const outcome = thread?.turns.at(-1)?.outcome ?? "ended";
       notifyDesktop(
         "Octant",
-        `${thread?.thread.title ?? "Thread"} — turn ${outcome === "completed" ? "finished" : outcome}`,
+        `${thread?.title ?? "Thread"} — turn ${outcome === "completed" ? "finished" : outcome}`,
       );
     }
     this.#wasRunning = running;
@@ -345,6 +350,10 @@ class AgentScreen {
     for (const match of text.matchAll(/(?:^|\s)@([^\s@#]+)/g)) {
       const path = match[1] ?? "";
       if (attachmentMediaType(path) === undefined) continue;
+      if (this.#port.mode !== "chat") {
+        refused.push(`Attach files to a ${this.#port.mode} thread from the app.`);
+        continue;
+      }
       const uploaded = await uploadAgentAttachment(this.#input.session, this.#threadId, path);
       if (uploaded.kind === "uploaded") attachmentIds.push(uploaded.attachmentId);
       else refused.push(uploaded.message);
@@ -374,6 +383,7 @@ class AgentScreen {
 
   async #switchThread(threadId: string): Promise<void> {
     this.#threadId = threadId;
+    this.#port = agentThreadPort(this.#input.session, "chat", threadId);
     this.#drawn = "";
     this.#listing = undefined;
     this.#pendingFollowUp = undefined;
@@ -388,18 +398,14 @@ class AgentScreen {
       queued.length === 0 ||
       this.#flushingSteering ||
       this.#thread === undefined ||
-      isAgentTurnRunning(this.#thread) ||
+      isAgentSnapshotRunning(this.#thread) ||
       this.#session?.session.status === "running"
     ) {
       return;
     }
     this.#flushingSteering = true;
     try {
-      const sent = await sendAgentPrompt(
-        this.#input.session,
-        this.#thread,
-        queued.map((note) => note.text).join("\n\n"),
-      );
+      const sent = await this.#port.send(queued.map((note) => note.text).join("\n\n"));
       if (sent.kind === "refused") this.#note = sent.message;
       else await steerAgent(this.#input.session, this.#threadId, { kind: "clear" });
     } finally {
@@ -409,7 +415,7 @@ class AgentScreen {
 
   async #interrupt(): Promise<void> {
     if (this.#thread === undefined) return;
-    const result = await interruptAgentTurn(this.#input.session, this.#thread);
+    const result = await this.#port.interrupt();
     this.#note =
       result.kind === "refused"
         ? result.message
@@ -423,7 +429,7 @@ class AgentScreen {
     const { t, fg, bold, dim } = this.#tui;
     const p = this.#palette;
     const session = this.#session;
-    const title = this.#thread?.thread.title ?? "Octant";
+    const title = this.#thread?.title ?? "Octant";
     const status = session?.session.status ?? "";
     const statusColor =
       status === "running"
@@ -435,7 +441,7 @@ class AgentScreen {
             : p.muted;
     this.#ticks += 1;
     const spinner = SPINNER[this.#ticks % SPINNER.length] ?? "";
-    const mode = this.#thread === undefined ? "" : ` · ${session?.session.mode ?? "chat"}`;
+    const mode = this.#thread === undefined ? "" : ` · ${this.#thread.mode}`;
     const percent = contextPercent(this.#thread, this.#models);
     const context =
       percent === undefined
@@ -490,8 +496,8 @@ class AgentScreen {
       const lines = this.#models.slice(0, 9).map((model, index) => {
         const here =
           this.#thread !== undefined &&
-          model.instanceId === String(this.#thread.thread.providerInstanceId) &&
-          model.modelId === String(this.#thread.thread.modelId);
+          model.instanceId === this.#thread.providerInstanceId &&
+          model.modelId === this.#thread.modelId;
         return `${here ? "●" : "○"} ${index + 1}. ${model.displayName}  ${model.endpoint}${model.contextLimit === undefined ? "" : `  ${Math.round(model.contextLimit / 1000)}k`}`;
       });
       this.#panelText.content = t`${fg(p.textSecondary)(lines.length === 0 ? "No harness endpoint offers a model yet. Add one in Settings → Providers." : lines.join("\n"))}\n${dim(fg(p.muted)("/model N switches the thread's model."))}`;
@@ -865,7 +871,17 @@ class AgentScreen {
         this.#draw();
         return;
       }
-      const changed = await changeAgentModel(this.#input.session, this.#thread, choice);
+      if (this.#thread.mode !== "chat") {
+        this.#note =
+          "Change a Work or Code thread's model from the app; the terminal switches Chat threads only.";
+        this.#draw();
+        return;
+      }
+      const changed = await changeAgentModel(
+        this.#input.session,
+        { thread: { id: this.#thread.id, version: this.#thread.version } } as never,
+        choice,
+      );
       this.#note = changed.kind === "refused" ? changed.message : `Now on ${choice.displayName}.`;
       this.#listing = undefined;
       await this.refresh();
@@ -928,7 +944,7 @@ class AgentScreen {
       this.#draw();
       return;
     }
-    if (isAgentTurnRunning(this.#thread)) {
+    if (isAgentSnapshotRunning(this.#thread)) {
       // The lead is busy: the note lands at its next tool step, not as a turn.
       const steered = await steerAgent(this.#input.session, this.#threadId, {
         kind: "queue",
@@ -944,7 +960,7 @@ class AgentScreen {
       this.#draw();
       return;
     }
-    const sent = await sendAgentPrompt(this.#input.session, this.#thread, resolved.prompt, {
+    const sent = await this.#port.send(resolved.prompt, {
       attachmentIds: resolved.attachmentIds,
       threadMentionIds: resolved.threadMentionIds,
     });
@@ -1028,7 +1044,7 @@ class AgentScreen {
         (entry) => String(entry.id) === pending.suggestionId,
       );
       if (suggestion !== undefined && this.#thread !== undefined) {
-        const sent = await sendAgentPrompt(this.#input.session, this.#thread, suggestion.prompt);
+        const sent = await this.#port.send(suggestion.prompt);
         if (sent.kind === "refused") this.#note = sent.message;
       }
     } else if (created.threadId !== undefined) {

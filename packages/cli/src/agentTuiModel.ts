@@ -1,4 +1,5 @@
-import type { ChatThreadView, NativeHarnessSessionView } from "@octant/contracts";
+import type { NativeHarnessSessionView } from "@octant/contracts";
+import type { AgentThreadSnapshot } from "./agentThread";
 import { BUILT_IN_THEME_PRESET_IDS, resolveThemePresetTokens } from "@octant/theme";
 
 /**
@@ -123,7 +124,7 @@ export function formatMs(ms: number): string {
 }
 
 /** The thread's work items as the tasks panel shows them: current first, done counted. */
-export function tasksFrom(thread: ChatThreadView | undefined): {
+export function tasksFrom(thread: AgentThreadSnapshot | undefined): {
   readonly done: number;
   readonly total: number;
   readonly items: ReadonlyArray<TuiTask>;
@@ -168,43 +169,29 @@ export function formatDuration(startIso: string, endIso: string): string {
  * per completed lead turn, so the last records line up with the last turns.
  */
 export function transcriptFrom(
-  thread: ChatThreadView | undefined,
+  thread: AgentThreadSnapshot | undefined,
   session: NativeHarnessSessionView | null | undefined,
 ): ReadonlyArray<TuiTranscriptEntry> {
   if (thread === undefined) return [];
-  const bodies = new Map(
-    thread.contents.map((content) => [String(content.contentId), content.body]),
-  );
   const records = session?.turns ?? [];
-  const completed = thread.turns.filter((turn) =>
-    turn.attempts.some(
-      (attempt) => attempt.outcome !== "queued" && attempt.outcome !== "streaming",
-    ),
-  );
+  const isDone = (outcome: string) =>
+    outcome !== "queued" && outcome !== "streaming" && outcome !== "waiting";
+  const completed = thread.turns.filter((turn) => isDone(turn.outcome));
   const offset = completed.length - records.length;
   const entries: TuiTranscriptEntry[] = [];
   let completedIndex = 0;
   for (const turn of thread.turns) {
-    entries.push({
-      kind: "you",
-      at: formatClock(turn.createdAt),
-      text: bodies.get(String(turn.userMessageRef.contentId)) ?? "",
-    });
-    const attempt = turn.attempts.at(-1);
-    if (attempt === undefined) continue;
-    const text = attempt.responseRefs
-      .map((ref) => bodies.get(String(ref.contentId)) ?? "")
-      .join("");
-    const done = attempt.outcome !== "queued" && attempt.outcome !== "streaming";
+    entries.push({ kind: "you", at: formatClock(turn.at), text: turn.prompt });
+    const done = isDone(turn.outcome);
     const record = done ? records[completedIndex - offset] : undefined;
     if (done) completedIndex += 1;
     const live =
       !done && session !== null && session !== undefined ? (session.activeTools ?? []) : [];
     entries.push({
       kind: "lead",
-      at: formatClock(attempt.createdAt),
-      text,
-      outcome: attempt.outcome,
+      at: formatClock(turn.replyAt),
+      text: turn.reply,
+      outcome: turn.outcome,
       ...(record === undefined
         ? {}
         : {
@@ -229,7 +216,7 @@ export function transcriptFrom(
 
 /** One line for the footer: what the run is doing and what it has cost in turns. */
 export function statusLineFrom(
-  thread: ChatThreadView | undefined,
+  thread: AgentThreadSnapshot | undefined,
   session: NativeHarnessSessionView | null | undefined,
 ): string {
   const parts: string[] = [];
@@ -249,7 +236,7 @@ export function statusLineFrom(
     const cost = session.turns.reduce((sum, turn) => sum + (turn.usage.costUsd ?? 0), 0);
     if (cost > 0) parts.push(`$${cost.toFixed(2)}`);
   } else if (thread !== undefined) {
-    parts.push(String(thread.thread.modelId));
+    parts.push(thread.modelId);
     parts.push(`${thread.turns.length} turns`);
   }
   return parts.join(" · ");

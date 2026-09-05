@@ -276,7 +276,7 @@ function printUsage(): void {
       "  octant server install --artifact <path> [--install-root <path>]",
       "  octant server upgrade --artifact <path> [--install-root <path>]",
       "  octant server uninstall [--install-root <path>] [--data-dir <path>] [--remove-data --confirm <exact-data-dir>]",
-      "  octant agent [--project <name>] [--thread <id>] [--prompt <text>] [--title <title>] [--last] [--json] [--plain] [--quiet] [--theme system|light|dark|octant]",
+      "  octant agent [--mode chat|work|code] [--project <name>] [--thread <id>] [--prompt <text>] [--title <title>] [--last] [--json] [--plain] [--quiet] [--theme system|light|dark|octant]",
       "  octant harness slots [--json]",
       "  octant harness session <thread-id> [--json]",
       "  octant project add <path> [--type work|code] [--name <name>]",

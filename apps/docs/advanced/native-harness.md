@@ -137,7 +137,11 @@ It draws with the app's own theme tokens — `--theme system|light|dark|octant`
 picks the preset, and the terminal's light or dark mode picks the palette.
 Enter sends, Shift+Enter adds a line, `/next N`, `/pause`, and `/resume` work
 as in the app, and a pending question is answered by typing its number or an
-answer. `--plain` keeps the line-by-line mode, which is also what a pipe or
+answer. `--mode work --project <name>` or `--mode code --project <name>` starts a
+Work or Code thread instead of a Chat one, through the same commands the
+app's composer sends — a Code thread lands in the current checkout,
+approval-gated, so its edits and commands ask you first, right there in the
+terminal. `--plain` keeps the line-by-line mode, which is also what a pipe or
 `--json` (one JSON object per line) gets. `--thread <id>` attaches to an
 existing thread, `--last` to the one you used most recently, and
 `--project <name>` files a new thread in a Project. Inside the screen,

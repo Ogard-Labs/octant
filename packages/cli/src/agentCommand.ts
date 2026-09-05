@@ -1,17 +1,13 @@
-import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import {
-  decodeChatCommandResult,
-  decodeChatThreadView,
   decodeNativeHarnessRoutingSettings,
   decodeNativeHarnessFollowUpActivationResult,
   decodeNativeHarnessFollowUpPreview,
   decodeNativeHarnessSessionView,
-  decodeProjectBootstrap,
-  type ChatThreadView,
   type NativeHarnessSessionView,
 } from "@octant/contracts";
 import { listAgentThreads } from "./agentHost";
+import { agentThreadPort, createAgentThread, isAgentSnapshotRunning } from "./agentThread";
 import { runAgentTui } from "./agentTui";
 import { isTuiThemeId, type TuiThemeId } from "./agentTuiModel";
 import { failureMessage, type OpenedLocalControlSession } from "./localControl";
@@ -31,6 +27,7 @@ export type AgentCliCommand =
       readonly last: boolean;
       /** No desktop notification when a turn ends. */
       readonly quiet: boolean;
+      readonly mode: "chat" | "work" | "code";
     }
   | { readonly action: "harness-slots"; readonly json: boolean }
   | { readonly action: "harness-session"; readonly threadId: string; readonly json: boolean };
@@ -45,6 +42,7 @@ const AGENT_FLAGS: ReadonlyArray<string> = [
   "theme",
   "last",
   "quiet",
+  "mode",
 ];
 
 export function resolveAgentCliCommand(
@@ -63,6 +61,8 @@ export function resolveAgentCliCommand(
     const title = text("title");
     const theme = text("theme");
     if (theme !== undefined && !isTuiThemeId(theme)) return undefined;
+    const mode = text("mode") ?? "chat";
+    if (mode !== "chat" && mode !== "work" && mode !== "code") return undefined;
     return {
       action: "agent",
       ...(prompt === undefined ? {} : { prompt }),
@@ -73,6 +73,7 @@ export function resolveAgentCliCommand(
       plain: flags.plain === true,
       last: flags.last === true,
       quiet: flags.quiet === true,
+      mode,
       ...(theme === undefined ? {} : { theme }),
     };
   }
@@ -208,6 +209,7 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
       threadId,
       themeId: input.command.theme,
       quiet: input.command.quiet,
+      mode: input.command.mode,
       ...(input.pollIntervalMs === undefined ? {} : { pollIntervalMs: input.pollIntervalMs }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
@@ -451,56 +453,17 @@ async function resolveThread(input: RunAgentCliCommandInput): Promise<string | u
     }
     return String(latest.id);
   }
-  let projectId: string | undefined;
-  if (input.command.project !== undefined) {
-    const bootstrap = await input.session.send({ path: "/api/projects/bootstrap", method: "GET" });
-    if (bootstrap.status !== 200) {
-      input.stderr.write(
-        `${failureMessage(bootstrap, "Projects are unavailable on this host.")}\n`,
-      );
-      return undefined;
-    }
-    const projects = decodeProjectBootstrap(bootstrap.body).active;
-    const wanted = input.command.project.trim().toLowerCase();
-    const project = projects.find((entry) => entry.name.trim().toLowerCase() === wanted);
-    if (project === undefined) {
-      input.stderr.write(`No Project named "${input.command.project}" on this host.\n`);
-      return undefined;
-    }
-    projectId = String(project.id);
-  }
-  const response = await input.session.send({
-    path: "/api/chat/commands",
-    method: "POST",
-    body: {
-      kind: "create-chat-thread",
-      title:
-        input.command.title ?? `Agent ${new Date().toISOString().slice(0, 16).replace("T", " ")}`,
-      ...(projectId === undefined ? {} : { projectId }),
-    },
+  const created = await createAgentThread(input.session, {
+    mode: input.command.mode,
+    title:
+      input.command.title ?? `Agent ${new Date().toISOString().slice(0, 16).replace("T", " ")}`,
+    projectName: input.command.project,
   });
-  if (response.status !== 200) {
-    input.stderr.write(`${failureMessage(response, "The host did not create a thread.")}\n`);
+  if (created.kind === "refused") {
+    input.stderr.write(`${created.message}\n`);
     return undefined;
   }
-  const created = decodeChatCommandResult(response.body);
-  if (created.kind !== "thread-created") {
-    input.stderr.write("The host did not create a thread.\n");
-    return undefined;
-  }
-  return String(created.thread.id);
-}
-
-async function readThread(
-  input: RunAgentCliCommandInput,
-  threadId: string,
-): Promise<ChatThreadView | undefined> {
-  const response = await input.session.send({
-    path: `/api/chat/threads/${encodeURIComponent(threadId)}`,
-    method: "GET",
-  });
-  if (response.status !== 200) return undefined;
-  return decodeChatThreadView(response.body);
+  return created.threadId;
 }
 
 async function runTurn(
@@ -509,24 +472,14 @@ async function runTurn(
   prompt: string,
   lines: LineSource,
 ): Promise<boolean> {
-  const view = await readThread(input, threadId);
-  if (view === undefined) {
-    input.stderr.write("The thread could not be read.\n");
-    return false;
-  }
-  const sent = await input.session.send({
-    path: "/api/chat/commands",
-    method: "POST",
-    body: {
-      kind: "send-chat-turn",
-      threadId,
-      expectedVersion: view.thread.version,
-      prompt,
-      submissionId: randomUUID(),
-    },
-  });
-  if (sent.status !== 200) {
-    input.stderr.write(`${failureMessage(sent, "The host refused the turn.")}\n`);
+  const port = agentThreadPort(
+    input.session,
+    input.command.action === "agent" ? input.command.mode : "chat",
+    threadId,
+  );
+  const sent = await port.send(prompt);
+  if (sent.kind === "refused") {
+    input.stderr.write(`${sent.message}\n`);
     return false;
   }
   let printed = "";
@@ -556,10 +509,10 @@ async function runTurn(
       answered.add(String(approval.id));
       await decidePendingApproval(input, threadId, approval, lines);
     }
-    const current = await readThread(input, threadId);
+    const current = await port.read();
     if (current === undefined) continue;
-    const attempt = current.turns.at(-1)?.attempts.at(-1);
-    const text = replyText(current);
+    const turn = current.turns.at(-1);
+    const text = turn?.reply ?? "";
     if (text.length > printed.length && text.startsWith(printed)) {
       const delta = text.slice(printed.length);
       if (input.command.json)
@@ -567,31 +520,22 @@ async function runTurn(
       else input.stdout.write(delta);
       printed = text;
     }
-    if (attempt === undefined) continue;
-    if (attempt.outcome === "queued" || attempt.outcome === "streaming") continue;
+    if (turn === undefined || isAgentSnapshotRunning(current)) continue;
     if (input.command.json) {
       input.stdout.write(
         `${JSON.stringify({
           kind: "outcome",
-          outcome: attempt.outcome,
+          outcome: turn.outcome,
           text,
-          ...(attempt.usage === undefined ? {} : { usage: attempt.usage }),
+          ...(turn.inputTokens === undefined ? {} : { usage: { inputTokens: turn.inputTokens } }),
         })}\n`,
       );
     } else {
       if (!printed.endsWith("\n")) input.stdout.write("\n");
-      if (attempt.outcome !== "completed") input.stderr.write(`Turn ended: ${attempt.outcome}.\n`);
+      if (turn.outcome !== "completed") input.stderr.write(`Turn ended: ${turn.outcome}.\n`);
     }
-    return attempt.outcome === "completed";
+    return turn.outcome === "completed";
   }
-}
-
-/** The latest assistant reply, from the content the latest attempt references. */
-function replyText(view: ChatThreadView): string {
-  const attempt = view.turns.at(-1)?.attempts.at(-1);
-  if (attempt === undefined) return "";
-  const bodies = new Map(view.contents.map((content) => [String(content.contentId), content.body]));
-  return attempt.responseRefs.map((ref) => bodies.get(String(ref.contentId)) ?? "").join("");
 }
 
 function printSession(
