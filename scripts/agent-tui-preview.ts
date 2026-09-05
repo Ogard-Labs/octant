@@ -85,7 +85,27 @@ const thread = {
   ],
   attachments: [],
   citations: [],
-  workItems: [],
+  workItems: [
+    "Audit the hero section for every breakpoint",
+    "Move button sizes onto the shared scale",
+    "Redesign blog archive and article layouts",
+    "Redesign the gallery with previews and detail pages",
+    "Redesign documentation layout and mobile controls",
+    "Redesign download and guided setup journeys",
+    "Review every remaining page",
+    "Add restrained page transitions with reduced-motion support",
+    "Update typography and content",
+  ].map((title, index) => ({
+    id: u(300 + index),
+    threadId,
+    title,
+    position: index,
+    origin: "agent",
+    version: 1,
+    status: index < 2 ? "completed" : index === 2 ? "in-progress" : "pending",
+    createdAt: "2026-09-05T11:30:00.000Z",
+    updatedAt: "2026-09-05T11:30:00.000Z",
+  })),
   workListVersion: 0,
   followUpVersion: 0,
 };
@@ -119,9 +139,23 @@ const session = {
         decidedAt: "2026-09-05T11:30:00.000Z",
         rejected: [],
       },
-      toolCalls: 3,
+      toolCalls: 80,
       stopReason: "end-of-turn",
-      usage: { inputTokens: 27400, outputTokens: 3900 },
+      usage: { inputTokens: 27400, outputTokens: 3900, costUsd: 0.61 },
+      tools: [
+        ["read", "read: apps/webapp/src/routes/download.tsx", "ok", 120],
+        ["grep", "grep: hero-download", "ok", 340],
+        ["edit", "edit: apps/webapp/src/routes/download.tsx", "ok", 90],
+        ["bash", "bash: bun run typecheck", "failed", 12400],
+        ["edit", "edit: apps/webapp/src/routes/download.tsx", "ok", 80],
+        ["bash", "bash: bun run typecheck", "ok", 1700],
+      ].map(([name, summary, status, durationMs], index) => ({
+        name,
+        summary,
+        status,
+        durationMs,
+        at: `2026-09-05T11:30:${String(10 + index).padStart(2, "0")}.000Z`,
+      })),
       startedAt: "2026-09-05T11:30:00.000Z",
       endedAt: "2026-09-05T11:31:27.000Z",
     },
@@ -133,6 +167,17 @@ const session = {
     suggestions: [{ id: u(71), title: "Add tests", prompt: "Write tests.", target: "new-thread" }],
   },
   activatedFollowUpIds: [],
+  activeTools: [
+    ["read", "read: vitest.config.ts", "ok", 60],
+    ["glob", "glob: apps/webapp/src/**/*.test.tsx", "ok", 210],
+    ["read", "read: apps/webapp/src/routes/download.test.tsx", "ok", 0],
+  ].map(([name, summary, status, durationMs], index) => ({
+    name,
+    summary,
+    status,
+    durationMs,
+    at: `2026-09-05T11:35:0${index + 2}.000Z`,
+  })),
   questions: [
     {
       id: u(81),
@@ -154,7 +199,7 @@ const fakeSession = {
 } as never;
 
 const mode = (process.argv[2] ?? "dark") as "light" | "dark";
-const setup = await createTestRenderer({ width: 100, height: 34 });
+const setup = await createTestRenderer({ width: 108, height: 50 });
 const screen = mountAgentScreen(tui, setup.renderer, paletteFor("octant", mode), {
   session: fakeSession,
   threadId,
@@ -163,6 +208,32 @@ const screen = mountAgentScreen(tui, setup.renderer, paletteFor("octant", mode),
 await screen.refresh();
 await setup.renderOnce();
 await setup.renderOnce();
-console.log(setup.captureCharFrame());
+const htmlPath = process.argv[3];
+if (htmlPath === undefined) {
+  console.log(setup.captureCharFrame());
+} else {
+  // A colour-true picture of the frame, for a look without a terminal.
+  const frame = setup.captureSpans();
+  const css = (rgba: { r: number; g: number; b: number }) =>
+    `rgb(${Math.round(rgba.r * 255)} ${Math.round(rgba.g * 255)} ${Math.round(rgba.b * 255)})`;
+  const escape = (text: string) =>
+    text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const rows = frame.lines
+    .map((line) =>
+      line.spans
+        .map(
+          (span) =>
+            `<span style="color:${css(span.fg)};background:${css(span.bg)};${(span.attributes & tui.TextAttributes.BOLD) !== 0 ? "font-weight:600;" : ""}${(span.attributes & tui.TextAttributes.DIM) !== 0 ? "opacity:.72;" : ""}">${escape(span.text)}</span>`,
+        )
+        .join(""),
+    )
+    .join("\n");
+  const ground = css(frame.lines[0]?.spans[0]?.bg ?? { r: 0, g: 0, b: 0 });
+  await Bun.write(
+    htmlPath,
+    `<!doctype html><meta charset="utf-8"><title>octant agent</title><body style="margin:0;background:#101010;display:grid;place-items:center;min-height:100vh"><pre style="margin:24px;padding:18px 22px;border-radius:14px;background:${ground};font:14px/1.38 'JetBrains Mono','SF Mono',Menlo,monospace;box-shadow:0 30px 80px rgba(0,0,0,.6)">${rows}</pre></body>`,
+  );
+  console.log(`wrote ${htmlPath}`);
+}
 setup.renderer.destroy();
 process.exit(0);

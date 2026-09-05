@@ -194,4 +194,26 @@ describe("native harness tools", () => {
       error: "context-unavailable",
     });
   });
+
+  it("tells the observer about every call, with how it ended and how long it took", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "octant-harness-tools-")));
+    await writeFile(join(root, "a.ts"), "hello\n");
+    const seen: unknown[] = [];
+    const tools = createNativeHarnessTools({
+      threadId: "thread-1",
+      mode: "code",
+      authority: service({}),
+      resolveAuthority: () => authority,
+      ports: { filesystem: new NativeHarnessFileSystem({ root }) },
+      uuid,
+      observe: (call) => seen.push(call),
+      clock: () => "2026-09-05T12:00:00.000Z",
+    });
+    await call(tools, "read", { path: "a.ts" });
+    await call(tools, "bash", { command: "ls" });
+    expect(seen).toMatchObject([
+      { name: "read", summary: "read: a.ts", status: "ok", at: "2026-09-05T12:00:00.000Z" },
+      { name: "bash", summary: "bash: ls", status: "refused" },
+    ]);
+  });
 });

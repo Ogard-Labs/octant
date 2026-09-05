@@ -25,6 +25,7 @@ import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import type { NativeHarnessAuthority } from "./nativeHarnessAuthority";
 import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
 import type { NativeHarnessQuestionStore } from "./nativeHarnessQuestions";
+import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 import { createNativeHarnessTodoPort } from "./nativeHarnessTodo";
 import {
   createNativeHarnessTools,
@@ -55,6 +56,8 @@ export interface NativeHarnessCompositionOptions {
   readonly readThreadTaint: (threadId: string) => boolean;
   /** Questions to the person; absent on a host with no surface to answer them. */
   readonly questions?: Pick<NativeHarnessQuestionStore, "ask">;
+  /** Where each lead tool call is noted while its turn runs. */
+  readonly activity?: Pick<NativeHarnessSessionStore, "noteToolCall">;
   readonly recordExternalContentIngestion: (
     input: RecordExternalContentIngestionInput,
   ) => ExternalContentIngestionResult;
@@ -135,6 +138,9 @@ export function createNativeHarnessComposition(
         resolveAuthority: () => options.authority.resolve(input.threadId, input.mode),
         ports: input.ports,
         uuid: options.uuid,
+        ...(options.activity === undefined
+          ? {}
+          : { observe: (call) => options.activity?.noteToolCall(input.threadId, call) }),
       }),
       threadId: input.threadId,
       recordExternalContentIngestion: options.recordExternalContentIngestion,

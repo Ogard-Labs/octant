@@ -11,9 +11,11 @@ import {
 import {
   paletteFor,
   statusLineFrom,
+  tasksFrom,
   transcriptFrom,
   type TuiPalette,
   type TuiThemeId,
+  type TuiToolLine,
   type TuiTranscriptEntry,
 } from "./agentTuiModel";
 import type { OpenedLocalControlSession } from "./localControl";
@@ -29,6 +31,9 @@ export interface RunAgentTuiInput {
 type OpenTui = typeof import("@opentui/core");
 
 const HINT = "Enter sends · Shift+Enter newline · /next N · /pause · /resume · Ctrl+C quits";
+const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+const SHOWN_TOOL_LINES = 4;
+const SHOWN_TASKS = 6;
 
 /**
  * The full-screen terminal front end for one harness thread: the same
@@ -78,6 +83,7 @@ class AgentScreen {
   #session: NativeHarnessSessionView | null | undefined;
   #note = "";
   #drawn = "";
+  #ticks = 0;
   #pendingFollowUp:
     | { readonly suggestionId: string; readonly turnId: string; readonly prompt: string }
     | undefined;
@@ -87,6 +93,8 @@ class AgentScreen {
   readonly #transcript;
   readonly #panel;
   readonly #panelText;
+  readonly #tasks;
+  readonly #tasksText;
   readonly #composer;
   readonly #noteText;
   readonly #footer;
@@ -132,6 +140,20 @@ class AgentScreen {
     });
     this.#panelText = new TextRenderable(renderer, { content: "", wrapMode: "word" });
     this.#panel.add(this.#panelText);
+    this.#tasks = new BoxRenderable(renderer, {
+      border: true,
+      borderStyle: "rounded",
+      borderColor: palette.border,
+      titleColor: palette.textSecondary,
+      paddingLeft: 1,
+      paddingRight: 1,
+      marginLeft: 1,
+      marginRight: 1,
+      flexShrink: 0,
+      visible: false,
+    });
+    this.#tasksText = new TextRenderable(renderer, { content: "", wrapMode: "word" });
+    this.#tasks.add(this.#tasksText);
     const composerBox = new BoxRenderable(renderer, {
       border: true,
       borderStyle: "rounded",
@@ -162,6 +184,7 @@ class AgentScreen {
     this.#footer = new TextRenderable(renderer, { content: "", height: 1, paddingLeft: 2 });
     root.add(this.#header);
     root.add(this.#transcript);
+    root.add(this.#tasks);
     root.add(this.#panel);
     root.add(composerBox);
     root.add(this.#noteText);
@@ -210,15 +233,28 @@ class AgentScreen {
           : status === "failed"
             ? p.danger
             : p.muted;
-    this.#header.content = t`${fg(p.accent)(bold("◆ Octant"))} ${fg(p.muted)("·")} ${fg(p.text)(title)}  ${fg(statusColor)(status)}`;
+    this.#ticks += 1;
+    const spinner = SPINNER[this.#ticks % SPINNER.length] ?? "";
+    const mode = this.#thread === undefined ? "" : ` · ${session?.session.mode ?? "chat"}`;
+    this.#header.content = t`${fg(p.accent)(bold("◆ Octant"))} ${fg(p.muted)("·")} ${fg(p.text)(title)}${dim(fg(p.muted)(mode))}  ${fg(statusColor)(status === "running" ? `${spinner} running` : status)}`;
 
     const entries = transcriptFrom(this.#thread, session);
     const pending = session?.questions.find((question) => question.status === "pending");
     const digest = JSON.stringify([entries, pending?.id, this.#pendingFollowUp?.suggestionId]);
-    if (digest !== this.#drawn) {
+    const live = entries.some((entry) => entry.kind === "lead" && entry.live !== undefined);
+    if (digest !== this.#drawn || live) {
       this.#drawn = digest;
       for (const child of this.#transcript.getChildren()) child.destroyRecursively();
-      for (const entry of entries) this.#transcript.add(this.#entryBox(entry));
+      for (const entry of entries) this.#transcript.add(this.#entryBox(entry, spinner));
+    }
+
+    const tasks = tasksFrom(this.#thread);
+    if (tasks.total > 0) {
+      this.#tasks.title = ` Tasks ${tasks.done}/${tasks.total} `;
+      this.#tasksText.content = this.#tasksLines(tasks);
+      this.#tasks.visible = true;
+    } else {
+      this.#tasks.visible = false;
     }
 
     if (pending !== undefined) {
@@ -254,7 +290,29 @@ class AgentScreen {
     this.#renderer.requestRender();
   }
 
-  #entryBox(entry: TuiTranscriptEntry) {
+  #tasksLines(tasks: ReturnType<typeof tasksFrom>): import("@opentui/core").StyledText {
+    const { StyledText, fg, bold, dim } = this.#tui;
+    const p = this.#palette;
+    const shown = tasks.items.slice(0, SHOWN_TASKS);
+    const chunks: import("@opentui/core").TextChunk[] = [];
+    if (tasks.done > 0) chunks.push(fg(p.success)(`+${tasks.done} done\n`));
+    if (shown.length === 0) chunks.push(fg(p.muted)("All done."));
+    shown.forEach((task, index) => {
+      const suffix = index < shown.length - 1 ? "\n" : "";
+      chunks.push(
+        task.status === "in-progress"
+          ? fg(p.text)(bold(`◐ ${task.title}${suffix}`))
+          : task.status === "blocked"
+            ? fg(p.warning)(`◌ ${task.title}${suffix}`)
+            : fg(p.textSecondary)(`○ ${task.title}${suffix}`),
+      );
+    });
+    const more = tasks.items.length - shown.length;
+    if (more > 0) chunks.push(dim(fg(p.muted)(`\n+${more} more`)));
+    return new StyledText(chunks);
+  }
+
+  #entryBox(entry: TuiTranscriptEntry, spinner: string) {
     const { BoxRenderable, TextRenderable, t, fg, bold, dim } = this.#tui;
     const p = this.#palette;
     const box = new BoxRenderable(this.#renderer, { flexDirection: "column" });
@@ -283,15 +341,69 @@ class AgentScreen {
     if (entry.actions !== undefined) {
       const a = entry.actions;
       const routeNote = a.route === "primary" ? "" : ` · ${a.route}`;
-      const actions = new BoxRenderable(this.#renderer, { paddingLeft: 2 });
-      box.add(actions);
-      actions.add(
+      const counts = [
+        `${a.toolCalls} ${a.toolCalls === 1 ? "action" : "actions"}`,
+        ...(a.edits > 0 ? [`${a.edits} ${a.edits === 1 ? "edit" : "edits"}`] : []),
+      ];
+      const tree = new BoxRenderable(this.#renderer, { paddingLeft: 2, flexDirection: "column" });
+      box.add(tree);
+      tree.add(
         new TextRenderable(this.#renderer, {
-          content: t`${dim(fg(p.muted)("└"))} ${fg(p.success)("✓")} ${fg(p.textSecondary)(`${a.toolCalls} ${a.toolCalls === 1 ? "action" : "actions"}`)} ${dim(fg(p.muted)(`· ${a.model}${routeNote} · ${a.stopReason} · ${a.duration}`))}`,
+          content: t`${fg(p.textSecondary)(counts.join(" · "))}${a.failed > 0 ? fg(p.danger)(` · ${a.failed} failed`) : ""} ${dim(fg(p.muted)(`· ${a.model}${routeNote} · ${a.duration}`))}`,
+        }),
+      );
+      this.#toolTree(tree, a.tools, a.toolCalls, undefined);
+    } else if (entry.live !== undefined) {
+      const tree = new BoxRenderable(this.#renderer, { paddingLeft: 2, flexDirection: "column" });
+      box.add(tree);
+      this.#toolTree(tree, entry.live, entry.live.length, spinner);
+    }
+    return box;
+  }
+
+  /**
+   * The turn's calls as a tree: the last few in full, the rest folded into
+   * one "+N completed" line, and a spinner on the call still running.
+   */
+  #toolTree(
+    into: import("@opentui/core").BoxRenderable,
+    tools: ReadonlyArray<TuiToolLine>,
+    total: number,
+    spinner: string | undefined,
+  ): void {
+    const { TextRenderable, t, fg, dim } = this.#tui;
+    const p = this.#palette;
+    const shown = tools.slice(-SHOWN_TOOL_LINES);
+    const folded = total - shown.length;
+    const width = Math.max(4, ...shown.map((tool) => tool.name.length));
+    if (folded > 0) {
+      into.add(
+        new TextRenderable(this.#renderer, {
+          content: t`${dim(fg(p.muted)("├"))} ${fg(p.success)("✓")} ${dim(fg(p.muted)(`+${folded} completed`))}`,
         }),
       );
     }
-    return box;
+    shown.forEach((tool, index) => {
+      const last = index === shown.length - 1;
+      const running = spinner !== undefined && last;
+      const mark = running
+        ? fg(p.accent)(spinner)
+        : tool.status === "ok"
+          ? fg(p.success)("✓")
+          : fg(p.danger)("✗");
+      const name = fg(running ? p.text : p.accent)(tool.name.padEnd(width));
+      const summary = fg(tool.status === "ok" || running ? p.textSecondary : p.danger)(
+        tool.summary,
+      );
+      const tail = running
+        ? fg(p.accent)("  running")
+        : dim(fg(p.muted)(`  ${tool.duration}${tool.status === "ok" ? "" : ` · ${tool.status}`}`));
+      into.add(
+        new TextRenderable(this.#renderer, {
+          content: t`${dim(fg(p.muted)(last ? "└" : "├"))} ${mark} ${name} ${summary}${tail}`,
+        }),
+      );
+    });
   }
 
   #body(text: string) {

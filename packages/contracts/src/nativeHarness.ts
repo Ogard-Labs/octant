@@ -651,6 +651,18 @@ export const NativeHarnessTurnUsage = Schema.Struct({
 }).annotations(strict);
 export type NativeHarnessTurnUsage = typeof NativeHarnessTurnUsage.Type;
 
+export const MAX_NATIVE_HARNESS_TOOL_CALLS_PER_TURN = 64;
+
+/** One tool call as the lead made it: what it asked for, how it ended, how long it took. */
+export const NativeHarnessToolCall = Schema.Struct({
+  name: NativeHarnessToolName,
+  summary: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(240)),
+  status: Schema.Literal("ok", "refused", "failed"),
+  durationMs: NonNegativeInt,
+  at: UtcTimestamp,
+}).annotations(strict);
+export type NativeHarnessToolCall = typeof NativeHarnessToolCall.Type;
+
 export const NativeHarnessTurnRecord = Schema.Struct({
   turnId: NativeHarnessTurnId,
   sessionId: NativeHarnessSessionId,
@@ -658,6 +670,12 @@ export const NativeHarnessTurnRecord = Schema.Struct({
   job: NativeHarnessJob,
   route: NativeHarnessRouteDecision,
   toolCalls: NonNegativeInt,
+  /** The last calls of the turn, newest last; `toolCalls` counts them all. */
+  tools: Schema.optional(
+    Schema.Array(NativeHarnessToolCall).pipe(
+      Schema.maxItems(MAX_NATIVE_HARNESS_TOOL_CALLS_PER_TURN),
+    ),
+  ),
   stopReason: NativeHarnessTurnStopReason,
   usage: NativeHarnessTurnUsage,
   startedAt: UtcTimestamp,
@@ -1011,6 +1029,12 @@ export const NativeHarnessSessionView = Schema.Struct({
   ),
   questions: Schema.Array(NativeHarnessQuestion).pipe(
     Schema.maxItems(MAX_NATIVE_HARNESS_VIEW_ENTRIES),
+  ),
+  /** Calls of the turn running right now; not journaled, gone when the turn ends. */
+  activeTools: Schema.optional(
+    Schema.Array(NativeHarnessToolCall).pipe(
+      Schema.maxItems(MAX_NATIVE_HARNESS_TOOL_CALLS_PER_TURN),
+    ),
   ),
 }).annotations(strict);
 export type NativeHarnessSessionView = typeof NativeHarnessSessionView.Type;

@@ -147,10 +147,12 @@ export class NativeHarnessTurnObserver {
     const now = this.#options.clock();
     const turnId = decodeNativeHarnessTurnId(this.#options.uuid());
     const lead = this.#lead(input);
+    const tools = this.#options.sessions.takeToolCalls(input.threadId);
     try {
       this.#options.sessions.recordTurn(
         input.threadId,
         decodeNativeHarnessTurnRecord({
+          ...(tools.length === 0 ? {} : { tools }),
           turnId,
           sessionId: session.id,
           sequence: session.turnsRun + 1,

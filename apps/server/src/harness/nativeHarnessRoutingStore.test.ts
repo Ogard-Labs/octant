@@ -295,4 +295,26 @@ describe("native harness session store", () => {
     await expect(asked).resolves.toMatchObject({ status: "cancelled" });
     expect(sessions.read(threadId)?.questions[0]?.status).toBe("cancelled");
   });
+
+  it("shows the running turn's calls live and hands them to the record exactly once", () => {
+    const threadId = "00000000-0000-4000-8000-000000000023";
+    const store = new NativeHarnessSessionStore({
+      journal: journalFor(openConnection()),
+      uuid: uuidFactory(),
+      actor,
+      clock: () => now,
+    });
+    store.ensure({
+      threadId,
+      mode: "code",
+      leadSlotId: "default" as never,
+      lead: candidate("big") as never,
+    });
+    const call = { name: "read", summary: "read: a.ts", status: "ok", durationMs: 5, at: now };
+    store.noteToolCall(threadId, call as never);
+    expect(store.read(threadId)?.activeTools).toEqual([call]);
+    expect(store.takeToolCalls(threadId)).toEqual([call]);
+    expect(store.takeToolCalls(threadId)).toEqual([]);
+    expect(store.read(threadId)?.activeTools).toEqual([]);
+  });
 });

@@ -3952,6 +3952,7 @@ export function startOctantServer(
     });
     nativeHarnessComposition = createNativeHarnessComposition({
       questions: nativeHarnessQuestionsLive,
+      activity: nativeHarnessSessionsLive,
       delegate: (scope) =>
         createNativeHarnessDelegatePort(
           {

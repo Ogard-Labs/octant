@@ -106,9 +106,12 @@ octant agent --prompt "Summarize the open pull requests"
 ```
 
 `octant agent` without `--prompt` opens the terminal UI on a new Chat thread:
-the conversation as you / lead turns with timestamps, each lead turn's action
-count, route, and duration underneath it, a panel for the lead's question or
-its suggested follow-ups, and a footer with the run's status and token use.
+the conversation as you / lead turns with timestamps; under each lead turn
+its actions as a tree — the last few calls in full with what they touched and
+how long they took, the rest folded into one line, failures in red, and a
+spinner on the call still running — plus a Tasks panel when the lead keeps a
+task list, a panel for a pending question or the suggested follow-ups, and a
+footer with the run's status, token use, and cost.
 It draws with the app's own theme tokens — `--theme system|light|dark|octant`
 picks the preset, and the terminal's light or dark mode picks the palette.
 Enter sends, Shift+Enter adds a line, `/next N`, `/pause`, and `/resume` work

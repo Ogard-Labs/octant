@@ -44,12 +44,69 @@ export function paletteFor(themeId: TuiThemeId | undefined, mode: "light" | "dar
   };
 }
 
+export interface TuiToolLine {
+  readonly name: string;
+  readonly summary: string;
+  readonly status: "ok" | "refused" | "failed";
+  readonly duration: string;
+}
+
 export interface TuiLeadActions {
   readonly toolCalls: number;
+  readonly edits: number;
+  readonly failed: number;
   readonly route: string;
   readonly model: string;
   readonly duration: string;
   readonly stopReason: string;
+  /** The last calls, newest last; `toolCalls` counts what came before too. */
+  readonly tools: ReadonlyArray<TuiToolLine>;
+}
+
+export interface TuiTask {
+  readonly title: string;
+  readonly status: "pending" | "in-progress" | "blocked" | "completed" | "cancelled";
+}
+
+export function toolLines(
+  calls: ReadonlyArray<{
+    readonly name: string;
+    readonly summary: string;
+    readonly status: "ok" | "refused" | "failed";
+    readonly durationMs: number;
+  }>,
+): ReadonlyArray<TuiToolLine> {
+  return calls.map((call) => ({
+    name: call.name,
+    summary: call.summary.startsWith(`${call.name}: `)
+      ? call.summary.slice(call.name.length + 2)
+      : call.summary === call.name
+        ? ""
+        : call.summary,
+    status: call.status,
+    duration: formatMs(call.durationMs),
+  }));
+}
+
+export function formatMs(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const seconds = Math.round(ms / 1000);
+  return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
+}
+
+/** The thread's work items as the tasks panel shows them: current first, done counted. */
+export function tasksFrom(thread: ChatThreadView | undefined): {
+  readonly done: number;
+  readonly total: number;
+  readonly items: ReadonlyArray<TuiTask>;
+} {
+  const items = [...(thread?.workItems ?? [])]
+    .sort((a, b) => a.position - b.position)
+    .map((item) => ({ title: item.title, status: item.status }));
+  const done = items.filter((item) => item.status === "completed").length;
+  const open = items.filter((item) => item.status !== "completed" && item.status !== "cancelled");
+  return { done, total: items.length, items: open };
 }
 
 export type TuiTranscriptEntry =
@@ -60,6 +117,8 @@ export type TuiTranscriptEntry =
       readonly text: string;
       readonly outcome: string;
       readonly actions?: TuiLeadActions;
+      /** Calls of a turn still running, newest last. */
+      readonly live?: ReadonlyArray<TuiToolLine>;
     };
 
 export function formatClock(iso: string): string {
@@ -112,6 +171,8 @@ export function transcriptFrom(
     const done = attempt.outcome !== "queued" && attempt.outcome !== "streaming";
     const record = done ? records[completedIndex - offset] : undefined;
     if (done) completedIndex += 1;
+    const live =
+      !done && session !== null && session !== undefined ? (session.activeTools ?? []) : [];
     entries.push({
       kind: "lead",
       at: formatClock(attempt.createdAt),
@@ -122,12 +183,18 @@ export function transcriptFrom(
         : {
             actions: {
               toolCalls: record.toolCalls,
+              edits: (record.tools ?? []).filter(
+                (call) => call.name === "edit" || call.name === "write",
+              ).length,
+              failed: (record.tools ?? []).filter((call) => call.status !== "ok").length,
               route: record.route.kind,
               model: "candidate" in record.route ? String(record.route.candidate.modelId) : "—",
               duration: formatDuration(record.startedAt, record.endedAt),
               stopReason: record.stopReason,
+              tools: toolLines(record.tools ?? []),
             },
           }),
+      ...(live.length === 0 ? {} : { live: toolLines(live) }),
     });
   }
   return entries;
@@ -152,6 +219,8 @@ export function statusLineFrom(
       { input: 0, output: 0 },
     );
     if (usage.input > 0) parts.push(`${compact(usage.input)} in · ${compact(usage.output)} out`);
+    const cost = session.turns.reduce((sum, turn) => sum + (turn.usage.costUsd ?? 0), 0);
+    if (cost > 0) parts.push(`$${cost.toFixed(2)}`);
   } else if (thread !== undefined) {
     parts.push(String(thread.thread.modelId));
     parts.push(`${thread.turns.length} turns`);

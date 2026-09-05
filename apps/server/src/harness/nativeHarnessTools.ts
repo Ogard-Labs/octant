@@ -1,4 +1,5 @@
 import {
+  decodeUtcTimestamp,
   NATIVE_HARNESS_TOOL_DEFINITIONS,
   NATIVE_HARNESS_TOOL_NAMES,
   decodeNativeHarnessToolArguments,
@@ -17,6 +18,7 @@ import {
   type NativeHarnessSecondOpinionArguments,
   type NativeHarnessTodoItem,
   type NativeHarnessTodoWriteArguments,
+  type NativeHarnessToolCall,
   type NativeHarnessToolName,
   type NativeHarnessWebFetchArguments,
   type NativeHarnessWebSearchArguments,
@@ -149,9 +151,13 @@ export interface CreateNativeHarnessToolsOptions {
   readonly resolveAuthority: () => ToolActionAuthority | undefined;
   readonly ports: NativeHarnessToolPorts;
   readonly uuid: () => string;
+  /** Told about every call, refused ones included, so a surface can show the turn's work. */
+  readonly observe?: (call: NativeHarnessToolCall) => void;
+  readonly clock?: () => string;
 }
 
 const decodeRequest = decodeToolActionRequest;
+const MAX_TOOL_SUMMARY_LENGTH = 240;
 const isToolName = Schema.is(Schema.Literal(...NATIVE_HARNESS_TOOL_NAMES));
 
 /**
@@ -170,68 +176,108 @@ export function createNativeHarnessTools(
   const offered = NATIVE_HARNESS_TOOL_DEFINITIONS.filter((definition) =>
     isOffered(definition.name, options),
   );
+  const clock = options.clock ?? (() => new Date().toISOString());
   return {
     definitions: offered,
     execute: async ({ name, inputJson, signal }) => {
-      if (signal?.aborted) return refused("tool-interrupted");
-      if (!isToolName(name) || !offered.some((definition) => definition.name === name)) {
-        return refused("tool-unavailable");
-      }
-      if (Buffer.byteLength(inputJson, "utf8") > MAX_TOOL_INPUT_BYTES) {
-        return refused("invalid-tool-input", "The tool input is too large.");
-      }
-      let raw: unknown;
-      try {
-        raw = inputJson.trim().length === 0 ? {} : JSON.parse(inputJson);
-      } catch {
-        return refused("invalid-tool-input", "The tool input is not valid JSON.");
-      }
-      let args: unknown;
-      try {
-        args = decodeNativeHarnessToolArguments(name, raw);
-      } catch {
-        return refused(
-          "invalid-tool-input",
-          `The ${name} arguments do not match the tool's schema.`,
-        );
-      }
-      const authority = options.resolveAuthority();
-      if (authority === undefined) return refused("tool-authority-stale");
-      const capabilityId = nativeHarnessToolCapabilityId(name);
-      let request: ToolActionRequest;
-      try {
-        request = decodeRequest({
-          actionId: options.uuid(),
-          correlationId: options.uuid(),
-          capability: { id: capabilityId, version: 1 },
-          authority,
-          intent: intentFor(name, args),
-          approval: { kind: "not-required" },
+      const startedAt = Date.now();
+      const outcome = await run({ name, inputJson, signal });
+      const toolName = NATIVE_HARNESS_TOOL_NAMES.find((candidate) => candidate === name);
+      if (options.observe !== undefined && toolName !== undefined) {
+        let summary: string = toolName;
+        try {
+          const parsed: unknown = inputJson.trim().length === 0 ? {} : JSON.parse(inputJson);
+          summary = intentFor(toolName, parsed);
+        } catch {
+          // An unparseable input still counts as a call; the name is its summary.
+        }
+        options.observe({
+          name: toolName,
+          summary:
+            summary.length > MAX_TOOL_SUMMARY_LENGTH
+              ? summary.slice(0, MAX_TOOL_SUMMARY_LENGTH)
+              : summary,
+          status:
+            outcome.isError === true ? (outcome.refused === true ? "refused" : "failed") : "ok",
+          durationMs: Math.max(0, Date.now() - startedAt),
+          at: decodeUtcTimestamp(clock()),
         });
-      } catch {
-        return refused("tool-authority-stale");
       }
-      const decision = options.authority.authorize({
-        threadId: options.threadId,
-        request,
-        arguments: args,
-      });
-      if (decision.kind === "deny") {
-        return refused(decision.reason, `The ${name} tool was refused by policy.`);
-      }
-      if (decision.kind === "prompt") {
-        return refused(
-          "approval-required",
-          `The ${name} tool needs approval (${decision.policy.approvalClass}) under the thread's current access posture.`,
-        );
-      }
-      try {
-        return await execute(name, args, options.ports, signal);
-      } catch {
-        return refused("tool-execution-failed");
-      }
+      return {
+        result: outcome.result,
+        ...(outcome.isError === undefined ? {} : { isError: outcome.isError }),
+      };
     },
   };
+
+  async function run({
+    name,
+    inputJson,
+    signal,
+  }: {
+    readonly name: string;
+    readonly inputJson: string;
+    readonly signal?: AbortSignal | undefined;
+  }): Promise<{
+    readonly result: unknown;
+    readonly isError?: boolean;
+    readonly refused?: boolean;
+  }> {
+    if (signal?.aborted) return refused("tool-interrupted");
+    if (!isToolName(name) || !offered.some((definition) => definition.name === name)) {
+      return refused("tool-unavailable");
+    }
+    if (Buffer.byteLength(inputJson, "utf8") > MAX_TOOL_INPUT_BYTES) {
+      return refused("invalid-tool-input", "The tool input is too large.");
+    }
+    let raw: unknown;
+    try {
+      raw = inputJson.trim().length === 0 ? {} : JSON.parse(inputJson);
+    } catch {
+      return refused("invalid-tool-input", "The tool input is not valid JSON.");
+    }
+    let args: unknown;
+    try {
+      args = decodeNativeHarnessToolArguments(name, raw);
+    } catch {
+      return refused("invalid-tool-input", `The ${name} arguments do not match the tool's schema.`);
+    }
+    const authority = options.resolveAuthority();
+    if (authority === undefined) return refused("tool-authority-stale");
+    const capabilityId = nativeHarnessToolCapabilityId(name);
+    let request: ToolActionRequest;
+    try {
+      request = decodeRequest({
+        actionId: options.uuid(),
+        correlationId: options.uuid(),
+        capability: { id: capabilityId, version: 1 },
+        authority,
+        intent: intentFor(name, args),
+        approval: { kind: "not-required" },
+      });
+    } catch {
+      return refused("tool-authority-stale");
+    }
+    const decision = options.authority.authorize({
+      threadId: options.threadId,
+      request,
+      arguments: args,
+    });
+    if (decision.kind === "deny") {
+      return refused(decision.reason, `The ${name} tool was refused by policy.`);
+    }
+    if (decision.kind === "prompt") {
+      return refused(
+        "approval-required",
+        `The ${name} tool needs approval (${decision.policy.approvalClass}) under the thread's current access posture.`,
+      );
+    }
+    try {
+      return await execute(name, args, options.ports, signal);
+    } catch {
+      return { ...refused("tool-execution-failed"), refused: false };
+    }
+  }
 }
 
 function isOffered(
@@ -456,6 +502,7 @@ function refused(error: string, message?: string) {
   return {
     result: { error, ...(message === undefined ? {} : { message }) },
     isError: true,
+    refused: true,
   } as const;
 }
 

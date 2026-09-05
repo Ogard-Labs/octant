@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { paletteFor, statusLineFrom, transcriptFrom } from "./agentTuiModel";
+import { paletteFor, statusLineFrom, tasksFrom, toolLines, transcriptFrom } from "./agentTuiModel";
 
 const threadId = "00000000-0000-4000-8000-000000000020";
 const content = (id: string, body: string) => ({
@@ -82,5 +82,47 @@ describe("agent terminal UI model", () => {
     expect(dark.background).not.toBe(light.background);
     expect(dark.accent).toMatch(/^#/);
     expect(paletteFor(undefined, "dark").text).toMatch(/^#/);
+  });
+
+  it("turns the turn's calls into tree lines and counts its edits and failures", () => {
+    const base = (session as { turns: ReadonlyArray<Record<string, unknown>> }).turns[0] ?? {};
+    const record = {
+      ...base,
+      toolCalls: 6,
+      tools: [
+        { name: "read", summary: "read: a.ts", status: "ok", durationMs: 120 },
+        { name: "edit", summary: "edit: a.ts", status: "ok", durationMs: 90 },
+        { name: "bash", summary: "bash: bun test", status: "failed", durationMs: 12400 },
+      ],
+    };
+    const entries = transcriptFrom(thread, {
+      ...(session as Record<string, unknown>),
+      turns: [record],
+    } as never);
+    expect(entries[1]).toMatchObject({
+      actions: { toolCalls: 6, edits: 1, failed: 1, tools: toolLines(record.tools as never) },
+    });
+    expect(toolLines(record.tools as never)).toEqual([
+      { name: "read", summary: "a.ts", status: "ok", duration: "120ms" },
+      { name: "edit", summary: "a.ts", status: "ok", duration: "90ms" },
+      { name: "bash", summary: "bun test", status: "failed", duration: "12.4s" },
+    ]);
+    expect(
+      tasksFrom({
+        ...(thread as Record<string, unknown>),
+        workItems: [
+          { title: "Done one", status: "completed", position: 0 },
+          { title: "Doing", status: "in-progress", position: 1 },
+          { title: "Later", status: "pending", position: 2 },
+        ],
+      } as never),
+    ).toEqual({
+      done: 1,
+      total: 3,
+      items: [
+        { title: "Doing", status: "in-progress" },
+        { title: "Later", status: "pending" },
+      ],
+    });
   });
 });

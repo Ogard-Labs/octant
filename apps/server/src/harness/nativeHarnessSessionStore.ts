@@ -24,6 +24,8 @@ import {
   type NativeHarnessSession,
   type NativeHarnessSessionView,
   type NativeHarnessSlotCandidate,
+  type NativeHarnessToolCall,
+  MAX_NATIVE_HARNESS_TOOL_CALLS_PER_TURN,
   type NativeHarnessSlotId,
   type NativeHarnessTurnRecord,
   type OctantMode,
@@ -72,6 +74,8 @@ export class NativeHarnessSessionStore {
   readonly #actor: typeof EventActor.Type;
   readonly #clock: () => string;
   readonly #records = new Map<string, SessionRecord>();
+  /** Calls of the turn running now, per thread; journaled with the turn when it ends. */
+  readonly #activeTools = new Map<string, NativeHarnessToolCall[]>();
 
   constructor(options: NativeHarnessSessionStoreOptions) {
     this.#journal = options.journal;
@@ -93,7 +97,22 @@ export class NativeHarnessSessionStore {
       ...(record.followUps === undefined ? {} : { followUps: record.followUps }),
       activatedFollowUpIds: record.activated,
       questions: record.questions,
+      activeTools: this.#activeTools.get(threadId) ?? [],
     });
+  }
+
+  noteToolCall(threadId: string, call: NativeHarnessToolCall): void {
+    const calls = this.#activeTools.get(threadId) ?? [];
+    calls.push(call);
+    if (calls.length > MAX_NATIVE_HARNESS_TOOL_CALLS_PER_TURN) calls.shift();
+    this.#activeTools.set(threadId, calls);
+  }
+
+  /** The running turn's calls, handed over once so they land on exactly one record. */
+  takeToolCalls(threadId: string): ReadonlyArray<NativeHarnessToolCall> {
+    const calls = this.#activeTools.get(threadId) ?? [];
+    this.#activeTools.delete(threadId);
+    return calls;
   }
 
   /** The session for a thread, started on first use. */
