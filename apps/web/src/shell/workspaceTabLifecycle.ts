@@ -149,3 +149,30 @@ export function findWorkspacePane(
   }
   return findWorkspacePane(layout.first, paneId) ?? findWorkspacePane(layout.second, paneId);
 }
+
+/**
+ * Every thread this window currently has open in any pane, in any mode.
+ *
+ * The sidebar marks all of them, not only the focused one: with several panes
+ * showing several threads, exactly one highlighted row is a lie about what the
+ * window is holding. Ids are stringified because the sidebar compares against
+ * navigation ids that are not branded per mode.
+ */
+export function openThreadIds(layout: WorkspaceLayoutNode): ReadonlyArray<string> {
+  const open: string[] = [];
+  collect(layout);
+  return open;
+
+  function collect(node: WorkspaceLayoutNode): void {
+    if (node.kind !== "pane") {
+      collect(node.first);
+      collect(node.second);
+      return;
+    }
+    const surface: WorkspaceTab = node.surface;
+    if (!("threadId" in surface) || surface.threadId === undefined) return;
+    const threadId = String(surface.threadId);
+    if (open.includes(threadId)) return;
+    open.push(threadId);
+  }
+}

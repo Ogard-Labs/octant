@@ -117,6 +117,33 @@ describe("WorkThreadEnvironment", () => {
     expect(screen.getByText("Work · No folder Project")).toBeVisible();
   });
 
+  it("keeps the unattended-work controls behind a disclosure instead of on the transcript", async () => {
+    const goalClient = {
+      read: vi.fn(async () => ({ goal: null })),
+      execute: vi.fn(),
+    };
+    const user = userEvent.setup();
+    render(
+      <WorkThreadEnvironment
+        environmentOpen
+        goalClient={goalClient as never}
+        projects={[workProject()]}
+        tab={workTab()}
+        threadClient={threadClient()}
+      >
+        <div />
+      </WorkThreadEnvironment>,
+    );
+    await openEnvironment();
+
+    // A task with no Goal shows no Goal form and asks the host for nothing.
+    expect(screen.queryByRole("region", { name: "Goal" })).not.toBeInTheDocument();
+    expect(goalClient.read).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: /^Keep working on this unattended/ }));
+    expect(await screen.findByRole("region", { name: "Goal" })).toBeVisible();
+  });
+
   it("submits a bounded relative working directory through the focused Change working folder flow", async () => {
     const client = threadClient();
     const user = userEvent.setup();

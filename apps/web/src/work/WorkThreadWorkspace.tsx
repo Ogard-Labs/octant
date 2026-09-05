@@ -25,7 +25,7 @@ import {
   type WorkTurnClient,
 } from "@octant/client-runtime/work-turn-client";
 import type { FileMentionClient, ThreadMentionClient } from "@octant/client-runtime";
-import { Check, Globe2, Paperclip } from "lucide-react";
+import { Check, FileText, Globe2, Paperclip } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -105,6 +105,11 @@ type WorkTranscriptRow =
     }
   | { readonly kind: "steered"; readonly key: string; readonly prompt: string }
   | { readonly kind: "request"; readonly key: string; readonly request: WorkRequest }
+  | {
+      readonly kind: "files";
+      readonly key: string;
+      readonly wrote: NonNullable<WorkTurnState["wroteFiles"]>;
+    }
   | { readonly kind: "status"; readonly key: "status"; readonly text: string };
 
 const WORK_TRANSCRIPT_RECONNECTING_MESSAGE = "Work transcript is reconnecting.";
@@ -323,6 +328,15 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           entry,
         });
       }
+      // The files land after the turn that produced them, so the transcript
+      // reads as what was said and then what came out of it.
+      if (turn.wroteFiles !== undefined) {
+        rows.push({
+          kind: "files",
+          key: `${String(turn.requestId)}-${String(turnIndex)}-files`,
+          wrote: turn.wroteFiles,
+        });
+      }
     }
     if (steered.pending !== undefined) {
       rows.push({
@@ -360,7 +374,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               );
         if (thread === undefined) {
           composerDraft.purge(String(props.threadId));
-          setErrorMessage("This Work thread is no longer available.");
+          setErrorMessage("This task is no longer available.");
           return;
         }
         setThread(thread);
@@ -426,7 +440,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         };
         await Promise.all([transcriptRead(), requestRead()]);
       } catch {
-        if (!cancelled) setErrorMessage("Work thread state could not be loaded.");
+        if (!cancelled) setErrorMessage("This task could not be loaded.");
       }
     })();
     return () => {
@@ -574,7 +588,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         props.turnClient !== undefined
       ) {
         setErrorMessage(
-          "This Work thread must be rebound before sending a follow-up. The Project folder is no longer authorized for this thread.",
+          "This task must be rebound before sending a follow-up. Its Project folder is no longer authorized.",
         );
         return false;
       }
@@ -799,7 +813,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         satisfactionEvidence: evidence,
       });
       if (!("kind" in result) || result.kind !== "thread-completion-confirmed") {
-        setErrorMessage("The delivery target could not be marked complete.");
+        setErrorMessage("This task could not be marked complete.");
         return;
       }
       setThread(result.thread);
@@ -808,7 +822,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       setCompletionEvidence("");
       setStatus("Delivery target marked complete.");
     } catch {
-      setErrorMessage("The delivery target could not be marked complete. Try again.");
+      setErrorMessage("This task could not be marked complete. Try again.");
     } finally {
       setCompleting(false);
     }
@@ -851,13 +865,12 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   }
 
   return (
-    <section aria-label="Work thread workspace" className="work-thread-workspace">
+    <section aria-label="Task workspace" className="work-thread-workspace">
       <header className="work-thread-workspace__header">
-        <div>
-          <p className="work-thread-workspace__eyebrow">Work thread</p>
-          <h1>{props.title}</h1>
-          <p>Confined Project transcript</p>
-        </div>
+        {/* The pane's tab already names the task; repeating it here cost a
+            heading, an eyebrow, and a subtitle for nothing. Chat resolved the
+            same duplication by keeping the name for assistive technology only. */}
+        <h1 className="sr-only">{props.title}</h1>
         {props.childRunStatus}
         <div aria-label="Work tools" className="work-thread-workspace__toolbar" role="toolbar">
           {props.onOpenBrowser === undefined ? null : (
@@ -872,7 +885,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           )}
           {thread?.lifecycle === "active" && thread.completionConfirmed !== true ? (
             <OctantButton
-              aria-label="Mark delivery target complete"
+              aria-label="Mark this task complete"
               disabled={completing || providerChanging || creating}
               onClick={() => setCompletionFormOpen(true)}
               size="sm"
@@ -887,23 +900,21 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       </header>
 
       {completionFormOpen && thread?.lifecycle === "active" && !completionLocked ? (
-        <section
-          aria-label="Confirm delivery target completion"
-          className="work-thread-workspace__completion"
-        >
+        <section aria-label="Mark this task complete" className="work-thread-workspace__completion">
           <p>
-            Confirm satisfaction of: <strong>{thread.title}</strong>
+            Say what <strong>{thread.title}</strong> delivered. Octant records your words as the
+            evidence that this task is done.
           </p>
           <OctantTextarea
-            aria-label="Delivery satisfaction evidence"
+            aria-label="What this task delivered"
             disabled={completing}
             onChange={(event) => setCompletionEvidence(event.target.value)}
-            placeholder="Describe the delivered result and how it satisfies the target…"
+            placeholder="Describe what was delivered…"
             rows={3}
             value={completionEvidence}
           />
           <OctantButton
-            aria-label="Confirm delivery target completion"
+            aria-label="Confirm this task is complete"
             disabled={completing || completionEvidence.trim().length === 0}
             onClick={() => void confirmCompletion()}
             size="sm"
@@ -926,56 +937,97 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         renderItem={(row) => {
           if (row.kind === "empty") {
             return (
-              <article className="work-thread-workspace__message">
-                <strong>Octant Work</strong>
-                <p>
-                  Start from Project Overview quick start to run the first provider-backed turn in
-                  this confined Project. Approvals and user-input waits appear from the durable
-                  request projection.
-                </p>
-              </article>
+              <p className="work-thread-workspace__opening">
+                Describe what you want made. Files this task writes stay inside its folder.
+              </p>
             );
           }
           if (row.kind === "message") {
+            if (row.entry.role === "user") {
+              return (
+                <article aria-label="Your message" className="turn-user">
+                  <div className="bubble">
+                    <TrackerReferenceText asParagraph text={row.entry.text} />
+                  </div>
+                </article>
+              );
+            }
             return (
-              <article className="work-thread-workspace__message">
-                <strong>{row.entry.role === "user" ? "You" : "Assistant"}</strong>
+              <article aria-label="Assistant message" className="turn-agent">
                 {row.entry.text === "" ? (
-                  <p>Working…</p>
+                  <p className="runstatus" role="status">
+                    Working…
+                  </p>
                 ) : (
                   <TrackerReferenceText asParagraph text={row.entry.text} />
                 )}
-                {row.entry.status === undefined ? null : <p role="status">{row.entry.status}</p>}
+                {row.entry.status === undefined ? null : (
+                  <p className="runstatus" role="status">
+                    {row.entry.status}
+                  </p>
+                )}
               </article>
             );
           }
           if (row.kind === "steered") {
             return (
-              <article className="work-thread-workspace__message">
-                <strong>You</strong>
-                <TrackerReferenceText asParagraph text={row.prompt} />
+              <article aria-label="Your message" className="turn-user">
+                <div className="bubble">
+                  <TrackerReferenceText asParagraph text={row.prompt} />
+                </div>
               </article>
+            );
+          }
+          if (row.kind === "files") {
+            return (
+              <section
+                aria-label="Files this turn changed"
+                className="work-thread-workspace__files"
+              >
+                <h3 className="oct-section-label">
+                  {/* A watcher that failed reports no paths and marks itself
+                      truncated. Counting that as zero told the person nothing
+                      changed, which is not what the host observed. An empty
+                      list that is not truncated really is nothing. */}
+                  {row.wrote.paths.length === 0 && row.wrote.truncated
+                    ? "Changed files could not be observed while this ran"
+                    : row.wrote.paths.length === 1
+                      ? "1 file changed while this ran"
+                      : `${String(row.wrote.paths.length)} files changed while this ran`}
+                </h3>
+                <ul className="work-thread-workspace__file-list">
+                  {row.wrote.paths.map((path) => (
+                    <li className="work-thread-workspace__file" key={path}>
+                      <FileText aria-hidden="true" size={14} strokeWidth={1.7} />
+                      <span>{path}</span>
+                    </li>
+                  ))}
+                </ul>
+                {row.wrote.truncated ? (
+                  <p className="oct-row-detail" role="status">
+                    {/* "More changed" claims a file changed. A watcher that
+                        failed establishes no such thing. */}
+                    {row.wrote.paths.length === 0
+                      ? "Octant could not watch the folder while this ran. Open Files for the folder itself."
+                      : "More changed than Octant could record. Open Files for the folder itself."}
+                  </p>
+                ) : null}
+              </section>
             );
           }
           if (row.kind === "request") {
             return (
-              <article className="work-thread-workspace__message" role="status">
-                <strong>
-                  {row.request.detail.kind === "approval" ? "Approval required" : "Input required"}
-                </strong>
-                <p>
-                  {row.request.detail.kind === "approval"
-                    ? `${row.request.detail.action}: ${row.request.detail.description}`
-                    : row.request.detail.prompt}
-                </p>
-              </article>
+              <p className="runstatus" role="status">
+                {row.request.detail.kind === "approval"
+                  ? `Approval required — ${row.request.detail.action}: ${row.request.detail.description}`
+                  : `Input required — ${row.request.detail.prompt}`}
+              </p>
             );
           }
           return (
-            <article className="work-thread-workspace__message" role="status">
-              <strong>Saved locally</strong>
-              <p>{row.text}</p>
-            </article>
+            <p className="runstatus" role="status">
+              {row.text}
+            </p>
           );
         }}
         restoreKey={`work:${String(props.threadId)}`}
@@ -1013,21 +1065,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       />
 
       <div className="work-thread-workspace__composer">
-        {thread === undefined ? null : (
-          <div className="work-thread-workspace__context" aria-label="Thread context">
-            <span aria-label="Bound provider and model">
-              {boundProviderModelLabel(props.providerGroups ?? [], thread)}
-            </span>
-            <ComposerModelPicker
-              ariaLabel="Provider and model"
-              disabled={providerChanging || creating || completionLocked}
-              groups={props.providerGroups ?? []}
-              onSelect={(selection) => void changeProvider(selection)}
-              selectedModelId={thread.modelId}
-              selectedProviderInstanceId={thread.providerInstanceId}
-            />
-          </div>
-        )}
         <div className="work-thread-workspace__composer-shell">
           <ThreadComposer
             chips={
@@ -1111,49 +1148,74 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               </>
             }
             row={{
-              leading:
-                props.turnClient === undefined ? null : (
-                  <>
-                    <label>
-                      <span className="work-composer-adapter__visually-hidden">Add attachment</span>
-                      {/* ui-boundary-exception: native-file-input */}
-                      <input
-                        aria-label="Choose attachment file"
-                        accept="image/png,image/jpeg,image/webp,image/gif"
-                        className="work-composer-adapter__file-input"
-                        disabled={creating || completionLocked || imageSupport === false}
-                        onChange={(event) => {
-                          const file = event.currentTarget.files?.item(0);
-                          if (file !== null && file !== undefined) {
-                            if (imageSupport === false) {
-                              images.refuse(
-                                "The selected model does not accept images. Choose an image-capable model.",
-                              );
-                            } else {
-                              images.attach([file]);
-                            }
-                          }
-                          event.currentTarget.value = "";
-                        }}
-                        type="file"
-                      />
-                    </label>
-                    <OctantButton
-                      aria-label="Add attachment"
-                      disabled={creating || completionLocked || imageSupport === false}
-                      onClick={(event) => {
-                        event.currentTarget.parentElement
-                          ?.querySelector<HTMLInputElement>('input[type="file"]')
-                          ?.click();
-                      }}
-                      size="icon"
-                      type="button"
-                      variant="ghost"
+              leading: (
+                <>
+                  {/* Model sits beside send, not on a strip above the composer:
+                      the bar holds how the task runs (0073). */}
+                  {thread === undefined ? null : (
+                    <span
+                      aria-label="Bound provider and model"
+                      className="work-thread-workspace__bound-model"
                     >
-                      <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
-                    </OctantButton>
-                  </>
-                ),
+                      <ComposerModelPicker
+                        ariaLabel="Provider and model"
+                        disabled={providerChanging || creating || completionLocked}
+                        groups={props.providerGroups ?? []}
+                        onSelect={(selection) => void changeProvider(selection)}
+                        {...(props.onOpenSettings === undefined
+                          ? {}
+                          : { onOpenSettings: props.onOpenSettings })}
+                        selectedModelId={thread.modelId}
+                        selectedProviderInstanceId={thread.providerInstanceId}
+                      />
+                    </span>
+                  )}
+                  {props.turnClient === undefined ? null : (
+                    <>
+                      <label>
+                        <span className="work-composer-adapter__visually-hidden">
+                          Add attachment
+                        </span>
+                        {/* ui-boundary-exception: native-file-input */}
+                        <input
+                          aria-label="Choose attachment file"
+                          accept="image/png,image/jpeg,image/webp,image/gif"
+                          className="work-composer-adapter__file-input"
+                          disabled={creating || completionLocked || imageSupport === false}
+                          onChange={(event) => {
+                            const file = event.currentTarget.files?.item(0);
+                            if (file !== null && file !== undefined) {
+                              if (imageSupport === false) {
+                                images.refuse(
+                                  "The selected model does not accept images. Choose an image-capable model.",
+                                );
+                              } else {
+                                images.attach([file]);
+                              }
+                            }
+                            event.currentTarget.value = "";
+                          }}
+                          type="file"
+                        />
+                      </label>
+                      <OctantButton
+                        aria-label="Add attachment"
+                        disabled={creating || completionLocked || imageSupport === false}
+                        onClick={(event) => {
+                          event.currentTarget.parentElement
+                            ?.querySelector<HTMLInputElement>('input[type="file"]')
+                            ?.click();
+                        }}
+                        size="icon"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
+                      </OctantButton>
+                    </>
+                  )}
+                </>
+              ),
               actions: {
                 kind: "send",
                 send: {
@@ -1179,7 +1241,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           )}
           <p className="draft-thread__hint">
             {completionLocked
-              ? "Reactivate this Work thread before creating another artifact or changing its provider."
+              ? "Reactivate this task before creating another file or changing its provider."
               : turnRunning
                 ? "Press Enter to send · it runs when this response finishes · Shift+Enter for a new line"
                 : props.turnClient === undefined
@@ -1208,17 +1270,4 @@ function workTurnSettlement(turns: ReadonlyArray<WorkTurnState>): TurnSettlement
     case "failed":
       return "failed";
   }
-}
-
-function boundProviderModelLabel(
-  groups: ReadonlyArray<PickerGroup>,
-  thread: Pick<WorkThread, "providerInstanceId" | "modelId">,
-): string {
-  const group = groups.find(
-    (candidate) => String(candidate.instance.id) === String(thread.providerInstanceId),
-  );
-  const model = group?.sections
-    .flatMap((section) => section.models)
-    .find((candidate) => String(candidate.model.id) === String(thread.modelId));
-  return `${group?.instance.displayName ?? String(thread.providerInstanceId)} — ${model?.model.displayName ?? String(thread.modelId)}`;
 }

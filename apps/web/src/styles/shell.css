@@ -578,6 +578,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
      radius, type size) so tree rows and shell nav rows read as one list; the
      class itself stays off because these rows carry row-only affordances
      (status dot, provider mark, context menu) the shell items do not. */
+  position: relative;
   display: flex;
   width: 100%;
   min-width: 0;
@@ -618,6 +619,28 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   background: var(--sidebar-accent);
   box-shadow: none;
   font-weight: 500;
+}
+
+/* A window can show several threads at once, and exactly one marked row
+   misstates that. Every open thread takes the darker ink; only the focused
+   one also takes the fill and the weight, so "open" and "the one I am in"
+   stay two readable states rather than one. */
+.sidebar-navigation__thread[data-open="true"] {
+  color: var(--oct-fg);
+}
+
+.sidebar-navigation__thread[data-open="true"]::before {
+  position: absolute;
+  left: 0;
+  width: 2px;
+  height: 14px;
+  border-radius: 0 1px 1px 0;
+  background: var(--oct-fg-soft);
+  content: "";
+}
+
+.sidebar-navigation__thread[aria-current="page"]::before {
+  background: var(--oct-fg);
 }
 
 .sidebar-navigation__thread-copy {
@@ -1631,16 +1654,6 @@ form > .work-composer-adapter__attachments {
   text-decoration: underline;
 }
 
-.work-thread-workspace__context {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-  color: var(--octant-text-secondary);
-  font-size: calc(11 * var(--oct-text-step));
-}
-
 .work-thread-workspace__header {
   display: flex;
   min-height: 52px;
@@ -1649,31 +1662,6 @@ form > .work-composer-adapter__attachments {
   gap: 12px 20px;
   padding: 8px clamp(16px, 3vw, 28px);
   border-bottom: 1px solid var(--octant-border);
-}
-
-.work-thread-workspace__header h1,
-.work-thread-workspace__header p {
-  margin: 0;
-}
-
-.work-thread-workspace__header h1 {
-  font-size: calc(14 * var(--oct-text-step));
-  font-weight: 600;
-  letter-spacing: -0.02em;
-}
-
-.work-thread-workspace__header > div > p:last-child {
-  margin-top: 3px;
-  color: var(--octant-text-muted);
-  font-size: calc(11 * var(--oct-text-step));
-}
-
-.work-thread-workspace__eyebrow {
-  color: var(--octant-text-muted);
-  font-size: calc(9 * var(--oct-text-step));
-  font-weight: 600;
-  letter-spacing: 0;
-  text-transform: none;
 }
 
 .work-thread-workspace__toolbar {
@@ -1703,23 +1691,57 @@ form > .work-composer-adapter__attachments {
   margin: 0 auto;
 }
 
-.work-thread-workspace__message {
-  display: grid;
-  gap: 6px;
-  color: var(--octant-text-primary);
-}
-
-.work-thread-workspace__message strong {
-  color: var(--octant-text-muted);
-  font-size: calc(11 * var(--oct-text-step));
-}
-
-.work-thread-workspace__message p {
+/* The transcript itself wears the design system's turn vocabulary
+   (`.turn-user`/`.bubble`, `.turn-agent`, `.runstatus`) so a Work message and
+   a Chat message are the same object. Only the opening line is Work's own. */
+.work-thread-workspace__opening {
   max-width: 62ch;
   margin: 0;
+  color: var(--octant-text-muted);
   font-size: var(--oct-transcript-font-size);
   line-height: 1.55;
   text-wrap: pretty;
+}
+
+/* What a turn produced, shown as files rather than narrated in prose. It is a
+   discrete object in the transcript, so it takes an edge where the messages
+   around it take none. */
+.work-thread-workspace__files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3) var(--oct-space-4);
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card, var(--octant-workspace));
+}
+
+.work-thread-workspace__file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.work-thread-workspace__file {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+  color: var(--octant-text-primary);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+}
+
+.work-thread-workspace__file > svg {
+  flex: 0 0 auto;
+  color: var(--octant-text-muted);
+}
+
+.work-thread-workspace__file > span {
+  overflow-wrap: anywhere;
 }
 
 .work-thread-workspace__composer {
@@ -1734,6 +1756,13 @@ form > .work-composer-adapter__attachments {
 .work-thread-workspace__composer-shell {
   display: grid;
   gap: 7px;
+}
+
+/* Names the model control for assistive technology without repeating the
+   selection as text: the picker's own trigger already shows it. */
+.work-thread-workspace__bound-model {
+  display: inline-flex;
+  min-width: 0;
 }
 
 .code-composer-adapter {

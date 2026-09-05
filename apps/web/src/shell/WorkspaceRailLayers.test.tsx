@@ -386,14 +386,14 @@ describe("WorkspaceRailLayers", () => {
 
     expect(await screen.findByRole("button", { name: "Board" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Board" }));
-    expect(await screen.findByRole("region", { name: "Work Thread Board" })).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Task board" })).toBeVisible();
     expect(queryBoard).toHaveBeenCalled();
     expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
 
-    const board = screen.getByRole("region", { name: "Work Thread Board" });
+    const board = screen.getByRole("region", { name: "Task board" });
     await user.click(await within(board).findByRole("button", { name: "Draft brief" }));
     await waitFor(() =>
-      expect(screen.queryByRole("region", { name: "Work Thread Board" })).not.toBeInTheDocument(),
+      expect(screen.queryByRole("region", { name: "Task board" })).not.toBeInTheDocument(),
     );
     expect(
       await screen.findByRole("region", { name: "Workspace pane: Draft brief" }),

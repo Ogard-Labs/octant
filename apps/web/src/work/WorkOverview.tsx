@@ -224,7 +224,7 @@ export function WorkOverview(props: WorkOverviewProps) {
         ) : null}
         <form noValidate onSubmit={(event) => void submit(event)}>
           <label className="sr-only" htmlFor="work-overview-quick-start">
-            Start a new Work thread
+            Start a new task
           </label>
           <WorkImageAttachmentChips images={images} />
           <OctantTextarea
@@ -242,7 +242,7 @@ export function WorkOverview(props: WorkOverviewProps) {
               }
               images.consumePaste(event.clipboardData);
             }}
-            placeholder="Describe the next Work thread…"
+            placeholder="Describe the next task…"
             rows={3}
             value={draft}
           />

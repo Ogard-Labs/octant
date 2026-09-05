@@ -81,12 +81,12 @@ describe("WorkPromotionFlow", () => {
       />,
     );
 
-    expect(screen.getByText(/Work never switches mode silently/i)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Propose promotion" }));
+    expect(screen.getByText(/Work never turns into Code on its own/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Propose a Code thread" }));
     expect(propose).toHaveBeenCalled();
     expect(onOpenLinkedCodeThread).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "Approve promotion" }));
+    await user.click(screen.getByRole("button", { name: "Approve" }));
     expect(approve).toHaveBeenCalledWith(
       expect.objectContaining({
         deliveryTarget,
@@ -125,7 +125,7 @@ describe("WorkPromotionFlow", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Propose promotion" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Propose a Code thread" })).toBeDisabled();
     expect(propose).not.toHaveBeenCalled();
   });
 
@@ -158,9 +158,9 @@ describe("WorkPromotionFlow", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Approve promotion" }));
+    await user.click(screen.getByRole("button", { name: "Approve" }));
     expect(approve).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert")).toHaveTextContent(/authoritative Code delivery target/i);
+    expect(screen.getByRole("alert")).toHaveTextContent(/confirmed delivery target/i);
   });
 
   /**
@@ -204,7 +204,7 @@ describe("WorkPromotionFlow", () => {
     );
 
     expect(screen.getByText(/No usable Code model/i)).toBeVisible();
-    const approveButton = screen.getByRole("button", { name: "Approve promotion" });
+    const approveButton = screen.getByRole("button", { name: "Approve" });
     expect(approveButton).toBeDisabled();
     await user.click(approveButton);
     expect(approve).not.toHaveBeenCalled();

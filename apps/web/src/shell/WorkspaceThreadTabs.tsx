@@ -7,7 +7,8 @@ import type {
   WorkThreadId,
 } from "@octant/contracts";
 import type { OctantMode } from "@octant/contracts/modes";
-import { Folder, Pin, X } from "lucide-react";
+import { LOCAL_HOST_ID } from "@octant/contracts/host";
+import { Cloud, Laptop, Pin, X } from "lucide-react";
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 
@@ -18,6 +19,7 @@ export type WorkspaceThreadTab =
       readonly threadId: ChatThreadId;
       readonly title: string;
       readonly projectId?: ProjectId;
+      readonly projectLabel?: string;
     }
   | {
       readonly key: string;
@@ -25,6 +27,7 @@ export type WorkspaceThreadTab =
       readonly threadId: WorkThreadId;
       readonly title: string;
       readonly projectId?: ProjectId;
+      readonly projectLabel?: string;
       readonly hostId?: HostId;
     }
   | {
@@ -33,6 +36,7 @@ export type WorkspaceThreadTab =
       readonly threadId: CodeThreadId;
       readonly title: string;
       readonly projectId?: ProjectId;
+      readonly projectLabel?: string;
       readonly hostId?: HostId;
     };
 
@@ -53,15 +57,20 @@ export function workspaceThreadTabFromSurface(
   surface: WorkspaceTab,
   projectId: ProjectId | undefined,
   titleOverride?: string,
+  projectLabel?: string,
 ): WorkspaceThreadTab | undefined {
   const title = titleOverride ?? surface.title;
+  const container = {
+    ...(projectId === undefined ? {} : { projectId }),
+    ...(projectLabel === undefined ? {} : { projectLabel }),
+  };
   if (surface.kind === "chat-thread") {
     return {
       key: `chat:${String(surface.threadId)}`,
       mode: "chat",
       threadId: surface.threadId,
       title,
-      ...(projectId === undefined ? {} : { projectId }),
+      ...container,
     };
   }
   if (surface.kind === "work-thread") {
@@ -70,7 +79,7 @@ export function workspaceThreadTabFromSurface(
       mode: "work",
       threadId: surface.threadId,
       title,
-      ...(projectId === undefined ? {} : { projectId }),
+      ...container,
       ...(surface.hostId === undefined ? {} : { hostId: surface.hostId }),
     };
   }
@@ -80,9 +89,20 @@ export function workspaceThreadTabFromSurface(
     mode: "code",
     threadId: surface.threadId,
     title,
-    ...(projectId === undefined ? {} : { projectId }),
+    ...container,
     ...(surface.hostId === undefined ? {} : { hostId: surface.hostId }),
   };
+}
+
+/**
+ * Where the thread runs, which is the first thing a person needs to know
+ * about a tab: a laptop for this machine, a cloud for a paired host. A tab
+ * with no host is local — only Work and Code carry one, and Chat never
+ * leaves the machine it was started on.
+ */
+function runsOnThisMachine(tab: WorkspaceThreadTab): boolean {
+  if (tab.mode === "chat") return true;
+  return tab.hostId === undefined || String(tab.hostId) === String(LOCAL_HOST_ID);
 }
 
 /**
@@ -138,13 +158,6 @@ export function WorkspaceThreadTabs(props: WorkspaceThreadTabsProps) {
 
   return (
     <header className="workspace-thread-tabs window-drag-region">
-      <div className="workspace-thread-tabs__context" title={props.contextLabel}>
-        <Folder aria-hidden="true" size={16} strokeWidth={1.7} />
-        <span>{props.contextLabel ?? modeLabel(props.mode)}</span>
-        <span aria-hidden="true" className="workspace-thread-tabs__separator">
-          /
-        </span>
-      </div>
       <div
         aria-label="Open threads"
         className="workspace-thread-tabs__list window-no-drag"
@@ -165,11 +178,38 @@ export function WorkspaceThreadTabs(props: WorkspaceThreadTabsProps) {
               role="tab"
               size="sm"
               tabIndex={entry.tab.key === activeKey ? 0 : -1}
-              title={entry.tab.title}
+              title={tabTitle(entry.tab, props.contextLabel)}
               type="button"
               variant="ghost"
             >
-              <span>{entry.tab.title}</span>
+              {/* Where the thread runs is stated in the tab's tooltip, not as a
+                  label on the glyph: an icon that names itself joins the tab's
+                  accessible name, so every tab would announce as "Runs on this
+                  machine <title>" instead of the thread the person asked for. */}
+              {runsOnThisMachine(entry.tab) ? (
+                <Laptop
+                  aria-hidden="true"
+                  className="workspace-thread-tabs__where"
+                  size={14}
+                  strokeWidth={1.7}
+                />
+              ) : (
+                <Cloud
+                  aria-hidden="true"
+                  className="workspace-thread-tabs__where"
+                  size={14}
+                  strokeWidth={1.7}
+                />
+              )}
+              <span className="workspace-thread-tabs__title">{entry.tab.title}</span>
+              {/* The chip repeats what the tab's tooltip already states, so it
+                  stays out of the accessible name: joined to the title it read
+                  as one run-together word ("First threadPlanning"). */}
+              {projectNameFor(entry.tab, props.contextLabel) === undefined ? null : (
+                <span aria-hidden="true" className="workspace-thread-tabs__project">
+                  {projectNameFor(entry.tab, props.contextLabel)}
+                </span>
+              )}
             </OctantButton>
             <OctantButton
               aria-label={`${entry.pinned ? "Unpin" : "Pin"} ${entry.tab.title}`}
@@ -213,8 +253,18 @@ export function WorkspaceThreadTabs(props: WorkspaceThreadTabsProps) {
   );
 }
 
-function modeLabel(mode: OctantMode): string {
-  if (mode === "chat") return "Chat";
-  if (mode === "work") return "Work";
-  return "Code";
+/**
+ * The Project a tab belongs to. A tab that was opened before its Project was
+ * resolved falls back to the pane's own container rather than showing nothing,
+ * because the alternative reads as "this thread has no Project" — which a Work
+ * or Code thread never is.
+ */
+function projectNameFor(tab: WorkspaceThreadTab, contextLabel?: string): string | undefined {
+  return tab.projectLabel ?? contextLabel;
+}
+
+function tabTitle(tab: WorkspaceThreadTab, contextLabel?: string): string {
+  const project = projectNameFor(tab, contextLabel);
+  const where = runsOnThisMachine(tab) ? "this machine" : "a paired host";
+  return project === undefined ? `${tab.title} — ${where}` : `${tab.title} — ${project} — ${where}`;
 }

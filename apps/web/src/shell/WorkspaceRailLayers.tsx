@@ -262,7 +262,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
       ) : null}
       {props.workBoardOpen && props.activeMode === "work" ? (
         <div className="code-board-layer">
-          <LazyRailSurface label="Work Thread Board">
+          <LazyRailSurface label="Task board">
             <WorkThreadBoard
               isNarrow={props.isNarrow}
               loadBoard={(query) => props.workThreadClient.queryBoard(query)}

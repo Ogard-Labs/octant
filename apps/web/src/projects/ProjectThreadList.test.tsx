@@ -104,6 +104,33 @@ describe("ProjectThreadRows", () => {
     expect(within(row).queryByRole("img", { name: "New activity" })).toBeNull();
   });
 
+  it("marks every thread the window has open, not only the focused one", () => {
+    render(
+      <ProjectThreadRows
+        activeThreadId="thread-a"
+        onSelectThread={vi.fn()}
+        openThreadIds={["thread-a", "thread-b"]}
+        threads={[
+          { threadId: "thread-a", title: "Focused" },
+          { threadId: "thread-b", title: "Also open" },
+          { threadId: "thread-c", title: "Not open" },
+        ]}
+      />,
+    );
+
+    const focused = screen.getByRole("button", { name: /Focused/ });
+    const alsoOpen = screen.getByRole("button", { name: /Also open/ });
+    const notOpen = screen.getByRole("button", { name: /Not open/ });
+
+    // Open and focused stay two states: a split view marks both panes' threads,
+    // and only the one holding focus is the current page.
+    expect(focused).toHaveAttribute("data-open", "true");
+    expect(alsoOpen).toHaveAttribute("data-open", "true");
+    expect(notOpen).not.toHaveAttribute("data-open");
+    expect(focused).toHaveAttribute("aria-current", "page");
+    expect(alsoOpen).not.toHaveAttribute("aria-current");
+  });
+
   it("folds a long list behind Show more, keeps the active thread visible, and unfolds on Show less", async () => {
     const threads = Array.from({ length: 12 }, (_, index) => ({
       threadId: `thread-${String(index)}`,

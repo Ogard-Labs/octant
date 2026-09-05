@@ -12,6 +12,7 @@ export * from "./computerUseClient";
 export * from "./codeClient";
 export * from "./codeFileListingClient";
 export * from "./workMutationClient";
+export * from "./workFileListingClient";
 export * from "./workPromotionClient";
 export * from "./workRequestClient";
 export * from "./workThreadClient";

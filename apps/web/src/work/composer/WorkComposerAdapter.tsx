@@ -182,7 +182,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   );
 
   return (
-    <section aria-label="New Work thread" className="work-composer-adapter">
+    <section aria-label="New task" className="work-composer-adapter">
       <div className="welcome">
         <div className="welcome__heading">
           <h1 className="oct-title oct-title--hero">What are we working on?</h1>

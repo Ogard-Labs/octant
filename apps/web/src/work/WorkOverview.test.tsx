@@ -116,7 +116,7 @@ describe("WorkOverview", () => {
     render(<WorkOverview model={emptyModel()} onCreateThread={onCreateThread} />);
 
     const composer = screen.getByRole("region", { name: "Work quick start" });
-    const input = within(composer).getByRole("textbox", { name: "Start a new Work thread" });
+    const input = within(composer).getByRole("textbox", { name: "Start a new task" });
     fireEvent.change(input, { target: { value: "Summarize the brief" } });
     fireEvent.click(within(composer).getByRole("button", { name: "Start thread" }));
 
@@ -131,7 +131,7 @@ describe("WorkOverview", () => {
     render(<WorkOverview model={emptyModel()} onCreateThread={onCreateThread} />);
 
     const composer = screen.getByRole("region", { name: "Work quick start" });
-    const input = within(composer).getByRole("textbox", { name: "Start a new Work thread" });
+    const input = within(composer).getByRole("textbox", { name: "Start a new task" });
     fireEvent.change(input, { target: { value: "Open the quarterly notes" } });
     fireEvent.click(within(composer).getByRole("button", { name: "Start thread" }));
 
@@ -247,9 +247,7 @@ describe("WorkOverview", () => {
     );
 
     const composer = screen.getByRole("region", { name: "Work quick start" });
-    expect(
-      within(composer).getByRole("textbox", { name: "Start a new Work thread" }),
-    ).toBeDisabled();
+    expect(within(composer).getByRole("textbox", { name: "Start a new task" })).toBeDisabled();
     expect(within(composer).getByRole("button", { name: "Start thread" })).toBeDisabled();
     expect(
       within(composer).getByText("Thread creation is unavailable for this Project."),

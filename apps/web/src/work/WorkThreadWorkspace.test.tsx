@@ -9,7 +9,7 @@ import {
 } from "@octant/contracts";
 import type { MentionableThreadId, ThreadMentionCandidate } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Profiler } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -138,14 +138,14 @@ describe("WorkThreadWorkspace", () => {
     );
 
     await screen.findByLabelText("Bound provider and model");
-    await user.click(screen.getByRole("button", { name: "Mark delivery target complete" }));
+    await user.click(screen.getByRole("button", { name: "Mark this task complete" }));
     await user.type(
-      screen.getByRole("textbox", { name: "Delivery satisfaction evidence" }),
+      screen.getByRole("textbox", { name: "What this task delivered" }),
       "The reviewed draft is saved in the bound folder.",
     );
     await user.click(
       screen.getByRole("button", {
-        name: "Confirm delivery target completion",
+        name: "Confirm this task is complete",
       }),
     );
 
@@ -180,7 +180,7 @@ describe("WorkThreadWorkspace", () => {
     expect(await screen.findByLabelText("Bound provider and model")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Work prompt" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Provider and model" })).toBeDisabled();
-    expect(screen.getByText(/Reactivate this Work thread/)).toBeInTheDocument();
+    expect(screen.getByText(/Reactivate this task/)).toBeInTheDocument();
   });
 
   it("keeps post-preview Canvas tools out of the live thread toolbar", async () => {
@@ -200,6 +200,70 @@ describe("WorkThreadWorkspace", () => {
 
     await screen.findByLabelText("Bound provider and model");
     expect(screen.queryByRole("button", { name: "Canvas" })).not.toBeInTheDocument();
+  });
+
+  it("shows the files a turn changed instead of narrating them in prose", async () => {
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({
+        threadId,
+        turns: [
+          {
+            requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            threadId,
+            turnId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            projectId: "20000000-0000-4000-8000-000000000101",
+            authority: {
+              hostId: "local",
+              projectId: "20000000-0000-4000-8000-000000000101",
+              bindingRevisionId: "30000000-0000-4000-8000-000000000101",
+              workingDirectory: ".",
+              confinementPosture: "project-root-confined",
+              providerInstanceId: providerId,
+              modelId,
+            },
+            status: "completed",
+            prompt: "Draft the brief",
+            transcript: [
+              { role: "user", text: "Draft the brief" },
+              { role: "assistant", text: "Done." },
+            ],
+            wroteFiles: { paths: ["brief.md", "research/notes.txt"], truncated: false },
+            capabilities: {
+              workspace: "project-backed",
+              confinement: "project-root-confined",
+              shell: "denied",
+              git: "denied",
+              worktree: "denied",
+              pullRequest: "denied",
+              code: "denied",
+            },
+            version: 2,
+            acceptedAt: "2026-09-04T20:00:00.000Z",
+            updatedAt: "2026-09-04T20:01:00.000Z",
+          },
+        ],
+      })),
+    };
+
+    render(
+      <WorkThreadWorkspace
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    const files = await screen.findByRole("region", { name: "Files this turn changed" });
+    // Observed, not attributed: the host watched the folder and never learned
+    // who wrote what, so the heading says what happened rather than who did it.
+    expect(within(files).getByText("2 files changed while this ran")).toBeVisible();
+    expect(within(files).getByText("brief.md")).toBeVisible();
+    expect(within(files).getByText("research/notes.txt")).toBeVisible();
   });
 
   it("renders the durable transcript and pending request projection", async () => {
@@ -279,8 +343,9 @@ describe("WorkThreadWorkspace", () => {
 
     expect(await screen.findByText("Summarize the brief")).toBeInTheDocument();
     expect(screen.getByText("Here is the confined summary.")).toBeInTheDocument();
-    expect(screen.getByText("Approval required")).toBeInTheDocument();
-    expect(screen.getByText("write-file: Save notes.md in the Project root.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Approval required — write-file: Save notes.md in the Project root."),
+    ).toBeInTheDocument();
     expect(turnClient.transcript).toHaveBeenCalledWith(threadId, expect.any(AbortSignal));
     expect(requestClient.list).toHaveBeenCalledWith(
       "20000000-0000-4000-8000-000000000101",
@@ -587,7 +652,7 @@ describe("WorkThreadWorkspace", () => {
       );
 
       await act(async () => vi.advanceTimersByTimeAsync(0));
-      expect(screen.getByRole("alert")).toHaveTextContent("Work thread state could not be loaded.");
+      expect(screen.getByRole("alert")).toHaveTextContent("This task could not be loaded.");
       await act(async () => vi.advanceTimersByTimeAsync(350));
       expect(transcript).toHaveBeenCalledOnce();
     } finally {
@@ -733,7 +798,9 @@ describe("WorkThreadWorkspace", () => {
     ];
 
     await waitFor(() => expect(list.mock.calls.length).toBeGreaterThan(1), { timeout: 2_500 });
-    expect(await screen.findByText("Approval required")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Approval required — write-file: Save notes.md in the Project root."),
+    ).toBeInTheDocument();
   });
 
   it("does not commit again when transcript polling returns the same data", async () => {
@@ -1357,12 +1424,12 @@ describe("WorkThreadWorkspace", () => {
 
     await user.type(await screen.findByLabelText("Work prompt"), "After done");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    await user.click(screen.getByRole("button", { name: "Mark delivery target complete" }));
+    await user.click(screen.getByRole("button", { name: "Mark this task complete" }));
     await user.type(
-      screen.getByRole("textbox", { name: "Delivery satisfaction evidence" }),
+      screen.getByRole("textbox", { name: "What this task delivered" }),
       "The reviewed draft is saved in the bound folder.",
     );
-    await user.click(screen.getByRole("button", { name: "Confirm delivery target completion" }));
+    await user.click(screen.getByRole("button", { name: "Confirm this task is complete" }));
     expect(await screen.findByText("Delivery target marked complete.")).toBeInTheDocument();
     turns = [workTurn({ status: "completed" })];
     await waitFor(
@@ -1615,7 +1682,7 @@ describe("WorkThreadWorkspace", () => {
         title="Draft brief"
       />,
     );
-    expect(await screen.findByText("This Work thread is no longer available.")).toBeInTheDocument();
+    expect(await screen.findByText("This task is no longer available.")).toBeInTheDocument();
     expect(onDisplayReadyChange).toHaveBeenLastCalledWith(false);
     expect(store.read("work", String(threadId))).toBeUndefined();
   });

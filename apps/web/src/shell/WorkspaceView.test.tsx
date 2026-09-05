@@ -1266,9 +1266,7 @@ describe("WorkspaceView Work overview", () => {
     );
 
     const composer = screen.getByRole("region", { name: "Work quick start" });
-    expect(
-      within(composer).getByRole("textbox", { name: "Start a new Work thread" }),
-    ).toBeDisabled();
+    expect(within(composer).getByRole("textbox", { name: "Start a new task" })).toBeDisabled();
   });
 
   it("creates from the exact Project tab instead of ambient active Project state", async () => {
@@ -1307,7 +1305,7 @@ describe("WorkspaceView Work overview", () => {
 
     const composer = screen.getByRole("region", { name: "Work quick start" });
     await user.type(
-      within(composer).getByRole("textbox", { name: "Start a new Work thread" }),
+      within(composer).getByRole("textbox", { name: "Start a new task" }),
       "Prepare the brief",
     );
     await user.click(within(composer).getByRole("button", { name: "Start thread" }));

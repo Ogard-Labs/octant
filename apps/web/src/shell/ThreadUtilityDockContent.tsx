@@ -6,6 +6,7 @@ import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import type { ShipClient } from "@octant/client-runtime/ship-client";
+import type { WorkFileListingClient } from "@octant/client-runtime/work-file-listing-client";
 import type { CodeCheckoutId, CodeRelativePath } from "@octant/contracts/code";
 import type { ChatThreadId } from "@octant/contracts/chat";
 import type { OctantMode } from "@octant/contracts/modes";
@@ -15,6 +16,7 @@ import {
   decodeBrowserThreadId,
   decodeCodeThreadId,
   decodeMentionableThreadId,
+  decodeWorkThreadId,
   decodeWorkspaceTab,
   decodeWorkspaceTabId,
   type SideChatSidecar,
@@ -32,6 +34,7 @@ import { ThreadPlanPanel } from "../plan/ThreadPlanPanel";
 import { ShipPanel } from "../ship/ShipPanel";
 import type { PickerGroup } from "@octant/domain";
 import type { ProviderController } from "../providers/useProviderController";
+import { WorkFilesPanel, type WorkFileOpenRequest } from "../work/WorkFilesPanel";
 import { DockCanvasTool } from "./DockCanvasTool";
 import { DockDocumentTool } from "./DockDocumentTool";
 import type { OctantHostBridge } from "./hostBridge";
@@ -85,6 +88,9 @@ export interface ThreadUtilityDockContentProps {
   readonly providerController?: ProviderController;
   readonly serverUrl?: string;
   readonly shipClient?: ShipClient;
+  readonly workFileListingClient?: WorkFileListingClient;
+  /** Opens one listed Work file in the preview surface. */
+  readonly onOpenWorkFile?: (request: WorkFileOpenRequest) => void;
   readonly sidecarThreadId?: ChatThreadId;
   readonly subject: ThreadUtilityDockSubject;
   readonly surface: RightUtilityDockSurfaceId;
@@ -171,8 +177,26 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
   }
 
   if (props.surface === "files") {
+    if (props.subject.mode === "work") {
+      return (
+        <WorkFilesPanel
+          {...(props.workFileListingClient === undefined
+            ? {}
+            : { client: props.workFileListingClient })}
+          {...(props.subject.projectId === undefined ? {} : { projectId: props.subject.projectId })}
+          {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+          threadId={decodeWorkThreadId(props.subject.threadId)}
+          {...(props.windowCapability === undefined
+            ? {}
+            : { windowCapability: props.windowCapability })}
+        />
+      );
+    }
     if (props.subject.mode !== "code") {
-      return unavailable("Files", "Files are not yet available for this thread type.");
+      return unavailable(
+        "Files",
+        "Files are not available for a Chat thread, which binds no folder.",
+      );
     }
     return (
       <Suspense

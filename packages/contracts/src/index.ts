@@ -10,6 +10,7 @@ export * from "./codeTestDefinitions";
 export * from "./context";
 export * from "./contextRpc";
 export * from "./workArtifacts";
+export * from "./workFileListing";
 export * from "./workBoard";
 export * from "./workOverview";
 export * from "./workPromotion";

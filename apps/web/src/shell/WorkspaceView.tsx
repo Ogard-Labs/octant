@@ -63,11 +63,9 @@ import type { GoalLoopClient } from "@octant/client-runtime/goal-loop-client";
 import type { UsageDashboardClient } from "@octant/client-runtime";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
 import { WorkResearchPanel } from "../work/WorkResearchPanel";
-import { ThreadGoalPanel } from "../goal/ThreadGoalPanel";
 import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
-import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
 import { ThreadChildRunStatusSlot } from "../agents/ThreadChildRunStatusSlot";
 import { useWorkResearchController } from "../work/useWorkResearchController";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
@@ -472,8 +470,13 @@ export function WorkspaceView(props: WorkspaceViewProps) {
     () =>
       activeSurface === undefined
         ? undefined
-        : workspaceThreadTabFromSurface(activeSurface, contextProjectId, activeCodeThreadTitle),
-    [activeCodeThreadTitle, activeSurface, contextProjectId],
+        : workspaceThreadTabFromSurface(
+            activeSurface,
+            contextProjectId,
+            activeCodeThreadTitle,
+            contextProject?.name,
+          ),
+    [activeCodeThreadTitle, activeSurface, contextProjectId, contextProject?.name],
   );
 
   function activateThreadTab(tab: WorkspaceThreadTab) {
@@ -1089,8 +1092,8 @@ function renderNonCodeTab(
     if (workThreadClient === undefined) {
       return (
         <ShellState
-          eyebrow="Work thread"
-          message="Work thread service is unavailable in this window."
+          eyebrow="Task"
+          message="Work is unavailable in this window."
           state="warning"
           title={tab.title}
         />
@@ -1114,6 +1117,16 @@ function renderNonCodeTab(
               ? {}
               : { onOpenAgents: props.onOpenAgents })}
             {...(initialThread === undefined ? {} : { initialThread })}
+            {...(props.goalClient === undefined ? {} : { goalClient: props.goalClient })}
+            {...(props.goalLoopClient === undefined
+              ? {}
+              : { goalLoopClient: props.goalLoopClient })}
+            {...(props.usageDashboardClient === undefined
+              ? {}
+              : { usageDashboardClient: props.usageDashboardClient })}
+            {...(props.onOpenUsageDashboard === undefined
+              ? {}
+              : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
             projects={props.projects}
             tab={tab}
             threadClient={workThreadClient}
@@ -1199,25 +1212,6 @@ function renderNonCodeTab(
                   ) : undefined
                 }
               />
-              {displayReady ? (
-                <>
-                  <ThreadGoalPanel
-                    {...(props.goalClient === undefined ? {} : { client: props.goalClient })}
-                    {...(props.goalLoopClient === undefined
-                      ? {}
-                      : { loopClient: props.goalLoopClient })}
-                    threadId={String(tab.threadId)}
-                  />
-                  <ThreadUsagePanel
-                    client={props.usageDashboardClient}
-                    subjectType="work-thread"
-                    subjectId={String(tab.threadId)}
-                    {...(props.onOpenUsageDashboard === undefined
-                      ? {}
-                      : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
-                  />
-                </>
-              ) : null}
             </ThreadActivityPictureInPicture>
           </WorkThreadEnvironment>
         )}

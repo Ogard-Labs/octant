@@ -115,8 +115,7 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
       },
       (error: unknown) => {
         if (!active) return;
-        const message =
-          error instanceof Error ? error.message : "The Work Thread Board is unavailable.";
+        const message = error instanceof Error ? error.message : "The task board is unavailable.";
         setBoard((previous) => {
           const view = lastUsefulView(previous);
           return view === undefined
@@ -147,9 +146,9 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
   ).length;
 
   return (
-    <Surface ariaLabel="Work Thread Board" className="code-board" measure="wide">
+    <Surface ariaLabel="Task board" className="code-board" measure="wide">
       <SurfaceHeader
-        subtitle="Your Work threads by status."
+        subtitle="Your tasks by status."
         title="Board"
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
       />
@@ -392,12 +391,7 @@ function WorkBoardBody(props: {
   if (props.board.status === "loading") {
     return (
       <div className="code-board__body">
-        <ShellState
-          eyebrow="Work Thread Board"
-          message="Loading the board."
-          state="loading"
-          title="Loading"
-        />
+        <ShellState eyebrow="Tasks" message="Loading the board." state="loading" title="Loading" />
       </div>
     );
   }
@@ -435,12 +429,10 @@ function WorkBoardBody(props: {
     cards.length === 0 ? (
       <div className="code-board__note" role="status">
         <span className="oct-row-label">
-          {hasActiveFilters ? "No Work threads match these filters" : "No Work threads yet"}
+          {hasActiveFilters ? "No tasks match these filters" : "No tasks yet"}
         </span>
         <span>
-          {hasActiveFilters
-            ? activeFilterSummary(props.filters)
-            : "Create a Work thread to see it here."}
+          {hasActiveFilters ? activeFilterSummary(props.filters) : "Create a task to see it here."}
         </span>
         {hasActiveFilters ? (
           <OctantButton onClick={props.onResetFilters} size="sm" type="button" variant="ghost">

@@ -191,6 +191,7 @@ const PROJECT_SORT_ITEMS: ReadonlyArray<OctantMenuItem> = [
 export interface ProjectSidebarSectionProps {
   readonly activeProjectId?: ProjectId;
   readonly activeThreadId?: string;
+  readonly openThreadIds?: ReadonlyArray<string>;
   readonly archivedProjects: ReadonlyArray<ProjectSummary>;
   readonly availabilityByProject: ReadonlyMap<ProjectId, ProjectAvailability>;
   /**
@@ -467,6 +468,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
         key={label}
         {...(props.activeProjectId === undefined ? {} : { activeProjectId: props.activeProjectId })}
         {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
+        {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
         availabilityByProject={props.availabilityByProject}
         collapsedProjects={collapsedProjects}
         {...(props.contextHealthByProject === undefined
@@ -568,6 +570,8 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
       {showFilteredThreadsEmpty ? null : nestThreads && activityView ? (
         <ActivityThreadList
           {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
+          {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
+          {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
           {...(filteringThreads && threadsReady
             ? { emptyLabel: FILTERED_THREADS_EMPTY_MESSAGE }
             : {})}
@@ -637,6 +641,7 @@ function projectThreadListId(projectId: ProjectId): string {
 function ProjectGroup(props: {
   readonly activeProjectId?: ProjectId;
   readonly activeThreadId?: string;
+  readonly openThreadIds?: ReadonlyArray<string>;
   readonly availabilityByProject: ReadonlyMap<ProjectId, ProjectAvailability>;
   readonly collapsedProjects: ReadonlySet<ProjectId>;
   readonly contextHealthByProject?: ReadonlyMap<ProjectId, ContextHealth>;
@@ -924,6 +929,7 @@ function ActivityViewToggle(props: { readonly enabled: boolean; readonly onToggl
 
 function ActivityThreadList(props: {
   readonly activeThreadId?: string;
+  readonly openThreadIds?: ReadonlyArray<string>;
   readonly emptyLabel?: string;
   readonly groups: ReturnType<typeof buildSidebarActivityView>["groups"];
   readonly onSelectThread: (threadId: string) => void;
@@ -962,6 +968,7 @@ function ActivityThreadList(props: {
 
 function ActivityThreadButton(props: {
   readonly activeThreadId?: string;
+  readonly openThreadIds?: ReadonlyArray<string>;
   readonly onSelectThread: (threadId: string) => void;
   readonly thread: SidebarActivityThread;
 }) {

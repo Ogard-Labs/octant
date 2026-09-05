@@ -87,6 +87,10 @@ import {
 } from "./checkpoint/threadCheckpointPorts";
 import { ThreadCheckpointService } from "./checkpoint/threadCheckpointService";
 import { createWorkMutationRouteHandler } from "./workMutationRoutes";
+import { createWorkFileListingRouteHandler } from "./workFileListingRoutes";
+import { WorkFileListingService } from "./work/workFileListingService";
+import { WorkTurnFileObserver } from "./work/workTurnFileObserver";
+import { WorkFilePreviewRefs } from "./work/workFilePreviewRefs";
 import { createWorkOverviewRouteHandler } from "./workOverviewRoutes";
 import { WorkArtifactProjection } from "./work/workArtifactProjection";
 import { liveWorkFilesystem } from "./work/workFilesystemPort";
@@ -4154,6 +4158,7 @@ export function startOctantServer(
     });
     const workTurnService = new WorkTurnService({
       persistence,
+      turnFileObserver: new WorkTurnFileObserver(),
       threads: workThreadService,
       peekIssueContextFramed: peekCreateFromIssueFramed,
       consumeIssueContextFramed: consumeCreateFromIssueFramed,
@@ -4749,6 +4754,37 @@ export function startOctantServer(
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    // Minted by the folder listing, read by the preview target resolver. It
+    // holds no authority of its own: a resolved path is still confined to the
+    // Project root, and the preview route still requires that Project to be the
+    // window's active one.
+    const workFilePreviewRefs = new WorkFilePreviewRefs({
+      hostId: previewHostId,
+      uuid: randomUUID,
+    });
+    const workFileListingRoutes = createWorkFileListingRouteHandler({
+      service: new WorkFileListingService({
+        filesystem: liveWorkFilesystem,
+        previewRefs: workFilePreviewRefs,
+        // The same projection the mutation service writes to, so a file the
+        // panel calls Work's own is one this host recorded writing.
+        artifactsForProject: (projectId) =>
+          [...workArtifactProjection.snapshot().values()].filter(
+            (entry) => String(entry.projectId) === String(projectId),
+          ),
+        // A provider writes with its own tools and never calls the mutation
+        // service, so the artifact projection alone would show most of a
+        // Project's real output as files the folder merely happened to hold.
+        // The turns' own observations are the other half of that answer.
+        pathsWrittenByTurns: (projectId) =>
+          workTurnProjection
+            .listForProject(projectId)
+            .flatMap((turn) => turn.wroteFiles?.paths ?? []),
+      }),
+      persistence,
+      projects: projectService,
+      windowAuthorityStore,
+    });
     const imageRoutes = createImageRouteHandler({
       jobs: imageJobService,
       listInstances: () => persistence.readProviderInstances(),
@@ -4948,6 +4984,15 @@ export function startOctantServer(
       textBudget: { maxLinesPerChunk: 200, maxBytesPerChunk: 64 * 1024 },
       targetResolver: {
         async resolve({ projectId, opaqueRef, kind }) {
+          // An ordinary file in a Work Project's bound folder, opened from the
+          // Files tool. The token was minted by the listing that showed it, so
+          // the renderer never names a path; a token this host does not know
+          // resolves to nothing rather than to a guess.
+          if (kind === "file") {
+            const relativePath = workFilePreviewRefs.resolve(projectId, opaqueRef);
+            if (relativePath === undefined) return { ok: false, code: "not-found" };
+            return { ok: true, relativePath, displayName: relativePath };
+          }
           if (kind !== "artifact-version") return { ok: false, code: "not-found" };
           for (const entry of workArtifactProjection.snapshot().values()) {
             if (
@@ -6181,6 +6226,7 @@ export function startOctantServer(
       (await workTurnRoutes(request)) ??
       (await workOverviewRoutes(request)) ??
       (await workMutationRoutes(request)) ??
+      (await workFileListingRoutes(request)) ??
       (await previewRoutes(request)) ??
       (await canvasRoutes(request)) ??
       (await imageRoutes(request)) ??
