@@ -324,6 +324,7 @@ import { AgentRunWorkspaceService } from "./agentRun/agentRunWorkspaceService";
 import type { AgentRunChildWorktreePort } from "./agentRun/agentRunWorkspaceService";
 import { AgentRunSettingsStore } from "./agentRun/agentRunSettingsStore";
 import { createAgentRunSettingsRouteHandler } from "./agentRun/agentRunSettingsRoutes";
+import type { AgentRunRouteDependencies } from "./agentRun/agentRunRoutes";
 import {
   createAgentRunSessionRuntime,
   createRecordedAgentRunContextSnapshotPort,
@@ -542,6 +543,12 @@ import {
   type NativeHarnessComposition,
 } from "./harness/nativeHarnessComposition";
 import { createNativeHarnessShell } from "./harness/nativeHarnessShell";
+import { createNativeHarnessDelegatePort } from "./harness/nativeHarnessDelegatePort";
+import { NativeHarnessRouter } from "./harness/nativeHarnessRouter";
+import { NativeHarnessRoutingStore } from "./harness/nativeHarnessRoutingStore";
+import { createNativeHarnessRoutingRouteHandler } from "./harness/nativeHarnessRoutingRoutes";
+import { NativeHarnessSessionStore } from "./harness/nativeHarnessSessionStore";
+import { createNativeHarnessSessionRouteHandler } from "./harness/nativeHarnessSessionRoutes";
 import { fetchPublicUrl, PublicFetchRefused } from "./harness/nativeHarnessWebFetch";
 import {
   ServerBrowserAuthorityResolver,
@@ -602,6 +609,7 @@ import {
   isAgentRunActiveStatus,
   isImageProfileDriverKind,
   isNativeHarnessDriverKind,
+  nativeHarnessJobForRole,
   THREAD_MENTION_UNREADABLE_CONTEXT,
   listHosts,
   type PreviewPosture,
@@ -1496,6 +1504,12 @@ export function startOctantServer(
       connection: persistence.connection,
     });
     agentRunPersistence.reconcileAfterRestart();
+    // The native harness is composed once the research router and plan
+    // service exist; every consumer here reads these per turn or per request,
+    // long after boot, never at construction.
+    let nativeHarnessComposition: NativeHarnessComposition | undefined;
+    let nativeHarnessRouter: NativeHarnessRouter | undefined;
+    let nativeHarnessSessions: NativeHarnessSessionStore | undefined;
     const agentRunSettingsStore = new AgentRunSettingsStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -1542,6 +1556,7 @@ export function startOctantServer(
     const agentRunSessionSupervisor = new AgentRunSessionSupervisor({
       port: createAgentRunSessionRuntime({
         capacityScheduler,
+        appManagedTools: (input) => nativeHarnessComposition?.forAgentRun(input),
         // `configuredDriverOptions` is declared later in this scope; the closure
         // only runs when a child starts, long after boot, so the reference is safe.
         resolveDriver: (providerInstanceId) => {
@@ -1627,8 +1642,35 @@ export function startOctantServer(
       approvals: { isCurrent: () => true },
       processes: agentRunProcessSupervisor,
     });
-    const agentRunRoutes = createAgentRunRouteHandler({
+    const agentRunRouteDependencies: AgentRunRouteDependencies = {
       windowAuthorityStore,
+      // A child's model comes from its role's slot when one is configured;
+      // the decision is journaled on the parent's harness session so a
+      // switch is visible, and an unroutable slot falls back to inheriting.
+      routeOverride: ({ parent, role }) => {
+        if (nativeHarnessRouter === undefined) return undefined;
+        const decision = nativeHarnessRouter.resolve({
+          job: nativeHarnessJobForRole(role),
+          ...(parent.parentRoute.projectId === undefined
+            ? {}
+            : { projectId: decodeProjectId(parent.parentRoute.projectId) }),
+        });
+        nativeHarnessSessions?.recordRouteDecision(
+          String(parent.workspaceParent.threadId),
+          decision,
+        );
+        if (decision.kind === "unroutable") return undefined;
+        return {
+          providerInstanceId: decision.candidate.providerInstanceId,
+          modelId: decision.candidate.modelId,
+          ...(decision.candidate.reasoning === undefined
+            ? {}
+            : { reasoning: decision.candidate.reasoning }),
+          ...(parent.parentRoute.projectId === undefined
+            ? {}
+            : { projectId: parent.parentRoute.projectId }),
+        };
+      },
       persistence: agentRunPersistence,
       liveConversations: agentRunLiveConversations,
       orchestration: agentRunOrchestration,
@@ -1790,7 +1832,8 @@ export function startOctantServer(
         },
       },
       uuid: randomUUID,
-    });
+    };
+    const agentRunRoutes = createAgentRunRouteHandler(agentRunRouteDependencies);
     /**
      * Synchronous per-candidate runtime facts for child pool routing,
      * mirroring ChatService's probe semantics but reading only the already
@@ -2585,9 +2628,6 @@ export function startOctantServer(
     projectPullRequestCadence.start();
     let codeOperationRuntime = options.codeOperationRuntime;
     const providerDataDirectory = persistence.dataDirectory;
-    // Composed once the research router exists; every consumer below reads it
-    // per turn, never at construction.
-    let nativeHarnessComposition: NativeHarnessComposition | undefined;
     const providerRuntimeRegistry =
       options.providerRuntimeRegistry ??
       new ProviderRuntimeRegistry({
@@ -3769,62 +3809,158 @@ export function startOctantServer(
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
-    {
-      // The harness `bash` tool runs through the same owned-process-group,
-      // Seatbelt-confined port repository tests use, with its own receipt and
-      // script directories so a command's leftovers never mix with a test's.
-      const harnessWorkDirectory = join(providerDataDirectory, "harness", "work");
-      mkdirSync(harnessWorkDirectory, { recursive: true, mode: 0o700 });
-      const harnessProcessPort = new RepositoryTestProcessPort({
-        receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
-        temporaryDirectory: harnessWorkDirectory,
-      });
-      nativeHarnessComposition = createNativeHarnessComposition({
-        authority: createNativeHarnessAuthority({
-          hostId: deriveToolHostId(providerDataDirectory),
+    // The harness `bash` tool runs through the same owned-process-group,
+    // Seatbelt-confined port repository tests use, with its own receipt and
+    // script directories so a command's leftovers never mix with a test's.
+    const harnessWorkDirectory = join(providerDataDirectory, "harness", "work");
+    mkdirSync(harnessWorkDirectory, { recursive: true, mode: 0o700 });
+    const harnessProcessPort = new RepositoryTestProcessPort({
+      receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
+      temporaryDirectory: harnessWorkDirectory,
+    });
+    const nativeHarnessRoutingStore = new NativeHarnessRoutingStore({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      clock: () => new Date().toISOString(),
+    });
+    nativeHarnessRouter = new NativeHarnessRouter({
+      store: nativeHarnessRoutingStore,
+      isReady: (candidate) =>
+        agentRunRouteDependencies.providerReadiness.isReady({
+          providerInstanceId: String(candidate.providerInstanceId),
+          modelId: String(candidate.modelId),
+        }),
+    });
+    const nativeHarnessRouterLive = nativeHarnessRouter;
+    nativeHarnessSessions = new NativeHarnessSessionStore({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      clock: () => new Date().toISOString(),
+    });
+    const nativeHarnessSessionsLive = nativeHarnessSessions;
+    const nativeHarnessRoutingRoutes = createNativeHarnessRoutingRouteHandler({
+      windowAuthorityStore,
+      store: nativeHarnessRoutingStore,
+    });
+    const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
+      windowAuthorityStore,
+      store: nativeHarnessSessionsLive,
+      authorizeThread: ({ threadId, windowId }) =>
+        authorizeAgentRunParentThread({
           persistence,
-          workThreads: workThreadProjection,
-          readThreadTaint: (threadId) =>
-            readThreadExternalContentTaint(persistence.connection, threadId),
+          workThreadProjection,
+          parentThreadId: threadId as never,
+          windowId,
         }),
-        isHarnessProvider: (providerInstanceId) => {
-          const instance = persistence.readProviderInstance(providerInstanceId);
-          return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
-        },
-        plans: planService,
-        shell: createNativeHarnessShell({
-          process: harnessProcessPort,
-          scriptDirectory: harnessWorkDirectory,
-        }),
-        webSearch:
-          persistence.readChatSettings()?.settings.searxngBaseUrl === undefined
-            ? undefined
-            : async (input) => {
-                const settings = persistence.readChatSettings()?.settings;
-                if (settings?.searxngBaseUrl === undefined) return [];
-                const found = await new SearxngClient({ baseUrl: settings.searxngBaseUrl }).search(
-                  input,
-                );
-                return found.results.map((result) => ({
-                  title: result.title,
-                  url: result.url,
-                  snippet: result.snippet,
-                }));
-              },
-        webFetch: async (input) => {
-          try {
-            return await fetchPublicUrl(input);
-          } catch (error) {
-            if (error instanceof PublicFetchRefused) return { refused: error.reason };
-            throw error;
-          }
-        },
-        contextHarness,
-        recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
-        uuid: randomUUID,
-        clock: () => new Date().toISOString(),
-      });
-    }
+      previewFollowUp: ({ view, suggestion }) => {
+        if (suggestion.target === "same-thread") {
+          return { kind: "same-thread", threadId: view.session.threadId };
+        }
+        if (suggestion.target === "new-thread") {
+          return {
+            kind: "new-thread",
+            mode: view.session.mode,
+            ...(view.session.projectId === undefined ? {} : { projectId: view.session.projectId }),
+            title: suggestion.title,
+          };
+        }
+        if (view.session.mode !== "code" || view.session.projectId === undefined) return undefined;
+        return {
+          kind: "new-worktree",
+          mode: "code",
+          projectId: view.session.projectId,
+          title: suggestion.title,
+        };
+      },
+    });
+    nativeHarnessComposition = createNativeHarnessComposition({
+      delegate: (scope) =>
+        createNativeHarnessDelegatePort(
+          {
+            admission: {
+              persistence: agentRunPersistence,
+              orchestration: agentRunOrchestration,
+              settings: agentRunSettingsStore,
+              providerReadiness: agentRunRouteDependencies.providerReadiness,
+              uuid: randomUUID,
+              authorizeCreation: agentRunRouteDependencies.authorizeCreation,
+              nativeEvidence: ({ parent }) =>
+                agentRunRouteDependencies.nativeEvidence?.({ parent }) ?? {
+                  claimedNativeSupport: "unsupported",
+                  workspace: false,
+                  authority: false,
+                  observability: false,
+                  cancellation: false,
+                  steering: false,
+                  recovery: false,
+                },
+              ...(agentRunRouteDependencies.workspace === undefined
+                ? {}
+                : { workspace: agentRunRouteDependencies.workspace }),
+              ...(agentRunRouteDependencies.poolRouting === undefined
+                ? {}
+                : { poolRouting: agentRunRouteDependencies.poolRouting }),
+              ...(agentRunRouteDependencies.parentContext === undefined
+                ? {}
+                : { parentContext: agentRunRouteDependencies.parentContext }),
+            },
+            orchestration: agentRunOrchestration,
+            persistence: agentRunPersistence,
+            router: nativeHarnessRouterLive,
+            sessions: nativeHarnessSessionsLive,
+            uuid: randomUUID,
+          },
+          scope,
+        ),
+      authority: createNativeHarnessAuthority({
+        hostId: deriveToolHostId(providerDataDirectory),
+        persistence,
+        workThreads: workThreadProjection,
+        readThreadTaint: (threadId) =>
+          readThreadExternalContentTaint(persistence.connection, threadId),
+      }),
+      isHarnessProvider: (providerInstanceId) => {
+        const instance = persistence.readProviderInstance(providerInstanceId);
+        return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
+      },
+      plans: planService,
+      shell: createNativeHarnessShell({
+        process: harnessProcessPort,
+        scriptDirectory: harnessWorkDirectory,
+      }),
+      webSearch:
+        persistence.readChatSettings()?.settings.searxngBaseUrl === undefined
+          ? undefined
+          : async (input) => {
+              const settings = persistence.readChatSettings()?.settings;
+              if (settings?.searxngBaseUrl === undefined) return [];
+              const found = await new SearxngClient({ baseUrl: settings.searxngBaseUrl }).search(
+                input,
+              );
+              return found.results.map((result) => ({
+                title: result.title,
+                url: result.url,
+                snippet: result.snippet,
+              }));
+            },
+      webFetch: async (input) => {
+        try {
+          return await fetchPublicUrl(input);
+        } catch (error) {
+          if (error instanceof PublicFetchRefused) return { refused: error.reason };
+          throw error;
+        }
+      },
+      contextHarness,
+      hostId: deriveToolHostId(providerDataDirectory),
+      readThreadTaint: (threadId) =>
+        readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+      recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
     let zenAssistantTools: ZenAssistantTools | undefined;
     let threadDialogueService: ThreadDialogueService | undefined;
     // Composed after the Canvas service exists, the same way Zen's tools are.
@@ -3907,7 +4043,7 @@ export function startOctantServer(
       resolveAppManagedTools: ({ windowId, thread, threadMentionIds, coordinationDepth }) =>
         taintAppManagedToolResults({
           tools: combineAppManagedToolSets(
-            nativeHarnessComposition?.forChat(thread),
+            nativeHarnessComposition?.forChat({ thread, windowId }),
             zenAssistantTools?.forThread(windowId, thread),
             threadDialogueService?.forThread({
               windowId,
@@ -6272,6 +6408,8 @@ export function startOctantServer(
       (await projectRoutes(request)) ??
       (await agentRunRoutes(request)) ??
       (await agentRunSettingsRoutes(request)) ??
+      (await nativeHarnessRoutingRoutes(request)) ??
+      (await nativeHarnessSessionRoutes(request)) ??
       (await githubRoutes(request)) ??
       (await integrationRoutes(request)) ??
       (await githubCloneRoutes(request)) ??

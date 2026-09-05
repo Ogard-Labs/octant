@@ -6,6 +6,7 @@ import {
   nativeHarnessToolCapabilityId,
   type NativeHarnessBashArguments,
   type NativeHarnessContextRemaining,
+  type NativeHarnessDelegateArguments,
   type NativeHarnessEditArguments,
   type NativeHarnessGlobArguments,
   type NativeHarnessGrepArguments,
@@ -57,6 +58,38 @@ export interface NativeHarnessWebSearchResult {
   readonly snippet: string;
 }
 
+export type NativeHarnessDelegateStart =
+  | { readonly status: "accepted"; readonly runId: string; readonly lifecycleStatus: string }
+  | { readonly status: "refused"; readonly reason: string; readonly message?: string };
+
+export interface NativeHarnessDelegateChild {
+  readonly runId: string;
+  readonly role: string;
+  readonly task: string;
+  readonly lifecycleStatus: string;
+  readonly resultAvailable: boolean;
+}
+
+export type NativeHarnessDelegateCollect =
+  | { readonly status: "completed"; readonly text: string; readonly truncated: boolean }
+  | { readonly status: "not-ready"; readonly lifecycleStatus: string }
+  | { readonly status: "refused"; readonly reason: string };
+
+/**
+ * Delegation as the tool set sees it. The port owns admission: role→slot
+ * routing, the creation posture, authority clamps, and capacity all happen
+ * behind it, and a refusal comes back as a value the model can read.
+ */
+export interface NativeHarnessDelegatePort {
+  start(input: {
+    readonly role: "research" | "implementation" | "review" | "custom";
+    readonly task: string;
+    readonly includeParentContext: boolean;
+  }): Promise<NativeHarnessDelegateStart>;
+  status(): Promise<ReadonlyArray<NativeHarnessDelegateChild>>;
+  collect(runId: string): Promise<NativeHarnessDelegateCollect>;
+}
+
 export interface NativeHarnessWebFetchResult {
   readonly status: number;
   readonly contentType?: string;
@@ -93,6 +126,7 @@ export interface NativeHarnessToolPorts {
     readonly question: string;
     readonly signal?: AbortSignal;
   }) => Promise<string | undefined>;
+  readonly delegate?: NativeHarnessDelegatePort;
 }
 
 export interface CreateNativeHarnessToolsOptions {
@@ -221,6 +255,8 @@ function isOffered(
       return ports.journalLookup !== undefined;
     case "second-opinion":
       return ports.secondOpinion !== undefined;
+    case "delegate":
+      return ports.delegate !== undefined;
   }
 }
 
@@ -315,6 +351,25 @@ async function execute(
         ...(signal === undefined ? {} : { signal }),
       });
       return answer === undefined ? refused("advisor-unavailable") : ok({ answer });
+    }
+    case "delegate": {
+      const input = args as NativeHarnessDelegateArguments;
+      const port = ports.delegate!;
+      if (input.operation === "start") {
+        const started = await port.start({
+          role: input.role,
+          task: input.task,
+          includeParentContext: input.includeParentContext === true,
+        });
+        return started.status === "accepted"
+          ? ok(started)
+          : refused(started.reason, started.message);
+      }
+      if (input.operation === "status") {
+        return ok({ children: await port.status() });
+      }
+      const collected = await port.collect(input.runId);
+      return collected.status === "refused" ? refused(collected.reason) : ok(collected);
     }
   }
 }

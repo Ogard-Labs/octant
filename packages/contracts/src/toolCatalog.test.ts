@@ -15,6 +15,7 @@ describe("closed tool catalog", () => {
       "computer-use",
       "harness-bash",
       "harness-context-remaining",
+      "harness-delegate",
       "harness-edit",
       "harness-glob",
       "harness-grep",

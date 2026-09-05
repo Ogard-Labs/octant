@@ -349,7 +349,8 @@ function resolveThreadElevation(input: {
     if (
       input.entry.approvalClass === "network-access" ||
       input.entry.approvalClass === "project-file-reads" ||
-      input.entry.approvalClass === "thread-local"
+      input.entry.approvalClass === "thread-local" ||
+      input.entry.approvalClass === "child-agent-creation"
     ) {
       // Browser network under approval-gated Code may proceed when the surface
       // already treated the action as not-required; still prompt for external

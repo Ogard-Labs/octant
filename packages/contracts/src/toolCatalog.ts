@@ -43,6 +43,12 @@ export const ToolApprovalClass = Schema.Literal(
   "project-file-reads",
   /** Writes that never leave the thread's journal: task lists, harness reads. */
   "thread-local",
+  /**
+   * Starting a child run. Gated by the creation posture, not by the thread's
+   * access posture: a child can never hold more than its parent, so the
+   * question is whether the user lets children start at all.
+   */
+  "child-agent-creation",
 );
 export type ToolApprovalClass = typeof ToolApprovalClass.Type;
 
@@ -216,6 +222,12 @@ const NATIVE_HARNESS_TOOL_POLICY: Readonly<
     modes: ["chat", "work", "code"],
     requiredCapabilityClass: "instructions",
     approvalClass: "thread-local",
+    irreversibleUnderTaint: false,
+  },
+  delegate: {
+    modes: ["chat", "work", "code"],
+    requiredCapabilityClass: "agents",
+    approvalClass: "child-agent-creation",
     irreversibleUnderTaint: false,
   },
 };

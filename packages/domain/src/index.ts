@@ -117,3 +117,4 @@ export * from "./canvasShareAccessLogPolicy";
 export * from "./canvasBoardPolicy";
 export * from "./workspacePresetPolicy";
 export * from "./appUpdatePolicy";
+export * from "./nativeHarnessRoutingPolicy";

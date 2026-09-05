@@ -1,12 +1,19 @@
 import {
   decodeNativeHarnessContextRemaining,
+  type AgentRun,
+  type AgentRunAuthority,
   type ChatThread,
   type CodeThread,
   type ContextSubjectRef,
   type NativeHarnessContextRemaining,
+  type NativeHarnessSlotCandidate,
+  type OctantMode,
+  type ProjectId,
   type ProviderInstanceId,
+  type ToolActionAuthority,
   type WorkThread,
 } from "@octant/contracts";
+import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { ContextHarnessService } from "../context/contextHarnessService";
 import type {
   ExternalContentIngestionResult,
@@ -20,6 +27,7 @@ import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
 import { createNativeHarnessTodoPort } from "./nativeHarnessTodo";
 import {
   createNativeHarnessTools,
+  type NativeHarnessDelegatePort,
   type NativeHarnessShellPort,
   type NativeHarnessToolPorts,
 } from "./nativeHarnessTools";
@@ -34,6 +42,16 @@ export interface NativeHarnessCompositionOptions {
   readonly webSearch?: NativeHarnessToolPorts["webSearch"];
   readonly webFetch?: NativeHarnessToolPorts["webFetch"];
   readonly contextHarness?: Pick<ContextHarnessService, "inspect">;
+  /** Delegation for a lead thread; absent on a host that cannot admit children. */
+  readonly delegate?: (scope: {
+    readonly parentThreadId: string;
+    readonly windowId: string;
+    readonly mode: OctantMode;
+    readonly projectId?: ProjectId | undefined;
+    readonly lead: NativeHarnessSlotCandidate;
+  }) => NativeHarnessDelegatePort;
+  readonly hostId: ToolActionAuthority["hostId"];
+  readonly readThreadTaint: (threadId: string) => boolean;
   readonly recordExternalContentIngestion: (
     input: RecordExternalContentIngestionInput,
   ) => ExternalContentIngestionResult;
@@ -42,14 +60,25 @@ export interface NativeHarnessCompositionOptions {
 }
 
 export interface NativeHarnessComposition {
-  readonly forChat: (thread: ChatThread) => AppManagedToolSet | undefined;
+  readonly forChat: (input: {
+    readonly thread: ChatThread;
+    readonly windowId: string;
+  }) => AppManagedToolSet | undefined;
   readonly forWork: (input: {
     readonly thread: WorkThread;
     readonly projectRoot: string;
+    readonly windowId: string;
   }) => AppManagedToolSet | undefined;
   readonly forCode: (input: {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
+    readonly windowId: string;
+  }) => AppManagedToolSet | undefined;
+  /** A managed child's tools, from its own clamped authority; it never delegates further. */
+  readonly forAgentRun: (input: {
+    readonly run: AgentRun;
+    readonly authority: AgentRunAuthority;
+    readonly projectRoot: string;
   }) => AppManagedToolSet | undefined;
 }
 
@@ -108,8 +137,24 @@ export function createNativeHarnessComposition(
       recordExternalContentIngestion: options.recordExternalContentIngestion,
       uuid: options.uuid,
     });
+  const leadOf = (thread: {
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly modelId: string;
+  }): NativeHarnessSlotCandidate => ({
+    hostId: options.hostId as never,
+    providerInstanceId: thread.providerInstanceId,
+    modelId: thread.modelId as never,
+  });
+  const delegateFor = (scope: {
+    readonly parentThreadId: string;
+    readonly windowId: string;
+    readonly mode: OctantMode;
+    readonly projectId?: ProjectId | undefined;
+    readonly lead: NativeHarnessSlotCandidate;
+  }): Pick<NativeHarnessToolPorts, "delegate"> =>
+    options.delegate === undefined ? {} : { delegate: options.delegate(scope) };
   return {
-    forChat: (thread) => {
+    forChat: ({ thread, windowId }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
       return compose({
@@ -117,6 +162,13 @@ export function createNativeHarnessComposition(
         mode: "chat",
         ports: {
           ...shared(threadId),
+          ...delegateFor({
+            parentThreadId: threadId,
+            windowId,
+            mode: "chat",
+            projectId: thread.projectId,
+            lead: leadOf(thread),
+          }),
           // Research is the user's grant for a Chat thread to reach the web.
           ...(thread.researchEnabled && options.webSearch !== undefined
             ? { webSearch: options.webSearch }
@@ -132,7 +184,7 @@ export function createNativeHarnessComposition(
         },
       });
     },
-    forWork: ({ thread, projectRoot }) => {
+    forWork: ({ thread, projectRoot, windowId }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
       return compose({
@@ -140,12 +192,19 @@ export function createNativeHarnessComposition(
         mode: "work",
         ports: {
           ...shared(threadId),
+          ...delegateFor({
+            parentThreadId: threadId,
+            windowId,
+            mode: "work",
+            projectId: thread.projectId,
+            lead: leadOf(thread),
+          }),
           filesystem: new NativeHarnessFileSystem({ root: projectRoot }),
           ...(options.webSearch === undefined ? {} : { webSearch: options.webSearch }),
         },
       });
     },
-    forCode: ({ thread, checkoutRoot }) => {
+    forCode: ({ thread, checkoutRoot, windowId }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
       return compose({
@@ -153,10 +212,75 @@ export function createNativeHarnessComposition(
         mode: "code",
         ports: {
           ...shared(threadId),
+          ...delegateFor({
+            parentThreadId: threadId,
+            windowId,
+            mode: "code",
+            projectId: thread.projectId,
+            lead: leadOf(thread),
+          }),
           filesystem: new NativeHarnessFileSystem({ root: checkoutRoot }),
           ...(options.shell === undefined ? {} : { shell: options.shell }),
           ...(options.webSearch === undefined ? {} : { webSearch: options.webSearch }),
         },
+      });
+    },
+    forAgentRun: ({ run, authority, projectRoot }) => {
+      const target = run.routingReceipt.selectedFallback ?? {
+        providerInstanceId: run.routingReceipt.selectedProviderInstanceId,
+      };
+      if (!options.isHarnessProvider(target.providerInstanceId)) return undefined;
+      const mode = run.routingReceipt.mode;
+      const runId = String(run.id);
+      const projectId =
+        run.workspaceReceipt.kind === "chat-virtual" ? undefined : run.workspaceReceipt.projectId;
+      if (projectId === undefined) return undefined;
+      // A child's authority is the run's own clamped grant, not a thread's
+      // posture: the run record is what admission decided, so it is what
+      // every tool call is judged against.
+      const granted: ToolActionAuthority = {
+        hostId: options.hostId,
+        mode,
+        projectId,
+        providerInstanceId: target.providerInstanceId,
+        extension: { kind: "core" },
+      } as ToolActionAuthority;
+      const service = new ToolCallAuthorityService({
+        resolveGrantedAuthority: () => granted,
+        resolveLiveFacts: () => ({
+          providerAppManagedTools: "supported",
+          host: { computerUseEnabled: false },
+          executionPolicy: authority.executionPolicy,
+          approvalSatisfied: authority.executionPolicy === "full-access",
+          externalContentIngested: options.readThreadTaint(runId),
+        }),
+      });
+      const tools = createNativeHarnessTools({
+        threadId: runId,
+        mode,
+        authority: service,
+        resolveAuthority: () => granted,
+        ports: {
+          ...(authority.filesystem && mode !== "chat"
+            ? { filesystem: new NativeHarnessFileSystem({ root: projectRoot }) }
+            : {}),
+          ...(authority.shell && mode === "code" && options.shell !== undefined
+            ? { shell: options.shell }
+            : {}),
+          ...(authority.network && options.webFetch !== undefined
+            ? { webFetch: options.webFetch }
+            : {}),
+          ...(authority.network && options.webSearch !== undefined
+            ? { webSearch: options.webSearch }
+            : {}),
+        },
+        uuid: options.uuid,
+      });
+      return taintAppManagedToolResults({
+        tools,
+        threadId: runId,
+        recordExternalContentIngestion: options.recordExternalContentIngestion,
+        uuid: options.uuid,
       });
     },
   };

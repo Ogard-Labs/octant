@@ -160,6 +160,7 @@ export interface WorkTurnServiceDependencies {
   readonly resolveAppManagedTools?: (input: {
     readonly thread: WorkThread;
     readonly projectRoot: string;
+    readonly windowId: WindowId;
   }) => AppManagedToolSet | undefined;
   /**
    * Watches the bound folder for the length of a turn. Absent on a host that
@@ -425,6 +426,7 @@ export class WorkTurnService {
     const launch = this.#runTurn({
       command,
       ...(thread === undefined ? {} : { thread }),
+      windowId: authenticatedWindowId,
       providerSessionId,
       projectRoot,
       driver,
@@ -553,6 +555,7 @@ export class WorkTurnService {
   async #runTurn(input: {
     readonly command: ReturnType<typeof decodeStartWorkThreadTurnCommand>;
     readonly thread?: WorkThread;
+    readonly windowId: WindowId;
     readonly providerSessionId: ProviderSessionId;
     readonly projectRoot: string;
     readonly driver: ProviderDriver;
@@ -573,7 +576,11 @@ export class WorkTurnService {
     const appManagedTools =
       input.thread === undefined
         ? undefined
-        : this.#resolveAppManagedTools?.({ thread: input.thread, projectRoot: input.projectRoot });
+        : this.#resolveAppManagedTools?.({
+            thread: input.thread,
+            projectRoot: input.projectRoot,
+            windowId: input.windowId,
+          });
     const outcome = await this.#turnRuntime.run({
       command: input.command,
       providerSessionId: input.providerSessionId,

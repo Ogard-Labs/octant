@@ -60,6 +60,7 @@ export const NATIVE_HARNESS_TOOL_NAMES = [
   "context-remaining",
   "journal-lookup",
   "second-opinion",
+  "delegate",
 ] as const;
 export const NativeHarnessToolName = Schema.Literal(...NATIVE_HARNESS_TOOL_NAMES);
 export type NativeHarnessToolName = typeof NativeHarnessToolName.Type;
@@ -287,6 +288,27 @@ export type NativeHarnessTodoWriteArguments = typeof NativeHarnessTodoWriteArgum
 
 export const NativeHarnessContextRemainingArguments = Schema.Struct({}).annotations(strict);
 
+/**
+ * Delegation to a child run. `start` proposes a bounded task under a role;
+ * the server decides the child's model from the role's slot, clamps its
+ * authority, and admits it under the creation posture — a model never picks
+ * a provider or widens anything by asking.
+ */
+export const NativeHarnessDelegateArguments = Schema.Union(
+  Schema.Struct({
+    operation: Schema.Literal("start"),
+    role: Schema.Literal("research", "implementation", "review", "custom"),
+    task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8_192)),
+    includeParentContext: Schema.optional(Schema.Boolean),
+  }).annotations(strict),
+  Schema.Struct({ operation: Schema.Literal("status") }).annotations(strict),
+  Schema.Struct({
+    operation: Schema.Literal("collect"),
+    runId: Schema.UUID,
+  }).annotations(strict),
+);
+export type NativeHarnessDelegateArguments = typeof NativeHarnessDelegateArguments.Type;
+
 export const NativeHarnessSecondOpinionArguments = Schema.Struct({
   question: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096)),
 }).annotations(strict);
@@ -305,6 +327,7 @@ const toolArgumentDecoders: Readonly<Record<NativeHarnessToolName, (value: unkno
   "context-remaining": Schema.decodeUnknownSync(NativeHarnessContextRemainingArguments),
   "journal-lookup": Schema.decodeUnknownSync(NativeHarnessJournalLookupRequest),
   "second-opinion": Schema.decodeUnknownSync(NativeHarnessSecondOpinionArguments),
+  delegate: Schema.decodeUnknownSync(NativeHarnessDelegateArguments),
 };
 
 /** Throws on a malformed argument object; the catalog's argument-schema step relies on it. */
@@ -471,6 +494,25 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
       type: "object",
       properties: { question: { type: "string" } },
       required: ["question"],
+    },
+  },
+  {
+    name: "delegate",
+    description:
+      "Hand a bounded task to a child agent (start), list your children (status), or read a finished child's reply (collect). Children run on the model configured for their role.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        operation: { type: "string", enum: ["start", "status", "collect"] },
+        role: { type: "string", enum: ["research", "implementation", "review", "custom"] },
+        task: {
+          type: "string",
+          description: "A standalone brief: objective, output format, boundaries.",
+        },
+        includeParentContext: { type: "boolean" },
+        runId: { type: "string" },
+      },
+      required: ["operation"],
     },
   },
 ];
@@ -847,6 +889,33 @@ export const NativeHarnessSessionCommandResult = Schema.Union(
 );
 export type NativeHarnessSessionCommandResult = typeof NativeHarnessSessionCommandResult.Type;
 
+export const MAX_NATIVE_HARNESS_VIEW_ENTRIES = 50;
+
+/**
+ * What every surface — web, desktop, phone, CLI — renders for one thread's
+ * harness session. Bounded to the recent tail; the journal holds the rest.
+ */
+export const NativeHarnessSessionView = Schema.Struct({
+  session: NativeHarnessSession,
+  routes: Schema.Array(NativeHarnessRouteDecision).pipe(
+    Schema.maxItems(MAX_NATIVE_HARNESS_VIEW_ENTRIES),
+  ),
+  turns: Schema.Array(NativeHarnessTurnRecord).pipe(
+    Schema.maxItems(MAX_NATIVE_HARNESS_VIEW_ENTRIES),
+  ),
+  reductions: Schema.Array(NativeHarnessContextReduction).pipe(
+    Schema.maxItems(MAX_NATIVE_HARNESS_VIEW_ENTRIES),
+  ),
+  interventions: Schema.Array(NativeHarnessAdvisorIntervention).pipe(
+    Schema.maxItems(MAX_NATIVE_HARNESS_VIEW_ENTRIES),
+  ),
+  followUps: Schema.optional(NativeHarnessFollowUpSet),
+  activatedFollowUpIds: Schema.Array(NativeHarnessFollowUpId).pipe(
+    Schema.maxItems(MAX_NATIVE_HARNESS_FOLLOW_UPS),
+  ),
+}).annotations(strict);
+export type NativeHarnessSessionView = typeof NativeHarnessSessionView.Type;
+
 export const NATIVE_HARNESS_SESSION_AGGREGATE_TYPE = "native-harness-session";
 export const NATIVE_HARNESS_SESSION_EVENT_NAMES = {
   started: "native-harness-session-started@1",
@@ -898,6 +967,7 @@ export const decodeNativeHarnessFollowUpActivationResult = Schema.decodeUnknownS
   NativeHarnessFollowUpActivationResult,
 );
 export const decodeNativeHarnessSession = Schema.decodeUnknownSync(NativeHarnessSession);
+export const decodeNativeHarnessSessionView = Schema.decodeUnknownSync(NativeHarnessSessionView);
 export const decodeNativeHarnessSessionCommand = Schema.decodeUnknownSync(
   NativeHarnessSessionCommand,
 );
