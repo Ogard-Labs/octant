@@ -187,6 +187,15 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
     readonly readThread: (windowId: WindowId, threadId: CodeThreadId) => CodeThread | undefined;
   }) => AppManagedToolSet | undefined;
+  /**
+   * The native harness tool set for a direct-endpoint provider: reads, edits,
+   * the sandboxed shell, and the harness's own reads, each authorized at the
+   * server choke point. Absent for providers that bring their own tools.
+   */
+  readonly nativeHarnessTools?: (input: {
+    readonly thread: CodeThread;
+    readonly checkoutRoot: string;
+  }) => AppManagedToolSet | undefined;
   readonly recordExternalContentIngestion?: CodeAppManagedToolsOptions["recordExternalContentIngestion"];
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
@@ -1263,6 +1272,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                     windowId: active.windowId,
                     thread: active.thread,
                     readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
+                  }),
+                  this.#options.nativeHarnessTools?.({
+                    thread: active.thread,
+                    checkoutRoot: active.checkoutRoot,
                   }),
                 ),
               }

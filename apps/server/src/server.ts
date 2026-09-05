@@ -536,6 +536,13 @@ import {
 } from "./browser/browserAutomationService";
 import { ExternalContentIngestionStore } from "./context/externalContentIngestionStore";
 import { readThreadExternalContentTaint } from "./context/externalContentTaintProjection";
+import { createNativeHarnessAuthority } from "./harness/nativeHarnessAuthority";
+import {
+  createNativeHarnessComposition,
+  type NativeHarnessComposition,
+} from "./harness/nativeHarnessComposition";
+import { createNativeHarnessShell } from "./harness/nativeHarnessShell";
+import { fetchPublicUrl, PublicFetchRefused } from "./harness/nativeHarnessWebFetch";
 import {
   ServerBrowserAuthorityResolver,
   deriveToolHostId,
@@ -594,6 +601,7 @@ import {
   formatThreadMentionContext,
   isAgentRunActiveStatus,
   isImageProfileDriverKind,
+  isNativeHarnessDriverKind,
   THREAD_MENTION_UNREADABLE_CONTEXT,
   listHosts,
   type PreviewPosture,
@@ -2577,6 +2585,9 @@ export function startOctantServer(
     projectPullRequestCadence.start();
     let codeOperationRuntime = options.codeOperationRuntime;
     const providerDataDirectory = persistence.dataDirectory;
+    // Composed once the research router exists; every consumer below reads it
+    // per turn, never at construction.
+    let nativeHarnessComposition: NativeHarnessComposition | undefined;
     const providerRuntimeRegistry =
       options.providerRuntimeRegistry ??
       new ProviderRuntimeRegistry({
@@ -3215,6 +3226,7 @@ export function startOctantServer(
             return undefined;
           }
         },
+        nativeHarnessTools: (input) => nativeHarnessComposition?.forCode(input),
         supportsAppManagedTools: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
           return (
@@ -3757,6 +3769,62 @@ export function startOctantServer(
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
+    {
+      // The harness `bash` tool runs through the same owned-process-group,
+      // Seatbelt-confined port repository tests use, with its own receipt and
+      // script directories so a command's leftovers never mix with a test's.
+      const harnessWorkDirectory = join(providerDataDirectory, "harness", "work");
+      mkdirSync(harnessWorkDirectory, { recursive: true, mode: 0o700 });
+      const harnessProcessPort = new RepositoryTestProcessPort({
+        receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
+        temporaryDirectory: harnessWorkDirectory,
+      });
+      nativeHarnessComposition = createNativeHarnessComposition({
+        authority: createNativeHarnessAuthority({
+          hostId: deriveToolHostId(providerDataDirectory),
+          persistence,
+          workThreads: workThreadProjection,
+          readThreadTaint: (threadId) =>
+            readThreadExternalContentTaint(persistence.connection, threadId),
+        }),
+        isHarnessProvider: (providerInstanceId) => {
+          const instance = persistence.readProviderInstance(providerInstanceId);
+          return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
+        },
+        plans: planService,
+        shell: createNativeHarnessShell({
+          process: harnessProcessPort,
+          scriptDirectory: harnessWorkDirectory,
+        }),
+        webSearch:
+          persistence.readChatSettings()?.settings.searxngBaseUrl === undefined
+            ? undefined
+            : async (input) => {
+                const settings = persistence.readChatSettings()?.settings;
+                if (settings?.searxngBaseUrl === undefined) return [];
+                const found = await new SearxngClient({ baseUrl: settings.searxngBaseUrl }).search(
+                  input,
+                );
+                return found.results.map((result) => ({
+                  title: result.title,
+                  url: result.url,
+                  snippet: result.snippet,
+                }));
+              },
+        webFetch: async (input) => {
+          try {
+            return await fetchPublicUrl(input);
+          } catch (error) {
+            if (error instanceof PublicFetchRefused) return { refused: error.reason };
+            throw error;
+          }
+        },
+        contextHarness,
+        recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+        uuid: randomUUID,
+        clock: () => new Date().toISOString(),
+      });
+    }
     let zenAssistantTools: ZenAssistantTools | undefined;
     let threadDialogueService: ThreadDialogueService | undefined;
     // Composed after the Canvas service exists, the same way Zen's tools are.
@@ -3839,6 +3907,7 @@ export function startOctantServer(
       resolveAppManagedTools: ({ windowId, thread, threadMentionIds, coordinationDepth }) =>
         taintAppManagedToolResults({
           tools: combineAppManagedToolSets(
+            nativeHarnessComposition?.forChat(thread),
             zenAssistantTools?.forThread(windowId, thread),
             threadDialogueService?.forThread({
               windowId,
@@ -4158,6 +4227,7 @@ export function startOctantServer(
     });
     const workTurnService = new WorkTurnService({
       persistence,
+      resolveAppManagedTools: (input) => nativeHarnessComposition?.forWork(input),
       turnFileObserver: new WorkTurnFileObserver(),
       threads: workThreadService,
       peekIssueContextFramed: peekCreateFromIssueFramed,

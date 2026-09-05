@@ -34,6 +34,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import {
   decideWorkTurnAuthority,
   FILE_MENTION_UNREADABLE_CONTEXT,
@@ -152,6 +153,15 @@ export interface WorkTurnServiceDependencies {
   }) => boolean;
   readonly turnRuntime?: WorkTurnRuntimePort;
   /**
+   * The app-managed tools a Work turn may offer its provider. Absent on a host
+   * that composes none, which sends the turn with no tools rather than
+   * pretending a provider can reach the folder.
+   */
+  readonly resolveAppManagedTools?: (input: {
+    readonly thread: WorkThread;
+    readonly projectRoot: string;
+  }) => AppManagedToolSet | undefined;
+  /**
    * Watches the bound folder for the length of a turn. Absent on a host that
    * cannot watch, which records no written files rather than guessing at them.
    */
@@ -199,6 +209,7 @@ export class WorkTurnService {
   readonly #attachments: WorkAttachmentStore | undefined;
   readonly #supportsAttachments: WorkTurnServiceDependencies["supportsAttachments"];
   readonly #turnRuntime: WorkTurnRuntimePort;
+  readonly #resolveAppManagedTools: WorkTurnServiceDependencies["resolveAppManagedTools"];
   readonly #turnFileObserver: WorkTurnFileObserver | undefined;
   readonly #resolveThreadMentionContext: WorkTurnServiceDependencies["resolveThreadMentionContext"];
   readonly #resolveFileMentionContext: WorkTurnServiceDependencies["resolveFileMentionContext"];
@@ -224,6 +235,7 @@ export class WorkTurnService {
     this.#attachments = dependencies.attachments;
     this.#supportsAttachments = dependencies.supportsAttachments;
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
+    this.#resolveAppManagedTools = dependencies.resolveAppManagedTools;
     this.#turnFileObserver = dependencies.turnFileObserver;
     this.#resolveThreadMentionContext = dependencies.resolveThreadMentionContext;
     this.#resolveFileMentionContext = dependencies.resolveFileMentionContext;
@@ -412,6 +424,7 @@ export class WorkTurnService {
     this.#controllers.set(String(command.requestId), controller);
     const launch = this.#runTurn({
       command,
+      ...(thread === undefined ? {} : { thread }),
       providerSessionId,
       projectRoot,
       driver,
@@ -539,6 +552,7 @@ export class WorkTurnService {
 
   async #runTurn(input: {
     readonly command: ReturnType<typeof decodeStartWorkThreadTurnCommand>;
+    readonly thread?: WorkThread;
     readonly providerSessionId: ProviderSessionId;
     readonly projectRoot: string;
     readonly driver: ProviderDriver;
@@ -556,12 +570,17 @@ export class WorkTurnService {
     // the only way the host learns what a turn produced.
     const observation = this.#turnFileObserver?.observe(input.projectRoot);
 
+    const appManagedTools =
+      input.thread === undefined
+        ? undefined
+        : this.#resolveAppManagedTools?.({ thread: input.thread, projectRoot: input.projectRoot });
     const outcome = await this.#turnRuntime.run({
       command: input.command,
       providerSessionId: input.providerSessionId,
       projectRoot: input.projectRoot,
       driver: input.driver,
       signal: input.signal,
+      ...(appManagedTools === undefined ? {} : { appManagedTools }),
       ...(input.attachments.length === 0 ? {} : { attachments: input.attachments }),
       ...(input.context.length === 0 ? {} : { context: input.context }),
       onDelta: (response) => {

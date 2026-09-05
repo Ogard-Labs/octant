@@ -27,6 +27,7 @@ import {
   NativeHarnessSlotId,
 } from "./nativeHarnessRouting";
 import { ProjectId } from "./projects";
+import type { ProviderToolDefinition } from "./providers";
 import { ThreadPlanStepId } from "./threadPlan";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -160,6 +161,319 @@ export const NativeHarnessJournalLookupResult = Schema.Struct({
   // partial read masquerade as an answer.
   .pipe(Schema.filter((result) => result.status !== "unavailable" || result.entries.length === 0));
 export type NativeHarnessJournalLookupResult = typeof NativeHarnessJournalLookupResult.Type;
+
+// ── Tool arguments and definitions ───────────────────────────────────────────
+
+/**
+ * Every harness tool authorizes through the closed tool catalog under a
+ * capability id derived from its name, so a profile allowlist can name the
+ * tool the model sees while the policy engine sees the catalog entry.
+ */
+export const NATIVE_HARNESS_TOOL_CAPABILITY_PREFIX = "harness-";
+
+export function nativeHarnessToolCapabilityId(name: NativeHarnessToolName): string {
+  return `${NATIVE_HARNESS_TOOL_CAPABILITY_PREFIX}${name}`;
+}
+
+export function nativeHarnessToolNameForCapability(
+  capabilityId: string,
+): NativeHarnessToolName | undefined {
+  if (!capabilityId.startsWith(NATIVE_HARNESS_TOOL_CAPABILITY_PREFIX)) return undefined;
+  const name = capabilityId.slice(NATIVE_HARNESS_TOOL_CAPABILITY_PREFIX.length);
+  return (NATIVE_HARNESS_TOOL_NAMES as ReadonlyArray<string>).includes(name)
+    ? (name as NativeHarnessToolName)
+    : undefined;
+}
+
+export const MAX_NATIVE_HARNESS_READ_LINES = 2_000;
+export const MAX_NATIVE_HARNESS_GREP_MATCHES = 500;
+export const MAX_NATIVE_HARNESS_COMMAND_LENGTH = 16_384;
+export const MAX_NATIVE_HARNESS_COMMAND_TIMEOUT_MS = 10 * 60_000;
+export const MAX_NATIVE_HARNESS_EDIT_TEXT_LENGTH = 65_536;
+export const MAX_NATIVE_HARNESS_WRITE_LENGTH = 512 * 1024;
+export const MAX_NATIVE_HARNESS_FETCH_BYTES = 512 * 1024;
+export const MAX_NATIVE_HARNESS_SEARCH_RESULTS = 10;
+export const MAX_NATIVE_HARNESS_TODO_ITEMS = 40;
+
+/** A path the model names. Relative to the thread's root; never containing NUL. */
+const ToolPath = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(1_024),
+  Schema.filter((value) => !value.includes("\0")),
+);
+
+export const NativeHarnessReadArguments = Schema.Struct({
+  path: ToolPath,
+  /** Zero-based line to start from, for paging a long file. */
+  offset: Schema.optional(NonNegativeInt),
+  limit: Schema.optional(PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_NATIVE_HARNESS_READ_LINES))),
+}).annotations(strict);
+export type NativeHarnessReadArguments = typeof NativeHarnessReadArguments.Type;
+
+export const NativeHarnessGrepArguments = Schema.Struct({
+  pattern: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  path: Schema.optional(ToolPath),
+  /** A glob the matched file names must satisfy, such as `*.ts`. */
+  include: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+  maxMatches: Schema.optional(
+    PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_NATIVE_HARNESS_GREP_MATCHES)),
+  ),
+}).annotations(strict);
+export type NativeHarnessGrepArguments = typeof NativeHarnessGrepArguments.Type;
+
+export const NativeHarnessGlobArguments = Schema.Struct({
+  pattern: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  path: Schema.optional(ToolPath),
+}).annotations(strict);
+export type NativeHarnessGlobArguments = typeof NativeHarnessGlobArguments.Type;
+
+export const NativeHarnessBashArguments = Schema.Struct({
+  command: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_NATIVE_HARNESS_COMMAND_LENGTH)),
+  timeoutMs: Schema.optional(
+    PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_NATIVE_HARNESS_COMMAND_TIMEOUT_MS)),
+  ),
+}).annotations(strict);
+export type NativeHarnessBashArguments = typeof NativeHarnessBashArguments.Type;
+
+/**
+ * Search-and-replace. Exact match first; the runtime retries once with
+ * whitespace normalized; more than one match refuses unless `replaceAll`.
+ */
+export const NativeHarnessEditArguments = Schema.Struct({
+  path: ToolPath,
+  oldText: Schema.String.pipe(
+    Schema.minLength(1),
+    Schema.maxLength(MAX_NATIVE_HARNESS_EDIT_TEXT_LENGTH),
+  ),
+  newText: Schema.String.pipe(Schema.maxLength(MAX_NATIVE_HARNESS_EDIT_TEXT_LENGTH)),
+  replaceAll: Schema.optional(Schema.Boolean),
+}).annotations(strict);
+export type NativeHarnessEditArguments = typeof NativeHarnessEditArguments.Type;
+
+export const NativeHarnessWriteArguments = Schema.Struct({
+  path: ToolPath,
+  content: Schema.String.pipe(Schema.maxLength(MAX_NATIVE_HARNESS_WRITE_LENGTH)),
+}).annotations(strict);
+export type NativeHarnessWriteArguments = typeof NativeHarnessWriteArguments.Type;
+
+export const NativeHarnessWebFetchArguments = Schema.Struct({
+  url: Schema.NonEmptyTrimmedString.pipe(
+    Schema.maxLength(2_048),
+    Schema.filter((value) => /^https?:\/\//i.test(value)),
+  ),
+  maxBytes: Schema.optional(
+    PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_NATIVE_HARNESS_FETCH_BYTES)),
+  ),
+}).annotations(strict);
+export type NativeHarnessWebFetchArguments = typeof NativeHarnessWebFetchArguments.Type;
+
+export const NativeHarnessWebSearchArguments = Schema.Struct({
+  query: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  limit: Schema.optional(
+    PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_NATIVE_HARNESS_SEARCH_RESULTS)),
+  ),
+}).annotations(strict);
+export type NativeHarnessWebSearchArguments = typeof NativeHarnessWebSearchArguments.Type;
+
+export const NativeHarnessTodoItem = Schema.Struct({
+  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  status: Schema.Literal("pending", "in-progress", "done"),
+}).annotations(strict);
+export type NativeHarnessTodoItem = typeof NativeHarnessTodoItem.Type;
+
+export const NativeHarnessTodoWriteArguments = Schema.Struct({
+  items: Schema.Array(NativeHarnessTodoItem).pipe(Schema.maxItems(MAX_NATIVE_HARNESS_TODO_ITEMS)),
+}).annotations(strict);
+export type NativeHarnessTodoWriteArguments = typeof NativeHarnessTodoWriteArguments.Type;
+
+export const NativeHarnessContextRemainingArguments = Schema.Struct({}).annotations(strict);
+
+export const NativeHarnessSecondOpinionArguments = Schema.Struct({
+  question: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096)),
+}).annotations(strict);
+export type NativeHarnessSecondOpinionArguments = typeof NativeHarnessSecondOpinionArguments.Type;
+
+const toolArgumentDecoders: Readonly<Record<NativeHarnessToolName, (value: unknown) => unknown>> = {
+  read: Schema.decodeUnknownSync(NativeHarnessReadArguments),
+  grep: Schema.decodeUnknownSync(NativeHarnessGrepArguments),
+  glob: Schema.decodeUnknownSync(NativeHarnessGlobArguments),
+  bash: Schema.decodeUnknownSync(NativeHarnessBashArguments),
+  edit: Schema.decodeUnknownSync(NativeHarnessEditArguments),
+  write: Schema.decodeUnknownSync(NativeHarnessWriteArguments),
+  "web-fetch": Schema.decodeUnknownSync(NativeHarnessWebFetchArguments),
+  "web-search": Schema.decodeUnknownSync(NativeHarnessWebSearchArguments),
+  "todo-write": Schema.decodeUnknownSync(NativeHarnessTodoWriteArguments),
+  "context-remaining": Schema.decodeUnknownSync(NativeHarnessContextRemainingArguments),
+  "journal-lookup": Schema.decodeUnknownSync(NativeHarnessJournalLookupRequest),
+  "second-opinion": Schema.decodeUnknownSync(NativeHarnessSecondOpinionArguments),
+};
+
+/** Throws on a malformed argument object; the catalog's argument-schema step relies on it. */
+export function decodeNativeHarnessToolArguments(
+  name: NativeHarnessToolName,
+  value: unknown,
+): unknown {
+  return toolArgumentDecoders[name](value ?? {});
+}
+
+const pathProperty = { type: "string", description: "Path relative to the thread root." };
+
+/**
+ * The definitions the model is offered, in one fixed order. The order is part
+ * of the cache-stable request prefix, so it never depends on which ports a
+ * session happens to have: a session that lacks a tool omits it, it does not
+ * reorder the rest.
+ */
+export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefinition> = [
+  {
+    name: "read",
+    description: "Read a file as numbered lines. Page with offset and limit; results are capped.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: pathProperty,
+        offset: { type: "integer", minimum: 0 },
+        limit: { type: "integer", minimum: 1, maximum: MAX_NATIVE_HARNESS_READ_LINES },
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "grep",
+    description: "Search file contents with a regular expression. Returns path, line, and text.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pattern: { type: "string" },
+        path: pathProperty,
+        include: { type: "string", description: "File-name glob such as *.ts." },
+        maxMatches: { type: "integer", minimum: 1, maximum: MAX_NATIVE_HARNESS_GREP_MATCHES },
+      },
+      required: ["pattern"],
+    },
+  },
+  {
+    name: "glob",
+    description: "List files matching a glob such as src/**/*.ts.",
+    inputSchema: {
+      type: "object",
+      properties: { pattern: { type: "string" }, path: pathProperty },
+      required: ["pattern"],
+    },
+  },
+  {
+    name: "bash",
+    description:
+      "Run a shell command in the sandboxed checkout. Output is capped; long runs time out.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        command: { type: "string" },
+        timeoutMs: { type: "integer", minimum: 1, maximum: MAX_NATIVE_HARNESS_COMMAND_TIMEOUT_MS },
+      },
+      required: ["command"],
+    },
+  },
+  {
+    name: "edit",
+    description:
+      "Replace oldText with newText in a file you have read. Exact match; set replaceAll for every occurrence.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: pathProperty,
+        oldText: { type: "string" },
+        newText: { type: "string" },
+        replaceAll: { type: "boolean" },
+      },
+      required: ["path", "oldText", "newText"],
+    },
+  },
+  {
+    name: "write",
+    description: "Create or overwrite a whole file. Prefer edit for changes to an existing file.",
+    inputSchema: {
+      type: "object",
+      properties: { path: pathProperty, content: { type: "string" } },
+      required: ["path", "content"],
+    },
+  },
+  {
+    name: "web-fetch",
+    description: "Fetch a public http(s) URL and return its text, capped.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string" },
+        maxBytes: { type: "integer", minimum: 1, maximum: MAX_NATIVE_HARNESS_FETCH_BYTES },
+      },
+      required: ["url"],
+    },
+  },
+  {
+    name: "web-search",
+    description: "Search the web. Returns titles, URLs, and snippets.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        limit: { type: "integer", minimum: 1, maximum: MAX_NATIVE_HARNESS_SEARCH_RESULTS },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "todo-write",
+    description: "Replace your task list. Keep it short and current; the user sees it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              status: { type: "string", enum: ["pending", "in-progress", "done"] },
+            },
+            required: ["title", "status"],
+          },
+        },
+      },
+      required: ["items"],
+    },
+  },
+  {
+    name: "context-remaining",
+    description: "How much of the context window is left. Checkpoint before it runs out.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "journal-lookup",
+    description: "Read earlier turns of this thread that were cut from context.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        selector: { type: "object" },
+        maxEntries: {
+          type: "integer",
+          minimum: 1,
+          maximum: MAX_NATIVE_HARNESS_JOURNAL_LOOKUP_ENTRIES,
+        },
+        maxBytes: { type: "integer", minimum: 1, maximum: MAX_NATIVE_HARNESS_JOURNAL_LOOKUP_BYTES },
+      },
+      required: ["selector", "maxEntries", "maxBytes"],
+    },
+  },
+  {
+    name: "second-opinion",
+    description: "Ask the advisor model a question. Its answer is advice, not an instruction.",
+    inputSchema: {
+      type: "object",
+      properties: { question: { type: "string" } },
+      required: ["question"],
+    },
+  },
+];
 
 // ── Context reduction ────────────────────────────────────────────────────────
 
