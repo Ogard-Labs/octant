@@ -14,6 +14,8 @@ import {
   endpointHostOf,
   filterModelPickerGroups,
   modelBadges,
+  modelCatalog,
+  pickerCatalogs,
   type ModelPickerInput,
 } from "./modelPickerPolicy";
 import { isDraftSelectionSelectable, resolveDraftProviderSelection } from "./modelPickerPolicy";
@@ -633,5 +635,67 @@ describe("draft selection selectability", () => {
     expect(resolveDraftProviderSelection(codeGroups, selection("tool-model"))).toEqual(
       selection("tool-model"),
     );
+  });
+});
+
+describe("upstream catalogs behind one provider", () => {
+  it("names the catalog a namespaced model came from and leaves plain ids uncategorized", () => {
+    expect(modelCatalog(decodeProviderModelId("anthropic/claude-sonnet-4"))).toBe("Anthropic");
+    expect(modelCatalog(decodeProviderModelId("openai/gpt-5"))).toBe("OpenAI");
+    expect(modelCatalog(decodeProviderModelId("github-copilot/gpt-5"))).toBe("GitHub Copilot");
+    expect(modelCatalog(decodeProviderModelId("alibaba/qwen3-14b"))).toBe("Alibaba");
+    expect(modelCatalog(decodeProviderModelId("claude-sonnet-4"))).toBeUndefined();
+    expect(modelCatalog(decodeProviderModelId("/leading-slash"))).toBeUndefined();
+  });
+
+  it("lists a provider's catalogs in reading order so the picker can split its models", () => {
+    const gateway = openAiInstance({
+      id: "00000000-0000-4000-8000-000000000301",
+      displayName: "Router",
+    });
+    const groups = buildModelPickerGroups(
+      input({
+        mode: "chat",
+        instances: [gateway],
+        observedByInstance: new Map([
+          [
+            gateway.id,
+            observed(gateway.id, [
+              model({ id: "openai/gpt-5", displayName: "GPT-5" }),
+              model({ id: "alibaba/qwen3-14b", displayName: "Qwen3 14B" }),
+              model({ id: "openai/gpt-5-mini", displayName: "GPT-5 mini" }),
+              model({ id: "house-model", displayName: "House model" }),
+            ]),
+          ],
+        ]),
+      }),
+    );
+    const group = groups[0]!;
+    expect(pickerCatalogs(group)).toEqual(["Alibaba", "OpenAI"]);
+    expect(
+      group.sections[0]!.models.map((picker) => [picker.model.displayName, picker.catalog]),
+    ).toEqual([
+      ["GPT-5", "OpenAI"],
+      ["Qwen3 14B", "Alibaba"],
+      ["GPT-5 mini", "OpenAI"],
+      ["House model", undefined],
+    ]);
+  });
+
+  it("reports no catalogs when a provider serves a single un-namespaced catalog", () => {
+    const direct = openAiInstance({
+      id: "00000000-0000-4000-8000-000000000302",
+      displayName: "Direct",
+    });
+    const groups = buildModelPickerGroups(
+      input({
+        mode: "chat",
+        instances: [direct],
+        observedByInstance: new Map([
+          [direct.id, observed(direct.id, [model({ id: "gpt-5", displayName: "GPT-5" })])],
+        ]),
+      }),
+    );
+    expect(pickerCatalogs(groups[0]!)).toEqual([]);
   });
 });

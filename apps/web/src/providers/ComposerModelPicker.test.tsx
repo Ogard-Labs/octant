@@ -196,6 +196,51 @@ describe("ComposerModelPicker", () => {
     expect(screen.queryByText(longReason)).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Model One" })).toHaveAttribute("title", longReason);
   });
+
+  it("splits one provider's models by the catalog each came from, and filters to one", async () => {
+    const user = userEvent.setup();
+    render(<ComposerModelPicker groups={routerGroups()} onSelect={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const menu = await screen.findByRole("dialog", { name: "Choose provider and model" });
+    expect(
+      within(menu)
+        .getAllByRole("group")
+        .map((group) => group.getAttribute("aria-label")),
+    ).toEqual(["Catalogs", "Alibaba", "Anthropic"]);
+    expect(
+      within(within(menu).getByRole("group", { name: "Alibaba" }))
+        .getAllByRole("option")
+        .map((option) => option.getAttribute("aria-label")),
+    ).toEqual(["Qwen3 14B"]);
+
+    await user.click(within(menu).getByRole("button", { name: "Anthropic", pressed: false }));
+    expect(within(menu).queryByRole("option", { name: "Qwen3 14B" })).not.toBeInTheDocument();
+    expect(within(menu).getByRole("option", { name: "Claude Sonnet" })).toBeVisible();
+    expect(within(menu).queryByRole("group", { name: "Anthropic" })).not.toBeInTheDocument();
+
+    await user.click(within(menu).getByRole("button", { name: "All", pressed: false }));
+    expect(within(menu).getByRole("option", { name: "Qwen3 14B" })).toBeVisible();
+  });
+
+  it("finds models by the catalog that serves them even when the model name never says it", async () => {
+    const user = userEvent.setup();
+    render(<ComposerModelPicker groups={routerGroups()} onSelect={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const menu = await screen.findByRole("dialog", { name: "Choose provider and model" });
+    await user.type(within(menu).getByRole("searchbox", { name: "Search models" }), "alibaba");
+
+    expect(
+      within(within(menu).getByRole("listbox", { name: "Models" }))
+        .getAllByRole("option")
+        .map((option) => option.getAttribute("aria-label")),
+    ).toEqual(["Qwen3 14B"]);
+    expect(within(menu).getByRole("option", { name: "Qwen3 14B" })).toHaveTextContent(
+      "Local OpenCode · Alibaba",
+    );
+    expect(within(menu).queryByRole("button", { name: "All" })).not.toBeInTheDocument();
+  });
 });
 
 function groups(options?: { readonly degraded?: boolean }) {
@@ -291,4 +336,21 @@ function observation(
     lastSuccessfulProbeAt: "2026-07-14T10:00:00.000Z" as never,
     ...patch,
   } as ProviderObservedState;
+}
+
+function routerGroups() {
+  return buildModelPickerGroups({
+    instances: [instance("opencode", providerA, "Local OpenCode")],
+    observedByInstance: new Map([
+      [
+        providerA,
+        observation(providerA, [
+          model(decodeProviderModelId("anthropic/claude-sonnet-4"), "Claude Sonnet"),
+          model(decodeProviderModelId("alibaba/qwen3-14b"), "Qwen3 14B"),
+          model(decodeProviderModelId("anthropic/claude-haiku-4"), "Claude Haiku"),
+        ]),
+      ],
+    ]),
+    mode: "chat",
+  });
 }
