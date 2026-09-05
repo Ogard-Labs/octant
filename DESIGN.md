@@ -537,7 +537,7 @@ track, underline recipe, or persistent active border.
 Use the Octant adapter names in feature code. The owned recipe list includes
 Button, Card, Badge, Input, Textarea, Field/FieldGroup, Select, Combobox,
 Switch, Slider, Checkbox, ToggleGroup, Tabs, DropdownMenu, ContextMenu, Dialog,
-and Tooltip. Composition rules:
+Tooltip, and PreviewCard. Composition rules:
 
 - Buttons use `OctantButton` or `OctantIconButton`; variants are default,
   destructive, destructive-outline, outline, secondary, ghost, and link.
@@ -556,6 +556,11 @@ and Tooltip. Composition rules:
 - Menus, popovers, dialogs, and overlays are opaque, keyboard dismissible, and
   titled for assistive technology. Use `OctantDialog` with a real label even
   when the title is visually hidden.
+- A hover card that only describes its trigger is an `OctantTooltip`; one that
+  holds a control the pointer must reach is an `OctantPreviewCard`, which stays
+  open while the pointer crosses into it and carries no tooltip role. Every
+  action a preview card offers is also reachable from a menu, because keyboard
+  and touch never open the card.
 - Use Badge for status labels, Alert for callouts, Empty for empty states,
   Skeleton for loading, and the shared `.toast-stack` notification owner for
   transient acknowledgements. Do not add another toast package or recreate
