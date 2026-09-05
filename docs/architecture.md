@@ -535,6 +535,34 @@ modelId }`, and the model picker is provider-first. Discovery can find
   the consent redirect, then closes it. Connect fails closed when the public
   client id (`OCTANT_LINEAR_OAUTH_CLIENT_ID`) is unset.
 
+### Native harness
+
+Direct-endpoint providers (`openai-compatible`, `anthropic-compatible`,
+`azure-foundry`, `ollama`) run under the native harness in `apps/server/src/harness`:
+
+- **Tools.** `createNativeHarnessTools` composes the nine working tools and
+  the harness reads as one `AppManagedToolSet`, trimmed by mode through the
+  closed tool catalog (`harness-*` capability ids). Every call decodes its
+  arguments, wraps a `ToolActionRequest` under the thread's current authority,
+  and passes `ToolCallAuthorityService.authorize` before any port runs. Files
+  go through `NativeHarnessFileSystem` (confined to the root, symlinks
+  resolved, edits require a prior read); `bash` runs through the same
+  Seatbelt-confined owned-process-group port as repository tests; web fetches
+  refuse private destinations.
+- **Routing.** `NativeHarnessRoutingStore` journals a host default and
+  Project overrides of slot tables; `resolveNativeHarnessRoute` in
+  `@octant/domain` is the pure resolver; `NativeHarnessRouter` adds cooldowns
+  and a per-slot circuit breaker. Child runs take their model from the role's
+  slot through the shared `admitAgentRunControlRequest` path.
+- **Session.** `NativeHarnessSessionStore` journals one session per thread:
+  routing decisions, turn records, context reductions, advisor interventions,
+  and follow-up suggestions. `NativeHarnessTurnObserver` puts the stable
+  instructions block in front of every harness turn, records the completed
+  reply, parses the follow-up block, and asks the `advisor` slot for a review.
+- **Surfaces.** `/api/native-harness/routing` and
+  `/api/native-harness/sessions/:threadId` serve the web, desktop, phone, and
+  `octant agent` / `octant harness` from one `NativeHarnessSessionView`.
+
 ## Extensions and skills
 
 `@octant/plugin-host` is the pure model: normalized component kinds

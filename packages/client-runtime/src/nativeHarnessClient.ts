@@ -79,6 +79,10 @@ export class NativeHarnessClientFailure extends Error {
   }
 }
 
+const ROUTING_PATH = "/api/native-harness/routing";
+const PROJECT_ROUTING_PATH = "/api/native-harness/routing/projects";
+const SESSIONS_PATH = "/api/native-harness/sessions";
+
 /**
  * Client for the native harness surfaces: slot routing and the per-thread
  * session view. The host decides everything; this carries the window
@@ -108,12 +112,12 @@ export function createNativeHarnessClient(
 
   return {
     async routing(signal) {
-      const body = await get("/api/native-harness/routing", signal);
+      const body = await get(ROUTING_PATH, signal);
       return decodeNativeHarnessRoutingSettings((body as { settings: unknown }).settings);
     },
     async updateRouting(input, signal) {
       return decodeNativeHarnessRoutingCommandResult(
-        await write("PUT", "/api/native-harness/routing", input, signal),
+        await write("PUT", ROUTING_PATH, input, signal),
       );
     },
     async projectRouting(projectId, signal) {
@@ -140,7 +144,7 @@ export function createNativeHarnessClient(
       return decodeNativeHarnessRoutingCommandResult(
         await write(
           "DELETE",
-          `/api/native-harness/routing/projects/${encodeURIComponent(projectId)}?expectedVersion=${expectedVersion}`,
+          `${PROJECT_ROUTING_PATH}/${encodeURIComponent(projectId)}?expectedVersion=${expectedVersion}`,
           undefined,
           signal,
         ),
@@ -167,7 +171,7 @@ export function createNativeHarnessClient(
     async previewFollowUp(threadId, suggestionId, signal) {
       const body = await write(
         "POST",
-        `/api/native-harness/sessions/${encodeURIComponent(threadId)}/follow-ups/preview`,
+        `${SESSIONS_PATH}/${encodeURIComponent(threadId)}/follow-ups/preview`,
         { suggestionId },
         signal,
       );
@@ -180,7 +184,7 @@ export function createNativeHarnessClient(
       return decodeNativeHarnessFollowUpActivationResult(
         await write(
           "POST",
-          `/api/native-harness/sessions/${encodeURIComponent(threadId)}/follow-ups/activate`,
+          `${SESSIONS_PATH}/${encodeURIComponent(threadId)}/follow-ups/activate`,
           activation,
           signal,
         ),

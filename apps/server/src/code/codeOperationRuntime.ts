@@ -74,6 +74,8 @@ import {
 } from "./codeOperationService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
+import type { NativeHarnessTurnScope } from "../harness/nativeHarnessTurnObserver";
+import type { ProviderContextBlock } from "@octant/contracts";
 import { RepositoryTestRunner } from "./repositoryTestRunner";
 import { RepositoryTestDiscoveryService } from "./repositoryTestDiscoveryService";
 import { CURATED_SCAFFOLDS, curatedScaffoldTools } from "../scaffold/curatedScaffoldCatalog";
@@ -197,6 +199,14 @@ export interface CodeOperationRuntimeOptions {
     readonly checkoutRoot: string;
     readonly windowId: WindowId;
   }) => AppManagedToolSet | undefined;
+  /** The harness around a turn: stable instructions in front, the reply observed after. */
+  readonly nativeHarness?: {
+    readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
+    readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
+    readonly turnCompleted: (
+      input: NativeHarnessTurnScope & { readonly text: string; readonly toolCalls: number },
+    ) => Promise<void>;
+  };
   readonly recordExternalContentIngestion?: CodeAppManagedToolsOptions["recordExternalContentIngestion"];
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
@@ -1185,6 +1195,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return;
     }
     active.cursor = replay.nextCursor;
+    const harnessScope: NativeHarnessTurnScope = {
+      threadId: String(active.thread.id),
+      mode: "code",
+      providerInstanceId: active.thread.providerInstanceId,
+      modelId: active.thread.modelId,
+      projectId: active.thread.projectId,
+    };
+    const harnessContext = this.#options.nativeHarness?.contextFor(harnessScope) ?? [];
+    this.#options.nativeHarness?.turnStarted(harnessScope);
+    const fullContext = [...harnessContext, ...(context ?? [])];
     void Effect.runPromise(
       Effect.scoped(
         this.#runner.run({
@@ -1192,7 +1212,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           sessionId: active.sessionId as never,
           checkoutRoot: active.checkoutRoot,
           prompt,
-          ...(context === undefined ? {} : { context }),
+          ...(fullContext.length === 0 ? {} : { context: fullContext }),
+          ...(this.#options.nativeHarness === undefined
+            ? {}
+            : {
+                onTurnCompleted: (completed) =>
+                  this.#options.nativeHarness!.turnCompleted({ ...harnessScope, ...completed }),
+              }),
           ...(attachments === undefined ? {} : { attachments }),
           signal: active.abort.signal,
           provider: {

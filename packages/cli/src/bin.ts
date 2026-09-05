@@ -13,6 +13,7 @@ import {
 import { join } from "node:path";
 import { openLocalControlSession, type OpenedLocalControlSession } from "./localControl";
 import { resolveProjectCliCommand, runProjectCliCommand } from "./projectCommand";
+import { resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
 import {
   resolveAuthCliCommand,
   resolvePairCliCommand,
@@ -172,6 +173,22 @@ async function main(): Promise<number> {
     }
     return await runServerRunCommand(options);
   }
+  if (args.command === "agent" || args.command === "harness") {
+    const command = resolveAgentCliCommand(args.command, args.positional, args.flags);
+    if (command === undefined) {
+      printUsage();
+      return 1;
+    }
+    return await withLocalControlSession((session) =>
+      runAgentCliCommand({
+        command,
+        session,
+        stdin: process.stdin,
+        stdout: process.stdout,
+        stderr: process.stderr,
+      }),
+    );
+  }
   if (args.command === "project") {
     const command = resolveProjectCliCommand(args.positional, args.flags);
     if (command === undefined) {
@@ -258,6 +275,9 @@ function printUsage(): void {
       "  octant server install --artifact <path> [--install-root <path>]",
       "  octant server upgrade --artifact <path> [--install-root <path>]",
       "  octant server uninstall [--install-root <path>] [--data-dir <path>] [--remove-data --confirm <exact-data-dir>]",
+      "  octant agent [--project <name>] [--thread <id>] [--prompt <text>] [--title <title>] [--json]",
+      "  octant harness slots [--json]",
+      "  octant harness session <thread-id> [--json]",
       "  octant project add <path> [--type work|code] [--name <name>]",
       "  octant project remove <name>",
       "  octant project rename <name> <new name>",

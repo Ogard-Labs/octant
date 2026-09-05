@@ -42,6 +42,7 @@
     "./goal-client": "./src/goalClient.ts",
     "./goal-loop-client": "./src/goalLoopClient.ts",
     "./native-harness-client": "./src/nativeHarnessClient.ts",
+    "./mobile-native-harness-client": "./src/mobileNativeHarnessClient.ts",
     "./ship-client": "./src/shipClient.ts",
     "./plan-client": "./src/planClient.ts",
     "./product-feedback-client": "./src/productFeedbackClient.ts",

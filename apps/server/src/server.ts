@@ -549,6 +549,7 @@ import { NativeHarnessRoutingStore } from "./harness/nativeHarnessRoutingStore";
 import { createNativeHarnessRoutingRouteHandler } from "./harness/nativeHarnessRoutingRoutes";
 import { NativeHarnessSessionStore } from "./harness/nativeHarnessSessionStore";
 import { createNativeHarnessSessionRouteHandler } from "./harness/nativeHarnessSessionRoutes";
+import { NativeHarnessTurnObserver } from "./harness/nativeHarnessTurnObserver";
 import { fetchPublicUrl, PublicFetchRefused } from "./harness/nativeHarnessWebFetch";
 import {
   ServerBrowserAuthorityResolver,
@@ -1510,6 +1511,15 @@ export function startOctantServer(
     let nativeHarnessComposition: NativeHarnessComposition | undefined;
     let nativeHarnessRouter: NativeHarnessRouter | undefined;
     let nativeHarnessSessions: NativeHarnessSessionStore | undefined;
+    let nativeHarnessObserver: NativeHarnessTurnObserver | undefined;
+    const nativeHarnessHooks = {
+      contextFor: (scope: Parameters<NativeHarnessTurnObserver["contextFor"]>[0]) =>
+        nativeHarnessObserver?.contextFor(scope) ?? [],
+      turnStarted: (scope: Parameters<NativeHarnessTurnObserver["turnStarted"]>[0]) =>
+        nativeHarnessObserver?.turnStarted(scope),
+      turnCompleted: (input: Parameters<NativeHarnessTurnObserver["turnCompleted"]>[0]) =>
+        nativeHarnessObserver?.turnCompleted(input) ?? Promise.resolve(),
+    };
     const agentRunSettingsStore = new AgentRunSettingsStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -3267,6 +3277,7 @@ export function startOctantServer(
           }
         },
         nativeHarnessTools: (input) => nativeHarnessComposition?.forCode(input),
+        nativeHarness: nativeHarnessHooks,
         supportsAppManagedTools: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
           return (
@@ -3875,6 +3886,28 @@ export function startOctantServer(
         };
       },
     });
+    nativeHarnessObserver = new NativeHarnessTurnObserver({
+      sessions: nativeHarnessSessionsLive,
+      router: nativeHarnessRouterLive,
+      isHarnessProvider: (providerInstanceId) => {
+        const instance = persistence.readProviderInstance(providerInstanceId);
+        return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
+      },
+      resolveDriver: (providerInstanceId) => {
+        const instance = persistence.readProviderInstance(providerInstanceId);
+        if (instance === undefined || !instance.enabled) return undefined;
+        try {
+          return makeConfiguredProviderDriver(instance, configuredDriverOptions);
+        } catch {
+          return undefined;
+        }
+      },
+      hostId: String(LOCAL_HOST_ID),
+      scratchRoot: harnessWorkDirectory,
+      contextHarness,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
     nativeHarnessComposition = createNativeHarnessComposition({
       delegate: (scope) =>
         createNativeHarnessDelegatePort(
@@ -4040,6 +4073,7 @@ export function startOctantServer(
       researchRouter,
       threadWork,
       providerRuntimeRegistry: providerRuntimeRegistry,
+      nativeHarness: nativeHarnessHooks,
       resolveAppManagedTools: ({ windowId, thread, threadMentionIds, coordinationDepth }) =>
         taintAppManagedToolResults({
           tools: combineAppManagedToolSets(
@@ -4364,6 +4398,7 @@ export function startOctantServer(
     const workTurnService = new WorkTurnService({
       persistence,
       resolveAppManagedTools: (input) => nativeHarnessComposition?.forWork(input),
+      nativeHarness: nativeHarnessHooks,
       turnFileObserver: new WorkTurnFileObserver(),
       threads: workThreadService,
       peekIssueContextFramed: peekCreateFromIssueFramed,

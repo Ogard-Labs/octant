@@ -35,6 +35,7 @@ import {
 } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import type { NativeHarnessTurnScope } from "../harness/nativeHarnessTurnObserver";
 import {
   decideWorkTurnAuthority,
   FILE_MENTION_UNREADABLE_CONTEXT,
@@ -162,6 +163,14 @@ export interface WorkTurnServiceDependencies {
     readonly projectRoot: string;
     readonly windowId: WindowId;
   }) => AppManagedToolSet | undefined;
+  /** The harness around a turn: stable instructions in front, the reply observed after. */
+  readonly nativeHarness?: {
+    readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
+    readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
+    readonly turnCompleted: (
+      input: NativeHarnessTurnScope & { readonly text: string; readonly toolCalls: number },
+    ) => Promise<void>;
+  };
   /**
    * Watches the bound folder for the length of a turn. Absent on a host that
    * cannot watch, which records no written files rather than guessing at them.
@@ -211,6 +220,7 @@ export class WorkTurnService {
   readonly #supportsAttachments: WorkTurnServiceDependencies["supportsAttachments"];
   readonly #turnRuntime: WorkTurnRuntimePort;
   readonly #resolveAppManagedTools: WorkTurnServiceDependencies["resolveAppManagedTools"];
+  readonly #nativeHarness: WorkTurnServiceDependencies["nativeHarness"];
   readonly #turnFileObserver: WorkTurnFileObserver | undefined;
   readonly #resolveThreadMentionContext: WorkTurnServiceDependencies["resolveThreadMentionContext"];
   readonly #resolveFileMentionContext: WorkTurnServiceDependencies["resolveFileMentionContext"];
@@ -237,6 +247,7 @@ export class WorkTurnService {
     this.#supportsAttachments = dependencies.supportsAttachments;
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
     this.#resolveAppManagedTools = dependencies.resolveAppManagedTools;
+    this.#nativeHarness = dependencies.nativeHarness;
     this.#turnFileObserver = dependencies.turnFileObserver;
     this.#resolveThreadMentionContext = dependencies.resolveThreadMentionContext;
     this.#resolveFileMentionContext = dependencies.resolveFileMentionContext;
@@ -581,6 +592,19 @@ export class WorkTurnService {
             projectRoot: input.projectRoot,
             windowId: input.windowId,
           });
+    const harnessScope: NativeHarnessTurnScope | undefined =
+      input.thread === undefined
+        ? undefined
+        : {
+            threadId: String(input.thread.id),
+            mode: "work",
+            providerInstanceId: input.thread.providerInstanceId,
+            modelId: input.thread.modelId,
+            projectId: input.thread.projectId,
+          };
+    if (harnessScope !== undefined) this.#nativeHarness?.turnStarted(harnessScope);
+    const harnessContext =
+      harnessScope === undefined ? [] : (this.#nativeHarness?.contextFor(harnessScope) ?? []);
     const outcome = await this.#turnRuntime.run({
       command: input.command,
       providerSessionId: input.providerSessionId,
@@ -589,7 +613,9 @@ export class WorkTurnService {
       signal: input.signal,
       ...(appManagedTools === undefined ? {} : { appManagedTools }),
       ...(input.attachments.length === 0 ? {} : { attachments: input.attachments }),
-      ...(input.context.length === 0 ? {} : { context: input.context }),
+      ...(harnessContext.length + input.context.length === 0
+        ? {}
+        : { context: [...harnessContext, ...input.context] }),
       onDelta: (response) => {
         const projected = this.#projection.lookup(input.command.requestId);
         if (
@@ -623,6 +649,15 @@ export class WorkTurnService {
         }
       }
       return;
+    }
+    if (
+      outcome.kind === "completed" &&
+      harnessScope !== undefined &&
+      this.#nativeHarness !== undefined
+    ) {
+      await this.#nativeHarness
+        .turnCompleted({ ...harnessScope, text: outcome.response, toolCalls: 0 })
+        .catch(() => undefined);
     }
     const live = this.#liveResponses.get(String(input.command.requestId));
     this.#persistOutcome(

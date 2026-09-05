@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Schema } from "effect";
-import { EventActor, decodeProjectId } from "@octant/contracts";
+import {
+  EventActor,
+  decodeNativeHarnessSlotCandidate,
+  decodeProjectId,
+  type NativeHarnessRoutingConfiguration,
+} from "@octant/contracts";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
@@ -21,11 +26,15 @@ const actor = Schema.decodeUnknownSync(EventActor)({
   actorId: "77777777-7777-4777-8777-777777777777",
 });
 const host = "00000000-0000-4000-8000-0000000000aa";
-const candidate = (model: string) => ({
-  hostId: host,
-  providerInstanceId: "00000000-0000-4000-8000-000000000001",
-  modelId: model,
-});
+const candidate = (model: string) =>
+  decodeNativeHarnessSlotCandidate({
+    hostId: host,
+    providerInstanceId: "00000000-0000-4000-8000-000000000001",
+    modelId: model,
+  });
+const configuration = (
+  slots: NativeHarnessRoutingConfiguration["slots"],
+): NativeHarnessRoutingConfiguration => ({ slots, jobSlots: [] }) as never;
 
 function openConnection(): SqliteConnection {
   const directory = mkdtempSync(join(tmpdir(), "octant-harness-store-"));
@@ -69,8 +78,8 @@ describe("native harness routing store", () => {
       configuration: {
         slots: [{ id: "default" as never, candidates: [candidate("big")] }],
         jobSlots: [{ job: "lead", slotId: "default" as never }],
-      },
-      expectedVersion: 0,
+      } as never,
+      expectedVersion: 0 as never,
     });
     expect(updated.kind).toBe("routing-settings");
     const restarted = new NativeHarnessRoutingStore({
@@ -93,7 +102,7 @@ describe("native harness routing store", () => {
     store.updateHost({ configuration: { slots: [], jobSlots: [] }, expectedVersion: 0 });
     const stale = store.updateHost({
       configuration: { slots: [], jobSlots: [] },
-      expectedVersion: 0,
+      expectedVersion: 0 as never,
     });
     expect(stale).toMatchObject({ kind: "routing-refused", reason: "stale-version" });
   });
@@ -115,7 +124,7 @@ describe("native harness routing store", () => {
         slots: [{ id: "task" as never, candidates: [candidate("small")] }],
         jobSlots: [],
       },
-      expectedVersion: 0,
+      expectedVersion: 0 as never,
     });
     expect(set.kind).toBe("project-routing-override");
     expect(store.host().version).toBe(0);
@@ -129,7 +138,7 @@ describe("native harness routing store", () => {
     const cleared = restarted.applyProjectCommand({
       kind: "clear-project-routing-override",
       projectId,
-      expectedVersion: 1,
+      expectedVersion: 1 as never,
     });
     expect(cleared.kind).toBe("project-routing-override-cleared");
     expect(restarted.projectOverride(projectId)).toBeUndefined();
