@@ -54,6 +54,7 @@
     "smoke:apple-toolchain": "bun scripts/smoke-apple-toolchain.ts",
     "smoke:packaged-claude": "bun scripts/smoke-packaged-claude.ts",
     "smoke:packaged-opencode": "bun scripts/smoke-packaged-opencode.ts",
+    "bench:harness": "bun scripts/harness-benchmark.ts",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
     "verify": "bun run paths:check && bun run wiring:check && bun run ui:check && bun run decisions:check && bun run fmt:check && bun run lint && bun run typecheck && bun run test && bun run build"

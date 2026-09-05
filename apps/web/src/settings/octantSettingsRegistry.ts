@@ -266,6 +266,14 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       settings: [],
     },
     {
+      id: "harness",
+      label: "Octant Harness",
+      scope: "app",
+      keywords:
+        "octant harness native agent loop model slots default plan slow task smol vision advisor routing fallback cooldown delegate children follow-ups chips endpoint openai-compatible anthropic-compatible ollama azure",
+      settings: [],
+    },
+    {
       id: "skills",
       label: "Skills & Extensions",
       scope: "host",

@@ -11,6 +11,7 @@ import {
   decodeCodeThreadId,
   decodeCodeWorktreeSourcePreview,
   decodeProjectId,
+  decodeUtcTimestamp,
   decodeWindowId,
   type AgentProfile,
   type AgentProfileScope,
@@ -308,6 +309,93 @@ describe("CodeService reads", () => {
     expect(fixture.checkouts.observe).not.toHaveBeenCalled();
     expect(fixture.roots.resolve).not.toHaveBeenCalled();
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("carries a thread's linked pull requests onto its navigation row from the cached snapshot", async () => {
+    const linked = thread();
+    const quiet = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
+    const snapshot = vi.fn(async (_windowId: unknown) => ({
+      rows: [
+        {
+          projectId: ids.project,
+          projectName: "Project",
+          repositoryOwner: "octant",
+          repositoryName: "octant",
+          number: 12,
+          title: "Sidebar pull request",
+          draft: false,
+          state: "open" as const,
+          mergeability: "mergeable" as const,
+          author: "octocat",
+          baseBranch: "main",
+          headBranch: "feature/sidebar",
+          updatedAt: "2026-08-22T08:00:00Z",
+          checks: "passing" as const,
+          review: "approved" as const,
+          linkedThreads: [{ threadId: linked.id, title: linked.title }],
+        },
+      ],
+      freshness: { status: "fresh" as const, lastSuccessfulRefreshAt: decodeUtcTimestamp(now) },
+      githubRevoked: false,
+    }));
+    const fixture = serviceFixture({
+      threads: [linked, quiet],
+      pullRequests: { snapshot: (windowId) => snapshot(windowId) },
+    });
+
+    const navigation = await fixture.service.navigation(ids.window);
+
+    expect(snapshot).toHaveBeenCalledWith(ids.window);
+    expect(navigation.runtime).toEqual([
+      {
+        threadId: linked.id,
+        executing: false,
+        pullRequestSummaries: {
+          items: [
+            {
+              identity: {
+                projectId: ids.project,
+                repositoryOwner: "octant",
+                repositoryName: "octant",
+                number: 12,
+              },
+              title: "Sidebar pull request",
+              state: "open",
+              checks: "passing",
+              review: "approved",
+              mergeability: "mergeable",
+              freshness: "fresh",
+              readyToMerge: true,
+            },
+          ],
+          hiddenCount: 0,
+        },
+      },
+      { threadId: quiet.id, executing: false },
+    ]);
+  });
+
+  it("keeps navigation rows without pull-request facts when the snapshot source fails or GitHub is revoked", async () => {
+    const failing = serviceFixture({
+      pullRequests: {
+        snapshot: () => Promise.reject(new Error("snapshot unavailable")),
+      },
+    });
+    await expect(failing.service.navigation(ids.window)).resolves.toMatchObject({
+      runtime: [{ threadId: thread().id, executing: false }],
+    });
+
+    const revoked = serviceFixture({
+      pullRequests: {
+        snapshot: () => ({
+          rows: [],
+          freshness: { status: "stale", staleReason: "disconnected" },
+          githubRevoked: true,
+        }),
+      },
+    });
+    const navigation = await revoked.service.navigation(ids.window);
+    expect(navigation.runtime[0]).not.toHaveProperty("pullRequestSummaries");
   });
 
   it("re-observes a shared existing checkout only once during restart bootstrap", async () => {
@@ -3314,6 +3402,7 @@ function serviceFixture(
     readonly worktreeRemoteFacts?: CodeWorktreeRemoteFacts;
     readonly probeProvider?: CodeServiceOptions["probeProvider"];
     readonly content?: CodeContentStoreOptions;
+    readonly pullRequests?: CodeServiceOptions["pullRequests"];
   } = {},
 ) {
   const threads = options.threads ?? [thread()];
@@ -3417,6 +3506,7 @@ function serviceFixture(
       ? {}
       : { managedThreadCreation: options.managedThreadCreation }),
     ...(options.probeProvider === undefined ? {} : { probeProvider: options.probeProvider }),
+    ...(options.pullRequests === undefined ? {} : { pullRequests: options.pullRequests }),
     ...(options.watcher === undefined
       ? {}
       : { watcher: options.watcher as unknown as NonNullable<CodeServiceOptions["watcher"]> }),

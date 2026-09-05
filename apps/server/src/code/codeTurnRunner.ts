@@ -120,6 +120,11 @@ export interface CodeTurnRunnerInput {
   readonly persistEvent: (event: CodeTurnEvent) => Effect.Effect<void, CodeTurnFailure>;
   readonly persistOutcome: (outcome: CodeTurnOutcome) => Effect.Effect<void, CodeTurnFailure>;
   readonly signal?: AbortSignal;
+  /** Observes a completed reply with its full text and the tool calls it made. */
+  readonly onTurnCompleted?: (input: {
+    readonly text: string;
+    readonly toolCalls: number;
+  }) => Promise<void>;
 }
 
 export interface CodeTurnRunnerOptions {
@@ -147,6 +152,7 @@ export class CodeTurnRunner {
       let handledEvents = 0;
       let unresolvedReconciliation = false;
       let providerCompleted = false;
+      let responseText = "";
       const answeredToolRequestIds = new Set<string>();
 
       const persistOutcome = (next: CodeTurnOutcome) =>
@@ -260,8 +266,19 @@ export class CodeTurnRunner {
                   }
                   yield* input.persistEvent(normalized);
                   providerCompleted = true;
+                  if (input.onTurnCompleted !== undefined) {
+                    yield* Effect.promise(() =>
+                      input.onTurnCompleted!({
+                        text: responseText,
+                        toolCalls: answeredToolRequestIds.size,
+                      }).catch(() => undefined),
+                    );
+                  }
                 } else {
                   yield* input.persistEvent(normalized);
+                  if (sanitizedEvent.kind === "text-delta" && responseText.length < 262_144) {
+                    responseText += sanitizedEvent.text;
+                  }
                   if (sanitizedEvent.kind === "tool-request") {
                     if (answeredToolRequestIds.has(sanitizedEvent.requestId)) return;
                     answeredToolRequestIds.add(sanitizedEvent.requestId);

@@ -74,6 +74,13 @@ import { ExtensionsSettingsView } from "../extensions/ExtensionsSettingsView";
 import type { ThemeController } from "../theme/useThemeController";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import { AgentRunSettingsPanel } from "../agents/AgentRunSettingsPanel";
+import {
+  NativeHarnessRoutingPanel,
+  type NativeHarnessProviderOption,
+} from "../harness/NativeHarnessRoutingPanel";
+import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
+import { LOCAL_HOST_ID } from "@octant/contracts";
+import { isNativeHarnessDriverKind } from "@octant/domain";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ThemeAppearanceEditor } from "../theme/ThemeAppearanceEditor";
 import { AppUpdateSettings } from "../settings/AppUpdateSettings";
@@ -129,6 +136,7 @@ export interface SettingsViewProps {
   readonly themeController?: ThemeController;
   readonly executionProfiles?: ReactNode;
   readonly agentRunSettingsClient?: AgentRunSettingsClient;
+  readonly nativeHarnessClient?: NativeHarnessClient;
   readonly automationNotificationClient?: AutomationNotificationClient;
   /**
    * Stand-in override for first-party plugin effectiveness. Production uses
@@ -154,6 +162,7 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   providers: "Connect providers, manage authentication, and pick default models.",
   profiles: "Reusable execution profiles for agent runs.",
   agents: "How agent runs behave in this app.",
+  harness: "Octant's own agent loop for API-key and local models: which model does which job.",
   skills: "Skills and extensions available to agents.",
   usage: "Activity and usage across providers.",
   advanced: "Layout resets and diagnostics.",
@@ -530,6 +539,25 @@ function ActiveSectionContent({
       return props.agentRunSettingsClient !== undefined ? (
         <div id="settings-agents">
           <AgentRunSettingsPanel client={props.agentRunSettingsClient} />
+        </div>
+      ) : null;
+    case "harness":
+      return props.nativeHarnessClient !== undefined ? (
+        <div id="settings-harness">
+          <section className="settings-card-section settings-card-section--open">
+            <h2>Octant Harness</h2>
+            <p className="native-harness-panel__lead">
+              Octant runs API-key and local endpoint models with its own tools, authority checks,
+              and journal. Those endpoints appear together as <strong>Octant</strong> in the model
+              picker. Slots decide which model does which job; whether a lead may start child runs
+              is the subagent creation posture under Agents.
+            </p>
+          </section>
+          <NativeHarnessRoutingPanel
+            client={props.nativeHarnessClient}
+            hostId={LOCAL_HOST_ID}
+            providers={nativeHarnessProviderOptions(props.providerController)}
+          />
         </div>
       ) : null;
     case "advanced":
@@ -1357,4 +1385,22 @@ function SidebarBackgroundSettings({
       ) : null}
     </div>
   );
+}
+
+/** The direct-endpoint providers a slot may name, with the models each reports. */
+function nativeHarnessProviderOptions(
+  controller: SettingsViewProps["providerController"],
+): ReadonlyArray<NativeHarnessProviderOption> {
+  if (controller === undefined) return [];
+  return controller.instances
+    .filter((instance) => instance.enabled && isNativeHarnessDriverKind(instance.driverKind))
+    .map((instance) => ({
+      instanceId: String(instance.id),
+      label: instance.displayName,
+      models: (controller.observedByInstance.get(instance.id)?.models ?? []).map((model) => ({
+        id: String(model.id),
+        label: model.displayName,
+      })),
+    }))
+    .filter((option) => option.models.length > 0);
 }

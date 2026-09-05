@@ -107,6 +107,14 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "Residual Cursor ACP connection-check policy kept for cursorAcpPolicy.test.ts and future probe wiring; production runtime and settings paths were removed. Remove once a product caller imports runCursorAcpConnectionCheck or the probe suite is retired.",
   ],
   [
+    "packages/contracts/src/nativeHarnessRouting.ts",
+    "Native harness slot routing contracts, delivered schema-first ahead of the server routing engine and Settings editor. Remove once the server resolves a NativeHarnessRouteDecision or a surface edits NativeHarnessRoutingSettings.",
+  ],
+  [
+    "packages/contracts/src/nativeHarness.ts",
+    "Native harness session, advisor, follow-up, and tool-bound contracts, delivered schema-first ahead of the turn runtime. Remove once the server journals a NativeHarnessTurnRecord or a surface renders a NativeHarnessFollowUpSet.",
+  ],
+  [
     "packages/domain/src/canvasBoardPolicy.ts",
     "Canvas board comment and layout-revision policy; server journal wiring and renderer integration are out of scope for the contracts/domain slice. Remove once a server service or renderer calls admitCanvasCommentCommand or admitCanvasDiagramLayoutRevision.",
   ],

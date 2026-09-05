@@ -25,6 +25,8 @@ export * from "./githubClient";
 export * from "./githubCloneClient";
 export * from "./goalClient";
 export * from "./goalLoopClient";
+export * from "./nativeHarnessClient";
+export * from "./mobileNativeHarnessClient";
 export * from "./shipClient";
 export * from "./planClient";
 export * from "./productFeedbackClient";

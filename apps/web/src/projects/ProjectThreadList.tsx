@@ -1,18 +1,24 @@
 import { memo, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
+import type { ThreadBoardPullRequestSummaries } from "@octant/contracts";
 import {
   Archive,
   Cpu,
+  ExternalLink,
   FolderGit2,
   GitBranch,
   GitFork,
+  GitPullRequest,
   MoreHorizontal,
   Pin,
   PinOff,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ChatThreadNavigationItem, ThreadRowActivity } from "../shell/navigationModel";
+import { describePullRequestSummary } from "../threadBoard/ThreadBoardPullRequestSummaries";
+import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
+import { pullRequestKey, threadRowPullRequestDestinations } from "./threadRowPullRequests";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { ThreadRenameField } from "./ThreadRenameField";
@@ -27,7 +33,7 @@ import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantContextMenuRoot, OctantContextMenuTrigger } from "../ui/base/OctantContextMenu";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
 import { OctantPopover } from "../ui/base/OctantPopover";
-import { OctantTooltip } from "../ui/base/OctantTooltip";
+import { OctantPreviewCard } from "../ui/base/OctantPreviewCard";
 
 /**
  * Thread rows and their honest states, shared by the Project sidebar and the
@@ -183,8 +189,91 @@ function threadRowFacts(props: {
 }
 
 /**
+ * Compact references to the row's exact linked pull requests, inside the card.
+ *
+ * A click opens the pull request in Octant's Review dock; Cmd-click (Ctrl on
+ * other platforms) and the trailing control go to github.com, so both
+ * destinations stay one gesture apart. Without a Review route the reference
+ * is plain text — a button that could open nothing would read as broken —
+ * and without an external route neither the control nor the modifier is
+ * offered. The facts come from the cached snapshot the row already carries;
+ * nothing here asks GitHub for more.
+ */
+function ThreadRowPullRequests(props: {
+  readonly actions: ThreadRowActions;
+  readonly summaries: ThreadBoardPullRequestSummaries;
+}) {
+  const openInReview = props.actions.onOpenPullRequest;
+  const openOnGithub = props.actions.onOpenPullRequestOnGithub;
+  return (
+    <span aria-label="Linked pull requests" className="thread-row-info-card__prs" role="group">
+      {props.summaries.items.map((summary) => {
+        const number = String(summary.identity.number);
+        const repo = `${summary.identity.repositoryOwner}/${summary.identity.repositoryName}`;
+        const meta = [repo, ...describePullRequestSummary(summary)].join(" · ");
+        const externalUrl =
+          openOnGithub === undefined ? undefined : githubPullRequestUrl(summary.identity);
+        const reference = (
+          <>
+            <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.7} />
+            <span className="thread-row-info-card__pr-title">
+              #{number} {summary.title}
+            </span>
+            <span className="thread-row-info-card__pr-meta">{meta}</span>
+          </>
+        );
+        return (
+          <span className="thread-row-info-card__pr" key={pullRequestKey(summary.identity)}>
+            {openInReview === undefined ? (
+              <span className="thread-row-info-card__pr-reference">{reference}</span>
+            ) : (
+              <OctantButton
+                aria-label={`Open pull request #${number}: ${summary.title} · ${meta}`}
+                className="thread-row-info-card__pr-reference thread-row-info-card__pr-open"
+                onClick={(event) => {
+                  if (event.metaKey || event.ctrlKey) {
+                    if (externalUrl !== undefined) openOnGithub?.(summary.identity);
+                    return;
+                  }
+                  openInReview(summary.identity);
+                }}
+                title={
+                  externalUrl === undefined
+                    ? "Opens in Review"
+                    : "Opens in Review. Cmd-click opens on GitHub."
+                }
+                type="button"
+                variant="ghost"
+              >
+                {reference}
+              </OctantButton>
+            )}
+            {externalUrl === undefined ? null : (
+              <OctantIconButton
+                className="thread-row-info-card__pr-github"
+                label={`Open #${number} on GitHub`}
+                onClick={() => openOnGithub?.(summary.identity)}
+                title={`Open #${number} on GitHub`}
+                type="button"
+              >
+                <ExternalLink aria-hidden="true" size={14} strokeWidth={1.8} />
+              </OctantIconButton>
+            )}
+          </span>
+        );
+      })}
+      {props.summaries.hiddenCount === 0 ? null : (
+        <span className="thread-row-info-card__pr-more">
+          +{String(props.summaries.hiddenCount)} more
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
  * A delayed, non-modal summary of the facts the navigation row and its Project
- * context already carry.
+ * context already carry, plus the row's exact linked pull requests.
  *
  * It reads on the ordinary raised surface rather than the inverted tooltip
  * ground: the card's own tokens paint `--oct-fg` text, which on the tooltip's
@@ -192,6 +281,7 @@ function threadRowFacts(props: {
  * grey that failed against near-black.
  */
 function ThreadRowInfoCard(props: {
+  readonly actions: ThreadRowActions;
   readonly lineageParentTitle?: string;
   readonly projectName: string | undefined;
   readonly thread: ChatThreadNavigationItem;
@@ -230,24 +320,34 @@ function ThreadRowInfoCard(props: {
           ))}
         </span>
       )}
+      {props.thread.pullRequests === undefined ||
+      (props.thread.pullRequests.items.length === 0 &&
+        props.thread.pullRequests.hiddenCount === 0) ? null : (
+        <ThreadRowPullRequests actions={props.actions} summaries={props.thread.pullRequests} />
+      )}
     </span>
   );
 }
 
 /**
- * Wraps a row trigger so the info card appears after a short delay. The popup
- * is rendered in a portal so it is never clipped by the sidebar.
+ * Wraps a row trigger so the info card appears after a short delay on hover or
+ * keyboard focus. The popup is rendered in a portal so it is never clipped by
+ * the sidebar, and it is a preview card rather than a tooltip because the
+ * pull-request references inside it are controls the pointer has to reach.
  */
-function ThreadRowTooltip(props: {
+function ThreadRowInfoPopup(props: {
+  readonly actions: ThreadRowActions;
   readonly children: ReactElement;
   readonly lineageParentTitle?: string;
   readonly projectName: string | undefined;
   readonly thread: ChatThreadNavigationItem;
 }) {
   return (
-    <OctantTooltip
-      label={
+    <OctantPreviewCard
+      align="start"
+      content={
         <ThreadRowInfoCard
+          actions={props.actions}
           {...(props.lineageParentTitle === undefined
             ? {}
             : { lineageParentTitle: props.lineageParentTitle })}
@@ -255,12 +355,11 @@ function ThreadRowTooltip(props: {
           thread={props.thread}
         />
       }
-      align="start"
+      label="Thread details"
       side="right"
-      surface="card"
     >
       {props.children}
-    </OctantTooltip>
+    </OctantPreviewCard>
   );
 }
 
@@ -276,6 +375,7 @@ function ThreadRowActionsGutter(props: {
   const threadId = props.thread.navigationId ?? props.thread.threadId;
   const pinned = props.thread.pinned === true;
   const pinLabel = pinned ? "Unpin thread" : "Pin thread";
+  const pullRequestDestinations = threadRowPullRequestDestinations(props.thread, props.actions);
   const overflowItems: ReadonlyArray<OctantMenuItem> = [
     ...(props.actions.onPinThread === undefined
       ? []
@@ -299,6 +399,11 @@ function ThreadRowActionsGutter(props: {
             value: "archive",
           } as const,
         ]),
+    ...pullRequestDestinations.map((destination) => ({
+      icon: <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.8} />,
+      label: destination.label,
+      value: destination.key,
+    })),
   ];
   return (
     <span className="sidebar-navigation__thread-actions">
@@ -334,6 +439,7 @@ function ThreadRowActionsGutter(props: {
           onValueChange={(value) => {
             if (value === "pin") props.actions.onPinThread?.(threadId, !pinned);
             if (value === "archive") props.actions.onArchiveThread?.(threadId);
+            pullRequestDestinations.find((destination) => destination.key === value)?.run();
           }}
           selectionMode="action"
           trigger={<MoreHorizontal aria-hidden="true" size={14} strokeWidth={1.8} />}
@@ -630,13 +736,14 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
     </OctantButton>
   );
   const wrappedRow = (
-    <ThreadRowTooltip
+    <ThreadRowInfoPopup
+      actions={props.actions}
       {...(parentTitle === undefined ? {} : { lineageParentTitle: parentTitle })}
       projectName={projectName}
       thread={props.thread}
     >
       {row}
-    </ThreadRowTooltip>
+    </ThreadRowInfoPopup>
   );
   if (!hasMenu) {
     return (
@@ -861,7 +968,8 @@ function ThreadRowContextMenu(props: {
     <div className="sidebar-navigation__thread-row">
       {props.leading}
       <OctantContextMenuRoot onOpenChange={setOpen}>
-        <ThreadRowTooltip
+        <ThreadRowInfoPopup
+          actions={props.actions}
           {...(props.lineageParentTitle === undefined
             ? {}
             : { lineageParentTitle: props.lineageParentTitle })}
@@ -869,7 +977,7 @@ function ThreadRowContextMenu(props: {
           thread={props.thread}
         >
           <OctantContextMenuTrigger aria-expanded={open} aria-haspopup="menu" render={props.row} />
-        </ThreadRowTooltip>
+        </ThreadRowInfoPopup>
         {props.inlineActions ? (
           <ThreadRowActionsGutter actions={props.actions} thread={props.thread} />
         ) : null}
