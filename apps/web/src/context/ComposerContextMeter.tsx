@@ -181,27 +181,25 @@ function ContextUsageFallback(props: { readonly fallback: ComposerContextUsageFa
     <>
       <header className="context-window-popover__header">
         <span>Provider usage</span>
-        <strong>{formatTokens(props.fallback.inputTokens)} input</strong>
+        <strong>{formatTokens(props.fallback.inputTokens)} in</strong>
       </header>
       <p className="context-window-popover__source">
-        The provider reported usage, but not an authoritative context-window maximum.
+        This provider reports what a turn spent, but not a context-window maximum, so there is no
+        share of a window to show.
       </p>
       <dl className="context-window-popover__facts">
         <Fact label="Input" value={formatTokens(props.fallback.inputTokens)} />
         <Fact label="Output" value={formatTokens(props.fallback.outputTokens)} />
-        <Fact label="Context maximum" value="Unavailable" />
-        <Fact
-          label="Cost"
-          value={
-            props.fallback.costUsd === undefined
-              ? "Not reported"
-              : new Intl.NumberFormat(undefined, {
-                  style: "currency",
-                  currency: "USD",
-                  maximumFractionDigits: 4,
-                }).format(props.fallback.costUsd)
-          }
-        />
+        {props.fallback.costUsd === undefined ? null : (
+          <Fact
+            label="Cost"
+            value={new Intl.NumberFormat(undefined, {
+              style: "currency",
+              currency: "USD",
+              maximumFractionDigits: 4,
+            }).format(props.fallback.costUsd)}
+          />
+        )}
       </dl>
       <section aria-label="Provider account limits" className="context-window-popover__limits">
         <div className="context-window-popover__limits-heading">
@@ -214,10 +212,7 @@ function ContextUsageFallback(props: { readonly fallback: ComposerContextUsageFa
           </p>
         ) : (
           props.fallback.limits.map((limit) => (
-            <p className="context-window-popover__limit-state" key={limit.window}>
-              <span>{limit.window.replaceAll("_", " ")}</span>
-              <span>{codeProviderLimitLabel(limit)}</span>
-            </p>
+            <ProviderLimitRow key={limit.window} limit={limit} />
           ))
         )}
       </section>
@@ -390,6 +385,38 @@ function meterLabel(input: {
   const health = input.healthLabel === undefined ? "" : ` ${input.healthLabel}.`;
   const scope = input.snapshotLabel === undefined ? "" : ` for ${input.snapshotLabel}`;
   return `${action} context usage${scope}. ${input.windowModel.usageLabel} (${String(Math.round(input.windowModel.percent))}%)${unknown}. ${source}.${health}`;
+}
+
+/**
+ * One provider window, as a share rather than a sentence.
+ *
+ * A row of prose asked the reader to compare percentages in their head; the bar
+ * ranks the windows at a glance and the words stay for the ones that have no
+ * measurable share.
+ */
+function ProviderLimitRow(props: {
+  readonly limit: ComposerContextUsageFallback["limits"][number];
+}) {
+  const { limit } = props;
+  const share = limit.utilization === undefined ? undefined : Math.round(limit.utilization * 100);
+  const tone =
+    limit.status === "exhausted" ? "danger" : limit.status === "warning" ? "warn" : undefined;
+  return (
+    <>
+      <p className="context-window-popover__limit-state">
+        <span>{limit.window.replaceAll("_", " ")}</span>
+        <span>{codeProviderLimitLabel(limit)}</span>
+      </p>
+      {share === undefined ? null : (
+        <span
+          className="context-window-popover__limit-meter"
+          {...(tone === undefined ? {} : { "data-tone": tone })}
+        >
+          <span style={{ width: `${String(Math.max(0, Math.min(100, share)))}%` }} />
+        </span>
+      )}
+    </>
+  );
 }
 
 function codeProviderLimitLabel(limit: ComposerContextUsageFallback["limits"][number]): string {

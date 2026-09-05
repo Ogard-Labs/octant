@@ -5,6 +5,7 @@ import {
   resolveRightUtilityDockSurface,
   type RightUtilityDockResolutionInput,
   type RightUtilityDockSurfaceAvailability,
+  MULTI_INSTANCE_DOCK_SURFACES,
 } from "./rightUtilityDockModel";
 
 const validInput = {
@@ -225,4 +226,17 @@ describe("resolving what the right utility dock shows", () => {
       ).toEqual({ kind: "closed", reason: "unknown-surface" });
     },
   );
+});
+
+describe("multi-instance dock surfaces", () => {
+  it("lets a reader keep several terminals and browsers open at once", () => {
+    expect(MULTI_INSTANCE_DOCK_SURFACES.has("terminal")).toBe(true);
+    expect(MULTI_INSTANCE_DOCK_SURFACES.has("browser")).toBe(true);
+  });
+
+  it("keeps a thread's single views single", () => {
+    for (const surface of ["environment", "plan", "review", "files", "tests"]) {
+      expect(MULTI_INSTANCE_DOCK_SURFACES.has(surface)).toBe(false);
+    }
+  });
 });

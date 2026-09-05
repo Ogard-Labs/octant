@@ -114,9 +114,17 @@
   background: var(--oct-fg-soft);
 }
 
+/* The tab in front is a different thing from the tab under the pointer, so it
+   is a raised surface with an edge rather than a slightly stronger tint —
+   sharing one ground made hovering look like selecting. */
 .dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"]) {
   color: var(--oct-fg);
-  background: var(--octant-selection);
+  background: var(--oct-surface);
+  box-shadow: inset 0 0 0 1px var(--oct-border);
+}
+
+.dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"]):hover {
+  background: var(--oct-surface);
 }
 
 .dock-tool-strip__select {
@@ -148,6 +156,14 @@
 .dock-tool-strip__tab:hover .dock-tool-strip__close,
 .dock-tool-strip__tab:focus-within .dock-tool-strip__close,
 .dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"]) .dock-tool-strip__close {
+  opacity: 1;
+}
+
+/* In the overflow menu there is no tab to hover, so the control that closes a
+   tool has to be visible to be usable at all. */
+.dock-tool-strip__close--overflow {
+  width: 26px;
+  min-height: 26px;
   opacity: 1;
 }
 
@@ -417,29 +433,10 @@
   gap: 4px;
 }
 
-.bottom-utility-panel__tab {
-  display: inline-flex;
-  min-height: 24px;
-  align-items: center;
-  gap: 5px;
-  padding: 0 7px;
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-  border: 0;
-  border-radius: var(--oct-radius-sm);
-  font-size: var(--oct-text-xs);
-}
-
-.bottom-utility-panel .dock-tool-strip__select {
-  min-height: 24px;
-  padding-inline: 6px 3px;
-}
-
-.bottom-utility-panel .dock-tool-strip__close {
-  width: 24px;
-  height: 24px;
-  min-height: 24px;
-}
+/* The bottom panel and the right dock show the same tab strip, so it is styled
+   once. Shrinking the shared control here gave one surface 24px tabs and the
+   other 30px, and the two read as different widgets doing the same job. The
+   dead `__tab` rule that sat here was never on any element. */
 
 .bottom-utility-panel__content {
   min-width: 0;

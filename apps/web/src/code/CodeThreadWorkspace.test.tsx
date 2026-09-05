@@ -379,6 +379,38 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByText("The restore was undone.")).toBeVisible();
   });
 
+  it("dates each turn from the moment the journal recorded it", async () => {
+    const at = new Date();
+    at.setHours(9, 14, 0, 0);
+    const conversation = [
+      {
+        id: "turn-1:user",
+        role: "user" as const,
+        text: "rewrite the parser",
+        at: at.toISOString(),
+      },
+      {
+        id: "turn-1:assistant",
+        role: "assistant" as const,
+        text: "done",
+        operationId: "50000000-0000-4000-8000-000000000001",
+        status: "completed" as const,
+        at: new Date(at.getTime() + 60_000).toISOString(),
+      },
+    ];
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ conversation } as never)}
+        threadId={threadId}
+      />,
+    );
+
+    const expected = at.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    const stamps = await screen.findAllByText(expected);
+    expect(stamps.length).toBeGreaterThan(0);
+    expect(stamps[0]).toHaveAttribute("datetime", at.toISOString());
+  });
+
   it("forks a new thread from a finished answer and opens it, leaving this one alone", async () => {
     const user = userEvent.setup();
     const forkThread = vi.fn(async () => ({

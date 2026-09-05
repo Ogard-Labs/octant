@@ -7,6 +7,7 @@ import {
   type GitSeatbeltPortOptions,
 } from "./process/gitSeatbeltLaunch";
 import { SeatbeltConfinementError } from "./process/seatbeltProfile";
+import { parseNumstat } from "./code/gitObservationPort";
 
 export type GitEnvironmentResult =
   | {
@@ -17,6 +18,9 @@ export type GitEnvironmentResult =
         | { readonly kind: "named"; readonly name: string }
         | { readonly kind: "detached"; readonly oid: string };
       readonly changes: "clean" | "dirty";
+      /** Absent when the counts could not be read, which is not the same as zero. */
+      readonly insertions?: number;
+      readonly deletions?: number;
     }
   | { readonly status: "unavailable" }
   | { readonly status: "failed" };
@@ -176,10 +180,23 @@ export class GitEnvironmentPort {
 
     try {
       const canonicalTopLevel = await this.#dependencies.realpath(topLevel.stdout.trim());
-      const [worktrees, symbolic, status] = await Promise.all([
+      const [worktrees, symbolic, status, numstat] = await Promise.all([
         run(["-C", canonicalRoot, "worktree", "list", "--porcelain"]),
         run(["-C", canonicalRoot, "symbolic-ref", "--quiet", "--short", "HEAD"]),
         run(["-C", canonicalRoot, "status", "--porcelain=v1", "--untracked-files=normal"]),
+        // Against HEAD, so the totals are what this tree has changed and not
+        // yet committed — the same thing "dirty" is claiming.
+        run([
+          "-C",
+          canonicalRoot,
+          "diff",
+          "--numstat",
+          "-z",
+          "--no-ext-diff",
+          "--no-color",
+          "HEAD",
+          "--",
+        ]),
       ]);
       if (worktrees.exitCode !== 0) return { status: "failed" };
       if (status.exitCode !== 0) return { status: "failed" };
@@ -217,12 +234,18 @@ export class GitEnvironmentPort {
         branch = { kind: "detached", oid: identity };
       } else return { status: "failed" };
 
+      // A repository with no commits has no HEAD to diff against, and a failed
+      // count is reported as absent rather than as zero.
+      const lineCounts = numstat.exitCode === 0 ? parseNumstat(numstat.stdout) : undefined;
       return {
         status: "ready",
         repositoryRoot,
         worktreeRoot,
         branch,
         changes: status.stdout.trim() ? "dirty" : "clean",
+        ...(lineCounts === undefined
+          ? {}
+          : { insertions: lineCounts.insertions, deletions: lineCounts.deletions }),
       };
     } catch {
       return { status: "failed" };

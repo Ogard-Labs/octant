@@ -18,6 +18,7 @@
     "@octant/theme": "workspace:*",
     "@tanstack/react-virtual": "3.14.10",
     "@xterm/addon-fit": "catalog:",
+    "@xterm/addon-webgl": "catalog:",
     "@xterm/xterm": "catalog:",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",

@@ -82,7 +82,7 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    for (const label of ["New thread", "Board"]) {
+    for (const label of ["New task", "Board"]) {
       await user.click(screen.getByRole("button", { name: label }));
     }
     await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
@@ -116,7 +116,7 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    for (const label of ["New thread", "Board", "Pull requests"]) {
+    for (const label of ["New task", "Board", "Pull requests"]) {
       await user.click(screen.getByRole("button", { name: label }));
     }
     await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));

@@ -8,7 +8,6 @@ import { buildModelPickerGroups } from "@octant/domain";
 import { useMemo, useState } from "react";
 import { ModelPicker } from "../providers/ModelPicker";
 import { SettingRow } from "../settings/primitives";
-import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -68,6 +67,61 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
     setEndpointError(endpointValidationMessage(value));
   }
 
+  /**
+   * Every page in Settings keeps what you change; a Save button here meant a
+   * choice could look made and not be. A pick commits as it is made, and free
+   * text commits when it is finished, because a URL is not valid halfway
+   * through typing it.
+   */
+  async function commit(change: Partial<ReturnType<typeof draftFrom>>) {
+    const next = { ...draft, ...change };
+    const nextEndpointError = endpointValidationMessage(next.searxngBaseUrl);
+    if (nextEndpointError !== undefined) {
+      setEndpointError(nextEndpointError);
+      return;
+    }
+    const providerInstanceId =
+      next.defaultProviderInstanceId === ""
+        ? undefined
+        : (next.defaultProviderInstanceId as ProviderInstanceId);
+    const modelId =
+      next.defaultModelId === "" ? undefined : (next.defaultModelId as ProviderModelId);
+    if (providerInstanceId === undefined || modelId === undefined) {
+      setFormError("Choose a ready provider and model for new Chat threads.");
+      return;
+    }
+    const instructions = next.defaultPersonalityInstructions.trim();
+    if (instructions.length === 0) {
+      setFormError("Enter calm personality instructions.");
+      return;
+    }
+    setFormError(undefined);
+    const searxngBaseUrl = next.searxngBaseUrl.trim();
+    const command: UpdateChatSettingsCommand = {
+      kind: "update-chat-settings",
+      expectedVersion: props.settings.version,
+      defaultProviderInstanceId: providerInstanceId,
+      defaultModelId: modelId,
+      defaultResearchEnabled: next.defaultResearchEnabled,
+      defaultResearchRouting: next.defaultResearchRouting,
+      ...(searxngBaseUrl === "" ? {} : { searxngBaseUrl }),
+      defaultPersonalityInstructions: instructions,
+      ...(props.settings.providerFallback === undefined
+        ? {}
+        : { providerFallback: props.settings.providerFallback }),
+    };
+    setSaving(true);
+    try {
+      if (!(await props.onUpdate(command))) {
+        setFormError("Chat defaults were not saved. Review the values and try again.");
+      }
+    } catch {
+      setFormError("Chat defaults were not saved. Review the values and try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <section
       aria-labelledby="chat-defaults-heading"
@@ -86,47 +140,11 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
         aria-label="Chat defaults"
         className="setgroup"
         noValidate
-        onSubmit={async (event) => {
+        onSubmit={(event) => {
+          // Enter in a text field submits without blurring it, so the commit
+          // that blur would have made has to happen here too.
           event.preventDefault();
-          const nextEndpointError = endpointValidationMessage(draft.searxngBaseUrl);
-          if (nextEndpointError !== undefined) {
-            setEndpointError(nextEndpointError);
-            return;
-          }
-          if (!hasSelection) {
-            setFormError("Choose a ready provider and model for new Chat threads.");
-            return;
-          }
-          const instructions = draft.defaultPersonalityInstructions.trim();
-          if (instructions.length === 0) {
-            setFormError("Enter calm personality instructions.");
-            return;
-          }
-          setFormError(undefined);
-          const searxngBaseUrl = draft.searxngBaseUrl.trim();
-          const command: UpdateChatSettingsCommand = {
-            kind: "update-chat-settings",
-            expectedVersion: props.settings.version,
-            defaultProviderInstanceId: selectedProviderInstanceId,
-            defaultModelId: selectedModelId,
-            defaultResearchEnabled: draft.defaultResearchEnabled,
-            defaultResearchRouting: draft.defaultResearchRouting,
-            ...(searxngBaseUrl === "" ? {} : { searxngBaseUrl }),
-            defaultPersonalityInstructions: instructions,
-            ...(props.settings.providerFallback === undefined
-              ? {}
-              : { providerFallback: props.settings.providerFallback }),
-          };
-          setSaving(true);
-          try {
-            if (!(await props.onUpdate(command))) {
-              setFormError("Chat defaults were not saved. Review the values and try again.");
-            }
-          } catch {
-            setFormError("Chat defaults were not saved. Review the values and try again.");
-          } finally {
-            setSaving(false);
-          }
+          void commit({});
         }}
       >
         <SettingRow
@@ -139,12 +157,13 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
             ariaLabel="Default Chat provider and model"
             groups={groups}
             onSelect={(selection) => {
-              setDraft((current) => ({
-                ...current,
+              const change = {
                 defaultProviderInstanceId: String(selection.providerInstanceId),
                 defaultModelId: String(selection.modelId),
-              }));
+              };
+              setDraft((current) => ({ ...current, ...change }));
               setFormError(undefined);
+              void commit(change);
             }}
             selectedModelId={selectedModelId}
             selectedProviderInstanceId={selectedProviderInstanceId}
@@ -162,6 +181,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
             label="Enable research by default"
             onCheckedChange={(defaultResearchEnabled) => {
               setDraft((current) => ({ ...current, defaultResearchEnabled }));
+              void commit({ defaultResearchEnabled });
             }}
           />
         </SettingRow>
@@ -181,6 +201,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
                 ...current,
                 defaultResearchRouting,
               }));
+              void commit({ defaultResearchRouting });
             }}
             options={[
               { id: "automatic", label: "Automatic" },
@@ -202,6 +223,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
             aria-label="SearXNG base URL"
             className="settings-view__text-input"
             disabled={busy}
+            onBlur={() => void commit({})}
             onChange={(event) => setEndpoint(event.currentTarget.value)}
             placeholder="https://search.example"
             type="url"
@@ -223,6 +245,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
             aria-label="Calm personality instructions"
             className="settings-view__text-input"
             disabled={busy}
+            onBlur={() => void commit({})}
             onChange={(event) => {
               const defaultPersonalityInstructions = event.currentTarget.value;
               setDraft((current) => ({
@@ -239,16 +262,6 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
             {formError}
           </p>
         )}
-        <SettingRow
-          description="Threads created after saving use these defaults."
-          label="Save"
-          scope="host"
-          settingId="chat-save"
-        >
-          <OctantButton disabled={busy} size="sm" type="submit" variant="secondary">
-            {saving ? "Saving Chat defaults…" : "Save Chat defaults"}
-          </OctantButton>
-        </SettingRow>
       </form>
     </section>
   );

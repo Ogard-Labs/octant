@@ -43,7 +43,7 @@ describe("EnvironmentGitGroup", () => {
     renderGroup();
 
     expectRowOrder();
-    expect(within(row("Changes")).getByText("Dirty working tree")).toBeVisible();
+    expect(within(row("Changes")).getByText("Uncommitted changes")).toBeVisible();
 
     const worktree = within(row("Worktree"));
     expect(worktree.getByText("issue-52-reference-faithful-shell")).toHaveClass(
@@ -68,12 +68,32 @@ describe("EnvironmentGitGroup", () => {
 
   it.each([
     ["clean", "Clean working tree"],
-    ["dirty", "Dirty working tree"],
-  ] as const)("renders %s changes without invented counts", (changes, expected) => {
+    ["dirty", "Uncommitted changes"],
+  ] as const)("says what a %s tree is without inventing counts", (changes, expected) => {
     renderGroup({ observation: { ...readyObservation, changes } });
 
     expect(within(row("Changes")).getByText(expected)).toBeVisible();
-    expect(screen.queryByText(/\b\d+\s+(addition|deletion)s?\b/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/[+\u2212]\d/)).not.toBeInTheDocument();
+  });
+
+  it("states how much a dirty tree changed once the host has measured it", () => {
+    // "Uncommitted changes" says only that something is uncommitted; the totals
+    // are what tell a reader whether that is a typo or a day's work.
+    renderGroup({
+      observation: { ...readyObservation, changes: "dirty", insertions: 2087, deletions: 621 },
+    });
+
+    const changes = within(row("Changes"));
+    expect(changes.getByText(`+${(2087).toLocaleString()}`)).toBeVisible();
+    expect(changes.getByText(`\u2212${(621).toLocaleString()}`)).toBeVisible();
+  });
+
+  it("keeps a clean tree clean even when the host reported zero counts", () => {
+    renderGroup({
+      observation: { ...readyObservation, changes: "clean", insertions: 0, deletions: 0 },
+    });
+
+    expect(within(row("Changes")).getByText("Clean working tree")).toBeVisible();
   });
 
   it("renders detached HEAD with a short display OID and discoverable full OID", () => {
@@ -144,14 +164,14 @@ describe("EnvironmentGitGroup way out", () => {
     const onClick = vi.fn();
     render(
       <EnvironmentGitGroup
-        action={{ label: "New thread in this Project", onClick }}
+        action={{ label: "New task in this Project", onClick }}
         errorMessage="The Code thread checkout is unavailable."
         status="error"
       />,
     );
 
     expect(screen.getByRole("alert")).toHaveTextContent("The Code thread checkout is unavailable.");
-    await userEvent.click(screen.getByRole("button", { name: "New thread in this Project" }));
+    await userEvent.click(screen.getByRole("button", { name: "New task in this Project" }));
 
     expect(onClick).toHaveBeenCalledTimes(1);
   });

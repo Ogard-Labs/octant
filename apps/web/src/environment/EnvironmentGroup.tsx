@@ -9,6 +9,12 @@ export interface EnvironmentGroupProps {
   readonly defaultOpen?: boolean;
   /** Lets a parent react to open/close, e.g. to pause polling while collapsed. */
   readonly onOpenChange?: (open: boolean) => void;
+  /**
+   * The one thing this section's facts let a reader do next, rendered beside
+   * the title. Rendered outside the disclosure control because a control
+   * nested inside a button is not reachable as its own control.
+   */
+  readonly action?: ReactNode;
   readonly children: ReactNode;
 }
 
@@ -27,24 +33,29 @@ export function EnvironmentGroup(props: EnvironmentGroupProps) {
   };
   return (
     <section className={`environment-group${open ? " environment-group--open" : ""}`}>
-      <OctantButton
-        aria-expanded={open}
-        className="environment-group__header window-no-drag"
-        onClick={toggle}
-        type="button"
-        variant="ghost"
-      >
-        <ChevronRight
-          aria-hidden="true"
-          className="environment-group__chevron"
-          size={14}
-          strokeWidth={2}
-        />
-        <span className="environment-group__title">{props.title}</span>
-        {props.summary === undefined ? null : (
-          <span className="environment-group__summary">{props.summary}</span>
+      <div className="environment-group__head">
+        <OctantButton
+          aria-expanded={open}
+          className="environment-group__header window-no-drag"
+          onClick={toggle}
+          type="button"
+          variant="ghost"
+        >
+          <ChevronRight
+            aria-hidden="true"
+            className="environment-group__chevron"
+            size={14}
+            strokeWidth={2}
+          />
+          <span className="environment-group__title">{props.title}</span>
+          {props.summary === undefined ? null : (
+            <span className="environment-group__summary">{props.summary}</span>
+          )}
+        </OctantButton>
+        {props.action === undefined ? null : (
+          <span className="environment-group__head-action">{props.action}</span>
         )}
-      </OctantButton>
+      </div>
       {open ? <div className="environment-group__body">{props.children}</div> : null}
     </section>
   );

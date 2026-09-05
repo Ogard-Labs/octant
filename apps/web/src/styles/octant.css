@@ -1928,6 +1928,17 @@ input.switch:checked::after {
   z-index: var(--oct-z-toast);
 }
 
+/* One focus treatment for every owned button.
+   The recipe drew a 3px ring, which is a filled glow rather than an edge: on a
+   tab it read as a highlighter circle drawn around the label, and inside the
+   composer's own frame it read as a second field. Keyboard focus is one
+   outline, at one width, drawn outside the control — the same mark the rest of
+   the system uses. */
+[data-slot="button"]:focus-visible {
+  outline: 2px solid var(--oct-accent-fg);
+  outline-offset: 1px;
+}
+
 .octant-tooltip {
   max-width: min(280px, calc(100vw - 24px));
   padding: 7px 10px;
@@ -1938,6 +1949,17 @@ input.switch:checked::after {
   box-shadow: var(--oct-elev-raised);
   font-size: var(--oct-text-sm);
   line-height: 1.25;
+}
+/* Structured content carries its own foreground tokens, so it needs the
+   ordinary raised ground rather than the label chip's inverted one. */
+.octant-tooltip--card {
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 10px 12px;
+  border-color: var(--oct-border);
+  background: var(--oct-surface);
+  color: var(--oct-fg);
+  border-radius: var(--oct-radius-md);
+  box-shadow: var(--oct-elev-overlay, var(--oct-elev-raised));
 }
 
 /* ─── modal ───────────────────────────────────────────────────────────
@@ -4096,6 +4118,29 @@ input.switch:checked::after {
   min-height: 32px;
   height: 32px;
   border-radius: var(--oct-radius-sm);
+}
+/* The composer is one raised object, so nothing riding its row draws a second
+   box inside it. Reset control by control, the rule kept coming undone: the
+   model picker was named and cleared while every control added after it — the
+   access menu, the pool control, whatever arrives next — still carried its
+   recipe's own border and 3px focus ring, and each of those read as an
+   outlined field nested in the prompt. State it once for the row instead. */
+.composer-row button,
+.composer-row [role="button"],
+.composer-row [role="combobox"],
+.composer-row input,
+.composer-row .composer-model-picker__trigger {
+  border-color: transparent;
+  box-shadow: none;
+}
+/* Buttons take the system's focus outline wherever they are; these are the
+   row's controls that are not the button recipe and would otherwise be left
+   with no focus mark at all once the ring above is suppressed. */
+.composer-row [role="combobox"]:focus-visible,
+.composer-row input:focus-visible,
+.composer-row .composer-model-picker__trigger:focus-visible {
+  outline: 2px solid var(--oct-accent-fg);
+  outline-offset: 1px;
 }
 /* The send control is the row's one filled affordance, so it stays a circle. */
 .composer-row button[data-size="icon"] {

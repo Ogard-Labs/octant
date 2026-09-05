@@ -231,10 +231,96 @@ describe("thread read cursors across windows", () => {
       restoreGlobalProperty("removeEventListener", originalRemove);
     }
   });
+
+  it("settles a pending read before the window stops being the one in front", () => {
+    const storage = memoryStorage();
+    const events = new EventTarget();
+    const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    const originalAdd = Object.getOwnPropertyDescriptor(globalThis, "addEventListener");
+    const originalRemove = Object.getOwnPropertyDescriptor(globalThis, "removeEventListener");
+    Object.defineProperties(globalThis, {
+      localStorage: { configurable: true, value: storage },
+      addEventListener: { configurable: true, value: events.addEventListener.bind(events) },
+      removeEventListener: {
+        configurable: true,
+        value: events.removeEventListener.bind(events),
+      },
+    });
+
+    try {
+      const store = createReadCursorStore<string>({ storageKey: "cursors" });
+      const unsubscribe = store.subscribe(() => undefined);
+      // A streaming thread marks deferred. Held only in memory, a host that
+      // tears its renderer down without a page lifecycle event loses the read
+      // and the thread comes back unread on the next launch.
+      store.markDeferred("thread-1", 42);
+      expect(createReadCursorStore<string>({ storageKey: "cursors" }).getSnapshot().size).toBe(0);
+
+      events.dispatchEvent(new Event("blur"));
+
+      expect(
+        createReadCursorStore<string>({ storageKey: "cursors" }).getSnapshot().get("thread-1"),
+      ).toBe(42);
+      unsubscribe();
+    } finally {
+      restoreGlobalProperty("localStorage", originalStorage);
+      restoreGlobalProperty("addEventListener", originalAdd);
+      restoreGlobalProperty("removeEventListener", originalRemove);
+    }
+  });
+
+  it("settles a pending read when the page is frozen", () => {
+    const storage = memoryStorage();
+    const windowEvents = new EventTarget();
+    const documentEvents = new EventTarget();
+    const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    const originalAdd = Object.getOwnPropertyDescriptor(globalThis, "addEventListener");
+    const originalRemove = Object.getOwnPropertyDescriptor(globalThis, "removeEventListener");
+    const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+    Object.defineProperties(globalThis, {
+      localStorage: { configurable: true, value: storage },
+      addEventListener: {
+        configurable: true,
+        value: windowEvents.addEventListener.bind(windowEvents),
+      },
+      removeEventListener: {
+        configurable: true,
+        value: windowEvents.removeEventListener.bind(windowEvents),
+      },
+      document: {
+        configurable: true,
+        value: {
+          visibilityState: "visible",
+          addEventListener: documentEvents.addEventListener.bind(documentEvents),
+          removeEventListener: documentEvents.removeEventListener.bind(documentEvents),
+        },
+      },
+    });
+
+    try {
+      const store = createReadCursorStore<string>({ storageKey: "cursors" });
+      const unsubscribe = store.subscribe(() => undefined);
+      store.markDeferred("thread-1", 7);
+
+      // The Page Lifecycle API dispatches `freeze` on the document; a window
+      // listener never runs for it.
+      documentEvents.dispatchEvent(new Event("freeze"));
+
+      expect(
+        createReadCursorStore<string>({ storageKey: "cursors" }).getSnapshot().get("thread-1"),
+      ).toBe(7);
+      unsubscribe();
+    } finally {
+      restoreGlobalProperty("localStorage", originalStorage);
+      restoreGlobalProperty("addEventListener", originalAdd);
+      restoreGlobalProperty("removeEventListener", originalRemove);
+      restoreGlobalProperty("document", originalDocument);
+    }
+  });
 });
 
 function restoreGlobalProperty(
-  name: "localStorage" | "addEventListener" | "removeEventListener",
+  name: "localStorage" | "addEventListener" | "removeEventListener" | "document",
   descriptor: PropertyDescriptor | undefined,
 ): void {
   if (descriptor === undefined) Reflect.deleteProperty(globalThis, name);

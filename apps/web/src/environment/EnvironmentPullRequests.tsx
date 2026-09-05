@@ -1,23 +1,9 @@
 import type { GithubClient } from "@octant/client-runtime/github-client";
-import type { GithubCatalogueReadResponse, GithubPullRequestRow } from "@octant/contracts";
+import type { GithubPullRequestRow } from "@octant/contracts";
 import { ExternalLink, GitPullRequest, RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
-import { describeGithubRemediation } from "../github/githubRemediation";
-
-interface RepositoryRef {
-  readonly owner: string;
-  readonly name: string;
-}
-
-type PullRequestState =
-  | { readonly status: "idle" | "loading"; readonly rows: ReadonlyArray<GithubPullRequestRow> }
-  | {
-      readonly status: "ready";
-      readonly rows: ReadonlyArray<GithubPullRequestRow>;
-      readonly stale: boolean;
-    }
-  | { readonly status: "unavailable"; readonly message: string };
+import { useRepositoryPullRequests } from "./useRepositoryPullRequests";
 
 export interface EnvironmentPullRequestsProps {
   readonly client?: GithubClient;
@@ -33,43 +19,13 @@ export interface EnvironmentPullRequestsProps {
  * section.
  */
 export function EnvironmentPullRequests(props: EnvironmentPullRequestsProps) {
-  const [state, setState] = useState<PullRequestState>({ status: "idle", rows: [] });
   const [refreshKey, setRefreshKey] = useState(0);
-  const repository = parseRepository(props.repository);
-
-  useEffect(() => {
-    if (!props.enabled || props.client === undefined || repository === undefined) {
-      setState({ status: "idle", rows: [] });
-      return;
-    }
-    let cancelled = false;
-    setState((current) => ({
-      status: "loading",
-      rows: current.status === "ready" ? current.rows : [],
-    }));
-    void props.client
-      .readCatalogue({
-        kind: "pull-requests",
-        owner: repository.owner,
-        name: repository.name,
-        pageSize: 20,
-        state: "open",
-      })
-      .then((response) => {
-        if (!cancelled) setState(toPullRequestState(response));
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setState({
-            status: "unavailable",
-            message: "Pull requests could not be loaded from GitHub.",
-          });
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [props.client, props.enabled, refreshKey, repository?.name, repository?.owner]);
+  const state = useRepositoryPullRequests({
+    ...(props.client === undefined ? {} : { client: props.client }),
+    ...(props.repository === undefined ? {} : { repository: props.repository }),
+    enabled: props.enabled,
+    refreshKey,
+  });
 
   if (state.status !== "ready" && state.status !== "unavailable") {
     return (
@@ -147,34 +103,4 @@ function PullRequestList(props: { readonly rows: ReadonlyArray<GithubPullRequest
       ))}
     </ul>
   );
-}
-
-function toPullRequestState(response: GithubCatalogueReadResponse): PullRequestState {
-  if (response.kind === "unavailable") {
-    return {
-      status: "unavailable",
-      message:
-        response.remediation === undefined
-          ? "Pull requests are unavailable from GitHub."
-          : describeGithubRemediation(response.remediation),
-    };
-  }
-  if (response.kind !== "pull-requests") {
-    return { status: "unavailable", message: "GitHub returned no pull-request list." };
-  }
-  return {
-    status: "ready",
-    rows: response.page.rows.filter((row) => row.state === "open" || row.state === "draft"),
-    stale: response.page.freshness.status === "stale",
-  };
-}
-
-function parseRepository(value: string | undefined): RepositoryRef | undefined {
-  if (value === undefined) return undefined;
-  const match =
-    /^([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38})\/([A-Za-z0-9_.-]{1,100})$/.exec(
-      value.trim(),
-    );
-  if (match === null || match[1] === undefined || match[2] === undefined) return undefined;
-  return { owner: match[1], name: match[2] };
 }

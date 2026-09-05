@@ -102,6 +102,11 @@ interface TerminalRecord {
   pendingResize: { columns: number; rows: number } | undefined;
   resizeScheduled: boolean;
   outputTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * When this terminal last published, so a quiet terminal can publish the
+   * next chunk at once instead of holding it for the coalescing window.
+   */
+  lastPublishedAt: number;
 }
 
 export class TerminalService {
@@ -126,6 +131,7 @@ export class TerminalService {
         pendingResize: undefined,
         resizeScheduled: false,
         outputTimer: undefined,
+        lastPublishedAt: 0,
       });
     }
   }
@@ -172,6 +178,7 @@ export class TerminalService {
       pendingResize: undefined,
       resizeScheduled: false,
       outputTimer: undefined,
+      lastPublishedAt: 0,
     };
     if (previous?.outputTimer !== undefined) clearTimeout(previous.outputTimer);
     this.#terminals.set(request.terminalId, record);
@@ -188,7 +195,7 @@ export class TerminalService {
     process.onExit(({ exitCode }) => {
       record.status = "exited";
       record.exitCode = exitCode;
-      this.#scheduleOutput(record);
+      this.#scheduleOutput(record, true);
     });
     try {
       await process.receiptReady;
@@ -291,12 +298,34 @@ export class TerminalService {
     };
   }
 
-  #scheduleOutput(record: TerminalRecord): void {
+  /**
+   * Coalescing only pays for itself while a terminal is actually flooding. Held
+   * on the trailing edge, every publish waited the full window — including the
+   * echo of a single keypress on an idle terminal, which is the one case where
+   * the delay is the whole perceived latency of typing. A terminal that has
+   * been quiet for a window publishes at once, and one still inside its window
+   * batches until the window closes.
+   *
+   * `settled` marks the shell's own exit rather than something it printed.
+   * That emission is what tells a listener nothing is journaling this terminal
+   * any more, and callers act on it — so it keeps the window it has always had
+   * instead of arriving a command earlier than every existing caller expects.
+   * Perceived speed is about printed output; the exit costs the reader nothing.
+   */
+  #scheduleOutput(record: TerminalRecord, settled = false): void {
     if (record.outputTimer !== undefined) return;
-    record.outputTimer = setTimeout(() => {
-      record.outputTimer = undefined;
+    const sinceLastPublish = Date.now() - record.lastPublishedAt;
+    if (!settled && sinceLastPublish >= OUTPUT_PUBLISH_DELAY_MS) {
       this.#publishOutput(record);
-    }, OUTPUT_PUBLISH_DELAY_MS);
+      return;
+    }
+    record.outputTimer = setTimeout(
+      () => {
+        record.outputTimer = undefined;
+        this.#publishOutput(record);
+      },
+      settled ? OUTPUT_PUBLISH_DELAY_MS : OUTPUT_PUBLISH_DELAY_MS - sinceLastPublish,
+    );
   }
 
   #publishOutput(record: TerminalRecord): void {
@@ -323,6 +352,10 @@ export class TerminalService {
     record.publishedStatus = snapshot.status;
     record.publishedExitCode = snapshot.exitCode;
     if (text.length === 0 && !stateChanged) return;
+    // Only a publish that actually sent something opens a coalescing window.
+    // Stamped on entry, the empty publish a new observer triggers would make
+    // that observer's first real chunk wait the full window.
+    record.lastPublishedAt = Date.now();
     const emission = { text, replace, snapshot } as const;
     for (const listener of record.outputListeners) listener(emission);
   }

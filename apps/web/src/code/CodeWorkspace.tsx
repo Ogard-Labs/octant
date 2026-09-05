@@ -178,6 +178,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
           ? {}
           : { imageGenerationProfiles: props.imageGenerationProfiles })}
         {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
+        {...(props.onOpenSurface === undefined
+          ? {}
+          : { onCreatePullRequest: () => props.onOpenSurface?.("code-pr") })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
         {...(props.onOpenCanvas === undefined ? {} : { onOpenCanvas: props.onOpenCanvas })}
         {...(props.onOpenCodeThread === undefined

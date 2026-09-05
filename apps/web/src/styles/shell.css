@@ -904,18 +904,74 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 .thread-row-info-card {
   display: flex;
   flex-direction: column;
+  gap: 8px;
+  max-width: 296px;
+}
+
+/* State and recency answer "does this need me, and how stale is it" before the
+   title is read, so they lead the card on one line. */
+.thread-row-info-card__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.thread-row-info-card__states {
+  display: flex;
+  flex-wrap: wrap;
   gap: 4px;
-  max-width: 240px;
+  min-width: 0;
+}
+
+.thread-row-info-card__state {
+  padding: 2px 7px;
+  color: var(--oct-muted);
+  background: var(--oct-fg-soft);
+  border-radius: var(--oct-radius-pill);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.thread-row-info-card__age {
+  flex: 0 0 auto;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
 .thread-row-info-card__title {
   color: var(--oct-fg);
   font-weight: 500;
+  line-height: 1.35;
 }
 
+/* One fact per line. Dot-joined into a single paragraph, the same facts wrapped
+   mid-value and read as prose rather than as a set of properties. */
 .thread-row-info-card__facts {
-  color: var(--oct-meta);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.thread-row-info-card__fact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--oct-fg);
   font-size: var(--oct-text-xs);
+}
+
+.thread-row-info-card__fact svg {
+  flex: 0 0 auto;
+  color: var(--oct-meta);
+}
+
+.thread-row-info-card__fact-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sidebar-navigation__thread-rename {
@@ -1905,10 +1961,20 @@ form > .work-composer-adapter__attachments {
   cursor: default;
 }
 
+/* Measured on the running row, this was the only border left on any control in
+   it: every neighbour is borderless, so the one rule drawing a line made the
+   access control read as an outlined box sitting inside the prompt. Spacing
+   separates it from the model picker; a drawn edge is not needed for that. */
 .code-composer-adapter__composer-bar .code-composer-choice__trigger {
-  margin-inline-start: 4px;
-  padding-inline-start: 10px;
-  border-inline-start: 1px solid var(--octant-border);
+  margin-inline-start: 6px;
+  padding-inline-start: 8px;
+  border-inline-start: 0;
+}
+
+/* Says the value is a reading, not a decision, until the reader makes it one. */
+.code-composer-choice__hint {
+  color: var(--octant-text-muted);
+  font-weight: 400;
 }
 
 .code-composer-choice__menu {
@@ -2185,6 +2251,9 @@ form > .work-composer-adapter__attachments {
   place-items: center;
 }
 
+/* The field's frame is the omnibox itself. The input recipe ships its own
+   border, radius and shadow, which drew a second rounded box inside the pill —
+   `border: 0` alone left the recipe's shadow painting that inner edge. */
 .browser-workspace__omnibox input {
   flex: 1;
   min-width: 0;
@@ -2192,8 +2261,10 @@ form > .work-composer-adapter__attachments {
   padding: 0;
   color: var(--oct-fg);
   border: 0;
+  border-radius: 0;
   outline: 0;
   background: transparent;
+  box-shadow: none;
   font-size: var(--oct-text-sm);
 }
 

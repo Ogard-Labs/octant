@@ -559,7 +559,8 @@ async function readRemotes(
   return remotes;
 }
 
-function parseNumstat(
+/** Shared with the environment port so one reading of `--numstat` is parsed one way. */
+export function parseNumstat(
   output: string,
 ): { readonly insertions: number; readonly deletions: number } | undefined {
   if (output.length === 0) return { insertions: 0, deletions: 0 };
