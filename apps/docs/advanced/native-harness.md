@@ -143,8 +143,9 @@ thread there — in the current checkout, approval-gated, so its edits and
 commands ask you first, right there in the terminal; inside a Work Project it
 starts a Work thread; anywhere else, Chat. `--mode chat|work|code` and
 `--project <name>` override that, and a folder that is not a Project yet is
-refused with the exact `octant project add` command to run. The host must be
-running (`octant server start`, or the desktop app). `--plain` keeps the line-by-line mode, which is also what a pipe or
+refused with the exact `octant project add` command to run. If the host is not
+running, `octant agent` starts it the way `octant server start` does and
+waits for it before opening the thread. `--plain` keeps the line-by-line mode, which is also what a pipe or
 `--json` (one JSON object per line) gets. `--thread <id>` attaches to an
 existing thread, `--last` to the one you used most recently, and
 `--project <name>` files a new thread in a Project. Inside the screen,
