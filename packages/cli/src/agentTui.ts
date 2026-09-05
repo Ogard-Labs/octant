@@ -30,12 +30,15 @@ export interface RunAgentTuiInput {
   readonly themeId?: TuiThemeId | undefined;
   readonly pollIntervalMs?: number;
   readonly signal?: AbortSignal;
+  /** Start with tool diffs and output expanded (what Ctrl+E toggles). */
+  readonly verbose?: boolean;
 }
 
 type OpenTui = typeof import("@opentui/core");
 
 const HINT =
-  "Enter sends · while working, Enter queues a note · Esc stops the turn · /next N · /pause · Ctrl+C quits";
+  "Enter sends · Enter while working queues a note · Esc stops · Ctrl+E details · Ctrl+R reasoning · PgUp/PgDn scroll · ? help";
+const REASONING_FENCE = /```(?:reasoning|thinking)\n([\s\S]*?)```|<think>([\s\S]*?)<\/think>/g;
 const QUIT_WINDOW_MS = 1_500;
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 const SHOWN_TOOL_LINES = 4;
@@ -92,6 +95,9 @@ class AgentScreen {
   #ticks = 0;
   #lastCtrlC = 0;
   #flushingSteering = false;
+  #verbose = false;
+  #showReasoning = false;
+  #showHelp = false;
   #pendingFollowUp:
     | { readonly suggestionId: string; readonly turnId: string; readonly prompt: string }
     | undefined;
@@ -117,6 +123,7 @@ class AgentScreen {
     this.#renderer = renderer;
     this.#palette = palette;
     this.#input = input;
+    this.#verbose = input.verbose === true;
     const { BoxRenderable, TextRenderable, ScrollBoxRenderable, TextareaRenderable } = tui;
     const root = new BoxRenderable(renderer, {
       width: "100%",
@@ -216,6 +223,19 @@ class AgentScreen {
           void this.#interrupt();
         } else if (key.ctrl && key.name === "p") {
           void this.#pauseOrResume();
+        } else if (key.ctrl && key.name === "e") {
+          this.#verbose = !this.#verbose;
+          this.#draw();
+        } else if (key.ctrl && key.name === "r") {
+          this.#showReasoning = !this.#showReasoning;
+          this.#draw();
+        } else if (key.name === "pageup" || key.name === "pagedown") {
+          const page = Math.max(1, this.#transcript.height - 2);
+          this.#transcript.scrollBy(key.name === "pageup" ? -page : page);
+        } else if (key.name === "home" && key.ctrl) {
+          this.#transcript.scrollTo(0);
+        } else if (key.name === "end" && key.ctrl) {
+          this.#transcript.scrollTo(this.#transcript.scrollHeight);
         }
       });
       this.#input.signal?.addEventListener("abort", () => resolve(1), { once: true });
@@ -302,6 +322,8 @@ class AgentScreen {
       pending?.id,
       this.#pendingFollowUp?.suggestionId,
       session?.steering,
+      this.#verbose,
+      this.#showReasoning,
     ]);
     const live = entries.some((entry) => entry.kind === "lead" && entry.live !== undefined);
     if (digest !== this.#drawn || live) {
@@ -320,7 +342,22 @@ class AgentScreen {
     }
 
     const approval = session?.approvals?.find((entry) => entry.status === "pending");
-    if (approval !== undefined) {
+    if (this.#showHelp) {
+      this.#panel.title = " Keys ";
+      this.#panel.borderColor = p.border;
+      this.#panelText.content = t`${fg(p.textSecondary)(
+        [
+          "Enter        send · while the lead works: queue a note for its next step",
+          "Shift+Enter  new line",
+          "Esc          stop the running turn        Ctrl+C  stop, twice to quit",
+          "Ctrl+E       show / hide diffs and output  Ctrl+R  show / hide reasoning",
+          "Ctrl+P       pause / resume the run        PgUp/PgDn · Ctrl+Home/End  scroll",
+          "/next N      take a suggested follow-up    /pause /resume /model /threads /open N /quit",
+          "y · a · n    answer an approval            1..9 or text  answer a question",
+        ].join("\n"),
+      )}\n${dim(fg(p.muted)("Enter or ? closes this."))}`;
+      this.#panel.visible = true;
+    } else if (approval !== undefined) {
       this.#panel.title = " Approval ";
       this.#panel.borderColor = p.warning;
       this.#panelText.content = t`${fg(p.text)(bold(approval.toolName))} ${fg(p.textSecondary)(approval.summary.replace(/^[a-z-]+: /, ""))}\n${dim(fg(p.muted)(`needs your say-so (${approval.approvalClass})`))}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.accent)("a")}${fg(p.textSecondary)(" allow for this session · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`;
@@ -390,7 +427,7 @@ class AgentScreen {
           content: t`${fg(p.you)("◆")} ${fg(p.text)(bold("You"))} ${dim(fg(p.muted)(`· ${entry.at}`))}`,
         }),
       );
-      box.add(this.#body(entry.text));
+      box.add(this.#body(entry.text, false));
       return box;
     }
     const outcomeColor =
@@ -480,25 +517,152 @@ class AgentScreen {
           content: t`${dim(fg(p.muted)(last ? "└" : "├"))} ${mark} ${name} ${summary}${tail}`,
         }),
       );
+      if (this.#verbose && tool.detail !== undefined) into.add(this.#detail(tool));
     });
   }
 
-  #body(text: string) {
+  /** An edit's diff or a command's output, indented under its line. */
+  #detail(tool: TuiToolLine) {
     const { BoxRenderable, TextRenderable } = this.#tui;
-    const box = new BoxRenderable(this.#renderer, { paddingLeft: 2 });
+    const p = this.#palette;
+    const box = new BoxRenderable(this.#renderer, {
+      paddingLeft: 4,
+      marginBottom: 1,
+      flexDirection: "column",
+    });
+    const detail = tool.detail ?? "";
+    if (detail.startsWith("--- ")) {
+      const { StyledText, fg, dim } = this.#tui;
+      const lines = detail
+        .split("\n")
+        .filter((line) => !line.startsWith("---") && !line.startsWith("+++"));
+      const chunks = lines.map((line, index) => {
+        const eol = index < lines.length - 1 ? "\n" : "";
+        if (line.startsWith("@@")) return dim(fg(p.muted)(`${line}${eol}`));
+        if (line.startsWith("+")) return fg(p.success)(`${line}${eol}`);
+        if (line.startsWith("-")) return fg(p.danger)(`${line}${eol}`);
+        return fg(p.textSecondary)(`${line}${eol}`);
+      });
+      box.add(
+        new TextRenderable(this.#renderer, { content: new StyledText(chunks), wrapMode: "none" }),
+      );
+      return box;
+    }
+    const lines = detail.split("\n");
+    const shown = lines.slice(-12);
     box.add(
       new TextRenderable(this.#renderer, {
-        content: text,
-        fg: this.#palette.text,
+        content: `${lines.length > shown.length ? `… ${lines.length - shown.length} more lines\n` : ""}${shown.join("\n")}`,
+        fg: tool.status === "ok" ? p.muted : p.danger,
         wrapMode: "word",
       }),
     );
     return box;
   }
 
+  /**
+   * A reply as markdown, with any reasoning the model wrote in a fenced
+   * block or think tags folded into one dim line until Ctrl+R opens it.
+   */
+  #body(text: string, markdown = true) {
+    const { BoxRenderable, TextRenderable, t, fg, dim } = this.#tui;
+    const p = this.#palette;
+    const box = new BoxRenderable(this.#renderer, { paddingLeft: 2, flexDirection: "column" });
+    const reasoning: string[] = [];
+    const visible = text
+      .replace(
+        REASONING_FENCE,
+        (_match, fenced: string | undefined, tagged: string | undefined) => {
+          const body = (fenced ?? tagged ?? "").trim();
+          if (body.length > 0) reasoning.push(body);
+          return "";
+        },
+      )
+      .trim();
+    if (reasoning.length > 0) {
+      const lines = reasoning.join("\n").split("\n");
+      box.add(
+        new TextRenderable(this.#renderer, {
+          content: this.#showReasoning
+            ? t`${dim(fg(p.muted)("› reasoning"))}\n${dim(fg(p.textSecondary)(lines.join("\n")))}`
+            : t`${dim(fg(p.muted)(`› reasoning · ${lines.length} ${lines.length === 1 ? "line" : "lines"} · Ctrl+R`))}`,
+          wrapMode: "word",
+        }),
+      );
+    }
+    if (visible.length === 0) return box;
+    box.add(
+      new TextRenderable(this.#renderer, {
+        content: markdown ? this.#markdown(visible) : visible,
+        fg: p.text,
+        wrapMode: "word",
+      }),
+    );
+    return box;
+  }
+
+  /**
+   * Just enough markdown for a reply to read well in a terminal: headings,
+   * bold, inline code, bullets, and fenced code. Deterministic and cheap, so
+   * a streaming reply restyles on every poll without a parser in the way.
+   */
+  #markdown(text: string): import("@opentui/core").StyledText {
+    const { StyledText, fg, bold, dim } = this.#tui;
+    const p = this.#palette;
+    const chunks: import("@opentui/core").TextChunk[] = [];
+    let inFence = false;
+    const lines = text.split("\n");
+    lines.forEach((line, index) => {
+      const eol = index < lines.length - 1 ? "\n" : "";
+      if (line.startsWith("```")) {
+        inFence = !inFence;
+        const info = line.slice(3).trim();
+        chunks.push(dim(fg(p.muted)(`${inFence ? `┌ ${info}` : "└"}${eol}`)));
+        return;
+      }
+      if (inFence) {
+        chunks.push(fg(p.success)(`│ ${line}${eol}`));
+        return;
+      }
+      const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+      if (heading !== null) {
+        chunks.push(fg(p.accent)(bold(`${heading[2] ?? ""}${eol}`)));
+        return;
+      }
+      const bullet = /^(\s*)[-*]\s+(.*)$/.exec(line);
+      const quote = line.startsWith("> ");
+      let rest = bullet !== null ? (bullet[2] ?? "") : quote ? line.slice(2) : line;
+      if (bullet !== null) chunks.push(fg(p.textSecondary)(`${bullet[1] ?? ""}• `));
+      if (quote) chunks.push(dim(fg(p.muted)("│ ")));
+      const inline = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+      let cursor = 0;
+      for (const match of rest.matchAll(inline)) {
+        const at = match.index ?? 0;
+        if (at > cursor) chunks.push(fg(quote ? p.muted : p.text)(rest.slice(cursor, at)));
+        const token = match[0];
+        if (token.startsWith("**")) chunks.push(fg(p.text)(bold(token.slice(2, -2))));
+        else chunks.push(fg(p.success)(token.slice(1, -1)));
+        cursor = at + token.length;
+      }
+      if (cursor < rest.length) chunks.push(fg(quote ? p.muted : p.text)(rest.slice(cursor)));
+      rest = "";
+      chunks.push(fg(p.text)(eol));
+    });
+    return new StyledText(chunks);
+  }
+
   async #submit(): Promise<void> {
     const text = this.#composer.plainText.trim();
     this.#composer.setText("");
+    if (this.#showHelp) {
+      this.#showHelp = false;
+      this.#draw();
+      if (text === "?" || text.length === 0) return;
+    } else if (text === "?" || text === "/help" || text === "/keys") {
+      this.#showHelp = true;
+      this.#draw();
+      return;
+    }
     if (text.length === 0) return;
     this.#note = "";
     if (text === "/quit" || text === "/exit") {

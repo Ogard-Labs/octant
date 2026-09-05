@@ -103,8 +103,8 @@ describe("agent terminal UI model", () => {
       actions: { toolCalls: 6, edits: 1, failed: 1, tools: toolLines(record.tools as never) },
     });
     expect(toolLines(record.tools as never)).toEqual([
-      { name: "read", summary: "a.ts", status: "ok", duration: "120ms" },
-      { name: "edit", summary: "a.ts", status: "ok", duration: "90ms" },
+      { name: "read", summary: "a.ts", status: "ok", duration: "120ms", filetype: "typescript" },
+      { name: "edit", summary: "a.ts", status: "ok", duration: "90ms", filetype: "typescript" },
       { name: "bash", summary: "bun test", status: "failed", duration: "12.4s" },
     ]);
     expect(

@@ -78,7 +78,7 @@ const thread = {
     content(
       u(42),
       "assistant",
-      "Done. The button now uses the shared size scale and stays inline on small screens.",
+      "<think>The hero button is full width because of a w-full utility that only made sense on desktop.</think>Done. The button now uses the **shared size scale** and stays inline on small screens:\n\n- `w-auto` below `md`, `w-full` above\n- hint tone moved to `muted`",
     ),
     content(u(43), "user", "Now add tests."),
     content(u(44), "assistant", "Reading the existing test setup"),
@@ -145,15 +145,28 @@ const session = {
       tools: [
         ["read", "read: apps/webapp/src/routes/download.tsx", "ok", 120],
         ["grep", "grep: hero-download", "ok", 340],
-        ["edit", "edit: apps/webapp/src/routes/download.tsx", "ok", 90],
-        ["bash", "bash: bun run typecheck", "failed", 12400],
+        [
+          "edit",
+          "edit: apps/webapp/src/routes/download.tsx",
+          "ok",
+          90,
+          '--- a/apps/webapp/src/routes/download.tsx\n+++ b/apps/webapp/src/routes/download.tsx\n@@ -1,2 +1,2 @@\n-<Button className="w-full">Download</Button>\n-<Hint>for macOS</Hint>\n+<Button size="md" className="w-auto md:w-full">Download</Button>\n+<Hint tone="muted">for macOS</Hint>',
+        ],
+        [
+          "bash",
+          "bash: bun run typecheck",
+          "failed",
+          12400,
+          "src/routes/download.tsx(41,7): error TS2322: Type 'string' is not assignable to type 'ButtonSize'.\n Tasks: 1 failed, 12 total",
+        ],
         ["edit", "edit: apps/webapp/src/routes/download.tsx", "ok", 80],
         ["bash", "bash: bun run typecheck", "ok", 1700],
-      ].map(([name, summary, status, durationMs], index) => ({
+      ].map(([name, summary, status, durationMs, detail], index) => ({
         name,
         summary,
         status,
         durationMs,
+        ...(detail === undefined ? {} : { detail }),
         at: `2026-09-05T11:30:${String(10 + index).padStart(2, "0")}.000Z`,
       })),
       startedAt: "2026-09-05T11:30:00.000Z",
@@ -204,10 +217,11 @@ const screen = mountAgentScreen(tui, setup.renderer, paletteFor("octant", mode),
   session: fakeSession,
   threadId,
   pollIntervalMs: 60_000,
+  verbose: true,
 });
 await screen.refresh();
 await setup.renderOnce();
-await setup.renderOnce();
+await setup.waitForVisualIdle({ quietFrames: 3, maxFrames: 60 });
 const htmlPath = process.argv[3];
 if (htmlPath === undefined) {
   console.log(setup.captureCharFrame());

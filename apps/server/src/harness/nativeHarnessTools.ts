@@ -1,5 +1,6 @@
 import {
   decodeUtcTimestamp,
+  MAX_NATIVE_HARNESS_TOOL_DETAIL,
   NATIVE_HARNESS_TOOL_DEFINITIONS,
   NATIVE_HARNESS_TOOL_NAMES,
   decodeNativeHarnessToolArguments,
@@ -203,7 +204,9 @@ export function createNativeHarnessTools(
         } catch {
           // An unparseable input still counts as a call; the name is its summary.
         }
+        const detail = detailFor(toolName, inputJson, outcome.result);
         options.observe({
+          ...(detail === undefined ? {} : { detail }),
           name: toolName,
           summary:
             summary.length > MAX_TOOL_SUMMARY_LENGTH
@@ -483,6 +486,72 @@ async function execute(
       );
     }
   }
+}
+
+/**
+ * What a surface can show under a call: an edit as a unified diff of the
+ * replaced text, a write as its first lines, a command as the tail of its
+ * output. Bounded, and never the whole file.
+ */
+function detailFor(
+  name: NativeHarnessToolName,
+  inputJson: string,
+  result: unknown,
+): string | undefined {
+  let args: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(inputJson);
+    args = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    args = {};
+  }
+  const bound = (text: string) =>
+    text.length > MAX_NATIVE_HARNESS_TOOL_DETAIL
+      ? `${text.slice(0, MAX_NATIVE_HARNESS_TOOL_DETAIL - 2)}…`
+      : text;
+  if (name === "edit" && typeof args.oldText === "string" && typeof args.newText === "string") {
+    const path = typeof args.path === "string" ? args.path : "file";
+    const removed = args.oldText.split("\n").map((line) => `-${line}`);
+    const added = args.newText.split("\n").map((line) => `+${line}`);
+    return bound(
+      [
+        `--- a/${path}`,
+        `+++ b/${path}`,
+        `@@ -1,${removed.length} +1,${added.length} @@`,
+        ...removed,
+        ...added,
+      ].join("\n"),
+    );
+  }
+  if (name === "write" && typeof args.content === "string") {
+    const path = typeof args.path === "string" ? args.path : "file";
+    const lines = args.content.split("\n");
+    const added = lines.slice(0, 40).map((line) => `+${line}`);
+    return bound(
+      [
+        `--- /dev/null`,
+        `+++ b/${path}`,
+        `@@ -0,0 +1,${lines.length} @@`,
+        ...added,
+        ...(lines.length > 40 ? [`… ${lines.length - 40} more lines`] : []),
+      ].join("\n"),
+    );
+  }
+  if (typeof result === "object" && result !== null) {
+    const record = result as Record<string, unknown>;
+    const text =
+      typeof record.output === "string"
+        ? record.output
+        : typeof record.message === "string"
+          ? record.message
+          : typeof record.error === "string"
+            ? record.error
+            : undefined;
+    if (text === undefined || text.trim().length === 0) return undefined;
+    const tail = text.length > 2_000 ? `…${text.slice(-2_000)}` : text;
+    return bound(tail);
+  }
+  return undefined;
 }
 
 function intentFor(name: NativeHarnessToolName, args: unknown): string {

@@ -652,6 +652,7 @@ export const NativeHarnessTurnUsage = Schema.Struct({
 export type NativeHarnessTurnUsage = typeof NativeHarnessTurnUsage.Type;
 
 export const MAX_NATIVE_HARNESS_TOOL_CALLS_PER_TURN = 64;
+export const MAX_NATIVE_HARNESS_TOOL_DETAIL = 4_096;
 
 /** One tool call as the lead made it: what it asked for, how it ended, how long it took. */
 export const NativeHarnessToolCall = Schema.Struct({
@@ -660,6 +661,8 @@ export const NativeHarnessToolCall = Schema.Struct({
   status: Schema.Literal("ok", "refused", "failed"),
   durationMs: NonNegativeInt,
   at: UtcTimestamp,
+  /** What the call produced, bounded: a unified diff for an edit, the tail of a command's output. */
+  detail: Schema.optional(Schema.String.pipe(Schema.maxLength(MAX_NATIVE_HARNESS_TOOL_DETAIL))),
 }).annotations(strict);
 export type NativeHarnessToolCall = typeof NativeHarnessToolCall.Type;
 

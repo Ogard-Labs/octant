@@ -49,6 +49,9 @@ export interface TuiToolLine {
   readonly summary: string;
   readonly status: "ok" | "refused" | "failed";
   readonly duration: string;
+  /** A unified diff for an edit or write, the output tail for a command. */
+  readonly detail?: string;
+  readonly filetype?: string;
 }
 
 export interface TuiLeadActions {
@@ -74,19 +77,43 @@ export function toolLines(
     readonly summary: string;
     readonly status: "ok" | "refused" | "failed";
     readonly durationMs: number;
+    readonly detail?: string | undefined;
   }>,
 ): ReadonlyArray<TuiToolLine> {
-  return calls.map((call) => ({
-    name: call.name,
-    summary: call.summary.startsWith(`${call.name}: `)
+  return calls.map((call) => {
+    const summary = call.summary.startsWith(`${call.name}: `)
       ? call.summary.slice(call.name.length + 2)
       : call.summary === call.name
         ? ""
-        : call.summary,
-    status: call.status,
-    duration: formatMs(call.durationMs),
-  }));
+        : call.summary;
+    const extension = /\.([a-z0-9]+)$/i.exec(summary)?.[1]?.toLowerCase();
+    return {
+      name: call.name,
+      summary,
+      status: call.status,
+      duration: formatMs(call.durationMs),
+      ...(call.detail === undefined ? {} : { detail: call.detail }),
+      ...(extension === undefined ? {} : { filetype: FILETYPES[extension] ?? extension }),
+    };
+  });
 }
+
+const FILETYPES: Readonly<Record<string, string>> = {
+  ts: "typescript",
+  tsx: "tsx",
+  js: "javascript",
+  jsx: "jsx",
+  md: "markdown",
+  json: "json",
+  css: "css",
+  html: "html",
+  py: "python",
+  rs: "rust",
+  go: "go",
+  sh: "bash",
+  yml: "yaml",
+  yaml: "yaml",
+};
 
 export function formatMs(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
