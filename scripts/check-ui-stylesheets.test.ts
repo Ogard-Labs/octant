@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  collectPrimitiveClasses,
   compareWithBaseline,
   findStylesheetFindings,
   serializeBaseline,
@@ -111,6 +112,31 @@ describe("UI stylesheet check", () => {
         ].join("\n"),
       }).map((finding) => `${finding.rule} ${String(finding.line)}`),
     ).toEqual(["heavy-weight 2", "heavy-weight 3"]);
+  });
+
+  it("flags feature rules that repaint a shared control instead of placing it", () => {
+    const primitives = collectPrimitiveClasses({
+      "apps/web/src/code/CodeHome.tsx":
+        '<OctantButton className="code-home__card window-no-drag" variant="ghost" />',
+      "apps/web/src/code/CodeRail.tsx": '<OctantButton className={cn("code-rail__item", extra)} />',
+    });
+    expect(
+      findStylesheetFindings(
+        {
+          [CSS]: [
+            ".code-home__card { min-height: 0; padding: 12px; border: 1px solid var(--oct-border); }",
+            ".code-home__card:hover { background: var(--oct-fg-soft); }",
+            ".code-rail__item { color: var(--oct-muted); }",
+            ".code-home__card .code-home__title { color: var(--oct-fg); }",
+          ].join("\n"),
+        },
+        primitives,
+      ).map((finding) => `${finding.rule} ${String(finding.line)} ${finding.detail}`),
+    ).toEqual([
+      "control-repaint 1 border repaints OctantButton through .code-home__card",
+      "control-repaint 2 background repaints OctantButton through .code-home__card",
+      "control-repaint 3 color repaints OctantButton through .code-rail__item",
+    ]);
   });
 
   it("fails closed on any colour literal and ratchets the other rules against the baseline", () => {

@@ -14,6 +14,7 @@ import { relative, resolve, sep } from "node:path";
 
 const WEB_SOURCE = "apps/web/src";
 const STYLESHEET_EXTENSION = /\.css$/;
+const COMPONENT_EXTENSION = /(?<!\.test)\.tsx$/;
 export const BASELINE_PATH = "scripts/ui-stylesheet-baseline.json";
 
 export type StylesheetRule =
@@ -21,7 +22,8 @@ export type StylesheetRule =
   | "font-size-scale"
   | "motion-literal"
   | "important"
-  | "heavy-weight";
+  | "heavy-weight"
+  | "control-repaint";
 
 export interface StylesheetFinding {
   readonly rule: StylesheetRule;
@@ -59,6 +61,61 @@ const ACCESSIBILITY_MEDIA =
 // DESIGN.md: nothing is bold except a page title. Content emphasis (`strong`,
 // transcript headings) and the handful of titles are the accepted residue.
 const HEAVY_WEIGHT = /^(?:[6-9]00|bold|bolder|var\(--oct-weight-strong\))$/;
+
+// 0046: a feature stylesheet may place or size a shared control, never repaint
+// it. These are the properties that recipe owns.
+const PAINT_PROPERTY =
+  /^(?:background|background-color|background-image|border|border-color|border-width|border-style|border-radius|box-shadow|color|outline)$/;
+const PRIMITIVE_ELEMENT =
+  /<(Octant(?:Button|IconButton|Card|Badge|Input|Select|Textarea|Checkbox|Switch))\b([^>]*)>/g;
+const CLASS_ATTRIBUTE = /className=(?:["']([^"']+)["']|\{\s*(?:cn\(\s*)?["'`]([^"'`$]+)["'`$])/;
+
+/**
+ * Classes that feature code hands to an Octant primitive, so a stylesheet
+ * rule ending in that class is styling the primitive itself.
+ */
+export function collectPrimitiveClasses(
+  sources: Readonly<Record<string, string>>,
+): ReadonlyMap<string, string> {
+  const classes = new Map<string, string>();
+  for (const source of Object.values(sources)) {
+    for (const match of source.matchAll(PRIMITIVE_ELEMENT)) {
+      const primitive = match[1] ?? "";
+      const attributes = match[2] ?? "";
+      // `unstyled` hands the paint to the feature on purpose; OctantTextarea
+      // does the same for `composer-input`, the system prompt (0038).
+      if (/\bunstyled\b/.test(attributes) || /\bcomposer-input\b/.test(attributes)) continue;
+      const attribute = CLASS_ATTRIBUTE.exec(attributes);
+      const literal = attribute?.[1] ?? attribute?.[2];
+      if (literal === undefined) continue;
+      for (const className of literal.trim().split(/\s+/)) {
+        if (/^[a-z][\w-]*$/.test(className) && className !== "window-no-drag") {
+          classes.set(className, primitive);
+        }
+      }
+    }
+  }
+  return classes;
+}
+
+function repaintedPrimitive(
+  header: string,
+  primitiveClasses: ReadonlyMap<string, string>,
+): { readonly className: string; readonly primitive: string } | undefined {
+  for (const selector of header.split(",")) {
+    const compound =
+      selector
+        .trim()
+        .split(/[\s>+~]+/)
+        .pop() ?? "";
+    for (const match of compound.matchAll(/\.([a-z][\w-]*)/g)) {
+      const className = match[1] ?? "";
+      const primitive = primitiveClasses.get(className);
+      if (primitive !== undefined) return { className, primitive };
+    }
+  }
+  return undefined;
+}
 
 interface Declaration {
   readonly property: string;
@@ -142,6 +199,7 @@ function fontSizeOnScale(value: string): boolean {
 
 export function findStylesheetFindings(
   files: Readonly<Record<string, string>>,
+  primitiveClasses: ReadonlyMap<string, string> = new Map(),
 ): ReadonlyArray<StylesheetFinding> {
   const findings: StylesheetFinding[] = [];
   for (const [file, source] of Object.entries(files).sort(([left], [right]) =>
@@ -172,6 +230,15 @@ export function findStylesheetFindings(
       if (!isToken && property === "font-weight" && HEAVY_WEIGHT.test(value)) {
         push("heavy-weight", `font-weight ${value} is heavier than a page title`);
       }
+      if (!isToken && PAINT_PROPERTY.test(property)) {
+        const repainted = repaintedPrimitive(headers[headers.length - 1] ?? "", primitiveClasses);
+        if (repainted) {
+          push(
+            "control-repaint",
+            `${property} repaints ${repainted.primitive} through .${repainted.className}`,
+          );
+        }
+      }
     }
   }
   return findings;
@@ -186,6 +253,7 @@ export function countFindings(
     "motion-literal": {},
     important: {},
     "heavy-weight": {},
+    "control-repaint": {},
   };
   for (const finding of findings) {
     const byFile = counts[finding.rule];
@@ -208,6 +276,7 @@ const RATCHETED_RULES: ReadonlyArray<StylesheetRule> = [
   "motion-literal",
   "important",
   "heavy-weight",
+  "control-repaint",
 ];
 
 export function compareWithBaseline(
@@ -247,27 +316,34 @@ export function serializeBaseline(findings: ReadonlyArray<StylesheetFinding>): s
   return `${JSON.stringify(baseline, null, 2)}\n`;
 }
 
-async function stylesheetFiles(root: string): Promise<Readonly<Record<string, string>>> {
-  const files: Record<string, string> = {};
+async function rendererFiles(root: string): Promise<{
+  readonly stylesheets: Readonly<Record<string, string>>;
+  readonly components: Readonly<Record<string, string>>;
+}> {
+  const stylesheets: Record<string, string> = {};
+  const components: Record<string, string> = {};
   const visit = async (directory: string): Promise<void> => {
     const entries = await readdir(directory, { withFileTypes: true });
     for (const entry of entries) {
       const absolute = resolve(directory, entry.name);
+      const key = relative(root, absolute).split(sep).join("/");
       if (entry.isDirectory()) {
         await visit(absolute);
       } else if (entry.isFile() && STYLESHEET_EXTENSION.test(entry.name)) {
-        files[relative(root, absolute).split(sep).join("/")] = await readFile(absolute, "utf8");
+        stylesheets[key] = await readFile(absolute, "utf8");
+      } else if (entry.isFile() && COMPONENT_EXTENSION.test(entry.name)) {
+        components[key] = await readFile(absolute, "utf8");
       }
     }
   };
   await visit(resolve(root, WEB_SOURCE));
-  return files;
+  return { stylesheets, components };
 }
 
 async function main(): Promise<void> {
   const root = resolve(import.meta.dir, "..");
-  const files = await stylesheetFiles(root);
-  const findings = findStylesheetFindings(files);
+  const { stylesheets, components } = await rendererFiles(root);
+  const findings = findStylesheetFindings(stylesheets, collectPrimitiveClasses(components));
   const baselineFile = resolve(root, BASELINE_PATH);
 
   if (process.argv.includes("--write-baseline")) {

@@ -27,5 +27,27 @@
     "apps/web/src/styles/settings.css": 1,
     "apps/web/src/styles/surface.css": 1,
     "apps/web/src/usage/usageWorkspace.css": 1
+  },
+  "control-repaint": {
+    "apps/web/src/agentProfile/execution-profile.css": 8,
+    "apps/web/src/context/context.css": 8,
+    "apps/web/src/onboarding/first-run.css": 3,
+    "apps/web/src/profile/profile.css": 9,
+    "apps/web/src/styles.css": 179,
+    "apps/web/src/styles/artifacts.css": 10,
+    "apps/web/src/styles/automation.css": 23,
+    "apps/web/src/styles/canvas.css": 4,
+    "apps/web/src/styles/chat.css": 4,
+    "apps/web/src/styles/code.css": 18,
+    "apps/web/src/styles/components.css": 1,
+    "apps/web/src/styles/dock.css": 8,
+    "apps/web/src/styles/github.css": 11,
+    "apps/web/src/styles/inbox.css": 3,
+    "apps/web/src/styles/octant.css": 44,
+    "apps/web/src/styles/polish.css": 2,
+    "apps/web/src/styles/remote-shell.css": 1,
+    "apps/web/src/styles/settings.css": 24,
+    "apps/web/src/styles/shell.css": 53,
+    "apps/web/src/styles/zen.css": 3
   }
 }

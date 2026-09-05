@@ -285,9 +285,6 @@ html[data-octant-native-host="true"] body {
   top: 16px;
   right: 16px;
   z-index: 24;
-  color: var(--octant-text-primary);
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border-strong);
 }
 
 .thread-activity-pip {
@@ -305,17 +302,7 @@ html[data-octant-native-host="true"] body {
   align-items: center;
   gap: 7px;
   padding: 0 10px;
-  border-radius: var(--oct-radius-pill);
-  box-shadow: var(--octant-shadow-lg);
-  cursor: pointer;
-  font: inherit;
-  font-size: calc(11 * var(--oct-text-step));
-}
-
-.thread-activity-pip-trigger:hover,
-.thread-activity-pip-trigger:focus-visible {
-  background: var(--octant-control-hover);
-  border-color: var(--octant-focus-ring);
+  font-size: var(--oct-text-xs);
 }
 
 .thread-activity-pip__collapsed-controls {
@@ -5456,37 +5443,18 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   max-width: min(100%, 280px);
 }
 
-/* Base look for the picker outside a composer row; inside one, the system's
-   `.composer-row` treatment out-specifies this (ADR 0038). */
+/* The trigger wears the ghost button recipe (OctantPopover `triggerVariant`);
+   this rule only sizes it. Inside a composer row the system.s `.composer-row`
+   treatment sets the row height. */
 .composer-model-picker__trigger {
   display: inline-flex;
+  height: auto;
+  min-height: 28px;
   align-items: center;
   gap: 6px;
   max-width: 100%;
-  min-height: 28px;
   padding: 0 10px;
-  color: var(--oct-fg);
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  cursor: pointer;
-  font: inherit;
   font-size: var(--oct-text-xs);
-  font-weight: 500;
-}
-
-.composer-model-picker__trigger:hover {
-  background: var(--oct-fg-soft);
-}
-
-.composer-model-picker__trigger:focus-visible {
-  outline: 2px solid var(--oct-accent-fg);
-  outline-offset: 2px;
-}
-
-.composer-model-picker__trigger:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 
 .composer-model-picker__trigger-label {
@@ -5944,23 +5912,12 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .code-thread-workspace__tool {
   display: inline-flex;
+  height: auto;
+  min-height: var(--oct-control-height-sm);
   align-items: center;
   gap: 6px;
-  min-height: var(--oct-control-height-sm);
   padding: 0 10px;
-  color: var(--oct-fg-2);
-  background: transparent;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  cursor: pointer;
-  font: inherit;
   font-size: var(--oct-text-xs);
-}
-
-.code-thread-workspace__tool:hover,
-.code-thread-workspace__tool:focus-visible {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
 }
 
 /* Kept for AgentRunHierarchy, which still reports its errors under this
@@ -6208,12 +6165,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .code-thread-workspace__composer .composer-row .composer-model-picker__trigger {
   height: 30px;
   min-height: 30px;
-}
-
-.code-thread-workspace__composer .composer-row .composer-model-picker__trigger {
   padding-inline: 8px;
-  background: transparent;
-  border-color: transparent;
 }
 
 .code-thread-workspace__composer
