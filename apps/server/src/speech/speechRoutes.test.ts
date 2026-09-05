@@ -239,6 +239,35 @@ describe("speech routes", () => {
     expect((await second)?.status).toBe(200);
   });
 
+  it("refuses an overflowing clip without buffering its body", async () => {
+    let release: () => void = () => undefined;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { handler } = setup({
+      adapter: {
+        transcribe: async () => {
+          await blocked;
+          return { status: "completed", text: "late" };
+        },
+      },
+    });
+    const first = handler(request("/api/speech/transcriptions", { method: "POST", body: clip() }));
+    const second = handler(request("/api/speech/transcriptions", { method: "POST", body: clip() }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const overflow = request("/api/speech/transcriptions", { method: "POST", body: clip() });
+    const third = await handler(overflow);
+
+    expect(third?.status).toBe(503);
+    // The gate is taken before the body is read, so an overflowing clip is
+    // refused without its audio ever being held in memory.
+    expect(overflow.bodyUsed).toBe(false);
+    release();
+    expect((await first)?.status).toBe(200);
+    expect((await second)?.status).toBe(200);
+  });
+
   it("returns synthesized audio bytes with the media type and no caching", async () => {
     const { handler, synthesize } = setup();
     const response = await handler(

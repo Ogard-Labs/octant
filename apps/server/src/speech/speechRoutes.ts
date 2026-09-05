@@ -137,40 +137,40 @@ export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) 
     if (exceedsDeclaredLength(request, TRANSCRIPTION_BODY_LIMIT)) {
       return refuse("The recording is larger than 10 MB.", "invalid", 413, origin);
     }
-    let form: FormData;
-    try {
-      form = await request.formData();
-    } catch {
-      return refuse("Speech request must be multipart form data.", "invalid", 400, origin);
-    }
-    const audioPart = form.get("audio");
-    if (!isBlob(audioPart)) {
-      return refuse("Speech request must carry an audio part.", "invalid", 400, origin);
-    }
-    if (audioPart.size === 0) {
-      return refuse("The recording is empty.", "invalid", 400, origin);
-    }
-    if (audioPart.size > SPEECH_TRANSCRIPTION_MAX_AUDIO_BYTES) {
-      return refuse("The recording is larger than 10 MB.", "invalid", 413, origin);
-    }
-    const audio = new Uint8Array(await audioPart.arrayBuffer());
-    const mediaType = sniffSpeechAudioMediaType(audio);
-    if (mediaType === undefined) {
-      return refuse("The recording is not a supported audio format.", "invalid", 400, origin);
-    }
-    let language: string | undefined;
-    const languagePart = form.get("language");
-    if (typeof languagePart === "string" && languagePart.length > 0) {
-      try {
-        language = decodeSpeechTranscriptionLanguage(languagePart);
-      } catch {
-        return refuse("The language hint is not a language tag.", "invalid", 400, origin);
-      }
-    }
 
     const release = gates.transcription.tryAcquire();
     if (release === null) return busy(origin);
     try {
+      let form: FormData;
+      try {
+        form = await request.formData();
+      } catch {
+        return refuse("Speech request must be multipart form data.", "invalid", 400, origin);
+      }
+      const audioPart = form.get("audio");
+      if (!isBlob(audioPart)) {
+        return refuse("Speech request must carry an audio part.", "invalid", 400, origin);
+      }
+      if (audioPart.size === 0) {
+        return refuse("The recording is empty.", "invalid", 400, origin);
+      }
+      if (audioPart.size > SPEECH_TRANSCRIPTION_MAX_AUDIO_BYTES) {
+        return refuse("The recording is larger than 10 MB.", "invalid", 413, origin);
+      }
+      const audio = new Uint8Array(await audioPart.arrayBuffer());
+      const mediaType = sniffSpeechAudioMediaType(audio);
+      if (mediaType === undefined) {
+        return refuse("The recording is not a supported audio format.", "invalid", 400, origin);
+      }
+      let language: string | undefined;
+      const languagePart = form.get("language");
+      if (typeof languagePart === "string" && languagePart.length > 0) {
+        try {
+          language = decodeSpeechTranscriptionLanguage(languagePart);
+        } catch {
+          return refuse("The language hint is not a language tag.", "invalid", 400, origin);
+        }
+      }
       const result = await adapterFor(resolution).transcribe({
         audio,
         mediaType,
@@ -199,23 +199,22 @@ export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) 
         origin,
       );
     }
-    const decoded = await readJson(request, SYNTHESIS_BODY_LIMIT);
-    if (decoded.kind === "too-large") {
-      return refuse("Request body is too large.", "invalid", 413, origin);
-    }
-    if (decoded.kind === "invalid") {
-      return refuse("Request body must be valid JSON.", "invalid", 400, origin);
-    }
-    let body;
-    try {
-      body = decodeSpeechSynthesisRequest(decoded.value);
-    } catch {
-      return refuse("Speech synthesis request is invalid.", "invalid", 400, origin);
-    }
-
     const release = gates.synthesis.tryAcquire();
     if (release === null) return busy(origin);
     try {
+      const decoded = await readJson(request, SYNTHESIS_BODY_LIMIT);
+      if (decoded.kind === "too-large") {
+        return refuse("Request body is too large.", "invalid", 413, origin);
+      }
+      if (decoded.kind === "invalid") {
+        return refuse("Request body must be valid JSON.", "invalid", 400, origin);
+      }
+      let body;
+      try {
+        body = decodeSpeechSynthesisRequest(decoded.value);
+      } catch {
+        return refuse("Speech synthesis request is invalid.", "invalid", 400, origin);
+      }
       const result = await adapterFor(resolution).synthesize({
         text: body.text,
         modelId: resolution.modelId,

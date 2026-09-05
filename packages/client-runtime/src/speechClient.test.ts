@@ -99,4 +99,77 @@ describe("createSpeechClient", () => {
       category: "protocol",
     });
   });
+  it("names an abort during the transcript body a cancellation", async () => {
+    const controller = new AbortController();
+    const fetch = vi.fn(async () => {
+      controller.abort();
+      return new Response(
+        new ReadableStream({
+          start(stream) {
+            stream.error(new DOMException("Aborted", "AbortError"));
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    const client = createSpeechClient({
+      baseUrl: "http://127.0.0.1:3100",
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      windowCapability: "cap",
+    });
+
+    await expect(
+      client.transcribe({ audio: new Blob(["a"]), signal: controller.signal }),
+    ).rejects.toMatchObject({ category: "interrupted" });
+  });
+
+  it("names an abort during the synthesis body a cancellation", async () => {
+    const controller = new AbortController();
+    const fetch = vi.fn(async () => {
+      controller.abort();
+      return new Response(
+        new ReadableStream({
+          start(stream) {
+            stream.error(new DOMException("Aborted", "AbortError"));
+          },
+        }),
+        { status: 200, headers: { "content-type": "audio/mpeg" } },
+      );
+    });
+    const client = createSpeechClient({
+      baseUrl: "http://127.0.0.1:3100",
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      windowCapability: "cap",
+    });
+
+    await expect(
+      client.synthesize({ text: "hello", signal: controller.signal }),
+    ).rejects.toMatchObject({ category: "interrupted" });
+  });
+
+  it("names an abort while reading a failure body a cancellation", async () => {
+    const controller = new AbortController();
+    const fetch = vi.fn(async () => {
+      controller.abort();
+      return new Response(
+        new ReadableStream({
+          start(stream) {
+            stream.error(new DOMException("Aborted", "AbortError"));
+          },
+        }),
+        { status: 502, headers: { "content-type": "application/json" } },
+      );
+    });
+    const client = createSpeechClient({
+      baseUrl: "http://127.0.0.1:3100",
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      windowCapability: "cap",
+    });
+
+    const failure = await client
+      .transcribe({ audio: new Blob(["a"]), signal: controller.signal })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(SpeechClientFailure);
+    expect((failure as SpeechClientFailure).category).toBe("interrupted");
+  });
 });

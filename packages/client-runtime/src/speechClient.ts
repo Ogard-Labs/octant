@@ -66,7 +66,7 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
   return {
     async status() {
       const response = await send(options, "/api/speech/status", { method: "GET", headers });
-      return decodeOrFail(response, decodeSpeechStatusResponse);
+      return decodeOrFail(response, decodeSpeechStatusResponse, undefined);
     },
     async transcribe(input) {
       const form = new FormData();
@@ -78,7 +78,7 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
         body: form,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
-      return decodeOrFail(response, decodeSpeechTranscript);
+      return decodeOrFail(response, decodeSpeechTranscript, input.signal);
     },
     async synthesize(input) {
       const response = await send(options, "/api/speech/synthesis", {
@@ -90,7 +90,7 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
         }),
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
-      if (!response.ok) throw await failureOf(response);
+      if (!response.ok) throw await failureOf(response, input.signal);
       const mediaType = response.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
       if (!mediaType.startsWith("audio/")) {
         throw new SpeechClientFailure({
@@ -99,7 +99,20 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
           category: "protocol",
         });
       }
-      return { bytes: await response.blob(), mediaType };
+      let bytes: Blob;
+      try {
+        bytes = await response.blob();
+      } catch {
+        throw (
+          cancelled(input.signal) ??
+          new SpeechClientFailure({
+            message: "Voice returned an invalid response.",
+            status: response.status,
+            category: "protocol",
+          })
+        );
+      }
+      return { bytes, mediaType };
     },
   };
 }
@@ -123,17 +136,38 @@ async function send(options: SpeechClientOptions, path: string, init: RequestIni
   }
 }
 
-async function decodeOrFail<T>(response: Response, decode: (value: unknown) => T): Promise<T> {
-  if (!response.ok) throw await failureOf(response);
+/**
+ * An abort that lands after the response headers surfaces from the body read
+ * rather than from `fetch`, so every body path has to name it a cancellation
+ * instead of a protocol or provider fault.
+ */
+function cancelled(signal: AbortSignal | undefined): SpeechClientFailure | undefined {
+  if (signal?.aborted !== true) return undefined;
+  return new SpeechClientFailure({
+    message: "The voice request was cancelled.",
+    status: 0,
+    category: "interrupted",
+  });
+}
+
+async function decodeOrFail<T>(
+  response: Response,
+  decode: (value: unknown) => T,
+  signal: AbortSignal | undefined,
+): Promise<T> {
+  if (!response.ok) throw await failureOf(response, signal);
   let body: unknown;
   try {
     body = await response.json();
   } catch {
-    throw new SpeechClientFailure({
-      message: "Voice returned an invalid response.",
-      status: response.status,
-      category: "protocol",
-    });
+    throw (
+      cancelled(signal) ??
+      new SpeechClientFailure({
+        message: "Voice returned an invalid response.",
+        status: response.status,
+        category: "protocol",
+      })
+    );
   }
   try {
     return decode(body);
@@ -146,7 +180,10 @@ async function decodeOrFail<T>(response: Response, decode: (value: unknown) => T
   }
 }
 
-async function failureOf(response: Response): Promise<SpeechClientFailure> {
+async function failureOf(
+  response: Response,
+  signal: AbortSignal | undefined,
+): Promise<SpeechClientFailure> {
   try {
     const failure = decodeSpeechFailureResponse(await response.json());
     return new SpeechClientFailure({
@@ -157,10 +194,13 @@ async function failureOf(response: Response): Promise<SpeechClientFailure> {
       ...(failure.settingsTarget === undefined ? {} : { settingsTarget: failure.settingsTarget }),
     });
   } catch {
-    return new SpeechClientFailure({
-      message: "Voice request failed.",
-      status: response.status,
-      category: "provider-failed",
-    });
+    return (
+      cancelled(signal) ??
+      new SpeechClientFailure({
+        message: "Voice request failed.",
+        status: response.status,
+        category: "provider-failed",
+      })
+    );
   }
 }
