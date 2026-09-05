@@ -160,6 +160,7 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   providers: "Connect providers, manage authentication, and pick default models.",
   profiles: "Reusable execution profiles for agent runs.",
   agents: "How agent runs behave in this app.",
+  harness: "Octant's own agent loop for API-key and local models: which model does which job.",
   skills: "Skills and extensions available to agents.",
   usage: "Activity and usage across providers.",
   advanced: "Layout resets and diagnostics.",
@@ -525,13 +526,25 @@ function ActiveSectionContent({
       return props.agentRunSettingsClient !== undefined ? (
         <div id="settings-agents">
           <AgentRunSettingsPanel client={props.agentRunSettingsClient} />
-          {props.nativeHarnessClient === undefined ? null : (
-            <NativeHarnessRoutingPanel
-              client={props.nativeHarnessClient}
-              hostId={LOCAL_HOST_ID}
-              providers={nativeHarnessProviderOptions(props.providerController)}
-            />
-          )}
+        </div>
+      ) : null;
+    case "harness":
+      return props.nativeHarnessClient !== undefined ? (
+        <div id="settings-harness">
+          <section className="settings-card-section settings-card-section--open">
+            <h2>Octant Harness</h2>
+            <p className="native-harness-panel__lead">
+              Octant runs API-key and local endpoint models with its own tools, authority checks,
+              and journal. Those endpoints appear together as <strong>Octant</strong> in the model
+              picker. Slots decide which model does which job; whether a lead may start child runs
+              is the subagent creation posture under Agents.
+            </p>
+          </section>
+          <NativeHarnessRoutingPanel
+            client={props.nativeHarnessClient}
+            hostId={LOCAL_HOST_ID}
+            providers={nativeHarnessProviderOptions(props.providerController)}
+          />
         </div>
       ) : null;
     case "advanced":

@@ -354,3 +354,79 @@ function routerGroups() {
     mode: "chat",
   });
 }
+
+describe("ComposerModelPicker with the native harness", () => {
+  it("shows every harness endpoint under one Octant entry and still selects the real endpoint", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const endpointA = decodeProviderInstanceId("80000000-0000-4000-8000-0000000000b1");
+    const endpointB = decodeProviderInstanceId("80000000-0000-4000-8000-0000000000b2");
+    const railGroups = buildModelPickerGroups({
+      instances: [
+        instance("opencode", providerA, "Local OpenCode"),
+        endpointInstance("openai-compatible", endpointA, "My OpenAI key"),
+        endpointInstance("anthropic-compatible", endpointB, "My Anthropic key"),
+      ],
+      observedByInstance: new Map<
+        ReturnType<typeof decodeProviderInstanceId>,
+        ProviderObservedState
+      >([
+        [providerA, observation(providerA, [model(modelOne, "Model One")])],
+        [endpointA, observation(endpointA, [model(decodeProviderModelId("gpt-x"), "GPT X")])],
+        [endpointB, observation(endpointB, [model(decodeProviderModelId("claude-y"), "Claude Y")])],
+      ]),
+      mode: "chat",
+    });
+    render(<ComposerModelPicker groups={railGroups} onSelect={onSelect} />);
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const rail = await screen.findByRole("listbox", { name: "Providers" });
+    expect(
+      within(rail)
+        .getAllByRole("option")
+        .map((item) => item.getAttribute("aria-label")),
+    ).toEqual(["Favorites", "Local OpenCode", "Octant"]);
+    await user.click(within(rail).getByRole("option", { name: "Octant" }));
+    const menu = screen.getByRole("dialog", { name: "Choose provider and model" });
+    expect(within(menu).getByRole("option", { name: "GPT X" })).toBeVisible();
+    expect(within(menu).getByRole("group", { name: "My OpenAI key" })).toBeVisible();
+    expect(within(menu).getByRole("group", { name: "My Anthropic key" })).toBeVisible();
+    await user.click(within(menu).getByRole("option", { name: "Claude Y" }));
+    expect(onSelect).toHaveBeenCalledWith({
+      providerInstanceId: endpointB,
+      modelId: decodeProviderModelId("claude-y"),
+    });
+  });
+});
+
+function endpointInstance(
+  driverKind: "openai-compatible" | "anthropic-compatible",
+  id: ReturnType<typeof decodeProviderInstanceId>,
+  displayName: string,
+): ProviderInstance {
+  return {
+    id,
+    displayName,
+    driverKind,
+    configuration:
+      driverKind === "openai-compatible"
+        ? {
+            kind: "openai-compatible-http",
+            baseUrl: "https://gateway.example/v1/",
+            authentication: "none",
+            protocol: "responses",
+            manualModelIds: [],
+          }
+        : {
+            kind: "anthropic-compatible-http",
+            baseUrl: "https://anthropic.example/v1/",
+            authentication: "none",
+            protocol: "messages",
+            manualModelIds: [],
+          },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1 as never,
+    createdAt: "2026-07-14T10:00:00.000Z" as never,
+    updatedAt: "2026-07-14T10:00:00.000Z" as never,
+  } as ProviderInstance;
+}

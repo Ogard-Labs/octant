@@ -9035,3 +9035,27 @@ ul.board-col-body {
 .linear-issues[data-narrow="true"] .linear-issues__meta {
   flex-wrap: wrap;
 }
+
+.model-picker__group--octant {
+  border: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+  border-radius: 0.75rem;
+  padding: 0.25rem 0.5rem 0.5rem;
+}
+
+.model-picker__group--nested {
+  margin-left: 0.75rem;
+  padding-left: 0.5rem;
+  border-left: 2px solid color-mix(in srgb, CanvasText 12%, transparent);
+}
+
+.composer-model-picker__runtime-note {
+  margin: 0 0.75rem 0.5rem;
+  font-size: var(--text-xs);
+  color: var(--color-muted-foreground);
+}
+
+.composer-model-picker__runtime-link {
+  padding: 0;
+  height: auto;
+  font-size: inherit;
+}

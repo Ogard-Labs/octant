@@ -20,6 +20,7 @@ export const SETTINGS_SECTION_IDS = [
   "providers",
   "profiles",
   "agents",
+  "harness",
   "skills",
   "usage",
   "host",
