@@ -895,8 +895,13 @@ function LaunchedShell(
       : activeMode === "work"
         ? activeWorkThreadId
         : activeCodeThreadId;
-  const projectPullRequestReviewOpen =
-    codePullRequestsOpen && selectedProjectPullRequest !== undefined;
+  // A selected pull request is the dock's Review subject wherever it was
+  // chosen. Requiring the Pull requests page to be open as well meant a pull
+  // request launched from the dock's own tab menu opened Review on the thread
+  // instead, and setting that flag from the dock would have navigated the main
+  // pane the reader was looking at. Closing the page clears the selection with
+  // it, so the two stay in step.
+  const projectPullRequestReviewOpen = selectedProjectPullRequest !== undefined;
   const dockThreadKey =
     dockThreadId === undefined ? undefined : threadUtilityDockKey(activeMode, String(dockThreadId));
   // A hand-off can take minutes, and the person is free to move threads while
