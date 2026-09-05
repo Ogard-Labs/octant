@@ -3,12 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Schema } from "effect";
-import {
-  EventActor,
-  decodeNativeHarnessSlotCandidate,
-  decodeProjectId,
-  type NativeHarnessRoutingConfiguration,
-} from "@octant/contracts";
+import { EventActor, decodeNativeHarnessSlotCandidate, decodeProjectId } from "@octant/contracts";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
@@ -34,10 +29,6 @@ const candidate = (model: string) =>
     providerInstanceId: "00000000-0000-4000-8000-000000000001",
     modelId: model,
   });
-const configuration = (
-  slots: NativeHarnessRoutingConfiguration["slots"],
-): NativeHarnessRoutingConfiguration => ({ slots, jobSlots: [] }) as never;
-
 function openConnection(): SqliteConnection {
   const directory = mkdtempSync(join(tmpdir(), "octant-harness-store-"));
   directories.push(directory);
