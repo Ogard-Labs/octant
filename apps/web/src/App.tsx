@@ -2,6 +2,7 @@ import type { ContextClient } from "@octant/client-runtime/context-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import { listEligibleImageProfiles } from "@octant/domain";
+import { SpeechCapabilityProvider } from "./voice/SpeechCapabilityContext";
 import { buildAutomationEditorCatalog } from "./automation/automationEditorCatalog";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
@@ -64,7 +65,7 @@ import {
 import { pastedImageName } from "./chat/composerImagePaste";
 import { markInteraction, markInteractionAfterPaint } from "./polling/interactionTrace";
 import { useMachineChangeFeed } from "./polling/useMachineChangeFeed";
-import type { CodeOperationId } from "@octant/contracts";
+import type { CodeOperationId, ProviderInstance, VoiceSettings } from "@octant/contracts";
 import type {
   CodeBoardQuery,
   CodeProjectPullRequestDetailQuery,
@@ -430,6 +431,9 @@ export interface AppProps {
   readonly themeClient?: ThemeClient;
   readonly zenClient?: ZenClient;
 }
+
+const NO_PROVIDER_INSTANCES: ReadonlyArray<ProviderInstance> = [];
+const NO_VOICE_SETTINGS: VoiceSettings = {};
 
 export function App(props: AppProps) {
   const [locationLaunch] = useState(() => launchFromLocation(window.location.href));
@@ -1036,6 +1040,7 @@ function LaunchedShell(
     hostClient,
     hostControlClient,
     imageGenerationClient,
+    speechClient,
     linearTransport,
     machineChangeClient,
     navigatorAssistantClient,
@@ -5598,22 +5603,28 @@ function LaunchedShell(
   );
 
   return (
-    <OctantCommandProvider commands={octantCommands}>
-      {/* Held here rather than with any Code pane: a thread's controller has to
+    <SpeechCapabilityProvider
+      client={speechClient}
+      instances={providerController.snapshot?.instances ?? NO_PROVIDER_INSTANCES}
+      settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
+    >
+      <OctantCommandProvider commands={octantCommands}>
+        {/* Held here rather than with any Code pane: a thread's controller has to
         outlive the surfaces reading it, so closing a diff tab never tears down
         the turn that thread is running. */}
-      <CodeThreadControllerSlots
-        client={codeClient}
-        readCursorStore={codeReadCursorStore}
-        registry={codeThreadControllers}
-        threadIds={openCodeThreadIds}
-      />
-      <TrackerReferenceProvider ports={trackerReferencePorts}>
-        <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
-          <ProjectThreadsProvider value={projectThreadsAccess}>{shell}</ProjectThreadsProvider>
-        </SidebarThreadDragContext.Provider>
-      </TrackerReferenceProvider>
-    </OctantCommandProvider>
+        <CodeThreadControllerSlots
+          client={codeClient}
+          readCursorStore={codeReadCursorStore}
+          registry={codeThreadControllers}
+          threadIds={openCodeThreadIds}
+        />
+        <TrackerReferenceProvider ports={trackerReferencePorts}>
+          <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
+            <ProjectThreadsProvider value={projectThreadsAccess}>{shell}</ProjectThreadsProvider>
+          </SidebarThreadDragContext.Provider>
+        </TrackerReferenceProvider>
+      </OctantCommandProvider>
+    </SpeechCapabilityProvider>
   );
 }
 

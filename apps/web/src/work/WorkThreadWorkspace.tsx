@@ -49,6 +49,8 @@ import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
+import { appendTranscript } from "../voice/appendTranscript";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type { ImageGenerationProfileView } from "@octant/contracts";
 import { decodeImageGenerationScopeId } from "@octant/contracts";
@@ -1214,6 +1216,12 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                       </OctantButton>
                     </>
                   )}
+                  <ComposerVoiceButton
+                    disabled={creating || completionLocked}
+                    onTranscript={(transcript) =>
+                      rememberDraft(appendTranscript(prompt, transcript), null)
+                    }
+                  />
                 </>
               ),
               actions: {

@@ -71,6 +71,7 @@ export * from "./providers";
 export * from "./providerDiscovery";
 export * from "./providerUsageLimits";
 export * from "./shell";
+export * from "./speech";
 export * from "./threadDraft";
 export * from "./threadMention";
 export * from "./threadDialogue";

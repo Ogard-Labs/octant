@@ -20,5 +20,8 @@ describe("packaged renderer policy", () => {
     expect(csp).toContain("base-uri 'none'");
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("connect-src 'self'");
+    // Synthesized speech plays from a blob URL; without this the default-src
+    // fallback refuses the audio element and read-aloud fails silently.
+    expect(csp).toContain("media-src 'self' blob:");
   });
 });

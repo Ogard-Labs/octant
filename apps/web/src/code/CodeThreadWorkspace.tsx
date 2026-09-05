@@ -19,6 +19,8 @@ import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { CirclePause, UserRoundCog } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
+import { appendTranscript } from "../voice/appendTranscript";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type { ImageGenerationProfileView } from "@octant/contracts";
 import { decodeImageGenerationScopeId } from "@octant/contracts";
@@ -1329,6 +1331,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           ariaLabel: "Thread context",
           leading: (
             <>
+              <ComposerVoiceButton
+                disabled={busy}
+                onTranscript={(transcript) => {
+                  const next = appendTranscript(draft, transcript);
+                  draftRevisionRef.current += 1;
+                  setDraft(next);
+                  props.controller.setPendingDraft?.(next, next.length);
+                }}
+              />
               <ComposerModelPicker
                 ariaLabel="Provider and model"
                 disabled={busy || providerChanging}

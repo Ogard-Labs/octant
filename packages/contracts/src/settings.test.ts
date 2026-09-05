@@ -18,6 +18,7 @@ describe("SettingsSectionId", () => {
       "work",
       "code",
       "navigator-assistant",
+      "voice",
       "providers",
       "profiles",
       "agents",
