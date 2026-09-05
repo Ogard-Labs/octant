@@ -7,6 +7,7 @@ export * from "./bindFetchPort";
 export * from "./browserAutomationClient";
 export * from "./canvasClient";
 export * from "./imageGenerationClient";
+export * from "./speechClient";
 export * from "./chatClient";
 export * from "./computerUseClient";
 export * from "./codeClient";

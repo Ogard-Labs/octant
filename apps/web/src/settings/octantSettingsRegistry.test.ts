@@ -10,6 +10,7 @@ describe("octantSettingsRegistry", () => {
       "chat",
       "code",
       "navigator-assistant",
+      "voice",
       "providers",
       "profiles",
       "agents",

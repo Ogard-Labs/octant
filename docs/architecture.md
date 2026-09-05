@@ -506,6 +506,14 @@ modelId }`, and the model picker is provider-first. Discovery can find
   carry no generation action. Agent-generated images preview in the thread by
   opaque attachment id, chain edits through `parentArtifactRef`, export with the thread, and
   never grant Chat filesystem authority.
+  **Voice** is an app-managed capability rather than a provider kind: speech
+  to text and text to speech each resolve against one enabled OpenAI-compatible
+  instance named in Settings › Voice and reuse its base URL, authentication,
+  and credential. The host serves `/api/speech/status`, `/api/speech/transcriptions`,
+  and `/api/speech/synthesis` behind window authority, sniffs and bounds the
+  audio, persists nothing, and reports each direction `ready`, `unconfigured`,
+  or `unavailable` with the Settings link that fixes it; see
+  [decisions/0084-voice-rides-an-openai-compatible-provider.md](decisions/0084-voice-rides-an-openai-compatible-provider.md).
   The ACP drivers share one
   generic ACP client and protocol layer. Each in-tree vendor is a bundled
   `provider-driver` plugin that reaches the host only through `provider-sdk`;
