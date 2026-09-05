@@ -793,12 +793,16 @@ export const NativeHarnessFollowUpCreation = Schema.Union(
     mode: OctantMode,
     projectId: Schema.optional(ProjectId),
     title: FollowUpTitle,
+    /** Present once the thread exists; a preview has none. */
+    threadId: Schema.optional(Schema.UUID),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("new-worktree"),
     mode: Schema.Literal("code"),
     projectId: ProjectId,
     title: FollowUpTitle,
+    /** Present once the thread exists; a preview has none. */
+    threadId: Schema.optional(Schema.UUID),
   }).annotations(strict),
 );
 export type NativeHarnessFollowUpCreation = typeof NativeHarnessFollowUpCreation.Type;

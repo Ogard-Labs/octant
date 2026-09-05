@@ -247,6 +247,7 @@ import {
 } from "./environment/useRepositoryPullRequests";
 import { RightUtilityDock } from "./shell/RightUtilityDock";
 import { DockProjectPullRequestReviewTool } from "./shell/DockProjectPullRequestReviewTool";
+import { composerThreadDrafts } from "./composer/composerThreadDraftStore";
 import { ThreadUtilityDockContent } from "./shell/ThreadUtilityDockContent";
 import {
   MULTI_INSTANCE_DOCK_SURFACES,
@@ -2402,6 +2403,43 @@ function LaunchedShell(
         agentRunClient={agentRunClient}
         agentRunSettingsClient={agentRunSettingsClient}
         nativeHarnessClient={nativeHarnessClient}
+        onFollowUpCreated={({ created, prompt }) => {
+          // The prompt waits in the composer of the thread it belongs to;
+          // sending it is the person's move.
+          const seed = (mode: "chat" | "work" | "code", threadId: string) =>
+            composerThreadDrafts.write(mode, threadId, {
+              text: prompt,
+              caretIndex: prompt.length,
+              stagedDropped: false,
+            });
+          if (created.kind === "same-thread") {
+            seed(dockThread.mode, created.threadId);
+            return;
+          }
+          if (created.threadId === undefined) return;
+          seed(created.mode, created.threadId);
+          if (created.mode === "chat") {
+            void controller.openChatThread(
+              decodeChatThreadId(created.threadId),
+              created.title,
+              created.projectId,
+            );
+          } else if (created.mode === "work") {
+            void controller.openWorkThread(
+              decodeWorkThreadId(created.threadId),
+              created.title,
+              undefined,
+              created.projectId,
+            );
+          } else {
+            void controller.openCodeThread(
+              decodeCodeThreadId(created.threadId),
+              created.title,
+              undefined,
+              created.projectId,
+            );
+          }
+        }}
         {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
         appleToolchainClient={appleToolchainClient}
         {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}

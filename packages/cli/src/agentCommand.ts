@@ -173,7 +173,7 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
       return (await runTurn(input, threadId, input.command.prompt, lines)) ? 0 : 1;
     }
     input.stdout.write(
-      "Type a prompt and press Enter. /session shows the harness session; /quit exits.\n",
+      "Type a prompt and press Enter. /session shows the harness session; /next N takes a suggested follow-up; /quit exits.\n",
     );
     for (;;) {
       const line = await lines.next();

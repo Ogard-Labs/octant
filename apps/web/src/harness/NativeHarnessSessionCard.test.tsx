@@ -114,7 +114,12 @@ describe("NativeHarnessSessionCard", () => {
     expect((client.activateFollowUp.mock.calls[0] as unknown[] | undefined)?.[1]).toMatchObject({
       confirmed: true,
     });
-    expect(activated).toHaveBeenCalledTimes(1);
+    expect(activated).toHaveBeenCalledWith({
+      preview: expect.objectContaining({
+        wouldCreate: { kind: "new-thread", mode: "code", title: "Add tests" },
+      }),
+      created: { kind: "new-thread", mode: "code", title: "Add tests" },
+    });
   });
 
   it("shows the lead's pending question and sends the picked option as the answer", async () => {

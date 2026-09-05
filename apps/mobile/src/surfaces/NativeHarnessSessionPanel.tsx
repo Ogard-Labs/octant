@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import * as Clipboard from "expo-clipboard";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import {
   activateMobileNativeHarnessFollowUp,
@@ -197,10 +198,19 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
                   turnId: String(view.followUps.turnId),
                   suggestionId: String(preview.suggestion.id),
                 }).then((result) => {
+                  if (result?.kind !== "follow-up-activated") {
+                    setNote(result?.message ?? "The host did not activate this follow-up.");
+                    return;
+                  }
+                  // No composer to seed from here: the prompt rides the clipboard.
+                  void Clipboard.setStringAsync(preview.suggestion.prompt).catch(() => undefined);
+                  const created = result.created;
                   setNote(
-                    result?.kind === "follow-up-activated"
-                      ? "Activated. Paste the prompt into the thread you create."
-                      : (result?.message ?? "The host refused the activation."),
+                    created.kind === "same-thread"
+                      ? "Activated. The prompt is on your clipboard for this thread."
+                      : created.threadId === undefined
+                        ? "Activated."
+                        : `Created "${created.title}". The prompt is on your clipboard; paste it there.`,
                   );
                   setPreview(undefined);
                   void load();

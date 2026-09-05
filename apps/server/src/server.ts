@@ -548,6 +548,10 @@ import { NativeHarnessRouter } from "./harness/nativeHarnessRouter";
 import { NativeHarnessRoutingStore } from "./harness/nativeHarnessRoutingStore";
 import { createNativeHarnessRoutingRouteHandler } from "./harness/nativeHarnessRoutingRoutes";
 import { NativeHarnessSessionStore } from "./harness/nativeHarnessSessionStore";
+import {
+  createNativeHarnessFollowUp,
+  type NativeHarnessFollowUpCreationDependencies,
+} from "./harness/nativeHarnessFollowUpCreation";
 import { NativeHarnessQuestionStore } from "./harness/nativeHarnessQuestions";
 import { createNativeHarnessSessionRouteHandler } from "./harness/nativeHarnessSessionRoutes";
 import { NativeHarnessTurnObserver } from "./harness/nativeHarnessTurnObserver";
@@ -3877,9 +3881,21 @@ export function startOctantServer(
       windowAuthorityStore,
       store: nativeHarnessRoutingStore,
     });
+    // The Chat, Work, and Code services a follow-up creates through are
+    // composed after these routes; the creator is bound once they exist.
+    const nativeHarnessFollowUpCreation: {
+      current: NativeHarnessFollowUpCreationDependencies | undefined;
+    } = { current: undefined };
     const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
       windowAuthorityStore,
       store: nativeHarnessSessionsLive,
+      createFollowUp: (input) =>
+        nativeHarnessFollowUpCreation.current === undefined
+          ? Promise.resolve({
+              kind: "refused" as const,
+              message: "Follow-up creation is unavailable on this host.",
+            })
+          : createNativeHarnessFollowUp(nativeHarnessFollowUpCreation.current, input),
       answerQuestion: ({ threadId, questionId, answer }) =>
         nativeHarnessQuestionsLive.answer(threadId, questionId, answer),
       authorizeThread: ({ threadId, windowId }) =>
@@ -4787,6 +4803,16 @@ export function startOctantServer(
       threads: workThreadService,
       workflows: workflowService,
     });
+    nativeHarnessFollowUpCreation.current = {
+      chat: chatService,
+      work: workThreadServiceWithWorkflows,
+      code: codeService,
+      readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+      readProject: (projectId) => persistence.readProject(projectId),
+      hostId: LOCAL_HOST_ID,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    };
     const zenThreadCatalog = new ZenThreadCatalog({
       localHostId: LOCAL_HOST_ID,
       localHostDisplayName: localHostDisplayName(),

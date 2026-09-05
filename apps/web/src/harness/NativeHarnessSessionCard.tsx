@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
+  NativeHarnessFollowUpCreation,
   NativeHarnessFollowUpPreview,
   NativeHarnessFollowUpSuggestion,
   NativeHarnessRouteDecision,
@@ -22,6 +23,7 @@ export interface NativeHarnessSessionCardProps {
   /** Called with the standalone prompt once a follow-up is confirmed. */
   readonly onFollowUpActivated?: (input: {
     readonly preview: NativeHarnessFollowUpPreview;
+    readonly created: NativeHarnessFollowUpCreation;
   }) => void;
   readonly refreshIntervalMs?: number;
 }
@@ -141,7 +143,7 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
         confirmed: true,
       });
       if (result.kind === "follow-up-activated") {
-        props.onFollowUpActivated?.({ preview });
+        props.onFollowUpActivated?.({ preview, created: result.created });
         setPreview(undefined);
         await load();
       } else {

@@ -13,6 +13,7 @@ import {
 import { authenticateRouteWindowId } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
+import type { NativeHarnessFollowUpCreationOutcome } from "./nativeHarnessFollowUpCreation";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 
 const METHODS = "GET, POST, OPTIONS";
@@ -36,6 +37,15 @@ export interface NativeHarnessSessionRouteDependencies {
     readonly threadId: string;
     readonly windowId: string;
   }) => void;
+  /**
+   * Creates what a confirmed follow-up names, on the confirming window. Absent
+   * on a host that only records the activation.
+   */
+  readonly createFollowUp?: (input: {
+    readonly windowId: string;
+    readonly view: NativeHarnessSessionView;
+    readonly creation: NativeHarnessFollowUpCreation;
+  }) => Promise<NativeHarnessFollowUpCreationOutcome>;
   /** Settles a pending question from any surface; the outcome says why it could not. */
   readonly answerQuestion?: (input: {
     readonly threadId: string;
@@ -207,10 +217,27 @@ export function createNativeHarnessSessionRouteHandler(
         } catch {
           return failure("Follow-up activation requires an explicit confirmation.", 400, origin);
         }
+        // Refuse a repeat before anything is created, not after.
+        if (view.activatedFollowUpIds.some((id) => String(id) === String(suggestion.id))) {
+          return json(refusedFollowUp(String(suggestion.id), "already-activated"), 409, origin);
+        }
+        const creation =
+          dependencies.createFollowUp === undefined
+            ? { kind: "created" as const, created }
+            : await dependencies.createFollowUp({ windowId, view, creation: created });
+        if (creation.kind === "refused") {
+          const result: NativeHarnessFollowUpActivationResult = {
+            kind: "follow-up-refused",
+            suggestionId: suggestion.id,
+            reason: "target-unavailable",
+            message: creation.message,
+          };
+          return json(result, 409, origin);
+        }
         const outcome = dependencies.store.activateFollowUp(
           threadId,
           activation.suggestionId,
-          created,
+          creation.created,
         );
         if (outcome !== "activated") {
           return json(refusedFollowUp(String(suggestion.id), outcome), 409, origin);
@@ -218,7 +245,7 @@ export function createNativeHarnessSessionRouteHandler(
         const result: NativeHarnessFollowUpActivationResult = {
           kind: "follow-up-activated",
           suggestionId: suggestion.id,
-          created,
+          created: creation.created,
         };
         return json(result, 200, origin);
       }

@@ -1,5 +1,6 @@
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
+import type { NativeHarnessFollowUpCreation } from "@octant/contracts";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
@@ -74,6 +75,11 @@ export interface ThreadUtilityDockContentProps {
   readonly agentRunClient?: AgentRunClient;
   readonly agentRunSettingsClient?: AgentRunSettingsClient;
   readonly nativeHarnessClient?: NativeHarnessClient;
+  /** A confirmed follow-up's thread exists; open it with the prompt ready to send. */
+  readonly onFollowUpCreated?: (input: {
+    readonly created: NativeHarnessFollowUpCreation;
+    readonly prompt: string;
+  }) => void;
   readonly appleProjectPath?: string;
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly browserAutomationClient?: BrowserAutomationClient;
@@ -115,12 +121,9 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
         {props.nativeHarnessClient === undefined ? null : (
           <NativeHarnessSessionCard
             client={props.nativeHarnessClient}
-            onFollowUpActivated={({ preview }) => {
-              // The suggestion's prompt is standalone by contract; the thread
-              // it names is created through the ordinary creation flow, so
-              // the prompt is handed to the person to paste there.
-              void navigator.clipboard?.writeText(preview.suggestion.prompt).catch(() => undefined);
-            }}
+            onFollowUpActivated={({ preview, created }) =>
+              props.onFollowUpCreated?.({ created, prompt: preview.suggestion.prompt })
+            }
             threadId={props.subject.threadId}
           />
         )}

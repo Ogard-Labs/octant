@@ -563,6 +563,10 @@ Direct-endpoint providers (`openai-compatible`, `anthropic-compatible`,
   turn is interrupted. `NativeHarnessTurnObserver` puts the stable
   instructions block in front of every harness turn, records the completed
   reply, parses the follow-up block, and asks the `advisor` slot for a review.
+  A confirmed follow-up is created by `createNativeHarnessFollowUp` through
+  the mode's ordinary creation command on the confirming window, and the
+  activation result carries the new thread id; the prompt is never sent on
+  the person's behalf.
 - **Surfaces.** `/api/native-harness/routing` and
   `/api/native-harness/sessions/:threadId` serve the web, desktop, phone, and
   `octant agent` / `octant harness` from one `NativeHarnessSessionView`.
