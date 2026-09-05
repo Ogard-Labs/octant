@@ -32,7 +32,7 @@
   margin: 0;
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
   color: var(--oct-fg);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -68,7 +68,7 @@
 
 .preview-fidelity-notice__icon {
   flex: 0 0 auto;
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
 }
 
 .preview-fidelity-notice__text {
@@ -203,7 +203,7 @@
   margin: 0 0 var(--oct-space-3);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-lg);
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
   color: var(--oct-fg);
 }
 

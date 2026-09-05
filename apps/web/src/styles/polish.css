@@ -8,7 +8,7 @@
 
 .workspace-pane__grip {
   transition:
-    background-color 120ms ease,
+    background-color var(--oct-motion-fast) ease,
     color 120ms ease;
 }
 
@@ -26,7 +26,7 @@
 .provider-card {
   border-radius: var(--oct-radius-sm);
   transition:
-    border-color 140ms ease,
+    border-color var(--oct-motion-fast) ease,
     background-color 140ms ease;
 }
 
@@ -39,7 +39,7 @@
 .chat-composer textarea,
 .chat-composer [role="combobox"] {
   transition:
-    background-color 120ms ease,
+    background-color var(--oct-motion-fast) ease,
     border-color 120ms ease,
     color 120ms ease,
     opacity 120ms ease;

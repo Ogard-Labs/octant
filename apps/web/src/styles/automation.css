@@ -26,7 +26,7 @@
   color: var(--oct-muted);
   border: 0;
   background: transparent;
-  font-size: 0.75rem;
+  font-size: var(--oct-text-detail);
 }
 
 .automation-center__delivery {
@@ -205,8 +205,8 @@
   background: transparent;
   color: inherit;
   padding: 0;
-  font-size: 0.875rem;
-  font-weight: var(--oct-weight-strong);
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-display);
   cursor: pointer;
   text-align: start;
 }
@@ -222,7 +222,7 @@
   align-items: center;
   gap: 0.25rem 0.75rem;
   color: var(--oct-meta);
-  font-size: 0.6875rem;
+  font-size: var(--oct-text-xs);
 }
 
 /* The shadcn badge recipe already gives the secondary variant a
@@ -246,7 +246,7 @@
   align-items: center;
   gap: 0.35rem;
   color: var(--oct-fg);
-  font-size: 0.875rem;
+  font-size: var(--oct-text-base);
 }
 
 .routine-composer__suggestions {
@@ -265,7 +265,7 @@
   background: transparent;
   color: var(--oct-muted);
   font: inherit;
-  font-size: 0.6875rem;
+  font-size: var(--oct-text-xs);
   cursor: pointer;
   transition: color var(--oct-motion-fast) var(--oct-ease-standard);
 }
@@ -282,7 +282,7 @@
   padding: 0.5rem;
   border-radius: var(--oct-radius-sm);
   background: var(--oct-surface);
-  font-size: 0.875rem;
+  font-size: var(--oct-text-base);
 }
 
 .routine-composer__draft-schedule {
@@ -297,7 +297,7 @@
 
 .automation-center__completed {
   color: var(--oct-muted);
-  font-size: 0.6875rem;
+  font-size: var(--oct-text-xs);
 }
 
 .automation-row__state[data-lifecycle="paused"],
@@ -347,8 +347,8 @@
 .automation-detail__title {
   margin: 0;
   font-family: var(--oct-font-display);
-  font-size: 0.95rem;
-  font-weight: var(--oct-weight-strong);
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-display);
 }
 
 .automation-detail__title:focus-visible {
@@ -361,7 +361,7 @@
   gap: 0.75rem;
   margin: 0;
   color: var(--oct-muted);
-  font-size: 0.875rem;
+  font-size: var(--oct-text-base);
 }
 
 .automation-detail__blocked {
@@ -370,7 +370,7 @@
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-sm);
   color: var(--oct-warn-fg);
-  font-size: 0.875rem;
+  font-size: var(--oct-text-base);
 }
 
 .automation-detail__actions {
@@ -384,7 +384,7 @@
   flex-direction: column;
   gap: 0.45rem;
   margin: 0;
-  font-size: 0.875rem;
+  font-size: var(--oct-text-base);
 }
 
 .automation-detail__facts dt {
@@ -405,8 +405,8 @@
   align-items: center;
   gap: 0.3rem;
   cursor: pointer;
-  font-size: 0.875rem;
-  font-weight: var(--oct-weight-strong);
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-display);
 }
 
 .automation-history {
@@ -426,7 +426,7 @@
   padding: 0.35rem 0.5rem;
   border: 1px solid var(--oct-border-soft);
   border-radius: var(--oct-radius-sm);
-  font-size: 0.6875rem;
+  font-size: var(--oct-text-xs);
 }
 
 .automation-history__status[data-run-lifecycle="failed"] {
@@ -447,14 +447,14 @@
   border-radius: var(--oct-radius-lg);
   background: var(--oct-surface);
   overflow: auto;
-  font-size: 0.875rem;
+  font-size: var(--oct-text-base);
 }
 
 .automation-editor__title {
   margin: 0;
   font-family: var(--oct-font-display);
-  font-size: 0.95rem;
-  font-weight: var(--oct-weight-strong);
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-display);
 }
 
 .automation-editor__problems {
@@ -485,7 +485,7 @@
 .automation-editor__field .input,
 .automation-editor__field .select,
 .automation-editor__field .textarea {
-  font-size: 0.875rem;
+  font-size: var(--oct-text-base);
 }
 
 .automation-editor__mode,
@@ -501,7 +501,7 @@
 .automation-editor__note {
   margin: 0;
   color: var(--oct-muted);
-  font-size: 0.6875rem;
+  font-size: var(--oct-text-xs);
 }
 
 .automation-editor__confirmation {
@@ -548,8 +548,8 @@
 .routine-calendar__month {
   margin: 0;
   font-family: var(--oct-font-display);
-  font-size: 0.875rem;
-  font-weight: var(--oct-weight-strong);
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-display);
 }
 
 .routine-calendar__weekdays,
@@ -562,7 +562,7 @@
 .routine-calendar__weekdays {
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
-  font-size: 0.6875rem;
+  font-size: var(--oct-text-xs);
   text-transform: none;
   letter-spacing: 0;
 }
@@ -590,12 +590,12 @@
 
 .routine-calendar__day[data-today="true"] .routine-calendar__day-number {
   color: var(--oct-fg);
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
   text-decoration: underline;
 }
 
 .routine-calendar__day-number {
-  font-size: 0.6875rem;
+  font-size: var(--oct-text-xs);
   color: var(--oct-meta);
 }
 
@@ -619,7 +619,7 @@
   background: var(--oct-fg-soft);
   color: inherit;
   font: inherit;
-  font-size: 0.6875rem;
+  font-size: var(--oct-text-xs);
   text-align: left;
   cursor: pointer;
 }
@@ -638,7 +638,7 @@
 .routine-calendar__note {
   margin: 0;
   color: var(--oct-muted);
-  font-size: 0.6875rem;
+  font-size: var(--oct-text-xs);
 }
 
 .list-arrangement {
@@ -654,7 +654,7 @@
   background: var(--oct-surface);
   color: inherit;
   font: inherit;
-  font-size: 0.6875rem;
+  font-size: var(--oct-text-xs);
 }
 
 .automation-center__groups {

@@ -187,7 +187,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   background: transparent;
   color: inherit;
   font: inherit;
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
   text-decoration: underline;
   cursor: pointer;
   padding: 0;
@@ -659,7 +659,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   align-items: center;
   gap: 3px;
   color: var(--oct-meta);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   line-height: 1.3;
 }
 
@@ -750,7 +750,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 .sidebar-navigation__thread-follow-up {
   padding: 0;
   color: var(--oct-meta);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   line-height: 1.4;
   border: 0;
   border-radius: 0;
@@ -871,7 +871,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   align-items: center;
   gap: 2px;
   opacity: 0;
-  transition: opacity 120ms ease;
+  transition: opacity var(--oct-motion-fast) ease;
 }
 
 .sidebar-navigation__thread-row:hover .sidebar-navigation__thread-actions,
@@ -1213,7 +1213,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   margin: 0;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
   letter-spacing: 0;
   text-transform: none;
 }
@@ -1221,7 +1221,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 .draft-thread__heading {
   margin: 0;
   color: var(--octant-text-primary);
-  font-size: clamp(25px, 3vw, 31px);
+  font-size: calc(28 * var(--oct-text-step));
   font-weight: 500;
   letter-spacing: -0.035em;
   line-height: 1.1;
@@ -1306,8 +1306,8 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 
 .draft-thread__intent-label {
   color: var(--octant-text-primary);
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
 }
 
 .draft-thread__intent-description {
@@ -1339,7 +1339,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   height: 24px;
   padding: 0 6px;
   color: var(--octant-text-muted);
-  font-size: 11.5px;
+  font-size: var(--oct-text-detail);
 }
 
 .composer-folder-selector__label {
@@ -1468,7 +1468,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   align-items: center;
   gap: 5px;
   color: var(--octant-text-muted);
-  font-size: 11.5px;
+  font-size: var(--oct-text-detail);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -1849,7 +1849,7 @@ form > .work-composer-adapter__attachments {
   border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
-  font-size: 11.5px;
+  font-size: var(--oct-text-detail);
   font-weight: 500;
 }
 
@@ -1954,7 +1954,7 @@ form > .work-composer-adapter__attachments {
   padding: 8px 12px;
   color: var(--octant-text-secondary);
   border-top: 1px solid var(--octant-border);
-  font-size: 11.5px;
+  font-size: var(--oct-text-detail);
   font-weight: 500;
 }
 
@@ -1971,7 +1971,7 @@ form > .work-composer-adapter__attachments {
   border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
-  font-size: 11.5px;
+  font-size: var(--oct-text-detail);
   font-weight: 500;
 }
 
@@ -2082,7 +2082,7 @@ form > .work-composer-adapter__attachments {
 
 .code-composer-choice__option-detail {
   color: var(--octant-text-muted);
-  font-size: calc(11.5 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   line-height: 1.4;
 }
 
@@ -2094,7 +2094,7 @@ form > .work-composer-adapter__attachments {
   padding: 8px 12px;
   color: var(--octant-text-secondary);
   border-top: 1px solid var(--octant-border);
-  font-size: 11.5px;
+  font-size: var(--oct-text-detail);
   font-weight: 500;
 }
 
@@ -2334,7 +2334,7 @@ form > .work-composer-adapter__attachments {
 .browser-workspace__empty h2 {
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
 }
 
 .browser-workspace__empty p,

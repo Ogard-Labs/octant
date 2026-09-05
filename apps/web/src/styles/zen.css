@@ -605,7 +605,7 @@
 .zen-research__title {
   flex: 1;
   font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
   color: var(--oct-muted);
 }
 
@@ -637,7 +637,7 @@
 }
 
 .zen-research__tab button[aria-selected="true"] {
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
   color: var(--oct-fg);
 }
 

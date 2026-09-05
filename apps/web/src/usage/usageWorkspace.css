@@ -113,7 +113,7 @@
   margin: 0;
   color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
 }
 
 .usage-workspace__totals {
@@ -198,7 +198,7 @@
 
 .usage-workspace__coverage-count {
   font-variant-numeric: tabular-nums;
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
 }
 
 .usage-workspace__hosts li {
@@ -216,7 +216,7 @@
 }
 
 .usage-workspace__host-id {
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
 }
 
 .usage-workspace__excluded {
@@ -257,7 +257,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--oct-space-2);
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
 }
 
 .usage-workspace__sources dd {
@@ -270,7 +270,7 @@
   border: 1px solid currentcolor;
   border-radius: var(--oct-radius-pill);
   font-family: var(--oct-font-mono);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   text-transform: none;
 }
 
@@ -297,7 +297,7 @@
 .usage-table thead th {
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   font-weight: 500;
   letter-spacing: var(--oct-tracking-wordmark);
   text-transform: none;
@@ -368,7 +368,7 @@
   height: 14px;
   border: 1px solid color-mix(in oklab, var(--oct-fg) 26%, transparent);
   border-radius: 3px;
-  font-size: calc(9 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   line-height: 1;
 }
 
@@ -428,7 +428,7 @@
   margin: 0;
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
 }
 
 .thread-usage__status {
@@ -462,7 +462,7 @@
 .thread-usage__totals dd {
   margin: 0;
   font-variant-numeric: tabular-nums;
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
 }
 
 /* A floor rather than a complete total is a caveat on every number below it,
