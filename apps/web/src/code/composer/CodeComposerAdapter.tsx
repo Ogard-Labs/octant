@@ -34,6 +34,8 @@ import {
 } from "react";
 import { ComposerModelPicker } from "../../providers/ComposerModelPicker";
 import { ThreadComposer } from "../../composer/ThreadComposer";
+import { ComposerVoiceButton } from "../../voice/ComposerVoiceButton";
+import { appendTranscript } from "../../voice/appendTranscript";
 import { HostSelector } from "../../shell/HostSelector";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
@@ -623,6 +625,12 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   >
                     <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
                   </OctantButton>
+                  <ComposerVoiceButton
+                    disabled={props.creating === true}
+                    onTranscript={(transcript) =>
+                      setPrompt((current) => appendTranscript(current, transcript))
+                    }
+                  />
 
                   <span aria-hidden="true" className="composer-gap" />
                   <span className="code-composer-adapter__context-picker">

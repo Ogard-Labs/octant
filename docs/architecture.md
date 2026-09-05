@@ -514,6 +514,12 @@ modelId }`, and the model picker is provider-first. Discovery can find
   audio, persists nothing, and reports each direction `ready`, `unconfigured`,
   or `unavailable` with the Settings link that fixes it; see
   [decisions/0084-voice-rides-an-openai-compatible-provider.md](decisions/0084-voice-rides-an-openai-compatible-provider.md).
+  Every composer (Chat, Work, Code, the welcome and draft composers) and
+  Navigator show a microphone beside the attach control only while
+  transcription is `ready`; the clip is recorded by the browser's own encoder,
+  the transcript is appended to the draft, and the person still sends. Navigator
+  can read replies aloud through the configured synthesis endpoint, or with the
+  operating system's voices when none is set.
   The ACP drivers share one
   generic ACP client and protocol layer. Each in-tree vendor is a bundled
   `provider-driver` plugin that reaches the host only through `provider-sdk`;

@@ -24,5 +24,10 @@
          otherwise refuses even with JIT allowed. -->
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
     <true/>
+    <!-- Dictation records the microphone when the person presses the
+         microphone button. The hardened runtime refuses audio input without
+         this, and the system still asks the person the first time. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
   </dict>
 </plist>

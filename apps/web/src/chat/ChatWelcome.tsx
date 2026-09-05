@@ -14,6 +14,8 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
+import { appendTranscript } from "../voice/appendTranscript";
 import type { DraftRecentThread } from "../shell/DraftThreadWorkspace";
 import { RecentThreadList } from "../shell/RecentThreadList";
 
@@ -116,6 +118,12 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             row={{
               leading: (
                 <>
+                  <ComposerVoiceButton
+                    disabled={!ready || props.creating === true}
+                    onTranscript={(transcript) =>
+                      setPrompt((current) => appendTranscript(current, transcript))
+                    }
+                  />
                   <span aria-hidden="true" className="composer-gap" />
                   <ComposerModelPicker
                     ariaLabel="Provider and model"
