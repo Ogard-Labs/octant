@@ -27,7 +27,8 @@ export type AgentCliCommand =
       readonly last: boolean;
       /** No desktop notification when a turn ends. */
       readonly quiet: boolean;
-      readonly mode: "chat" | "work" | "code";
+      /** `auto` follows the folder: a Code or Work Project holding it, else Chat. */
+      readonly mode: "chat" | "work" | "code" | "auto";
     }
   | { readonly action: "harness-slots"; readonly json: boolean }
   | { readonly action: "harness-session"; readonly threadId: string; readonly json: boolean };
@@ -61,8 +62,8 @@ export function resolveAgentCliCommand(
     const title = text("title");
     const theme = text("theme");
     if (theme !== undefined && !isTuiThemeId(theme)) return undefined;
-    const mode = text("mode") ?? "chat";
-    if (mode !== "chat" && mode !== "work" && mode !== "code") return undefined;
+    const mode = text("mode") ?? "auto";
+    if (mode !== "chat" && mode !== "work" && mode !== "code" && mode !== "auto") return undefined;
     return {
       action: "agent",
       ...(prompt === undefined ? {} : { prompt }),
@@ -209,7 +210,7 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
       threadId,
       themeId: input.command.theme,
       quiet: input.command.quiet,
-      mode: input.command.mode,
+      mode: modeOf(input.command),
       ...(input.pollIntervalMs === undefined ? {} : { pollIntervalMs: input.pollIntervalMs }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
@@ -463,7 +464,24 @@ async function resolveThread(input: RunAgentCliCommandInput): Promise<string | u
     input.stderr.write(`${created.message}\n`);
     return undefined;
   }
+  resolvedMode = created.mode;
+  if (!input.command.json) {
+    input.stdout.write(
+      created.mode === "chat"
+        ? "New Chat thread.\n"
+        : `New ${created.mode === "code" ? "Code" : "Work"} thread in ${created.projectName ?? "the Project"}.\n`,
+    );
+  }
   return created.threadId;
+}
+
+/** The mode a thread created under `auto` turned out to be in. */
+let resolvedMode: "chat" | "work" | "code" | undefined;
+
+function modeOf(command: AgentCliCommand): "chat" | "work" | "code" {
+  if (command.action !== "agent") return "chat";
+  if (command.mode !== "auto") return command.mode;
+  return resolvedMode ?? "chat";
 }
 
 async function runTurn(
@@ -472,11 +490,7 @@ async function runTurn(
   prompt: string,
   lines: LineSource,
 ): Promise<boolean> {
-  const port = agentThreadPort(
-    input.session,
-    input.command.action === "agent" ? input.command.mode : "chat",
-    threadId,
-  );
+  const port = agentThreadPort(input.session, modeOf(input.command), threadId);
   const sent = await port.send(prompt);
   if (sent.kind === "refused") {
     input.stderr.write(`${sent.message}\n`);

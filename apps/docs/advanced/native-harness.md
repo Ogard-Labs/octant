@@ -137,11 +137,14 @@ It draws with the app's own theme tokens — `--theme system|light|dark|octant`
 picks the preset, and the terminal's light or dark mode picks the palette.
 Enter sends, Shift+Enter adds a line, `/next N`, `/pause`, and `/resume` work
 as in the app, and a pending question is answered by typing its number or an
-answer. `--mode work --project <name>` or `--mode code --project <name>` starts a
-Work or Code thread instead of a Chat one, through the same commands the
-app's composer sends — a Code thread lands in the current checkout,
-approval-gated, so its edits and commands ask you first, right there in the
-terminal. `--plain` keeps the line-by-line mode, which is also what a pipe or
+answer. The folder you run it in decides the mode, the way a coding CLI does: inside
+a folder you have added as a Code Project, `octant agent` starts a Code
+thread there — in the current checkout, approval-gated, so its edits and
+commands ask you first, right there in the terminal; inside a Work Project it
+starts a Work thread; anywhere else, Chat. `--mode chat|work|code` and
+`--project <name>` override that, and a folder that is not a Project yet is
+refused with the exact `octant project add` command to run. The host must be
+running (`octant server start`, or the desktop app). `--plain` keeps the line-by-line mode, which is also what a pipe or
 `--json` (one JSON object per line) gets. `--thread <id>` attaches to an
 existing thread, `--last` to the one you used most recently, and
 `--project <name>` files a new thread in a Project. Inside the screen,
@@ -151,7 +154,9 @@ with the header showing how much of that model's window the last turn used.
 Type `@` to attach a file from the working directory (images, PDFs, text)
 and `#` to bring another thread's transcript in as read-only context; both
 complete as you type. Ctrl+E opens each call's diff or output, Ctrl+R the
-model's reasoning, `?` the key list. A finished turn sends a desktop
+model's reasoning, `?` the key list. Paste works as in any terminal; drag to
+select text and press Ctrl+C to copy it, or `/copy` to copy the last reply —
+through the terminal (OSC 52, so over SSH too) and the host clipboard. A finished turn sends a desktop
 notification unless `--quiet`. `octant harness slots` prints the routing
 table.
 

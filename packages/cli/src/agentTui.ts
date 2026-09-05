@@ -245,7 +245,14 @@ class AgentScreen {
       this.#resolveExit = resolve;
       this.#renderer.keyInput.on("keypress", (key) => {
         if (key.ctrl && key.name === "c") {
-          // Ctrl+C stops the turn first; a second press right after quits.
+          // With text selected, Ctrl+C copies it, as in any terminal; otherwise
+          // it stops the turn first, and a second press right after quits.
+          const selected = this.#renderer.getSelection()?.getSelectedText() ?? "";
+          if (selected.trim().length > 0) {
+            void this.#copy(selected);
+            this.#renderer.clearSelection();
+            return;
+          }
           const now = Date.now();
           const again = now - this.#lastCtrlC < QUIT_WINDOW_MS;
           this.#lastCtrlC = now;
@@ -413,6 +420,29 @@ class AgentScreen {
     }
   }
 
+  /** Copies through the terminal (OSC 52, works over SSH) and the host clipboard, best effort. */
+  async #copy(text: string): Promise<void> {
+    let copied = false;
+    try {
+      copied = this.#renderer.copyToClipboardOSC52(text);
+    } catch {
+      // A terminal without OSC 52 just says no; the host clipboard may still take it.
+    }
+    try {
+      const host = this.#tui.createHostClipboard();
+      const written = await host.writeText(text);
+      copied = copied || written.status === "written";
+      await host.dispose();
+    } catch {
+      // No host clipboard on this machine.
+    }
+    const lines = text.split("\n").length;
+    this.#note = copied
+      ? `Copied ${lines === 1 ? `${text.length} characters` : `${lines} lines`}.`
+      : "This terminal does not let Octant reach the clipboard.";
+    this.#draw();
+  }
+
   async #interrupt(): Promise<void> {
     if (this.#thread === undefined) return;
     const result = await this.#port.interrupt();
@@ -513,6 +543,7 @@ class AgentScreen {
           "Ctrl+E       show / hide diffs and output  Ctrl+R  show / hide reasoning",
           "Ctrl+P       pause / resume the run        PgUp/PgDn · Ctrl+Home/End  scroll",
           "/next N      take a suggested follow-up    /pause /resume /model /threads /open N /quit",
+          "drag + Ctrl+C  copy selected text           /copy   copy the last reply",
           "y · a · n    answer an approval            1..9 or text  answer a question",
         ].join("\n"),
       )}\n${dim(fg(p.muted)("Enter or ? closes this."))}`;
@@ -834,6 +865,15 @@ class AgentScreen {
       return;
     }
     this.#suggestions = undefined;
+    if (text === "/copy") {
+      const reply = [...(this.#thread?.turns ?? [])]
+        .reverse()
+        .find((turn) => turn.reply.length > 0);
+      if (reply === undefined) this.#note = "Nothing to copy yet.";
+      else await this.#copy(reply.reply);
+      this.#draw();
+      return;
+    }
     if (text === "/threads") {
       this.#threads = await listAgentThreads(this.#input.session);
       this.#listing = this.#listing === "threads" ? undefined : "threads";

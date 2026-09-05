@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
+import { resolve, sep } from "node:path";
 import {
   decodeChatCommandResult,
   decodeChatThreadView,
@@ -416,11 +418,21 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
 export async function createAgentThread(
   session: OpenedLocalControlSession,
   input: {
-    readonly mode: OctantMode;
+    /** `auto` picks the Project whose folder holds the working directory, else Chat. */
+    readonly mode: OctantMode | "auto";
     readonly title: string;
     readonly projectName?: string | undefined;
+    readonly cwd?: string | undefined;
   },
-): Promise<HostRefusal | { readonly kind: "created"; readonly threadId: string }> {
+): Promise<
+  | HostRefusal
+  | {
+      readonly kind: "created";
+      readonly threadId: string;
+      readonly mode: OctantMode;
+      readonly projectName?: string;
+    }
+> {
   const projects = await session.send({ path: "/api/projects/bootstrap", method: "GET" });
   if (projects.status !== 200) {
     return {
@@ -430,14 +442,30 @@ export async function createAgentThread(
   }
   const active = decodeProjectBootstrap(projects.body).active;
   const wanted = input.projectName?.trim().toLowerCase();
-  const project =
+  let project =
     wanted === undefined
       ? undefined
       : active.find((entry) => entry.name.trim().toLowerCase() === wanted);
   if (wanted !== undefined && project === undefined) {
     return { kind: "refused", message: `No Project named "${input.projectName}" on this host.` };
   }
-  if (input.mode === "chat") {
+  // The folder you are in decides, the way a coding CLI does: a registered
+  // Code or Work Project that holds the working directory is where the
+  // thread goes; anywhere else is a Chat thread.
+  const folder = input.cwd ?? process.cwd();
+  if (project === undefined && input.mode !== "chat") project = projectHolding(active, folder);
+  const mode: OctantMode =
+    input.mode !== "auto" ? input.mode : project === undefined ? "chat" : project.type;
+  if (mode !== "chat" && (project === undefined || project.type !== mode)) {
+    return {
+      kind: "refused",
+      message:
+        project === undefined
+          ? `This folder is not a ${mode === "work" ? "Work" : "Code"} Project yet. Add it with: octant project add ${JSON.stringify(folder)} --type ${mode}  — or name one with --project <name>.`
+          : `"${project.name}" is a ${project.type} Project; --mode ${mode} needs a ${mode} one.`,
+    };
+  }
+  if (mode === "chat") {
     const response = await session.send({
       path: "/api/chat/commands",
       method: "POST",
@@ -455,14 +483,16 @@ export async function createAgentThread(
     }
     const created = decodeChatCommandResult(response.body);
     return created.kind === "thread-created"
-      ? { kind: "created", threadId: String(created.thread.id) }
+      ? {
+          kind: "created",
+          threadId: String(created.thread.id),
+          mode: "chat",
+          ...(project === undefined ? {} : { projectName: project.name }),
+        }
       : { kind: "refused", message: "The host did not create a thread." };
   }
-  if (project === undefined || project.type !== input.mode) {
-    return {
-      kind: "refused",
-      message: `A ${input.mode === "work" ? "Work" : "Code"} thread needs --project <name> naming a ${input.mode} Project.`,
-    };
+  if (project === undefined || project.type !== mode) {
+    return { kind: "refused", message: "The Project for this thread is unavailable." };
   }
   const model = (await listAgentModels(session))[0];
   if (model === undefined) {
@@ -471,7 +501,7 @@ export async function createAgentThread(
       message: "No harness endpoint offers a model yet. Add one in Settings → Providers.",
     };
   }
-  if (input.mode === "work") {
+  if (mode === "work") {
     const threadId = randomUUID();
     const response = await session.send({
       path: "/api/work/threads/commands",
@@ -495,7 +525,7 @@ export async function createAgentThread(
     }
     const created = decodeWorkThreadCommandResult(response.body);
     return "kind" in created && created.kind === "thread-created"
-      ? { kind: "created", threadId }
+      ? { kind: "created", threadId, mode: "work", projectName: project.name }
       : { kind: "refused", message: "The host did not create the Work thread." };
   }
   const prepared = await session.send({
@@ -560,6 +590,35 @@ export async function createAgentThread(
   }
   const created = decodeCodeCommandResult(response.body);
   return created.kind === "thread-created"
-    ? { kind: "created", threadId }
+    ? { kind: "created", threadId, mode: "code", projectName: project.name }
     : { kind: "refused", message: "The host did not create the Code thread." };
+}
+
+/** The Work or Code Project whose bound folder holds the directory, deepest match first. */
+function projectHolding<
+  T extends {
+    readonly type: "chat" | "work" | "code";
+    readonly binding?: { readonly canonicalRoot: string };
+  },
+>(active: ReadonlyArray<T>, directory: string): T | undefined {
+  let here: string;
+  try {
+    here = realpathSync(resolve(directory));
+  } catch {
+    return undefined;
+  }
+  const holding = active
+    .flatMap((entry) => {
+      if ((entry.type !== "code" && entry.type !== "work") || entry.binding === undefined)
+        return [];
+      let root: string;
+      try {
+        root = realpathSync(entry.binding.canonicalRoot);
+      } catch {
+        root = entry.binding.canonicalRoot;
+      }
+      return here === root || here.startsWith(`${root}${sep}`) ? [{ entry, root }] : [];
+    })
+    .sort((a, b) => b.root.length - a.root.length);
+  return holding[0]?.entry;
 }

@@ -28,7 +28,7 @@ describe("octant agent command line", () => {
       plain: false,
       last: false,
       quiet: false,
-      mode: "chat",
+      mode: "auto",
     });
     expect(resolveAgentCliCommand("agent", [], { theme: "neon" })).toBeUndefined();
     expect(resolveAgentCliCommand("agent", [], { theme: "octant", plain: true })).toMatchObject({
