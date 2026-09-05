@@ -159,6 +159,7 @@ export function defaultShellSettings(): ShellSettings {
     transcriptWidth: "narrow",
     showThreadProviderIcons: true,
     navigatorAssistant: {},
+    voice: {},
     userProfile: { accent: DEFAULT_AVATAR_ACCENT, avatar: DEFAULT_USER_AVATAR },
   };
 }

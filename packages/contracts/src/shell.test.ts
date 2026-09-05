@@ -69,6 +69,7 @@ const settings = {
   automaticUpdateChecks: true,
   marketplaceFetchesEnabled: true,
   navigatorAssistant: {},
+  voice: {},
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
 
@@ -208,6 +209,31 @@ describe("shell bootstrap contracts", () => {
     ).toThrow();
     expect(() =>
       decodeShellSettings({ ...settings, navigatorAssistant: { fallback: "any" } }),
+    ).toThrow();
+  });
+
+  it("decodes a store without the Voice section to no speech endpoints", () => {
+    const { voice: _omitted, ...withoutVoice } = settings;
+
+    // A store persisted before voice shipped never chose an endpoint, so it
+    // must decode as unconfigured rather than guessing one from a chat model.
+    const decoded = decodeShellSettings(withoutVoice).voice;
+    expect(decoded.transcription).toBeUndefined();
+    expect(decoded.synthesis).toBeUndefined();
+
+    const configured = decodeShellSettings({
+      ...settings,
+      voice: {
+        transcription: {
+          providerInstanceId: "00000000-0000-4000-8000-00000000c001",
+          modelId: "whisper-1",
+        },
+      },
+    });
+    expect(configured.voice.transcription?.modelId).toBe("whisper-1");
+    expect(configured.voice.synthesis).toBeUndefined();
+    expect(() =>
+      decodeShellSettings({ ...settings, voice: { synthesis: { modelId: "tts-1" } } }),
     ).toThrow();
   });
 

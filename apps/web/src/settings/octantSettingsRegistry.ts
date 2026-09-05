@@ -222,6 +222,27 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
+      id: "voice",
+      label: "Voice",
+      scope: "app",
+      keywords:
+        "voice speech microphone dictation transcription speech to text text to speech read aloud whisper tts stt",
+      settings: [
+        {
+          id: settingId("transcription"),
+          label: "Transcription",
+          scope: "app",
+          keywords: "voice transcription speech to text microphone dictation whisper stt model",
+        },
+        {
+          id: settingId("synthesis"),
+          label: "Speech",
+          scope: "app",
+          keywords: "voice speech text to speech read aloud tts model voice",
+        },
+      ],
+    },
+    {
       id: "providers",
       label: "Providers & Models",
       scope: "app",

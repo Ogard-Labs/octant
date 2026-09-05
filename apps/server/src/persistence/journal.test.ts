@@ -185,6 +185,7 @@ describe("Journal", () => {
         workspaceMaterial: "opaque",
         modeSwitcherPresentation: "dropdown",
         navigatorAssistant: {},
+        voice: {},
         projectViewSwitcherPresentation: "dropdown",
         transcriptTextSize: "medium",
         transcriptWidth: "narrow",

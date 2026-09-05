@@ -65,6 +65,7 @@ import {
 import { octantSettingsRegistry } from "../settings/octantSettingsRegistry";
 import { KeybindingSettings } from "../keybindings/KeybindingSettings";
 import { NavigatorAssistantSettingsView } from "../settings/NavigatorAssistantSettingsView";
+import { VoiceSettingsView } from "../settings/VoiceSettingsView";
 import { UserProfileSettingsView } from "../profile/UserProfileSettingsView";
 import { SettingRow } from "../settings/primitives";
 import { SettingsSearchResults } from "../settings/SettingsSearchResults";
@@ -157,6 +158,7 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   work: "Defaults for tasks.",
   code: "Defaults for Code threads and delivery.",
   "navigator-assistant": "The models Navigator uses to converse and to review images.",
+  voice: "The providers that turn speech into text and text into speech.",
   providers: "Connect providers, manage authentication, and pick default models.",
   profiles: "Reusable execution profiles for agent runs.",
   agents: "How agent runs behave in this app.",
@@ -511,6 +513,17 @@ function ActiveSectionContent({
             ? {}
             : { providerSnapshot: props.providerController.snapshot })}
           settings={props.settings.navigatorAssistant}
+        />
+      );
+    case "voice":
+      return (
+        <VoiceSettingsView
+          focusedSetting={focusedSetting}
+          onSettingsChange={props.onSettingsChange}
+          {...(props.providerController?.snapshot === undefined
+            ? {}
+            : { providerSnapshot: props.providerController.snapshot })}
+          settings={props.settings.voice}
         />
       );
     case "providers":
