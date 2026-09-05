@@ -6,6 +6,8 @@ import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
+import { appendTranscript } from "../voice/appendTranscript";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import type { ChatController } from "./useChatController";
@@ -154,24 +156,32 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
             }
             row={{
               leading: (
-                <ComposerModelPicker
-                  ariaLabel="Provider and model"
-                  disabled={!createAvailable || submitting}
-                  groups={props.providerGroups ?? []}
-                  menuSide="bottom"
-                  onSelect={props.onSelectProvider ?? (() => undefined)}
-                  {...(props.onOpenSettings === undefined
-                    ? {}
-                    : { onOpenSettings: props.onOpenSettings })}
-                  {...(props.selectedModelId === undefined
-                    ? {}
-                    : { selectedModelId: props.selectedModelId })}
-                  {...(props.selectedProviderInstanceId === undefined
-                    ? {}
-                    : {
-                        selectedProviderInstanceId: props.selectedProviderInstanceId,
-                      })}
-                />
+                <>
+                  <ComposerVoiceButton
+                    disabled={!createAvailable || submitting}
+                    onTranscript={(transcript) =>
+                      setDraft((current) => appendTranscript(current, transcript))
+                    }
+                  />
+                  <ComposerModelPicker
+                    ariaLabel="Provider and model"
+                    disabled={!createAvailable || submitting}
+                    groups={props.providerGroups ?? []}
+                    menuSide="bottom"
+                    onSelect={props.onSelectProvider ?? (() => undefined)}
+                    {...(props.onOpenSettings === undefined
+                      ? {}
+                      : { onOpenSettings: props.onOpenSettings })}
+                    {...(props.selectedModelId === undefined
+                      ? {}
+                      : { selectedModelId: props.selectedModelId })}
+                    {...(props.selectedProviderInstanceId === undefined
+                      ? {}
+                      : {
+                          selectedProviderInstanceId: props.selectedProviderInstanceId,
+                        })}
+                  />
+                </>
               ),
               actions: {
                 kind: "send",

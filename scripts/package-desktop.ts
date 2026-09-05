@@ -486,6 +486,18 @@ export function createPackagerOptions(
     asar: false,
     dir,
     electronVersion: ELECTRON_VERSION,
+    // macOS terminates a process that opens the microphone without this
+    // string in its Info.plist; the dictation control asks for the microphone
+    // only when the person presses it, and this is the sentence the system
+    // permission prompt shows.
+    ...(target.platform === "darwin"
+      ? {
+          extendInfo: {
+            NSMicrophoneUsageDescription:
+              "Octant uses the microphone to dictate a message when you press the microphone button.",
+          },
+        }
+      : {}),
     icon:
       target.platform === "darwin"
         ? resolve(dir, "apps/desktop/resources/icon.icns")

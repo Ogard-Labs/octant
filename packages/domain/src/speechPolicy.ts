@@ -82,6 +82,11 @@ export function resolveSpeechEndpoint(
   if (!instance.enabled) {
     return { status: "unavailable", reason: "The chosen provider is disabled." };
   }
+  // Synthesis needs a voice as much as it needs a model. Reporting ready
+  // without one would promise a call the routes already refuse.
+  if ("voice" in ref && ref.voice === undefined) {
+    return { status: "unavailable", reason: "No voice is chosen." };
+  }
   return {
     status: "ready",
     instance,
