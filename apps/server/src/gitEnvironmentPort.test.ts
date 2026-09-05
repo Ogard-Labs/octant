@@ -89,7 +89,35 @@ describe("GitEnvironmentPort", () => {
     });
   });
 
-  it("observes independent worktree, branch, and status facts concurrently", async () => {
+  it("counts what a tracked file changed against HEAD", async () => {
+    const root = temporaryDirectory();
+    const repository = join(root, "repository");
+    mkdirSync(repository);
+    git(repository, "init", "--initial-branch=main");
+    git(repository, "config", "user.name", "Octant Test");
+    git(repository, "config", "user.email", "test@octant.local");
+    writeFileSync(join(repository, "README.md"), "one\ntwo\nthree\n");
+    git(repository, "add", "README.md");
+    git(repository, "commit", "-m", "initial");
+    const port = new GitEnvironmentPort(undefined, confinedOptions());
+
+    // A clean tree has nothing to count, and saying so is not the same as
+    // having failed to count.
+    expect(await port.observe(realpathSync(repository))).toMatchObject({
+      changes: "clean",
+      insertions: 0,
+      deletions: 0,
+    });
+
+    writeFileSync(join(repository, "README.md"), "one\nchanged\nthree\nfour\n");
+    expect(await port.observe(realpathSync(repository))).toMatchObject({
+      changes: "dirty",
+      insertions: 2,
+      deletions: 1,
+    });
+  });
+
+  it("observes worktree, branch, status, and diff facts concurrently", async () => {
     let active = 0;
     let peak = 0;
     const execFile = vi.fn(async (_file: string, args: readonly string[]) => {
@@ -114,7 +142,7 @@ describe("GitEnvironmentPort", () => {
     );
 
     await expect(port.observe("/repo")).resolves.toMatchObject({ status: "ready" });
-    expect(peak).toBe(3);
+    expect(peak).toBe(4);
   });
 
   it("returns unavailable for missing, non-directory, and non-Git roots", async () => {
@@ -177,7 +205,7 @@ describe("GitEnvironmentPort", () => {
     );
 
     expect(await port.observe("/candidate")).toEqual({ status: "failed" });
-    expect(execFile).toHaveBeenCalledTimes(4);
+    expect(execFile).toHaveBeenCalledTimes(5);
     for (const environment of environments) {
       expect(environment).toMatchObject({
         PATH: process.env.PATH,
@@ -212,6 +240,8 @@ describe("GitEnvironmentPort", () => {
       { exitCode: 0, stdout: "worktree /canonical\n" },
       { exitCode: 1, stdout: "" },
       { exitCode: 0, stdout: "" },
+      // `diff --numstat`, read in the same batch as status.
+      { exitCode: 0, stdout: "" },
       { exitCode: 0, stdout: `${identity}\n` },
     ];
     const execFile = vi.fn(async () => results.shift()!);
@@ -233,6 +263,7 @@ describe("GitEnvironmentPort", () => {
       { exitCode: 0, stdout: "worktree /canonical\n" },
       { exitCode: 128, stdout: "" },
       { exitCode: 0, stdout: "" },
+      { exitCode: 0, stdout: "" },
     ];
     const execFile = vi.fn(async () => results.shift()!);
     const port = new GitEnvironmentPort(
@@ -245,7 +276,7 @@ describe("GitEnvironmentPort", () => {
     );
 
     expect(await port.observe("/canonical")).toEqual({ status: "failed" });
-    expect(execFile).toHaveBeenCalledTimes(4);
+    expect(execFile).toHaveBeenCalledTimes(5);
   });
 
   it("ignores an unrelated stale worktree while preserving primary and active identities", async () => {
@@ -257,6 +288,7 @@ describe("GitEnvironmentPort", () => {
           "worktree /primary\n\nworktree /stale\nprunable stale metadata\n\nworktree /active\n",
       },
       { exitCode: 0, stdout: "feature/active\n" },
+      { exitCode: 0, stdout: "" },
       { exitCode: 0, stdout: "" },
     ];
     const execFile = vi.fn(async () => results.shift()!);
@@ -290,6 +322,7 @@ describe("GitEnvironmentPort", () => {
       },
       { exitCode: 0, stdout: "feature/active\n" },
       { exitCode: 0, stdout: "" },
+      { exitCode: 0, stdout: "" },
     ];
     const port = new GitEnvironmentPort(
       {
@@ -317,6 +350,7 @@ describe("GitEnvironmentPort", () => {
           "worktree /primary\n\nHEAD aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nbranch refs/heads/ghost\n\nworktree /active\n",
       },
       { exitCode: 0, stdout: "feature/active\n" },
+      { exitCode: 0, stdout: "" },
       { exitCode: 0, stdout: "" },
     ];
     const port = new GitEnvironmentPort(

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type ReactNode } from "react";
@@ -260,8 +262,59 @@ describe("ComposerContextMeter", () => {
     expect(popover).toHaveTextContent("Provider usage");
     expect(popover).toHaveTextContent("Input25,500");
     expect(popover).toHaveTextContent("Output38");
-    expect(popover).toHaveTextContent("Context maximumUnavailable");
+    // The panel must not imply a share of a window when the provider never
+    // reported one; it says so in words rather than as an "Unavailable" row.
+    expect(popover).toHaveTextContent(/not a context-window maximum/);
+    expect(popover).not.toHaveTextContent("Context maximum");
     expect(popover).toHaveTextContent("Provider account limits");
     expect(popover).toHaveTextContent(/five hourLow · 91% used · resets/i);
+  });
+
+  it("moves the ring to its new share instead of snapping between renders", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/context/context.css"), "utf8");
+
+    // The ring is the only place a reader watches the window fill, and a value
+    // that jumps reads as a redraw rather than as consumption.
+    expect(styles).toMatch(/\.composer-context-meter__used \{[^}]*transition:\s*stroke-dasharray/);
+    // Motion is a preference, not a fact about the data.
+    expect(styles).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{\s*\.composer-context-meter__used \{\s*transition: none;/,
+    );
+  });
+
+  it("ranks provider windows with a bar rather than percentages to compare in the head", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerContextMeterProvider
+        fallback={{
+          inputTokens: 25_500,
+          outputTokens: 38,
+          limits: [
+            {
+              window: "five_hour",
+              status: "warning",
+              utilization: 0.91,
+              resetsAt: "2026-08-24T01:00:00.000Z" as never,
+            },
+          ],
+        }}
+        status="not-planned"
+        subjectKey="code-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /Provider reported 25\.5K input and 38 output/i }),
+    );
+    const meter = document.querySelector(".context-window-popover__limit-meter > span");
+    expect(meter).not.toBeNull();
+    expect((meter as HTMLElement).style.width).toBe("91%");
+    expect(
+      document.querySelector(".context-window-popover__limit-meter")?.getAttribute("data-tone"),
+    ).toBe("warn");
   });
 });

@@ -1411,9 +1411,17 @@ strong {
   grid-row: 1;
 }
 
+/* The dock runs the full height beside the workspace column. The bottom panel
+   belongs to the pane whose tab opened it, so it must not slide underneath the
+   dock and cut the live page off at the terminal's top edge. */
 .workspace-layer > .right-utility-dock {
   grid-column: 2;
-  grid-row: 1;
+  grid-row: 1 / -1;
+}
+
+.workspace-layer > .bottom-utility-panel {
+  grid-column: 1;
+  grid-row: 2;
 }
 
 .workspace-layer--wide-context-open {
@@ -1421,9 +1429,11 @@ strong {
     minmax(var(--octant-wide-primary-min), 1fr)
     minmax(
       var(--octant-context-sidebar-min),
-      min(
+      /* The primary column's own minimum is the only ceiling the dock needs.
+         A 38vw cap sat below the stored maximum, so dragging the handle past
+         roughly a third of the window moved the stored width and changed
+         nothing on screen — the control looked broken rather than bounded. */ min(
         var(--octant-context-sidebar-width, 360px),
-        38vw,
         calc(100% - var(--octant-wide-primary-min))
       )
     );
@@ -1983,6 +1993,36 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   background: var(--octant-control-hover);
 }
 
+/* Separates "what kind of tab" from "which one", so the two lists do not read
+   as one long menu of unrelated things. */
+.workspace-disclosure__caption {
+  display: block;
+  margin-top: 6px;
+  padding: 6px 8px 2px;
+  color: var(--oct-meta);
+  border-top: 1px solid var(--oct-border-soft);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+}
+
+.dock-utility-launcher__reference {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.dock-utility-launcher__reference > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-utility-launcher__reference-detail {
+  color: var(--oct-meta);
+  font-size: calc(10 * var(--oct-text-step));
+}
+
 .workspace-pane__panel {
   display: grid;
   min-width: 0;
@@ -2512,28 +2552,31 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   margin: clamp(36px, 8vh, 72px) clamp(28px, 6vw, 72px);
 }
 
-/* Recovery and connection states use the same raised-object language as the
-   composer and settings cards. The old compact status card used an all-caps
-   label and tight outlined controls, which made a temporary failure read like
-   a diagnostic widget rather than a calm route back into the workspace. */
+/* A recovery state is the surface reporting on itself, not an object sitting
+   on top of it. Given a border, a floating ground and a shadow, it read as a
+   dialog that had opened over the pane — one more card language competing with
+   the panes, popovers and menus already on screen. It keeps its icon, kicker,
+   sentence and route back, and drops the chrome, so it matches the loading
+   state below rather than contradicting it. */
 .shell-state {
   width: min(100% - 40px, 560px);
   max-width: 560px;
   grid-template-columns: 38px minmax(0, 1fr);
   gap: 4px 14px;
-  padding: 22px 24px;
-  border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--octant-floating);
-  box-shadow: var(--octant-shadow-md);
+  padding: 22px 4px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
+/* Without the card around it, a filled well would be the only raised shape
+   left in the state; the glyph carries the severity on its own. */
 .shell-state [data-slot="empty-state-media"] {
   width: 38px;
   height: 38px;
   border: 0;
   border-radius: var(--oct-radius-sm);
-  background: var(--oct-fg-soft);
+  background: transparent;
 }
 
 .shell-state [data-slot="empty-state-eyebrow"] {
@@ -3420,11 +3463,14 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   white-space: nowrap;
 }
 
+/* Name and path on one line. Stacked, every path row was two lines tall and
+   the four-row list ran taller than the sections under it. */
 .environment-git-group__path {
-  display: grid;
+  display: flex;
+  align-items: baseline;
   min-width: 0;
   overflow: hidden;
-  gap: 1px;
+  gap: 8px;
 }
 
 .environment-git-group__identity-primary,
@@ -3435,13 +3481,34 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 }
 
 .environment-git-group__identity-primary {
+  flex: 0 0 auto;
   color: var(--octant-text-secondary);
 }
 
+/* The path yields first: the name identifies the repository, the path only
+   disambiguates two checkouts that share one. */
 .environment-git-group__identity-secondary {
+  flex: 0 1 auto;
+  min-width: 0;
   color: var(--octant-text-muted);
   font-family: var(--oct-font-mono);
   font-size: calc(9 * var(--oct-text-step));
+}
+
+/* Added and removed read as one measurement, so they sit together and take the
+   two colours the rest of the app uses for the same idea. */
+.environment-git-group__diffstat {
+  display: inline-flex;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.environment-git-group__insertions {
+  color: var(--oct-success-fg);
+}
+
+.environment-git-group__deletions {
+  color: var(--oct-danger-fg);
 }
 
 .environment-git-group__detached {
@@ -3647,6 +3714,34 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .thread-environment-dock__body > * + * {
   border-top: 1px solid var(--oct-hairline);
 }
+/* Title and action share one row so a section's action sits with the section
+   it belongs to, rather than floating between two of them. */
+.thread-environment-dock .environment-group__head {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.thread-environment-dock .environment-group__head .environment-group__header {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.thread-environment-dock .environment-group__head-action {
+  flex: 0 0 auto;
+  display: inline-flex;
+}
+
+/* An empty section still states what is true, in the same quiet register the
+   summaries use. */
+.thread-environment-dock .environment-subagents__empty {
+  margin: 0;
+  padding: var(--oct-space-1) 0 var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
+}
+
 .thread-environment-dock .environment-group__header {
   min-height: 36px;
   padding: 0;
@@ -5409,10 +5504,12 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr);
   width: min(640px, 90vw);
-  /* A cap, not a height: five models do not need a 520px box with four
-     hundred empty pixels under them. The pane scrolls once the list is
-     longer than the cap. */
-  max-height: min(60vh, 520px);
+  /* A fixed box, not a cap. The rail switches provider inside one open menu,
+     and provider lists differ wildly in length — a twelve-model list next to
+     an empty one resized the panel between clicks, so the menu appeared to
+     jump under the pointer. A stable height costs some empty space on short
+     lists and buys a menu that holds still. The list pane scrolls. */
+  height: min(60vh, 520px);
   padding: 0;
   overflow: hidden;
   background: var(--octant-surface);
@@ -5972,9 +6069,90 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   letter-spacing: 0.01em;
 }
 
+/* Sits directly on the composer, sharing its column, so the branch reads as
+   part of the box the next message is typed into rather than as a banner
+   floating above the transcript. */
+.code-checkout-bar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-3);
+  width: min(100% - 40px, var(--oct-thread-measure));
+  margin-inline: auto;
+  padding: 6px 14px 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-checkout-bar__identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.code-checkout-bar__project {
+  flex: 0 1 auto;
+  overflow: hidden;
+  min-width: 0;
+  color: var(--oct-fg);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-checkout-bar__branch {
+  overflow: hidden;
+  min-width: 0;
+  font-family: var(--oct-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-checkout-bar__diffstat {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.code-checkout-bar__insertions {
+  color: var(--oct-success-fg);
+}
+
+.code-checkout-bar__deletions {
+  color: var(--oct-danger-fg);
+}
+
+/* The action is the last thing on the line, so the facts read first. */
+.code-checkout-bar__action {
+  margin-inline-start: auto;
+  height: 26px;
+  min-height: 26px;
+  padding-inline: 8px;
+}
+
 .code-thread-workspace__turn-status {
   color: var(--oct-meta);
   font-weight: 400;
+}
+
+/* Recency belongs to the turn but never competes with it: the time sits at the
+   far end of the byline, quiet, and only the reader who looks for it finds it. */
+.code-thread-workspace__turn-time {
+  margin-inline-start: auto;
+  color: var(--oct-meta);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A user turn has no byline to hang the time from, so it trails the bubble on
+   the same side the bubble is aligned to. */
+.code-thread-workspace__turn-time--user {
+  display: block;
+  margin: 6px 0 0;
+  text-align: end;
+  font-size: var(--oct-text-xs);
 }
 
 .code-thread-workspace__message p {

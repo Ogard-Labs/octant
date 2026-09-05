@@ -53,6 +53,10 @@ export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
     );
   }
   const content = gitContent(props.observation);
+  // A thread bound to the checkout itself worktrees nowhere, so the two rows
+  // carried the same repository name over the same path twice and read as a
+  // rendering fault. Only a checkout that really is somewhere else is a fact.
+  const separateWorktree = props.observation.worktreeRoot !== props.observation.repositoryRoot;
 
   return (
     <div className="environment-git-group">
@@ -60,7 +64,9 @@ export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
         <GitRow icon={GitCommitHorizontal} label="Changes" value={content.changes} />
         <GitRow icon={GitBranch} label="Branch" value={content.branch} />
         <GitRow icon={FolderGit2} label="Repository" value={content.repository} />
-        <GitRow icon={Files} label="Worktree" value={content.worktree} />
+        {separateWorktree ? (
+          <GitRow icon={Files} label="Worktree" value={content.worktree} />
+        ) : null}
       </dl>
     </div>
   );
@@ -92,7 +98,7 @@ function gitContent(
   readonly worktree: ReactNode;
 } {
   return {
-    changes: observation.changes === "dirty" ? "Dirty working tree" : "Clean working tree",
+    changes: <ChangeCount observation={observation} />,
     worktree: (
       <PathIdentity
         path={observation.worktreeRoot}
@@ -119,6 +125,27 @@ function gitContent(
       />
     ),
   };
+}
+
+/**
+ * What the working tree has changed, in the units a reader acts on.
+ *
+ * "Dirty working tree" says only that something is uncommitted; the totals say
+ * whether that is a typo or a day's work. They are shown only when the host
+ * measured them, so an unmeasured tree still reads honestly.
+ */
+function ChangeCount(props: {
+  readonly observation: Extract<CodeEnvironmentObservation, { readonly status: "ready" }>;
+}) {
+  const { insertions, deletions } = props.observation;
+  if (props.observation.changes === "clean") return "Clean working tree";
+  if (insertions === undefined || deletions === undefined) return "Uncommitted changes";
+  return (
+    <span className="environment-git-group__diffstat">
+      <span className="environment-git-group__insertions">{`+${insertions.toLocaleString()}`}</span>
+      <span className="environment-git-group__deletions">{`\u2212${deletions.toLocaleString()}`}</span>
+    </span>
+  );
 }
 
 function PathIdentity(props: {

@@ -92,7 +92,7 @@ export function WindowChrome(props: WindowChromeProps) {
             <IconButton
               className="window-chrome__button window-chrome__new-thread"
               icon={SquarePen}
-              label="New thread"
+              label="New task"
               onClick={props.onNewThread}
             />
           )}

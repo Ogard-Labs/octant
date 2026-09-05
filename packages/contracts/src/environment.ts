@@ -39,6 +39,13 @@ export const CodeEnvironmentReady = Schema.Struct({
   worktreeRoot: Schema.NonEmptyTrimmedString,
   branch: GitBranchIdentity,
   changes: Schema.Literal("clean", "dirty"),
+  /**
+   * Lines the working tree adds and removes against its own HEAD. Absent when
+   * the host could not count them, which is not the same as none: a reader is
+   * told the tree is dirty either way, and only sees totals that were measured.
+   */
+  insertions: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  deletions: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
 }).annotations(strict);
 export type CodeEnvironmentReady = typeof CodeEnvironmentReady.Type;
 

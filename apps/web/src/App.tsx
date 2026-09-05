@@ -240,10 +240,15 @@ import {
   chatDefaultModelCommand,
 } from "./chat/autoConfigureChatDefaults";
 import { ShellFrame } from "./shell/ShellFrame";
+import {
+  parseRepository,
+  useRepositoryPullRequests,
+} from "./environment/useRepositoryPullRequests";
 import { RightUtilityDock } from "./shell/RightUtilityDock";
 import { DockProjectPullRequestReviewTool } from "./shell/DockProjectPullRequestReviewTool";
 import { ThreadUtilityDockContent } from "./shell/ThreadUtilityDockContent";
 import {
+  MULTI_INSTANCE_DOCK_SURFACES,
   RIGHT_UTILITY_DOCK_SURFACES,
   resolveRightUtilityDockSurface,
   type RightUtilityDockResolution,
@@ -897,8 +902,13 @@ function LaunchedShell(
       : activeMode === "work"
         ? activeWorkThreadId
         : activeCodeThreadId;
-  const projectPullRequestReviewOpen =
-    codePullRequestsOpen && selectedProjectPullRequest !== undefined;
+  // A selected pull request is the dock's Review subject wherever it was
+  // chosen. Requiring the Pull requests page to be open as well meant a pull
+  // request launched from the dock's own tab menu opened Review on the thread
+  // instead, and setting that flag from the dock would have navigated the main
+  // pane the reader was looking at. Closing the page clears the selection with
+  // it, so the two stay in step.
+  const projectPullRequestReviewOpen = selectedProjectPullRequest !== undefined;
   const dockThreadKey =
     dockThreadId === undefined ? undefined : threadUtilityDockKey(activeMode, String(dockThreadId));
   // A hand-off can take minutes, and the person is free to move threads while
@@ -1853,7 +1863,15 @@ function LaunchedShell(
     return surface === undefined ? [] : [surface];
   });
   const bottomPanelAvailable = bottomPanelSurfaces.length > 0;
-  const bottomPanelOpen = bottomPanelPresentation.open && bottomPanelAvailable && !isNarrow;
+  // The panel belongs to the thread whose tab opened it. Held only as a window
+  // flag, opening a terminal on one thread also opened the panel on every other
+  // thread the reader switched to, showing that thread's own empty default
+  // rather than the shell they had started. A thread that has opened the panel
+  // has an entry in the per-thread map; one that has not, has none.
+  const bottomPanelOpenedHere =
+    dockThreadKey === undefined || bottomPanelStatesByThread.has(dockThreadKey);
+  const bottomPanelOpen =
+    bottomPanelPresentation.open && bottomPanelOpenedHere && bottomPanelAvailable && !isNarrow;
   const displayedDockState = bottomPanelOpen
     ? removeUtilityTabs(
         retainedDockState,
@@ -1864,12 +1882,63 @@ function LaunchedShell(
     (tab) => tab.id === displayedDockState.active,
   )?.surface;
   const dockResolution = resolveDockSurface(dockSurface);
+  const bottomPanelSurfaceIds = new Set(renderedBottomPanelState.tabs.map((tab) => tab.surface));
   const launchableDockSurfaces = RIGHT_UTILITY_DOCK_SURFACES.filter(
     (surface) =>
       resolveDockSurface(surface.id).kind === "surface" &&
       isDockToolLaunchable(surface.id, dockToolCapabilities) &&
-      (!bottomPanelOpen || surface.id !== activeBottomSurface?.id),
+      // A tool the bottom panel is already showing is hidden from the dock
+      // launcher, because opening it there would only move the same single
+      // view. The panel holds several tools at once, so this asks whether the
+      // panel shows this tool at all — checking only its active tab made a
+      // second one launchable by switching tabs. Terminal and Browser are the
+      // exception: a second one is a second shell or page.
+      (MULTI_INSTANCE_DOCK_SURFACES.has(surface.id) ||
+        !bottomPanelOpen ||
+        !bottomPanelSurfaceIds.has(surface.id)),
   );
+  // The pull requests the active Code thread is already about, offered where a
+  // reader adds a tab. Read from the same catalogue the Environment panel uses,
+  // so the two never disagree.
+  const dockThreadRepository =
+    activeMode !== "code" || activeCodeThreadId === undefined
+      ? undefined
+      : codeController.bootstrap?.threads.find(
+          (thread) => String(thread.id) === String(activeCodeThreadId),
+        )?.deliveryTarget.proposedBaseRepository;
+  const dockThreadProjectId =
+    activeMode !== "code" || activeCodeThreadId === undefined
+      ? undefined
+      : codeController.bootstrap?.threads.find(
+          (thread) => String(thread.id) === String(activeCodeThreadId),
+        )?.projectId;
+  const dockPullRequests = useRepositoryPullRequests({
+    ...(githubTransport === undefined ? {} : { client: githubTransport }),
+    ...(dockThreadRepository === undefined ? {} : { repository: dockThreadRepository }),
+    enabled: dockVisible && dockThreadRepository !== undefined,
+  });
+  const dockRepository = parseRepository(dockThreadRepository);
+  // Built per render rather than memoized: the entries close over
+  // `selectProjectPullRequestIdentity`, which is redeclared every render, and a
+  // memo would keep calling the one it was built with. At five entries the
+  // rebuild costs nothing and cannot go stale.
+  const launchableDockReferences =
+    dockPullRequests.status !== "ready" ||
+    dockRepository === undefined ||
+    dockThreadProjectId === undefined
+      ? []
+      : dockPullRequests.rows.slice(0, 5).map((row) => ({
+          id: String(row.url),
+          label: `#${String(row.number)} ${row.title}`,
+          detail: `${dockRepository.owner}/${dockRepository.name}`,
+          onOpen: () =>
+            selectProjectPullRequestIdentity({
+              projectId: dockThreadProjectId,
+              repositoryOwner: dockRepository.owner,
+              repositoryName: dockRepository.name,
+              number: row.number,
+            }),
+        }));
   const dockTabs = useMemo(
     () => describeUtilityTabs(displayedDockState.tabs),
     [displayedDockState.tabs],
@@ -2497,11 +2566,47 @@ function LaunchedShell(
       await openSelectedProject(project);
     }
   }
+  // A panel the reader left open is theirs to get back on launch. Openness now
+  // lives with the thread, but the remembered flag predates any thread being
+  // resolved, so the first thread to resolve after a restart adopts it once.
+  const restoredBottomPanel = useRef(false);
+  const restoredBottomSurfaceId = defaultBottomSurface?.id;
+  useEffect(() => {
+    if (restoredBottomPanel.current) return;
+    if (dockThreadKey === undefined || !bottomPanelPresentation.open) return;
+    if (restoredBottomSurfaceId === undefined) return;
+    restoredBottomPanel.current = true;
+    setBottomPanelStatesByThread((current) =>
+      current.has(dockThreadKey)
+        ? current
+        : new Map(current).set(dockThreadKey, {
+            tabs: [{ id: restoredBottomSurfaceId, surface: restoredBottomSurfaceId }],
+            active: restoredBottomSurfaceId,
+          }),
+    );
+  }, [
+    bottomPanelPresentation.open,
+    dockThreadKey,
+    restoredBottomSurfaceId,
+    setBottomPanelStatesByThread,
+  ]);
+
   function closeDock() {
     pendingDockFocus.current = dockOpener.current;
     setDockVisible(false);
   }
   function closeBottomPanel(restoreFocus = true) {
+    // Closing is a decision about this thread's panel, so its entry goes with
+    // the flag; otherwise the thread would reopen the moment another thread
+    // set the window flag again.
+    if (dockThreadKey !== undefined) {
+      setBottomPanelStatesByThread((current) => {
+        if (!current.has(dockThreadKey)) return current;
+        const next = new Map(current);
+        next.delete(dockThreadKey);
+        return next;
+      });
+    }
     persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
     if (restoreFocus) {
       queueMicrotask(() =>
@@ -5248,6 +5353,7 @@ function LaunchedShell(
                   : threadUtility("ios-simulator")
               }
               launchableSurfaces={launchableDockSurfaces}
+              launchableReferences={launchableDockReferences}
               onClose={closeDock}
               onCloseTab={closeDockTab}
               onCommitWidth={(width) => {

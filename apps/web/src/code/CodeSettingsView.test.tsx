@@ -12,7 +12,7 @@ const settings = {
 } as const;
 
 describe("CodeSettingsView", () => {
-  it("saves defaults for new threads without implying existing-thread mutation", async () => {
+  it("keeps a chosen default the moment it is chosen, with no Save step", async () => {
     const update = vi.fn(async () => true);
     render(<CodeSettingsView onUpdate={update} settings={settings as never} />);
 
@@ -21,6 +21,7 @@ describe("CodeSettingsView", () => {
       "Approval",
     );
     expect(screen.getByRole("button", { name: "Session" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: /Save/i })).toBeNull();
 
     const user = userEvent.setup();
     await chooseSelectFieldOption(
@@ -28,16 +29,32 @@ describe("CodeSettingsView", () => {
       screen.getByRole("combobox", { name: "Default Code access" }),
       "Plan",
     );
+
+    expect(update).toHaveBeenCalledWith({
+      defaultExecutionPolicy: "plan",
+      defaultPermissionPersistence: "current-session",
+    });
+  });
+
+  it("keeps an external editor path once the field is finished, not mid-keystroke", async () => {
+    const update = vi.fn(async () => true);
+    render(<CodeSettingsView onUpdate={update} settings={settings as never} />);
+
+    const user = userEvent.setup();
     await user.type(
       screen.getByRole("textbox", { name: "External editor executable" }),
       "/usr/local/bin/code",
     );
+    // A path is not valid halfway through typing it, so nothing is written
+    // until the field is left.
+    expect(update).not.toHaveBeenCalled();
+
     await user.click(screen.getByRole("textbox", { name: "External editor arguments" }));
     await user.paste("--goto\n{file}:{line}:{column}");
-    await user.click(screen.getByRole("button", { name: "Save Code defaults" }));
+    await user.tab();
 
-    expect(update).toHaveBeenCalledWith({
-      defaultExecutionPolicy: "plan",
+    expect(update).toHaveBeenLastCalledWith({
+      defaultExecutionPolicy: "approval-gated",
       defaultPermissionPersistence: "current-session",
       externalEditor: {
         executable: "/usr/local/bin/code",

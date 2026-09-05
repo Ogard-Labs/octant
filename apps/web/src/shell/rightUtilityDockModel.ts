@@ -106,6 +106,14 @@ export type RightUtilityDockResolution =
  * enabled target, not by this catalog. Agents is conditional: it appears when
  * children exist or the user invokes Add agent. Review is the local-diff tool.
  */
+/**
+ * Surfaces a reader can hold several of at once. A second browser is a second
+ * page and a second terminal is a second shell, so neither is satisfied by
+ * revealing the one already open — every other surface shows one thread's one
+ * view of a thing and a duplicate tab would say nothing new.
+ */
+export const MULTI_INSTANCE_DOCK_SURFACES: ReadonlySet<string> = new Set(["browser", "terminal"]);
+
 export const RIGHT_UTILITY_DOCK_SURFACES = [
   {
     id: "environment",

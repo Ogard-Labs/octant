@@ -5,6 +5,7 @@ import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type {
   CodeCommand,
   CodeCommandResult,
+  CodeDeliveryOutcomeKind,
   LocalServerOpenTarget,
   ProjectSummary,
   WorkspaceTab,
@@ -12,6 +13,7 @@ import type {
 import type { OpenInApplicationId } from "@octant/contracts/shell";
 import { deriveCodeEnvironmentProjection } from "@octant/domain/shell-policy";
 import type { ReactNode } from "react";
+import { CodeCheckoutProvider } from "./CodeCheckoutContext";
 import { EnvironmentGitGroup } from "./EnvironmentGitGroup";
 import { EnvironmentGroup } from "./EnvironmentGroup";
 import { EnvironmentPullRequests } from "./EnvironmentPullRequests";
@@ -25,6 +27,10 @@ import { OpenInMenu } from "./OpenInMenu";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
 import { OctantButton } from "../ui/base/OctantButton";
+import {
+  CODE_DELIVERY_OUTCOME_OPTIONS,
+  CodeDeliveryOutcomeSelector,
+} from "../code/composer/CodeDeliveryOutcomeSelector";
 
 type CodeThreadWorkspaceTab = Extract<WorkspaceTab, { readonly mode: "code" }>;
 
@@ -65,6 +71,11 @@ export interface CodeThreadEnvironmentProps {
   readonly hostBridge?: OctantHostBridge;
   readonly openInApplications?: ReadonlyArray<OpenInApplicationId>;
   readonly agentRunClient?: AgentRunClient;
+  /**
+   * What this thread has to produce before it may be called Done. Absent when
+   * the caller has no thread record to read it from.
+   */
+  readonly deliveryOutcome?: CodeDeliveryOutcomeKind;
   readonly onOpenAgents?: () => void;
   readonly environmentOpen?: boolean;
 }
@@ -99,7 +110,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
   const freshThreadAction =
     !checkoutUnusable || project === undefined || onNewThreadInProject === undefined
       ? undefined
-      : { label: "New thread in this Project", onClick: () => onNewThreadInProject(project.id) };
+      : { label: "New task in this Project", onClick: () => onNewThreadInProject(project.id) };
   const observed = controller.observation;
   const readyObservation = observed?.status === "ready" ? observed : undefined;
   const localServersAvailable = localServersSection?.available === true;
@@ -118,6 +129,17 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
       : countGroupedLocalServerListeners(localServers.snapshot);
   const workingDirectory = readyObservation?.workingDirectory;
   const threadVersion = readyObservation?.threadVersion;
+  // The header answers "which checkout, and is it clean" without opening the
+  // section, which is the question a reader opens this panel with.
+  const checkoutSummary =
+    readyObservation === undefined
+      ? undefined
+      : [
+          readyObservation.branch.kind === "named"
+            ? readyObservation.branch.name
+            : `Detached ${readyObservation.branch.oid.slice(0, 7)}`,
+          readyObservation.changes === "dirty" ? "Uncommitted changes" : "Clean",
+        ].join(" · ");
 
   return (
     <div className="code-thread-environment">
@@ -145,23 +167,66 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           ...(runningServerCount === undefined ? {} : { runningServerCount }),
         }}
       >
-        <EnvironmentGitGroup
-          {...(freshThreadAction === undefined ? {} : { action: freshThreadAction })}
-          {...(controller.errorMessage === undefined
+        {/* Every block in the panel is the same object: a titled section whose
+            header states what is true right now. The checkout used to be a
+            bare definition list above three disclosures, with its one action
+            floating loose between them, so the panel read as a fragment
+            followed by a menu rather than one list of sections. */}
+        <EnvironmentGroup
+          defaultOpen
+          summary={checkoutSummary}
+          title="Checkout"
+          {...(props.onOpenChanges === undefined || readyObservation === undefined
             ? {}
-            : { errorMessage: controller.errorMessage })}
-          {...(controller.observation === undefined ? {} : { observation: controller.observation })}
-          status={controller.status}
-        />
-        {props.onOpenChanges === undefined || readyObservation === undefined ? null : (
-          <OctantButton
-            className="environment-group__action window-no-drag"
-            onClick={() => props.onOpenChanges?.()}
-            type="button"
-            variant="ghost"
+            : {
+                action: (
+                  <OctantButton
+                    className="window-no-drag"
+                    onClick={() => props.onOpenChanges?.()}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    View changes
+                  </OctantButton>
+                ),
+              })}
+        >
+          <EnvironmentGitGroup
+            {...(freshThreadAction === undefined ? {} : { action: freshThreadAction })}
+            {...(controller.errorMessage === undefined
+              ? {}
+              : { errorMessage: controller.errorMessage })}
+            {...(controller.observation === undefined
+              ? {}
+              : { observation: controller.observation })}
+            status={controller.status}
+          />
+        </EnvironmentGroup>
+        {props.deliveryOutcome === undefined ||
+        threadVersion === undefined ||
+        props.onExecute === undefined ? null : (
+          <EnvironmentGroup
+            defaultOpen
+            summary={deliveryOutcomeLabel(props.deliveryOutcome)}
+            title="Delivers"
           >
-            View changes
-          </OctantButton>
+            {/* Decision 0003 makes the outcome the reader's to confirm, and the
+                host has accepted a confirmation all along — nothing ever sent
+                one, so a thread carried whatever its first prompt read as. */}
+            <CodeDeliveryOutcomeSelector
+              onChange={(outcomeKind) => {
+                void props.onExecute?.({
+                  kind: "confirm-code-delivery-outcome",
+                  threadId: props.tab.threadId,
+                  expectedVersion: threadVersion,
+                  outcomeKind,
+                });
+              }}
+              suggested={false}
+              value={props.deliveryOutcome}
+            />
+          </EnvironmentGroup>
         )}
         {props.agentRunClient === undefined ? null : (
           <EnvironmentSubagents
@@ -171,6 +236,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           />
         )}
         <EnvironmentGroup
+          defaultOpen
           {...(localServers.snapshot === undefined
             ? {}
             : {
@@ -230,7 +296,20 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           </EnvironmentGroup>
         )}
       </ThreadEnvironmentPanel>
-      <div className="code-thread-environment__content">{props.children}</div>
+      <div className="code-thread-environment__content">
+        <CodeCheckoutProvider
+          {...(readyObservation === undefined ? {} : { observation: readyObservation })}
+        >
+          {props.children}
+        </CodeCheckoutProvider>
+      </div>
     </div>
+  );
+}
+
+/** The product name for an outcome, for a header that states it without opening. */
+function deliveryOutcomeLabel(outcome: CodeDeliveryOutcomeKind): string {
+  return (
+    CODE_DELIVERY_OUTCOME_OPTIONS.find((option) => option.id === outcome)?.label ?? String(outcome)
   );
 }

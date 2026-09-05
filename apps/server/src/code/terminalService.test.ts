@@ -145,6 +145,48 @@ describe("TerminalService", () => {
     expect(process.resume).toHaveBeenCalledTimes(2);
   });
 
+  it("echoes the first output of a quiet terminal without waiting for the coalescing window", async () => {
+    // Held on the trailing edge, a single keypress echo waited the whole
+    // window before it reached the pane, which is the entire perceived latency
+    // of typing into an otherwise idle shell.
+    vi.useFakeTimers();
+    try {
+      const process = fakeProcess();
+      const service = new TerminalService({
+        port: { start: () => process },
+        inheritedEnvironment: {},
+        credentials: { resolve: async () => "private-token" },
+      });
+      await service.launch({
+        terminalId: "terminal-1",
+        shell: "/bin/zsh",
+        cwd: "/repo",
+        stateScope: "repo_test",
+        columns: 80,
+        rows: 24,
+        credentialReferences: [],
+      });
+      const observer = vi.fn();
+      service.observe("terminal-1", observer);
+
+      process.emitData("l");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(observer).toHaveBeenCalledOnce();
+      expect(observer.mock.calls[0]?.[0]).toMatchObject({ text: "l", replace: false });
+
+      // A terminal still inside its window batches rather than publishing per
+      // chunk, so a flood does not cost one emission per PTY callback.
+      process.emitData("s");
+      process.emitData(" -la\n");
+      expect(observer).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(50);
+      expect(observer).toHaveBeenCalledTimes(2);
+      expect(observer.mock.calls[1]?.[0]).toMatchObject({ text: "s -la\n" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("publishes debounced redacted snapshots to terminal output observers", async () => {
     vi.useFakeTimers();
     try {
@@ -170,11 +212,12 @@ describe("TerminalService", () => {
       process.emitData("token\n");
       await vi.advanceTimersByTimeAsync(50);
 
-      expect(observer).toHaveBeenCalledOnce();
-      expect(observer.mock.calls[0]?.[0]).toMatchObject({
-        text: "result [REDACTED]\n",
-        replace: false,
-      });
+      // A credential split across two PTY callbacks is held back until it can
+      // be redacted, so no observer ever sees it in the clear however the
+      // publishes happen to be batched.
+      const published = observer.mock.calls.map((call) => String(call[0].text)).join("");
+      expect(published).toBe("result [REDACTED]\n");
+      expect(observer.mock.calls.every((call) => call[0].replace === false)).toBe(true);
     } finally {
       vi.useRealTimers();
     }
@@ -306,10 +349,16 @@ describe("TerminalService", () => {
       }
       await vi.advanceTimersByTimeAsync(2_000);
 
-      const first = observer.mock.calls[0]?.[0] as { replace: boolean; text: string };
-      expect(first.replace).toBe(true);
-      expect(first.text.length).toBeLessThanOrEqual(64 * 1024);
-      expect(first.text).toContain("[Octant terminal output truncated]");
+      // The flood is published in batches, so the reader is only left behind
+      // once the ceiling slides past the position it had already been sent.
+      // That emission is the one that must replace rather than append.
+      const emissions = observer.mock.calls.map(
+        (call) => call[0] as { replace: boolean; text: string },
+      );
+      const replaced = emissions.find((emission) => emission.replace);
+      expect(replaced).toBeDefined();
+      expect(replaced!.text.length).toBeLessThanOrEqual(64 * 1024);
+      expect(replaced!.text).toContain("[Octant terminal output truncated]");
     } finally {
       vi.useRealTimers();
     }

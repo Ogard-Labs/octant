@@ -204,6 +204,17 @@ export function createReadCursorStore<ThreadId>(options: {
   const onVisibility = () => {
     if (typeof document !== "undefined" && document.visibilityState === "hidden") flush();
   };
+  /**
+   * A read that never reached storage is a thread that comes back unread.
+   *
+   * The debounce exists so a streaming thread does not write on every frame,
+   * but it also means up to one window's worth of reads live only in memory.
+   * `pagehide` and `beforeunload` are not guaranteed to run when a desktop
+   * host tears its renderer down, so the store also settles whenever the
+   * window stops being the one in front — the moment after which no further
+   * reading can happen anyway.
+   */
+  const onBlur = () => flush();
   let listening = false;
   const beginListening = () => {
     if (!usesDefaultStorage || storage === undefined || listening) return;
@@ -211,8 +222,13 @@ export function createReadCursorStore<ThreadId>(options: {
     globalThis.addEventListener("storage", onStorage);
     globalThis.addEventListener("pagehide", flush);
     globalThis.addEventListener("beforeunload", flush);
-    if (typeof document !== "undefined")
+    globalThis.addEventListener("blur", onBlur);
+    if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", onVisibility);
+      // The Page Lifecycle API dispatches `freeze` on the document; a window
+      // listener never runs for it.
+      document.addEventListener("freeze", flush);
+    }
   };
   const stopListening = () => {
     if (!listening) return;
@@ -220,8 +236,10 @@ export function createReadCursorStore<ThreadId>(options: {
     globalThis.removeEventListener("storage", onStorage);
     globalThis.removeEventListener("pagehide", flush);
     globalThis.removeEventListener("beforeunload", flush);
+    globalThis.removeEventListener("blur", onBlur);
     if (typeof document !== "undefined") {
       document.removeEventListener("visibilitychange", onVisibility);
+      document.removeEventListener("freeze", flush);
     }
   };
   return {

@@ -33,9 +33,8 @@ describe("ChatSettingsView", () => {
     );
     expect(screen.getByRole("switch", { name: "Enable research by default" })).toBeVisible();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Save Chat defaults" }).closest("[data-setting-id]"),
-    ).toHaveAttribute("data-setting-id", "chat-save");
+    // Settings keep what you change; nothing here waits behind a Save step.
+    expect(screen.queryByRole("button", { name: /Save/i })).toBeNull();
     expect(screen.getByRole("combobox", { name: "Default research backend" })).toHaveTextContent(
       "Automatic",
     );
@@ -55,9 +54,9 @@ describe("ChatSettingsView", () => {
     await user.type(screen.getByLabelText("SearXNG base URL"), "https://search.example/");
     await user.clear(screen.getByLabelText("Calm personality instructions"));
     await user.type(screen.getByLabelText("Calm personality instructions"), "Be calm and precise.");
-    await user.click(screen.getByRole("button", { name: "Save Chat defaults" }));
+    await user.tab();
 
-    expect(onUpdate).toHaveBeenCalledWith({
+    expect(onUpdate).toHaveBeenLastCalledWith({
       kind: "update-chat-settings",
       expectedVersion: 4 as never,
       defaultProviderInstanceId: providerB as never,
@@ -86,13 +85,13 @@ describe("ChatSettingsView", () => {
 
     await user.type(screen.getByLabelText("SearXNG base URL"), "http://search.example/");
     expect(await screen.findByText("Use HTTPS or a loopback HTTP address.")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Save Chat defaults" }));
+    await user.tab();
     expect(onUpdate).not.toHaveBeenCalled();
 
     await user.clear(screen.getByLabelText("SearXNG base URL"));
     await user.type(screen.getByLabelText("SearXNG base URL"), "http://127.0.0.1:8080/");
     expect(screen.queryByText("Use HTTPS or a loopback HTTP address.")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Save Chat defaults" }));
+    await user.tab();
     expect(onUpdate).toHaveBeenCalledOnce();
   });
 
@@ -111,7 +110,7 @@ describe("ChatSettingsView", () => {
     expect(
       await screen.findByText("Use a base URL without credentials, query, or fragment."),
     ).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Save Chat defaults" }));
+    await user.tab();
     expect(onUpdate).not.toHaveBeenCalled();
   });
 });

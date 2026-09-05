@@ -1,7 +1,17 @@
 import { memo, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import { Archive, GitBranch, MoreHorizontal, Pin, PinOff } from "lucide-react";
+import {
+  Archive,
+  Cpu,
+  FolderGit2,
+  GitBranch,
+  GitFork,
+  MoreHorizontal,
+  Pin,
+  PinOff,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { ChatThreadNavigationItem, ThreadRowActivity } from "../shell/navigationModel";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
@@ -102,60 +112,124 @@ function activityOf(thread: ChatThreadNavigationItem): ThreadRowActivity {
 }
 
 /**
- * Builds a compact, screen-reader-friendly fact line for a thread row tooltip.
- * Only uses values already present in the navigation item and Project context;
- * unparseable timestamps are omitted rather than rendered as "Invalid Date".
+ * The states worth naming at the top of the card, most actionable first. A row
+ * can hold several at once, so each is its own marker rather than a joined
+ * phrase.
+ */
+function threadRowStates(thread: ChatThreadNavigationItem): ReadonlyArray<string> {
+  const states: string[] = [];
+  if (thread.followUp === true) states.push("Follow-up");
+  if (thread.unread === true) states.push("Unread");
+  if (thread.pinned === true) states.push("Pinned");
+  return states;
+}
+
+/**
+ * Distance from now in the coarsest unit that still reads as true, so the
+ * header carries recency without the reader parsing a date. Falls back to the
+ * absolute date past a year, where "14mo ago" stops being useful.
+ */
+function threadRowAge(updatedAt: string | undefined): string | undefined {
+  if (updatedAt === undefined) return undefined;
+  const date = new Date(updatedAt);
+  if (Number.isNaN(date.getTime())) return undefined;
+  const minutes = Math.round((Date.now() - date.getTime()) / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 365) return `${days}d ago`;
+  return date.toLocaleDateString();
+}
+
+/** One icon-and-label line of the info card. */
+interface ThreadRowFact {
+  readonly icon: LucideIcon;
+  readonly key: string;
+  readonly label: string;
+}
+
+/**
+ * Builds the card's fact rows from values already present in the navigation
+ * item and Project context. It does not invent transcript detail, model names,
+ * or turn counts; those are not in the row's contract.
  */
 function threadRowFacts(props: {
   readonly lineageParentTitle?: string;
   readonly projectName: string | undefined;
   readonly thread: ChatThreadNavigationItem;
-}): string {
-  const facts: string[] = [];
-  if (props.thread.pinned === true) facts.push("Pinned");
-  if (props.thread.unread === true) facts.push("Unread");
-  if (props.thread.followUp === true) facts.push("Follow-up");
+}): ReadonlyArray<ThreadRowFact> {
+  const facts: ThreadRowFact[] = [];
+  if (props.projectName !== undefined) {
+    facts.push({ icon: FolderGit2, key: "project", label: props.projectName });
+  }
   if (props.thread.checkoutChip !== undefined) {
-    facts.push(`Worktree ${props.thread.checkoutChip.label}`);
+    facts.push({ icon: GitBranch, key: "checkout", label: props.thread.checkoutChip.label });
   }
-  if (props.thread.provider !== undefined) facts.push(props.thread.provider.displayName);
-  if (props.projectName !== undefined) facts.push(props.projectName);
+  if (props.thread.provider !== undefined) {
+    facts.push({ icon: Cpu, key: "provider", label: props.thread.provider.displayName });
+  }
   if (props.lineageParentTitle !== undefined) {
-    facts.push(`Forked from ${props.lineageParentTitle}`);
+    facts.push({ icon: GitFork, key: "lineage", label: `Forked from ${props.lineageParentTitle}` });
   } else if (props.thread.lineageParentThreadId !== undefined) {
-    facts.push("Forked from origin no longer available");
+    facts.push({
+      icon: GitFork,
+      key: "lineage",
+      label: "Forked from a thread no longer available",
+    });
   }
-  if (props.thread.updatedAt !== undefined) {
-    const date = new Date(props.thread.updatedAt);
-    if (!Number.isNaN(date.getTime())) {
-      facts.push(`Updated ${date.toLocaleDateString()}`);
-    }
-  }
-  return facts.join(" · ");
+  return facts;
 }
 
 /**
  * A delayed, non-modal summary of the facts the navigation row and its Project
- * context already carry. It does not invent transcript detail, model names, or
- * turn counts; those are not in the row's contract.
+ * context already carry.
+ *
+ * It reads on the ordinary raised surface rather than the inverted tooltip
+ * ground: the card's own tokens paint `--oct-fg` text, which on the tooltip's
+ * `--oct-fg` background rendered the title invisible and left the facts at a
+ * grey that failed against near-black.
  */
 function ThreadRowInfoCard(props: {
   readonly lineageParentTitle?: string;
   readonly projectName: string | undefined;
   readonly thread: ChatThreadNavigationItem;
 }) {
+  const states = threadRowStates(props.thread);
+  const age = threadRowAge(props.thread.updatedAt);
+  const facts = threadRowFacts({
+    ...(props.lineageParentTitle === undefined
+      ? {}
+      : { lineageParentTitle: props.lineageParentTitle }),
+    projectName: props.projectName,
+    thread: props.thread,
+  });
   return (
     <span className="thread-row-info-card">
+      {states.length === 0 && age === undefined ? null : (
+        <span className="thread-row-info-card__header">
+          <span className="thread-row-info-card__states">
+            {states.map((state) => (
+              <span className="thread-row-info-card__state" key={state}>
+                {state}
+              </span>
+            ))}
+          </span>
+          {age === undefined ? null : <span className="thread-row-info-card__age">{age}</span>}
+        </span>
+      )}
       <span className="thread-row-info-card__title">{props.thread.title}</span>
-      <span className="thread-row-info-card__facts">
-        {threadRowFacts({
-          ...(props.lineageParentTitle === undefined
-            ? {}
-            : { lineageParentTitle: props.lineageParentTitle }),
-          projectName: props.projectName,
-          thread: props.thread,
-        })}
-      </span>
+      {facts.length === 0 ? null : (
+        <span className="thread-row-info-card__facts">
+          {facts.map((fact) => (
+            <span className="thread-row-info-card__fact" key={fact.key}>
+              <fact.icon aria-hidden="true" size={14} strokeWidth={1.7} />
+              <span className="thread-row-info-card__fact-label">{fact.label}</span>
+            </span>
+          ))}
+        </span>
+      )}
     </span>
   );
 }
@@ -181,6 +255,9 @@ function ThreadRowTooltip(props: {
           thread={props.thread}
         />
       }
+      align="start"
+      side="right"
+      surface="card"
     >
       {props.children}
     </OctantTooltip>

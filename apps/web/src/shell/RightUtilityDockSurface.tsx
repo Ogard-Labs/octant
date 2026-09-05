@@ -1,11 +1,12 @@
 import { X } from "lucide-react";
 import type { ReactNode, Ref } from "react";
-import { DockUtilityLauncher } from "./DockUtilityLauncher";
+import { DockUtilityLauncher, type DockUtilityLauncherReference } from "./DockUtilityLauncher";
 import { DockToolIcon } from "./dockToolIcons";
 import { DockToolStrip } from "./DockToolStrip";
 import { IconButton } from "./IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ShellState } from "./ShellState";
+import { MULTI_INSTANCE_DOCK_SURFACES } from "./rightUtilityDockModel";
 import type {
   RightUtilityDockResolution,
   RightUtilityDockSurfaceDescriptor,
@@ -30,6 +31,7 @@ export interface RightUtilityDockSurfaceProps {
   readonly files?: ReactNode;
   readonly iosSimulator?: ReactNode;
   readonly launchableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
+  readonly launchableReferences?: ReadonlyArray<DockUtilityLauncherReference>;
   readonly onClose?: () => void;
   readonly onCloseTab: (tabId: string) => void;
   readonly onOpenTab: (surface: RightUtilityDockSurfaceId) => void;
@@ -49,8 +51,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   const activeTab = props.tabs.find((tab) => tab.id === activeTabId);
   const remaining = props.launchableSurfaces.filter(
     (surface) =>
-      surface.id === "browser" ||
-      surface.id === "terminal" ||
+      MULTI_INSTANCE_DOCK_SURFACES.has(surface.id) ||
       !props.tabs.some((tab) => dockTabSurface(tab).id === surface.id),
   );
   const contents: Readonly<Record<RightUtilityDockSurfaceId, ReactNode | undefined>> = {
@@ -83,12 +84,17 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
               tabs={props.tabs}
             />
           )}
-          {/* With no tool open the body already lists every tool; a second
-              entry point beside an empty strip is a control with nothing to
-              add. */}
-          {props.tabs.length === 0 ? null : (
-            <DockUtilityLauncher onOpen={props.onOpenTab} surfaces={remaining} />
-          )}
+          {/* With no tool open the body already lists every tool, so a second
+              tool list beside an empty strip adds nothing. The task's own pull
+              requests are not in that body, so the launcher still appears for
+              those alone. */}
+          <DockUtilityLauncher
+            onOpen={props.onOpenTab}
+            surfaces={props.tabs.length === 0 ? [] : remaining}
+            {...(props.launchableReferences === undefined
+              ? {}
+              : { references: props.launchableReferences })}
+          />
         </div>
         <div className="right-utility-dock__actions">
           {props.onClose === undefined ? null : (

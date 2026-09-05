@@ -215,9 +215,11 @@ async function closePaneShowing(title: string): Promise<void> {
   await userEvent.click(await screen.findByRole("menuitem", { name: "Close pane" }));
 }
 
+/** Makes the Local servers list visible however the section happens to start. */
 async function expandLocalServers(): Promise<void> {
   await screen.findByRole("region", { name: "Environment details" }, { timeout: 5_000 });
-  fireEvent.click(await screen.findByRole("button", { name: /^Local servers/ }));
+  const header = await screen.findByRole("button", { name: /^Local servers/ });
+  if (header.getAttribute("aria-expanded") !== "true") fireEvent.click(header);
 }
 
 describe("WorkspaceView Local servers wiring", () => {

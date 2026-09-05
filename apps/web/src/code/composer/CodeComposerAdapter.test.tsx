@@ -518,6 +518,69 @@ describe("CodeComposerAdapter interactions", () => {
     container.remove();
   });
 
+  it("lets the reader confirm what the task delivers instead of taking the prompt's word", async () => {
+    const onCreateThread = vi.fn();
+    const user = userEvent.setup();
+    render(<CodeComposerAdapter {...defaultProps} onCreateThread={onCreateThread} />);
+
+    await user.type(screen.getByLabelText("First message"), "open a pull request for the parser");
+    const trigger = screen.getByRole("button", { name: "Delivers" });
+    // The reading is offered, and said to be a reading.
+    expect(trigger).toHaveTextContent("Opened PR");
+    expect(trigger).toHaveTextContent("read from your prompt");
+
+    await user.click(trigger);
+    await user.click(screen.getByRole("option", { name: /Investigation/ }));
+
+    expect(screen.getByRole("button", { name: "Delivers" })).not.toHaveTextContent(
+      "read from your prompt",
+    );
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    expect(onCreateThread).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryTarget: expect.objectContaining({ outcomeKind: "investigation-result" }),
+      }),
+    );
+  });
+
+  it("names the branch the repository is actually on rather than a stock default", async () => {
+    const projectId = "00000000-0000-0000-0000-000000000009";
+    const execute = vi.fn(async (command: { kind: string; projectId?: string }) => {
+      if (command.kind !== "list-code-worktree-refs") return undefined;
+      return {
+        kind: "worktree-refs-listed",
+        projectId: command.projectId,
+        refs: [
+          { name: "development", kind: "local" },
+          { name: "main", kind: "local", isCurrent: true },
+        ],
+      };
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <CodeComposerAdapter
+          {...defaultProps}
+          execute={execute as never}
+          projectId={projectId as never}
+        />,
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // The tray states where a new task starts from, so it has to read the
+    // checkout rather than assume a branch name that many repositories lack.
+    const trigger = container.querySelector('button[aria-label="Base branch"]');
+    expect(trigger?.textContent).toContain("main");
+    expect(trigger?.textContent).not.toContain("development");
+    root.unmount();
+    container.remove();
+  });
+
   it("clears stale worktree refs when the selected project changes", async () => {
     const firstProject = "00000000-0000-0000-0000-000000000001";
     const secondProject = "00000000-0000-0000-0000-000000000002";
@@ -528,8 +591,8 @@ describe("CodeComposerAdapter interactions", () => {
         projectId: command.projectId,
         refs:
           command.projectId === firstProject
-            ? [{ name: "project-a-only", kind: "local" }]
-            : [{ name: "project-b-only", kind: "local" }],
+            ? [{ name: "project-a-only", kind: "local", isCurrent: true }]
+            : [{ name: "project-b-only", kind: "local", isCurrent: true }],
       };
     });
     const container = document.createElement("div");
@@ -573,6 +636,10 @@ describe("CodeComposerAdapter interactions", () => {
     });
     expect(document.body.textContent).not.toContain("project-a-only");
     expect(document.body.textContent).toContain("project-b-only");
+    // The tray names the new Project's head. Left standing, the previous
+    // Project's selection both showed the wrong branch and told the adoption
+    // that this Project's head had already been overruled.
+    expect(trigger()?.textContent).toContain("project-b-only");
     root.unmount();
     container.remove();
   });
