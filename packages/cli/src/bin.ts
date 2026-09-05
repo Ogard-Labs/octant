@@ -13,6 +13,7 @@ import {
 import { join } from "node:path";
 import { openLocalControlSession, type OpenedLocalControlSession } from "./localControl";
 import { resolveProjectCliCommand, runProjectCliCommand } from "./projectCommand";
+import { resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
 import {
   resolveAuthCliCommand,
   resolvePairCliCommand,
@@ -172,6 +173,25 @@ async function main(): Promise<number> {
     }
     return await runServerRunCommand(options);
   }
+  if (args.command === "agent" || args.command === "harness") {
+    const command = resolveAgentCliCommand(args.command, args.positional, args.flags);
+    if (command === undefined) {
+      printUsage();
+      return 1;
+    }
+    return await withLocalControlSession(
+      (session) =>
+        runAgentCliCommand({
+          command,
+          session,
+          stdin: process.stdin,
+          stdout: process.stdout,
+          stderr: process.stderr,
+          interactive: process.stdout.isTTY === true && process.stdin.isTTY === true,
+        }),
+      { startHost: true },
+    );
+  }
   if (args.command === "project") {
     const command = resolveProjectCliCommand(args.positional, args.flags);
     if (command === undefined) {
@@ -217,12 +237,46 @@ async function main(): Promise<number> {
   return 1;
 }
 
+function isNotRunning(reason: string): boolean {
+  return reason.startsWith("Octant is not running");
+}
+
+/** Starts the host the way `octant server start` does; the message says why it could not. */
+async function startHostForCommand(): Promise<string | undefined> {
+  try {
+    const paths = resolveCliHostRuntimePaths();
+    const report = await runServerLifecycleCommand({
+      action: "start",
+      paths,
+      policyStore: new ServicePolicyStore({ path: paths.servicePolicyPath }),
+      stdout: { write: () => undefined },
+    });
+    return report.state === "ready" ? undefined : report.message;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
 async function withLocalControlSession(
   run: (session: OpenedLocalControlSession) => Promise<number>,
+  options: { readonly startHost?: boolean } = {},
 ): Promise<number> {
-  const session = await openLocalControlSession({
-    host: { env: process.env, platform: process.platform, home: homedir() },
-  });
+  const host = { env: process.env, platform: process.platform, home: homedir() };
+  let session = await openLocalControlSession({ host });
+  if (session.kind === "refuses" && options.startHost === true && isNotRunning(session.reason)) {
+    // The same start `octant server start` performs, then a short wait for
+    // the host to write its local control files.
+    process.stderr.write("Octant is not running here; starting it…\n");
+    const started = await startHostForCommand();
+    if (started !== undefined) {
+      process.stderr.write(`${started}\n`);
+      return 1;
+    }
+    for (let attempt = 0; attempt < 40 && session.kind === "refuses"; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      session = await openLocalControlSession({ host });
+    }
+  }
   if (session.kind === "refuses") {
     process.stderr.write(`${session.reason}\n`);
     return 1;
@@ -258,6 +312,9 @@ function printUsage(): void {
       "  octant server install --artifact <path> [--install-root <path>]",
       "  octant server upgrade --artifact <path> [--install-root <path>]",
       "  octant server uninstall [--install-root <path>] [--data-dir <path>] [--remove-data --confirm <exact-data-dir>]",
+      "  octant agent [--mode auto|chat|work|code] [--project <name>] [--thread <id>] [--prompt <text>] [--title <title>] [--last] [--json] [--plain] [--quiet] [--theme system|light|dark|octant]",
+      "  octant harness slots [--json]",
+      "  octant harness session <thread-id> [--json]",
       "  octant project add <path> [--type work|code] [--name <name>]",
       "  octant project remove <name>",
       "  octant project rename <name> <new name>",

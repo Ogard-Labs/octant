@@ -12,7 +12,7 @@ import {
   orderProviderModels,
   resolveCapabilitySupport,
 } from "./modelCatalogPolicy";
-import { isImageProfileDriverKind } from "./providerPolicy";
+import { isImageProfileDriverKind, isNativeHarnessDriverKind } from "./providerPolicy";
 
 const driverLabels: Readonly<Record<ProviderDriverKind, string>> = {
   codex: "Codex CLI",
@@ -192,8 +192,16 @@ export interface PickerSection {
   readonly models: ReadonlyArray<PickerModel>;
 }
 
+/**
+ * Who runs the agent loop for a group's models. Endpoint providers run under
+ * Octant's own harness and are shown together as one "Octant" provider; a
+ * coding CLI brings its own loop and stands on its own.
+ */
+export type PickerRuntime = "octant-harness" | "provider";
+
 export interface PickerGroup {
   readonly instance: ProviderInstance;
+  readonly runtime: PickerRuntime;
   readonly readiness: ProviderReadiness;
   readonly driverLabel: string;
   readonly endpointHost: string | undefined;
@@ -319,6 +327,7 @@ export function buildModelPickerGroups(input: ModelPickerInput): ReadonlyArray<P
         : undefined;
     groups.push({
       instance,
+      runtime: isNativeHarnessDriverKind(instance.driverKind) ? "octant-harness" : "provider",
       readiness: observed.readiness,
       driverLabel: driverLabel(instance.driverKind),
       endpointHost: endpointHostOf(instance),
@@ -471,6 +480,7 @@ function maybeAppendUnavailableCurrent(
   }
   groups.push({
     instance,
+    runtime: isNativeHarnessDriverKind(instance.driverKind) ? "octant-harness" : "provider",
     readiness: observed?.readiness ?? "unavailable",
     driverLabel: driverLabel(instance.driverKind),
     endpointHost: endpointHostOf(instance),

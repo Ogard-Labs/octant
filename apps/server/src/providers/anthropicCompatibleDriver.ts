@@ -11,13 +11,14 @@ import {
   type ProviderModelId,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
+  type ProviderToolAnswer,
+  type ProviderToolDefinition,
   type UtcTimestamp,
 } from "@octant/contracts";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import {
   renderProviderTurnPrompt,
   textOnlyInputModalities,
-  unsupportedAnswerTool,
   unsupportedChatCapabilities,
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
@@ -31,8 +32,10 @@ import {
   type AnthropicCompatibleFetch,
 } from "./anthropicCompatibleEndpoint";
 import {
+  buildAnthropicMessagesBody,
   sendAnthropicMessagesTurn,
   type AnthropicHistoryMessage,
+  type AnthropicToolCall,
   type AnthropicTurnEvent,
   type AnthropicTurnResult,
 } from "./anthropicMessages";
@@ -53,6 +56,10 @@ const initialCapabilities: ProviderCapabilities = {
   taskProgress: "unsupported",
   nativeChildAgents: "unsupported",
   ...unsupportedChatCapabilities,
+  // Tool use is part of the Messages protocol itself, not a per-model extra,
+  // so an Anthropic-compatible endpoint offers app-managed tools from the
+  // first turn rather than after a probe.
+  appManagedTools: "supported",
 };
 
 export interface AnthropicCompatibleDriverOptions {
@@ -77,6 +84,11 @@ interface SessionState {
   abortController: AbortController | undefined;
   active: boolean;
   stopped: boolean;
+  pendingToolCalls: readonly AnthropicToolCall[];
+  toolAnswers: ProviderToolAnswer[];
+  activeTools: readonly ProviderToolDefinition[];
+  accumulatedInputTokens: number;
+  accumulatedOutputTokens: number;
 }
 
 export function makeAnthropicCompatibleDriver(
@@ -202,6 +214,11 @@ function makeConnection(
               abortController: undefined,
               active: true,
               stopped: false,
+              pendingToolCalls: [],
+              toolAnswers: [],
+              activeTools: [],
+              accumulatedInputTokens: 0,
+              accumulatedOutputTokens: 0,
             };
             sessions.set(input.sessionId, state);
             options.runtimeRegistry.setActiveSessionCount(
@@ -234,14 +251,21 @@ function makeConnection(
             const started = deferred();
             const priorHistory = state.history.slice();
             const prompt = renderProviderTurnPrompt(input);
-            assertTurnRequestConstructable(options, state, priorHistory, prompt);
+            assertTurnRequestConstructable(options, state, priorHistory, prompt, input.tools, []);
             state.abortController = controller;
             state.history.push({ role: "user", text: prompt });
+            state.pendingToolCalls = [];
+            state.toolAnswers = [];
+            state.activeTools = input.tools;
+            state.accumulatedInputTokens = 0;
+            state.accumulatedOutputTokens = 0;
             const turn = runTurn(
               options,
               state,
               priorHistory,
               prompt,
+              input.tools,
+              [],
               controller.signal,
               offer,
               clock,
@@ -252,6 +276,9 @@ function makeConnection(
                 finishFailedTurn(options.instanceId, state, sanitizeFailure(error), offer, clock),
               )
               .finally(() => {
+                // The turn stays in flight while tool answers are pending, so
+                // interrupt and stop keep working during the tool phase.
+                if (state.pendingToolCalls.length > 0) return;
                 state.inFlight = undefined;
                 state.abortController = undefined;
               });
@@ -270,6 +297,21 @@ function makeConnection(
             state.stopped = true;
             state.abortController.abort();
             await state.inFlight;
+            if (state.pendingToolCalls.length > 0) {
+              // The request already settled; only the tool phase was open, so
+              // nothing else will report the cancellation.
+              state.pendingToolCalls = [];
+              state.toolAnswers = [];
+              state.activeTools = [];
+              offer(
+                terminalEvent(
+                  options.instanceId,
+                  state,
+                  { kind: "interrupted", message: "The provider request was cancelled." },
+                  clock,
+                ),
+              );
+            }
             releaseSession(state);
           },
           catch: sanitizeFailure,
@@ -290,8 +332,78 @@ function makeConnection(
         Effect.fail(failure("unsupported", "This provider does not support approval requests.")),
       answerUserInput: () =>
         Effect.fail(failure("unsupported", "This provider does not support user questions.")),
-      answerTool: () => unsupportedAnswerTool(initialCapabilities.appManagedTools),
+      answerTool: (input) =>
+        answerToolEffect(options, stateFor(input.sessionId), input, offer, clock),
     };
+  });
+}
+
+function answerToolEffect(
+  options: AnthropicCompatibleDriverOptions,
+  state: SessionState,
+  input: ProviderToolAnswer,
+  offer: (event: ProviderRuntimeEvent) => void,
+  clock: () => string,
+): Effect.Effect<void, ProviderFailure> {
+  if (state.activeTools.length === 0 || state.pendingToolCalls.length === 0) {
+    return Effect.fail(failure("protocol", "The tool request is unknown."));
+  }
+  if (!state.pendingToolCalls.some((call) => call.toolCallId === input.requestId)) {
+    return Effect.fail(failure("protocol", "The tool request is unknown."));
+  }
+  // A retried answer must not start a second continuation or send the same
+  // tool_result twice.
+  if (state.toolAnswers.some((answer) => answer.requestId === input.requestId)) {
+    return Effect.void;
+  }
+  state.toolAnswers.push(input);
+  const allAnswered = state.pendingToolCalls.every((call) =>
+    state.toolAnswers.some((answer) => answer.requestId === call.toolCallId),
+  );
+  if (!allAnswered) return Effect.void;
+  // Results go into history before the continuation starts, so a continuation
+  // that fails or asks for another tool leaves a history whose tool_use blocks
+  // all have their tool_result.
+  state.history.push({
+    role: "assistant",
+    text: "",
+    toolResults: state.toolAnswers.map((answer) => ({
+      toolCallId: answer.requestId,
+      resultJson: answer.resultJson,
+      isError: answer.isError,
+    })),
+  });
+  return Effect.tryPromise({
+    try: async () => {
+      const controller = new AbortController();
+      state.abortController = controller;
+      const priorHistory = state.history.slice();
+      const started = deferred();
+      const turn = runTurn(
+        options,
+        state,
+        priorHistory,
+        "",
+        state.activeTools,
+        state.toolAnswers.slice(),
+        controller.signal,
+        offer,
+        clock,
+        started.resolve,
+      )
+        .then((result) => finishSuccessfulTurn(options, state, result, offer, clock))
+        .catch((error) =>
+          finishFailedTurn(options.instanceId, state, sanitizeFailure(error), offer, clock),
+        )
+        .finally(() => {
+          if (state.pendingToolCalls.length > 0) return;
+          state.inFlight = undefined;
+          state.abortController = undefined;
+        });
+      state.inFlight = turn;
+      await started.promise;
+    },
+    catch: sanitizeFailure,
   });
 }
 
@@ -300,6 +412,8 @@ async function runTurn(
   state: SessionState,
   history: readonly AnthropicHistoryMessage[],
   prompt: string,
+  tools: readonly ProviderToolDefinition[],
+  toolAnswers: readonly ProviderToolAnswer[],
   signal: AbortSignal,
   offer: (event: ProviderRuntimeEvent) => void,
   clock: () => string,
@@ -319,6 +433,8 @@ async function runTurn(
         modelId: state.modelId,
         history,
         prompt,
+        tools,
+        toolAnswers,
         sequenceStart: state.nextSequence,
         signal,
         onEvent,
@@ -342,7 +458,10 @@ function finishSuccessfulTurn(
   for (const bucket of result.rateLimitBuckets ?? []) {
     offer(rateLimitBucketEvent(options.instanceId, state, bucket, clock));
   }
-  state.history.push({ role: "assistant", text: result.text });
+  if (result.usage !== undefined) {
+    state.accumulatedInputTokens += result.usage.inputTokens;
+    state.accumulatedOutputTokens += result.usage.outputTokens;
+  }
   const current = options.runtimeRegistry.observedState(options.instanceId);
   const models = markAnthropicModelVerified(
     current?.models ?? manualModels(options.configuration.manualModelIds),
@@ -366,6 +485,72 @@ function finishSuccessfulTurn(
       : { lastSuccessfulProbeAt: current.lastSuccessfulProbeAt }),
     observedAt: clock(),
   });
+  if (result.toolCalls.length > 0) {
+    // A name outside the offered set fails closed rather than waiting for an
+    // answer nobody was authorized to give.
+    const offered = new Set(state.activeTools.map((tool) => tool.name));
+    for (const call of result.toolCalls) {
+      if (!offered.has(call.toolName)) {
+        state.pendingToolCalls = [];
+        state.toolAnswers = [];
+        state.activeTools = [];
+        offer(
+          terminalEvent(
+            options.instanceId,
+            state,
+            {
+              kind: "failed",
+              failure: {
+                category: "protocol",
+                message: `The provider requested an unsupported tool: ${call.toolName}.`,
+              },
+            },
+            clock,
+          ),
+        );
+        return;
+      }
+    }
+    state.pendingToolCalls = result.toolCalls;
+    state.toolAnswers = [];
+    state.history.push({ role: "assistant", text: result.text, toolCalls: result.toolCalls });
+    for (const call of result.toolCalls) {
+      offer({
+        kind: "tool-request",
+        requestId: call.toolCallId,
+        toolName: call.toolName,
+        inputJson: call.argumentsJson,
+        instanceId: options.instanceId,
+        sessionId: state.sessionId,
+        sequence: state.nextSequence++,
+        correlationId: state.correlationId,
+        occurredAt: clock() as UtcTimestamp,
+      } as ProviderRuntimeEvent);
+    }
+    // No terminal yet: the turn ends when the tool loop does.
+    return;
+  }
+  const wasContinuation = state.toolAnswers.length > 0;
+  state.pendingToolCalls = [];
+  state.toolAnswers = [];
+  state.activeTools = [];
+  state.history.push({ role: "assistant", text: result.text });
+  if (wasContinuation && state.accumulatedInputTokens + state.accumulatedOutputTokens > 0) {
+    // One usage figure for the whole loop, so the turn's cost is recorded in full.
+    offer(
+      runtimeEvent(
+        options.instanceId,
+        state,
+        {
+          kind: "usage",
+          sequence: state.nextSequence++,
+          inputTokens: state.accumulatedInputTokens,
+          outputTokens: state.accumulatedOutputTokens,
+        },
+        clock,
+      ),
+    );
+  }
   offer(terminalEvent(options.instanceId, state, { kind: "completed" }, clock));
 }
 
@@ -376,6 +561,9 @@ function finishFailedTurn(
   offer: (event: ProviderRuntimeEvent) => void,
   clock: () => string,
 ): void {
+  state.pendingToolCalls = [];
+  state.toolAnswers = [];
+  state.activeTools = [];
   offer(
     failed.category === "interrupted"
       ? terminalEvent(
@@ -481,17 +669,18 @@ function assertTurnRequestConstructable(
   state: SessionState,
   history: readonly AnthropicHistoryMessage[],
   prompt: string,
+  tools: readonly ProviderToolDefinition[],
+  toolAnswers: readonly ProviderToolAnswer[],
 ): void {
   const endpoint = state.endpoint;
   if (endpoint === undefined) throw failure("protocol", "Provider session is not active.");
-  const body = {
-    model: state.modelId,
-    messages: [
-      ...history.map(({ role, text }) => ({ role, content: text })),
-      { role: "user" as const, content: prompt },
-    ],
-    stream: true,
-  };
+  const body = buildAnthropicMessagesBody({
+    modelId: state.modelId,
+    history,
+    prompt,
+    tools,
+    toolAnswers,
+  });
   if (Buffer.byteLength(JSON.stringify(body), "utf8") > endpoint.limits.requestBodyBytes) {
     throw failure(
       "invalid-configuration",

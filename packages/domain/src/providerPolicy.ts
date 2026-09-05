@@ -95,6 +95,22 @@ export function isImageProfileDriverKind(
   return driverKind === "openai-image" || driverKind === "gemini-native-image";
 }
 
+/**
+ * The providers Octant drives with its own agent loop. They are inference
+ * transports only: every tool they are offered is app-managed and every call
+ * passes the server's authority choke point before it runs.
+ */
+export function isNativeHarnessDriverKind(
+  driverKind: ProviderDriverKind,
+): driverKind is "openai-compatible" | "anthropic-compatible" | "azure-foundry" | "ollama" {
+  return (
+    driverKind === "openai-compatible" ||
+    driverKind === "anthropic-compatible" ||
+    driverKind === "azure-foundry" ||
+    driverKind === "ollama"
+  );
+}
+
 function nextVersion(version: AggregateVersion): AggregateVersion {
   return (version + 1) as AggregateVersion;
 }

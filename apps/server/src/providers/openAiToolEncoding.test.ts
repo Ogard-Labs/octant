@@ -1,3 +1,4 @@
+import { MAX_PROVIDER_TOOLS } from "@octant/contracts";
 import type { ProviderFailure, ProviderToolDefinition } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import {
@@ -66,19 +67,11 @@ describe("encodeResponsesTools", () => {
     expect(failure.category).toBe("invalid-configuration");
   });
 
-  it("rejects more than eight tools to preserve the provider contract bound", () => {
+  it("rejects more tools than the provider contract bound", () => {
     const failure = failureOf(() =>
-      encodeResponsesTools([
-        tool("t1"),
-        tool("t2"),
-        tool("t3"),
-        tool("t4"),
-        tool("t5"),
-        tool("t6"),
-        tool("t7"),
-        tool("t8"),
-        tool("t9"),
-      ]),
+      encodeResponsesTools(
+        Array.from({ length: MAX_PROVIDER_TOOLS + 1 }, (_, index) => tool(`t${index + 1}`)),
+      ),
     );
     expect(failure.category).toBe("invalid-configuration");
   });
@@ -115,9 +108,11 @@ describe("encodeChatCompletionsTools", () => {
     expect(failure.category).toBe("invalid-configuration");
   });
 
-  it("rejects more than eight tools", () => {
+  it("rejects more tools than the provider contract bound", () => {
     const failure = failureOf(() =>
-      encodeChatCompletionsTools(Array.from({ length: 9 }, (_, index) => tool(`t${index + 1}`))),
+      encodeChatCompletionsTools(
+        Array.from({ length: MAX_PROVIDER_TOOLS + 1 }, (_, index) => tool(`t${index + 1}`)),
+      ),
     );
     expect(failure.category).toBe("invalid-configuration");
   });

@@ -1,5 +1,6 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
+import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import type { DiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
@@ -41,6 +42,7 @@ export interface ShellSettingsSurfaceProps {
     Readonly<{ receiptId: string; displayName: string }> | undefined
   >;
   readonly agentRunSettingsClient: AgentRunSettingsClient;
+  readonly nativeHarnessClient?: NativeHarnessClient;
   readonly automationNotificationClient: AutomationNotificationClient;
   readonly isNarrow: boolean;
   readonly nativeBoundsAvailable: boolean;
@@ -100,6 +102,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
               ? {}
               : { pickLocalPluginFolder: props.pickLocalPluginFolder })}
             agentRunSettingsClient={props.agentRunSettingsClient}
+            {...(props.nativeHarnessClient === undefined
+              ? {}
+              : { nativeHarnessClient: props.nativeHarnessClient })}
             automationNotificationClient={props.automationNotificationClient}
             isNarrow={props.isNarrow}
             nativeBoundsAvailable={props.nativeBoundsAvailable}

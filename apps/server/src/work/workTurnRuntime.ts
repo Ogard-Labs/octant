@@ -13,6 +13,7 @@ import {
 } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Effect, Fiber, Scope, Stream } from "effect";
+import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
   countsTowardTurnEventBudget,
@@ -42,6 +43,7 @@ export interface WorkTurnRuntimePort {
     readonly signal: AbortSignal;
     readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
     readonly context?: ReadonlyArray<ProviderContextBlock>;
+    readonly appManagedTools?: AppManagedToolSet;
     readonly onDelta?: (response: string) => void;
   }): Promise<WorkTurnRuntimeOutcome>;
 }
@@ -71,6 +73,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
     readonly signal: AbortSignal;
     readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
     readonly context?: ReadonlyArray<ProviderContextBlock>;
+    readonly appManagedTools?: AppManagedToolSet;
     readonly onDelta?: (response: string) => void;
   }): Promise<WorkTurnRuntimeOutcome> {
     try {
@@ -114,6 +117,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       readonly signal: AbortSignal;
       readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
       readonly context?: ReadonlyArray<ProviderContextBlock>;
+      readonly appManagedTools?: AppManagedToolSet;
       readonly onDelta?: (response: string) => void;
     },
     idle: IdleTimeout,
@@ -154,6 +158,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       let handledEvents = 0;
       let response = "";
       let terminal: ProviderRuntimeEvent | undefined;
+      const answeredToolRequestIds = new Set<string>();
       const events = yield* subscribeThenSend({
         connection,
         consume: (runtimeEvents) =>
@@ -162,12 +167,51 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
             Stream.takeUntil((event) => isTerminalEvent(event) || handledEvents > MAX_EVENTS),
             Stream.tap(() => idle.touch),
             Stream.runForEach((event) =>
-              Effect.sync(() => {
+              Effect.gen(function* () {
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 if (handledEvents > MAX_EVENTS) return;
                 if (event.kind === "text-delta") {
                   response = appendBoundedResponse(response, event.text);
                   input.onDelta?.(response);
+                }
+                if (event.kind === "tool-request") {
+                  if (answeredToolRequestIds.has(event.requestId)) return;
+                  answeredToolRequestIds.add(event.requestId);
+                  const toolSet = input.appManagedTools;
+                  const offered = toolSet?.definitions.some(
+                    (definition) => definition.name === event.toolName,
+                  );
+                  if (toolSet === undefined || offered !== true) {
+                    yield* connection
+                      .answerTool({
+                        sessionId: input.providerSessionId,
+                        requestId: event.requestId,
+                        resultJson: JSON.stringify({ error: "tool-unavailable" }),
+                        isError: true,
+                      })
+                      .pipe(Effect.catchAll(() => Effect.void));
+                    return;
+                  }
+                  const execution = yield* Effect.promise(async () => {
+                    try {
+                      return await toolSet.execute({
+                        name: event.toolName,
+                        inputJson: event.inputJson,
+                        signal: input.signal,
+                      });
+                    } catch {
+                      return { result: { error: "tool-execution-failed" }, isError: true } as const;
+                    }
+                  });
+                  yield* connection
+                    .answerTool({
+                      sessionId: input.providerSessionId,
+                      requestId: event.requestId,
+                      resultJson: JSON.stringify(execution.result),
+                      isError: execution.isError === true,
+                    })
+                    .pipe(Effect.catchAll(() => Effect.void));
+                  return;
                 }
                 if (isTerminalEvent(event)) terminal = event;
               }),
@@ -178,7 +222,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           prompt: input.command.prompt,
           context: [...(input.context ?? [])],
           attachments: [...(input.attachments ?? [])],
-          tools: [],
+          tools: [...(input.appManagedTools?.definitions ?? [])],
         }),
       });
       yield* Fiber.join(events);
