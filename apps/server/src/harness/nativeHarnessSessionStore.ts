@@ -25,6 +25,7 @@ import {
   type NativeHarnessSessionView,
   type NativeHarnessSlotCandidate,
   type NativeHarnessToolCall,
+  type NativeHarnessTurnUsage,
   MAX_NATIVE_HARNESS_TOOL_CALLS_PER_TURN,
   MAX_NATIVE_HARNESS_STEERING_NOTES,
   decodeNativeHarnessApproval,
@@ -163,8 +164,10 @@ export class NativeHarnessSessionStore {
       approvals: [],
       version: 0,
     };
-    this.#records.set(input.threadId, record);
+    // Journal first: a record the journal never accepted must not stay in
+    // memory, or every later frame for the thread fails its version check.
     this.#append(record, input.threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.started, session);
+    this.#records.set(input.threadId, record);
     return session;
   }
 
@@ -185,6 +188,7 @@ export class NativeHarnessSessionStore {
     push(record.turns, turn);
     this.#setSession(record, {
       ...record.session,
+      usage: addUsage(record.session.usage, turn.usage),
       turnsRun: record.session.turnsRun + 1,
       status: record.session.status === "running" ? "idle" : record.session.status,
       updatedAt: decodeUtcTimestamp(this.#clock()),
@@ -384,7 +388,8 @@ export class NativeHarnessSessionStore {
   ): boolean {
     const record = this.#records.get(threadId);
     if (record === undefined) return false;
-    const bounded = detail.length > 512 ? detail.slice(0, 512) : detail;
+    const trimmed = detail.trim().slice(0, 512).trim();
+    const bounded = trimmed.length === 0 ? "Paused." : trimmed;
     this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.paused, {
       sessionId: record.session.id,
       status,
@@ -484,8 +489,14 @@ export class NativeHarnessSessionStore {
     if (eventName === names.routeDecided) {
       push(record.routes, body.decision as NativeHarnessRouteDecision);
     } else if (eventName === names.turnCompleted) {
-      push(record.turns, payload as NativeHarnessTurnRecord);
-      record.session = { ...record.session, turnsRun: record.session.turnsRun + 1, status: "idle" };
+      const turn = payload as NativeHarnessTurnRecord;
+      push(record.turns, turn);
+      record.session = {
+        ...record.session,
+        usage: addUsage(record.session.usage, turn.usage),
+        turnsRun: record.session.turnsRun + 1,
+        status: "idle",
+      };
     } else if (eventName === names.contextReduced) {
       const reduction = payload as NativeHarnessContextReduction;
       push(record.reductions, reduction);
@@ -546,4 +557,17 @@ function push<T>(list: T[], entry: T): void {
   list.push(entry);
   if (list.length > MAX_NATIVE_HARNESS_VIEW_ENTRIES)
     list.splice(0, list.length - MAX_NATIVE_HARNESS_VIEW_ENTRIES);
+}
+
+/** Running totals that outlive the bounded turn list. */
+function addUsage(
+  total: NativeHarnessTurnUsage | undefined,
+  turn: NativeHarnessTurnUsage,
+): NativeHarnessTurnUsage {
+  const cost = (total?.costUsd ?? 0) + (turn.costUsd ?? 0);
+  return {
+    inputTokens: (total?.inputTokens ?? 0) + turn.inputTokens,
+    outputTokens: (total?.outputTokens ?? 0) + turn.outputTokens,
+    ...(total?.costUsd === undefined && turn.costUsd === undefined ? {} : { costUsd: cost }),
+  };
 }

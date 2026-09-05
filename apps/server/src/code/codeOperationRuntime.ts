@@ -650,6 +650,19 @@ export function createCodeOperationRuntime(
       const command = decodeCodeOperationCommand(rawCommand);
       if (command.kind === "start-provider-turn") {
         const thread = options.persistence.readCodeThread(command.threadId);
+        // The pause state is the thread's own; a window without Open
+        // authority over its Project learns nothing here, not even "paused".
+        if (
+          thread !== undefined &&
+          !(await options.windowAccess.canAccessProject(windowId, thread.projectId))
+        ) {
+          throw new CodeServiceError(
+            decodeCodeFailure({
+              category: "unauthorized",
+              message: "Code operation is unauthorized.",
+            }),
+          );
+        }
         const admission =
           thread === undefined
             ? undefined

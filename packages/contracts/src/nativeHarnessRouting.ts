@@ -234,7 +234,7 @@ export const NativeHarnessRoutingCommandResult = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("routing-refused"),
-    reason: Schema.Literal("stale-version", "not-authorized", "project-not-found"),
+    reason: Schema.Literal("stale-version", "not-authorized", "project-not-found", "not-a-subset"),
     message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
   }).annotations(strict),
 );
@@ -333,7 +333,14 @@ export const NativeHarnessRouteDecision = Schema.Union(
     candidate: NativeHarnessSlotCandidate,
   })
     .annotations(strict)
-    .pipe(Schema.filter((decision) => decision.requestedSlotId !== decision.slotId)),
+    // The only sanctioned fallback for a slot nobody configured is `default`;
+    // a `default` with no ready candidate is an `unroutable` decision instead.
+    .pipe(
+      Schema.filter(
+        (decision) =>
+          decision.requestedSlotId !== decision.slotId && String(decision.slotId) === "default",
+      ),
+    ),
   Schema.Struct({
     ...RouteDecisionFields,
     kind: Schema.Literal("unroutable"),

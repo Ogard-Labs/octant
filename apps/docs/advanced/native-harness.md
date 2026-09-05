@@ -2,7 +2,7 @@
 
 The native harness is Octant's own agent loop for models you reach through an
 API key or a local endpoint — OpenAI-compatible, Anthropic-compatible, Azure
-AI Foundry, and Ollama providers. Where a coding CLI such as Claude Code or
+AI Foundry providers (Ollama joins once its driver runs the tool loop). Where a coding CLI such as Claude Code or
 Codex brings its own tools and its own loop, the harness gives an endpoint
 model Octant's tools, Octant's authority checks, and Octant's journal, in
 every mode and on every surface: web, desktop, phone, and the `octant` CLI.
@@ -165,8 +165,10 @@ table.
 
 - Only endpoint providers run the harness. Coding CLIs keep their own tools;
   they can be delegated to as children, never made the lead.
-- Ollama and Anthropic-compatible endpoints offer tools when the endpoint
-  does; a model that ignores tool calls simply answers in text.
+- Anthropic-compatible endpoints offer tools when the endpoint does; a model
+  that ignores tool calls simply answers in text. Ollama is not a harness
+  provider yet: its driver has no tool loop, so it is not offered as a slot
+  candidate until it does.
 - Context is reduced by the host's planner; each prune and cut is journaled
   with the cache cost it paid, and the lead can read `context-remaining` to
   checkpoint before one.

@@ -670,8 +670,8 @@ export class ChatService {
     }
     if (options.resolveAppManagedTools !== undefined) {
       this.#resolveAppManagedTools = options.resolveAppManagedTools;
-      this.#nativeHarness = options.nativeHarness;
     }
+    this.#nativeHarness = options.nativeHarness;
     if (options.resolveExtensionSelectionContext !== undefined) {
       this.#resolveExtensionSelectionContext = options.resolveExtensionSelectionContext;
     }
@@ -1795,27 +1795,32 @@ export class ChatService {
     return { kind: "thread-updated", thread: next };
   }
 
+  /** A paused harness session refuses a new prompt, whether sent or edited in. */
+  #admitHarnessTurn(thread: ChatThread): void {
+    const admission = this.#nativeHarness?.admitTurn?.({
+      threadId: String(thread.id),
+      mode: "chat",
+      providerInstanceId: decodeProviderInstanceId(thread.providerInstanceId),
+      modelId: decodeProviderModelId(thread.modelId),
+      ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+    });
+    if (admission?.kind === "paused") {
+      throw new ChatServiceError(
+        decodeChatFailure({
+          category: "waiting",
+          message: `${admission.status === "paused-by-advisor" ? "The advisor paused this thread" : "This thread is paused"}: ${admission.detail} Resume the harness session to continue.`,
+        }),
+      );
+    }
+  }
+
   async #sendTurn(
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "send-chat-turn" }>,
     executionContext?: ChatServiceExecutionContext,
   ): Promise<ChatCommandResult> {
     const accepted = await this.#withThreadAdmission(command.threadId, async () => {
       const thread = this.#requireActiveThread(command.threadId);
-      const admission = this.#nativeHarness?.admitTurn?.({
-        threadId: String(thread.id),
-        mode: "chat",
-        providerInstanceId: decodeProviderInstanceId(thread.providerInstanceId),
-        modelId: decodeProviderModelId(thread.modelId),
-        ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
-      });
-      if (admission?.kind === "paused") {
-        throw new ChatServiceError(
-          decodeChatFailure({
-            category: "waiting",
-            message: `${admission.status === "paused-by-advisor" ? "The advisor paused this thread" : "This thread is paused"}: ${admission.detail} Resume the harness session to continue.`,
-          }),
-        );
-      }
+      this.#admitHarnessTurn(thread);
       if (command.submissionId !== undefined) {
         // Match on submissionId alone. A turn whose only attempt ended
         // failed, cancelled, or interrupted is still the turn this
@@ -1974,6 +1979,7 @@ export class ChatService {
   ): Promise<ChatCommandResult> {
     const accepted = await this.#withThreadAdmission(command.threadId, async () => {
       const thread = this.#requireActiveThread(command.threadId);
+      this.#admitHarnessTurn(thread);
       this.#assertExpectedThreadVersion(thread, command.expectedVersion);
       const view = this.#requireThreadView(command.threadId);
       this.#assertNoActiveTurn(view, thread.id);

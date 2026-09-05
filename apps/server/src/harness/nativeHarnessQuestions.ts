@@ -126,12 +126,13 @@ export class NativeHarnessQuestionStore {
   ): "answered" | "question-not-found" | "already-settled" {
     const waiter = this.#waiters.get(questionId);
     if (waiter === undefined || waiter.threadId !== threadId) {
-      return this.#options.sessions.settleQuestion(threadId, questionId as never, {
+      // No turn is waiting (a restart, say); the journaled question can still
+      // take the answer, and that is an answer, not a refusal.
+      const settled = this.#options.sessions.settleQuestion(threadId, questionId as never, {
         status: "answered",
         answer,
-      }) === "question-not-found"
-        ? "question-not-found"
-        : "already-settled";
+      });
+      return typeof settled === "string" ? settled : "answered";
     }
     waiter.resolve({ status: "answered", answer });
     return "answered";

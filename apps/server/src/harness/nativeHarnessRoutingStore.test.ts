@@ -119,17 +119,31 @@ describe("native harness routing store", () => {
       clock: () => now,
     });
     const projectId = decodeProjectId("00000000-0000-4000-8000-0000000000cc");
-    const set = store.applyProjectCommand({
-      kind: "set-project-routing-override",
+    // An override may only narrow the host table, so it is refused until the
+    // host names the slot and the model it wants to use.
+    const override = {
+      kind: "set-project-routing-override" as const,
       projectId,
       configuration: {
         slots: [{ id: "task" as never, candidates: [candidate("small")] }],
         jobSlots: [],
       },
       expectedVersion: 0 as never,
+    };
+    expect(store.applyProjectCommand(override)).toMatchObject({
+      kind: "routing-refused",
+      reason: "not-a-subset",
     });
+    store.updateHost({
+      configuration: {
+        slots: [{ id: "task" as never, candidates: [candidate("small"), candidate("big")] }],
+        jobSlots: [{ job: "lead", slotId: "task" as never }],
+      } as never,
+      expectedVersion: 0 as never,
+    });
+    const set = store.applyProjectCommand(override);
     expect(set.kind).toBe("project-routing-override");
-    expect(store.host().version).toBe(0);
+    expect(store.host().version).toBe(1);
     const restarted = new NativeHarnessRoutingStore({
       journal: journalFor(connection),
       uuid,
@@ -144,6 +158,17 @@ describe("native harness routing store", () => {
     });
     expect(cleared.kind).toBe("project-routing-override-cleared");
     expect(restarted.projectOverride(projectId)).toBeUndefined();
+    // Clearing keeps the aggregate's version, so the Project can be set again.
+    expect(restarted.applyProjectCommand({ ...override, expectedVersion: 2 as never }).kind).toBe(
+      "project-routing-override",
+    );
+    const again = new NativeHarnessRoutingStore({
+      journal: journalFor(connection),
+      uuid,
+      actor,
+      clock: () => now,
+    });
+    expect(again.projectOverride(projectId)?.version).toBe(3);
   });
 });
 

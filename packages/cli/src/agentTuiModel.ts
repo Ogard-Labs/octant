@@ -180,13 +180,17 @@ export function transcriptFrom(
   const offset = completed.length - records.length;
   const entries: TuiTranscriptEntry[] = [];
   let completedIndex = 0;
+  const last = thread.turns.at(-1);
   for (const turn of thread.turns) {
     entries.push({ kind: "you", at: formatClock(turn.at), text: turn.prompt });
     const done = isDone(turn.outcome);
     const record = done ? records[completedIndex - offset] : undefined;
     if (done) completedIndex += 1;
+    // Only the turn actually running owns the live calls; a queued one behind it does not.
     const live =
-      !done && session !== null && session !== undefined ? (session.activeTools ?? []) : [];
+      !done && turn === last && session !== null && session !== undefined
+        ? (session.activeTools ?? [])
+        : [];
     entries.push({
       kind: "lead",
       at: formatClock(turn.replyAt),
@@ -225,16 +229,17 @@ export function statusLineFrom(
     parts.push(String(session.session.lead.modelId));
     parts.push(`${session.session.turnsRun} turns`);
     if (session.session.cutovers > 0) parts.push(`${session.session.cutovers} context cuts`);
-    const usage = session.turns.reduce(
-      (sum, turn) => ({
-        input: sum.input + turn.usage.inputTokens,
-        output: sum.output + turn.usage.outputTokens,
-      }),
-      { input: 0, output: 0 },
-    );
-    if (usage.input > 0) parts.push(`${compact(usage.input)} in · ${compact(usage.output)} out`);
-    const cost = session.turns.reduce((sum, turn) => sum + (turn.usage.costUsd ?? 0), 0);
-    if (cost > 0) parts.push(`$${cost.toFixed(2)}`);
+    // The session's own totals survive the bounded turn list; older hosts
+    // without them fall back to what the list still holds.
+    const usage = session.session.usage ?? {
+      inputTokens: session.turns.reduce((sum, turn) => sum + turn.usage.inputTokens, 0),
+      outputTokens: session.turns.reduce((sum, turn) => sum + turn.usage.outputTokens, 0),
+      costUsd: session.turns.reduce((sum, turn) => sum + (turn.usage.costUsd ?? 0), 0),
+    };
+    if (usage.inputTokens > 0) {
+      parts.push(`${compact(usage.inputTokens)} in · ${compact(usage.outputTokens)} out`);
+    }
+    if ((usage.costUsd ?? 0) > 0) parts.push(`$${(usage.costUsd ?? 0).toFixed(2)}`);
   } else if (thread !== undefined) {
     parts.push(thread.modelId);
     parts.push(`${thread.turns.length} turns`);

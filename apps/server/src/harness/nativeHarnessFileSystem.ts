@@ -8,6 +8,9 @@ const SKIPPED_DIRECTORY_NAMES = new Set([".git", "node_modules"]);
 const MAX_READ_RESULT_BYTES = 64 * 1024;
 const MAX_GREP_RESULT_BYTES = 64 * 1024;
 const MAX_GREP_SCANNED_FILE_BYTES = 4 * 1024 * 1024;
+const MAX_GREP_PATTERN_LENGTH = 512;
+/** A scan the model asked for never holds the event loop longer than this. */
+const MAX_GREP_SCAN_MS = 5_000;
 const MAX_GLOB_RESULTS = 1_000;
 const MAX_WALKED_ENTRIES = 50_000;
 const MAX_GREP_LINE_LENGTH = 512;
@@ -298,12 +301,16 @@ export class NativeHarnessFileSystem {
     if (base === undefined) return { kind: "refused", reason: "path-escapes-root" };
     let expression: RegExp;
     let include: RegExp | undefined;
+    if (input.pattern.length > MAX_GREP_PATTERN_LENGTH) {
+      return { kind: "refused", reason: "pattern-invalid" };
+    }
     try {
       expression = new RegExp(input.pattern);
       include = input.include === undefined ? undefined : globToRegExp(input.include);
     } catch {
       return { kind: "refused", reason: "pattern-invalid" };
     }
+    const deadline = Date.now() + MAX_GREP_SCAN_MS;
     const maxMatches = input.maxMatches ?? 200;
     const matches: NativeHarnessGrepMatch[] = [];
     let filesScanned = 0;
@@ -334,6 +341,11 @@ export class NativeHarnessFileSystem {
       filesScanned += 1;
       const lines = content.toString("utf8").split("\n");
       for (let index = 0; index < lines.length; index += 1) {
+        // A pattern that backtracks badly is cut off by time, not by luck.
+        if ((index & 255) === 0 && Date.now() > deadline) {
+          truncated = true;
+          break;
+        }
         const line = lines[index] ?? "";
         if (!expression.test(line)) continue;
         const text =

@@ -94,6 +94,9 @@ function failure(message: string, status: number, origin: string | null): Respon
  * thread it names is created through the surface's ordinary creation command
  * with the suggestion's prompt, so no new creation path exists here.
  */
+/** Suggestions whose thread is being created right now, so a repeat waits its turn and is refused. */
+const activating = new Set<string>();
+
 export function createNativeHarnessSessionRouteHandler(
   dependencies: NativeHarnessSessionRouteDependencies,
 ) {
@@ -272,14 +275,25 @@ export function createNativeHarnessSessionRouteHandler(
         } catch {
           return failure("Follow-up activation requires an explicit confirmation.", 400, origin);
         }
-        // Refuse a repeat before anything is created, not after.
-        if (view.activatedFollowUpIds.some((id) => String(id) === String(suggestion.id))) {
+        // Refuse a repeat before anything is created, not after — including a
+        // second request that arrives while the first is still creating.
+        const activationKey = `${threadId}:${String(suggestion.id)}`;
+        if (
+          view.activatedFollowUpIds.some((id) => String(id) === String(suggestion.id)) ||
+          activating.has(activationKey)
+        ) {
           return json(refusedFollowUp(String(suggestion.id), "already-activated"), 409, origin);
         }
-        const creation =
-          dependencies.createFollowUp === undefined
-            ? { kind: "created" as const, created }
-            : await dependencies.createFollowUp({ windowId, view, creation: created });
+        activating.add(activationKey);
+        let creation;
+        try {
+          creation =
+            dependencies.createFollowUp === undefined
+              ? { kind: "created" as const, created }
+              : await dependencies.createFollowUp({ windowId, view, creation: created });
+        } finally {
+          activating.delete(activationKey);
+        }
         if (creation.kind === "refused") {
           const result: NativeHarnessFollowUpActivationResult = {
             kind: "follow-up-refused",

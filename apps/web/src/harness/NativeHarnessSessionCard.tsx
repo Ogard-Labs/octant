@@ -179,7 +179,13 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
     }
   }, [preview, props, view, load]);
 
-  if (view === undefined) return <p role="status">Loading the harness session…</p>;
+  if (view === undefined) {
+    return error === undefined ? (
+      <p role="status">Loading the harness session…</p>
+    ) : (
+      <p role="alert">{error}</p>
+    );
+  }
   if (view === null) return null;
   const paused = view.session.status !== "running" && view.session.status !== "idle";
 

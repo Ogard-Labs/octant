@@ -214,6 +214,16 @@ describe("native harness route decisions", () => {
         candidate: opus,
       }),
     ).toThrow();
+    // `default` is the only place an unconfigured slot may land.
+    expect(() =>
+      decodeNativeHarnessRouteDecision({
+        ...base,
+        kind: "unconfigured-slot",
+        requestedSlotId: "slow",
+        slotId: "task",
+        candidate: opus,
+      }),
+    ).toThrow();
   });
 
   it("cannot claim no candidate was eligible without saying which were refused and why", () => {

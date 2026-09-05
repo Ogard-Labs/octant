@@ -53,6 +53,7 @@ export class NativeHarnessRoutingStore {
   readonly #clock: () => string;
   #host: NativeHarnessRoutingSettings;
   readonly #projects = new Map<string, NativeHarnessProjectRoutingOverride>();
+  readonly #clearedVersions = new Map<string, number>();
 
   constructor(options: NativeHarnessRoutingStoreOptions) {
     this.#journal = options.journal;
@@ -106,7 +107,10 @@ export class NativeHarnessRoutingStore {
     command: NativeHarnessProjectRoutingCommand,
   ): NativeHarnessRoutingCommandResult {
     const current = this.#projects.get(String(command.projectId));
-    const currentVersion = current?.version ?? 0;
+    // A cleared override keeps its aggregate version, or the next set would
+    // expect version 0 against a journal that has moved on.
+    const currentVersion =
+      current?.version ?? this.#clearedVersions.get(String(command.projectId)) ?? 0;
     if (command.expectedVersion !== currentVersion) {
       return refused(
         "stale-version",
@@ -117,6 +121,8 @@ export class NativeHarnessRoutingStore {
     const version = decodeAggregateVersion(currentVersion + 1);
     const aggregateId = decodeAggregateId(String(command.projectId));
     if (command.kind === "set-project-routing-override") {
+      const outside = outsideHost(command.configuration, this.#host.configuration);
+      if (outside !== undefined) return refused("not-a-subset", outside);
       const override = decodeNativeHarnessProjectRoutingOverride({
         projectId: command.projectId,
         configuration: command.configuration,
@@ -143,6 +149,7 @@ export class NativeHarnessRoutingStore {
     );
     if (appended !== undefined) return appended;
     this.#projects.delete(String(command.projectId));
+    this.#clearedVersions.set(String(command.projectId), version);
     return { kind: "project-routing-override-cleared", projectId: command.projectId, version };
   }
 
@@ -200,8 +207,12 @@ export class NativeHarnessRoutingStore {
         } else if (
           envelope.eventName === NATIVE_HARNESS_ROUTING_EVENT_NAMES.projectOverrideCleared
         ) {
-          const cleared = envelope.payload as { readonly projectId: string };
+          const cleared = envelope.payload as {
+            readonly projectId: string;
+            readonly version: number;
+          };
           this.#projects.delete(String(cleared.projectId));
+          this.#clearedVersions.set(String(cleared.projectId), cleared.version);
         }
       }
       if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
@@ -209,8 +220,39 @@ export class NativeHarnessRoutingStore {
   }
 }
 
+/**
+ * A Project override may only narrow the host table: every slot and every
+ * candidate it names must exist there. The first thing outside is the reason.
+ */
+function outsideHost(
+  override: NativeHarnessRoutingConfiguration,
+  host: NativeHarnessRoutingConfiguration,
+): string | undefined {
+  for (const slot of override.slots) {
+    const hostSlot = host.slots.find((entry) => String(entry.id) === String(slot.id));
+    if (hostSlot === undefined) return `Slot "${String(slot.id)}" is not in the host table.`;
+    for (const candidate of slot.candidates) {
+      const known = hostSlot.candidates.some(
+        (entry) =>
+          String(entry.hostId) === String(candidate.hostId) &&
+          String(entry.providerInstanceId) === String(candidate.providerInstanceId) &&
+          String(entry.modelId) === String(candidate.modelId),
+      );
+      if (!known) {
+        return `Model "${String(candidate.modelId)}" is not in the host's "${String(slot.id)}" slot.`;
+      }
+    }
+  }
+  for (const binding of override.jobSlots) {
+    if (!host.slots.some((entry) => String(entry.id) === String(binding.slotId))) {
+      return `Job "${binding.job}" points at slot "${String(binding.slotId)}", which is not in the host table.`;
+    }
+  }
+  return undefined;
+}
+
 function refused(
-  reason: "stale-version" | "not-authorized" | "project-not-found",
+  reason: "stale-version" | "not-authorized" | "project-not-found" | "not-a-subset",
   message: string,
 ): NativeHarnessRoutingCommandResult {
   return { kind: "routing-refused", reason, message };

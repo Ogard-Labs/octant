@@ -51,7 +51,11 @@ async function runTask(task: BenchmarkTask, commit: string): Promise<ScoreboardR
       text += String(chunk);
     });
     child.on("error", fail);
-    child.on("close", () => done(text));
+    child.on("close", (code) => {
+      // A run that died is a failed run, never an "unknown" success.
+      if (code === 0) done(text);
+      else fail(new Error(`octant agent exited with code ${String(code)} on task ${task.id}.`));
+    });
   });
   const lines = output
     .split("\n")

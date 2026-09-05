@@ -538,7 +538,8 @@ modelId }`, and the model picker is provider-first. Discovery can find
 ### Native harness
 
 Direct-endpoint providers (`openai-compatible`, `anthropic-compatible`,
-`azure-foundry`, `ollama`) run under the native harness in `apps/server/src/harness`:
+`azure-foundry`; `ollama` joins once its driver runs the tool loop) run under the
+native harness in `apps/server/src/harness`:
 
 - **Tools.** `createNativeHarnessTools` composes the nine working tools and
   the harness reads as one `AppManagedToolSet`, trimmed by mode through the

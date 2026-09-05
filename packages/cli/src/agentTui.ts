@@ -83,9 +83,11 @@ export async function runAgentTui(input: RunAgentTuiInput): Promise<number | "un
     targetFps: 30,
     useMouse: true,
   });
-  const mode = (await renderer.waitForThemeMode(400)) === "light" ? "light" : "dark";
-  const screen = mountAgentScreen(tui, renderer, paletteFor(input.themeId, mode), input);
+  // From here the terminal is in raw mode on the alternate screen; every
+  // exit, including a failure while setting up, must give it back.
   try {
+    const mode = (await renderer.waitForThemeMode(400)) === "light" ? "light" : "dark";
+    const screen = mountAgentScreen(tui, renderer, paletteFor(input.themeId, mode), input);
     return await screen.run();
   } finally {
     renderer.destroy();
@@ -688,21 +690,16 @@ class AgentScreen {
         }),
       );
     }
+    // Every recorded call has finished; the one in flight is not known by
+    // name, so the spinner gets its own last line rather than masking a result.
     shown.forEach((tool, index) => {
-      const last = index === shown.length - 1;
-      const running = spinner !== undefined && last;
-      const mark = running
-        ? fg(p.accent)(spinner)
-        : tool.status === "ok"
-          ? fg(p.success)("✓")
-          : fg(p.danger)("✗");
-      const name = fg(running ? p.text : p.accent)(tool.name.padEnd(width));
-      const summary = fg(tool.status === "ok" || running ? p.textSecondary : p.danger)(
-        tool.summary,
+      const last = index === shown.length - 1 && spinner === undefined;
+      const mark = tool.status === "ok" ? fg(p.success)("✓") : fg(p.danger)("✗");
+      const name = fg(p.accent)(tool.name.padEnd(width));
+      const summary = fg(tool.status === "ok" ? p.textSecondary : p.danger)(tool.summary);
+      const tail = dim(
+        fg(p.muted)(`  ${tool.duration}${tool.status === "ok" ? "" : ` · ${tool.status}`}`),
       );
-      const tail = running
-        ? fg(p.accent)("  running")
-        : dim(fg(p.muted)(`  ${tool.duration}${tool.status === "ok" ? "" : ` · ${tool.status}`}`));
       into.add(
         new TextRenderable(this.#renderer, {
           content: t`${dim(fg(p.muted)(last ? "└" : "├"))} ${mark} ${name} ${summary}${tail}`,
@@ -710,6 +707,13 @@ class AgentScreen {
       );
       if (this.#verbose && tool.detail !== undefined) into.add(this.#detail(tool));
     });
+    if (spinner !== undefined) {
+      into.add(
+        new TextRenderable(this.#renderer, {
+          content: t`${dim(fg(p.muted)("└"))} ${fg(p.accent)(spinner)} ${fg(p.textSecondary)("working")}`,
+        }),
+      );
+    }
   }
 
   /** An edit's diff or a command's output, indented under its line. */

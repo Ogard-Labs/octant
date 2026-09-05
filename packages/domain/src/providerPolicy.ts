@@ -102,12 +102,13 @@ export function isImageProfileDriverKind(
  */
 export function isNativeHarnessDriverKind(
   driverKind: ProviderDriverKind,
-): driverKind is "openai-compatible" | "anthropic-compatible" | "azure-foundry" | "ollama" {
+): driverKind is "openai-compatible" | "anthropic-compatible" | "azure-foundry" {
+  // Ollama joins once its driver runs the tool loop; offering it as a slot
+  // candidate before then would route a lead to a model that cannot act.
   return (
     driverKind === "openai-compatible" ||
     driverKind === "anthropic-compatible" ||
-    driverKind === "azure-foundry" ||
-    driverKind === "ollama"
+    driverKind === "azure-foundry"
   );
 }
 

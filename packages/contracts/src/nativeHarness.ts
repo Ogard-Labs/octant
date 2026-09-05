@@ -1032,6 +1032,8 @@ export const NativeHarnessSession = Schema.Struct({
   detail: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
   turnsRun: NonNegativeInt,
   cutovers: NonNegativeInt,
+  /** Totals over every turn, kept even after the view's turn list has scrolled old ones out. */
+  usage: Schema.optional(NativeHarnessTurnUsage),
   startedAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
   version: AggregateVersion,

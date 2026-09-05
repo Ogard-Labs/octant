@@ -107,6 +107,8 @@ const MAX_PROVIDER_ATTACHMENTS = 16;
 export const MAX_PROVIDER_CONTEXT_BLOCKS = 256;
 // The native harness offers twelve tools beside research and extension tools;
 // the wire protocols this bound guards accept far more than that.
+/** The largest tool result any driver encodes; larger results are previewed. */
+export const MAX_PROVIDER_TOOL_RESULT_BYTES = 65_536;
 export const MAX_PROVIDER_TOOLS = 32;
 const ProviderAttachmentBytes = Schema.declare(
   (input: unknown): input is Uint8Array =>

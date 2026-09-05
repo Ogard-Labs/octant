@@ -63,7 +63,10 @@ export function nativeHarnessJobForRole(role: AgentRunRole): NativeHarnessJob {
 export function resolveNativeHarnessRoute(
   input: ResolveNativeHarnessRouteInput,
 ): NativeHarnessRouteDecision {
-  const requestedSlotId = bindingFor(input.job, input.project) ?? bindingFor(input.job, input.host);
+  // A Project may rebind a job; a job it leaves alone keeps the host's own
+  // binding, explicit or default, rather than the built-in default.
+  const requestedSlotId =
+    explicitBindingFor(input.job, input.project) ?? bindingFor(input.job, input.host);
   const base = { job: input.job, decidedAt: input.now } as const;
   let slot = requestedSlotId === undefined ? undefined : slotFor(requestedSlotId, input);
   let unconfigured = false;
@@ -131,11 +134,18 @@ export function resolveNativeHarnessRoute(
   };
 }
 
+function explicitBindingFor(
+  job: NativeHarnessJob,
+  configuration: NativeHarnessRoutingConfiguration | undefined,
+): NativeHarnessSlotId | undefined {
+  return configuration?.jobSlots.find((binding) => binding.job === job)?.slotId;
+}
+
 function bindingFor(
   job: NativeHarnessJob,
   configuration: NativeHarnessRoutingConfiguration | undefined,
 ): NativeHarnessSlotId | undefined {
-  const explicit = configuration?.jobSlots.find((binding) => binding.job === job)?.slotId;
+  const explicit = explicitBindingFor(job, configuration);
   if (explicit !== undefined) return explicit;
   if (configuration === undefined) return undefined;
   return DEFAULT_NATIVE_HARNESS_JOB_SLOTS.find((binding) => binding.job === job)?.slotId;

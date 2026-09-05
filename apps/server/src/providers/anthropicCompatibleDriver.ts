@@ -333,7 +333,10 @@ function makeConnection(
       answerUserInput: () =>
         Effect.fail(failure("unsupported", "This provider does not support user questions.")),
       answerTool: (input) =>
-        answerToolEffect(options, stateFor(input.sessionId), input, offer, clock),
+        Effect.try({
+          try: () => stateFor(input.sessionId),
+          catch: (error) => sanitizeFailure(error),
+        }).pipe(Effect.flatMap((state) => answerToolEffect(options, state, input, offer, clock))),
     };
   });
 }
@@ -379,13 +382,15 @@ function answerToolEffect(
       state.abortController = controller;
       const priorHistory = state.history.slice();
       const started = deferred();
+      // The history entry above already carries every tool_result; sending
+      // the answers again would put each tool_use_id in two blocks.
       const turn = runTurn(
         options,
         state,
         priorHistory,
         "",
         state.activeTools,
-        state.toolAnswers.slice(),
+        [],
         controller.signal,
         offer,
         clock,

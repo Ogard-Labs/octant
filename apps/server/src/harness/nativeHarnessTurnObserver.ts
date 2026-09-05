@@ -189,7 +189,9 @@ export class NativeHarnessTurnObserver {
     if (followUps !== undefined) this.#options.sessions.recordFollowUps(input.threadId, followUps);
     if (input.contextSubject !== undefined)
       this.#recordReductions(input.threadId, turnId, input.contextSubject);
-    await this.#review(input, turnId);
+    // The advisor answers in its own time; the thread is free the moment the
+    // turn is recorded, and its verdict lands on the session when it arrives.
+    void this.#review(input, turnId).catch(() => undefined);
   }
 
   #recordReductions(threadId: string, turnId: string, subject: ContextSubjectRef): void {
