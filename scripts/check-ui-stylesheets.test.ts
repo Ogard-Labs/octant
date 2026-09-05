@@ -101,6 +101,18 @@ describe("UI stylesheet check", () => {
     ]);
   });
 
+  it("flags a raw duration and an annotation however they are cased or spaced", () => {
+    expect(
+      findStylesheetFindings({
+        [CSS]: [
+          ".a { TRANSITION-DELAY: 120ms; }",
+          ".b { margin: 0 ! IMPORTANT; }",
+          ".c { --Transition-Delay: 120ms; }",
+        ].join("\n"),
+      }).map((finding) => `${finding.rule} ${String(finding.line)}`),
+    ).toEqual(["motion-literal 1", "important 2"]);
+  });
+
   it("flags a selector that only spells an accessibility feature out", () => {
     expect(
       findStylesheetFindings({

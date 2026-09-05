@@ -63,12 +63,13 @@ const ACCESSIBILITY_MEDIA =
 // transcript headings) and the handful of titles are the accepted residue.
 const HEAVY_WEIGHT = /^(?:bold|bolder|var\(--oct-weight-strong\))$/;
 
+// CSS allows whitespace between `!` and the keyword and matches the keyword
+// case-insensitively, so `! IMPORTANT` is the same annotation as `!important`.
+const IMPORTANT_ANNOTATION = /!\s*important\b/i;
+
 /** `!important` and casing must not let a weight slip past the 500 limit. */
 function isHeavyWeight(value: string): boolean {
-  const weight = value
-    .replace(/!important/i, "")
-    .trim()
-    .toLowerCase();
+  const weight = value.replace(IMPORTANT_ANNOTATION, "").trim().toLowerCase();
   const numeric = Number(weight);
   return Number.isFinite(numeric) && weight !== "" ? numeric > 500 : HEAVY_WEIGHT.test(weight);
 }
@@ -170,6 +171,9 @@ export function findStylesheetFindings(
     for (const declaration of readDeclarations(source)) {
       const { property, value, line, exempt, headers } = declaration;
       const isToken = property.startsWith("--");
+      // A standard property name is ASCII case-insensitive; a custom property
+      // name is not, so only the standard names are folded.
+      const name = isToken ? property : property.toLowerCase();
       const push = (rule: StylesheetRule, detail: string): void => {
         findings.push({ rule, file: normalized, line, detail });
       };
@@ -178,17 +182,17 @@ export function findStylesheetFindings(
         const color = COLOR_LITERAL.exec(value);
         if (color) push("color-literal", `${property} uses a raw colour: ${color[0]}`);
       }
-      if (property === "font-size" && !fontSizeOnScale(value)) {
+      if (name === "font-size" && !fontSizeOnScale(value)) {
         push("font-size-scale", `font-size ${value} is not a type-scale token`);
       }
-      if (!isToken && MOTION_PROPERTY.test(property) && !MOTION_TOKEN.test(value)) {
+      if (!isToken && MOTION_PROPERTY.test(name) && !MOTION_TOKEN.test(value)) {
         const literal = MOTION_LITERAL.exec(value);
         if (literal) push("motion-literal", `${property} uses a raw duration: ${literal[0]}`);
       }
-      if (value.includes("!important") && !isAccessibilityFallback(headers)) {
+      if (IMPORTANT_ANNOTATION.test(value) && !isAccessibilityFallback(headers)) {
         push("important", `${property} uses !important outside an accessibility fallback`);
       }
-      if (!isToken && property === "font-weight" && isHeavyWeight(value)) {
+      if (!isToken && name === "font-weight" && isHeavyWeight(value)) {
         push("heavy-weight", `font-weight ${value} is heavier than a page title`);
       }
     }
