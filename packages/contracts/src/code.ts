@@ -12,6 +12,7 @@ import {
   ProviderModelId,
   ThreadProviderHandoff,
 } from "./providers";
+import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -893,6 +894,12 @@ export type CodeThreadActivity = typeof CodeThreadActivity.Type;
  * way board reasons are, and the chip is a projection over the persisted
  * checkout identity (no filesystem probe on a navigation tick). `checkoutChip`
  * is absent for the Project's default checkout so the row stays quiet there.
+ *
+ * `pullRequestSummaries` carries the same bounded, authority-filtered join the
+ * board card shows, read from the cached snapshot and never from GitHub. It is
+ * absent — not empty — when the thread has no exact linked pull request, when
+ * GitHub authority is revoked, or when the host wired no snapshot, so a row
+ * with nothing to show costs nothing on the wire.
  */
 export const CodeNavigationRuntime = Schema.Struct({
   threadId: CodeThreadId,
@@ -903,6 +910,7 @@ export const CodeNavigationRuntime = Schema.Struct({
       label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
     }).annotations(strict),
   ),
+  pullRequestSummaries: Schema.optional(ThreadBoardPullRequestSummaries),
 }).annotations(strict);
 export type CodeNavigationRuntime = typeof CodeNavigationRuntime.Type;
 

@@ -1962,6 +1962,27 @@ input.switch:checked::after {
   box-shadow: var(--oct-elev-overlay, var(--oct-elev-raised));
 }
 
+/* The preview card is the tooltip card's interactive sibling: the same raised
+   ground, but the pointer can cross into it and press what it holds. It sits
+   at the tooltip's layer so a card opened from a menu-adjacent row is never
+   buried under the dock. */
+.octant-preview-card__positioner {
+  z-index: var(--oct-z-toast);
+}
+
+.octant-preview-card {
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 10px 12px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+  color: var(--oct-fg);
+  box-shadow: var(--oct-elev-overlay, var(--oct-elev-raised));
+  font-size: var(--oct-text-sm);
+  line-height: 1.25;
+  outline: none;
+}
+
 /* ─── modal ───────────────────────────────────────────────────────────
    Built on <dialog> so focus trapping, Esc, and inertness come from the
    platform rather than from JS we would have to maintain. */

@@ -445,6 +445,47 @@ describe("CodeProjectPullRequestService", () => {
     ]);
   });
 
+  it("reuses one board join for sidebar navigation reads until it ages out or a refresh replaces it", async () => {
+    let clockMs = Date.parse(now);
+    const remoteLookup = vi.fn(
+      async (): Promise<ReadonlyArray<{ name: string; fetchUrl: string; pushUrl: string }>> => [
+        {
+          name: "origin",
+          fetchUrl: "https://github.com/octant/octant.git",
+          pushUrl: "https://github.com/octant/octant.git",
+        },
+      ],
+    );
+    const { service, listActive } = serviceFixture({
+      projects: [codeProject({ id: projectA, name: "Octant", root: "/repos/octant" })],
+      remoteLookup,
+      clock: () => new Date(clockMs).toISOString(),
+    });
+
+    const first = await service.navigationSnapshot(windowId);
+    const second = await service.navigationSnapshot(windowId);
+
+    expect(second).toBe(first);
+    expect(remoteLookup).toHaveBeenCalledTimes(1);
+    expect(listActive).not.toHaveBeenCalled();
+
+    clockMs += 10_001;
+    await service.navigationSnapshot(windowId);
+    expect(remoteLookup).toHaveBeenCalledTimes(2);
+
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    const refreshedCalls = remoteLookup.mock.calls.length;
+    const afterRefresh = await service.navigationSnapshot(windowId);
+    expect(remoteLookup.mock.calls.length).toBe(refreshedCalls + 1);
+    expect(afterRefresh.rows.map((row) => row.number)).toEqual([12]);
+
+    service.revokeGithub();
+    await expect(service.navigationSnapshot(windowId)).resolves.toMatchObject({
+      rows: [],
+      githubRevoked: true,
+    });
+  });
+
   it("keeps another window's linked pull-request pairs when a window with disjoint thread visibility refreshes", async () => {
     // Window A's renderer can only see the Octant Project's threads; window B
     // only works in Docs. The snapshot they share must carry both Projects'
