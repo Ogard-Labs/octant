@@ -12,6 +12,7 @@ import type { PlanClient } from "@octant/client-runtime/plan-client";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
+import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { HostClient } from "@octant/client-runtime/host-client";
@@ -400,6 +401,7 @@ export interface AppProps {
   readonly agentProfileClient?: AgentProfileClient;
   readonly agentRunClient?: AgentRunClient;
   readonly agentRunSettingsClient?: AgentRunSettingsClient;
+  readonly nativeHarnessClient?: NativeHarnessClient;
   readonly browserAutomationClient?: BrowserAutomationClient;
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly automationClient?: AutomationClient;
@@ -973,6 +975,7 @@ function LaunchedShell(
         agentProfileClient: props.agentProfileClient,
         agentRunClient: props.agentRunClient,
         agentRunSettingsClient: props.agentRunSettingsClient,
+        nativeHarnessClient: props.nativeHarnessClient,
         appleToolchainClient: props.appleToolchainClient,
         automationClient: props.automationClient,
         browserAutomationClient: props.browserAutomationClient,
@@ -993,6 +996,7 @@ function LaunchedShell(
       props.agentProfileClient,
       props.agentRunClient,
       props.agentRunSettingsClient,
+      props.nativeHarnessClient,
       props.appleToolchainClient,
       props.automationClient,
       props.browserAutomationClient,
@@ -1017,6 +1021,7 @@ function LaunchedShell(
     agentProfileClient,
     agentRunClient,
     agentRunSettingsClient,
+    nativeHarnessClient,
     appleToolchainClient,
     automationClient,
     automationNotificationClient,
@@ -2396,6 +2401,7 @@ function LaunchedShell(
         key={`${dockThreadKey}:${utilityTab?.id ?? surface}`}
         agentRunClient={agentRunClient}
         agentRunSettingsClient={agentRunSettingsClient}
+        nativeHarnessClient={nativeHarnessClient}
         {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
         appleToolchainClient={appleToolchainClient}
         {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}
@@ -4220,6 +4226,7 @@ function LaunchedShell(
             },
           })}
       agentRunSettingsClient={agentRunSettingsClient}
+      nativeHarnessClient={nativeHarnessClient}
       automationNotificationClient={automationNotificationClient}
       isNarrow={isNarrow}
       nativeBoundsAvailable={nativeHost !== undefined}

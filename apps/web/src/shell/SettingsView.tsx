@@ -73,6 +73,13 @@ import { ExtensionsSettingsView } from "../extensions/ExtensionsSettingsView";
 import type { ThemeController } from "../theme/useThemeController";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import { AgentRunSettingsPanel } from "../agents/AgentRunSettingsPanel";
+import {
+  NativeHarnessRoutingPanel,
+  type NativeHarnessProviderOption,
+} from "../harness/NativeHarnessRoutingPanel";
+import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
+import { LOCAL_HOST_ID } from "@octant/contracts";
+import { isNativeHarnessDriverKind } from "@octant/domain";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ThemeAppearanceEditor } from "../theme/ThemeAppearanceEditor";
 import { AppUpdateSettings } from "../settings/AppUpdateSettings";
@@ -128,6 +135,7 @@ export interface SettingsViewProps {
   readonly themeController?: ThemeController;
   readonly executionProfiles?: ReactNode;
   readonly agentRunSettingsClient?: AgentRunSettingsClient;
+  readonly nativeHarnessClient?: NativeHarnessClient;
   readonly automationNotificationClient?: AutomationNotificationClient;
   /**
    * Stand-in override for first-party plugin effectiveness. Production uses
@@ -517,6 +525,13 @@ function ActiveSectionContent({
       return props.agentRunSettingsClient !== undefined ? (
         <div id="settings-agents">
           <AgentRunSettingsPanel client={props.agentRunSettingsClient} />
+          {props.nativeHarnessClient === undefined ? null : (
+            <NativeHarnessRoutingPanel
+              client={props.nativeHarnessClient}
+              hostId={LOCAL_HOST_ID}
+              providers={nativeHarnessProviderOptions(props.providerController)}
+            />
+          )}
         </div>
       ) : null;
     case "advanced":
@@ -1344,4 +1359,22 @@ function SidebarBackgroundSettings({
       ) : null}
     </div>
   );
+}
+
+/** The direct-endpoint providers a slot may name, with the models each reports. */
+function nativeHarnessProviderOptions(
+  controller: SettingsViewProps["providerController"],
+): ReadonlyArray<NativeHarnessProviderOption> {
+  if (controller === undefined) return [];
+  return controller.instances
+    .filter((instance) => instance.enabled && isNativeHarnessDriverKind(instance.driverKind))
+    .map((instance) => ({
+      instanceId: String(instance.id),
+      label: instance.displayName,
+      models: (controller.observedByInstance.get(instance.id)?.models ?? []).map((model) => ({
+        id: String(model.id),
+        label: model.displayName,
+      })),
+    }))
+    .filter((option) => option.models.length > 0);
 }

@@ -1,0 +1,138 @@
+.native-harness-panel__lead,
+.native-harness-card__detail {
+  margin: 0 0 0.75rem;
+  color: var(--color-muted-foreground);
+}
+
+.native-harness-panel__empty,
+.native-harness-panel__message {
+  margin: 0.5rem 0 0;
+  color: var(--color-muted-foreground);
+}
+
+.native-harness-panel__error {
+  margin: 0.5rem 0 0;
+  color: var(--color-destructive);
+}
+
+.native-harness-slots,
+.native-harness-jobs {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.native-harness-slot {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.native-harness-slot__head,
+.native-harness-candidate,
+.native-harness-job,
+.native-harness-card__head,
+.native-harness-panel__actions,
+.native-harness-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.native-harness-slot__head {
+  justify-content: space-between;
+}
+
+.native-harness-slot__count,
+.native-harness-candidate__rank {
+  font-size: var(--text-sm);
+  color: var(--color-muted-foreground);
+}
+
+.native-harness-candidate {
+  margin-top: 0.5rem;
+}
+
+.native-harness-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+  margin-bottom: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, Canvas 92%, CanvasText 8%);
+}
+
+.native-harness-card__head h3,
+.native-harness-card h4 {
+  flex: 1;
+  margin: 0;
+  font-size: 1rem;
+}
+
+.native-harness-card h4 {
+  margin-top: 0.5rem;
+  font-size: var(--text-sm);
+  color: var(--color-muted-foreground);
+}
+
+.native-harness-card__status {
+  padding: 0 0.5rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  background: color-mix(in srgb, CanvasText 10%, transparent);
+}
+
+.native-harness-card__status--running {
+  background: color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+
+.native-harness-card__status--paused-by-advisor,
+.native-harness-card__status--paused-by-user,
+.native-harness-card__status--budget-limited,
+.native-harness-card__status--failed {
+  background: color-mix(in srgb, var(--color-destructive) 25%, transparent);
+}
+
+.native-harness-card__facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0;
+}
+
+.native-harness-card__facts dt {
+  color: var(--color-muted-foreground);
+}
+
+.native-harness-card__facts dd {
+  margin: 0;
+}
+
+.native-harness-card__list {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.native-harness-route--failure-fallback,
+.native-harness-route--unconfigured-slot,
+.native-harness-route--unroutable {
+  color: var(--color-destructive);
+}
+
+.native-harness-preview {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.native-harness-preview__prompt {
+  padding: 0.5rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+  background: color-mix(in srgb, CanvasText 6%, transparent);
+}
