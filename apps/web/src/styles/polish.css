@@ -8,8 +8,8 @@
 
 .workspace-pane__grip {
   transition:
-    background-color 120ms ease,
-    color 120ms ease;
+    background-color var(--oct-motion-fast) ease,
+    color var(--oct-motion-fast) ease;
 }
 
 .settings-view__header h1 {
@@ -26,8 +26,8 @@
 .provider-card {
   border-radius: var(--oct-radius-sm);
   transition:
-    border-color 140ms ease,
-    background-color 140ms ease;
+    border-color var(--oct-motion-fast) ease,
+    background-color var(--oct-motion-fast) ease;
 }
 
 .provider-card:hover {
@@ -39,10 +39,10 @@
 .chat-composer textarea,
 .chat-composer [role="combobox"] {
   transition:
-    background-color 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease,
-    opacity 120ms ease;
+    background-color var(--oct-motion-fast) ease,
+    border-color var(--oct-motion-fast) ease,
+    color var(--oct-motion-fast) ease,
+    opacity var(--oct-motion-fast) ease;
 }
 
 .chat-composer__actions > button:last-child:not(:disabled) {
@@ -51,7 +51,7 @@
 }
 
 .project-dialog {
-  animation: octant-dialog-enter 140ms cubic-bezier(0.2, 0, 0, 1);
+  animation: octant-dialog-enter var(--oct-motion-fast) cubic-bezier(0.2, 0, 0, 1);
 }
 
 @keyframes octant-dialog-enter {

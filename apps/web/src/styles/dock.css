@@ -231,7 +231,7 @@
 .dock-work-map__header h2 {
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
 }
 
 .dock-work-map__header p,
@@ -540,7 +540,7 @@
 
 .navigator-panel__header h2 {
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
 }
 
 .navigator-panel__header p {

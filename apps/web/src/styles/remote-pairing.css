@@ -116,6 +116,6 @@
   color: var(--oct-fg);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-2xl);
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
   letter-spacing: 0.12em;
 }

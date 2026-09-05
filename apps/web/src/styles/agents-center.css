@@ -78,7 +78,7 @@
 }
 
 .agents-center-row__task {
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
 }
 
 .agents-center-row__meta {
@@ -86,7 +86,7 @@
   flex-wrap: wrap;
   gap: 0.5rem;
   color: var(--oct-muted);
-  font-size: 0.8125rem;
+  font-size: var(--oct-text-sm);
 }
 
 .agents-center-row__actions {
@@ -110,7 +110,7 @@
 
 .agents-center-detail__title {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--oct-text-lg);
 }
 
 .agents-center-detail__state,
@@ -139,7 +139,7 @@
 
 .agents-center-detail__facts dt {
   color: var(--oct-muted);
-  font-size: 0.75rem;
+  font-size: var(--oct-text-detail);
 }
 
 .agents-center-detail__facts dd {
