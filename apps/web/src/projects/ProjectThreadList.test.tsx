@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { decodeProjectId, type ThreadBoardPullRequestSummaries } from "@octant/contracts";
 import { ProjectThreadRows } from "./ProjectThreadList";
 
 const thread = {
@@ -8,6 +9,27 @@ const thread = {
   title: "Controller foundation",
   provider: { displayName: "Claude", driverKind: "claude" },
 } as const;
+
+const projectId = decodeProjectId("10000000-0000-4000-8000-000000000001");
+
+function pullRequest(
+  number: number,
+  overrides: Partial<ThreadBoardPullRequestSummaries["items"][number]> = {},
+): ThreadBoardPullRequestSummaries["items"][number] {
+  return {
+    identity: { projectId, repositoryOwner: "octant", repositoryName: "octant", number },
+    title: `Sidebar pull request ${String(number)}`,
+    state: "open",
+    checks: "passing",
+    review: "approved",
+    mergeability: "mergeable",
+    freshness: "fresh",
+    readyToMerge: true,
+    ...overrides,
+  };
+}
+
+const identity12 = { projectId, repositoryOwner: "octant", repositoryName: "octant", number: 12 };
 
 describe("ProjectThreadRows", () => {
   it("keeps a long thread list bounded to the visible window", async () => {
@@ -519,7 +541,7 @@ describe("ProjectThreadRows", () => {
     const row = screen.getByRole("button", { name: /Controller foundation/ });
     await user.hover(row);
 
-    const card = await screen.findByRole("tooltip");
+    const card = await screen.findByRole("group", { name: "Thread details" });
     expect(card).toHaveTextContent("Controller foundation");
     expect(card).toHaveTextContent("Core Project");
     expect(card).toHaveTextContent("Pinned");
@@ -746,7 +768,7 @@ describe("ProjectThreadRows", () => {
     );
 
     await user.hover(screen.getByRole("button", { name: /Second direction/ }));
-    const card = await screen.findByRole("tooltip");
+    const card = await screen.findByRole("group", { name: "Thread details" });
     expect(card).toHaveTextContent("Forked from Original direction");
   });
 
@@ -779,6 +801,145 @@ describe("ProjectThreadRows", () => {
     expect(onSelectThread).not.toHaveBeenCalled();
   });
 
+  it("shows a Code thread's linked pull request in the info card and opens it in Review", async () => {
+    const user = userEvent.setup();
+    const onOpenPullRequest = vi.fn();
+    const onOpenPullRequestOnGithub = vi.fn();
+    const onSelectThread = vi.fn();
+    render(
+      <ProjectThreadRows
+        actions={{ onOpenPullRequest, onOpenPullRequestOnGithub }}
+        onSelectThread={onSelectThread}
+        projectNameForThread={() => "Core Project"}
+        threads={[
+          {
+            ...thread,
+            pullRequests: {
+              items: [pullRequest(12, { freshness: "stale", readyToMerge: false })],
+              hiddenCount: 0,
+            },
+          },
+        ]}
+      />,
+    );
+
+    await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
+    const card = await screen.findByRole("group", { name: "Thread details" });
+    const reference = within(card).getByRole("button", { name: /Open pull request #12/ });
+    expect(reference).toHaveAccessibleName(
+      "Open pull request #12: Sidebar pull request 12 · octant/octant · Open · Checks passing · Approved · Stale snapshot",
+    );
+    expect(within(card).getByRole("button", { name: "Open #12 on GitHub" })).toBeVisible();
+
+    await user.click(reference);
+
+    expect(onOpenPullRequest).toHaveBeenCalledWith(identity12);
+    expect(onOpenPullRequestOnGithub).not.toHaveBeenCalled();
+    expect(onSelectThread).not.toHaveBeenCalled();
+  });
+
+  it("opens the pull request on GitHub with Cmd-click and through the explicit GitHub control", async () => {
+    const user = userEvent.setup();
+    const onOpenPullRequest = vi.fn();
+    const onOpenPullRequestOnGithub = vi.fn();
+    const onSelectThread = vi.fn();
+    render(
+      <ProjectThreadRows
+        actions={{ onOpenPullRequest, onOpenPullRequestOnGithub }}
+        onSelectThread={onSelectThread}
+        threads={[{ ...thread, pullRequests: { items: [pullRequest(12)], hiddenCount: 0 } }]}
+      />,
+    );
+
+    await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
+    const card = await screen.findByRole("group", { name: "Thread details" });
+
+    await user.keyboard("{Meta>}");
+    await user.click(within(card).getByRole("button", { name: /Open pull request #12/ }));
+    await user.keyboard("{/Meta}");
+    expect(onOpenPullRequestOnGithub).toHaveBeenCalledWith(identity12);
+    expect(onOpenPullRequest).not.toHaveBeenCalled();
+
+    await user.click(within(card).getByRole("button", { name: "Open #12 on GitHub" }));
+    expect(onOpenPullRequestOnGithub).toHaveBeenCalledTimes(2);
+    expect(onSelectThread).not.toHaveBeenCalled();
+  });
+
+  it("keeps the info card free of pull-request controls when the thread has none", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProjectThreadRows
+        actions={{ onOpenPullRequest: vi.fn(), onOpenPullRequestOnGithub: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+
+    await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
+    const card = await screen.findByRole("group", { name: "Thread details" });
+
+    expect(within(card).queryByRole("group", { name: "Linked pull requests" })).toBeNull();
+    expect(within(card).queryByRole("button")).toBeNull();
+  });
+
+  it("shows a compact overflow count past the display bound and no external route without one", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProjectThreadRows
+        actions={{ onOpenPullRequest: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[
+          {
+            ...thread,
+            pullRequests: {
+              items: [pullRequest(12), pullRequest(13), pullRequest(14)],
+              hiddenCount: 2,
+            },
+          },
+        ]}
+      />,
+    );
+
+    await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
+    const card = await screen.findByRole("group", { name: "Thread details" });
+    const list = within(card).getByRole("group", { name: "Linked pull requests" });
+
+    expect(within(list).getAllByRole("button")).toHaveLength(3);
+    expect(list).toHaveTextContent("+2 more");
+    expect(within(list).queryByRole("button", { name: /on GitHub/ })).toBeNull();
+  });
+
+  it("offers both pull-request destinations from the row menus for keyboard and coarse pointers", async () => {
+    const user = userEvent.setup();
+    const onOpenPullRequest = vi.fn();
+    const onOpenPullRequestOnGithub = vi.fn();
+    render(
+      <ProjectThreadRows
+        actions={{
+          onArchiveThread: vi.fn(),
+          onOpenPullRequest,
+          onOpenPullRequestOnGithub,
+          onPinThread: vi.fn(),
+        }}
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, pullRequests: { items: [pullRequest(12)], hiddenCount: 0 } }]}
+      />,
+    );
+
+    await user.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+    await user.click(await screen.findByRole("menuitem", { name: "Open pull request #12" }));
+    expect(onOpenPullRequest).toHaveBeenCalledWith(identity12);
+
+    const overflow = screen.getByRole("button", { name: "Thread actions" });
+    overflow.focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Open #12 on GitHub" }));
+    expect(onOpenPullRequestOnGithub).toHaveBeenCalledWith(identity12);
+  });
+
   it("omits an unparseable updated timestamp from the hover info card", async () => {
     const user = userEvent.setup();
     render(
@@ -792,7 +953,7 @@ describe("ProjectThreadRows", () => {
     const row = screen.getByRole("button", { name: /Controller foundation/ });
     await user.hover(row);
 
-    const card = await screen.findByRole("tooltip");
+    const card = await screen.findByRole("group", { name: "Thread details" });
     expect(card).not.toHaveTextContent("Updated");
     expect(card).not.toHaveTextContent("Invalid Date");
   });

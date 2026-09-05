@@ -1,4 +1,6 @@
+import type { ThreadBoardPullRequestIdentity } from "@octant/contracts";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
+import { threadRowPullRequestDestinations } from "./threadRowPullRequests";
 import {
   OctantContextMenuContent,
   OctantContextMenuGroup,
@@ -45,6 +47,16 @@ export interface ThreadRowActions {
   readonly onPinInPane?: (threadId: string) => void;
   /** Absent when the host cannot accept a list pin. */
   readonly onPinThread?: (threadId: string, pinned: boolean) => void;
+  /**
+   * Opens one of the row's exact linked pull requests in the read-only Review
+   * dock. Absent when this window has no Review dock to open it in.
+   */
+  readonly onOpenPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
+  /**
+   * Opens the same pull request on github.com in the default browser. Absent
+   * when no external route is offered, which also hides Cmd-click.
+   */
+  readonly onOpenPullRequestOnGithub?: (identity: ThreadBoardPullRequestIdentity) => void;
   /** Asks the list to open its rename field; the list owns the commit. */
   readonly onStartRenameThread?: (threadId: string) => void;
 }
@@ -61,6 +73,8 @@ export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boo
     actions.onMarkThreadUnread === undefined &&
     actions.onPinInPane === undefined &&
     actions.onPinThread === undefined &&
+    actions.onOpenPullRequest === undefined &&
+    actions.onOpenPullRequestOnGithub === undefined &&
     actions.onStartRenameThread === undefined
   );
 }
@@ -147,6 +161,17 @@ export function ThreadRowMenu(props: {
           Mark for follow-up
         </OctantContextMenuItem>
       )}
+      {/* Every destination the hover card offers is here too, because the
+              menu is where keyboard and touch reach them. */}
+      {threadRowPullRequestDestinations(props.thread, props.actions).map((destination) => (
+        <OctantContextMenuItem
+          key={destination.key}
+          label={destination.label}
+          onClick={destination.run}
+        >
+          {destination.label}
+        </OctantContextMenuItem>
+      ))}
       <OctantContextMenuSeparator />
       <OctantContextMenuItem label="Copy title" onClick={() => void copyText(props.thread.title)}>
         Copy title
