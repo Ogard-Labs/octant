@@ -282,7 +282,9 @@ function refuseEndpoint(
         resolution.status === "unconfigured"
           ? `${direction} is not configured.`
           : `${direction} is unavailable: ${resolution.reason}`,
-      category: "unconfigured",
+      // A removed or disabled instance is not the same problem as an empty
+      // Voice setting, and a surface offers a different next step for each.
+      category: resolution.status === "unconfigured" ? "unconfigured" : "unavailable",
       settingsTarget,
     } satisfies SpeechFailureResponse),
     412,
@@ -296,11 +298,12 @@ function providerFailure(failure: ProviderFailure, origin: string | null): Respo
       ? 429
       : failure.category === "interrupted"
         ? 499
-        : failure.category === "unauthenticated" || failure.category === "unauthorized"
-          ? 401
-          : failure.category === "unsupported"
-            ? 501
-            : 502;
+        : failure.category === "unsupported"
+          ? 501
+          : // A provider credential failure is not a window authority failure:
+            // 401 here would start local session renewal instead of surfacing
+            // the speech error.
+            502;
   return json(
     decodeSpeechFailureResponse({
       error: failure.message,

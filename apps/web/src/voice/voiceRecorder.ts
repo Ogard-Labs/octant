@@ -36,6 +36,9 @@ interface ActiveRecording {
   readonly startedAt: number;
   readonly mimeType: string;
   settle: ((recording: VoiceRecording | undefined) => void) | undefined;
+  /** One promise per recording, so a second `stop()` awaits the same clip
+   * instead of releasing whatever recording has replaced this one. */
+  completion: Promise<VoiceRecording | undefined> | undefined;
 }
 
 const PREFERRED_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
@@ -57,46 +60,59 @@ export function useVoiceRecorder(): VoiceRecorder {
   const [state, setState] = useState<VoiceRecorderState>({ kind: "idle" });
   const [elapsedMs, setElapsedMs] = useState(0);
   const active = useRef<ActiveRecording | undefined>(undefined);
+  // Two synchronous guards, because a start races the browser's permission
+  // prompt: `starting` refuses a second start while the first still waits, and
+  // `generation` lets a cancel disown a stream that arrives after it.
+  const starting = useRef(false);
+  const generation = useRef(0);
   const supported = isVoiceRecordingSupported();
 
-  const teardown = useCallback(() => {
-    const current = active.current;
+  /** Releases the microphone only while this recording still owns the slot. */
+  const release = useCallback((recording: ActiveRecording) => {
+    if (active.current !== recording) return;
     active.current = undefined;
-    if (current !== undefined) {
-      for (const track of current.stream.getTracks()) track.stop();
-    }
+    for (const track of recording.stream.getTracks()) track.stop();
     setElapsedMs(0);
+    setState({ kind: "idle" });
   }, []);
 
   const stop = useCallback(async (): Promise<VoiceRecording | undefined> => {
     const current = active.current;
     if (current === undefined) return undefined;
-    if (current.recorder.state === "inactive") {
-      teardown();
-      setState({ kind: "idle" });
-      return undefined;
-    }
-    const recording = await new Promise<VoiceRecording | undefined>((resolve) => {
+    current.completion ??= new Promise<VoiceRecording | undefined>((resolve) => {
+      if (current.recorder.state === "inactive") {
+        resolve(undefined);
+        return;
+      }
       current.settle = resolve;
       current.recorder.stop();
     });
-    teardown();
-    setState({ kind: "idle" });
+    const recording = await current.completion;
+    release(current);
     return recording;
-  }, [teardown]);
+  }, [release]);
 
   const cancel = useCallback(() => {
+    // Any permission request still in flight now belongs to nobody.
+    generation.current += 1;
+    starting.current = false;
     const current = active.current;
     if (current !== undefined) {
+      const settle = current.settle;
       current.settle = undefined;
       if (current.recorder.state !== "inactive") current.recorder.stop();
+      active.current = undefined;
+      for (const track of current.stream.getTracks()) track.stop();
+      settle?.(undefined);
     }
-    teardown();
+    setElapsedMs(0);
     setState({ kind: "idle" });
-  }, [teardown]);
+  }, []);
 
   const start = useCallback(async () => {
-    if (active.current !== undefined || !supported) return;
+    if (active.current !== undefined || starting.current || !supported) return;
+    starting.current = true;
+    const token = generation.current;
     setState({ kind: "requesting" });
     let stream: MediaStream;
     try {
@@ -104,7 +120,15 @@ export function useVoiceRecorder(): VoiceRecorder {
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
       });
     } catch (error) {
-      setState({ kind: "unavailable", reason: describeMicrophoneFailure(error) });
+      starting.current = false;
+      if (generation.current === token) {
+        setState({ kind: "unavailable", reason: describeMicrophoneFailure(error) });
+      }
+      return;
+    }
+    starting.current = false;
+    if (generation.current !== token) {
+      for (const track of stream.getTracks()) track.stop();
       return;
     }
     const mimeType = PREFERRED_MIME_TYPES.find((candidate) =>
@@ -128,6 +152,7 @@ export function useVoiceRecorder(): VoiceRecorder {
       startedAt,
       mimeType: recorder.mimeType || mimeType || "audio/webm",
       settle: undefined,
+      completion: undefined,
     };
     recorder.ondataavailable = (event) => {
       if (event.data.size > 0) recording.chunks.push(event.data);

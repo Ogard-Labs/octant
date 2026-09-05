@@ -97,6 +97,19 @@ describe("speech endpoint policy", () => {
     ).toEqual({ status: "unavailable", reason: "The chosen provider no longer exists." });
   });
 
+  it("refuses to call synthesis ready when no voice is chosen", () => {
+    expect(
+      resolveSpeechEndpoint(
+        {
+          providerInstanceId: compatibleId as never,
+          modelId: "gpt-4o-mini-tts" as never,
+          voice: undefined,
+        },
+        instances,
+      ),
+    ).toEqual({ status: "unavailable", reason: "No voice is chosen." });
+  });
+
   it("reports each direction with the Settings link that fixes it", () => {
     const status = speechStatusOf(
       {

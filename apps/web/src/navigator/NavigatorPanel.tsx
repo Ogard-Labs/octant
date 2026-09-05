@@ -48,7 +48,9 @@ export function NavigatorPanel(props: NavigatorPanelProps) {
   const [readAloudOn, setReadAloudOn] = useState(false);
   // The reply on screen when read-aloud was switched on is not read: the
   // person has already seen it. Only replies that arrive afterwards speak.
-  const lastHeardReply = useRef<string | undefined>(undefined);
+  // `null` is the distinct baseline for "switched on with nothing on screen",
+  // so the first reply of an empty transcript is still read.
+  const lastHeardReply = useRef<string | null | undefined>(undefined);
   const latestReply = state.kind === "ready" ? latestAssistantReply(state.snapshot) : undefined;
   useEffect(() => {
     if (!readAloudOn || latestReply === undefined) return;
@@ -143,7 +145,7 @@ export function NavigatorPanel(props: NavigatorPanelProps) {
             onClick={() => {
               const next = !readAloudOn;
               setReadAloudOn(next);
-              lastHeardReply.current = undefined;
+              lastHeardReply.current = latestReply?.key ?? null;
               if (!next) readAloud.stop();
             }}
             size="sm"

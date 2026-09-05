@@ -37,6 +37,21 @@ function snapshot(
   } as NavigatorAssistantSnapshot;
 }
 
+/** A Navigator with nothing on screen that answers for the first time on send. */
+function emptyNavigatorClient(): NavigatorAssistantClient {
+  const existing = snapshot([]);
+  return {
+    snapshot: async () => existing,
+    execute: async () => ({
+      kind: "message-sent",
+      snapshot: snapshot([
+        { role: "user", text: "what now", createdAt: LATER },
+        { role: "assistant", text: "A first reply.", createdAt: LATER },
+      ]),
+    }),
+  } as unknown as NavigatorAssistantClient;
+}
+
 /** A Navigator that already answered once and answers again on send. */
 function navigatorClient(): NavigatorAssistantClient {
   const existing = snapshot([
@@ -113,6 +128,20 @@ describe("Navigator read-aloud", () => {
 
     await waitFor(() => expect(speak).toHaveBeenCalledTimes(1));
     expect((speak.mock.calls[0] as unknown as [{ text: string }])[0].text).toBe("A fresh reply.");
+  });
+
+  it("reads the first reply when read-aloud was switched on with an empty transcript", async () => {
+    const user = userEvent.setup();
+    const { speak } = stubSystemVoice();
+    render(<Harness client={emptyNavigatorClient()} />);
+    await screen.findByRole("log", { name: "Navigator transcript" });
+
+    await user.click(screen.getByRole("button", { name: "Read replies aloud (system voice)" }));
+    await user.type(screen.getByRole("textbox", { name: "Message Navigator" }), "what now");
+    await user.click(screen.getByRole("button", { name: "Send to Navigator" }));
+
+    await waitFor(() => expect(speak).toHaveBeenCalledTimes(1));
+    expect((speak.mock.calls[0] as unknown as [{ text: string }])[0].text).toBe("A first reply.");
   });
 
   it("asks the configured provider for audio instead of the system voice", async () => {
