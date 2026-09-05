@@ -336,6 +336,15 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     setWorktreeRefs(undefined);
     setRefsLoading(false);
     setWorkspaceOverride(undefined);
+    // A ref the reader picked belongs to the Project they picked it in. Left
+    // standing, it both kept the previous Project's branch on screen and told
+    // the adoption below that this Project's head had already been overruled.
+    // Falls back to whatever the caller seeded, not to nothing: a host that
+    // never lists refs still has that to show.
+    baseBranchChosen.current = false;
+    setBaseBranch(props.baseBranch ?? props.branchName ?? "");
+    // Only a change of Project resets this; the seed is read as it stands then.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
   const loadWorktreeRefs = useCallback(() => {
     if (projectId === undefined || execute === undefined) return;

@@ -140,7 +140,12 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
         aria-label="Chat defaults"
         className="setgroup"
         noValidate
-        onSubmit={(event) => event.preventDefault()}
+        onSubmit={(event) => {
+          // Enter in a text field submits without blurring it, so the commit
+          // that blur would have made has to happen here too.
+          event.preventDefault();
+          void commit({});
+        }}
       >
         <SettingRow
           description="The provider and model a new Chat thread starts with."

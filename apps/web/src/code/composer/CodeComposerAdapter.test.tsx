@@ -591,8 +591,8 @@ describe("CodeComposerAdapter interactions", () => {
         projectId: command.projectId,
         refs:
           command.projectId === firstProject
-            ? [{ name: "project-a-only", kind: "local" }]
-            : [{ name: "project-b-only", kind: "local" }],
+            ? [{ name: "project-a-only", kind: "local", isCurrent: true }]
+            : [{ name: "project-b-only", kind: "local", isCurrent: true }],
       };
     });
     const container = document.createElement("div");
@@ -636,6 +636,10 @@ describe("CodeComposerAdapter interactions", () => {
     });
     expect(document.body.textContent).not.toContain("project-a-only");
     expect(document.body.textContent).toContain("project-b-only");
+    // The tray names the new Project's head. Left standing, the previous
+    // Project's selection both showed the wrong branch and told the adoption
+    // that this Project's head had already been overruled.
+    expect(trigger()?.textContent).toContain("project-b-only");
     root.unmount();
     container.remove();
   });

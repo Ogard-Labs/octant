@@ -31,7 +31,7 @@
    only place the reader sees the window filling, and a value that snaps
    between renders reads as a redraw rather than as consumption. */
 .composer-context-meter__used {
-  stroke: currentColor;
+  stroke: currentcolor;
   stroke-width: 2.5;
   stroke-linecap: round;
   transition: stroke-dasharray 480ms cubic-bezier(0.22, 1, 0.36, 1);

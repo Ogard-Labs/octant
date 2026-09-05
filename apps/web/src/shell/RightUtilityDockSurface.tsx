@@ -84,18 +84,17 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
               tabs={props.tabs}
             />
           )}
-          {/* With no tool open the body already lists every tool; a second
-              entry point beside an empty strip is a control with nothing to
-              add. */}
-          {props.tabs.length === 0 ? null : (
-            <DockUtilityLauncher
-              onOpen={props.onOpenTab}
-              surfaces={remaining}
-              {...(props.launchableReferences === undefined
-                ? {}
-                : { references: props.launchableReferences })}
-            />
-          )}
+          {/* With no tool open the body already lists every tool, so a second
+              tool list beside an empty strip adds nothing. The task's own pull
+              requests are not in that body, so the launcher still appears for
+              those alone. */}
+          <DockUtilityLauncher
+            onOpen={props.onOpenTab}
+            surfaces={props.tabs.length === 0 ? [] : remaining}
+            {...(props.launchableReferences === undefined
+              ? {}
+              : { references: props.launchableReferences })}
+          />
         </div>
         <div className="right-utility-dock__actions">
           {props.onClose === undefined ? null : (

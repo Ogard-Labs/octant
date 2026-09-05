@@ -1870,17 +1870,20 @@ function LaunchedShell(
     (tab) => tab.id === displayedDockState.active,
   )?.surface;
   const dockResolution = resolveDockSurface(dockSurface);
+  const bottomPanelSurfaceIds = new Set(renderedBottomPanelState.tabs.map((tab) => tab.surface));
   const launchableDockSurfaces = RIGHT_UTILITY_DOCK_SURFACES.filter(
     (surface) =>
       resolveDockSurface(surface.id).kind === "surface" &&
       isDockToolLaunchable(surface.id, dockToolCapabilities) &&
       // A tool the bottom panel is already showing is hidden from the dock
       // launcher, because opening it there would only move the same single
-      // view. Terminal and Browser are the exception: a second one is a second
-      // shell or page, and hiding them left no way to run two at once.
+      // view. The panel holds several tools at once, so this asks whether the
+      // panel shows this tool at all — checking only its active tab made a
+      // second one launchable by switching tabs. Terminal and Browser are the
+      // exception: a second one is a second shell or page.
       (MULTI_INSTANCE_DOCK_SURFACES.has(surface.id) ||
         !bottomPanelOpen ||
-        surface.id !== activeBottomSurface?.id),
+        !bottomPanelSurfaceIds.has(surface.id)),
   );
   // The pull requests the active Code thread is already about, offered where a
   // reader adds a tab. Read from the same catalogue the Environment panel uses,
@@ -1903,28 +1906,27 @@ function LaunchedShell(
     enabled: dockVisible && dockThreadRepository !== undefined,
   });
   const dockRepository = parseRepository(dockThreadRepository);
-  const launchableDockReferences = useMemo(
-    () =>
-      dockPullRequests.status !== "ready" ||
-      dockRepository === undefined ||
-      dockThreadProjectId === undefined
-        ? []
-        : dockPullRequests.rows.slice(0, 5).map((row) => ({
-            id: String(row.url),
-            label: `#${String(row.number)} ${row.title}`,
-            detail: `${dockRepository.owner}/${dockRepository.name}`,
-            onOpen: () =>
-              selectProjectPullRequestIdentity({
-                projectId: dockThreadProjectId,
-                repositoryOwner: dockRepository.owner,
-                repositoryName: dockRepository.name,
-                number: row.number,
-              }),
-          })),
-    // selectProjectPullRequestIdentity is a stable component-scope function.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [dockPullRequests, dockRepository?.name, dockRepository?.owner, dockThreadProjectId],
-  );
+  // Built per render rather than memoized: the entries close over
+  // `selectProjectPullRequestIdentity`, which is redeclared every render, and a
+  // memo would keep calling the one it was built with. At five entries the
+  // rebuild costs nothing and cannot go stale.
+  const launchableDockReferences =
+    dockPullRequests.status !== "ready" ||
+    dockRepository === undefined ||
+    dockThreadProjectId === undefined
+      ? []
+      : dockPullRequests.rows.slice(0, 5).map((row) => ({
+          id: String(row.url),
+          label: `#${String(row.number)} ${row.title}`,
+          detail: `${dockRepository.owner}/${dockRepository.name}`,
+          onOpen: () =>
+            selectProjectPullRequestIdentity({
+              projectId: dockThreadProjectId,
+              repositoryOwner: dockRepository.owner,
+              repositoryName: dockRepository.name,
+              number: row.number,
+            }),
+        }));
   const dockTabs = useMemo(
     () => describeUtilityTabs(displayedDockState.tabs),
     [displayedDockState.tabs],

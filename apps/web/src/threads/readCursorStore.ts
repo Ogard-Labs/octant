@@ -223,9 +223,12 @@ export function createReadCursorStore<ThreadId>(options: {
     globalThis.addEventListener("pagehide", flush);
     globalThis.addEventListener("beforeunload", flush);
     globalThis.addEventListener("blur", onBlur);
-    globalThis.addEventListener("freeze", flush);
-    if (typeof document !== "undefined")
+    if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", onVisibility);
+      // The Page Lifecycle API dispatches `freeze` on the document; a window
+      // listener never runs for it.
+      document.addEventListener("freeze", flush);
+    }
   };
   const stopListening = () => {
     if (!listening) return;
@@ -234,9 +237,9 @@ export function createReadCursorStore<ThreadId>(options: {
     globalThis.removeEventListener("pagehide", flush);
     globalThis.removeEventListener("beforeunload", flush);
     globalThis.removeEventListener("blur", onBlur);
-    globalThis.removeEventListener("freeze", flush);
     if (typeof document !== "undefined") {
       document.removeEventListener("visibilitychange", onVisibility);
+      document.removeEventListener("freeze", flush);
     }
   };
   return {

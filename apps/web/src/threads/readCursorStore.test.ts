@@ -268,10 +268,59 @@ describe("thread read cursors across windows", () => {
       restoreGlobalProperty("removeEventListener", originalRemove);
     }
   });
+
+  it("settles a pending read when the page is frozen", () => {
+    const storage = memoryStorage();
+    const windowEvents = new EventTarget();
+    const documentEvents = new EventTarget();
+    const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    const originalAdd = Object.getOwnPropertyDescriptor(globalThis, "addEventListener");
+    const originalRemove = Object.getOwnPropertyDescriptor(globalThis, "removeEventListener");
+    const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+    Object.defineProperties(globalThis, {
+      localStorage: { configurable: true, value: storage },
+      addEventListener: {
+        configurable: true,
+        value: windowEvents.addEventListener.bind(windowEvents),
+      },
+      removeEventListener: {
+        configurable: true,
+        value: windowEvents.removeEventListener.bind(windowEvents),
+      },
+      document: {
+        configurable: true,
+        value: {
+          visibilityState: "visible",
+          addEventListener: documentEvents.addEventListener.bind(documentEvents),
+          removeEventListener: documentEvents.removeEventListener.bind(documentEvents),
+        },
+      },
+    });
+
+    try {
+      const store = createReadCursorStore<string>({ storageKey: "cursors" });
+      const unsubscribe = store.subscribe(() => undefined);
+      store.markDeferred("thread-1", 7);
+
+      // The Page Lifecycle API dispatches `freeze` on the document; a window
+      // listener never runs for it.
+      documentEvents.dispatchEvent(new Event("freeze"));
+
+      expect(
+        createReadCursorStore<string>({ storageKey: "cursors" }).getSnapshot().get("thread-1"),
+      ).toBe(7);
+      unsubscribe();
+    } finally {
+      restoreGlobalProperty("localStorage", originalStorage);
+      restoreGlobalProperty("addEventListener", originalAdd);
+      restoreGlobalProperty("removeEventListener", originalRemove);
+      restoreGlobalProperty("document", originalDocument);
+    }
+  });
 });
 
 function restoreGlobalProperty(
-  name: "localStorage" | "addEventListener" | "removeEventListener",
+  name: "localStorage" | "addEventListener" | "removeEventListener" | "document",
   descriptor: PropertyDescriptor | undefined,
 ): void {
   if (descriptor === undefined) Reflect.deleteProperty(globalThis, name);

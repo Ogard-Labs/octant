@@ -73,18 +73,23 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       setMessage("External editor arguments are limited to 32 entries.");
       return;
     }
-    const updated = await props.onUpdate({
-      defaultExecutionPolicy: draft.executionPolicy,
-      defaultPermissionPersistence: draft.permissionPersistence,
-      ...(trimmedExecutable === ""
-        ? {}
-        : {
-            externalEditor: {
-              executable: trimmedExecutable,
-              arguments: arguments_,
-            },
-          }),
-    });
+    let updated = false;
+    try {
+      updated = await props.onUpdate({
+        defaultExecutionPolicy: draft.executionPolicy,
+        defaultPermissionPersistence: draft.permissionPersistence,
+        ...(trimmedExecutable === ""
+          ? {}
+          : {
+              externalEditor: {
+                executable: trimmedExecutable,
+                arguments: arguments_,
+              },
+            }),
+      });
+    } catch {
+      updated = false;
+    }
     setMessage(updated ? undefined : "Code defaults could not be saved.");
   }
 
