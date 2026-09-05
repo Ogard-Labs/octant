@@ -1,3 +1,4 @@
+import { MAX_PROVIDER_TOOLS } from "./providers";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
@@ -1792,7 +1793,7 @@ describe("provider registry contracts", () => {
     expect(() =>
       decodeProviderTurnInput({
         ...turn,
-        tools: Array.from({ length: 9 }, (_, index) => ({
+        tools: Array.from({ length: MAX_PROVIDER_TOOLS + 1 }, (_, index) => ({
           ...turn.tools[0],
           name: `tool-${index}`,
         })),
