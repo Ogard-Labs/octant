@@ -1,3 +1,4 @@
+import { MAX_PROVIDER_TOOLS } from "@octant/contracts";
 import { mkdtempSync, rmSync, accessSync, constants, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -2961,7 +2962,7 @@ describe("ChatService", () => {
       catalogEpoch: `sha256:${"c".repeat(64)}` as never,
       origin: { kind: "draft" as const, reference: "draft-capacity" },
     };
-    const appDefinitions = Array.from({ length: 6 }, (_, index) => ({
+    const appDefinitions = Array.from({ length: MAX_PROVIDER_TOOLS - 2 }, (_, index) => ({
       name: `app-tool-${index}`,
       inputSchema: { type: "object", properties: {}, required: [] },
     }));

@@ -34,6 +34,11 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import type {
+  NativeHarnessTurnAdmission,
+  NativeHarnessTurnScope,
+} from "../harness/nativeHarnessTurnObserver";
 import {
   decideWorkTurnAuthority,
   FILE_MENTION_UNREADABLE_CONTEXT,
@@ -152,6 +157,26 @@ export interface WorkTurnServiceDependencies {
   }) => boolean;
   readonly turnRuntime?: WorkTurnRuntimePort;
   /**
+   * The app-managed tools a Work turn may offer its provider. Absent on a host
+   * that composes none, which sends the turn with no tools rather than
+   * pretending a provider can reach the folder.
+   */
+  readonly resolveAppManagedTools?: (input: {
+    readonly thread: WorkThread;
+    readonly projectRoot: string;
+    readonly windowId: WindowId;
+  }) => AppManagedToolSet | undefined;
+  /** The harness around a turn: stable instructions in front, the reply observed after. */
+  readonly nativeHarness?: {
+    readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
+    /** Absent means every turn is admitted. */
+    readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
+    readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
+    readonly turnCompleted: (
+      input: NativeHarnessTurnScope & { readonly text: string; readonly toolCalls: number },
+    ) => Promise<void>;
+  };
+  /**
    * Watches the bound folder for the length of a turn. Absent on a host that
    * cannot watch, which records no written files rather than guessing at them.
    */
@@ -199,6 +224,8 @@ export class WorkTurnService {
   readonly #attachments: WorkAttachmentStore | undefined;
   readonly #supportsAttachments: WorkTurnServiceDependencies["supportsAttachments"];
   readonly #turnRuntime: WorkTurnRuntimePort;
+  readonly #resolveAppManagedTools: WorkTurnServiceDependencies["resolveAppManagedTools"];
+  readonly #nativeHarness: WorkTurnServiceDependencies["nativeHarness"];
   readonly #turnFileObserver: WorkTurnFileObserver | undefined;
   readonly #resolveThreadMentionContext: WorkTurnServiceDependencies["resolveThreadMentionContext"];
   readonly #resolveFileMentionContext: WorkTurnServiceDependencies["resolveFileMentionContext"];
@@ -224,6 +251,8 @@ export class WorkTurnService {
     this.#attachments = dependencies.attachments;
     this.#supportsAttachments = dependencies.supportsAttachments;
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
+    this.#resolveAppManagedTools = dependencies.resolveAppManagedTools;
+    this.#nativeHarness = dependencies.nativeHarness;
     this.#turnFileObserver = dependencies.turnFileObserver;
     this.#resolveThreadMentionContext = dependencies.resolveThreadMentionContext;
     this.#resolveFileMentionContext = dependencies.resolveFileMentionContext;
@@ -255,6 +284,22 @@ export class WorkTurnService {
     }
 
     const thread = await this.#threads.read(authenticatedWindowId, command.threadId);
+    const admission =
+      thread === undefined
+        ? undefined
+        : this.#nativeHarness?.admitTurn?.({
+            threadId: String(thread.id),
+            mode: "work",
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+            projectId: thread.projectId,
+          });
+    if (admission?.kind === "paused") {
+      throw this.#failure(
+        "unavailable",
+        `${admission.status === "paused-by-advisor" ? "The advisor paused this thread" : "This thread is paused"}: ${admission.detail} Resume the harness session to continue.`,
+      );
+    }
     const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);
     const accessible = projectBootstrap.active.some(
       (project) =>
@@ -412,6 +457,8 @@ export class WorkTurnService {
     this.#controllers.set(String(command.requestId), controller);
     const launch = this.#runTurn({
       command,
+      ...(thread === undefined ? {} : { thread }),
+      windowId: authenticatedWindowId,
       providerSessionId,
       projectRoot,
       driver,
@@ -539,6 +586,8 @@ export class WorkTurnService {
 
   async #runTurn(input: {
     readonly command: ReturnType<typeof decodeStartWorkThreadTurnCommand>;
+    readonly thread?: WorkThread;
+    readonly windowId: WindowId;
     readonly providerSessionId: ProviderSessionId;
     readonly projectRoot: string;
     readonly driver: ProviderDriver;
@@ -556,14 +605,38 @@ export class WorkTurnService {
     // the only way the host learns what a turn produced.
     const observation = this.#turnFileObserver?.observe(input.projectRoot);
 
+    const appManagedTools =
+      input.thread === undefined
+        ? undefined
+        : this.#resolveAppManagedTools?.({
+            thread: input.thread,
+            projectRoot: input.projectRoot,
+            windowId: input.windowId,
+          });
+    const harnessScope: NativeHarnessTurnScope | undefined =
+      input.thread === undefined
+        ? undefined
+        : {
+            threadId: String(input.thread.id),
+            mode: "work",
+            providerInstanceId: input.thread.providerInstanceId,
+            modelId: input.thread.modelId,
+            projectId: input.thread.projectId,
+          };
+    if (harnessScope !== undefined) this.#nativeHarness?.turnStarted(harnessScope);
+    const harnessContext =
+      harnessScope === undefined ? [] : (this.#nativeHarness?.contextFor(harnessScope) ?? []);
     const outcome = await this.#turnRuntime.run({
       command: input.command,
       providerSessionId: input.providerSessionId,
       projectRoot: input.projectRoot,
       driver: input.driver,
       signal: input.signal,
+      ...(appManagedTools === undefined ? {} : { appManagedTools }),
       ...(input.attachments.length === 0 ? {} : { attachments: input.attachments }),
-      ...(input.context.length === 0 ? {} : { context: input.context }),
+      ...(harnessContext.length + input.context.length === 0
+        ? {}
+        : { context: [...harnessContext, ...input.context] }),
       onDelta: (response) => {
         const projected = this.#projection.lookup(input.command.requestId);
         if (
@@ -597,6 +670,15 @@ export class WorkTurnService {
         }
       }
       return;
+    }
+    if (
+      outcome.kind === "completed" &&
+      harnessScope !== undefined &&
+      this.#nativeHarness !== undefined
+    ) {
+      await this.#nativeHarness
+        .turnCompleted({ ...harnessScope, text: outcome.response, toolCalls: 0 })
+        .catch(() => undefined);
     }
     const live = this.#liveResponses.get(String(input.command.requestId));
     this.#persistOutcome(

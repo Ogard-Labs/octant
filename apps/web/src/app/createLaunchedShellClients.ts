@@ -38,6 +38,10 @@ import { createGithubClient } from "@octant/client-runtime/github-client";
 import { createGithubCloneClient } from "@octant/client-runtime/github-clone-client";
 import { createGoalClient } from "@octant/client-runtime/goal-client";
 import { createGoalLoopClient } from "@octant/client-runtime/goal-loop-client";
+import {
+  createNativeHarnessClient,
+  type NativeHarnessClient,
+} from "@octant/client-runtime/native-harness-client";
 import { createHostClient, type HostClient } from "@octant/client-runtime/host-client";
 import { createHostControlClient } from "@octant/client-runtime/host-control-client";
 import { createImageGenerationClient } from "@octant/client-runtime/image-generation-client";
@@ -70,6 +74,7 @@ export interface CreateLaunchedShellClientsOptions {
   readonly agentProfileClient: AgentProfileClient | undefined;
   readonly agentRunClient: AgentRunClient | undefined;
   readonly agentRunSettingsClient: AgentRunSettingsClient | undefined;
+  readonly nativeHarnessClient: NativeHarnessClient | undefined;
   readonly appleToolchainClient: AppleToolchainClient | undefined;
   readonly automationClient: AutomationClient | undefined;
   readonly browserAutomationClient: BrowserAutomationClient | undefined;
@@ -91,6 +96,7 @@ export interface LaunchedShellClients {
   readonly agentProfileClient: AgentProfileClient;
   readonly agentRunClient: AgentRunClient;
   readonly agentRunSettingsClient: AgentRunSettingsClient;
+  readonly nativeHarnessClient: NativeHarnessClient;
   readonly appleToolchainClient: AppleToolchainClient;
   readonly automationClient: AutomationClient;
   readonly automationNotificationClient: ReturnType<typeof createAutomationNotificationClient>;
@@ -189,6 +195,7 @@ export function createLaunchedShellClients(
     imageGenerationClient: createImageGenerationClient(port),
     linearTransport: createIntegrationClient({ ...port, slug: "linear" }),
     machineChangeClient: createMachineChangeClient(port),
+    nativeHarnessClient: options.nativeHarnessClient ?? createNativeHarnessClient(port),
     navigatorAssistantClient,
     planClient: options.planClient ?? createPlanClient(port),
     previewClient: createPreviewClient(port),

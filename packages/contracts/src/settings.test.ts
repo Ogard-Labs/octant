@@ -21,6 +21,7 @@ describe("SettingsSectionId", () => {
       "providers",
       "profiles",
       "agents",
+      "harness",
       "skills",
       "usage",
       "host",

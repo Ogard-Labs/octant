@@ -60,6 +60,8 @@ export * from "./machineChanges";
 export * from "./localServers";
 export * from "./modes";
 export * from "./multiModelPool";
+export * from "./nativeHarnessRouting";
+export * from "./nativeHarness";
 export * from "./navigatorAssistant";
 export * from "./userProfile";
 export * from "./previews";

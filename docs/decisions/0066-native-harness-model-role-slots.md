@@ -1,6 +1,6 @@
 # 0066. Native harness model role slots
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
