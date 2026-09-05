@@ -113,6 +113,18 @@ describe("UI stylesheet check", () => {
     ).toEqual(["motion-literal 1", "important 2"]);
   });
 
+  it("reads the annotation only where CSS puts it, not inside a value", () => {
+    expect(
+      findStylesheetFindings({
+        [CSS]: [
+          '.a::after { content: "Use !important"; }',
+          ".b { --status: !important-foo; }",
+          ".c { font-weight: 600 !important; }",
+        ].join("\n"),
+      }).map((finding) => `${finding.rule} ${String(finding.line)}`),
+    ).toEqual(["important 3", "heavy-weight 3"]);
+  });
+
   it("flags a selector that only spells an accessibility feature out", () => {
     expect(
       findStylesheetFindings({

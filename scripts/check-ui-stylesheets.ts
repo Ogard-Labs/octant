@@ -65,7 +65,9 @@ const HEAVY_WEIGHT = /^(?:bold|bolder|var\(--oct-weight-strong\))$/;
 
 // CSS allows whitespace between `!` and the keyword and matches the keyword
 // case-insensitively, so `! IMPORTANT` is the same annotation as `!important`.
-const IMPORTANT_ANNOTATION = /!\s*important\b/i;
+// Anchoring to the end of the value keeps quoted text such as
+// `content: "Use !important"` and a suffixed `!important-foo` out of the rule.
+const IMPORTANT_ANNOTATION = /!\s*important\s*$/i;
 
 /** `!important` and casing must not let a weight slip past the 500 limit. */
 function isHeavyWeight(value: string): boolean {
