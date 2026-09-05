@@ -8,7 +8,10 @@ import type {
   ToolApprovalClass,
   ToolNetworkEgressPolicy,
 } from "@octant/contracts";
-import { lookupClosedToolCatalogEntry } from "@octant/contracts";
+import {
+  lookupClosedToolCatalogEntry,
+  nativeHarnessToolNameForCapability,
+} from "@octant/contracts";
 import { decideProfileToolConstraint } from "./agentProfilePolicy";
 import { authorizePrincipalAction, type PrincipalKind } from "./remoteAccessPolicy";
 
@@ -269,7 +272,8 @@ export function resolveNetworkEgressPolicy(input: {
  * admitted it.
  */
 function profileToolIdForCapability(capabilityId: string): string {
-  return capabilityId === "browser-automation" ? "octant_browser" : capabilityId;
+  if (capabilityId === "browser-automation") return "octant_browser";
+  return nativeHarnessToolNameForCapability(capabilityId) ?? capabilityId;
 }
 
 function requiredCapabilityClassForExtension(
@@ -342,9 +346,17 @@ function resolveThreadElevation(input: {
     (input.executionPolicy === "approval-gated" || input.executionPolicy === "auto-accept-edits") &&
     !input.approvalSatisfied
   ) {
-    if (input.entry.approvalClass === "network-access") {
+    if (
+      input.entry.approvalClass === "network-access" ||
+      input.entry.approvalClass === "project-file-reads" ||
+      input.entry.approvalClass === "thread-local" ||
+      input.entry.approvalClass === "child-agent-creation"
+    ) {
       // Browser network under approval-gated Code may proceed when the surface
-      // already treated the action as not-required; still prompt for external apps.
+      // already treated the action as not-required; still prompt for external
+      // apps. A read inside the root or a write that never leaves the journal
+      // has no effect an approval could gate, so asking would only teach the
+      // user to click through.
       return { kind: "allow" };
     }
     return { kind: "prompt", reason: "approval-required" };

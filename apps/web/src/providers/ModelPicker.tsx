@@ -100,30 +100,88 @@ export function ModelPicker(props: ModelPickerProps) {
           role="listbox"
           tabIndex={props.disabled ? -1 : 0}
         >
-          {filtered.map((group) => (
-            <ProviderGroupView
-              group={group}
-              key={String(group.instance.id)}
-              selectedProviderInstanceId={props.selectedProviderInstanceId}
-              selectedModelId={props.selectedModelId}
-              activeProviderInstanceId={
-                effectiveActive >= 0 ? flatOptions[effectiveActive]?.providerInstanceId : undefined
-              }
-              activeModelId={
-                effectiveActive >= 0 ? flatOptions[effectiveActive]?.modelId : undefined
-              }
-              disabled={props.disabled === true}
-              onSelect={props.onSelect}
-            />
-          ))}
+          {umbrellaBlocks(filtered).map((block) =>
+            block.kind === "octant" ? (
+              <div className="model-picker__group model-picker__group--octant" key="octant-harness">
+                <div className="model-picker__group-header">
+                  <span className="model-picker__group-name">Octant</span>
+                  <span className="model-picker__group-meta">
+                    <span className="model-picker__group-driver">Native harness</span>
+                  </span>
+                </div>
+                {block.groups.map((group) => (
+                  <ProviderGroupView
+                    group={group}
+                    key={String(group.instance.id)}
+                    nested
+                    selectedProviderInstanceId={props.selectedProviderInstanceId}
+                    selectedModelId={props.selectedModelId}
+                    activeProviderInstanceId={
+                      effectiveActive >= 0
+                        ? flatOptions[effectiveActive]?.providerInstanceId
+                        : undefined
+                    }
+                    activeModelId={
+                      effectiveActive >= 0 ? flatOptions[effectiveActive]?.modelId : undefined
+                    }
+                    disabled={props.disabled === true}
+                    onSelect={props.onSelect}
+                  />
+                ))}
+              </div>
+            ) : (
+              <ProviderGroupView
+                group={block.group}
+                key={String(block.group.instance.id)}
+                selectedProviderInstanceId={props.selectedProviderInstanceId}
+                selectedModelId={props.selectedModelId}
+                activeProviderInstanceId={
+                  effectiveActive >= 0
+                    ? flatOptions[effectiveActive]?.providerInstanceId
+                    : undefined
+                }
+                activeModelId={
+                  effectiveActive >= 0 ? flatOptions[effectiveActive]?.modelId : undefined
+                }
+                disabled={props.disabled === true}
+                onSelect={props.onSelect}
+              />
+            ),
+          )}
         </div>
       )}
     </div>
   );
 }
 
+type UmbrellaBlock =
+  | { readonly kind: "provider"; readonly group: PickerGroup }
+  | { readonly kind: "octant"; readonly groups: ReadonlyArray<PickerGroup> };
+
+/**
+ * Endpoints the native harness drives are shown together under one Octant
+ * heading, placed where the first of them sat in the provider order.
+ */
+function umbrellaBlocks(groups: ReadonlyArray<PickerGroup>): ReadonlyArray<UmbrellaBlock> {
+  const blocks: UmbrellaBlock[] = [];
+  const harness = groups.filter((group) => group.runtime === "octant-harness");
+  let placed = false;
+  for (const group of groups) {
+    if (group.runtime === "octant-harness") {
+      if (!placed) {
+        blocks.push({ kind: "octant", groups: harness });
+        placed = true;
+      }
+      continue;
+    }
+    blocks.push({ kind: "provider", group });
+  }
+  return blocks;
+}
+
 function ProviderGroupView(props: {
   readonly group: PickerGroup;
+  readonly nested?: boolean;
   readonly selectedProviderInstanceId?: ProviderInstanceId | undefined;
   readonly selectedModelId?: ProviderModelId | undefined;
   readonly activeProviderInstanceId?: ProviderInstanceId | undefined;
@@ -133,7 +191,9 @@ function ProviderGroupView(props: {
 }) {
   const { group } = props;
   return (
-    <div className="model-picker__group">
+    <div
+      className={`model-picker__group${props.nested === true ? " model-picker__group--nested" : ""}`}
+    >
       <div className="model-picker__group-header">
         <span className="model-picker__group-name">{group.instance.displayName}</span>
         <span className="model-picker__group-meta">

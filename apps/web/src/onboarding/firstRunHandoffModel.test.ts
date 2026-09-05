@@ -38,6 +38,7 @@ function group(
       id: instanceId,
       displayName: "Ollama",
     } as ProviderInstance,
+    runtime: "octant-harness",
     readiness: "ready",
     driverLabel: "Ollama",
     endpointHost: undefined,

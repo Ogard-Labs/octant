@@ -45,6 +45,11 @@ approval.
   could not include.
 - Managed subagents that run as in-process provider sessions with narrowed
   authority.
+- Native harness for API-key and local models: Octant's own tools, authority
+  checks, and journal around any OpenAI- or Anthropic-compatible endpoint, with
+  model slots so a strong model can lead and review while cheaper ones read and
+  implement, an advisor that can redirect or pause a run, and the same session
+  view in the app, on the phone, and in `octant agent`.
 - Approval-gated Code threads with a read-only Plan mode, repository test
   discovery, Git worktrees, PR view, and a runtime-derived Code board.
 - Plugin and skill marketplace: packages are quarantined on install, disabled

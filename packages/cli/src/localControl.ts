@@ -9,6 +9,9 @@ export interface LocalControlRequest {
   readonly path: string;
   readonly method: "GET" | "POST";
   readonly body?: unknown;
+  /** Raw bytes instead of a JSON body, with their own content type. */
+  readonly bytes?: Uint8Array;
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 export interface LocalControlResponse {
@@ -74,10 +77,15 @@ export async function openLocalControlSession(
         method: request.method,
         headers: {
           "content-type": "application/json",
+          ...request.headers,
           "x-octant-desktop-secret": secret,
           "x-octant-window-capability": capability,
         },
-        ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
+        ...(request.bytes !== undefined
+          ? { body: new Blob([request.bytes as BlobPart]) }
+          : request.body === undefined
+            ? {}
+            : { body: JSON.stringify(request.body) }),
       }).catch(() => undefined);
       if (response === undefined) {
         return {

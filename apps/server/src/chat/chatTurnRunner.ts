@@ -1,3 +1,4 @@
+import { boundedToolResultJson } from "../providers/toolResultJson";
 import {
   decodeChatFailure,
   UtcTimestamp,
@@ -163,6 +164,12 @@ export interface ChatTurnRunnerInput {
   readonly clock?: () => string;
   readonly ambiguousRecovery?: ChatAttemptOutcome;
   readonly signal?: AbortSignal;
+  /** Observes a completed reply with its full text and the tool calls it made. */
+  readonly onTurnCompleted?: (input: {
+    readonly text: string;
+    readonly toolCalls: number;
+    readonly usage?: { readonly inputTokens: number; readonly outputTokens: number };
+  }) => Promise<void>;
 }
 
 export type { AppManagedToolSet } from "../providers/appManagedToolSet";
@@ -204,7 +211,20 @@ export class ChatTurnRunner {
       let selectedResearchBackend: "searxng" | "provider-native" =
         input.researchRoute.kind === "ready" ? input.researchRoute.backend : "searxng";
       let handledEvents = 0;
+      let responseText = "";
       const updatedAt = () => decodeTimestamp(clock());
+      const observeCompleted = () =>
+        input.onTurnCompleted === undefined
+          ? Effect.void
+          : Effect.promise(() =>
+              input.onTurnCompleted!({
+                text: responseText,
+                toolCalls: answeredToolRequestIds.size,
+                ...(sawUsage
+                  ? { usage: { inputTokens: actualInputTokens, outputTokens: actualOutputTokens } }
+                  : {}),
+              }).catch(() => undefined),
+            );
 
       const persistOutcome = (outcome: ChatAttemptOutcome) =>
         Effect.gen(function* () {
@@ -488,6 +508,7 @@ export class ChatTurnRunner {
                 }
                 if (event.kind === "text-delta") {
                   if (event.text.trim().length > 0) sawVisibleResponse = true;
+                  if (responseText.length < 262_144) responseText += event.text;
                   if (currentAttempt.outcome === "queued") {
                     currentAttempt = transitionChatAttempt(currentAttempt, {
                       outcome: "streaming",
@@ -612,7 +633,7 @@ export class ChatTurnRunner {
                   yield* connection.answerTool({
                     sessionId: input.attempt.providerSessionId,
                     requestId: event.requestId,
-                    resultJson: JSON.stringify(execution.result),
+                    resultJson: boundedToolResultJson(execution.result),
                     isError: execution.isError === true,
                   });
                   return;
@@ -662,6 +683,7 @@ export class ChatTurnRunner {
                   };
                   yield* input.persistAttempt(currentAttempt);
                   terminalOutcome = "completed";
+                  yield* observeCompleted();
                   return;
                 }
                 if (event.kind === "interrupted") {

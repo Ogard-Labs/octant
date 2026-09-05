@@ -22,6 +22,8 @@ export interface ComposerModelPickerProps {
   readonly selectedModelId?: ProviderModelId;
   readonly onSelect: (selection: ModelPickerSelection) => void;
   readonly onOpenSettings?: () => void;
+  /** Opens Settings → Octant Harness, shown from the Octant entry. */
+  readonly onOpenHarnessSettings?: () => void;
   readonly disabled?: boolean;
   readonly ariaLabel?: string;
   /**
@@ -34,7 +36,14 @@ export interface ComposerModelPickerProps {
 }
 
 const FAVORITES_RAIL_ID = "favorites";
-type RailId = ProviderInstanceId | typeof FAVORITES_RAIL_ID;
+/** One rail entry for every endpoint the native harness drives. */
+const OCTANT_RAIL_ID = "octant-harness";
+type RailId = ProviderInstanceId | typeof FAVORITES_RAIL_ID | typeof OCTANT_RAIL_ID;
+
+function railIdFor(group: PickerGroup | undefined): RailId | undefined {
+  if (group === undefined) return undefined;
+  return group.runtime === "octant-harness" ? OCTANT_RAIL_ID : group.instance.id;
+}
 
 interface ModelRow {
   readonly picker: PickerModel;
@@ -56,11 +65,23 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
       props.groups[0],
     [props.groups, props.selectedProviderInstanceId],
   );
-  const [activeRailId, setActiveRailId] = useState<RailId | undefined>(selectedGroup?.instance.id);
+  const [activeRailId, setActiveRailId] = useState<RailId | undefined>(railIdFor(selectedGroup));
+  const harnessGroups = useMemo(
+    () => props.groups.filter((group) => group.runtime === "octant-harness"),
+    [props.groups],
+  );
+  const railGroups = useMemo(
+    () => props.groups.filter((group) => group.runtime !== "octant-harness"),
+    [props.groups],
+  );
+  // The Octant entry sits where the first harness endpoint sat in the user's
+  // provider order, so folding endpoints together does not move Octant to
+  // the front or the back on its own.
+  const octantRailIndex = props.groups.findIndex((group) => group.runtime === "octant-harness");
 
   useEffect(() => {
     if (!open) return;
-    setActiveRailId(selectedGroup?.instance.id ?? props.groups[0]?.instance.id);
+    setActiveRailId(railIdFor(selectedGroup) ?? railIdFor(props.groups[0]));
     setCatalogFilter(undefined);
     setFavorites(readModelFavorites());
   }, [open, props.groups, selectedGroup?.instance.id]);
@@ -88,14 +109,17 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     );
   }
 
+  const trimmedQuery = query.trim().toLowerCase();
+  const searching = trimmedQuery !== "";
+  const octantActive = !searching && activeRailId === OCTANT_RAIL_ID;
   const activeGroup =
-    props.groups.find((group) => group.instance.id === activeRailId) ?? props.groups[0]!;
+    props.groups.find((group) => group.instance.id === activeRailId) ??
+    (activeRailId === OCTANT_RAIL_ID ? harnessGroups[0] : undefined) ??
+    props.groups[0]!;
   const selectedLabel =
     selectedModelLabel(props.groups, props.selectedProviderInstanceId, props.selectedModelId) ??
     activeGroup.sections[0]?.models[0]?.model.displayName ??
     activeGroup.instance.displayName;
-  const trimmedQuery = query.trim().toLowerCase();
-  const searching = trimmedQuery !== "";
   const favoritesActive = !searching && activeRailId === FAVORITES_RAIL_ID;
   // With a search query, matches span every provider; the Favorites rail entry
   // lists starred models across providers; otherwise the list shows the active
@@ -110,11 +134,13 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             favorites.has(modelFavoriteKey(group.instance.id, row.picker.model.id)),
           ),
         )
-      : flattenModels(activeGroup);
+      : octantActive
+        ? harnessGroups.flatMap((group) => flattenModels(group))
+        : flattenModels(activeGroup);
   // One OpenCode or router instance fronts many upstream catalogs, so its pane
   // is where "which of these hundred models is a Qwen model" gets answered. A
   // provider serving a single catalog gains nothing from the split.
-  const catalogs = searching || favoritesActive ? [] : pickerCatalogs(activeGroup);
+  const catalogs = searching || favoritesActive || octantActive ? [] : pickerCatalogs(activeGroup);
   const filteringCatalog = catalogs.length > 1 ? catalogFilter : undefined;
   const models: ReadonlyArray<ModelRow> =
     filteringCatalog === undefined
@@ -123,8 +149,9 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
   const blocks: ReadonlyArray<{
     readonly catalog: string | undefined;
     readonly rows: ReadonlyArray<ModelRow>;
-  }> =
-    catalogs.length > 1 && filteringCatalog === undefined
+  }> = octantActive
+    ? groupByEndpoint(models)
+    : catalogs.length > 1 && filteringCatalog === undefined
       ? groupByCatalog(models, catalogs)
       : [{ catalog: undefined, rows: models }];
 
@@ -216,6 +243,87 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     );
   }
 
+  function renderRailItem(group: PickerGroup) {
+    const active = !searching && group.instance.id === activeRailId;
+    const status = readinessStatus(group.readiness);
+    return (
+      <OctantButton
+        aria-label={group.instance.displayName}
+        aria-selected={active}
+        className={`composer-model-picker__rail-item${active ? " composer-model-picker__rail-item--active" : ""}`}
+        key={String(group.instance.id)}
+        onClick={() => {
+          setQuery("");
+          setCatalogFilter(undefined);
+          setActiveRailId(group.instance.id);
+        }}
+        onMouseEnter={() => {
+          if (searching) return;
+          // Moving across the rail lands on a different catalog set, so
+          // a filter chosen for the provider you left must not silently
+          // hide models on the one you arrived at.
+          if (group.instance.id !== activeRailId) setCatalogFilter(undefined);
+          setActiveRailId(group.instance.id);
+        }}
+        role="option"
+        title={group.instance.displayName}
+        type="button"
+        variant="ghost"
+      >
+        <ProviderGlyph
+          displayName={group.instance.displayName}
+          driverKind={group.instance.driverKind}
+          size={16}
+        />
+        {status === undefined ? null : (
+          <span
+            className={`composer-model-picker__rail-status composer-model-picker__rail-status--${group.readiness}`}
+            title={status}
+          >
+            <span className="sr-only">{status}</span>
+          </span>
+        )}
+      </OctantButton>
+    );
+  }
+
+  function renderOctantRailItem() {
+    const active = octantActive;
+    const worst = harnessGroups.map((group) => readinessStatus(group.readiness)).find(Boolean);
+    return (
+      <OctantButton
+        aria-label="Octant"
+        aria-selected={active}
+        className={`composer-model-picker__rail-item composer-model-picker__rail-item--octant${active ? " composer-model-picker__rail-item--active" : ""}`}
+        key={OCTANT_RAIL_ID}
+        onClick={() => {
+          setQuery("");
+          setCatalogFilter(undefined);
+          setActiveRailId(OCTANT_RAIL_ID);
+        }}
+        onMouseEnter={() => {
+          if (searching) return;
+          setCatalogFilter(undefined);
+          setActiveRailId(OCTANT_RAIL_ID);
+        }}
+        role="option"
+        title="Octant — native harness"
+        type="button"
+        variant="ghost"
+      >
+        <ProviderGlyph displayName="Octant" driverKind="octant-harness" size={16} />
+        {worst === undefined ? null : (
+          <span
+            className="composer-model-picker__rail-status composer-model-picker__rail-status--degraded"
+            title={worst}
+          >
+            <span className="sr-only">{worst}</span>
+          </span>
+        )}
+      </OctantButton>
+    );
+  }
+
   return (
     <div className="composer-model-picker">
       <OctantPopover
@@ -256,49 +364,20 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             <Star aria-hidden="true" fill="currentColor" size={16} strokeWidth={1.75} />
           </OctantButton>
           <OctantSeparator aria-hidden="true" className="my-0.5 w-5 shrink-0" />
-          {props.groups.map((group) => {
-            const active = !searching && group.instance.id === activeRailId;
-            const status = readinessStatus(group.readiness);
-            return (
-              <OctantButton
-                aria-label={group.instance.displayName}
-                aria-selected={active}
-                className={`composer-model-picker__rail-item${active ? " composer-model-picker__rail-item--active" : ""}`}
-                key={String(group.instance.id)}
-                onClick={() => {
-                  setQuery("");
-                  setCatalogFilter(undefined);
-                  setActiveRailId(group.instance.id);
-                }}
-                onMouseEnter={() => {
-                  if (searching) return;
-                  // Moving across the rail lands on a different catalog set, so
-                  // a filter chosen for the provider you left must not silently
-                  // hide models on the one you arrived at.
-                  if (group.instance.id !== activeRailId) setCatalogFilter(undefined);
-                  setActiveRailId(group.instance.id);
-                }}
-                role="option"
-                title={group.instance.displayName}
-                type="button"
-                variant="ghost"
-              >
-                <ProviderGlyph
-                  displayName={group.instance.displayName}
-                  driverKind={group.instance.driverKind}
-                  size={16}
-                />
-                {status === undefined ? null : (
-                  <span
-                    className={`composer-model-picker__rail-status composer-model-picker__rail-status--${group.readiness}`}
-                    title={status}
-                  >
-                    <span className="sr-only">{status}</span>
-                  </span>
-                )}
-              </OctantButton>
-            );
+          {railGroups.flatMap((group, index) => {
+            const entries = [];
+            if (
+              harnessGroups.length > 0 &&
+              index === Math.min(octantRailIndex, railGroups.length)
+            ) {
+              entries.push(renderOctantRailItem());
+            }
+            entries.push(renderRailItem(group));
+            return entries;
           })}
+          {harnessGroups.length > 0 && octantRailIndex >= railGroups.length
+            ? renderOctantRailItem()
+            : null}
         </div>
         <div className="composer-model-picker__pane">
           <label className="composer-model-picker__search">
@@ -311,6 +390,21 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               value={query}
             />
           </label>
+          {octantActive ? (
+            <p className="composer-model-picker__runtime-note">
+              Octant runs these endpoint models with its own tools, routing, and advisor.{" "}
+              {props.onOpenHarnessSettings === undefined ? null : (
+                <OctantButton
+                  className="composer-model-picker__runtime-link"
+                  onClick={props.onOpenHarnessSettings}
+                  type="button"
+                  variant="link"
+                >
+                  Model slots
+                </OctantButton>
+              )}
+            </p>
+          ) : null}
           {catalogs.length > 1 ? (
             <div aria-label="Catalogs" className="composer-model-picker__catalogs" role="group">
               <OctantButton
@@ -394,6 +488,20 @@ function groupByCatalog(
   for (const catalog of catalogs) {
     const matching = rows.filter((row) => row.picker.catalog === catalog);
     if (matching.length > 0) blocks.push({ catalog, rows: matching });
+  }
+  return blocks;
+}
+
+/** Under the Octant entry, models are headed by the endpoint that serves them. */
+function groupByEndpoint(
+  rows: ReadonlyArray<ModelRow>,
+): ReadonlyArray<{ readonly catalog: string | undefined; readonly rows: ReadonlyArray<ModelRow> }> {
+  const blocks: Array<{ catalog: string; rows: ModelRow[] }> = [];
+  for (const row of rows) {
+    const label = row.group.instance.displayName;
+    const block = blocks.find((entry) => entry.catalog === label);
+    if (block === undefined) blocks.push({ catalog: label, rows: [row] });
+    else block.rows.push(row);
   }
   return blocks;
 }
