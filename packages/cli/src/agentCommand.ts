@@ -11,6 +11,8 @@ import {
   type ChatThreadView,
   type NativeHarnessSessionView,
 } from "@octant/contracts";
+import { runAgentTui } from "./agentTui";
+import { isTuiThemeId, type TuiThemeId } from "./agentTuiModel";
 import { failureMessage, type OpenedLocalControlSession } from "./localControl";
 
 export type AgentCliCommand =
@@ -21,11 +23,22 @@ export type AgentCliCommand =
       readonly project?: string;
       readonly title?: string;
       readonly json: boolean;
+      /** Line mode even on a terminal that could draw the full screen. */
+      readonly plain: boolean;
+      readonly theme?: TuiThemeId;
     }
   | { readonly action: "harness-slots"; readonly json: boolean }
   | { readonly action: "harness-session"; readonly threadId: string; readonly json: boolean };
 
-const AGENT_FLAGS: ReadonlyArray<string> = ["prompt", "thread", "project", "title", "json"];
+const AGENT_FLAGS: ReadonlyArray<string> = [
+  "prompt",
+  "thread",
+  "project",
+  "title",
+  "json",
+  "plain",
+  "theme",
+];
 
 export function resolveAgentCliCommand(
   command: string,
@@ -41,6 +54,8 @@ export function resolveAgentCliCommand(
     const threadId = text("thread");
     const project = text("project");
     const title = text("title");
+    const theme = text("theme");
+    if (theme !== undefined && !isTuiThemeId(theme)) return undefined;
     return {
       action: "agent",
       ...(prompt === undefined ? {} : { prompt }),
@@ -48,6 +63,8 @@ export function resolveAgentCliCommand(
       ...(project === undefined ? {} : { project }),
       ...(title === undefined ? {} : { title }),
       json: flags.json === true,
+      plain: flags.plain === true,
+      ...(theme === undefined ? {} : { theme }),
     };
   }
   if (command === "harness") {
@@ -103,6 +120,8 @@ export interface RunAgentCliCommandInput {
   readonly stderr: { readonly write: (chunk: string) => unknown };
   readonly pollIntervalMs?: number;
   readonly signal?: AbortSignal;
+  /** Whether stdout is a terminal that can draw the full screen. */
+  readonly interactive?: boolean;
 }
 
 /**
@@ -169,6 +188,22 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
   if (input.command.json) input.stdout.write(`${JSON.stringify({ kind: "thread", threadId })}\n`);
   else input.stdout.write(`Thread ${threadId}\n`);
 
+  if (
+    input.command.prompt === undefined &&
+    !input.command.json &&
+    !input.command.plain &&
+    input.interactive === true
+  ) {
+    const exit = await runAgentTui({
+      session: input.session,
+      threadId,
+      themeId: input.command.theme,
+      ...(input.pollIntervalMs === undefined ? {} : { pollIntervalMs: input.pollIntervalMs }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+    if (exit !== "unavailable") return exit;
+    input.stderr.write("The terminal UI is unavailable here; continuing in line mode.\n");
+  }
   const lines = lineSource(input.stdin);
   try {
     if (input.command.prompt !== undefined) {

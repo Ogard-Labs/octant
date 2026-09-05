@@ -105,11 +105,18 @@ journaled with the session.
 octant agent --prompt "Summarize the open pull requests"
 ```
 
-`octant agent` without `--prompt` opens an interactive session on a new Chat
-thread; `--thread <id>` attaches to an existing one and `--project <name>`
-files the thread in a Project. `/session` prints the harness session; `--json`
-emits one JSON object per line for scripts. `octant harness slots` prints the
-routing table.
+`octant agent` without `--prompt` opens the terminal UI on a new Chat thread:
+the conversation as you / lead turns with timestamps, each lead turn's action
+count, route, and duration underneath it, a panel for the lead's question or
+its suggested follow-ups, and a footer with the run's status and token use.
+It draws with the app's own theme tokens — `--theme system|light|dark|octant`
+picks the preset, and the terminal's light or dark mode picks the palette.
+Enter sends, Shift+Enter adds a line, `/next N`, `/pause`, and `/resume` work
+as in the app, and a pending question is answered by typing its number or an
+answer. `--plain` keeps the line-by-line mode, which is also what a pipe or
+`--json` (one JSON object per line) gets. `--thread <id>` attaches to an
+existing thread and `--project <name>` files the thread in a Project.
+`octant harness slots` prints the routing table.
 
 ## Honest limits
 

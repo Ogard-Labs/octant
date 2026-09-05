@@ -567,6 +567,11 @@ Direct-endpoint providers (`openai-compatible`, `anthropic-compatible`,
   the mode's ordinary creation command on the confirming window, and the
   activation result carries the new thread id; the prompt is never sent on
   the person's behalf.
+- **Terminal.** `octant agent` in `packages/cli` is the same thread on a
+  terminal: `agentHost.ts` holds the host calls, `agentTuiModel.ts` the pure
+  presentation (transcript, footer, palette projected from `@octant/theme`
+  tokens), and `agentTui.ts` the OpenTUI screen, loaded only when stdout is
+  a terminal and `--plain` or `--json` was not asked for.
 - **Surfaces.** `/api/native-harness/routing` and
   `/api/native-harness/sessions/:threadId` serve the web, desktop, phone, and
   `octant agent` / `octant harness` from one `NativeHarnessSessionView`.
