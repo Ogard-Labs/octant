@@ -272,6 +272,80 @@ describe("ShellService", () => {
     expect(fixture.append).toHaveBeenCalledTimes(1);
   });
 
+  it("binds the window to the Project a draft thread names", () => {
+    // Choosing a folder in the composer is how a Code thread starts. Leaving
+    // that window unbound refused every Code command about the folder, and the
+    // composer reported the refusal as a missing Git checkout.
+    const base = { ...defaultWindowWorkspace(ids.window), activeMode: "code" as const };
+    const code = base.layouts.code;
+    if (code.kind !== "pane") throw new Error("expected pane");
+    const fixture = persistenceStub({ project: projectFixture("code") });
+    const service = new ShellService({
+      persistence: fixture.persistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+    });
+    service.bootstrap(ids.window);
+
+    const result = service.execute({
+      kind: "apply-workspace-operation",
+      windowId: ids.window,
+      expectedVersion: 0,
+      operation: {
+        kind: "open-surface",
+        mode: "code",
+        paneId: code.paneId,
+        surface: {
+          kind: "draft-thread",
+          id: "00000000-0000-4000-8000-000000000231" as never,
+          projectId,
+          mode: "code",
+          title: "New Code thread",
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      kind: "workspace-replaced",
+      workspace: { contextByMode: { code: { projectId, boundRoot: "/repo" } } },
+    });
+  });
+
+  it("leaves the window unbound for a draft thread that names no Project", () => {
+    const base = { ...defaultWindowWorkspace(ids.window), activeMode: "code" as const };
+    const code = base.layouts.code;
+    if (code.kind !== "pane") throw new Error("expected pane");
+    const fixture = persistenceStub({ project: projectFixture("code") });
+    const service = new ShellService({
+      persistence: fixture.persistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+    });
+    service.bootstrap(ids.window);
+
+    const result = service.execute({
+      kind: "apply-workspace-operation",
+      windowId: ids.window,
+      expectedVersion: 0,
+      operation: {
+        kind: "open-surface",
+        mode: "code",
+        paneId: code.paneId,
+        surface: {
+          kind: "draft-thread",
+          id: "00000000-0000-4000-8000-000000000232" as never,
+          mode: "code",
+          title: "New Code thread",
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      kind: "workspace-replaced",
+      workspace: { contextByMode: { code: { projectId: null, boundRoot: null } } },
+    });
+  });
+
   it("keeps archived restored Project surfaces but presents missing or mismatched ones as welcome", () => {
     const base = { ...defaultWindowWorkspace(ids.window), activeMode: "code" as const };
     const code = base.layouts.code;

@@ -682,6 +682,24 @@ function resolveTabContext(
       boundRoot,
     };
   }
+  if (tab.kind === "draft-thread") {
+    // A draft that names a Project is an authority transition, not a
+    // preference: the composer carries the chosen folder before any thread
+    // exists, and a window whose persisted context does not name that Project
+    // is refused every Code command about it. Leaving this unresolved reported
+    // the refusal to the user as a missing Git checkout.
+    if (tab.projectId === undefined) return undefined;
+    const project = persistence.readProject(tab.projectId);
+    if (project === undefined || project.lifecycle !== "active" || project.type !== tab.mode) {
+      return undefined;
+    }
+    return {
+      host: LOCAL_HOST_ID,
+      mode: tab.mode,
+      projectId: project.id,
+      boundRoot: project.type === "chat" ? null : project.binding.canonicalRoot,
+    };
+  }
   if (tab.kind === "chat-thread") {
     const thread = persistence.readChatThread(tab.threadId);
     if (thread === undefined) return undefined;

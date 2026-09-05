@@ -3627,7 +3627,10 @@ function LaunchedShell(
         projectId: project.id,
       });
       if (prepared?.kind !== "checkout-prepared") {
-        setDraftError(checkoutNotPreparedMessage(project.name));
+        setDraftError(
+          codeController.lastExecuteError.current?.message ??
+            checkoutNotPreparedMessage(project.name),
+        );
         return false;
       }
       const codeSelection = resolveDraftProviderSelection(
@@ -3837,7 +3840,10 @@ function LaunchedShell(
           projectId: project.id,
         });
         if (prepared?.kind !== "checkout-prepared") {
-          setDraftError(checkoutNotPreparedMessage(project.name));
+          setDraftError(
+            codeController.lastExecuteError.current?.message ??
+              checkoutNotPreparedMessage(project.name),
+          );
           return;
         }
         if (prepared.checkout.head.kind !== "branch") {
@@ -4948,9 +4954,16 @@ function LaunchedShell(
                   <WorkspaceView
                     draftResetRevision={draftResetRevision}
                     draftProjectSelection={draftProjectSelection}
-                    onDraftSelectProject={(mode, projectId) =>
-                      setDraftProjectSelection((current) => ({ ...current, [mode]: projectId }))
-                    }
+                    onDraftSelectProject={(mode, projectId) => {
+                      setDraftProjectSelection((current) => ({ ...current, [mode]: projectId }));
+                      // Choosing a folder in the composer is the authority
+                      // transition, not a renderer preference: the window is
+                      // refused every Code command about a Project its
+                      // persisted workspace does not name. Re-opening the draft
+                      // with the Project records it on the surface the server
+                      // reads.
+                      void controller.openDraftThread(mode, projectId);
+                    }}
                     onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
                     appleToolchainClient={appleToolchainClient}
                     agentRunClient={agentRunClient}
