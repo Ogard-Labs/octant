@@ -1,6 +1,6 @@
 # 0067. Native harness turn loop, advisor, and follow-up suggestions
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 

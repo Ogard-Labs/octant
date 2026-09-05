@@ -1,0 +1,14 @@
+[
+  {
+    "id": "explain-file",
+    "prompt": "Read package.json in this project and explain in three sentences what the repository is."
+  },
+  {
+    "id": "find-and-report",
+    "prompt": "Find every TODO comment in the source tree, list the files with counts, and suggest which one to fix first."
+  },
+  {
+    "id": "plan-a-change",
+    "prompt": "Propose a plan, as a todo list, for adding a --verbose flag to the CLI. Do not edit files."
+  }
+]

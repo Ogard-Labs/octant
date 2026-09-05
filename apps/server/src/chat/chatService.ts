@@ -171,6 +171,10 @@ import { createDiagnosticsFailureIncidentEvent } from "../diagnosticsExportServi
 import { ChatAttachmentStore } from "./chatAttachmentStore";
 import { ChatScratchStore } from "./chatScratchStore";
 import { ChatTurnRunner, type AppManagedToolSet } from "./chatTurnRunner";
+import type {
+  NativeHarnessTurnAdmission,
+  NativeHarnessTurnScope,
+} from "../harness/nativeHarnessTurnObserver";
 import type { ResearchRouteDecision, ResearchRouter } from "./research/researchRouter";
 import { SearxngEndpointRejected, validateSearxngEndpoint } from "./research/searxngEndpoint";
 import {
@@ -467,6 +471,25 @@ export interface ChatServiceOptions {
   }) => AppManagedToolSet | undefined;
   readonly resolveExtensionSelectionContext?: ChatExtensionSelectionContextResolver;
   /**
+   * The native harness around a turn on a provider it drives: stable
+   * instructions in front of the context, and the completed reply observed
+   * for follow-ups and the advisor. Absent means turns run without it.
+   */
+  readonly nativeHarness?: {
+    readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
+    /** Absent means every turn is admitted. */
+    readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
+    readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
+    readonly turnCompleted: (
+      input: NativeHarnessTurnScope & {
+        readonly text: string;
+        readonly toolCalls: number;
+        readonly usage?: { readonly inputTokens: number; readonly outputTokens: number };
+        readonly contextSubject?: ContextSubjectRef;
+      },
+    ) => Promise<void>;
+  };
+  /**
    * Chat threads that are hidden sidecars. A Side Chat sidecar is an
    * ordinary Chat thread that must not appear in Recents, Unfiled, or Project
    * nesting; hiding it here rather than in the renderer means every client of
@@ -608,6 +631,7 @@ export class ChatService {
   readonly #contextMaintenanceShutdownTimeoutMs?: number;
   readonly #providerRuntimeRegistry?: ProviderRuntimeRegistryLike;
   readonly #resolveAppManagedTools?: ChatServiceOptions["resolveAppManagedTools"];
+  readonly #nativeHarness?: ChatServiceOptions["nativeHarness"];
   readonly #resolveExtensionSelectionContext?: ChatExtensionSelectionContextResolver;
   readonly #hiddenThreadIds: () => ReadonlySet<string>;
   readonly #resolveSideChatSourceContext?: ChatServiceOptions["resolveSideChatSourceContext"];
@@ -647,6 +671,7 @@ export class ChatService {
     if (options.resolveAppManagedTools !== undefined) {
       this.#resolveAppManagedTools = options.resolveAppManagedTools;
     }
+    this.#nativeHarness = options.nativeHarness;
     if (options.resolveExtensionSelectionContext !== undefined) {
       this.#resolveExtensionSelectionContext = options.resolveExtensionSelectionContext;
     }
@@ -1770,12 +1795,32 @@ export class ChatService {
     return { kind: "thread-updated", thread: next };
   }
 
+  /** A paused harness session refuses a new prompt, whether sent or edited in. */
+  #admitHarnessTurn(thread: ChatThread): void {
+    const admission = this.#nativeHarness?.admitTurn?.({
+      threadId: String(thread.id),
+      mode: "chat",
+      providerInstanceId: decodeProviderInstanceId(thread.providerInstanceId),
+      modelId: decodeProviderModelId(thread.modelId),
+      ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+    });
+    if (admission?.kind === "paused") {
+      throw new ChatServiceError(
+        decodeChatFailure({
+          category: "waiting",
+          message: `${admission.status === "paused-by-advisor" ? "The advisor paused this thread" : "This thread is paused"}: ${admission.detail} Resume the harness session to continue.`,
+        }),
+      );
+    }
+  }
+
   async #sendTurn(
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "send-chat-turn" }>,
     executionContext?: ChatServiceExecutionContext,
   ): Promise<ChatCommandResult> {
     const accepted = await this.#withThreadAdmission(command.threadId, async () => {
       const thread = this.#requireActiveThread(command.threadId);
+      this.#admitHarnessTurn(thread);
       if (command.submissionId !== undefined) {
         // Match on submissionId alone. A turn whose only attempt ended
         // failed, cancelled, or interrupted is still the turn this
@@ -1934,6 +1979,7 @@ export class ChatService {
   ): Promise<ChatCommandResult> {
     const accepted = await this.#withThreadAdmission(command.threadId, async () => {
       const thread = this.#requireActiveThread(command.threadId);
+      this.#admitHarnessTurn(thread);
       this.#assertExpectedThreadVersion(thread, command.expectedVersion);
       const view = this.#requireThreadView(command.threadId);
       this.#assertNoActiveTurn(view, thread.id);
@@ -3916,13 +3962,34 @@ export class ChatService {
       const reservationId = decodeCapacityReservationId(this.#uuid());
       const providerInstanceId = decodeProviderInstanceId(input.thread.providerInstanceId);
 
+      const harnessScope: NativeHarnessTurnScope = {
+        threadId: String(input.thread.id),
+        mode: "chat",
+        providerInstanceId,
+        modelId: decodeProviderModelId(input.attempt.modelId),
+        ...(input.thread.projectId === undefined ? {} : { projectId: input.thread.projectId }),
+      };
+      this.#nativeHarness?.turnStarted(harnessScope);
       await Effect.runPromise(
         Effect.scoped(
           this.#turnRunner.run({
             thread: input.thread,
             attempt: input.attempt,
             prompt: input.prompt,
-            context: input.prepared.context.providerContext,
+            context: [
+              ...(this.#nativeHarness?.contextFor(harnessScope) ?? []),
+              ...input.prepared.context.providerContext,
+            ],
+            ...(this.#nativeHarness === undefined
+              ? {}
+              : {
+                  onTurnCompleted: (completed) =>
+                    this.#nativeHarness!.turnCompleted({
+                      ...harnessScope,
+                      ...completed,
+                      contextSubject: input.prepared.context.subject,
+                    }),
+                }),
             scratchRoot,
             driver: this.#driver(providerInstanceId),
             providerInstanceId,

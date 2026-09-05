@@ -34,6 +34,7 @@ import {
   type CodeAttachmentReference,
   type MentionableThreadId,
   type ProviderExecutionPolicy,
+  ThreadBoardPullRequestSummaries,
 } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
@@ -133,6 +134,8 @@ export interface CodeThreadNavigationItem {
     readonly checkoutKind: "managed-worktree";
     readonly label: string;
   };
+  /** Exact linked pull requests joined by the host; absent when it has none. */
+  readonly pullRequestSummaries?: ThreadBoardPullRequestSummaries;
   readonly executing?: boolean;
   readonly executionPolicy: CodeThread["executionPolicy"];
   readonly lifecycle: CodeThread["lifecycle"];
@@ -1310,12 +1313,16 @@ export function useCodeController(options: CodeControllerOptions) {
           readonly checkoutKind: "managed-worktree";
           readonly label: string;
         };
+        readonly pullRequestSummaries?: ThreadBoardPullRequestSummaries;
       }
     >();
     for (const entry of bootstrap?.runtime ?? []) {
       byThread.set(String(entry.threadId), {
         executing: entry.executing,
         ...(entry.checkoutChip === undefined ? {} : { checkoutChip: entry.checkoutChip }),
+        ...(entry.pullRequestSummaries === undefined
+          ? {}
+          : { pullRequestSummaries: entry.pullRequestSummaries }),
       });
     }
     return byThread;
@@ -1348,6 +1355,9 @@ export function useCodeController(options: CodeControllerOptions) {
                 (readCursors.get(String(thread.id)) ?? 0),
             ...(runtime?.executing === true ? { executing: true } : {}),
             ...(runtime?.checkoutChip === undefined ? {} : { checkoutChip: runtime.checkoutChip }),
+            ...(runtime?.pullRequestSummaries === undefined
+              ? {}
+              : { pullRequestSummaries: runtime.pullRequestSummaries }),
             ...(thread.pinned === true ? { pinned: true } : {}),
             ...(thread.forkedFrom === undefined
               ? {}

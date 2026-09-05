@@ -1,4 +1,9 @@
-import { decodeProviderFailure, type ProviderFailure } from "@octant/contracts";
+import {
+  decodeProviderFailure,
+  type ProviderFailure,
+  type ProviderToolAnswer,
+  type ProviderToolDefinition,
+} from "@octant/contracts";
 import { Effect } from "effect";
 import {
   type AnthropicCompatibleEndpoint,
@@ -7,9 +12,29 @@ import {
 import { decodeSse } from "./openAiCompatibleSse";
 import { readAnthropicRateLimitBuckets, type ObservedRateLimitBucket } from "./rateLimitHeaders";
 
+export interface AnthropicToolCall {
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly argumentsJson: string;
+}
+
+export interface AnthropicToolResult {
+  readonly toolCallId: string;
+  readonly resultJson: string;
+  readonly isError: boolean;
+}
+
+/**
+ * One turn of the conversation as the driver remembers it. An assistant entry
+ * may carry the tool calls it made; an entry that carries only tool results is
+ * the answer to those calls and is sent back as a user turn of tool_result
+ * blocks, which is the shape the Messages API pairs with a tool_use.
+ */
 export interface AnthropicHistoryMessage {
   readonly role: "user" | "assistant";
   readonly text: string;
+  readonly toolCalls?: readonly AnthropicToolCall[];
+  readonly toolResults?: readonly AnthropicToolResult[];
 }
 
 export type AnthropicTurnEvent =
@@ -35,6 +60,8 @@ export interface AnthropicTurnResult {
   readonly streaming: "supported";
   readonly text: string;
   readonly reasoning: string;
+  /** Tool calls the model stopped on; empty when the turn ended in text. */
+  readonly toolCalls: readonly AnthropicToolCall[];
   readonly usage?: AnthropicUsage;
   readonly events: readonly AnthropicTurnEvent[];
   readonly verifiedManualModelId?: string;
@@ -47,6 +74,11 @@ export interface AnthropicMessagesTurnInput {
   readonly modelId: string;
   readonly history: readonly AnthropicHistoryMessage[];
   readonly prompt: string;
+  /** A stable system prompt, sent as a cached system block when present. */
+  readonly system?: string;
+  readonly tools?: readonly ProviderToolDefinition[];
+  /** Answers to the previous turn's tool calls, when this request continues a tool loop. */
+  readonly toolAnswers?: readonly ProviderToolAnswer[];
   readonly sequenceStart?: number;
   readonly signal?: AbortSignal;
   readonly onEvent?: (event: AnthropicTurnEvent) => void;
@@ -66,12 +98,105 @@ interface StreamState {
   usage?: AnthropicUsage;
   readonly events: AnthropicTurnEvent[];
   readonly contentBlocks: Map<number, TrackedContentBlock>;
+  readonly toolCalls: AnthropicToolCall[];
 }
 
 interface TrackedContentBlock {
   readonly index: number;
   readonly type: "text" | "thinking" | "tool_use" | "unknown";
   status: "in_progress" | "completed";
+  toolCallId?: string;
+  toolName?: string;
+  inputJson: string;
+}
+
+/**
+ * The request body for one turn, shared by the sender and the size check so
+ * the bytes that are measured are the bytes that are sent.
+ */
+export function buildAnthropicMessagesBody(
+  input: Pick<
+    AnthropicMessagesTurnInput,
+    "modelId" | "history" | "prompt" | "system" | "tools" | "toolAnswers" | "maxTokens"
+  >,
+): Record<string, unknown> {
+  const messages: Record<string, unknown>[] = [];
+  for (const entry of input.history) {
+    if (entry.toolResults !== undefined && entry.toolCalls === undefined) {
+      messages.push({
+        role: "user",
+        content: entry.toolResults.map((result) => ({
+          type: "tool_result",
+          tool_use_id: result.toolCallId,
+          content: result.resultJson,
+          ...(result.isError ? { is_error: true } : {}),
+        })),
+      });
+      continue;
+    }
+    if (entry.toolCalls === undefined) {
+      messages.push({ role: entry.role, content: entry.text });
+      continue;
+    }
+    messages.push({
+      role: entry.role,
+      content: [
+        ...(entry.text.length === 0 ? [] : [{ type: "text", text: entry.text }]),
+        ...entry.toolCalls.map((call) => ({
+          type: "tool_use",
+          id: call.toolCallId,
+          name: call.toolName,
+          input: parseArguments(call.argumentsJson),
+        })),
+      ],
+    });
+  }
+  const answers = input.toolAnswers ?? [];
+  const finalContent: Record<string, unknown>[] = [
+    ...answers.map((answer) => ({
+      type: "tool_result",
+      tool_use_id: answer.requestId,
+      content: answer.resultJson,
+      ...(answer.isError ? { is_error: true } : {}),
+    })),
+    ...(input.prompt.length === 0 ? [] : [{ type: "text", text: input.prompt }]),
+  ];
+  if (finalContent.length > 0) {
+    messages.push({
+      role: "user",
+      content: answers.length === 0 && input.prompt.length > 0 ? input.prompt : finalContent,
+    });
+  }
+  return {
+    model: input.modelId,
+    ...(input.system === undefined || input.system.length === 0
+      ? {}
+      : {
+          // The system prompt is the stable prefix; marking it lets the
+          // endpoint serve it from cache on every following turn.
+          system: [{ type: "text", text: input.system, cache_control: { type: "ephemeral" } }],
+        }),
+    messages,
+    max_tokens: input.maxTokens ?? DEFAULT_MAX_TOKENS,
+    stream: true,
+    ...(input.tools === undefined || input.tools.length === 0
+      ? {}
+      : {
+          tools: input.tools.map((tool) => ({
+            name: tool.name,
+            ...(tool.description === undefined ? {} : { description: tool.description }),
+            input_schema: tool.inputSchema,
+          })),
+        }),
+  };
+}
+
+function parseArguments(argumentsJson: string): unknown {
+  try {
+    return argumentsJson.trim().length === 0 ? {} : (JSON.parse(argumentsJson) as unknown);
+  } catch {
+    return {};
+  }
 }
 
 export function sendAnthropicMessagesTurn(
@@ -83,15 +208,7 @@ export function sendAnthropicMessagesTurn(
 async function runMessagesTurn(input: AnthropicMessagesTurnInput): Promise<AnthropicTurnResult> {
   const response = await requestAnthropicGeneration(input.endpoint, {
     path: "messages",
-    body: {
-      model: input.modelId,
-      messages: [
-        ...input.history.map(({ role, text }) => ({ role, content: text })),
-        { role: "user" as const, content: input.prompt },
-      ],
-      max_tokens: input.maxTokens ?? DEFAULT_MAX_TOKENS,
-      stream: true,
-    },
+    body: buildAnthropicMessagesBody(input),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   if (response.body === null) {
@@ -108,6 +225,7 @@ async function runMessagesTurn(input: AnthropicMessagesTurnInput): Promise<Anthr
     reasoning: "",
     events: [],
     contentBlocks: new Map(),
+    toolCalls: [],
   };
   assertSequenceStart(state.nextSequence);
 
@@ -224,11 +342,32 @@ function validateContentBlockStart(event: Record<string, unknown>, state: Stream
     throw protocol("The provider stream contained an unsupported content block type.");
   }
   if (type === "tool_use") {
-    throw failure("unsupported", "The provider attempted an unsupported tool call.");
+    if (typeof block.id !== "string" || block.id.length === 0 || typeof block.name !== "string") {
+      throw protocol("The provider stream contained an invalid tool_use block.");
+    }
+    state.outputStarted = true;
+    state.contentBlocks.set(index, {
+      index,
+      type: "tool_use",
+      status: "in_progress",
+      toolCallId: block.id,
+      toolName: block.name,
+      // A tool_use start may carry the whole input when the stream is short.
+      inputJson:
+        isRecord(block.input) && Object.keys(block.input).length > 0
+          ? JSON.stringify(block.input)
+          : "",
+    });
+    return;
   }
   const trackedType: TrackedContentBlock["type"] =
     type === "text" ? "text" : type === "thinking" ? "thinking" : "unknown";
-  state.contentBlocks.set(index, { index, type: trackedType, status: "in_progress" });
+  state.contentBlocks.set(index, {
+    index,
+    type: trackedType,
+    status: "in_progress",
+    inputJson: "",
+  });
 }
 
 function normalizeContentBlockDelta(
@@ -283,7 +422,11 @@ function normalizeContentBlockDelta(
     return;
   }
   if (delta.type === "input_json_delta") {
-    throw failure("unsupported", "The provider attempted an unsupported tool call.");
+    if (tracked.type !== "tool_use" || typeof delta.partial_json !== "string") {
+      throw protocol("The provider stream contained an invalid tool input delta.");
+    }
+    tracked.inputJson += delta.partial_json;
+    return;
   }
   throw protocol("The provider stream contained an unsupported content block delta.");
 }
@@ -298,6 +441,19 @@ function validateContentBlockStop(event: Record<string, unknown>, state: StreamS
     throw protocol("The provider stream referenced an unknown content block.");
   }
   tracked.status = "completed";
+  if (tracked.type === "tool_use") {
+    const argumentsJson = tracked.inputJson.trim().length === 0 ? "{}" : tracked.inputJson;
+    try {
+      JSON.parse(argumentsJson);
+    } catch {
+      throw protocol("The provider stream ended a tool call with invalid JSON input.");
+    }
+    state.toolCalls.push({
+      toolCallId: tracked.toolCallId!,
+      toolName: tracked.toolName!,
+      argumentsJson,
+    });
+  }
 }
 
 function normalizeMessageDelta(
@@ -310,10 +466,8 @@ function normalizeMessageDelta(
     throw protocol("The provider stream contained an invalid message delta.");
   }
   if (delta.stop_reason !== undefined && delta.stop_reason !== null) {
-    if (delta.stop_reason === "tool_use") {
-      throw failure("unsupported", "The provider attempted an unsupported tool call.");
-    }
     if (
+      delta.stop_reason !== "tool_use" &&
       delta.stop_reason !== "end_turn" &&
       delta.stop_reason !== "stop_sequence" &&
       delta.stop_reason !== "max_tokens" &&
@@ -358,6 +512,7 @@ function result(
     streaming: "supported",
     text: state.text,
     reasoning: state.reasoning,
+    toolCalls: state.toolCalls,
     ...(state.usage === undefined ? {} : { usage: state.usage }),
     events: state.events,
     ...(input.endpoint.configuration.manualModelIds.includes(input.modelId as never)
