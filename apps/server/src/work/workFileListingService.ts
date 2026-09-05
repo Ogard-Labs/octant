@@ -164,7 +164,13 @@ export class WorkFileListingService {
         canonicalRoot,
         current.absolute,
       );
-      if (identity === undefined || !identity.stat.isDirectory) continue;
+      // A directory that cannot be re-resolved is dropped from the walk, so the
+      // listing is missing a subtree. Reporting it as complete would tell the
+      // panel there is nothing more to show.
+      if (identity === undefined || !identity.stat.isDirectory) {
+        truncated = true;
+        continue;
+      }
 
       // One more than the remaining budget, so a directory that overflows is
       // reported as truncated rather than silently cut at the boundary.
@@ -175,7 +181,10 @@ export class WorkFileListingService {
         identity.stat,
         remaining + 1,
       );
-      if (names === undefined) continue;
+      if (names === undefined) {
+        truncated = true;
+        continue;
+      }
       if (names.length > remaining) truncated = true;
 
       for (const name of names.slice(0, remaining)) {

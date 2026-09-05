@@ -985,9 +985,15 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                 className="work-thread-workspace__files"
               >
                 <h3 className="oct-section-label">
-                  {row.wrote.paths.length === 1
-                    ? "1 file changed while this ran"
-                    : `${String(row.wrote.paths.length)} files changed while this ran`}
+                  {/* A watcher that failed reports no paths and marks itself
+                      truncated. Counting that as zero told the person nothing
+                      changed, which is not what the host observed. An empty
+                      list that is not truncated really is nothing. */}
+                  {row.wrote.paths.length === 0 && row.wrote.truncated
+                    ? "Changed files could not be observed while this ran"
+                    : row.wrote.paths.length === 1
+                      ? "1 file changed while this ran"
+                      : `${String(row.wrote.paths.length)} files changed while this ran`}
                 </h3>
                 <ul className="work-thread-workspace__file-list">
                   {row.wrote.paths.map((path) => (
@@ -1152,6 +1158,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                         disabled={providerChanging || creating || completionLocked}
                         groups={props.providerGroups ?? []}
                         onSelect={(selection) => void changeProvider(selection)}
+                        {...(props.onOpenSettings === undefined
+                          ? {}
+                          : { onOpenSettings: props.onOpenSettings })}
                         selectedModelId={thread.modelId}
                         selectedProviderInstanceId={thread.providerInstanceId}
                       />

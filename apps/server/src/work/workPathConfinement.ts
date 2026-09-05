@@ -90,9 +90,17 @@ export async function readContainedWorkDirectoryNames(
   }
 }
 
-/** Stable, case-insensitive name order, so a walk is reproducible. */
+/**
+ * Stable, case-insensitive name order, so a walk is reproducible.
+ *
+ * Base sensitivity calls `"A"` and `"a"` equal, which left two case variants
+ * in whatever order the filesystem enumerated them — the one thing this
+ * comparator exists to remove. An exact comparison breaks that tie.
+ */
 export function compareWorkPathNames(left: string, right: string): number {
-  return left.localeCompare(right, "en", { sensitivity: "base" });
+  const folded = left.localeCompare(right, "en", { sensitivity: "base" });
+  if (folded !== 0) return folded;
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 export function joinWorkPath(root: string, segment: string): string {

@@ -74,9 +74,14 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
   }, [injected, serverUrl, windowCapability]);
 
   useEffect(() => {
+    // A refusal clears the rows with it. Left standing, the panel kept showing
+    // file names beside an alert saying the host had just declined to confirm
+    // them, and a truncation notice about a listing that no longer exists.
     if (client === undefined || projectId === undefined) {
       setStatus("error");
       setMessage("Work files are unavailable in this window.");
+      setEntries([]);
+      setTruncated(false);
       return;
     }
     const controller = new AbortController();
@@ -90,6 +95,8 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
         if (result.status === "failed") {
           setStatus("error");
           setMessage(result.failure.message);
+          setEntries([]);
+          setTruncated(false);
           return;
         }
         setEntries(result.listing.entries);
@@ -101,6 +108,8 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
         if (cancelled) return;
         setStatus("error");
         setMessage("Work files could not be read.");
+        setEntries([]);
+        setTruncated(false);
       });
     return () => {
       cancelled = true;

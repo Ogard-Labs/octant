@@ -91,8 +91,10 @@ function validateLoopbackBaseUrl(baseUrl: string): void {
   } catch {
     throw new WorkFileListingClientFailure("Work file listing base URL is invalid.", 0);
   }
+  // `URL.hostname` keeps the brackets on an IPv6 literal, so the bare form
+  // never matches and `http://[::1]:5173` was refused as non-loopback.
   const host = url.hostname;
-  if (host !== "127.0.0.1" && host !== "localhost" && host !== "::1") {
+  if (host !== "127.0.0.1" && host !== "localhost" && host !== "::1" && host !== "[::1]") {
     throw new WorkFileListingClientFailure("Work file listing base URL must be loopback.", 0);
   }
 }

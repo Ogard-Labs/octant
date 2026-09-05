@@ -580,7 +580,24 @@ export class WorkTurnService {
     });
     const wroteFiles = observation?.finish();
     const latest = this.#projection.lookup(input.command.requestId);
-    if (latest === undefined || latest.status === "cancelled") return;
+    if (latest === undefined) return;
+    if (latest.status === "cancelled") {
+      // Cancelling settles the turn, but files the provider wrote before it
+      // stopped are still on disk. Returning without recording them told the
+      // person the folder was untouched when it was not.
+      if (wroteFiles !== undefined) {
+        this.#persistUpdate(latest, {
+          status: "cancelled",
+          ...(latest.response === undefined ? {} : { response: latest.response }),
+          wroteFiles,
+        });
+        const settledCancel = this.#projection.lookup(input.command.requestId);
+        if (settledCancel !== undefined) {
+          this.#liveUpdates.settle(input.command.threadId, settledCancel);
+        }
+      }
+      return;
+    }
     const live = this.#liveResponses.get(String(input.command.requestId));
     this.#persistOutcome(
       live === undefined ? latest : decodeWorkTurnState({ ...latest, response: live }),
