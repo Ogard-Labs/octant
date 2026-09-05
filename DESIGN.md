@@ -165,8 +165,11 @@ block that must depict one fixed scheme regardless of theme, such as the
 light/dark preview swatches in Settings, carries
 `/* ui-style-exception: fixed-scheme */` on the line before it. Off-scale
 `font-size` values, raw `transition`/`animation` durations, and `!important`
-outside an accessibility fallback, and any `font-weight` heavier than 500 (only a
-page title and content emphasis such as `strong` are 600) ratchet against
+outside an accessibility fallback, any `font-weight` heavier than 500 (only a
+page title and content emphasis such as `strong` are 600), and any paint
+(colour, background, border, radius, shadow, outline) that a feature rule puts
+on a class handed to an Octant primitive (0046: place or size a shared control,
+never repaint it; pick a recipe variant instead) ratchet against
 `scripts/ui-stylesheet-baseline.json`: a file may not add one, and a fix must
 re-record the lower count with `--write-baseline` so the baseline never
 overstates.

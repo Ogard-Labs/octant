@@ -73,6 +73,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           className="composer-model-picker__trigger window-no-drag"
           disabled={props.disabled || props.onOpenSettings === undefined}
           onClick={props.onOpenSettings}
+          size="sm"
           title={
             props.onOpenSettings === undefined
               ? "Configure and check a provider in Settings."
@@ -236,6 +237,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
         }
         triggerClassName="composer-model-picker__trigger"
         triggerLabel={ariaLabel}
+        triggerVariant="ghost"
         {...(props.disabled === undefined ? {} : { triggerDisabled: props.disabled })}
       >
         <div aria-label="Providers" className="composer-model-picker__rail" role="listbox">

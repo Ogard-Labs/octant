@@ -267,7 +267,7 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
             className="thread-activity-pip-trigger window-no-drag"
             onClick={() => setCollapsed(false)}
             type="button"
-            variant="ghost"
+            variant="secondary"
           >
             <span className="thread-activity-pip__pulse" />
             {activeKind === "browser" ? (

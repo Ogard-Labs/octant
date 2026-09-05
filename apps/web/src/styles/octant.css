@@ -4115,8 +4115,7 @@ input.switch:checked::after {
 }
 .composer-row button,
 .composer-row [role="button"],
-.composer-row [role="combobox"],
-.composer-row .composer-model-picker__trigger {
+.composer-row [role="combobox"] {
   min-height: 32px;
   height: 32px;
   border-radius: var(--oct-radius-sm);
@@ -4130,8 +4129,7 @@ input.switch:checked::after {
 .composer-row button,
 .composer-row [role="button"],
 .composer-row [role="combobox"],
-.composer-row input,
-.composer-row .composer-model-picker__trigger {
+.composer-row input {
   border-color: transparent;
   box-shadow: none;
 }
@@ -4139,8 +4137,7 @@ input.switch:checked::after {
    row's controls that are not the button recipe and would otherwise be left
    with no focus mark at all once the ring above is suppressed. */
 .composer-row [role="combobox"]:focus-visible,
-.composer-row input:focus-visible,
-.composer-row .composer-model-picker__trigger:focus-visible {
+.composer-row input:focus-visible {
   outline: 2px solid var(--oct-accent-fg);
   outline-offset: 1px;
 }
@@ -4176,9 +4173,6 @@ input.switch:checked::after {
   min-height: 32px;
   padding-block: 0;
   padding-inline: 8px 6px;
-  border: 0;
-  border-radius: var(--oct-radius-sm);
-  background: transparent;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
