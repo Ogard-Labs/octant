@@ -1005,7 +1005,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                 </ul>
                 {row.wrote.truncated ? (
                   <p className="oct-row-detail" role="status">
-                    More changed than Octant could record. Open Files for the folder itself.
+                    {/* "More changed" claims a file changed. A watcher that
+                        failed establishes no such thing. */}
+                    {row.wrote.paths.length === 0
+                      ? "Octant could not watch the folder while this ran. Open Files for the folder itself."
+                      : "More changed than Octant could record. Open Files for the folder itself."}
                   </p>
                 ) : null}
               </section>
