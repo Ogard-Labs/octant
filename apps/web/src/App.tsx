@@ -126,6 +126,8 @@ import { loadPluginSidebarDestinationAction } from "./shell/pluginSidebarDestina
 import type { SidebarDestinationActionContext } from "./shell/pluginSidebarDestinationRegistry";
 import { WindowChrome } from "./shell/WindowChrome";
 import type { CodeDeepLink, OctantHostBridge } from "./shell/hostBridge";
+import { openExternalUrl } from "./shell/openExternalUrl";
+import { githubPullRequestUrl } from "./threadBoard/githubPullRequestUrl";
 import { useDesktopWindowAuthority } from "./shell/useDesktopWindowAuthority";
 import { buildInboxAttentionItems, inboxThreadProjectId } from "./inbox/inboxModel";
 import { loadAssignedLinearIssues as fetchAssignedLinearIssues } from "./inbox/loadAssignedLinearIssues";
@@ -2958,6 +2960,9 @@ function LaunchedShell(
           // nothing. The status dot carries it instead.
           activity: codeThreadActivity(thread),
           ...(thread.checkoutChip === undefined ? {} : { checkoutChip: thread.checkoutChip }),
+          ...(thread.pullRequestSummaries === undefined
+            ? {}
+            : { pullRequests: thread.pullRequestSummaries }),
           ...(thread.followUp === undefined ? {} : { followUp: thread.followUp }),
           ...(thread.unread === undefined ? {} : { unread: thread.unread }),
           ...(thread.pinned === undefined ? {} : { pinned: thread.pinned }),
@@ -3117,6 +3122,11 @@ function LaunchedShell(
     onPinInPane: pinCodeThreadInPane,
     onPinThread: (threadId, pinned) =>
       void codeController.pinThread(decodeCodeThreadId(threadId), pinned),
+    onOpenPullRequest: selectProjectPullRequestIdentity,
+    onOpenPullRequestOnGithub: (identity) => {
+      const url = githubPullRequestUrl(identity);
+      if (url !== undefined) openExternalUrl(props.hostBridge, url);
+    },
   };
   const renameCodeThreadFromRow = (threadId: string, title: string): void => {
     void codeController.renameThread(decodeCodeThreadId(threadId), title);

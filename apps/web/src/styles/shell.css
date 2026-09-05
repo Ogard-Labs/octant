@@ -997,6 +997,83 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   white-space: nowrap;
 }
 
+/* Linked pull requests close the card as their own group: a rule above them
+   says these are things to open, where the facts above are things to read. */
+.thread-row-info-card__prs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--oct-border-soft);
+}
+
+.thread-row-info-card__pr {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* Number and title on the first line, repository and facts on the second,
+   with the glyph spanning both. The reference is a card-shaped control, so
+   it drops the button recipe's fixed height rather than clipping its second
+   line. */
+.thread-row-info-card__pr-reference {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 8px;
+  row-gap: 1px;
+  align-items: center;
+  min-width: 0;
+  height: auto;
+  min-height: 0;
+  padding: 4px 6px;
+  text-align: left;
+  font-weight: 400;
+}
+
+.thread-row-info-card__pr-reference > svg {
+  grid-row: span 2;
+  color: var(--oct-meta);
+}
+
+.thread-row-info-card__pr-title,
+.thread-row-info-card__pr-meta {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--oct-text-xs);
+  line-height: 1.35;
+}
+
+.thread-row-info-card__pr-title {
+  color: var(--oct-fg);
+  font-weight: 500;
+}
+
+.thread-row-info-card__pr-meta {
+  color: var(--oct-meta);
+}
+
+.thread-row-info-card__pr-github {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  color: var(--oct-meta);
+  border-radius: var(--oct-radius-sm);
+}
+
+.thread-row-info-card__pr-more {
+  padding: 2px 6px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
 .sidebar-navigation__thread-rename {
   width: 100%;
 }

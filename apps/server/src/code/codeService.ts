@@ -88,6 +88,10 @@ import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalE
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
 import { boardRuntimeActivityFromWorks } from "./codeThreadBoardService";
+import {
+  joinCodeThreadBoardPullRequests,
+  type ThreadBoardPullRequestSnapshot,
+} from "./threadBoardPullRequestJoin";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import {
   issueContextFailureCategory,
@@ -529,6 +533,19 @@ export interface CodeServiceOptions {
   readonly waitForThreadChange?: (signal: AbortSignal) => Promise<void>;
   readonly issueContext?: GithubIssueContextPort;
   readonly linearIssueContext?: LinearIssueContextPort;
+  /**
+   * The cached pull-request snapshot the sidebar joins linked pull requests
+   * from. Optional for the same reason as `files.list`: a host that wired no
+   * snapshot leaves every row without pull-request facts rather than
+   * pretending the thread has none.
+   */
+  readonly pullRequests?: CodeNavigationPullRequestSource;
+}
+
+export interface CodeNavigationPullRequestSource {
+  snapshot(
+    authenticatedWindowId: WindowId,
+  ): ThreadBoardPullRequestSnapshot | Promise<ThreadBoardPullRequestSnapshot>;
 }
 
 /**
@@ -638,6 +655,7 @@ export class CodeService {
   readonly #workingDirectories: CodeServiceOptions["workingDirectories"];
   readonly #onWorkingDirectoryChanged: CodeServiceOptions["onWorkingDirectoryChanged"];
   readonly #waitForThreadChange: CodeServiceOptions["waitForThreadChange"];
+  readonly #pullRequests: CodeNavigationPullRequestSource | undefined;
   readonly #issueContext?: GithubIssueContextPort;
   readonly #linearIssueContext?: LinearIssueContextPort;
   /**
@@ -679,6 +697,7 @@ export class CodeService {
     this.#workingDirectories = options.workingDirectories;
     this.#onWorkingDirectoryChanged = options.onWorkingDirectoryChanged;
     this.#waitForThreadChange = options.waitForThreadChange;
+    this.#pullRequests = options.pullRequests;
     if (options.issueContext !== undefined) {
       this.#issueContext = options.issueContext;
     }
@@ -688,16 +707,22 @@ export class CodeService {
   }
 
   async navigation(authenticatedWindowId: WindowId): Promise<CodeNavigation> {
-    const threads = await this.#visibleThreads(authenticatedWindowId);
+    const [threads, pullRequests] = await Promise.all([
+      this.#visibleThreads(authenticatedWindowId),
+      this.#pullRequestSnapshot(authenticatedWindowId),
+    ]);
     return {
       threads,
       activity: this.#visibleActivity(threads),
-      runtime: this.#visibleRuntime(threads),
+      runtime: this.#visibleRuntime(threads, pullRequests),
     };
   }
 
   async bootstrap(authenticatedWindowId: WindowId): Promise<CodeBootstrap> {
-    const threads = await this.#visibleThreads(authenticatedWindowId);
+    const [threads, pullRequests] = await Promise.all([
+      this.#visibleThreads(authenticatedWindowId),
+      this.#pullRequestSnapshot(authenticatedWindowId),
+    ]);
     const recoveredCheckouts = new Map<string, CodeCheckoutIdentity>();
     const observedExistingCheckouts = new Map<string, CodeCheckoutIdentity | undefined>();
     const attemptedManagedCheckoutIds = new Set<string>();
@@ -828,7 +853,7 @@ export class CodeService {
         .filter((checkout) => checkoutIds.has(String(checkout.id)))
         .map((checkout) => recoveredCheckouts.get(String(checkout.id)) ?? checkout),
       activity: this.#visibleActivity(threads),
-      runtime: this.#visibleRuntime(threads),
+      runtime: this.#visibleRuntime(threads, pullRequests),
     };
   }
 
@@ -858,19 +883,47 @@ export class CodeService {
    * checkout identity — never a filesystem probe — so a navigation tick stays
    * cheap. The chip appears only for a thread's own managed worktree.
    */
-  #visibleRuntime(threads: ReadonlyArray<CodeThread>): ReadonlyArray<CodeNavigationRuntime> {
+  #visibleRuntime(
+    threads: ReadonlyArray<CodeThread>,
+    pullRequests: ThreadBoardPullRequestSnapshot | undefined,
+  ): ReadonlyArray<CodeNavigationRuntime> {
     return threads.map((thread) => {
       const activity = boardRuntimeActivityFromWorks(
         this.#persistence.readCodeRuntimeWorks(thread.id),
       );
       const checkout = this.#persistence.readCodeCheckout(thread.checkoutId);
       const checkoutChip = codeNavigationCheckoutChip(checkout);
+      const pullRequestSummaries =
+        pullRequests === undefined
+          ? undefined
+          : joinCodeThreadBoardPullRequests({ threadId: thread.id, snapshot: pullRequests });
+      const hasPullRequests =
+        pullRequestSummaries !== undefined &&
+        (pullRequestSummaries.items.length > 0 || pullRequestSummaries.hiddenCount > 0);
       return {
         threadId: thread.id,
         executing: activity.executing,
         ...(checkoutChip === undefined ? {} : { checkoutChip }),
+        ...(hasPullRequests ? { pullRequestSummaries } : {}),
       };
     });
+  }
+
+  /**
+   * The cached pull-request snapshot for a navigation read, or nothing when
+   * the host wired no source or the source failed. A failed join must not
+   * take the thread list down with it: the rows still render, only without
+   * pull-request facts, and the next tick tries again.
+   */
+  async #pullRequestSnapshot(
+    authenticatedWindowId: WindowId,
+  ): Promise<ThreadBoardPullRequestSnapshot | undefined> {
+    if (this.#pullRequests === undefined) return undefined;
+    try {
+      return await this.#pullRequests.snapshot(authenticatedWindowId);
+    } catch {
+      return undefined;
+    }
   }
 
   async read(authenticatedWindowId: WindowId, threadId: CodeThreadId): Promise<CodeThreadView> {
