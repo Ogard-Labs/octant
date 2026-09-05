@@ -3618,8 +3618,12 @@ function LaunchedShell(
         return false;
       }
       const project = resolution.project;
-      if (project?.type !== "code" || codeController.bootstrap === undefined) {
-        setDraftError("No active Code Project is available.");
+      if (project?.type !== "code") {
+        setDraftError("Choose a Code Project before starting a thread.");
+        return false;
+      }
+      if (codeController.bootstrap === undefined) {
+        setDraftError("Code is still loading on this host. Try again in a moment.");
         return false;
       }
       const prepared = await codeController.execute({
@@ -3831,8 +3835,15 @@ function LaunchedShell(
           return;
         }
         const project = resolution.project;
-        if (project?.type !== "code" || codeController.bootstrap === undefined) {
-          setDraftError("No active Code Project is available.");
+        // Two different problems wore one sentence. "No active Code Project"
+        // sent the user hunting for a Project they had already chosen when the
+        // real answer was that Code had not finished loading on this host.
+        if (project?.type !== "code") {
+          setDraftError("Choose a Code Project before starting a thread.");
+          return;
+        }
+        if (codeController.bootstrap === undefined) {
+          setDraftError("Code is still loading on this host. Try again in a moment.");
           return;
         }
         const prepared = await codeController.execute({
