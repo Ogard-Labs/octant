@@ -17,6 +17,7 @@ import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import { registerNativeHarnessEvents } from "./nativeHarnessEvents";
 import { NativeHarnessRoutingStore } from "./nativeHarnessRoutingStore";
+import { NativeHarnessQuestionStore } from "./nativeHarnessQuestions";
 import { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 
 const directories: string[] = [];
@@ -223,5 +224,75 @@ describe("native harness session store", () => {
     expect(
       store.activateFollowUp(threadId, "00000000-0000-4000-8000-000000000099" as never, created),
     ).toBe("suggestion-not-found");
+  });
+
+  it("keeps a lead's question pending until any surface answers it, then rebuilds it after a restart", async () => {
+    const threadId = "00000000-0000-4000-8000-000000000021";
+    const connection = openConnection();
+    const uuid = uuidFactory();
+    const sessions = new NativeHarnessSessionStore({
+      journal: journalFor(connection),
+      uuid,
+      actor,
+      clock: () => now,
+    });
+    const shown: string[] = [];
+    const questions = new NativeHarnessQuestionStore({
+      sessions,
+      uuid,
+      clock: () => now,
+      onAsked: ({ question }) => shown.push(question.prompt),
+    });
+    const asked = questions.ask({
+      threadId,
+      mode: "chat",
+      lead: candidate("big") as never,
+      prompt: "Which database?",
+      options: ["sqlite", "postgres"],
+    });
+    const pending = sessions.read(threadId)?.questions[0];
+    expect(pending?.status).toBe("pending");
+    expect(shown).toEqual(["Which database?"]);
+    expect(questions.answer("other-thread", String(pending!.id), "sqlite")).toBe(
+      "question-not-found",
+    );
+    expect(questions.answer(threadId, String(pending!.id), "sqlite")).toBe("answered");
+    await expect(asked).resolves.toMatchObject({ status: "answered", answer: "sqlite" });
+    expect(questions.answer(threadId, String(pending!.id), "postgres")).toBe("already-settled");
+
+    const restarted = new NativeHarnessSessionStore({
+      journal: journalFor(connection),
+      uuid,
+      actor,
+      clock: () => now,
+    });
+    expect(restarted.read(threadId)?.questions[0]).toMatchObject({
+      status: "answered",
+      answer: "sqlite",
+    });
+  });
+
+  it("settles a question as cancelled when the turn asking it is aborted", async () => {
+    const threadId = "00000000-0000-4000-8000-000000000022";
+    const uuid = uuidFactory();
+    const sessions = new NativeHarnessSessionStore({
+      journal: journalFor(openConnection()),
+      uuid,
+      actor,
+      clock: () => now,
+    });
+    const questions = new NativeHarnessQuestionStore({ sessions, uuid, clock: () => now });
+    const controller = new AbortController();
+    const asked = questions.ask({
+      threadId,
+      mode: "code",
+      lead: candidate("big") as never,
+      prompt: "Continue?",
+      options: [],
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(asked).resolves.toMatchObject({ status: "cancelled" });
+    expect(sessions.read(threadId)?.questions[0]?.status).toBe("cancelled");
   });
 });

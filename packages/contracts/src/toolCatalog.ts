@@ -230,6 +230,12 @@ const NATIVE_HARNESS_TOOL_POLICY: Readonly<
     approvalClass: "child-agent-creation",
     irreversibleUnderTaint: false,
   },
+  "ask-user": {
+    modes: ["chat", "work", "code"],
+    requiredCapabilityClass: "instructions",
+    approvalClass: "thread-local",
+    irreversibleUnderTaint: false,
+  },
 };
 
 const nativeHarnessCatalogEntries: ReadonlyArray<ClosedToolCatalogEntry> =

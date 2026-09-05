@@ -61,6 +61,38 @@ export function resolveAgentCliCommand(
   return undefined;
 }
 
+/** One reader over stdin shared by the prompt loop and the questions a turn asks. */
+interface LineSource {
+  readonly next: () => Promise<string | undefined>;
+  readonly close: () => void;
+}
+
+function lineSource(stdin: NodeJS.ReadableStream): LineSource {
+  const lines = createInterface({ input: stdin, terminal: false });
+  const queue: string[] = [];
+  const waiters: Array<(line: string | undefined) => void> = [];
+  let closed = false;
+  lines.on("line", (line) => {
+    const waiter = waiters.shift();
+    if (waiter !== undefined) waiter(line);
+    else queue.push(line);
+  });
+  lines.on("close", () => {
+    closed = true;
+    for (const waiter of waiters.splice(0)) waiter(undefined);
+  });
+  return {
+    next: () =>
+      new Promise((resolve) => {
+        const queued = queue.shift();
+        if (queued !== undefined) resolve(queued);
+        else if (closed) resolve(undefined);
+        else waiters.push(resolve);
+      }),
+    close: () => lines.close(),
+  };
+}
+
 export interface RunAgentCliCommandInput {
   readonly command: AgentCliCommand;
   readonly session: OpenedLocalControlSession;
@@ -135,39 +167,80 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
   if (input.command.json) input.stdout.write(`${JSON.stringify({ kind: "thread", threadId })}\n`);
   else input.stdout.write(`Thread ${threadId}\n`);
 
-  if (input.command.prompt !== undefined) {
-    return (await runTurn(input, threadId, input.command.prompt)) ? 0 : 1;
-  }
-
-  const lines = createInterface({ input: input.stdin, terminal: false });
-  input.stdout.write(
-    "Type a prompt and press Enter. /session shows the harness session; /quit exits.\n",
-  );
-  for await (const line of lines) {
-    const prompt = line.trim();
-    if (prompt.length === 0) continue;
-    if (prompt === "/quit" || prompt === "/exit") break;
-    if (prompt === "/session") {
-      const view = await readSession(input, threadId);
-      if (view === null || view === "unavailable") input.stdout.write("No harness session yet.\n");
-      else printSession(view, input.stdout);
-      continue;
+  const lines = lineSource(input.stdin);
+  try {
+    if (input.command.prompt !== undefined) {
+      return (await runTurn(input, threadId, input.command.prompt, lines)) ? 0 : 1;
     }
-    await runTurn(input, threadId, prompt);
+    input.stdout.write(
+      "Type a prompt and press Enter. /session shows the harness session; /quit exits.\n",
+    );
+    for (;;) {
+      const line = await lines.next();
+      if (line === undefined) break;
+      const prompt = line.trim();
+      if (prompt.length === 0) continue;
+      if (prompt === "/quit" || prompt === "/exit") break;
+      if (prompt === "/session") {
+        const view = await readSession(input, threadId);
+        if (view === null || view === "unavailable")
+          input.stdout.write("No harness session yet.\n");
+        else printSession(view, input.stdout);
+        continue;
+      }
+      await runTurn(input, threadId, prompt, lines);
+    }
+    return 0;
+  } finally {
+    lines.close();
   }
-  return 0;
+}
+
+/**
+ * A pending question is answered from the same terminal the prompt came
+ * from: the options are numbered so a digit picks one, and any other line is
+ * the answer itself. In JSON mode the question is emitted as a line and the
+ * answer is read the same way, so a script can answer too.
+ */
+async function answerPendingQuestion(
+  input: RunAgentCliCommandInput,
+  threadId: string,
+  question: NativeHarnessSessionView["questions"][number],
+  lines: LineSource,
+): Promise<void> {
+  if (input.command.json) {
+    input.stdout.write(`${JSON.stringify({ kind: "question", question })}\n`);
+  } else {
+    input.stdout.write(`\n? ${question.prompt}\n`);
+    question.options.forEach((option, index) => input.stdout.write(`  ${index + 1}. ${option}\n`));
+    input.stdout.write("> ");
+  }
+  const line = await lines.next();
+  if (line === undefined) return;
+  const trimmed = line.trim();
+  const picked = /^\d+$/.test(trimmed) ? question.options[Number(trimmed) - 1] : undefined;
+  const answer = picked ?? trimmed;
+  if (answer.length === 0) return;
+  await input.session.send({
+    path: `/api/native-harness/sessions/${encodeURIComponent(threadId)}/questions`,
+    method: "POST",
+    body: { questionId: String(question.id), answer },
+  });
 }
 
 async function readSession(
   input: RunAgentCliCommandInput,
   threadId: string,
+  quiet = false,
 ): Promise<NativeHarnessSessionView | null | "unavailable"> {
   const response = await input.session.send({
     path: `/api/native-harness/sessions/${encodeURIComponent(threadId)}`,
     method: "GET",
   });
   if (response.status !== 200) {
-    input.stderr.write(`${failureMessage(response, "The harness session is unavailable.")}\n`);
+    if (!quiet) {
+      input.stderr.write(`${failureMessage(response, "The harness session is unavailable.")}\n`);
+    }
     return "unavailable";
   }
   const view = (response.body as { view?: unknown }).view;
@@ -233,6 +306,7 @@ async function runTurn(
   input: RunAgentCliCommandInput,
   threadId: string,
   prompt: string,
+  lines: LineSource,
 ): Promise<boolean> {
   const view = await readThread(input, threadId);
   if (view === undefined) {
@@ -256,9 +330,21 @@ async function runTurn(
   }
   let printed = "";
   const interval = input.pollIntervalMs ?? 400;
+  const answered = new Set<string>();
   for (;;) {
     if (input.signal?.aborted) return false;
     await new Promise((resolve) => setTimeout(resolve, interval));
+    const session = await readSession(input, threadId, true);
+    const pending =
+      session === null || session === "unavailable"
+        ? undefined
+        : session.questions.find(
+            (question) => question.status === "pending" && !answered.has(String(question.id)),
+          );
+    if (pending !== undefined) {
+      answered.add(String(pending.id));
+      await answerPendingQuestion(input, threadId, pending, lines);
+    }
     const current = await readThread(input, threadId);
     if (current === undefined) continue;
     const attempt = current.turns.at(-1)?.attempts.at(-1);

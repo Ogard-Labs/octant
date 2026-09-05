@@ -10,12 +10,13 @@ import {
   type NativeHarnessClient,
 } from "@octant/client-runtime/native-harness-client";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 import "./native-harness.css";
 
 export interface NativeHarnessSessionCardProps {
   readonly client: Pick<
     NativeHarnessClient,
-    "session" | "command" | "previewFollowUp" | "activateFollowUp"
+    "session" | "command" | "previewFollowUp" | "activateFollowUp" | "answerQuestion"
   >;
   readonly threadId: string;
   /** Called with the standalone prompt once a follow-up is confirmed. */
@@ -54,6 +55,7 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
   const [error, setError] = useState<string>();
   const [preview, setPreview] = useState<NativeHarnessFollowUpPreview>();
   const [busy, setBusy] = useState(false);
+  const [draftAnswer, setDraftAnswer] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -68,11 +70,35 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
     }
   }, [props.client, props.threadId]);
 
+  const pendingQuestion = view?.questions.find((question) => question.status === "pending");
   useEffect(() => {
     void load();
-    const interval = setInterval(() => void load(), props.refreshIntervalMs ?? 5_000);
+    // A pending question deserves a quicker refresh: the lead is blocked on it.
+    const interval = setInterval(
+      () => void load(),
+      props.refreshIntervalMs ?? (pendingQuestion === undefined ? 5_000 : 1_500),
+    );
     return () => clearInterval(interval);
-  }, [load, props.refreshIntervalMs]);
+  }, [load, props.refreshIntervalMs, pendingQuestion === undefined]);
+
+  const answerQuestion = useCallback(
+    async (answer: string) => {
+      if (pendingQuestion === undefined || busy) return;
+      setBusy(true);
+      try {
+        const result = await props.client.answerQuestion(props.threadId, {
+          questionId: String(pendingQuestion.id),
+          answer,
+        });
+        if (result.kind === "question-refused") setError(result.message);
+        setDraftAnswer("");
+        await load();
+      } finally {
+        setBusy(false);
+      }
+    },
+    [pendingQuestion, busy, props.client, props.threadId, load],
+  );
 
   const pauseOrResume = useCallback(async () => {
     if (view === null || view === undefined || busy) return;
@@ -150,6 +176,51 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
       </div>
       {view.session.detail === undefined ? null : (
         <p className="native-harness-card__detail">{view.session.detail}</p>
+      )}
+      {pendingQuestion === undefined ? null : (
+        <form
+          aria-label="Question from the lead"
+          className="native-harness-question"
+          noValidate
+          onSubmit={(event) => {
+            event.preventDefault();
+            const trimmed = draftAnswer.trim();
+            if (trimmed.length > 0) void answerQuestion(trimmed);
+          }}
+        >
+          <p className="native-harness-question__prompt">{pendingQuestion.prompt}</p>
+          {pendingQuestion.options.length === 0 ? null : (
+            <div className="native-harness-chips">
+              {pendingQuestion.options.map((option) => (
+                <OctantButton
+                  disabled={busy}
+                  key={option}
+                  onClick={() => void answerQuestion(option)}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  {option}
+                </OctantButton>
+              ))}
+            </div>
+          )}
+          <div className="native-harness-panel__actions">
+            <OctantInput
+              aria-label="Answer"
+              onChange={(event) => setDraftAnswer(event.target.value)}
+              placeholder="Type an answer"
+              value={draftAnswer}
+            />
+            <OctantButton
+              disabled={busy || draftAnswer.trim().length === 0}
+              type="submit"
+              variant="default"
+            >
+              Send answer
+            </OctantButton>
+          </div>
+        </form>
       )}
       <dl className="native-harness-card__facts">
         <dt>Lead</dt>

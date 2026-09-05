@@ -62,6 +62,7 @@ function view(): NativeHarnessSessionView {
       ],
     },
     activatedFollowUpIds: [],
+    questions: [],
   } as never;
 }
 
@@ -72,6 +73,7 @@ describe("NativeHarnessSessionCard", () => {
       command: vi.fn(),
       previewFollowUp: vi.fn(),
       activateFollowUp: vi.fn(),
+      answerQuestion: vi.fn(),
     };
     render(<NativeHarnessSessionCard client={client} threadId={threadId} />);
     await waitFor(() => expect(screen.getByText(/frontier-large/)).toBeVisible());
@@ -113,5 +115,34 @@ describe("NativeHarnessSessionCard", () => {
       confirmed: true,
     });
     expect(activated).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the lead's pending question and sends the picked option as the answer", async () => {
+    const question = {
+      id: "00000000-0000-4000-8000-000000000051",
+      prompt: "Which database?",
+      options: ["sqlite", "postgres"],
+      status: "pending",
+      askedAt: "2026-09-05T12:06:00.000Z",
+    };
+    const client = {
+      session: vi.fn(async () => ({ ...view(), questions: [question] })),
+      command: vi.fn(),
+      previewFollowUp: vi.fn(),
+      activateFollowUp: vi.fn(),
+      answerQuestion: vi.fn(async () => ({
+        kind: "question-answered",
+        question: { ...question, status: "answered", answer: "sqlite" },
+      })),
+    };
+    render(<NativeHarnessSessionCard client={client as never} threadId={threadId} />);
+    await waitFor(() => expect(screen.getByText("Which database?")).toBeVisible());
+    await userEvent.click(screen.getByRole("button", { name: "sqlite" }));
+    await waitFor(() =>
+      expect(client.answerQuestion).toHaveBeenCalledWith(threadId, {
+        questionId: question.id,
+        answer: "sqlite",
+      }),
+    );
   });
 });

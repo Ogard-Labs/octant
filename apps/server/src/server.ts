@@ -548,6 +548,7 @@ import { NativeHarnessRouter } from "./harness/nativeHarnessRouter";
 import { NativeHarnessRoutingStore } from "./harness/nativeHarnessRoutingStore";
 import { createNativeHarnessRoutingRouteHandler } from "./harness/nativeHarnessRoutingRoutes";
 import { NativeHarnessSessionStore } from "./harness/nativeHarnessSessionStore";
+import { NativeHarnessQuestionStore } from "./harness/nativeHarnessQuestions";
 import { createNativeHarnessSessionRouteHandler } from "./harness/nativeHarnessSessionRoutes";
 import { NativeHarnessTurnObserver } from "./harness/nativeHarnessTurnObserver";
 import { fetchPublicUrl, PublicFetchRefused } from "./harness/nativeHarnessWebFetch";
@@ -1512,7 +1513,11 @@ export function startOctantServer(
     let nativeHarnessRouter: NativeHarnessRouter | undefined;
     let nativeHarnessSessions: NativeHarnessSessionStore | undefined;
     let nativeHarnessObserver: NativeHarnessTurnObserver | undefined;
+    let nativeHarnessQuestions: NativeHarnessQuestionStore | undefined;
     const nativeHarnessHooks = {
+      answerQuestion: (threadId: string, questionId: string, answer: string) => {
+        nativeHarnessQuestions?.answer(threadId, questionId, answer);
+      },
       contextFor: (scope: Parameters<NativeHarnessTurnObserver["contextFor"]>[0]) =>
         nativeHarnessObserver?.contextFor(scope) ?? [],
       turnStarted: (scope: Parameters<NativeHarnessTurnObserver["turnStarted"]>[0]) =>
@@ -3851,6 +3856,23 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
     });
     const nativeHarnessSessionsLive = nativeHarnessSessions;
+    nativeHarnessQuestions = new NativeHarnessQuestionStore({
+      sessions: nativeHarnessSessionsLive,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      // Code threads already have an inline question surface; the same
+      // question shows there so the answer can come from the thread itself.
+      onAsked: ({ threadId, mode, question }) => {
+        if (mode !== "code") return;
+        codeOperationRuntime?.raiseHarnessQuestion?.({
+          threadId,
+          questionId: String(question.id),
+          prompt: question.prompt,
+          options: question.options,
+        });
+      },
+    });
+    const nativeHarnessQuestionsLive = nativeHarnessQuestions;
     const nativeHarnessRoutingRoutes = createNativeHarnessRoutingRouteHandler({
       windowAuthorityStore,
       store: nativeHarnessRoutingStore,
@@ -3858,6 +3880,8 @@ export function startOctantServer(
     const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
       windowAuthorityStore,
       store: nativeHarnessSessionsLive,
+      answerQuestion: ({ threadId, questionId, answer }) =>
+        nativeHarnessQuestionsLive.answer(threadId, questionId, answer),
       authorizeThread: ({ threadId, windowId }) =>
         authorizeAgentRunParentThread({
           persistence,
@@ -3909,6 +3933,7 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
     });
     nativeHarnessComposition = createNativeHarnessComposition({
+      questions: nativeHarnessQuestionsLive,
       delegate: (scope) =>
         createNativeHarnessDelegatePort(
           {

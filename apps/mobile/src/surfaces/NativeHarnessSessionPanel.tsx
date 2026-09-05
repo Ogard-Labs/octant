@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import {
   activateMobileNativeHarnessFollowUp,
+  answerMobileNativeHarnessQuestion,
   loadMobileNativeHarnessSession,
   previewMobileNativeHarnessFollowUp,
   type MobileRemoteTransport,
@@ -28,6 +29,7 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
   const [view, setView] = useState<NativeHarnessSessionView | null>();
   const [preview, setPreview] = useState<NativeHarnessFollowUpPreview>();
   const [note, setNote] = useState<string>();
+  const [answer, setAnswer] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -49,6 +51,24 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
   }, [load, props.refreshIntervalMs]);
 
   if (view === undefined || view === null) return null;
+  const pendingQuestion = view.questions.find((question) => question.status === "pending");
+  const sendAnswer = (text: string) => {
+    if (pendingQuestion === undefined || text.trim().length === 0) return;
+    void answerMobileNativeHarnessQuestion({
+      transport: props.transport,
+      threadId: props.threadId,
+      questionId: String(pendingQuestion.id),
+      answer: text.trim(),
+    }).then((result) => {
+      setNote(
+        result?.kind === "question-answered"
+          ? undefined
+          : (result?.message ?? "The answer was refused."),
+      );
+      setAnswer("");
+      void load();
+    });
+  };
   const lastRoute = view.routes.at(-1);
   const lastIntervention = view.interventions.at(-1);
 
@@ -70,6 +90,47 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
         <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
           {view.session.detail}
         </Text>
+      )}
+      {pendingQuestion === undefined ? null : (
+        <View
+          style={[styles.question, { borderColor: colors.border }]}
+          testID="mobile-native-harness-question"
+        >
+          <Text style={[mobileTypography.body, { color: colors.textPrimary }]}>
+            {pendingQuestion.prompt}
+          </Text>
+          {pendingQuestion.options.length === 0 ? null : (
+            <View style={styles.chips}>
+              {pendingQuestion.options.map((option) => (
+                <GlassChip
+                  active={false}
+                  key={option}
+                  label={option}
+                  onPress={() => sendAnswer(option)}
+                />
+              ))}
+            </View>
+          )}
+          <View style={styles.row}>
+            <TextInput
+              accessibilityLabel="Answer"
+              onChangeText={setAnswer}
+              onSubmitEditing={() => sendAnswer(answer)}
+              placeholder="Type an answer"
+              placeholderTextColor={colors.textSecondary}
+              style={[styles.input, { color: colors.textPrimary, borderColor: colors.border }]}
+              value={answer}
+            />
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => sendAnswer(answer)}
+              style={[styles.button, { backgroundColor: colors.send }]}
+              testID="mobile-native-harness-answer"
+            >
+              <Text style={[mobileTypography.section, { color: colors.sendLabel }]}>Send</Text>
+            </Pressable>
+          </View>
+        </View>
       )}
       {lastRoute === undefined ? null : (
         <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
@@ -198,5 +259,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: mobileSpacing.md,
     paddingVertical: mobileSpacing.xs,
     borderRadius: 999,
+  },
+  question: {
+    gap: mobileSpacing.xs,
+    padding: mobileSpacing.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+  },
+  input: {
+    flex: 1,
+    paddingHorizontal: mobileSpacing.sm,
+    paddingVertical: mobileSpacing.xs,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
   },
 });

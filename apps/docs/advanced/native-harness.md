@@ -10,9 +10,10 @@ every mode and on every surface: web, desktop, phone, and the `octant` CLI.
 ## What the model gets
 
 Nine working tools — `read`, `grep`, `glob`, `bash`, `edit`, `write`,
-`web-fetch`, `web-search`, `todo-write` — and four harness reads:
-`context-remaining`, `journal-lookup`, `second-opinion`, and `delegate`.
-Each mode trims the set to what it may reach:
+`web-fetch`, `web-search`, `todo-write` — four harness reads:
+`context-remaining`, `journal-lookup`, `second-opinion`, and `delegate` — and
+`ask-user`, which lets the lead stop and ask you something. Each mode trims
+the set to what it may reach:
 
 | Mode | Files                   | Shell     | Web                 | Delegation |
 | ---- | ----------------------- | --------- | ------------------- | ---------- |
@@ -78,6 +79,17 @@ At the end of a turn the lead may suggest up to three follow-ups. They appear
 as chips on the harness card and as a numbered list in the CLI. Activating
 one shows exactly what would be created and asks you to confirm; nothing is
 created by the suggestion itself.
+
+## Questions
+
+When the lead needs a decision it cannot make alone, it asks. The question
+appears inline on the thread — on the harness card in the app, on the phone
+panel, and as a numbered prompt in the CLI — with any options it offered as
+buttons. Pick one or type an answer; the turn continues the moment it lands,
+and the same question can be answered from any surface. A question nobody
+answers within ten minutes expires and the lead is told to continue with its
+best judgment; interrupting the turn cancels it. Every question and answer is
+journaled with the session.
 
 ## From the terminal
 

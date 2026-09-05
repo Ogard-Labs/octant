@@ -7,6 +7,9 @@ import {
   NativeHarnessFollowUpId,
   NativeHarnessFollowUpSet,
   NativeHarnessProjectRoutingOverride,
+  NativeHarnessQuestion,
+  NativeHarnessQuestionId,
+  NativeHarnessQuestionStatus,
   NativeHarnessRouteDecision,
   NativeHarnessRoutingSettings,
   NativeHarnessSession,
@@ -14,6 +17,7 @@ import {
   NativeHarnessTurnRecord,
   ProjectId,
   AggregateVersion,
+  UtcTimestamp,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
@@ -34,6 +38,14 @@ export const NativeHarnessFollowUpActivated = Schema.Struct({
   sessionId: NativeHarnessSessionId,
   suggestionId: NativeHarnessFollowUpId,
   created: NativeHarnessFollowUpCreation,
+}).annotations(strict);
+
+export const NativeHarnessQuestionSettled = Schema.Struct({
+  sessionId: NativeHarnessSessionId,
+  questionId: NativeHarnessQuestionId,
+  status: NativeHarnessQuestionStatus,
+  answer: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096))),
+  settledAt: UtcTimestamp,
 }).annotations(strict);
 
 export const NativeHarnessSessionPaused = Schema.Struct({
@@ -80,6 +92,8 @@ export function registerNativeHarnessEvents(registry: EventRegistry): EventRegis
       1,
       NativeHarnessFollowUpActivated,
     )
+    .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.questionAsked, 1, NativeHarnessQuestion)
+    .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.questionSettled, 1, NativeHarnessQuestionSettled)
     .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.paused, 1, NativeHarnessSessionPaused)
     .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.resumed, 1, NativeHarnessSessionResumed);
 }

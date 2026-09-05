@@ -13,6 +13,7 @@ describe("closed tool catalog", () => {
     expect(ids).toEqual([
       "browser-automation",
       "computer-use",
+      "harness-ask-user",
       "harness-bash",
       "harness-context-remaining",
       "harness-delegate",

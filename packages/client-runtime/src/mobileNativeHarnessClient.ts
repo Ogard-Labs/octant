@@ -1,9 +1,11 @@
 import {
   decodeNativeHarnessFollowUpActivationResult,
+  decodeNativeHarnessQuestionAnswerResult,
   decodeNativeHarnessFollowUpPreview,
   decodeNativeHarnessSessionView,
   type NativeHarnessFollowUpActivationResult,
   type NativeHarnessFollowUpPreview,
+  type NativeHarnessQuestionAnswerResult,
   type NativeHarnessSessionView,
 } from "@octant/contracts";
 import type { MobileRemoteTransport } from "./mobileInboxClient";
@@ -64,6 +66,25 @@ export async function activateMobileNativeHarnessFollowUp(input: {
   });
   try {
     return decodeNativeHarnessFollowUpActivationResult(await response.json());
+  } catch {
+    return undefined;
+  }
+}
+
+export async function answerMobileNativeHarnessQuestion(input: {
+  readonly transport: MobileRemoteTransport;
+  readonly threadId: string;
+  readonly questionId: string;
+  readonly answer: string;
+}): Promise<NativeHarnessQuestionAnswerResult | undefined> {
+  const response = await input.transport.authenticatedFetch({
+    method: "POST",
+    path: `/api/native-harness/sessions/${encodeURIComponent(input.threadId)}/questions`,
+    body: JSON.stringify({ questionId: input.questionId, answer: input.answer }),
+    contentType: "application/json",
+  });
+  try {
+    return decodeNativeHarnessQuestionAnswerResult(await response.json());
   } catch {
     return undefined;
   }

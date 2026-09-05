@@ -136,3 +136,18 @@
   white-space: pre-wrap;
   background: color-mix(in srgb, CanvasText 6%, transparent);
 }
+
+.native-harness-question {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, CanvasText 5%, transparent);
+}
+
+.native-harness-question__prompt {
+  margin: 0;
+  white-space: pre-wrap;
+}

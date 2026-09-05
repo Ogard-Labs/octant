@@ -24,6 +24,7 @@ import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import type { NativeHarnessAuthority } from "./nativeHarnessAuthority";
 import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
+import type { NativeHarnessQuestionStore } from "./nativeHarnessQuestions";
 import { createNativeHarnessTodoPort } from "./nativeHarnessTodo";
 import {
   createNativeHarnessTools,
@@ -52,6 +53,8 @@ export interface NativeHarnessCompositionOptions {
   }) => NativeHarnessDelegatePort;
   readonly hostId: ToolActionAuthority["hostId"];
   readonly readThreadTaint: (threadId: string) => boolean;
+  /** Questions to the person; absent on a host with no surface to answer them. */
+  readonly questions?: Pick<NativeHarnessQuestionStore, "ask">;
   readonly recordExternalContentIngestion: (
     input: RecordExternalContentIngestionInput,
   ) => ExternalContentIngestionResult;
@@ -145,6 +148,26 @@ export function createNativeHarnessComposition(
     providerInstanceId: thread.providerInstanceId,
     modelId: thread.modelId as never,
   });
+  const askUserFor = (scope: {
+    readonly parentThreadId: string;
+    readonly mode: OctantMode;
+    readonly projectId?: ProjectId | undefined;
+    readonly lead: NativeHarnessSlotCandidate;
+  }): Pick<NativeHarnessToolPorts, "askUser"> =>
+    options.questions === undefined
+      ? {}
+      : {
+          askUser: (input) =>
+            options.questions!.ask({
+              threadId: scope.parentThreadId,
+              mode: scope.mode,
+              projectId: scope.projectId,
+              lead: scope.lead,
+              prompt: input.prompt,
+              options: input.options,
+              signal: input.signal,
+            }),
+        };
   const delegateFor = (scope: {
     readonly parentThreadId: string;
     readonly windowId: string;
@@ -165,6 +188,12 @@ export function createNativeHarnessComposition(
           ...delegateFor({
             parentThreadId: threadId,
             windowId,
+            mode: "chat",
+            projectId: thread.projectId,
+            lead: leadOf(thread),
+          }),
+          ...askUserFor({
+            parentThreadId: threadId,
             mode: "chat",
             projectId: thread.projectId,
             lead: leadOf(thread),
@@ -199,6 +228,12 @@ export function createNativeHarnessComposition(
             projectId: thread.projectId,
             lead: leadOf(thread),
           }),
+          ...askUserFor({
+            parentThreadId: threadId,
+            mode: "work",
+            projectId: thread.projectId,
+            lead: leadOf(thread),
+          }),
           filesystem: new NativeHarnessFileSystem({ root: projectRoot }),
           ...(options.webSearch === undefined ? {} : { webSearch: options.webSearch }),
         },
@@ -215,6 +250,12 @@ export function createNativeHarnessComposition(
           ...delegateFor({
             parentThreadId: threadId,
             windowId,
+            mode: "code",
+            projectId: thread.projectId,
+            lead: leadOf(thread),
+          }),
+          ...askUserFor({
+            parentThreadId: threadId,
             mode: "code",
             projectId: thread.projectId,
             lead: leadOf(thread),

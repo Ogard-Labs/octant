@@ -556,7 +556,11 @@ Direct-endpoint providers (`openai-compatible`, `anthropic-compatible`,
   slot through the shared `admitAgentRunControlRequest` path.
 - **Session.** `NativeHarnessSessionStore` journals one session per thread:
   routing decisions, turn records, context reductions, advisor interventions,
-  and follow-up suggestions. `NativeHarnessTurnObserver` puts the stable
+  follow-up suggestions, and the questions a lead asked with how each was
+  settled. `NativeHarnessQuestionStore` blocks an `ask-user` call until an
+  answer arrives from any surface (`POST /api/native-harness/sessions/:thread/questions`,
+  or the Code thread's own inline question path), or until it expires or the
+  turn is interrupted. `NativeHarnessTurnObserver` puts the stable
   instructions block in front of every harness turn, records the completed
   reply, parses the follow-up block, and asks the `advisor` slot for a review.
 - **Surfaces.** `/api/native-harness/routing` and

@@ -4,6 +4,7 @@ import {
   decodeNativeHarnessToolArguments,
   lookupClosedToolCatalogEntry,
   nativeHarnessToolCapabilityId,
+  type NativeHarnessAskUserArguments,
   type NativeHarnessBashArguments,
   type NativeHarnessContextRemaining,
   type NativeHarnessDelegateArguments,
@@ -127,6 +128,16 @@ export interface NativeHarnessToolPorts {
     readonly signal?: AbortSignal;
   }) => Promise<string | undefined>;
   readonly delegate?: NativeHarnessDelegatePort;
+  /** Asks the person and waits; resolves with the answer or how the wait ended. */
+  readonly askUser?: (input: {
+    readonly prompt: string;
+    readonly options: ReadonlyArray<string>;
+    readonly signal?: AbortSignal;
+  }) => Promise<
+    | { readonly status: "answered"; readonly answer: string }
+    | { readonly status: "expired" }
+    | { readonly status: "cancelled" }
+  >;
 }
 
 export interface CreateNativeHarnessToolsOptions {
@@ -257,6 +268,8 @@ function isOffered(
       return ports.secondOpinion !== undefined;
     case "delegate":
       return ports.delegate !== undefined;
+    case "ask-user":
+      return ports.askUser !== undefined;
   }
 }
 
@@ -370,6 +383,21 @@ async function execute(
       }
       const collected = await port.collect(input.runId);
       return collected.status === "refused" ? refused(collected.reason) : ok(collected);
+    }
+    case "ask-user": {
+      const input = args as NativeHarnessAskUserArguments;
+      const outcome = await ports.askUser!({
+        prompt: input.prompt,
+        options: input.options ?? [],
+        ...(signal === undefined ? {} : { signal }),
+      });
+      if (outcome.status === "answered") return ok({ answer: outcome.answer });
+      return refused(
+        outcome.status === "expired" ? "question-expired" : "question-cancelled",
+        outcome.status === "expired"
+          ? "The person did not answer in time. Continue with your best judgment and say what you assumed."
+          : "The turn was cancelled while waiting for an answer.",
+      );
     }
   }
 }

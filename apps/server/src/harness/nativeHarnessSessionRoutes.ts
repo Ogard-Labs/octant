@@ -1,10 +1,12 @@
 import {
   decodeActivateNativeHarnessFollowUp,
+  decodeAnswerNativeHarnessQuestion,
   decodeNativeHarnessFollowUpPreview,
   decodeNativeHarnessSessionCommand,
   type NativeHarnessFollowUpActivationResult,
   type NativeHarnessFollowUpCreation,
   type NativeHarnessFollowUpSuggestion,
+  type NativeHarnessQuestionAnswerResult,
   type NativeHarnessSessionCommandResult,
   type NativeHarnessSessionView,
 } from "@octant/contracts";
@@ -34,6 +36,12 @@ export interface NativeHarnessSessionRouteDependencies {
     readonly threadId: string;
     readonly windowId: string;
   }) => void;
+  /** Settles a pending question from any surface; the outcome says why it could not. */
+  readonly answerQuestion?: (input: {
+    readonly threadId: string;
+    readonly questionId: string;
+    readonly answer: string;
+  }) => "answered" | "question-not-found" | "already-settled";
   readonly now?: () => number;
 }
 
@@ -139,6 +147,36 @@ export function createNativeHarnessSessionRouteHandler(
         session: (updated ?? view).session,
       };
       return json(result, 200, origin);
+    }
+
+    if (action === "questions") {
+      let answer;
+      try {
+        answer = decodeAnswerNativeHarnessQuestion(body);
+      } catch {
+        return failure("Native harness question answer is invalid.", 400, origin);
+      }
+      const outcome = dependencies.answerQuestion?.({
+        threadId,
+        questionId: String(answer.questionId),
+        answer: answer.answer,
+      });
+      const settled = dependencies.store
+        .read(threadId)
+        ?.questions.find((question) => String(question.id) === String(answer.questionId));
+      const result: NativeHarnessQuestionAnswerResult =
+        outcome === "answered" && settled !== undefined
+          ? { kind: "question-answered", question: settled }
+          : {
+              kind: "question-refused",
+              questionId: answer.questionId,
+              reason: outcome === "already-settled" ? "already-settled" : "question-not-found",
+              message:
+                outcome === "already-settled"
+                  ? "That question was already answered."
+                  : "No pending question has that id on this thread.",
+            };
+      return json(result, result.kind === "question-answered" ? 200 : 409, origin);
     }
 
     if (action === "follow-ups") {

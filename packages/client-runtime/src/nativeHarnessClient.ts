@@ -1,5 +1,6 @@
 import {
   decodeNativeHarnessFollowUpActivationResult,
+  decodeNativeHarnessQuestionAnswerResult,
   decodeNativeHarnessFollowUpPreview,
   decodeNativeHarnessProjectRoutingOverride,
   decodeNativeHarnessRoutingCommandResult,
@@ -10,6 +11,7 @@ import {
   type NativeHarnessFollowUpActivationResult,
   type NativeHarnessFollowUpPreview,
   type NativeHarnessProjectRoutingOverride,
+  type NativeHarnessQuestionAnswerResult,
   type NativeHarnessRoutingCommandResult,
   type NativeHarnessRoutingConfiguration,
   type NativeHarnessRoutingSettings,
@@ -67,6 +69,11 @@ export interface NativeHarnessClient {
     activation: ActivateNativeHarnessFollowUp,
     signal?: AbortSignal,
   ): Promise<NativeHarnessFollowUpActivationResult>;
+  answerQuestion(
+    threadId: string,
+    input: { readonly questionId: string; readonly answer: string },
+    signal?: AbortSignal,
+  ): Promise<NativeHarnessQuestionAnswerResult>;
 }
 
 export class NativeHarnessClientFailure extends Error {
@@ -180,6 +187,16 @@ export function createNativeHarnessClient(
         ? decodeNativeHarnessFollowUpActivationResult(body)
         : decodeNativeHarnessFollowUpPreview(preview);
     },
+    async answerQuestion(threadId, input, signal) {
+      return decodeNativeHarnessQuestionAnswerResult(
+        await write(
+          "POST",
+          `${SESSIONS_PATH}/${encodeURIComponent(threadId)}/questions`,
+          input,
+          signal,
+        ),
+      );
+    },
     async activateFollowUp(threadId, activation, signal) {
       return decodeNativeHarnessFollowUpActivationResult(
         await write(
@@ -236,6 +253,7 @@ function isRefusal(body: unknown): boolean {
   return (
     kind === "routing-refused" ||
     kind === "native-harness-session-refused" ||
-    kind === "follow-up-refused"
+    kind === "follow-up-refused" ||
+    kind === "question-refused"
   );
 }

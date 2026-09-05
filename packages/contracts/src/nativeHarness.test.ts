@@ -27,7 +27,7 @@ const lead = {
 
 describe("native harness tools", () => {
   it("offers the nine working tools, the three harness reads, and delegation", () => {
-    expect(NATIVE_HARNESS_TOOL_NAMES.length).toBe(13);
+    expect(NATIVE_HARNESS_TOOL_NAMES.length).toBe(14);
     expect(NATIVE_HARNESS_TOOL_NAMES).toContain("edit");
     expect(NATIVE_HARNESS_TOOL_NAMES).toContain("context-remaining");
   });

@@ -61,6 +61,7 @@ export const NATIVE_HARNESS_TOOL_NAMES = [
   "journal-lookup",
   "second-opinion",
   "delegate",
+  "ask-user",
 ] as const;
 export const NativeHarnessToolName = Schema.Literal(...NATIVE_HARNESS_TOOL_NAMES);
 export type NativeHarnessToolName = typeof NativeHarnessToolName.Type;
@@ -288,6 +289,23 @@ export type NativeHarnessTodoWriteArguments = typeof NativeHarnessTodoWriteArgum
 
 export const NativeHarnessContextRemainingArguments = Schema.Struct({}).annotations(strict);
 
+export const MAX_NATIVE_HARNESS_QUESTION_OPTIONS = 8;
+
+/**
+ * A question for the person. The turn blocks until it is answered, expires,
+ * or the turn is cancelled; the answer comes back as the tool's result, so
+ * the model never has to guess what the user meant.
+ */
+export const NativeHarnessAskUserArguments = Schema.Struct({
+  prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8_192)),
+  options: Schema.optional(
+    Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))).pipe(
+      Schema.maxItems(MAX_NATIVE_HARNESS_QUESTION_OPTIONS),
+    ),
+  ),
+}).annotations(strict);
+export type NativeHarnessAskUserArguments = typeof NativeHarnessAskUserArguments.Type;
+
 /**
  * Delegation to a child run. `start` proposes a bounded task under a role;
  * the server decides the child's model from the role's slot, clamps its
@@ -328,6 +346,7 @@ const toolArgumentDecoders: Readonly<Record<NativeHarnessToolName, (value: unkno
   "journal-lookup": Schema.decodeUnknownSync(NativeHarnessJournalLookupRequest),
   "second-opinion": Schema.decodeUnknownSync(NativeHarnessSecondOpinionArguments),
   delegate: Schema.decodeUnknownSync(NativeHarnessDelegateArguments),
+  "ask-user": Schema.decodeUnknownSync(NativeHarnessAskUserArguments),
 };
 
 /** Throws on a malformed argument object; the catalog's argument-schema step relies on it. */
@@ -513,6 +532,23 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
         runId: { type: "string" },
       },
       required: ["operation"],
+    },
+  },
+  {
+    name: "ask-user",
+    description:
+      "Ask the person a question and wait for the answer. Offer options when there are natural choices; the answer may still be free text.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        prompt: { type: "string" },
+        options: {
+          type: "array",
+          items: { type: "string" },
+          maxItems: MAX_NATIVE_HARNESS_QUESTION_OPTIONS,
+        },
+      },
+      required: ["prompt"],
     },
   },
 ];
@@ -805,6 +841,62 @@ export const NativeHarnessFollowUpActivationResult = Schema.Union(
 export type NativeHarnessFollowUpActivationResult =
   typeof NativeHarnessFollowUpActivationResult.Type;
 
+// ── Questions ────────────────────────────────────────────────────────────────
+
+export const NativeHarnessQuestionId = brandedUuid("NativeHarnessQuestionId");
+export type NativeHarnessQuestionId = typeof NativeHarnessQuestionId.Type;
+
+export const NativeHarnessQuestionStatus = Schema.Literal(
+  "pending",
+  "answered",
+  "expired",
+  "cancelled",
+);
+export type NativeHarnessQuestionStatus = typeof NativeHarnessQuestionStatus.Type;
+
+/** A question the lead asked the person, and what became of it. */
+export const NativeHarnessQuestion = Schema.Struct({
+  id: NativeHarnessQuestionId,
+  prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8_192)),
+  options: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))).pipe(
+    Schema.maxItems(MAX_NATIVE_HARNESS_QUESTION_OPTIONS),
+  ),
+  status: NativeHarnessQuestionStatus,
+  answer: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096))),
+  askedAt: UtcTimestamp,
+  settledAt: Schema.optional(UtcTimestamp),
+})
+  .annotations(strict)
+  // An answered question carries its answer; a pending one carries nothing yet.
+  .pipe(
+    Schema.filter(
+      (question) =>
+        (question.status === "answered") === (question.answer !== undefined) &&
+        (question.status === "pending") === (question.settledAt === undefined),
+    ),
+  );
+export type NativeHarnessQuestion = typeof NativeHarnessQuestion.Type;
+
+export const AnswerNativeHarnessQuestion = Schema.Struct({
+  questionId: NativeHarnessQuestionId,
+  answer: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096)),
+}).annotations(strict);
+export type AnswerNativeHarnessQuestion = typeof AnswerNativeHarnessQuestion.Type;
+
+export const NativeHarnessQuestionAnswerResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("question-answered"),
+    question: NativeHarnessQuestion,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("question-refused"),
+    questionId: NativeHarnessQuestionId,
+    reason: Schema.Literal("question-not-found", "already-settled", "not-authorized"),
+    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  }).annotations(strict),
+);
+export type NativeHarnessQuestionAnswerResult = typeof NativeHarnessQuestionAnswerResult.Type;
+
 // ── Session ──────────────────────────────────────────────────────────────────
 
 export const NativeHarnessSessionStatus = Schema.Literal(
@@ -913,6 +1005,9 @@ export const NativeHarnessSessionView = Schema.Struct({
   activatedFollowUpIds: Schema.Array(NativeHarnessFollowUpId).pipe(
     Schema.maxItems(MAX_NATIVE_HARNESS_FOLLOW_UPS),
   ),
+  questions: Schema.Array(NativeHarnessQuestion).pipe(
+    Schema.maxItems(MAX_NATIVE_HARNESS_VIEW_ENTRIES),
+  ),
 }).annotations(strict);
 export type NativeHarnessSessionView = typeof NativeHarnessSessionView.Type;
 
@@ -926,6 +1021,8 @@ export const NATIVE_HARNESS_SESSION_EVENT_NAMES = {
   advisorIntervened: "native-harness-advisor-intervened@1",
   followUpsSuggested: "native-harness-follow-ups-suggested@1",
   followUpActivated: "native-harness-follow-up-activated@1",
+  questionAsked: "native-harness-question-asked@1",
+  questionSettled: "native-harness-question-settled@1",
   paused: "native-harness-session-paused@1",
   resumed: "native-harness-session-resumed@1",
 } as const;
@@ -965,6 +1062,14 @@ export const decodeActivateNativeHarnessFollowUp = Schema.decodeUnknownSync(
 );
 export const decodeNativeHarnessFollowUpActivationResult = Schema.decodeUnknownSync(
   NativeHarnessFollowUpActivationResult,
+);
+export const decodeNativeHarnessQuestionId = Schema.decodeUnknownSync(NativeHarnessQuestionId);
+export const decodeNativeHarnessQuestion = Schema.decodeUnknownSync(NativeHarnessQuestion);
+export const decodeAnswerNativeHarnessQuestion = Schema.decodeUnknownSync(
+  AnswerNativeHarnessQuestion,
+);
+export const decodeNativeHarnessQuestionAnswerResult = Schema.decodeUnknownSync(
+  NativeHarnessQuestionAnswerResult,
 );
 export const decodeNativeHarnessSession = Schema.decodeUnknownSync(NativeHarnessSession);
 export const decodeNativeHarnessSessionView = Schema.decodeUnknownSync(NativeHarnessSessionView);

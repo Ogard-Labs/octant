@@ -7,6 +7,7 @@ import {
   MAX_NATIVE_HARNESS_VIEW_ENTRIES,
   NATIVE_HARNESS_SESSION_AGGREGATE_TYPE,
   NATIVE_HARNESS_SESSION_EVENT_NAMES,
+  decodeNativeHarnessQuestion,
   decodeNativeHarnessSession,
   decodeNativeHarnessSessionId,
   decodeNativeHarnessSessionView,
@@ -16,6 +17,9 @@ import {
   type NativeHarnessFollowUpCreation,
   type NativeHarnessFollowUpId,
   type NativeHarnessFollowUpSet,
+  type NativeHarnessQuestion,
+  type NativeHarnessQuestionId,
+  type NativeHarnessQuestionStatus,
   type NativeHarnessRouteDecision,
   type NativeHarnessSession,
   type NativeHarnessSessionView,
@@ -52,6 +56,7 @@ interface SessionRecord {
   interventions: NativeHarnessAdvisorIntervention[];
   followUps: NativeHarnessFollowUpSet | undefined;
   activated: NativeHarnessFollowUpId[];
+  questions: NativeHarnessQuestion[];
   version: number;
 }
 
@@ -87,6 +92,7 @@ export class NativeHarnessSessionStore {
       interventions: record.interventions,
       ...(record.followUps === undefined ? {} : { followUps: record.followUps }),
       activatedFollowUpIds: record.activated,
+      questions: record.questions,
     });
   }
 
@@ -123,6 +129,7 @@ export class NativeHarnessSessionStore {
       interventions: [],
       followUps: undefined,
       activated: [],
+      questions: [],
       version: 0,
     };
     this.#records.set(input.threadId, record);
@@ -224,6 +231,46 @@ export class NativeHarnessSessionStore {
     return "activated";
   }
 
+  askQuestion(threadId: string, question: NativeHarnessQuestion): void {
+    const record = this.#records.get(threadId);
+    if (record === undefined) return;
+    this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.questionAsked, question);
+    push(record.questions, question);
+  }
+
+  settleQuestion(
+    threadId: string,
+    questionId: NativeHarnessQuestionId,
+    outcome: {
+      readonly status: Exclude<NativeHarnessQuestionStatus, "pending">;
+      readonly answer?: string;
+    },
+  ): NativeHarnessQuestion | "question-not-found" | "already-settled" {
+    const record = this.#records.get(threadId);
+    const index = record?.questions.findIndex((entry) => entry.id === questionId) ?? -1;
+    if (record === undefined || index === -1) return "question-not-found";
+    const current = record.questions[index]!;
+    if (current.status !== "pending") return "already-settled";
+    const settledAt = decodeUtcTimestamp(this.#clock());
+    const settled = decodeNativeHarnessQuestion({
+      ...current,
+      status: outcome.status,
+      ...(outcome.status === "answered" && outcome.answer !== undefined
+        ? { answer: outcome.answer }
+        : {}),
+      settledAt,
+    });
+    this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.questionSettled, {
+      sessionId: record.session.id,
+      questionId,
+      status: outcome.status,
+      ...(settled.answer === undefined ? {} : { answer: settled.answer }),
+      settledAt,
+    });
+    record.questions[index] = settled;
+    return settled;
+  }
+
   pause(
     threadId: string,
     status: "paused-by-advisor" | "paused-by-user" | "budget-limited" | "failed",
@@ -318,6 +365,7 @@ export class NativeHarnessSessionStore {
         interventions: [],
         followUps: undefined,
         activated: [],
+        questions: [],
         version: 1,
       });
       return;
@@ -344,6 +392,21 @@ export class NativeHarnessSessionStore {
       record.activated = [];
     } else if (eventName === names.followUpActivated) {
       record.activated.push(body.suggestionId as NativeHarnessFollowUpId);
+    } else if (eventName === names.questionAsked) {
+      push(record.questions, payload as NativeHarnessQuestion);
+    } else if (eventName === names.questionSettled) {
+      const index = record.questions.findIndex(
+        (entry) => String(entry.id) === String(body.questionId),
+      );
+      const current = record.questions[index];
+      if (current !== undefined) {
+        record.questions[index] = {
+          ...current,
+          status: body.status as NativeHarnessQuestionStatus,
+          ...(body.answer === undefined ? {} : { answer: body.answer as string }),
+          settledAt: body.settledAt as never,
+        };
+      }
     } else if (eventName === names.paused) {
       record.session = {
         ...record.session,
