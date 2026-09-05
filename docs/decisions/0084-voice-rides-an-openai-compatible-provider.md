@@ -15,8 +15,11 @@ The obvious alternative — a new `ProviderInstance` kind for speech, on the
 0055 image-profile pattern — would add a fixed-URL vendor profile, a second
 credential, and a second Settings object for something every OpenAI-compatible
 endpoint already serves beside its chat routes. OpenAI, Groq, Mistral, and
-local servers such as whisper.cpp or Speaches all expose `/audio/transcriptions`
-and `/audio/speech` under the same base URL and key as `/chat/completions`.
+local servers such as Speaches expose `/audio/transcriptions` and
+`/audio/speech` under the same base URL and key as `/chat/completions`. The
+two directions are independent: a local transcription-only server may serve
+neither route under those names, which is why Settings name each direction's
+endpoint separately rather than assuming one instance serves both.
 
 ## Decision
 

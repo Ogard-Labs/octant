@@ -66,6 +66,10 @@ describe("desktop packaging boundary", () => {
       asar: false,
       dir: "/tmp/octant-stage",
       electronVersion: "43.1.0",
+      extendInfo: {
+        NSMicrophoneUsageDescription:
+          "Octant uses the microphone to dictate a message when you press the microphone button.",
+      },
       icon: "/tmp/octant-stage/apps/desktop/resources/icon.icns",
       name: "Octant",
       out: "/tmp/octant-out",

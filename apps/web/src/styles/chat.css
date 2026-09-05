@@ -1179,3 +1179,45 @@ html[data-octant-reduced-motion="true"]
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Dictation sits beside the attach control in every composer. The button is
+   the same ghost icon as its neighbours until it records; then it takes the
+   danger colour and the live pulse so a hot microphone is never mistaken for
+   an idle one. */
+.composer-voice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
+.composer-voice__button[data-recording="true"] {
+  color: var(--oct-danger-fg);
+  animation: chat-composer-live 1.4s ease-in-out infinite;
+}
+
+.composer-voice__timer {
+  color: var(--oct-danger-fg);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.composer-voice__spin {
+  animation: chat-status-spin 1s linear infinite;
+}
+
+.composer-voice__error {
+  overflow: hidden;
+  max-width: 28ch;
+  color: var(--octant-danger-text);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-voice__button[data-recording="true"],
+  .composer-voice__spin {
+    animation: none;
+  }
+}

@@ -153,10 +153,34 @@ describe("speech routes", () => {
       request("/api/speech/transcriptions", { method: "POST", body: clip() }),
     );
     expect(off?.status).toBe(412);
-    expect(decodeSpeechFailureResponse(await off!.json()).error).toBe(
-      "Transcription is unavailable: The chosen provider is disabled.",
-    );
+    expect(decodeSpeechFailureResponse(await off!.json())).toMatchObject({
+      error: "Transcription is unavailable: The chosen provider is disabled.",
+      // A gone instance is not an empty setting, and a surface offers a
+      // different next step for each.
+      category: "unavailable",
+    });
     expect(disabled.transcribe).not.toHaveBeenCalled();
+  });
+
+  it("reports a provider credential failure as a gateway error, not a window authority failure", async () => {
+    const { handler } = setup({
+      adapter: {
+        transcribe: async () => ({
+          status: "failed",
+          providerFailure: {
+            category: "unauthenticated",
+            message: "The provider rejected the credential.",
+          },
+        }),
+      },
+    });
+    const response = await handler(
+      request("/api/speech/transcriptions", { method: "POST", body: clip() }),
+    );
+    // 401 here would start local window-session renewal instead of surfacing
+    // the speech error.
+    expect(response?.status).toBe(502);
+    expect(decodeSpeechFailureResponse(await response!.json()).category).toBe("unauthenticated");
   });
 
   it("transcribes a sniffed clip on the configured model and returns only the text", async () => {
