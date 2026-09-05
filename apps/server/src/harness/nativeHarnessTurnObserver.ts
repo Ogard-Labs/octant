@@ -24,6 +24,15 @@ import { completeOnce } from "./nativeHarnessSingleShot";
 const ADVISOR_TIMEOUT_MS = 60_000;
 const MAX_DIGEST_CHARACTERS = 2_048;
 
+/** Whether a turn may start on the thread; a pause names who paused it and why. */
+export type NativeHarnessTurnAdmission =
+  | { readonly kind: "admitted" }
+  | {
+      readonly kind: "paused";
+      readonly status: "paused-by-advisor" | "paused-by-user";
+      readonly detail: string;
+    };
+
 export interface NativeHarnessTurnScope {
   readonly threadId: string;
   readonly mode: OctantMode;
@@ -84,6 +93,26 @@ export class NativeHarnessTurnObserver {
             },
           ]),
     ];
+  }
+
+  /**
+   * A paused session refuses the next turn until a person resumes it. The
+   * advisor pauses when someone must decide before work continues; letting
+   * the next prompt through would make that decision by default.
+   */
+  admitTurn(scope: NativeHarnessTurnScope): NativeHarnessTurnAdmission {
+    if (!this.#options.isHarnessProvider(scope.providerInstanceId)) return { kind: "admitted" };
+    const session = this.#options.sessions.read(scope.threadId)?.session;
+    if (session?.status === "paused-by-advisor" || session?.status === "paused-by-user") {
+      return {
+        kind: "paused",
+        status: session.status,
+        detail:
+          session.detail ??
+          (session.status === "paused-by-advisor" ? "The advisor paused this run." : "Paused."),
+      };
+    }
+    return { kind: "admitted" };
   }
 
   turnStarted(scope: NativeHarnessTurnScope): void {

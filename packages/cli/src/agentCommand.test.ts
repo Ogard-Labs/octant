@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import type { LocalControlRequest, OpenedLocalControlSession } from "./localControl";
 import { resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
@@ -94,5 +95,83 @@ describe("octant agent command line", () => {
     });
     expect(code).toBe(0);
     expect(stdout.text()).toContain("no native harness session");
+  });
+
+  it("takes a suggested follow-up from the terminal only after a yes and names the created thread", async () => {
+    const stdout = sink();
+    const seen: string[] = [];
+    const threadId = "00000000-0000-4000-8000-000000000020";
+    const suggestionId = "00000000-0000-4000-8000-000000000041";
+    const view = {
+      session: {
+        id: "00000000-0000-4000-8000-000000000010",
+        threadId,
+        mode: "chat",
+        leadSlotId: "default",
+        lead: {
+          hostId: "00000000-0000-4000-8000-0000000000aa",
+          providerInstanceId: "00000000-0000-4000-8000-000000000001",
+          modelId: "frontier-large",
+        },
+        status: "idle",
+        turnsRun: 1,
+        cutovers: 0,
+        startedAt: "2026-09-05T12:00:00.000Z",
+        updatedAt: "2026-09-05T12:00:00.000Z",
+        version: 2,
+      },
+      routes: [],
+      turns: [],
+      reductions: [],
+      interventions: [],
+      followUps: {
+        turnId: "00000000-0000-4000-8000-000000000031",
+        suggestions: [
+          { id: suggestionId, title: "Add tests", prompt: "Write tests.", target: "new-thread" },
+        ],
+      },
+      activatedFollowUpIds: [],
+      questions: [],
+    };
+    const code = await runAgentCliCommand({
+      command: { action: "agent", threadId, json: false },
+      session: session((request) => {
+        seen.push(`${request.method} ${request.path}`);
+        if (request.path.endsWith("/follow-ups/preview")) {
+          return {
+            status: 200,
+            body: {
+              preview: {
+                suggestion: view.followUps.suggestions[0],
+                wouldCreate: { kind: "new-thread", mode: "chat", title: "Add tests" },
+              },
+            },
+          };
+        }
+        if (request.path.endsWith("/follow-ups/activate")) {
+          return {
+            status: 200,
+            body: {
+              kind: "follow-up-activated",
+              suggestionId,
+              created: {
+                kind: "new-thread",
+                mode: "chat",
+                title: "Add tests",
+                threadId: "00000000-0000-4000-8000-000000000077",
+              },
+            },
+          };
+        }
+        return { status: 200, body: { view } };
+      }),
+      stdin: Readable.from(["/next 1\n", "n\n", "/next 1\n", "y\n", "/quit\n"]),
+      stdout,
+      stderr: sink(),
+    });
+    expect(code).toBe(0);
+    expect(seen.filter((entry) => entry.endsWith("/activate"))).toHaveLength(1);
+    expect(stdout.text()).toContain("Left as a suggestion.");
+    expect(stdout.text()).toContain("Created chat thread 00000000-0000-4000-8000-000000000077");
   });
 });

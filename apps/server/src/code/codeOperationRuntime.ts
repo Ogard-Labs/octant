@@ -33,6 +33,7 @@ import {
   type EventActor,
   type ProviderRuntimeEvent,
   type WindowId,
+  decodeCodeFailure,
 } from "@octant/contracts";
 import { Effect } from "effect";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
@@ -74,8 +75,12 @@ import {
 } from "./codeOperationService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
-import type { NativeHarnessTurnScope } from "../harness/nativeHarnessTurnObserver";
+import type {
+  NativeHarnessTurnAdmission,
+  NativeHarnessTurnScope,
+} from "../harness/nativeHarnessTurnObserver";
 import type { ProviderContextBlock } from "@octant/contracts";
+import { CodeServiceError } from "./codeService";
 import { RepositoryTestRunner } from "./repositoryTestRunner";
 import { RepositoryTestDiscoveryService } from "./repositoryTestDiscoveryService";
 import { CURATED_SCAFFOLDS, curatedScaffoldTools } from "../scaffold/curatedScaffoldCatalog";
@@ -202,6 +207,8 @@ export interface CodeOperationRuntimeOptions {
   /** The harness around a turn: stable instructions in front, the reply observed after. */
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
+    /** Absent means every turn is admitted. */
+    readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
     readonly turnCompleted: (
       input: NativeHarnessTurnScope & { readonly text: string; readonly toolCalls: number },
@@ -639,15 +646,36 @@ export function createCodeOperationRuntime(
       });
     },
     revokeApprovals: (windowId) => approvalStore?.revokeWindow(windowId),
-    execute: async (windowId, rawCommand, options) => {
+    execute: async (windowId, rawCommand, executeOptions) => {
       const command = decodeCodeOperationCommand(rawCommand);
-      if (command.kind === "start-provider-turn") turns.noteStart(command);
+      if (command.kind === "start-provider-turn") {
+        const thread = options.persistence.readCodeThread(command.threadId);
+        const admission =
+          thread === undefined
+            ? undefined
+            : options.nativeHarness?.admitTurn?.({
+                threadId: String(thread.id),
+                mode: "code",
+                providerInstanceId: thread.providerInstanceId,
+                modelId: thread.modelId,
+                projectId: thread.projectId,
+              });
+        if (admission?.kind === "paused") {
+          throw new CodeServiceError(
+            decodeCodeFailure({
+              category: "waiting",
+              message: `${admission.status === "paused-by-advisor" ? "The advisor paused this thread" : "This thread is paused"}: ${admission.detail} Resume the harness session to continue.`,
+            }),
+          );
+        }
+        turns.noteStart(command);
+      }
       // Runtime work is opened by the service after its authoritative scope
       // check, while provider turns outlive this call and are opened by the
       // turn controller itself.
       const observed = codeRuntimeWorkObserved(command);
       try {
-        const result = await service.execute(windowId, command, options);
+        const result = await service.execute(windowId, command, executeOptions);
         if (
           command.kind === "start-provider-turn" &&
           result.kind === "provider-turn-state" &&

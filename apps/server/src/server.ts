@@ -1524,6 +1524,8 @@ export function startOctantServer(
       },
       contextFor: (scope: Parameters<NativeHarnessTurnObserver["contextFor"]>[0]) =>
         nativeHarnessObserver?.contextFor(scope) ?? [],
+      admitTurn: (scope: Parameters<NativeHarnessTurnObserver["admitTurn"]>[0]) =>
+        nativeHarnessObserver?.admitTurn(scope) ?? { kind: "admitted" as const },
       turnStarted: (scope: Parameters<NativeHarnessTurnObserver["turnStarted"]>[0]) =>
         nativeHarnessObserver?.turnStarted(scope),
       turnCompleted: (input: Parameters<NativeHarnessTurnObserver["turnCompleted"]>[0]) =>

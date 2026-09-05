@@ -171,7 +171,10 @@ import { createDiagnosticsFailureIncidentEvent } from "../diagnosticsExportServi
 import { ChatAttachmentStore } from "./chatAttachmentStore";
 import { ChatScratchStore } from "./chatScratchStore";
 import { ChatTurnRunner, type AppManagedToolSet } from "./chatTurnRunner";
-import type { NativeHarnessTurnScope } from "../harness/nativeHarnessTurnObserver";
+import type {
+  NativeHarnessTurnAdmission,
+  NativeHarnessTurnScope,
+} from "../harness/nativeHarnessTurnObserver";
 import type { ResearchRouteDecision, ResearchRouter } from "./research/researchRouter";
 import { SearxngEndpointRejected, validateSearxngEndpoint } from "./research/searxngEndpoint";
 import {
@@ -474,6 +477,8 @@ export interface ChatServiceOptions {
    */
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
+    /** Absent means every turn is admitted. */
+    readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
     readonly turnCompleted: (
       input: NativeHarnessTurnScope & {
@@ -1796,6 +1801,21 @@ export class ChatService {
   ): Promise<ChatCommandResult> {
     const accepted = await this.#withThreadAdmission(command.threadId, async () => {
       const thread = this.#requireActiveThread(command.threadId);
+      const admission = this.#nativeHarness?.admitTurn?.({
+        threadId: String(thread.id),
+        mode: "chat",
+        providerInstanceId: decodeProviderInstanceId(thread.providerInstanceId),
+        modelId: decodeProviderModelId(thread.modelId),
+        ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+      });
+      if (admission?.kind === "paused") {
+        throw new ChatServiceError(
+          decodeChatFailure({
+            category: "waiting",
+            message: `${admission.status === "paused-by-advisor" ? "The advisor paused this thread" : "This thread is paused"}: ${admission.detail} Resume the harness session to continue.`,
+          }),
+        );
+      }
       if (command.submissionId !== undefined) {
         // Match on submissionId alone. A turn whose only attempt ended
         // failed, cancelled, or interrupted is still the turn this

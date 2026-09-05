@@ -70,8 +70,11 @@ implement: put the strong model on `default` and `slow`, the cheap one on
 When the `advisor` slot is configured, a second model reviews a digest of
 each of the lead's turns. It may redirect the next turn or pause the run for
 you; it can never run a tool, edit a file, or approve anything. Its
-interventions appear on the harness card. The lead can also ask it a question
-with `second-opinion`.
+interventions appear on the harness card. A pause holds the thread: the next
+prompt is refused with the advisor's reason until you press Resume on the
+harness card, the phone panel, or type `/resume` in the CLI — the decision it
+asked for is yours, not the next prompt's. The lead can also ask it a
+question with `second-opinion`.
 
 ## Follow-ups
 

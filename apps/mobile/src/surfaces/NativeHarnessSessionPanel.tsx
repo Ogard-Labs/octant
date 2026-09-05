@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import {
   activateMobileNativeHarnessFollowUp,
   answerMobileNativeHarnessQuestion,
+  commandMobileNativeHarnessSession,
   loadMobileNativeHarnessSession,
   previewMobileNativeHarnessFollowUp,
   type MobileRemoteTransport,
@@ -82,6 +83,29 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
         <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
           {view.session.status}
         </Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => {
+            const paused = view.session.status !== "running" && view.session.status !== "idle";
+            void commandMobileNativeHarnessSession({
+              transport: props.transport,
+              threadId: props.threadId,
+              kind: paused ? "resume-native-harness-session" : "pause-native-harness-session",
+              sessionId: String(view.session.id),
+              expectedVersion: view.session.version,
+            }).then((ok) => {
+              setNote(ok ? undefined : "The host refused that.");
+              void load();
+            });
+          }}
+          testID="mobile-native-harness-pause"
+        >
+          <Text style={[mobileTypography.caption, { color: colors.textPrimary }]}>
+            {view.session.status !== "running" && view.session.status !== "idle"
+              ? "Resume"
+              : "Pause"}
+          </Text>
+        </Pressable>
       </View>
       <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
         {String(view.session.lead.modelId)} · {view.session.turnsRun} turns ·{" "}

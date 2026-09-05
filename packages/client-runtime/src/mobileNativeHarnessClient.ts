@@ -89,3 +89,23 @@ export async function answerMobileNativeHarnessQuestion(input: {
     return undefined;
   }
 }
+
+export async function commandMobileNativeHarnessSession(input: {
+  readonly transport: MobileRemoteTransport;
+  readonly threadId: string;
+  readonly kind: "pause-native-harness-session" | "resume-native-harness-session";
+  readonly sessionId: string;
+  readonly expectedVersion: number;
+}): Promise<boolean> {
+  const response = await input.transport.authenticatedFetch({
+    method: "POST",
+    path: `/api/native-harness/sessions/${encodeURIComponent(input.threadId)}/commands`,
+    body: JSON.stringify({
+      kind: input.kind,
+      sessionId: input.sessionId,
+      expectedVersion: input.expectedVersion,
+    }),
+    contentType: "application/json",
+  });
+  return response.ok;
+}

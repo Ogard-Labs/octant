@@ -35,7 +35,10 @@ import {
 } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
-import type { NativeHarnessTurnScope } from "../harness/nativeHarnessTurnObserver";
+import type {
+  NativeHarnessTurnAdmission,
+  NativeHarnessTurnScope,
+} from "../harness/nativeHarnessTurnObserver";
 import {
   decideWorkTurnAuthority,
   FILE_MENTION_UNREADABLE_CONTEXT,
@@ -166,6 +169,8 @@ export interface WorkTurnServiceDependencies {
   /** The harness around a turn: stable instructions in front, the reply observed after. */
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
+    /** Absent means every turn is admitted. */
+    readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
     readonly turnCompleted: (
       input: NativeHarnessTurnScope & { readonly text: string; readonly toolCalls: number },
@@ -279,6 +284,22 @@ export class WorkTurnService {
     }
 
     const thread = await this.#threads.read(authenticatedWindowId, command.threadId);
+    const admission =
+      thread === undefined
+        ? undefined
+        : this.#nativeHarness?.admitTurn?.({
+            threadId: String(thread.id),
+            mode: "work",
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+            projectId: thread.projectId,
+          });
+    if (admission?.kind === "paused") {
+      throw this.#failure(
+        "unavailable",
+        `${admission.status === "paused-by-advisor" ? "The advisor paused this thread" : "This thread is paused"}: ${admission.detail} Resume the harness session to continue.`,
+      );
+    }
     const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);
     const accessible = projectBootstrap.active.some(
       (project) =>

@@ -4,6 +4,8 @@ import {
   decodeChatCommandResult,
   decodeChatThreadView,
   decodeNativeHarnessRoutingSettings,
+  decodeNativeHarnessFollowUpActivationResult,
+  decodeNativeHarnessFollowUpPreview,
   decodeNativeHarnessSessionView,
   decodeProjectBootstrap,
   type ChatThreadView,
@@ -173,7 +175,7 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
       return (await runTurn(input, threadId, input.command.prompt, lines)) ? 0 : 1;
     }
     input.stdout.write(
-      "Type a prompt and press Enter. /session shows the harness session; /next N takes a suggested follow-up; /quit exits.\n",
+      "Type a prompt and press Enter. /session shows the harness session; /next N takes a suggested follow-up; /pause and /resume hold or release the run; /quit exits.\n",
     );
     for (;;) {
       const line = await lines.next();
@@ -188,12 +190,130 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
         else printSession(view, input.stdout);
         continue;
       }
+      if (prompt === "/pause" || prompt === "/resume") {
+        await pauseOrResume(input, threadId, prompt === "/pause" ? "pause" : "resume");
+        continue;
+      }
+      if (prompt === "/next" || prompt.startsWith("/next ")) {
+        await takeFollowUp(input, threadId, prompt.slice("/next".length).trim(), lines);
+        continue;
+      }
       await runTurn(input, threadId, prompt, lines);
     }
     return 0;
   } finally {
     lines.close();
   }
+}
+
+/** Holds or releases the harness session; a held session refuses the next turn. */
+async function pauseOrResume(
+  input: RunAgentCliCommandInput,
+  threadId: string,
+  action: "pause" | "resume",
+): Promise<void> {
+  const view = await readSession(input, threadId);
+  if (view === null || view === "unavailable") {
+    input.stdout.write("No harness session yet.\n");
+    return;
+  }
+  const response = await input.session.send({
+    path: `/api/native-harness/sessions/${encodeURIComponent(threadId)}/commands`,
+    method: "POST",
+    body: {
+      kind: action === "pause" ? "pause-native-harness-session" : "resume-native-harness-session",
+      sessionId: String(view.session.id),
+      expectedVersion: view.session.version,
+    },
+  });
+  if (response.status !== 200) {
+    input.stderr.write(`${failureMessage(response, `The session could not be ${action}d.`)}\n`);
+    return;
+  }
+  input.stdout.write(action === "pause" ? "Paused.\n" : "Resumed.\n");
+}
+
+/**
+ * Takes one of the lead's suggested follow-ups: shows what it would create,
+ * asks for a plain yes, and only then activates it. A same-thread follow-up
+ * runs here at once; a new thread is created on the host and named so the
+ * person can continue there.
+ */
+async function takeFollowUp(
+  input: RunAgentCliCommandInput,
+  threadId: string,
+  argument: string,
+  lines: LineSource,
+): Promise<void> {
+  const view = await readSession(input, threadId);
+  if (view === null || view === "unavailable" || view.followUps === undefined) {
+    input.stdout.write("No follow-ups have been suggested yet.\n");
+    return;
+  }
+  const suggestion = /^\d+$/.test(argument)
+    ? view.followUps.suggestions[Number(argument) - 1]
+    : undefined;
+  if (suggestion === undefined) {
+    view.followUps.suggestions.forEach((entry, index) =>
+      input.stdout.write(`  ${index + 1}. ${entry.title} [${entry.target}]\n`),
+    );
+    input.stdout.write("Pick one by number: /next 1\n");
+    return;
+  }
+  const base = `/api/native-harness/sessions/${encodeURIComponent(threadId)}/follow-ups`;
+  const previewed = await input.session.send({
+    path: `${base}/preview`,
+    method: "POST",
+    body: { suggestionId: String(suggestion.id) },
+  });
+  if (previewed.status !== 200) {
+    input.stderr.write(`${failureMessage(previewed, "The follow-up could not be previewed.")}\n`);
+    return;
+  }
+  const preview = decodeNativeHarnessFollowUpPreview(
+    (previewed.body as { preview?: unknown }).preview,
+  );
+  const target =
+    preview.wouldCreate.kind === "same-thread"
+      ? "continues in this thread"
+      : preview.wouldCreate.kind === "new-thread"
+        ? `starts a new ${preview.wouldCreate.mode} thread`
+        : "starts a new Code thread on its own worktree";
+  input.stdout.write(`${suggestion.title} — ${target}\n${suggestion.prompt}\nGo ahead? [y/N] `);
+  const answer = (await lines.next())?.trim() ?? "";
+  if (!/^y(es)?$/i.test(answer)) {
+    input.stdout.write("Left as a suggestion.\n");
+    return;
+  }
+  const activated = await input.session.send({
+    path: `${base}/activate`,
+    method: "POST",
+    body: {
+      turnId: String(view.followUps.turnId),
+      suggestionId: String(suggestion.id),
+      confirmed: true,
+    },
+  });
+  const result = decodeNativeHarnessFollowUpActivationResult(activated.body);
+  if (result.kind !== "follow-up-activated") {
+    input.stderr.write(`${result.message}\n`);
+    return;
+  }
+  if (result.created.kind === "same-thread") {
+    await runTurn(input, threadId, suggestion.prompt, lines);
+    return;
+  }
+  if (input.command.json) {
+    input.stdout.write(`${JSON.stringify({ kind: "follow-up", created: result.created })}\n`);
+    return;
+  }
+  if (result.created.threadId === undefined) {
+    input.stdout.write("Activated; the host created no thread to attach to.\n");
+    return;
+  }
+  input.stdout.write(
+    `Created ${result.created.mode} thread ${result.created.threadId}. Continue there with:\n  octant agent --thread ${result.created.threadId} --prompt ${JSON.stringify(suggestion.prompt)}\n`,
+  );
 }
 
 /**

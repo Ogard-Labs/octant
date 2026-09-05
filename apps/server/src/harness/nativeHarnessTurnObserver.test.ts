@@ -9,7 +9,7 @@ const scope = {
   modelId: "frontier-large" as never,
 };
 
-function observer(isHarness = true) {
+function observer(isHarness = true, session?: { status: string; detail?: string }) {
   const recorded: { turns: unknown[]; followUps: unknown[]; interventions: unknown[] } = {
     turns: [],
     followUps: [],
@@ -18,6 +18,7 @@ function observer(isHarness = true) {
   let counter = 0;
   const subject = new NativeHarnessTurnObserver({
     sessions: {
+      read: () => (session === undefined ? undefined : ({ session } as never)),
       ensure: () =>
         ({
           id: "00000000-0000-4000-8000-000000000010",
@@ -61,6 +62,21 @@ describe("native harness turn observer", () => {
     // No advisor slot is configured, so no redirect is ever pending; a
     // second read is the same stable prefix.
     expect(subject.contextFor(scope)).toEqual(subject.contextFor(scope));
+  });
+
+  it("refuses the next turn while a pause stands and admits it for other providers", () => {
+    const paused = observer(true, { status: "paused-by-advisor", detail: "Spending ahead." });
+    expect(paused.subject.admitTurn(scope)).toEqual({
+      kind: "paused",
+      status: "paused-by-advisor",
+      detail: "Spending ahead.",
+    });
+    expect(observer(true, { status: "idle" }).subject.admitTurn(scope)).toEqual({
+      kind: "admitted",
+    });
+    expect(
+      observer(false, { status: "paused-by-advisor", detail: "x" }).subject.admitTurn(scope),
+    ).toEqual({ kind: "admitted" });
   });
 
   it("records the turn and the follow-ups a reply ends with", async () => {
