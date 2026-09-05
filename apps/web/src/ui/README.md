@@ -37,6 +37,12 @@ radio. Remaining raw controls must be native platform exceptions:
 Place `{/* ui-boundary-exception: native-file-input */}` immediately above the
 element. Hidden `type="file"` inputs are also recognized without a comment.
 
+The same script checks every stylesheet under `apps/web/src`
+(`scripts/check-ui-stylesheets.ts`): a raw colour in a rule fails closed, and
+off-scale `font-size`, raw motion durations, and `!important` may not grow past
+`scripts/ui-stylesheet-baseline.json`. See DESIGN.md, "Source of truth and CSS
+layers".
+
 ## Surface utilities (`styles/components.css`)
 
 - `octant-card` / `octant-card--flat` — raised or flat in-flow container.

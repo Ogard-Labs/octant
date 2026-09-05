@@ -22,7 +22,7 @@
 
 .agent-hierarchy__eyebrow {
   margin: 0;
-  font-size: 0.75rem;
+  font-size: var(--oct-text-detail);
   letter-spacing: 0;
   text-transform: none;
   opacity: 0.7;
@@ -30,7 +30,7 @@
 
 .agent-hierarchy__header h2 {
   margin: 0.15rem 0;
-  font-size: 1rem;
+  font-size: var(--oct-text-lg);
 }
 
 .agent-hierarchy__header p,
@@ -38,14 +38,14 @@
 .agent-hierarchy__empty,
 .agent-hierarchy__banner {
   margin: 0;
-  font-size: 0.875rem;
+  font-size: var(--oct-text-base);
   opacity: 0.9;
 }
 
 .agent-hierarchy__counts {
   display: flex;
   gap: 0.75rem;
-  font-size: 0.8125rem;
+  font-size: var(--oct-text-sm);
   white-space: nowrap;
 }
 
@@ -59,7 +59,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  font-size: 0.75rem;
+  font-size: var(--oct-text-detail);
 }
 
 .agent-hierarchy__list {
@@ -88,7 +88,7 @@
 }
 
 .agent-hierarchy__row-main span {
-  font-size: 0.8125rem;
+  font-size: var(--oct-text-sm);
   opacity: 0.8;
 }
 
@@ -120,14 +120,14 @@
 
 .agent-run-create-form h3 {
   margin: 0;
-  font-size: 0.9375rem;
+  font-size: var(--oct-text-base);
 }
 
 .agent-run-create-form label {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  font-size: 0.8125rem;
+  font-size: var(--oct-text-sm);
 }
 
 .agent-run-create-form label.agent-run-create-form__context {
@@ -157,13 +157,13 @@
 .agent-run-create-form__hint,
 .agent-run-create-form__disabled {
   margin: 0;
-  font-size: 0.8125rem;
+  font-size: var(--oct-text-sm);
   opacity: 0.85;
 }
 
 .agent-run-create-form__error {
   margin: 0;
-  font-size: 0.8125rem;
+  font-size: var(--oct-text-sm);
   color: color-mix(in srgb, Canvas 15%, red 85%);
 }
 
@@ -178,7 +178,7 @@
 
 .agent-run-create-form__facts h4 {
   margin: 0;
-  font-size: 0.8125rem;
+  font-size: var(--oct-text-sm);
 }
 
 .agent-run-create-form__facts dl {
@@ -193,13 +193,13 @@
 }
 
 .agent-run-create-form__facts dt {
-  font-size: 0.75rem;
+  font-size: var(--oct-text-detail);
   opacity: 0.75;
 }
 
 .agent-run-create-form__facts dd {
   margin: 0;
-  font-size: 0.8125rem;
+  font-size: var(--oct-text-sm);
   overflow-wrap: anywhere;
 }
 
@@ -211,7 +211,7 @@
 
 .agent-run-settings-panel__message,
 .agent-run-settings-panel__error {
-  font-size: 0.8125rem;
+  font-size: var(--oct-text-sm);
   opacity: 0.9;
 }
 
@@ -249,7 +249,7 @@
   gap: 6px;
   margin: 0;
   color: var(--octant-text-primary);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
 }
 
 .child-run-status__detail,

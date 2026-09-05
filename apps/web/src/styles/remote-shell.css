@@ -89,7 +89,7 @@
   margin: 0;
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
 }
 
 .remote-shell__surface-description {
@@ -183,7 +183,7 @@
 .remote-shell__device-fact dt {
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   letter-spacing: 0;
   text-transform: none;
 }

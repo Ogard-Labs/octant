@@ -1,0 +1,31 @@
+{
+  "font-size-scale": {
+    "apps/web/src/styles/chat.css": 1,
+    "apps/web/src/styles/octant.css": 5
+  },
+  "motion-literal": {
+    "apps/web/src/context/context.css": 2,
+    "apps/web/src/styles.css": 1,
+    "apps/web/src/styles/canvas.css": 2,
+    "apps/web/src/styles/chat.css": 2,
+    "apps/web/src/styles/octant.css": 5,
+    "apps/web/src/styles/polish.css": 1,
+    "apps/web/src/styles/shell.css": 2
+  },
+  "important": {
+    "apps/web/src/styles.css": 4,
+    "apps/web/src/styles/octant.css": 1,
+    "apps/web/src/styles/settings.css": 4
+  },
+  "heavy-weight": {
+    "apps/web/src/styles.css": 6,
+    "apps/web/src/styles/canvas.css": 1,
+    "apps/web/src/styles/chat.css": 1,
+    "apps/web/src/styles/octant.css": 1,
+    "apps/web/src/styles/remote-pairing.css": 1,
+    "apps/web/src/styles/remote-shell.css": 1,
+    "apps/web/src/styles/settings.css": 1,
+    "apps/web/src/styles/surface.css": 1,
+    "apps/web/src/usage/usageWorkspace.css": 1
+  }
+}

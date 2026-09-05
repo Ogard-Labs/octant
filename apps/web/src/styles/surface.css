@@ -35,7 +35,7 @@
 }
 
 .oct-title--hero {
-  font-size: clamp(24px, 2.5vw, 30px);
+  font-size: calc(28 * var(--oct-text-step));
   font-weight: var(--oct-weight-display);
   line-height: 1.15;
 }
@@ -50,7 +50,7 @@
 
 .oct-section-label {
   margin: 0;
-  color: var(--oct-fg);
+  color: var(--oct-muted);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-display);

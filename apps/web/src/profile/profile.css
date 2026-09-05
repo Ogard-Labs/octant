@@ -14,7 +14,7 @@
   justify-content: center;
   flex: none;
   border-radius: var(--oct-radius-pill);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
   letter-spacing: 0.01em;
   line-height: 1;
   user-select: none;
@@ -101,14 +101,14 @@ fieldset.profile-editor__field > legend {
 }
 
 .profile-editor__label {
-  font-size: 0.8125rem;
-  font-weight: 600;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
 }
 
 .profile-editor__hint,
 .profile-editor__notice {
   margin: 0;
-  font-size: 0.8125rem;
+  font-size: var(--oct-text-sm);
   opacity: 0.85;
 }
 
