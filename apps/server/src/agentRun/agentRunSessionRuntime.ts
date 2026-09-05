@@ -1,3 +1,4 @@
+import { boundedToolResultJson } from "../providers/toolResultJson";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import {
   decodeCapacityReservationId,
@@ -632,6 +633,9 @@ function runSessionTurn(
     });
     state.acquired = true;
 
+    // A stopped run must also stop a tool call still working for it.
+    const toolAbort = new AbortController();
+    yield* Effect.addFinalizer(() => Effect.sync(() => toolAbort.abort()));
     yield* Effect.addFinalizer(() =>
       shutdownProviderSession(connection, input, state, releaseCapacity),
     );
@@ -646,7 +650,7 @@ function runSessionTurn(
 
     const collected = yield* subscribeThenSend({
       connection,
-      consume: (events) => collectSessionEvents(connection, events, input, state),
+      consume: (events) => collectSessionEvents(connection, events, input, state, toolAbort),
       send: connection.send({
         sessionId: input.sessionId,
         prompt: input.run.task,
@@ -756,6 +760,7 @@ function collectSessionEvents(
   events: Stream.Stream<ProviderRuntimeEvent, ProviderFailure>,
   input: ManagedSessionInput,
   state: ManagedSessionState,
+  toolAbort: AbortController,
 ): Effect.Effect<void, ProviderFailure> {
   const answeredToolRequestIds = new Set<string>();
   const answeredApprovalRequestIds = new Set<string>();
@@ -835,7 +840,11 @@ function collectSessionEvents(
           }
           const execution = yield* Effect.promise(async () => {
             try {
-              return await toolSet.execute({ name: event.toolName, inputJson: event.inputJson });
+              return await toolSet.execute({
+                name: event.toolName,
+                inputJson: event.inputJson,
+                signal: toolAbort.signal,
+              });
             } catch {
               return { result: { error: "tool-execution-failed" }, isError: true } as const;
             }
@@ -843,7 +852,7 @@ function collectSessionEvents(
           yield* connection.answerTool({
             sessionId: input.sessionId,
             requestId: event.requestId,
-            resultJson: JSON.stringify(execution.result).slice(0, 65_536),
+            resultJson: boundedToolResultJson(execution.result),
             isError: execution.isError === true,
           });
           return;

@@ -1,3 +1,4 @@
+import { boundedToolResultJson } from "../providers/toolResultJson";
 import {
   decodeChatFailure,
   UtcTimestamp,
@@ -632,7 +633,7 @@ export class ChatTurnRunner {
                   yield* connection.answerTool({
                     sessionId: input.attempt.providerSessionId,
                     requestId: event.requestId,
-                    resultJson: JSON.stringify(execution.result),
+                    resultJson: boundedToolResultJson(execution.result),
                     isError: execution.isError === true,
                   });
                   return;

@@ -1,3 +1,4 @@
+import { boundedToolResultJson } from "../providers/toolResultJson";
 import {
   MAX_PROVIDER_CONTEXT_BLOCKS,
   MAX_WORK_TURN_RESPONSE_BYTES,
@@ -207,7 +208,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                     .answerTool({
                       sessionId: input.providerSessionId,
                       requestId: event.requestId,
-                      resultJson: JSON.stringify(execution.result),
+                      resultJson: boundedToolResultJson(execution.result),
                       isError: execution.isError === true,
                     })
                     .pipe(Effect.catchAll(() => Effect.void));
