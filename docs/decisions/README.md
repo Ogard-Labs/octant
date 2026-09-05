@@ -91,6 +91,7 @@ distilled successor of the earlier long-form design specifications.
 | [0081](0081-image-generation-is-its-own-surface.md)                         | Image generation is its own surface                                                         | Accepted           |
 | [0082](0082-provider-events-are-subscribed-before-a-turn-is-sent.md)        | Provider events are subscribed before a turn is sent                                        | Accepted           |
 | [0083](0083-a-work-turn-records-what-changed-in-its-folder.md)              | A Work turn records what changed in its folder                                              | Accepted           |
+| [0084](0084-voice-rides-an-openai-compatible-provider.md)                   | Voice rides an OpenAI-compatible provider                                                   | Accepted           |
 
 ## Adding an ADR
 
