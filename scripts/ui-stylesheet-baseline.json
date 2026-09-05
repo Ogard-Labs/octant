@@ -1,5 +1,7 @@
 {
   "font-size-scale": {
+    "apps/web/src/harness/native-harness.css": 6,
+    "apps/web/src/styles.css": 1,
     "apps/web/src/styles/chat.css": 1,
     "apps/web/src/styles/octant.css": 5
   },
@@ -9,7 +11,6 @@
     "apps/web/src/styles/canvas.css": 2,
     "apps/web/src/styles/chat.css": 2,
     "apps/web/src/styles/octant.css": 5,
-    "apps/web/src/styles/polish.css": 1,
     "apps/web/src/styles/shell.css": 2
   },
   "important": {

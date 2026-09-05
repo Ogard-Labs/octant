@@ -678,8 +678,8 @@ strong {
   text-align: left;
   transition:
     background-color var(--oct-motion-fast) ease,
-    border-color 140ms ease,
-    color 140ms ease;
+    border-color var(--oct-motion-fast) ease,
+    color var(--oct-motion-fast) ease;
 }
 
 .octant-menu__trigger:hover,
@@ -764,7 +764,7 @@ strong {
   cursor: pointer;
   transition:
     background-color var(--oct-motion-fast) ease,
-    color 140ms ease;
+    color var(--oct-motion-fast) ease;
 }
 
 .new-project {
@@ -909,7 +909,7 @@ strong {
   color: var(--octant-text-muted);
   transition:
     background var(--oct-motion-fast) ease,
-    color 120ms ease;
+    color var(--oct-motion-fast) ease;
 }
 
 .code-project-views__inline-button:hover {

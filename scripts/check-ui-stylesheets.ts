@@ -38,8 +38,10 @@ export type StylesheetBaseline = Readonly<
  * such as a light/dark preview swatch, and so must not follow the active theme. */
 const EXCEPTION_MARKER = /ui-style-exception:\s*fixed-scheme/;
 
+// `color-mix()` is how a theme token is tinted, so the call itself is not a raw
+// colour; a literal written inside one is still caught by the alternatives here.
 const COLOR_LITERAL =
-  /(?:#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\b|\b(?:rgb|hsl)a?\([^)]*\))/;
+  /(?:#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\b|\b(?:(?:rgb|hsl)a?|hwb|lab|lch|oklab|oklch|color)\([^)]*\))/;
 
 // The type scale from DESIGN.md plus the token steps octant.css defines
 // (11 xs, 12 detail, 13 sm, 14 base, 17 lg, 20 xl, 26 2xl, 28 hero, 36 3xl).
@@ -48,7 +50,8 @@ const SCALE_TOKEN =
   /^var\(--(?:oct-text-[a-z0-9-]+|oct-fs-[a-z0-9-]+|oct-transcript-font-size|octant-(?:ui|editor|terminal)-font-size)\)$/;
 const SCALE_CALC = /^calc\((\d+) \* var\(--oct-text-step\)\)$/;
 
-const MOTION_PROPERTY = /^(?:transition|transition-duration|animation|animation-duration)$/;
+const MOTION_PROPERTY =
+  /^(?:transition|transition-duration|transition-delay|animation|animation-duration|animation-delay)$/;
 // `0s`, `0ms`, and `0.01ms` are the reduced-motion idiom, not a chosen duration.
 const MOTION_LITERAL = /(?<![\w.-])(?!0(?:\.01)?m?s\b)\d*\.?\d+m?s\b/;
 const MOTION_TOKEN = /var\(--oct-motion-[a-z-]+\)/;
@@ -58,7 +61,23 @@ const ACCESSIBILITY_MEDIA =
 
 // DESIGN.md: nothing is bold except a page title. Content emphasis (`strong`,
 // transcript headings) and the handful of titles are the accepted residue.
-const HEAVY_WEIGHT = /^(?:[6-9]00|bold|bolder|var\(--oct-weight-strong\))$/;
+const HEAVY_WEIGHT = /^(?:bold|bolder|var\(--oct-weight-strong\))$/;
+
+/** `!important` and casing must not let a weight slip past the 500 limit. */
+function isHeavyWeight(value: string): boolean {
+  const weight = value
+    .replace(/!important/i, "")
+    .trim()
+    .toLowerCase();
+  const numeric = Number(weight);
+  return Number.isFinite(numeric) && weight !== "" ? numeric > 500 : HEAVY_WEIGHT.test(weight);
+}
+
+/** Only an `@media` rule that names an accessibility feature earns the
+ * `!important` exemption; a selector that merely spells one out does not. */
+function isAccessibilityFallback(headers: ReadonlyArray<string>): boolean {
+  return headers.some((header) => /^@media\b/.test(header) && ACCESSIBILITY_MEDIA.test(header));
+}
 
 interface Declaration {
   readonly property: string;
@@ -166,10 +185,10 @@ export function findStylesheetFindings(
         const literal = MOTION_LITERAL.exec(value);
         if (literal) push("motion-literal", `${property} uses a raw duration: ${literal[0]}`);
       }
-      if (value.includes("!important") && !headers.some((h) => ACCESSIBILITY_MEDIA.test(h))) {
+      if (value.includes("!important") && !isAccessibilityFallback(headers)) {
         push("important", `${property} uses !important outside an accessibility fallback`);
       }
-      if (!isToken && property === "font-weight" && HEAVY_WEIGHT.test(value)) {
+      if (!isToken && property === "font-weight" && isHeavyWeight(value)) {
         push("heavy-weight", `font-weight ${value} is heavier than a page title`);
       }
     }

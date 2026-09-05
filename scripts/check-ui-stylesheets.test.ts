@@ -101,6 +101,53 @@ describe("UI stylesheet check", () => {
     ]);
   });
 
+  it("flags a selector that only spells an accessibility feature out", () => {
+    expect(
+      findStylesheetFindings({
+        [CSS]: [
+          ".prefers-reduced-motion { margin: 0 !important; }",
+          "@media (prefers-contrast: more) { .b { outline-width: 2px !important; } }",
+        ].join("\n"),
+      }).map((finding) => `${finding.rule} ${String(finding.line)}`),
+    ).toEqual(["important 1"]);
+  });
+
+  it("flags a raw colour written as a modern colour function", () => {
+    expect(
+      findStylesheetFindings({
+        [CSS]: [
+          ".a { color: oklch(60% 0.2 30); }",
+          ".b { background: color-mix(in oklab, #fff, #000); }",
+          ".c { color: var(--octant-text); }",
+        ].join("\n"),
+      }).map((finding) => `${finding.rule} ${String(finding.line)}`),
+    ).toEqual(["color-literal 1", "color-literal 2"]);
+  });
+
+  it("flags a raw duration written as a delay", () => {
+    expect(
+      findStylesheetFindings({
+        [CSS]: [
+          ".a { transition-delay: 120ms; }",
+          ".b { animation-delay: 120ms; }",
+          ".c { transition-delay: var(--oct-motion-fast); }",
+        ].join("\n"),
+      }).map((finding) => `${finding.rule} ${String(finding.line)}`),
+    ).toEqual(["motion-literal 1", "motion-literal 2"]);
+  });
+
+  it("flags a numeric weight above 500 that is not a hundred step", () => {
+    expect(
+      findStylesheetFindings({
+        [CSS]: [
+          ".a { font-weight: 550; }",
+          ".b { font-weight: 600 !important; }",
+          ".c { font-weight: 500; }",
+        ].join("\n"),
+      }).map((finding) => `${finding.rule} ${String(finding.line)}`),
+    ).toEqual(["heavy-weight 1", "important 2", "heavy-weight 2"]);
+  });
+
   it("flags bold weights so only page titles and content emphasis stay heavy", () => {
     expect(
       findStylesheetFindings({
