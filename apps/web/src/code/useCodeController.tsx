@@ -2274,6 +2274,7 @@ function applyResult(current: CodeBootstrap | undefined, result: CodeCommandResu
       };
     case "worktree-source-previewed":
     case "worktree-remote-facts-retrieved":
+    case "worktree-refs-listed":
       return current;
     case "thread-checkout-rebind":
       return result.outcome.status === "refused"
@@ -2289,6 +2290,15 @@ function applyResult(current: CodeBootstrap | undefined, result: CodeCommandResu
         threads: replaceById(current.threads, result.thread),
         checkouts: replaceById(current.checkouts, result.checkout),
       };
+    default:
+      // A result this reducer does not name says nothing about bootstrap
+      // state, so it leaves it alone. Falling out of the switch returned
+      // `undefined` instead, which erased everything Code had loaded — while
+      // `status` stayed "ready", so the renderer reported a healthy Code
+      // surface that then refused every thread. A host one version ahead can
+      // answer with a kind this renderer has never heard of, so the safe
+      // answer has to be the runtime one, not an exhaustiveness assertion.
+      return current;
   }
 }
 
