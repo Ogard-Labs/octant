@@ -1,15 +1,29 @@
 import { lookup } from "node:dns/promises";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
+import { Readable } from "node:stream";
 import type { NativeHarnessWebFetchResult } from "./nativeHarnessTools";
 
 const MAX_REDIRECTS = 5;
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+/** One hop of a public fetch: no automatic redirects, the caller follows them. */
+export type PublicFetchTransport = (
+  url: URL,
+  init: {
+    readonly signal: AbortSignal;
+    readonly headers: Readonly<Record<string, string>>;
+    readonly redirect: "manual";
+  },
+) => Promise<Response>;
+
 export interface FetchPublicUrlOptions {
   readonly url: string;
   readonly maxBytes: number;
   readonly signal?: AbortSignal;
-  readonly fetch?: typeof fetch;
+  /** Defaults to the pinned transport; a test may hand in a fake. */
+  readonly fetch?: PublicFetchTransport;
   readonly resolveAddress?: (hostname: string) => Promise<string>;
   readonly timeoutMs?: number;
 }
@@ -30,7 +44,7 @@ export class PublicFetchRefused extends Error {
 export async function fetchPublicUrl(
   options: FetchPublicUrlOptions,
 ): Promise<NativeHarnessWebFetchResult> {
-  const doFetch = options.fetch ?? fetch;
+  const doFetch = options.fetch ?? createPinnedFetch();
   const resolveAddress = options.resolveAddress ?? defaultResolve;
   let current = new URL(options.url);
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
@@ -73,6 +87,88 @@ export async function fetchPublicUrl(
     }
   }
   throw new PublicFetchRefused("too-many-redirects");
+}
+
+/**
+ * A transport that connects only to addresses that passed the private-network
+ * check, at connect time. Bun's `fetch` resolves the name itself, so a name
+ * could pass the check and then resolve to a private address a moment later;
+ * `node:http` takes a `lookup`, so every address the name resolves to is
+ * checked right where the socket opens, and the hostname still reaches the
+ * server as `Host` and TLS server name.
+ */
+export function createPinnedFetch(
+  dependencies: {
+    readonly resolveAll?: (hostname: string) => Promise<ReadonlyArray<string>>;
+    readonly isPrivate?: (address: string) => boolean;
+  } = {},
+): PublicFetchTransport {
+  const resolveAll = dependencies.resolveAll ?? defaultResolveAll;
+  const isPrivate = dependencies.isPrivate ?? isPrivateAddress;
+  return (url, init) =>
+    new Promise<Response>((resolve, reject) => {
+      const secure = url.protocol === "https:";
+      const lookup = (
+        hostname: string,
+        _options: unknown,
+        callback: (
+          error: Error | null,
+          addresses?: ReadonlyArray<{ readonly address: string; readonly family: number }>,
+        ) => void,
+      ) => {
+        resolveAll(hostname).then(
+          (addresses) => {
+            if (addresses.length === 0) {
+              callback(new PublicFetchRefused("unresolvable"));
+              return;
+            }
+            if (addresses.some((address) => isPrivate(address))) {
+              callback(new PublicFetchRefused("private-destination"));
+              return;
+            }
+            callback(
+              null,
+              addresses.map((address) => ({ address, family: isIP(address) })),
+            );
+          },
+          (error: unknown) => callback(error instanceof Error ? error : new Error(String(error))),
+        );
+      };
+      const request = (secure ? httpsRequest : httpRequest)(
+        {
+          host: url.hostname,
+          port: url.port.length > 0 ? Number(url.port) : secure ? 443 : 80,
+          path: `${url.pathname}${url.search}`,
+          method: "GET",
+          headers: { ...init.headers, host: url.host },
+          signal: init.signal,
+          lookup: lookup as never,
+          ...(secure ? { servername: url.hostname } : {}),
+        },
+        (incoming) => {
+          const headers = new Headers();
+          for (const [name, value] of Object.entries(incoming.headers)) {
+            if (typeof value === "string") headers.set(name, value);
+            else if (Array.isArray(value)) headers.set(name, value.join(", "));
+          }
+          resolve(
+            new Response(Readable.toWeb(incoming) as unknown as ReadableStream<Uint8Array>, {
+              status: incoming.statusCode ?? 0,
+              headers,
+            }),
+          );
+        },
+      );
+      request.on("error", reject);
+      request.end();
+    });
+}
+
+async function defaultResolveAll(hostname: string): Promise<ReadonlyArray<string>> {
+  const bare = hostname.startsWith("[") ? hostname.slice(1, -1) : hostname;
+  if (isIP(bare) !== 0) return [bare];
+  const results = await lookup(hostname, { all: true });
+  return results.map((result) => result.address);
 }
 
 async function defaultResolve(hostname: string): Promise<string> {

@@ -549,7 +549,9 @@ native harness in `apps/server/src/harness`:
   go through `NativeHarnessFileSystem` (confined to the root, symlinks
   resolved, edits require a prior read); `bash` runs through the same
   Seatbelt-confined owned-process-group port as repository tests; web fetches
-  refuse private destinations.
+  refuse private destinations, and connect through a `lookup` that checks
+  every address the name resolves to at the moment the socket opens, so a
+  name cannot pass the check and then resolve somewhere private.
 - **Routing.** `NativeHarnessRoutingStore` journals a host default and
   Project overrides of slot tables; `resolveNativeHarnessRoute` in
   `@octant/domain` is the pure resolver; `NativeHarnessRouter` adds cooldowns
