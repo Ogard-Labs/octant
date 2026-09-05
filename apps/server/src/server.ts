@@ -167,6 +167,7 @@ import { GeneratedImageStore } from "./image/generatedImageStore";
 import { ImageJobService } from "./image/imageJobService";
 import { createImageAgentTools } from "./image/imageAgentTools";
 import { createImageRouteHandler } from "./image/imageRoutes";
+import { createSpeechRouteHandler } from "./speech/speechRoutes";
 import { chatImageScopeAllowedForWindow } from "./image/imageScopeAuthority";
 import { writeConfinedWorkFile } from "./work/workConfinedWrite";
 import { CodeContentStore } from "./code/codeContentStore";
@@ -5106,6 +5107,13 @@ export function startOctantServer(
       projects: projectService,
       windowAuthorityStore,
     });
+    const speechRoutes = createSpeechRouteHandler({
+      readVoiceSettings: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).voice,
+      listInstances: () => persistence.readProviderInstances(),
+      windowAuthorityStore,
+      ...(credentialResolver === undefined ? {} : { credentialResolver }),
+    });
     const imageRoutes = createImageRouteHandler({
       jobs: imageJobService,
       listInstances: () => persistence.readProviderInstances(),
@@ -6553,6 +6561,7 @@ export function startOctantServer(
       (await previewRoutes(request)) ??
       (await canvasRoutes(request)) ??
       (await imageRoutes(request)) ??
+      (await speechRoutes(request)) ??
       (await artifactLibraryRoutes(request)) ??
       (await artifactMirrorRoutes(request)) ??
       (await automationRoutes(request)) ??

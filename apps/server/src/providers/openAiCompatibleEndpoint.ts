@@ -47,8 +47,21 @@ export interface OpenAiCompatibleEndpoint {
   readonly fetch: CompatibleFetch;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly limits: CompatibleHttpLimits;
-  readonly url: (path: "models" | "responses" | "chat/completions") => string;
+  readonly url: (path: CompatibleEndpointPath) => string;
 }
+
+/**
+ * The paths one OpenAI-compatible base URL serves. Speech rides the same
+ * instance as chat: `/audio/*` is resolved against the same base URL with the
+ * same credential and endpoint policy, so a voice profile never needs a second
+ * URL a person could point somewhere else.
+ */
+export type CompatibleEndpointPath =
+  | "models"
+  | "responses"
+  | "chat/completions"
+  | "audio/transcriptions"
+  | "audio/speech";
 
 export type CompatibleFetch = (
   input: string | URL | Request,
@@ -94,7 +107,7 @@ export function makeOpenAiCompatibleEndpoint(
       ? {}
       : { credentialResolver: options.credentialResolver }),
     limits,
-    url: (path: "models" | "responses" | "chat/completions") => `${baseUrl}/${path}`,
+    url: (path: CompatibleEndpointPath) => `${baseUrl}/${path}`,
   });
 }
 
@@ -197,6 +210,20 @@ export function classifyCompatibleHttpFailure(
     default:
       return fail("provider-failed", `The provider request failed with HTTP ${response.status}.`);
   }
+}
+
+/**
+ * One authenticated, deadline-bounded request against the endpoint for a
+ * caller that builds its own body — multipart audio, or JSON whose response
+ * is bytes rather than a stream of events. Rejections are returned, not
+ * thrown, because what a non-2xx means differs per route.
+ */
+export function performCompatibleRequest(
+  endpoint: OpenAiCompatibleEndpoint,
+  path: CompatibleEndpointPath,
+  init: RequestInit,
+): Promise<Response> {
+  return performRequest(endpoint, endpoint.url(path), init);
 }
 
 export function markCompatibleModelVerified(
@@ -500,7 +527,7 @@ function makeRequestDeadline(
   };
 }
 
-async function cancelResponseBody(response: Response): Promise<void> {
+export async function cancelResponseBody(response: Response): Promise<void> {
   try {
     await response.body?.cancel();
   } catch {
@@ -535,11 +562,11 @@ function fail(category: ProviderFailure["category"], message: string): ProviderF
   return { category, message };
 }
 
-function isProviderFailure(error: unknown): error is ProviderFailure {
+export function isProviderFailure(error: unknown): error is ProviderFailure {
   return typeof error === "object" && error !== null && "category" in error && "message" in error;
 }
 
-function sanitizeCompatibleFailure(error: unknown): ProviderFailure {
+export function sanitizeCompatibleFailure(error: unknown): ProviderFailure {
   try {
     const decoded = decodeProviderFailure(error);
     return {

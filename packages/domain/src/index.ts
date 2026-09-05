@@ -74,6 +74,7 @@ export * from "./navigatorAssistantPolicy";
 export * from "./providerPolicy";
 export * from "./researchPolicy";
 export * from "./shellPolicy";
+export * from "./speechPolicy";
 export * from "./themePolicy";
 export * from "./toolActionPolicy";
 export * from "./toolCallPolicy";

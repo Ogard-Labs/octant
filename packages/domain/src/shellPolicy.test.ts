@@ -177,6 +177,8 @@ describe("shell settings policy", () => {
       marketplaceFetchesEnabled: true,
       // Navigator starts honestly unconfigured: no default model, no reviewer.
       navigatorAssistant: {},
+      // Voice starts unconfigured: no transcription or synthesis endpoint.
+      voice: {},
       // The host has not been told who is using it, so the profile carries no
       // name and no address — only the accent the initials avatar falls back to.
       userProfile: { accent: "indigo", avatar: { kind: "initials" } },

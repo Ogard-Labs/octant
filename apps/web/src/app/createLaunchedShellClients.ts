@@ -45,6 +45,7 @@ import {
 import { createHostClient, type HostClient } from "@octant/client-runtime/host-client";
 import { createHostControlClient } from "@octant/client-runtime/host-control-client";
 import { createImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import { createSpeechClient } from "@octant/client-runtime/speech-client";
 import { createIntegrationClient } from "@octant/client-runtime/integration-client";
 import { createMachineChangeClient } from "@octant/client-runtime/machine-change-client";
 import {
@@ -116,6 +117,7 @@ export interface LaunchedShellClients {
   readonly hostClient: HostClient;
   readonly hostControlClient: ReturnType<typeof createHostControlClient>;
   readonly imageGenerationClient: ReturnType<typeof createImageGenerationClient>;
+  readonly speechClient: ReturnType<typeof createSpeechClient>;
   readonly linearTransport: ReturnType<typeof createIntegrationClient>;
   readonly machineChangeClient: ReturnType<typeof createMachineChangeClient>;
   readonly navigatorAssistantClient: NavigatorAssistantClient | undefined;
@@ -193,6 +195,7 @@ export function createLaunchedShellClients(
     hostClient: options.hostClient ?? createHostClient({ baseUrl: options.serverUrl, fetch }),
     hostControlClient: createHostControlClient(port),
     imageGenerationClient: createImageGenerationClient(port),
+    speechClient: createSpeechClient(port),
     linearTransport: createIntegrationClient({ ...port, slug: "linear" }),
     machineChangeClient: createMachineChangeClient(port),
     nativeHarnessClient: options.nativeHarnessClient ?? createNativeHarnessClient(port),

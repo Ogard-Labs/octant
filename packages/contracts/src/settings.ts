@@ -17,6 +17,7 @@ export const SETTINGS_SECTION_IDS = [
   "work",
   "code",
   "navigator-assistant",
+  "voice",
   "providers",
   "profiles",
   "agents",
