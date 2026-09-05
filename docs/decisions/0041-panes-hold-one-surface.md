@@ -53,6 +53,14 @@ activating a pane.
   Simulator tools plus the selected tool. Project- and host-scoped readers keep
   a window fallback where no thread exists. A tool with no valid subject shows
   an explicit unavailable state, never another pane's content.
+- **A wide window arrives with the dock shown.** Its top-right control is the
+  only thing that opens or closes it, and a window that has never been told
+  otherwise starts with it shown. Starting it hidden left the workspace as one
+  narrow column in an empty window, with the dock's own region reading as page
+  margin rather than as the place the thread's tools live. A narrow window
+  still starts closed, because there the dock is a modal drawer and would cover
+  the workspace on launch. Arrival state is window presentation state and stays
+  user-controllable; an explicit close is remembered for that window.
 - **Global readers do not block navigation.** New thread, thread search, and
   thread-tab activation dismiss Inbox, Thread Board, Pull Requests, and other
   blocking readers before opening their destination.
