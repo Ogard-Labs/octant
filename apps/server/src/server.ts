@@ -2468,6 +2468,11 @@ export function startOctantServer(
         probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
         issueContext: githubIssueContextService,
         linearIssueContext: linearIssueContextService,
+        // Resolved lazily: the pull-request service is constructed after this
+        // one, and a navigation read is the first thing that needs it.
+        pullRequests: {
+          snapshot: (windowId) => projectPullRequestService.navigationSnapshot(windowId),
+        },
       });
     // Revocation is wired at construction, before any window can hold a watch.
     activeCodeService = codeService;
