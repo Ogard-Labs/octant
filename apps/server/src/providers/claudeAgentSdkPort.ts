@@ -17,6 +17,8 @@ import {
   failure,
   permissionMode,
   protocol,
+  object,
+  runtimeErrorReason,
   sanitizeFailure,
 } from "./claudeAgentSdkDecoder";
 import { BoundedAsyncInput, makeClaudeCloseCoordinator } from "./claudeAgentSdkLifecycle";
@@ -793,19 +795,50 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                     }
                     return result;
                   } catch (error) {
-                    streamEnded(failure("provider-failed", "Claude message stream failed."));
+                    // Only the classified reason reaches the log: the raw error
+                    // can quote paths, prompt text, or tokens.
+                    console.error("Claude message stream failed.", {
+                      reason: runtimeErrorReason(error) ?? "unclassified",
+                    });
+                    streamEnded(sanitizeFailure(error, "message stream"));
                     throw error;
                   }
                 },
               }),
             };
-            const decodedMessages = Stream.fromAsyncIterable(remaining, () =>
-              failure("provider-failed", "Claude message stream failed."),
+            const decodedMessages = Stream.fromAsyncIterable(remaining, (error) =>
+              sanitizeFailure(error, "message stream"),
             ).pipe(
               Stream.mapEffect((message) =>
                 Effect.try({
                   try: () => decodeNext(message),
                   catch: (error) => {
+                    // The shape, never the content: enough to name which runtime
+                    // message the decoder refused when a turn dies on it.
+                    const shape = object(message);
+                    console.error("Claude runtime message refused by the decoder.", {
+                      type: shape?.type,
+                      subtype: shape?.subtype,
+                      keys: shape === undefined ? [] : Object.keys(shape).sort(),
+                      parentToolUse:
+                        shape?.parent_tool_use_id === null
+                          ? "null"
+                          : typeof shape?.parent_tool_use_id,
+                      event: object(shape?.event)?.type,
+                      delta: object(object(shape?.event)?.delta)?.type,
+                      block: object(object(shape?.event)?.content_block)?.type,
+                      blockKeys: Object.keys(
+                        object(object(shape?.event)?.content_block) ?? {},
+                      ).sort(),
+                      callerKeys: Object.keys(
+                        object(object(object(shape?.event)?.content_block)?.caller) ?? {},
+                      ),
+                      toolAllowed: input.tools.includes(
+                        String(object(object(shape?.event)?.content_block)?.name),
+                      ),
+                      inputIsObject:
+                        object(object(object(shape?.event)?.content_block)?.input) !== undefined,
+                    });
                     const failed = sanitizeFailure(error, "message decoding");
                     streamEnded(failed);
                     return failed;

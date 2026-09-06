@@ -60,6 +60,13 @@ import {
 import { useThreadMentions } from "../chat/useThreadMentions";
 import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
 import { CodeTranscriptRow } from "./CodeTranscriptRow";
+import { providerModelLabel } from "../providers/providerModelLabel";
+import {
+  TurnHeader,
+  turnTimeLabel,
+  turnTimeTitle,
+  type TurnHeaderOutcome,
+} from "../transcript/TurnHeader";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
@@ -592,7 +599,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     // letting the user write the message first and lose it at send.
     if (boundModelReadsImages(providerGroups, thread) === false) {
       attachments.refuse(
-        `${boundProviderModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`,
+        `${providerModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`,
       );
       return true;
     }
@@ -942,7 +949,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     className="uppercase tracking-wide"
                   >
                     Provider handoff ·{" "}
-                    {boundProviderModelLabel(providerGroups, {
+                    {providerModelLabel(providerGroups, {
                       providerInstanceId: message.providerInstanceId,
                       modelId: message.modelId,
                     })}
@@ -994,30 +1001,21 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     }}
                   >
                     {message.role === "assistant" ? (
-                      <header>
-                        <span>
-                          {message.providerInstanceId === undefined || message.modelId === undefined
+                      <TurnHeader
+                        outcome={turnHeaderOutcome(message.status)}
+                        provider={
+                          message.providerInstanceId === undefined || message.modelId === undefined
                             ? "Octant Code"
-                            : boundProviderModelLabel(providerGroups, {
+                            : providerModelLabel(providerGroups, {
                                 providerInstanceId: message.providerInstanceId,
                                 modelId: message.modelId,
-                              })}
-                        </span>
-                        {message.status === undefined || message.status === "completed" ? null : (
-                          <span className="code-thread-workspace__turn-status">
-                            {turnStatusLabel(message.status)}
-                          </span>
-                        )}
-                        {turnTimeLabel(message.at) === undefined ? null : (
-                          <time
-                            className="code-thread-workspace__turn-time"
-                            dateTime={message.at}
-                            title={turnTimeTitle(message.at)}
-                          >
-                            {turnTimeLabel(message.at)}
-                          </time>
-                        )}
-                      </header>
+                              })
+                        }
+                        {...(message.status === undefined || message.status === "completed"
+                          ? {}
+                          : { label: turnStatusLabel(message.status) })}
+                        {...(message.at === undefined ? {} : { at: message.at })}
+                      />
                     ) : null}
                     {message.attachments === undefined ? null : (
                       <CodeAttachmentGallery
@@ -1611,42 +1609,6 @@ function providerIdentityChanged(
  * Clock time for a turn from today, and a date for anything older: a bare
  * "09:14" on a week-old message reads as if it just happened.
  */
-function turnTimeLabel(at: string | undefined): string | undefined {
-  if (at === undefined) return undefined;
-  const date = new Date(at);
-  if (Number.isNaN(date.getTime())) return undefined;
-  const time = date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-  const now = new Date();
-  const sameDay =
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate();
-  if (sameDay) return time;
-  return `${date.toLocaleDateString(undefined, { day: "numeric", month: "short" })} ${time}`;
-}
-
-/** The full local timestamp, for the reader who needs the exact moment. */
-function turnTimeTitle(at: string | undefined): string | undefined {
-  if (at === undefined) return undefined;
-  const date = new Date(at);
-  return Number.isNaN(date.getTime()) ? undefined : date.toLocaleString();
-}
-
-function boundProviderModelLabel(
-  groups: ReadonlyArray<PickerGroup>,
-  thread: { readonly providerInstanceId: unknown; readonly modelId: unknown },
-): string {
-  const group = groups.find(
-    (candidate) => String(candidate.instance.id) === String(thread.providerInstanceId),
-  );
-  const model = group?.sections
-    .flatMap((section) => section.models)
-    .find((candidate) => String(candidate.model.id) === String(thread.modelId));
-  const providerLabel = group?.instance.displayName ?? String(thread.providerInstanceId);
-  const modelLabel = model?.model.displayName ?? String(thread.modelId);
-  return `${providerLabel} — ${modelLabel}`;
-}
-
 /**
  * Whether the model a thread is bound to reads images.
  *
@@ -1664,6 +1626,16 @@ function boundModelReadsImages(
     .find((candidate) => String(candidate.model.id) === String(thread.modelId));
   const modalities = model?.model.inputModalities;
   return modalities === undefined ? undefined : modalities.includes("image");
+}
+
+function turnHeaderOutcome(
+  status: "waiting" | "completed" | "interrupted" | "failed" | "incomplete" | undefined,
+): TurnHeaderOutcome {
+  return status === undefined || status === "completed"
+    ? "completed"
+    : status === "incomplete"
+      ? "running"
+      : status;
 }
 
 function turnStatusLabel(status: "waiting" | "interrupted" | "failed" | "incomplete"): string {

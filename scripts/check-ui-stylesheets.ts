@@ -140,6 +140,12 @@ function readAttributes(source: string, start: number): string {
       quote = char;
       continue;
     }
+    // `=>` and `>=` are operators inside a prop, not a tag boundary; a nested
+    // element opens with `<` followed by a name, never `<=` or `< `.
+    if (char === ">" && (source[index - 1] === "=" || source[index + 1] === "=")) continue;
+    if (char === "<" && source[index + 1] !== ">" && !/[A-Za-z_$/]/.test(source[index + 1] ?? "")) {
+      continue;
+    }
     if (char === "{" || char === "(" || char === "[" || char === "<") depth += 1;
     else if (char === "}" || char === ")" || char === "]") depth -= 1;
     else if (char === ">") {
