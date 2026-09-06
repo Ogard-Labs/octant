@@ -1316,12 +1316,14 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
    from a start screen, so they stay quiet until pointed at and never compete
    with the prompt above them. The button recipe fixes its own height, which a
    two-line row has to opt out of. */
+/* The Continue list keeps the same clear step below the cards that the
+   cards keep below the composer, so the three read as separate bands. */
 .draft-thread__recent {
   order: 4;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 28px;
+  margin-top: 44px;
 }
 
 .draft-thread__recent-title {
@@ -1372,7 +1374,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   flex-wrap: wrap;
   justify-content: center;
   gap: 7px;
-  margin-top: 26px;
+  margin-top: 44px;
 }
 
 .draft-thread__intent-card {
@@ -2492,12 +2494,14 @@ form > .work-composer-adapter__attachments {
    (Start something new), and where the latest threads stand (Continue).
    Sections are a label, a note, and a hairline panel; Continue's cards lead
    with a tile that names the thread's delivery state. */
+/* The cards sit a clear step below the composer: pressed up against its
+   band they read as part of the card, and the prompt lost its edge. */
 .code-home__suggestions {
   display: grid;
   width: min(100%, 704px);
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 8px;
-  margin-inline: auto;
+  margin: 26px auto 0;
 }
 
 .code-home__suggestions button {
@@ -2550,11 +2554,12 @@ form > .work-composer-adapter__attachments {
 /* The composer is the widest thing on the start screen; everything under it
    sits on a narrower measure so the prompt reads as the window and the
    cards as its contents. */
+/* What continues below the cards keeps the same clear step under them. */
 .code-home {
   display: grid;
   width: min(100%, 704px);
   gap: var(--oct-space-6);
-  margin: var(--oct-space-5) auto 0;
+  margin: 30px auto 0;
 }
 
 .code-home .draft-thread__recent {
