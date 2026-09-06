@@ -11,7 +11,7 @@ import {
 } from "./presets";
 
 describe("built-in theme preset catalog", () => {
-  it("publishes System, Light, Dark, Octant, and the seven tinted presets", () => {
+  it("publishes System, Light, Dark, Octant, and the tinted presets", () => {
     expect(BUILT_IN_THEME_PRESET_IDS).toEqual([
       "system",
       "light",
@@ -24,6 +24,17 @@ describe("built-in theme preset catalog", () => {
       "rose",
       "ember",
       "ink",
+      "coral",
+      "clay",
+      "sand",
+      "olive",
+      "mint",
+      "sky",
+      "slate",
+      "plum",
+      "ash",
+      "obsidian",
+      "onyx",
     ]);
     expect(THEME_PRESETS.map((preset) => preset.id)).toEqual(BUILT_IN_THEME_PRESET_IDS);
     expect(THEME_PRESETS.map((preset) => preset.displayName)).toEqual([
@@ -38,6 +49,17 @@ describe("built-in theme preset catalog", () => {
       "Rose",
       "Ember",
       "Ink",
+      "Coral",
+      "Clay",
+      "Sand",
+      "Olive",
+      "Mint",
+      "Sky",
+      "Slate",
+      "Plum",
+      "Ash",
+      "Obsidian",
+      "Onyx",
     ]);
   });
 
@@ -97,18 +119,19 @@ describe("built-in theme preset catalog", () => {
   });
 
   it("colours every tinted preset's accent while the default stays monochrome", () => {
-    const tinted = THEME_PRESETS.filter((preset) =>
-      ["moss", "lagoon", "harbor", "iris", "rose", "ember", "ink"].includes(preset.id),
+    const tinted = THEME_PRESETS.filter(
+      (preset) => !["system", "light", "dark", "octant"].includes(preset.id),
     );
-    expect(tinted).toHaveLength(7);
+    expect(tinted).toHaveLength(18);
     for (const preset of tinted) {
       for (const mode of ["light", "dark"] as const) {
         const tokens = preset.tokens[mode]!;
         const accent = parseHexColor(tokens.accent!);
         const spread =
           Math.max(accent.r, accent.g, accent.b) - Math.min(accent.r, accent.g, accent.b);
-        // A tinted accent has hue; a grey has none.
-        expect(spread).toBeGreaterThan(40);
+        // A tinted accent has hue; a grey has none. Ash and Slate are the
+        // quiet ones and carry only a little.
+        expect(spread).toBeGreaterThan(["ash", "slate"].includes(preset.id) ? 8 : 40);
         expect(validateThemePreset(preset).valid).toBe(true);
       }
     }

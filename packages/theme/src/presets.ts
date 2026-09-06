@@ -35,6 +35,17 @@ export const BUILT_IN_THEME_PRESET_IDS = [
   "rose",
   "ember",
   "ink",
+  "coral",
+  "clay",
+  "sand",
+  "olive",
+  "mint",
+  "sky",
+  "slate",
+  "plum",
+  "ash",
+  "obsidian",
+  "onyx",
 ] as const;
 export type BuiltInThemePresetId = (typeof BUILT_IN_THEME_PRESET_IDS)[number];
 
@@ -96,6 +107,8 @@ interface TintedPresetSpec {
   readonly chroma?: number;
   /** True-black surfaces for OLED screens. */
   readonly ink?: boolean;
+  /** How strongly the surfaces lean toward the hue; 1 is the usual faint tint. */
+  readonly surface?: number;
 }
 
 // A colour preset is one hue applied twice: faintly to every surface, so the
@@ -105,21 +118,22 @@ interface TintedPresetSpec {
 // show at that lightness gives up chroma rather than contrast.
 function tintedTokens(mode: ThemePresetMode, spec: TintedPresetSpec): Record<string, string> {
   const chroma = spec.chroma ?? 0.13;
+  const lean = spec.surface ?? 1;
   const color = (l: number, c: number) => oklchToHex({ l, c, h: spec.hue });
   if (mode === "light") {
     return {
       ...DEFAULT_LIGHT_TOKENS,
-      "app-background": color(0.965, 0.006),
-      chrome: color(0.965, 0.006),
-      sidebar: color(0.965, 0.006),
-      workspace: color(0.995, 0.003),
-      floating: color(0.985, 0.005),
-      control: color(0.95, 0.008),
-      "control-hover": color(0.925, 0.01),
-      "control-pressed": color(0.9, 0.012),
-      border: color(0.9, 0.01),
-      "border-strong": color(0.78, 0.012),
-      "divider-strong": color(0.55, 0.015),
+      "app-background": color(0.965, 0.006 * lean),
+      chrome: color(0.965, 0.006 * lean),
+      sidebar: color(0.965, 0.006 * lean),
+      workspace: color(0.995, 0.003 * lean),
+      floating: color(0.985, 0.005 * lean),
+      control: color(0.95, 0.008 * lean),
+      "control-hover": color(0.925, 0.01 * lean),
+      "control-pressed": color(0.9, 0.012 * lean),
+      border: color(0.9, 0.01 * lean),
+      "border-strong": color(0.78, 0.012 * lean),
+      "divider-strong": color(0.55, 0.015 * lean),
       "text-primary": color(0.22, 0.012),
       "text-secondary": color(0.42, 0.015),
       "text-muted": color(0.52, 0.015),
@@ -131,7 +145,7 @@ function tintedTokens(mode: ThemePresetMode, spec: TintedPresetSpec): Record<str
       "primary-foreground": "#ffffff",
     };
   }
-  const tint = spec.ink === true ? 0.008 : 0.012;
+  const tint = (spec.ink === true ? 0.008 : 0.012) * lean;
   const l =
     spec.ink === true
       ? {
@@ -230,6 +244,89 @@ const TINTED_PRESETS: ReadonlyArray<TintedPresetSpec> = [
     description: "True black for OLED screens, with a cool blue accent.",
     hue: 240,
     chroma: 0.12,
+    ink: true,
+  },
+  {
+    id: "coral",
+    displayName: "Coral",
+    description: "Graphite leaning warm pink, with a coral accent.",
+    hue: 20,
+    chroma: 0.14,
+  },
+  {
+    id: "clay",
+    displayName: "Clay",
+    description: "Warm earthen surfaces, with a clay accent.",
+    hue: 35,
+    chroma: 0.09,
+    surface: 1.8,
+  },
+  {
+    id: "sand",
+    displayName: "Sand",
+    description: "Warm paper-like surfaces, with a sand accent.",
+    hue: 85,
+    chroma: 0.11,
+    surface: 1.8,
+  },
+  {
+    id: "olive",
+    displayName: "Olive",
+    description: "Graphite leaning yellow-green, with an olive accent.",
+    hue: 115,
+    chroma: 0.1,
+  },
+  {
+    id: "mint",
+    displayName: "Mint",
+    description: "Graphite leaning cool green, with a mint accent.",
+    hue: 165,
+    chroma: 0.12,
+  },
+  {
+    id: "sky",
+    displayName: "Sky",
+    description: "Graphite leaning light blue, with a sky accent.",
+    hue: 225,
+    chroma: 0.13,
+  },
+  {
+    id: "slate",
+    displayName: "Slate",
+    description: "Cool blue-grey surfaces, with a quiet slate accent.",
+    hue: 245,
+    chroma: 0.05,
+    surface: 1.5,
+  },
+  {
+    id: "plum",
+    displayName: "Plum",
+    description: "Graphite leaning magenta, with a plum accent.",
+    hue: 320,
+    chroma: 0.13,
+  },
+  {
+    id: "ash",
+    displayName: "Ash",
+    description: "Warm grey surfaces, with a quiet ash accent.",
+    hue: 70,
+    chroma: 0.03,
+    surface: 1.5,
+  },
+  {
+    id: "obsidian",
+    displayName: "Obsidian",
+    description: "True black for OLED screens, with a violet accent.",
+    hue: 300,
+    chroma: 0.12,
+    ink: true,
+  },
+  {
+    id: "onyx",
+    displayName: "Onyx",
+    description: "True black for OLED screens, with a green accent.",
+    hue: 160,
+    chroma: 0.11,
     ink: true,
   },
 ];

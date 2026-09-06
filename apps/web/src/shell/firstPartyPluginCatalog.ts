@@ -239,6 +239,37 @@ const appearancePlugin = firstPartyManifest({
       label: "Ember",
     },
     { point: "appearance.preset", componentId: "appearance-pack", presetId: "ink", label: "Ink" },
+    {
+      point: "appearance.preset",
+      componentId: "appearance-pack",
+      presetId: "coral",
+      label: "Coral",
+    },
+    { point: "appearance.preset", componentId: "appearance-pack", presetId: "clay", label: "Clay" },
+    { point: "appearance.preset", componentId: "appearance-pack", presetId: "sand", label: "Sand" },
+    {
+      point: "appearance.preset",
+      componentId: "appearance-pack",
+      presetId: "olive",
+      label: "Olive",
+    },
+    { point: "appearance.preset", componentId: "appearance-pack", presetId: "mint", label: "Mint" },
+    { point: "appearance.preset", componentId: "appearance-pack", presetId: "sky", label: "Sky" },
+    {
+      point: "appearance.preset",
+      componentId: "appearance-pack",
+      presetId: "slate",
+      label: "Slate",
+    },
+    { point: "appearance.preset", componentId: "appearance-pack", presetId: "plum", label: "Plum" },
+    { point: "appearance.preset", componentId: "appearance-pack", presetId: "ash", label: "Ash" },
+    {
+      point: "appearance.preset",
+      componentId: "appearance-pack",
+      presetId: "obsidian",
+      label: "Obsidian",
+    },
+    { point: "appearance.preset", componentId: "appearance-pack", presetId: "onyx", label: "Onyx" },
   ],
 });
 
