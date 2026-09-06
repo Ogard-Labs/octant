@@ -302,9 +302,15 @@ describe("the public-block visual language", () => {
     expect(navigation).toMatch(/letter-spacing:\s*normal/);
     // The desktop rail shows its group labels; a quiet label is what separates
     // one group of pages from the next, not a hairline and not a hidden name.
-    expect(settings).not.toMatch(
-      /\.settings-view__sidebar \.settings-navigation \.setnav-section\s*\{[^}]*clip-path/,
+    // Any way of hiding them counts: the sr-only recipe, display, visibility.
+    const sidebarLabelRules = settings.match(
+      /\.settings-view__sidebar[^{]*\.setnav-section[^{]*\{[^}]*\}/g,
     );
+    for (const rule of sidebarLabelRules ?? []) {
+      expect(rule).not.toMatch(
+        /clip-path|display:\s*none|visibility:\s*hidden|width:\s*1px|font-size:\s*0/,
+      );
+    }
     expect(settings).not.toMatch(
       /\.settings-navigation__group \+ \.settings-navigation__group\s*\{[^}]*border-top/,
     );
