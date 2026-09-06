@@ -6015,17 +6015,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--oct-fg);
 }
 
-.code-thread-workspace__message header {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 0 0 8px;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-display);
-  letter-spacing: 0.01em;
-}
-
 /* Sits directly on the composer, sharing its column, so the branch reads as
    part of the box the next message is typed into rather than as a banner
    floating above the transcript. */
@@ -6087,20 +6076,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   height: 26px;
   min-height: 26px;
   padding-inline: 8px;
-}
-
-.code-thread-workspace__turn-status {
-  color: var(--oct-meta);
-  font-weight: 400;
-}
-
-/* Recency belongs to the turn but never competes with it: the time sits at the
-   far end of the byline, quiet, and only the reader who looks for it finds it. */
-.code-thread-workspace__turn-time {
-  margin-inline-start: auto;
-  color: var(--oct-meta);
-  font-weight: 400;
-  font-variant-numeric: tabular-nums;
 }
 
 /* A user turn has no byline to hang the time from, so it trails the bubble on
