@@ -42,6 +42,22 @@ describe("WorkspaceThreadTabs", () => {
     );
   });
 
+  it("wears the pull request a Code thread delivers to, ahead of its title", () => {
+    render(
+      <WorkspaceThreadTabs
+        activeTab={{ ...second, pullRequest: { number: 917, state: "merged" } }}
+        fallbackTitle="Second thread"
+        mode="code"
+        onActivate={vi.fn()}
+      />,
+    );
+
+    const chip = screen.getByText("PR #917");
+    expect(chip).toBeVisible();
+    expect(chip).toHaveAttribute("data-state", "merged");
+    expect(screen.getByRole("tab", { name: /Second thread/ })).toBeVisible();
+  });
+
   it("says a thread on a paired host runs somewhere else", async () => {
     render(
       <WorkspaceThreadTabs

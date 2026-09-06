@@ -466,6 +466,23 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           (thread) => String(thread.id) === String(activeSurface.threadId),
         )?.title
       : undefined;
+  // The tab wears the thread's pull request the way the sidebar row and the
+  // board card do: the first linked request, from the cached snapshot.
+  const activeCodePullRequest = useMemo(() => {
+    if (
+      activeSurface === undefined ||
+      !("threadId" in activeSurface) ||
+      activeSurface.mode !== "code"
+    ) {
+      return undefined;
+    }
+    const summary = props.codeController.navigation?.find(
+      (item) => String(item.threadId) === String(activeSurface.threadId),
+    )?.pullRequestSummaries?.items[0];
+    return summary === undefined
+      ? undefined
+      : { number: summary.identity.number, state: summary.state };
+  }, [activeSurface, props.codeController.navigation]);
   const activeThreadTab = useMemo(
     () =>
       activeSurface === undefined
@@ -475,8 +492,15 @@ export function WorkspaceView(props: WorkspaceViewProps) {
             contextProjectId,
             activeCodeThreadTitle,
             contextProject?.name,
+            activeCodePullRequest,
           ),
-    [activeCodeThreadTitle, activeSurface, contextProjectId, contextProject?.name],
+    [
+      activeCodePullRequest,
+      activeCodeThreadTitle,
+      activeSurface,
+      contextProjectId,
+      contextProject?.name,
+    ],
   );
 
   function activateThreadTab(tab: WorkspaceThreadTab) {

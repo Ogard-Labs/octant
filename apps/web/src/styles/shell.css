@@ -2772,3 +2772,50 @@ form > .work-composer-adapter__attachments {
 .code-home__fact--chip[data-tone="merged"] > svg {
   color: inherit;
 }
+
+/* The row's second line of truth: a pull request number beside the title, the
+   request's state as a small glyph at the edge, and how long ago the thread
+   last moved. Colour is spent on the state only. */
+.sidebar-navigation__thread-headline {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.sidebar-navigation__thread-pr {
+  flex: none;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-navigation__thread-pr-mark {
+  display: inline-flex;
+  flex: none;
+  color: var(--oct-meta);
+}
+
+.sidebar-navigation__thread-pr-mark[data-state="open"] {
+  color: var(--octant-success-text);
+}
+
+.sidebar-navigation__thread-pr-mark[data-state="merged"] {
+  color: var(--octant-palette-purple);
+}
+
+.sidebar-navigation__thread-pr-mark[data-state="closed"] {
+  color: var(--octant-danger-text);
+}
+
+.sidebar-navigation__thread-age {
+  flex: none;
+  margin-left: auto;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-navigation__thread-age + .sidebar-navigation__thread-unread-dot {
+  margin-left: 0;
+}

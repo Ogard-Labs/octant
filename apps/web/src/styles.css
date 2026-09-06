@@ -1562,6 +1562,36 @@ strong {
   opacity: 1;
 }
 
+/* "PR #917" on the tab of a thread that delivers to a pull request: a tinted
+   chip in the request's state colour, ahead of the title, so the tab says
+   where the work is going before it says what the work is. */
+.workspace-thread-tabs__pr {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-meta);
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-display);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.workspace-thread-tabs__pr[data-state="open"] {
+  color: var(--octant-success-text);
+}
+
+.workspace-thread-tabs__pr[data-state="merged"] {
+  color: var(--octant-palette-purple);
+}
+
+.workspace-thread-tabs__pr[data-state="closed"] {
+  color: var(--octant-danger-text);
+}
+
 .workspace-thread-tabs__title {
   overflow: hidden;
   text-overflow: ellipsis;
