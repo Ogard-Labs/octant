@@ -2727,6 +2727,18 @@ function LaunchedShell(
   }
   function toggleDock(opener: HTMLElement) {
     dockOpener.current = { element: opener, logicalTarget: "dock" };
+    // With a reader up the dock is stepped aside, not closed: the toggle
+    // leaves the reader so the dock shows again, and opens it if it was
+    // closed. Closing it here instead lost the dock the reader had hidden.
+    if (readerOpen) {
+      closeWorkspaceReaders();
+      if (!dockOpen) {
+        markInteraction("renderer", "dock-open-requested");
+        markInteractionAfterPaint("dock-open");
+        setDockVisible(true);
+      }
+      return;
+    }
     if (dockOpen) {
       closeDock();
       return;
@@ -3213,6 +3225,10 @@ function LaunchedShell(
     if (chatController.status !== "ready") return;
     const thread = chatController.navigation.find((candidate) => candidate.threadId === threadId);
     if (thread === undefined) return;
+    // Picking a thread means "show me this thread": a Board or Inbox that was
+    // open stays out of the way rather than keeping the pane while the row
+    // highlights underneath it.
+    closeWorkspaceReaders();
     markInteraction("renderer", "thread-open-requested");
     markInteractionAfterPaint("thread-open");
     void controller.openChatThread(
@@ -3227,6 +3243,7 @@ function LaunchedShell(
       (candidate) => String(candidate.threadId) === navigationId,
     );
     if (thread === undefined) return;
+    closeWorkspaceReaders();
     markInteraction("renderer", "thread-open-requested");
     markInteractionAfterPaint("thread-open");
     void controller.openCodeThread(
@@ -3242,6 +3259,7 @@ function LaunchedShell(
       (candidate) => String(candidate.threadId) === navigationId,
     );
     if (thread === undefined) return;
+    closeWorkspaceReaders();
     markInteraction("renderer", "thread-open-requested");
     markInteractionAfterPaint("thread-open");
     void controller.openWorkThread(
@@ -3334,6 +3352,26 @@ function LaunchedShell(
    * thread dismisses the reader first instead of opening the destination
    * invisibly behind it.
    */
+  // A reader (Board, Inbox, pull requests, issues, archive) is a page about
+  // many threads, and the dock is about the one active thread; while a reader
+  // is up the dock steps aside so the page gets the pane. With the dock kept
+  // open the Board's four columns squeezed to about 90px each.
+  const readerOpen =
+    railPlaceholder !== undefined ||
+    inboxOpen ||
+    codeBoardOpen ||
+    workBoardOpen ||
+    codePullRequestsOpen ||
+    githubIssuesOpen ||
+    linearIssuesOpen ||
+    archiveOpen ||
+    automationCenterOpen ||
+    agentsCenterOpen ||
+    artifactLibraryOpen;
+  // What the shell shows for the dock right now: open, unless a reader has
+  // it step aside. The remembered `dockOpen` is what comes back afterwards.
+  const dockPresentedOpen = dockOpen && !readerOpen;
+
   function closeWorkspaceReaders() {
     setRailPlaceholder(undefined);
     setAutomationCenterOpen(false);
@@ -3356,8 +3394,11 @@ function LaunchedShell(
 
   // Used right after creation, when the Project is not yet in this render's
   // snapshot; the dialog already knows the mode and name.
-  async function openDraftInKnownProject(projectId: ProjectId, mode: OctantMode, name: string) {
-    await controller.openProject(projectId, mode, name);
+  async function openDraftInKnownProject(projectId: ProjectId, mode: OctantMode, _name: string) {
+    // The draft carries its Project itself. Opening the Project first put its
+    // overview on screen for a frame before the draft replaced it, which read
+    // as an old page flashing past every time a task was started from a row.
+    closeWorkspaceReaders();
     await controller.openDraftThread(mode, projectId);
   }
 
@@ -4542,7 +4583,7 @@ function LaunchedShell(
             bottomPanelAvailable={bottomPanelAvailable && !isNarrow}
             bottomPanelExpanded={bottomPanelOpen}
             dockAvailable={dockAvailable}
-            dockExpanded={dockOpen}
+            dockExpanded={dockPresentedOpen}
             dockLabel="Right sidebar"
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             isNarrow={isNarrow}
@@ -4823,7 +4864,7 @@ function LaunchedShell(
         }
         sidebarResizable={!isNarrow}
         sidebarWidth={sidebarWidth}
-        wideContextOpen={!isNarrow && dockOpen}
+        wideContextOpen={!isNarrow && dockOpen && !readerOpen}
         workspace={
           <>
             <div className="primary-workspace-layer">
@@ -5493,7 +5534,7 @@ function LaunchedShell(
               onPreviewWidth={setPreviewContextWidth}
               onOpenTab={addDockTab}
               onSelectSurface={selectDockTab}
-              open={dockOpen}
+              open={dockPresentedOpen}
               plan={
                 bottomPanelOpen && activeBottomSurface?.id === "plan"
                   ? undefined
