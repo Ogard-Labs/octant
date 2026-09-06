@@ -1410,10 +1410,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           persistEvent: (event) => Effect.sync(() => this.#persistNormalized(active, event)),
           persistOutcome: (outcome, failure) =>
             Effect.sync(() => {
+              // A typed failure's message is provider-authored text like any
+              // event's, so it takes the same redaction before it is journaled.
               const message =
                 failure === undefined || outcome !== "failed"
                   ? undefined
-                  : boundProviderFailureMessage(failure.message);
+                  : boundProviderFailureMessage(
+                      sanitizeProviderText(failure.message, active.checkoutRoot, active.secrets),
+                    );
               this.#persistOutcome(
                 active,
                 outcome,
@@ -1677,17 +1681,24 @@ function boundProviderFailureMessage(text: string): string | undefined {
   return head === "" ? undefined : `${head}${FAILURE_MESSAGE_SUFFIX}`;
 }
 
+/**
+ * The one treatment every provider-authored string gets before it is journaled:
+ * the checkout root and the turn's secrets are replaced. Event text and a
+ * typed failure's message share it, so neither has a path the other lacks.
+ */
+function sanitizeProviderText(value: string, checkoutRoot: string, secrets: readonly string[]) {
+  let sanitized = value.replaceAll(checkoutRoot, "[CHECKOUT]");
+  for (const secret of secrets) sanitized = sanitized.replaceAll(secret, "[REDACTED]");
+  return sanitized;
+}
+
 function sanitizeProviderEvent(
   event: ProviderRuntimeEvent,
   checkoutRoot: string,
   secrets: readonly string[],
 ): ProviderRuntimeEvent {
   const sanitize = (value: unknown): unknown => {
-    if (typeof value === "string") {
-      let sanitized = value.replaceAll(checkoutRoot, "[CHECKOUT]");
-      for (const secret of secrets) sanitized = sanitized.replaceAll(secret, "[REDACTED]");
-      return sanitized;
-    }
+    if (typeof value === "string") return sanitizeProviderText(value, checkoutRoot, secrets);
     if (Array.isArray(value)) return value.map(sanitize);
     if (typeof value !== "object" || value === null) return value;
     return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, sanitize(child)]));

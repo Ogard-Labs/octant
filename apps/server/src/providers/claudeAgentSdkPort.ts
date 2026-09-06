@@ -18,6 +18,7 @@ import {
   permissionMode,
   protocol,
   object,
+  runtimeErrorReason,
   sanitizeFailure,
 } from "./claudeAgentSdkDecoder";
 import { BoundedAsyncInput, makeClaudeCloseCoordinator } from "./claudeAgentSdkLifecycle";
@@ -794,7 +795,11 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                     }
                     return result;
                   } catch (error) {
-                    console.error("Claude message stream failed.", error);
+                    // Only the classified reason reaches the log: the raw error
+                    // can quote paths, prompt text, or tokens.
+                    console.error("Claude message stream failed.", {
+                      reason: runtimeErrorReason(error) ?? "unclassified",
+                    });
                     streamEnded(sanitizeFailure(error, "message stream"));
                     throw error;
                   }
