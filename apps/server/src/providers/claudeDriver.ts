@@ -1369,11 +1369,16 @@ function makeConnection(
           if (input.executionPolicy === "full-access") {
             return decide();
           }
+          // A shell call carries no cwd of its own: Claude Code runs it in the
+          // session's working directory, which is the Project root, and the
+          // sandbox confines it there. Requiring a cwd field denied every
+          // shell call before it could be asked about (observed 2026-09-06:
+          // "git status" refused four times, then the turn failed).
           const candidate =
             request.toolName === "AskUserQuestion"
               ? projectRoot
               : request.toolName === "Bash"
-                ? requestInput?.cwd
+                ? (requestInput?.cwd ?? projectRoot)
                 : request.toolName === "Glob" || request.toolName === "Grep"
                   ? (requestInput?.path ?? projectRoot)
                   : requestInput?.file_path;

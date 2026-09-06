@@ -863,6 +863,47 @@ describe("Claude execution policy", () => {
     await acquired.close();
   });
 
+  it("asks about a shell call that names no cwd, since the runtime runs it in the Project root", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    // Claude Code's Bash input is the command and a description; there is no
+    // cwd field. The old check wanted one and refused every shell call.
+    const input = { command: "git status", description: "Show working tree status" };
+    const approvalEvent = Effect.runPromise(
+      Stream.runHead(
+        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+          Stream.filter((event) => event.kind === "approval-request"),
+        ),
+      ),
+    );
+    await expect(
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Bash",
+        input,
+        toolUseId: "bash-no-cwd",
+        signal,
+      }),
+    ).resolves.toEqual({ behavior: "ask" });
+    const callback = open.canUseTool({ toolName: "Bash", input, toolUseId: "bash-no-cwd", signal });
+    const first = await Promise.race([
+      approvalEvent.then((event) => ({ kind: "approval" as const, event })),
+      callback.then((decision) => ({ kind: "decision" as const, decision })),
+    ]);
+    expect(first.kind).toBe("approval");
+    await Effect.runPromise(
+      acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: false }),
+    );
+    await expect(callback).resolves.toMatchObject({ behavior: "deny" });
+    await acquired.close();
+  });
+
   it("allows reads from the hook alone, so a read-heavy turn never trips the grant cap", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);
