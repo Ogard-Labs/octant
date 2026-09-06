@@ -2,6 +2,7 @@ import type { ContextClient } from "@octant/client-runtime/context-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import { listEligibleImageProfiles } from "@octant/domain";
+import { SpeechCapabilityProvider } from "./voice/SpeechCapabilityContext";
 import { buildAutomationEditorCatalog } from "./automation/automationEditorCatalog";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
@@ -12,6 +13,7 @@ import type { PlanClient } from "@octant/client-runtime/plan-client";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
+import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { HostClient } from "@octant/client-runtime/host-client";
@@ -64,7 +66,7 @@ import {
 import { pastedImageName } from "./chat/composerImagePaste";
 import { markInteraction, markInteractionAfterPaint } from "./polling/interactionTrace";
 import { useMachineChangeFeed } from "./polling/useMachineChangeFeed";
-import type { CodeOperationId } from "@octant/contracts";
+import type { CodeOperationId, ProviderInstance, VoiceSettings } from "@octant/contracts";
 import type {
   CodeBoardQuery,
   CodeProjectPullRequestDetailQuery,
@@ -126,6 +128,8 @@ import { loadPluginSidebarDestinationAction } from "./shell/pluginSidebarDestina
 import type { SidebarDestinationActionContext } from "./shell/pluginSidebarDestinationRegistry";
 import { WindowChrome } from "./shell/WindowChrome";
 import type { CodeDeepLink, OctantHostBridge } from "./shell/hostBridge";
+import { openExternalUrl } from "./shell/openExternalUrl";
+import { githubPullRequestUrl } from "./threadBoard/githubPullRequestUrl";
 import { useDesktopWindowAuthority } from "./shell/useDesktopWindowAuthority";
 import { buildInboxAttentionItems, inboxThreadProjectId } from "./inbox/inboxModel";
 import { loadAssignedLinearIssues as fetchAssignedLinearIssues } from "./inbox/loadAssignedLinearIssues";
@@ -246,6 +250,7 @@ import {
 } from "./environment/useRepositoryPullRequests";
 import { RightUtilityDock } from "./shell/RightUtilityDock";
 import { DockProjectPullRequestReviewTool } from "./shell/DockProjectPullRequestReviewTool";
+import { composerThreadDrafts } from "./composer/composerThreadDraftStore";
 import { ThreadUtilityDockContent } from "./shell/ThreadUtilityDockContent";
 import {
   MULTI_INSTANCE_DOCK_SURFACES,
@@ -400,6 +405,7 @@ export interface AppProps {
   readonly agentProfileClient?: AgentProfileClient;
   readonly agentRunClient?: AgentRunClient;
   readonly agentRunSettingsClient?: AgentRunSettingsClient;
+  readonly nativeHarnessClient?: NativeHarnessClient;
   readonly browserAutomationClient?: BrowserAutomationClient;
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly automationClient?: AutomationClient;
@@ -430,6 +436,9 @@ export interface AppProps {
   readonly themeClient?: ThemeClient;
   readonly zenClient?: ZenClient;
 }
+
+const NO_PROVIDER_INSTANCES: ReadonlyArray<ProviderInstance> = [];
+const NO_VOICE_SETTINGS: VoiceSettings = {};
 
 export function App(props: AppProps) {
   const [locationLaunch] = useState(() => launchFromLocation(window.location.href));
@@ -771,7 +780,7 @@ function LaunchedShell(
     setBottomPanelStatesByThread,
     fallbackBottomPanelState,
     setFallbackBottomPanelState,
-  } = useThreadUtilityPresentation(String(props.launch.windowId), globalThis);
+  } = useThreadUtilityPresentation(String(props.launch.windowId), globalThis, !isNarrow);
   const [previewBottomPanelHeight, setPreviewBottomPanelHeight] = useState<number>();
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   const navigatorOpener = useRef<HTMLElement | null>(null);
@@ -973,6 +982,7 @@ function LaunchedShell(
         agentProfileClient: props.agentProfileClient,
         agentRunClient: props.agentRunClient,
         agentRunSettingsClient: props.agentRunSettingsClient,
+        nativeHarnessClient: props.nativeHarnessClient,
         appleToolchainClient: props.appleToolchainClient,
         automationClient: props.automationClient,
         browserAutomationClient: props.browserAutomationClient,
@@ -993,6 +1003,7 @@ function LaunchedShell(
       props.agentProfileClient,
       props.agentRunClient,
       props.agentRunSettingsClient,
+      props.nativeHarnessClient,
       props.appleToolchainClient,
       props.automationClient,
       props.browserAutomationClient,
@@ -1017,6 +1028,7 @@ function LaunchedShell(
     agentProfileClient,
     agentRunClient,
     agentRunSettingsClient,
+    nativeHarnessClient,
     appleToolchainClient,
     automationClient,
     automationNotificationClient,
@@ -1036,6 +1048,7 @@ function LaunchedShell(
     hostClient,
     hostControlClient,
     imageGenerationClient,
+    speechClient,
     linearTransport,
     machineChangeClient,
     navigatorAssistantClient,
@@ -2396,6 +2409,44 @@ function LaunchedShell(
         key={`${dockThreadKey}:${utilityTab?.id ?? surface}`}
         agentRunClient={agentRunClient}
         agentRunSettingsClient={agentRunSettingsClient}
+        nativeHarnessClient={nativeHarnessClient}
+        onFollowUpCreated={({ created, prompt }) => {
+          // The prompt waits in the composer of the thread it belongs to;
+          // sending it is the person's move.
+          const seed = (mode: "chat" | "work" | "code", threadId: string) =>
+            composerThreadDrafts.write(mode, threadId, {
+              text: prompt,
+              caretIndex: prompt.length,
+              stagedDropped: false,
+            });
+          if (created.kind === "same-thread") {
+            seed(dockThread.mode, created.threadId);
+            return;
+          }
+          if (created.threadId === undefined) return;
+          seed(created.mode, created.threadId);
+          if (created.mode === "chat") {
+            void controller.openChatThread(
+              decodeChatThreadId(created.threadId),
+              created.title,
+              created.projectId,
+            );
+          } else if (created.mode === "work") {
+            void controller.openWorkThread(
+              decodeWorkThreadId(created.threadId),
+              created.title,
+              undefined,
+              created.projectId,
+            );
+          } else {
+            void controller.openCodeThread(
+              decodeCodeThreadId(created.threadId),
+              created.title,
+              undefined,
+              created.projectId,
+            );
+          }
+        }}
         {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
         appleToolchainClient={appleToolchainClient}
         {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}
@@ -2958,6 +3009,9 @@ function LaunchedShell(
           // nothing. The status dot carries it instead.
           activity: codeThreadActivity(thread),
           ...(thread.checkoutChip === undefined ? {} : { checkoutChip: thread.checkoutChip }),
+          ...(thread.pullRequestSummaries === undefined
+            ? {}
+            : { pullRequests: thread.pullRequestSummaries }),
           ...(thread.followUp === undefined ? {} : { followUp: thread.followUp }),
           ...(thread.unread === undefined ? {} : { unread: thread.unread }),
           ...(thread.pinned === undefined ? {} : { pinned: thread.pinned }),
@@ -3117,6 +3171,11 @@ function LaunchedShell(
     onPinInPane: pinCodeThreadInPane,
     onPinThread: (threadId, pinned) =>
       void codeController.pinThread(decodeCodeThreadId(threadId), pinned),
+    onOpenPullRequest: selectProjectPullRequestIdentity,
+    onOpenPullRequestOnGithub: (identity) => {
+      const url = githubPullRequestUrl(identity);
+      if (url !== undefined) openExternalUrl(props.hostBridge, url);
+    },
   };
   const renameCodeThreadFromRow = (threadId: string, title: string): void => {
     void codeController.renameThread(decodeCodeThreadId(threadId), title);
@@ -4237,6 +4296,7 @@ function LaunchedShell(
             },
           })}
       agentRunSettingsClient={agentRunSettingsClient}
+      nativeHarnessClient={nativeHarnessClient}
       automationNotificationClient={automationNotificationClient}
       isNarrow={isNarrow}
       nativeBoundsAvailable={nativeHost !== undefined}
@@ -5622,22 +5682,28 @@ function LaunchedShell(
   );
 
   return (
-    <OctantCommandProvider commands={octantCommands}>
-      {/* Held here rather than with any Code pane: a thread's controller has to
+    <SpeechCapabilityProvider
+      client={speechClient}
+      instances={providerController.snapshot?.instances ?? NO_PROVIDER_INSTANCES}
+      settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
+    >
+      <OctantCommandProvider commands={octantCommands}>
+        {/* Held here rather than with any Code pane: a thread's controller has to
         outlive the surfaces reading it, so closing a diff tab never tears down
         the turn that thread is running. */}
-      <CodeThreadControllerSlots
-        client={codeClient}
-        readCursorStore={codeReadCursorStore}
-        registry={codeThreadControllers}
-        threadIds={openCodeThreadIds}
-      />
-      <TrackerReferenceProvider ports={trackerReferencePorts}>
-        <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
-          <ProjectThreadsProvider value={projectThreadsAccess}>{shell}</ProjectThreadsProvider>
-        </SidebarThreadDragContext.Provider>
-      </TrackerReferenceProvider>
-    </OctantCommandProvider>
+        <CodeThreadControllerSlots
+          client={codeClient}
+          readCursorStore={codeReadCursorStore}
+          registry={codeThreadControllers}
+          threadIds={openCodeThreadIds}
+        />
+        <TrackerReferenceProvider ports={trackerReferencePorts}>
+          <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
+            <ProjectThreadsProvider value={projectThreadsAccess}>{shell}</ProjectThreadsProvider>
+          </SidebarThreadDragContext.Provider>
+        </TrackerReferenceProvider>
+      </OctantCommandProvider>
+    </SpeechCapabilityProvider>
   );
 }
 

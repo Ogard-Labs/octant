@@ -118,7 +118,7 @@
   overflow: hidden;
   background: var(--oct-bg);
   color: var(--oct-muted);
-  font-size: 0.7rem;
+  font-size: var(--oct-text-xs);
 }
 
 .artifact-card__preview-svg,
@@ -138,8 +138,8 @@
 .artifact-card__title {
   overflow: hidden;
   color: var(--oct-fg);
-  font-size: 0.875rem;
-  font-weight: var(--oct-weight-strong);
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-display);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -147,7 +147,7 @@
 .artifact-card__meta,
 .artifact-card__footer {
   color: var(--oct-meta);
-  font-size: 0.6875rem;
+  font-size: var(--oct-text-xs);
 }
 
 .artifact-card__footer {
@@ -165,7 +165,7 @@
 }
 
 .artifact-mirror {
-  font-size: 0.875rem;
+  font-size: var(--oct-text-base);
 }
 
 .artifact-mirror__body {
@@ -212,7 +212,7 @@
 .artifact-mirror__tier-detail,
 .artifact-mirror__auto-commit {
   color: var(--oct-muted);
-  font-size: 0.875rem;
+  font-size: var(--oct-text-base);
 }
 
 .artifact-mirror__field {
@@ -223,7 +223,7 @@
 
 .artifact-mirror__field .input {
   min-height: var(--oct-control-height-sm);
-  font-size: 0.875rem;
+  font-size: var(--oct-text-base);
 }
 
 .artifact-mirror__auto-commit {

@@ -157,6 +157,8 @@
   --oct-leading-snug: 1.3;
   --oct-leading-code: 1.7;
 
+  --oct-weight-regular: 400;
+  --oct-weight-medium: 500;
   --oct-weight-display: 500;
   --oct-weight-strong: 600;
 
@@ -189,6 +191,10 @@
 
   --oct-motion-fast: 150ms;
   --oct-motion-base: 200ms;
+  /* Ambient loops, not interaction durations: a spinner turn and the breathing
+     dot that says something is live. */
+  --oct-motion-spin: 900ms;
+  --oct-motion-pulse: 1.6s;
   --oct-ease-standard: ease;
 
   --oct-container-max: 1200px;
@@ -504,7 +510,7 @@ h2 {
 h3 {
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xl);
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
   line-height: var(--oct-leading-snug);
   letter-spacing: var(--oct-tracking-snug);
   margin: 0;
@@ -513,7 +519,7 @@ h3 {
 h4 {
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-lg);
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
   line-height: var(--oct-leading-snug);
   letter-spacing: var(--oct-tracking-snug);
   margin: 0;
@@ -790,7 +796,7 @@ h4 {
 }
 .callout-title {
   font-family: var(--oct-font-display);
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
   color: var(--oct-fg);
   margin-bottom: 2px;
 }
@@ -1363,7 +1369,7 @@ input.switch:checked::after {
   background: var(--oct-bg);
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 .viewer-thumb[aria-selected="true"] {
   border-color: var(--oct-accent-fg);
@@ -1381,7 +1387,7 @@ input.switch:checked::after {
 }
 .codeblock {
   font-family: var(--oct-font-mono);
-  font-size: 13px;
+  font-size: var(--oct-text-sm);
   line-height: var(--oct-leading-code);
   padding: var(--oct-space-5);
   border: 1px solid var(--oct-border);
@@ -1482,7 +1488,7 @@ input.switch:checked::after {
 .runpanel-body {
   padding: var(--oct-space-5) var(--oct-space-4) var(--oct-space-6);
   font-family: var(--oct-font-mono);
-  font-size: 13px;
+  font-size: var(--oct-text-sm);
   line-height: 1.7;
 }
 .runline {
@@ -1517,7 +1523,7 @@ input.switch:checked::after {
     gap: 0;
   }
   .runline .k {
-    font-size: 10px;
+    font-size: var(--oct-text-xs);
   }
 }
 
@@ -1713,7 +1719,7 @@ input.switch:checked::after {
 .avatar-sm {
   width: var(--oct-avatar-sm);
   height: var(--oct-avatar-sm);
-  font-size: calc(9 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 .avatar-lg {
   width: var(--oct-avatar-lg);
@@ -1960,6 +1966,27 @@ input.switch:checked::after {
   color: var(--oct-fg);
   border-radius: var(--oct-radius-md);
   box-shadow: var(--oct-elev-overlay, var(--oct-elev-raised));
+}
+
+/* The preview card is the tooltip card's interactive sibling: the same raised
+   ground, but the pointer can cross into it and press what it holds. It sits
+   at the tooltip's layer so a card opened from a menu-adjacent row is never
+   buried under the dock. */
+.octant-preview-card__positioner {
+  z-index: var(--oct-z-toast);
+}
+
+.octant-preview-card {
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 10px 12px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+  color: var(--oct-fg);
+  box-shadow: var(--oct-elev-overlay, var(--oct-elev-raised));
+  font-size: var(--oct-text-sm);
+  line-height: 1.25;
+  outline: none;
 }
 
 /* ─── modal ───────────────────────────────────────────────────────────
@@ -3125,7 +3152,7 @@ input.switch:checked::after {
   padding-inline: var(--oct-space-2);
   border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-mono);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   letter-spacing: 0;
   text-transform: none;
 }
@@ -3299,7 +3326,7 @@ input.switch:checked::after {
   background: var(--oct-accent);
   color: var(--oct-accent-on);
   font-family: var(--oct-font-mono);
-  font-size: calc(9 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   line-height: 15px;
   text-align: center;
 }
@@ -3312,7 +3339,7 @@ input.switch:checked::after {
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   font-family: var(--oct-font-mono);
-  font-size: 13px;
+  font-size: var(--oct-text-sm);
   line-height: var(--oct-leading-code);
   overflow: hidden;
 }
@@ -3552,7 +3579,7 @@ input.switch:checked::after {
   margin-top: var(--oct-space-3);
   padding: var(--oct-space-1) var(--oct-space-2);
   font-family: var(--oct-font-display);
-  font-size: clamp(8px, calc(var(--octant-ui-font-size) * 0.85), 32px);
+  font-size: var(--oct-text-xs);
   font-weight: 500;
   letter-spacing: 0;
   color: var(--oct-meta);
@@ -3724,7 +3751,7 @@ input.switch:checked::after {
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
   letter-spacing: -0.01em;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4113,8 +4140,7 @@ input.switch:checked::after {
 }
 .composer-row button,
 .composer-row [role="button"],
-.composer-row [role="combobox"],
-.composer-row .composer-model-picker__trigger {
+.composer-row [role="combobox"] {
   min-height: 32px;
   height: 32px;
   border-radius: var(--oct-radius-sm);
@@ -4128,8 +4154,7 @@ input.switch:checked::after {
 .composer-row button,
 .composer-row [role="button"],
 .composer-row [role="combobox"],
-.composer-row input,
-.composer-row .composer-model-picker__trigger {
+.composer-row input {
   border-color: transparent;
   box-shadow: none;
 }
@@ -4137,8 +4162,7 @@ input.switch:checked::after {
    row's controls that are not the button recipe and would otherwise be left
    with no focus mark at all once the ring above is suppressed. */
 .composer-row [role="combobox"]:focus-visible,
-.composer-row input:focus-visible,
-.composer-row .composer-model-picker__trigger:focus-visible {
+.composer-row input:focus-visible {
   outline: 2px solid var(--oct-accent-fg);
   outline-offset: 1px;
 }
@@ -4174,9 +4198,6 @@ input.switch:checked::after {
   min-height: 32px;
   padding-block: 0;
   padding-inline: 8px 6px;
-  border: 0;
-  border-radius: var(--oct-radius-sm);
-  background: transparent;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
@@ -4245,7 +4266,7 @@ input.switch:checked::after {
   background: var(--oct-bg);
   color: var(--oct-fg-2);
   font-family: var(--oct-font-mono);
-  font-size: 13px;
+  font-size: var(--oct-text-sm);
   line-height: var(--oct-leading-code);
   overflow: hidden;
 }
@@ -6764,7 +6785,7 @@ input.switch:checked::after {
   background: transparent;
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
   letter-spacing: normal;
   color: var(--oct-fg);
 }
@@ -7460,6 +7481,7 @@ input.switch:checked::after {
    The grain is an inline SVG turbulence, not an asset. It is destroyed
    by a 48px blur, which is the point — it is there so the ground looks
    photographic, not so it changes any measurement. */
+/* ui-style-exception: fixed-scheme */
 .phone-atmos {
   position: absolute;
   inset: 0;
@@ -7641,7 +7663,7 @@ input.switch:checked::after {
   background: none;
   color: var(--oct-meta);
   font-family: var(--oct-font-display);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   letter-spacing: var(--oct-tracking-wide);
 }
 .tabitem .icon {
@@ -7899,7 +7921,7 @@ input.switch:checked::after {
   border-radius: var(--oct-radius-md);
   background: var(--oct-bg);
   font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
   color: var(--oct-muted);
 }
 .attempt[data-state="queued"],
@@ -8157,7 +8179,7 @@ input.switch:checked::after {
 /* selection is the check mark and the weight; it was accent-coloured,
    which measured 3.79:1 on glass over a light ground */
 .mopt[aria-selected="true"] .mopt-name {
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
 }
 
 /* ─── deferral ────────────────────────────────────────────────────────

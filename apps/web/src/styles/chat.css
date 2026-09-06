@@ -80,7 +80,7 @@
 .chat-workspace__meta {
   margin: 4px 0 0;
   color: var(--oct-muted);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   line-height: 1.35;
 }
 
@@ -189,7 +189,7 @@
 
 .chat-transcript__empty h2 {
   color: var(--oct-fg);
-  font-size: calc(24 * var(--oct-text-step));
+  font-size: var(--oct-text-xl);
   font-weight: 400;
   letter-spacing: -0.02em;
   line-height: 1.25;
@@ -300,7 +300,7 @@
   flex-basis: 100%;
   margin: 0;
   color: var(--oct-muted);
-  font-size: 10.5px;
+  font-size: var(--oct-text-xs);
   line-height: 1.4;
   text-align: end;
 }
@@ -347,11 +347,11 @@
 }
 
 .chat-rich-text h2 {
-  font-size: calc(18 * var(--oct-text-step));
+  font-size: var(--oct-text-xl);
 }
 
 .chat-rich-text h3 {
-  font-size: calc(16 * var(--oct-text-step));
+  font-size: var(--oct-text-lg);
 }
 
 .chat-rich-text h4 {
@@ -412,7 +412,7 @@
   padding: 6px 10px;
   color: var(--oct-meta);
   border-bottom: 1px solid var(--oct-border);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 .chat-rich-text__code pre {
@@ -453,7 +453,7 @@
 }
 
 .chat-transcript__attempt-status--streaming svg {
-  animation: chat-status-spin 900ms linear infinite;
+  animation: chat-status-spin var(--oct-motion-spin) linear infinite;
 }
 
 /* The spinner already names live state; keep its label readable and still. */
@@ -571,7 +571,7 @@
   display: block;
   margin-bottom: 2px;
   color: var(--oct-muted);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   line-height: 1.3;
 }
 
@@ -612,7 +612,7 @@
   border: 1px solid var(--oct-border);
   border-radius: 4px;
   cursor: pointer;
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 .thread-work-shelf__item-actions button:hover,
@@ -630,7 +630,7 @@
   display: grid;
   gap: 3px;
   color: var(--oct-muted);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 .thread-work-shelf input {
@@ -711,7 +711,7 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .chat-composer__status--live::before {
-    animation: chat-composer-live 1.6s ease-in-out infinite;
+    animation: chat-composer-live var(--oct-motion-pulse) ease-in-out infinite;
   }
 }
 
@@ -1178,4 +1178,46 @@ html[data-octant-reduced-motion="true"]
   font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Dictation sits beside the attach control in every composer. The button is
+   the same ghost icon as its neighbours until it records; then it takes the
+   danger colour and the live pulse so a hot microphone is never mistaken for
+   an idle one. */
+.composer-voice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
+.composer-voice__button[data-recording="true"] {
+  color: var(--oct-danger-fg);
+  animation: chat-composer-live var(--oct-motion-pulse) ease-in-out infinite;
+}
+
+.composer-voice__timer {
+  color: var(--oct-danger-fg);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.composer-voice__spin {
+  animation: chat-status-spin var(--oct-motion-spin) linear infinite;
+}
+
+.composer-voice__error {
+  overflow: hidden;
+  max-width: 28ch;
+  color: var(--octant-danger-text);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-voice__button[data-recording="true"],
+  .composer-voice__spin {
+    animation: none;
+  }
 }

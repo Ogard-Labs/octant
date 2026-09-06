@@ -58,25 +58,37 @@ function relationshipLabel(
   return relationship === "promoted" ? "Promoted Code thread" : "Linked Code thread";
 }
 
+/**
+ * The facts worth reading beside a pull-request number, in the order a reader
+ * decides on them: state first, then checks, review, conflicts, how old the
+ * snapshot is, readiness, and how a Work card reached it. Absent facts are
+ * left out rather than named "unknown" one by one.
+ */
+export function describePullRequestSummary(
+  summary: ThreadBoardPullRequestSummaryList["items"][number],
+): ReadonlyArray<string> {
+  return [
+    stateLabel(summary.state),
+    checksLabel(summary.checks),
+    reviewLabel(summary.review),
+    mergeabilityLabel(summary.mergeability),
+    summary.freshness === "stale"
+      ? "Stale snapshot"
+      : summary.freshness === "unavailable"
+        ? "GitHub unavailable"
+        : undefined,
+    summary.readyToMerge ? "Ready to merge" : undefined,
+    relationshipLabel(summary.relationship),
+  ].filter((value): value is string => value !== undefined);
+}
+
 export function ThreadBoardPullRequestSummaries(props: ThreadBoardPullRequestSummariesProps) {
   if (props.summaries.items.length === 0 && props.summaries.hiddenCount === 0) return null;
   return (
     <ul aria-label="Linked pull requests" className="board-card-pr-list">
       {props.summaries.items.map((summary) => {
         const repo = `${summary.identity.repositoryOwner}/${summary.identity.repositoryName}`;
-        const details = [
-          stateLabel(summary.state),
-          checksLabel(summary.checks),
-          reviewLabel(summary.review),
-          mergeabilityLabel(summary.mergeability),
-          summary.freshness === "stale"
-            ? "Stale snapshot"
-            : summary.freshness === "unavailable"
-              ? "GitHub unavailable"
-              : undefined,
-          summary.readyToMerge ? "Ready to merge" : undefined,
-          relationshipLabel(summary.relationship),
-        ].filter((value): value is string => value !== undefined);
+        const details = describePullRequestSummary(summary);
         const label = `${repo} #${summary.identity.number} · ${summary.title}${
           details.length === 0 ? "" : ` · ${details.join(" · ")}`
         }`;

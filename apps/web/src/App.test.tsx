@@ -896,7 +896,9 @@ describe("App", () => {
 
     const welcome = await screen.findByRole("region", { name: "Chat welcome" });
     await user.click(within(welcome).getByRole("button", { name: "Provider and model" }));
-    await user.click(screen.getByRole("option", { name: "Primary Gateway" }));
+    // Both gateways run the native harness, so the picker lists them under
+    // one Octant entry; GPT-5 lives only on the primary one.
+    await user.click(screen.getByRole("option", { name: "Octant" }));
     await user.click(screen.getByRole("option", { name: "GPT-5" }));
 
     await openSettingsFromSidebar(user);

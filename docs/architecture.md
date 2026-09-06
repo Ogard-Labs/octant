@@ -506,6 +506,20 @@ modelId }`, and the model picker is provider-first. Discovery can find
   carry no generation action. Agent-generated images preview in the thread by
   opaque attachment id, chain edits through `parentArtifactRef`, export with the thread, and
   never grant Chat filesystem authority.
+  **Voice** is an app-managed capability rather than a provider kind: speech
+  to text and text to speech each resolve against one enabled OpenAI-compatible
+  instance named in Settings › Voice and reuse its base URL, authentication,
+  and credential. The host serves `/api/speech/status`, `/api/speech/transcriptions`,
+  and `/api/speech/synthesis` behind window authority, sniffs and bounds the
+  audio, persists nothing, and reports each direction `ready`, `unconfigured`,
+  or `unavailable` with the Settings link that fixes it; see
+  [decisions/0084-voice-rides-an-openai-compatible-provider.md](decisions/0084-voice-rides-an-openai-compatible-provider.md).
+  Every composer (Chat, Work, Code, the welcome and draft composers) and
+  Navigator show a microphone beside the attach control only while
+  transcription is `ready`; the clip is recorded by the browser's own encoder,
+  the transcript is appended to the draft, and the person still sends. Navigator
+  can read replies aloud through the configured synthesis endpoint, or with the
+  operating system's voices when none is set.
   The ACP drivers share one
   generic ACP client and protocol layer. Each in-tree vendor is a bundled
   `provider-driver` plugin that reaches the host only through `provider-sdk`;
@@ -534,6 +548,54 @@ modelId }`, and the model picker is provider-first. Discovery can find
   `127.0.0.1:52693` (`/oauth/linear/callback`, fallbacks 52694 and 52695) for
   the consent redirect, then closes it. Connect fails closed when the public
   client id (`OCTANT_LINEAR_OAUTH_CLIENT_ID`) is unset.
+
+### Native harness
+
+Direct-endpoint providers (`openai-compatible`, `anthropic-compatible`,
+`azure-foundry`; `ollama` joins once its driver runs the tool loop) run under the
+native harness in `apps/server/src/harness`:
+
+- **Tools.** `createNativeHarnessTools` composes the nine working tools and
+  the harness reads as one `AppManagedToolSet`, trimmed by mode through the
+  closed tool catalog (`harness-*` capability ids). Every call decodes its
+  arguments, wraps a `ToolActionRequest` under the thread's current authority,
+  and passes `ToolCallAuthorityService.authorize` before any port runs. Files
+  go through `NativeHarnessFileSystem` (confined to the root, symlinks
+  resolved, edits require a prior read); `bash` runs through the same
+  Seatbelt-confined owned-process-group port as repository tests; web fetches
+  refuse private destinations, and connect through a `lookup` that checks
+  every address the name resolves to at the moment the socket opens, so a
+  name cannot pass the check and then resolve somewhere private.
+- **Routing.** `NativeHarnessRoutingStore` journals a host default and
+  Project overrides of slot tables; `resolveNativeHarnessRoute` in
+  `@octant/domain` is the pure resolver; `NativeHarnessRouter` adds cooldowns
+  and a per-slot circuit breaker. Child runs take their model from the role's
+  slot through the shared `admitAgentRunControlRequest` path.
+- **Session.** `NativeHarnessSessionStore` journals one session per thread:
+  routing decisions, turn records, context reductions, advisor interventions,
+  follow-up suggestions, the questions a lead asked with how each was
+  settled, and — on each turn record — the last calls the lead made (tool,
+  what it asked for, ok/refused/failed, duration), noted live on the session
+  while the turn runs and journaled with the record when it ends. `NativeHarnessQuestionStore` blocks an `ask-user` call until an
+  answer arrives from any surface (`POST /api/native-harness/sessions/:thread/questions`,
+  or the Code thread's own inline question path), or until it expires or the
+  turn is interrupted. `NativeHarnessTurnObserver` puts the stable
+  instructions block in front of every harness turn, records the completed
+  reply, parses the follow-up block, and asks the `advisor` slot for a review.
+  A confirmed follow-up is created by `createNativeHarnessFollowUp` through
+  the mode's ordinary creation command on the confirming window, and the
+  activation result carries the new thread id; the prompt is never sent on
+  the person's behalf.
+- **Terminal.** `octant agent` in `packages/cli` is the same thread on a
+  terminal: `agentThread.ts` is the mode-neutral thread port (Chat, Work,
+  and Code adapters over the modes' own routes, plus creation), `agentHost.ts`
+  the harness calls, `agentTuiModel.ts` the pure presentation (transcript,
+  footer, palette projected from `@octant/theme` tokens), and `agentTui.ts`
+  the OpenTUI screen, loaded only when stdout is a terminal and `--plain` or
+  `--json` was not asked for.
+- **Surfaces.** `/api/native-harness/routing` and
+  `/api/native-harness/sessions/:threadId` serve the web, desktop, phone, and
+  `octant agent` / `octant harness` from one `NativeHarnessSessionView`.
 
 ## Extensions and skills
 

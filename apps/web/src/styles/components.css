@@ -160,7 +160,7 @@ html[data-octant-reduced-transparency="true"] .thread-activity-pip__collapsed-co
   z-index: 1;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 120ms ease;
+  transition: opacity var(--oct-motion-fast) ease;
 }
 
 .turn-action-menu:hover .turn-action-menu__more,
@@ -512,7 +512,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 
 .thread-task-viewer__evidence {
   color: var(--octant-text-secondary);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -644,7 +644,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 .thread-task-viewer__rationale,
 .thread-task-viewer__state {
   color: var(--octant-text-secondary);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 /* The chip's own reading, restated where the steps it counts are on screen. */
@@ -674,7 +674,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 .thread-task-viewer__actions button {
   min-height: 24px;
   padding-inline: 6px;
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 @media (max-width: 560px) {
@@ -702,7 +702,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 .goal-loop__title {
   margin: 0;
   font-size: var(--oct-text-sm);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
 }
 
 .goal-loop__note,
@@ -769,7 +769,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 .ship-panel__title {
   margin: 0;
   font-size: var(--oct-text-sm);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
 }
 
 .ship-panel__note,

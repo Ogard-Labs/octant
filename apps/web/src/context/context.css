@@ -111,7 +111,7 @@
 .context-window-popover__source {
   margin: 8px 0 0;
   color: var(--octant-text-secondary);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 .context-window-popover__meter {
@@ -237,7 +237,7 @@
 .context-window-popover__limits p {
   margin: 4px 0 0;
   color: var(--octant-text-secondary);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 .context-window-popover__capabilities p > span:first-child,
@@ -249,7 +249,7 @@
 .context-window-popover__limits h3 {
   margin: 0 0 5px;
   color: var(--octant-text-secondary);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   font-weight: 500;
 }
 
@@ -264,7 +264,7 @@
 .context-window-popover__reset,
 .context-window-popover__limit-state {
   color: var(--octant-text-secondary);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 .context-window-popover__limits-heading time {
@@ -317,7 +317,7 @@
   border: 1px solid var(--octant-border);
   border-radius: var(--oct-radius-pill);
   cursor: pointer;
-  font-size: calc(9 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 .context-health-warning:hover,
@@ -367,7 +367,7 @@
 .context-inspector__freshness,
 .context-inspector__section-heading > span {
   color: var(--octant-text-muted);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 .context-inspector__header h2 {
@@ -382,7 +382,7 @@
   border: 1px solid var(--octant-border);
   border-radius: var(--oct-radius-sm);
   cursor: pointer;
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 .context-inspector button:hover:not(:disabled),
@@ -427,7 +427,7 @@
   padding: 8px;
   border: 1px solid var(--octant-border);
   border-radius: var(--oct-radius-sm);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 .context-inspector__facts,
@@ -449,7 +449,7 @@
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 .context-inspector dt {

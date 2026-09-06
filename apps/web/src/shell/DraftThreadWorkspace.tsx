@@ -75,6 +75,8 @@ import { OctantPopover } from "../ui/base/OctantPopover";
 import { RecentThreadList, type RecentThreadListItem } from "./RecentThreadList";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
+import { appendTranscript } from "../voice/appendTranscript";
 import { HostSelector } from "./HostSelector";
 import type { OctantHostBridge } from "./hostBridge";
 
@@ -760,6 +762,14 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
               />
             }
             row={{
+              leading: (
+                <ComposerVoiceButton
+                  disabled={props.creating}
+                  onTranscript={(transcript) =>
+                    setPrompt((current) => appendTranscript(current, transcript))
+                  }
+                />
+              ),
               actions: {
                 kind: "send",
                 send: { ariaLabel: "Create thread", disabled: !canSubmit, onSend: submit },

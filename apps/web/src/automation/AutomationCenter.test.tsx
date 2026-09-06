@@ -550,12 +550,12 @@ describe("AutomationCenter narrow layout, keyboard, and focus", () => {
     expect(screen.queryByText("Automation paused.")).not.toBeInTheDocument();
   });
 
-  it("scales with browser zoom: the stylesheet sizes text and layout in rem/em, never px fonts", () => {
+  it("scales with the interface size: the stylesheet sizes text from the type scale, never px fonts", () => {
     const stylesheet = readFileSync(resolve(process.cwd(), "src/styles/automation.css"), "utf8");
-    // 200% zoom multiplies the root font size; px-sized fonts and px-fixed
-    // heights would refuse to scale with it.
+    // The type-scale tokens follow the Appearance interface size; px-sized
+    // fonts and px-fixed heights would refuse to scale with it.
     expect(stylesheet).not.toMatch(/font-size:\s*\d+px/);
-    expect(stylesheet).toMatch(/font-size:\s*[\d.]+rem/);
+    expect(stylesheet).toMatch(/font-size:\s*var\(--oct-text-/);
     // 1px is the visually-hidden input idiom; anything larger must scale.
     expect(stylesheet).not.toMatch(/(?<!m(?:in|ax)-)height:\s*(?!1px)\d+px/);
     // The full-surface layer scrolls instead of clipping at high zoom.

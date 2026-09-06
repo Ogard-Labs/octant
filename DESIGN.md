@@ -73,7 +73,7 @@ Appearance interface size; nothing is authored at 11.5 or 12.5.
 | ------------- | ---- | ------ | --------------- | --------------------------------------------------------- |
 | Hero          | 28   | 500    | primary         | Welcome question only (`oct-title--hero`)                 |
 | Title         | 20   | 600    | primary         | One per page (`oct-title`)                                |
-| Section label | 13   | 500    | primary         | Group heading over a hairline (`oct-section-label`)       |
+| Section label | 13   | 500    | secondary       | Group heading over a hairline (`oct-section-label`)       |
 | Row label     | 13   | 500    | primary         | Setting, list row, menu option (`oct-row-label`)          |
 | Body          | 13   | 400    | primary         | Transcript, paragraphs, controls                          |
 | Detail        | 12   | 400    | secondary       | Subtitle, row description, menu detail (`oct-row-detail`) |
@@ -158,6 +158,28 @@ The import order in `apps/web/src/styles.css` is load-bearing:
 `--octant-*` roles own persistence and theme editing. `--oct-*` and shadcn
 variables are consumption aliases. Do not add a new raw colour, radius, shadow,
 or control recipe in a feature stylesheet.
+
+`bun run ui:check` enforces this on every `.css` file under `apps/web/src`
+(`scripts/check-ui-stylesheets.ts`). A raw colour in a rule fails closed; a
+block that must depict one fixed scheme regardless of theme, such as the
+light/dark preview swatches in Settings, carries
+`/* ui-style-exception: fixed-scheme */` on the line before it. Off-scale
+`font-size` values, raw `transition`/`animation` durations, and `!important`
+outside an accessibility fallback, any `font-weight` heavier than 500 (only a
+page title and content emphasis such as `strong` are 600), and any paint
+(colour, background, border, radius, shadow, outline) that a feature rule puts
+on a class handed to an Octant primitive (0046: place or size a shared control,
+never repaint it; pick a recipe variant instead) ratchet against
+`scripts/ui-stylesheet-baseline.json`: a file may not add one, and a fix must
+re-record the lower count with `--write-baseline` so the baseline never
+overstates.
+
+The `control-repaint` rule reads the classes feature code hands to an Octant
+primitive. A control marked `unstyled` is feature-owned paint by design and is
+skipped; `unstyled={false}` is not, and stays under the rule. The checker also
+skips `composer-input`, the system prompt (0038), because that surface is
+already painted twice; the rule still holds for it — feature CSS must not
+repaint it a third time — it is simply not machine-checked.
 
 The shadcn registry metadata is in `apps/web/components.json` (`new-york`,
 Tailwind v4, CSS variables, Lucide). The checked-in recipes are owned source

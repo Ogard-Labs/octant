@@ -3,6 +3,12 @@ import { BrowserContextPolicy } from "./browserAutomation";
 import { ComputerUsePolicy } from "./computerUse";
 import { ExtensionCapability } from "./extensions";
 import {
+  decodeNativeHarnessToolArguments,
+  NATIVE_HARNESS_TOOL_NAMES,
+  nativeHarnessToolCapabilityId,
+  type NativeHarnessToolName,
+} from "./nativeHarness";
+import {
   ToolActionCapability,
   ToolCapabilityId,
   type ToolActionCapability as ToolActionCapabilityType,
@@ -29,6 +35,20 @@ export const ToolApprovalClass = Schema.Literal(
    * local checkpoint undoes something other people can already see.
    */
   "publish-to-target",
+  /**
+   * Reading inside the thread's own root. Its own class because a read has
+   * nothing an approval could gate, so it stays available under every posture
+   * that can see the root at all, Plan included.
+   */
+  "project-file-reads",
+  /** Writes that never leave the thread's journal: task lists, harness reads. */
+  "thread-local",
+  /**
+   * Starting a child run. Gated by the creation posture, not by the thread's
+   * access posture: a child can never hold more than its parent, so the
+   * question is whether the user lets children start at all.
+   */
+  "child-agent-creation",
 );
 export type ToolApprovalClass = typeof ToolApprovalClass.Type;
 
@@ -115,7 +135,123 @@ const decodeValidationToolArguments = Schema.decodeUnknownSync(ValidationToolArg
  * invent a parallel drifting catalogue. Providers/extensions/prompts cannot add
  * entries; MCP tools resolve only as `extension-namespaced`.
  */
+/**
+ * How each native harness tool is policed. Reads and thread-local writes never
+ * need an approval; edits, writes, and the shell are the ordinary side-effect
+ * classes and stay irreversible under taint, so hostile content a tool pulled
+ * in cannot quietly turn into a file write or a command.
+ */
+const NATIVE_HARNESS_TOOL_POLICY: Readonly<
+  Record<
+    NativeHarnessToolName,
+    {
+      readonly modes: ReadonlyArray<"chat" | "work" | "code">;
+      readonly requiredCapabilityClass: ToolCatalogCapabilityClass;
+      readonly approvalClass: ToolApprovalClass;
+      readonly irreversibleUnderTaint: boolean;
+    }
+  >
+> = {
+  read: {
+    modes: ["work", "code"],
+    requiredCapabilityClass: "filesystem",
+    approvalClass: "project-file-reads",
+    irreversibleUnderTaint: false,
+  },
+  grep: {
+    modes: ["work", "code"],
+    requiredCapabilityClass: "filesystem",
+    approvalClass: "project-file-reads",
+    irreversibleUnderTaint: false,
+  },
+  glob: {
+    modes: ["work", "code"],
+    requiredCapabilityClass: "filesystem",
+    approvalClass: "project-file-reads",
+    irreversibleUnderTaint: false,
+  },
+  bash: {
+    modes: ["code"],
+    requiredCapabilityClass: "shell",
+    approvalClass: "shell-commands",
+    irreversibleUnderTaint: true,
+  },
+  edit: {
+    modes: ["work", "code"],
+    requiredCapabilityClass: "filesystem",
+    approvalClass: "project-file-writes",
+    irreversibleUnderTaint: true,
+  },
+  write: {
+    modes: ["work", "code"],
+    requiredCapabilityClass: "filesystem",
+    approvalClass: "project-file-writes",
+    irreversibleUnderTaint: true,
+  },
+  "web-fetch": {
+    modes: ["chat", "work", "code"],
+    requiredCapabilityClass: "network",
+    approvalClass: "network-access",
+    irreversibleUnderTaint: false,
+  },
+  "web-search": {
+    modes: ["chat", "work", "code"],
+    requiredCapabilityClass: "network",
+    approvalClass: "network-access",
+    irreversibleUnderTaint: false,
+  },
+  "todo-write": {
+    modes: ["chat", "work", "code"],
+    requiredCapabilityClass: "instructions",
+    approvalClass: "thread-local",
+    irreversibleUnderTaint: false,
+  },
+  "context-remaining": {
+    modes: ["chat", "work", "code"],
+    requiredCapabilityClass: "instructions",
+    approvalClass: "thread-local",
+    irreversibleUnderTaint: false,
+  },
+  "journal-lookup": {
+    modes: ["chat", "work", "code"],
+    requiredCapabilityClass: "instructions",
+    approvalClass: "thread-local",
+    irreversibleUnderTaint: false,
+  },
+  "second-opinion": {
+    modes: ["chat", "work", "code"],
+    requiredCapabilityClass: "instructions",
+    approvalClass: "thread-local",
+    irreversibleUnderTaint: false,
+  },
+  delegate: {
+    modes: ["chat", "work", "code"],
+    requiredCapabilityClass: "agents",
+    approvalClass: "child-agent-creation",
+    irreversibleUnderTaint: false,
+  },
+  "ask-user": {
+    modes: ["chat", "work", "code"],
+    requiredCapabilityClass: "instructions",
+    approvalClass: "thread-local",
+    irreversibleUnderTaint: false,
+  },
+};
+
+const nativeHarnessCatalogEntries: ReadonlyArray<ClosedToolCatalogEntry> =
+  NATIVE_HARNESS_TOOL_NAMES.map((name) =>
+    entry({
+      capabilityId: nativeHarnessToolCapabilityId(name),
+      version: 1,
+      owner: "core",
+      ...NATIVE_HARNESS_TOOL_POLICY[name],
+      requiresAppManagedTools: true,
+      decodeArguments: (value) => decodeNativeHarnessToolArguments(name, value),
+    }),
+  );
+
 export const CLOSED_TOOL_CATALOG: ReadonlyArray<ClosedToolCatalogEntry> = [
+  ...nativeHarnessCatalogEntries,
   entry({
     capabilityId: "browser-automation",
     version: 1,

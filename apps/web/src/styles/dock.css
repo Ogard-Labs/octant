@@ -231,7 +231,7 @@
 .dock-work-map__header h2 {
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
 }
 
 .dock-work-map__header p,
@@ -540,7 +540,7 @@
 
 .navigator-panel__header h2 {
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
 }
 
 .navigator-panel__header p {
@@ -596,6 +596,21 @@
 .navigator-panel form input {
   min-width: 0;
   flex: 1;
+}
+
+/* Read-aloud lives with the transcript it reads; the row keeps the toggle,
+   the stop control while speaking, and the reason when a voice refused. */
+.navigator-panel__read-aloud {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.navigator-panel__read-aloud p {
+  margin: 0;
+  color: var(--octant-danger-text);
+  font-size: var(--oct-text-xs);
 }
 
 @media (prefers-contrast: more) {

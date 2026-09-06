@@ -75,10 +75,10 @@ describe("ThemeTypographyProvider", () => {
       /\.board-card-title\s*\{[^}]*font-size:\s*var\(--octant-ui-font-size\);/s,
     );
     expect(appStyles).toMatch(
-      /\.project-section > \.sidebar-section\s*\{[^}]*font-size:\s*clamp\([^}]*var\(--octant-ui-font-size\)/s,
+      /\.project-section > \.sidebar-section\s*\{[^}]*font-size:\s*var\(--oct-text-xs\);/s,
     );
     expect(appStyles).toMatch(
-      /\.workspace-pane__grip\s*\{[^}]*font-family:\s*var\(--oct-font-display\);[^}]*font-size:\s*clamp\([^}]*var\(--octant-ui-font-size\)/s,
+      /\.workspace-pane__grip\s*\{[^}]*font-family:\s*var\(--oct-font-display\);[^}]*font-size:\s*var\(--oct-text-xs\);/s,
     );
   });
 

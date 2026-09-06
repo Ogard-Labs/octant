@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   decodeContentSha256,
@@ -10,6 +10,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatComposer, type ChatComposerProps } from "./ChatComposer";
 import { OctantCommandProvider } from "../palette/CommandRegistry";
 import type { OctantCommand } from "../palette/commandModel";
+import { SpeechCapabilityProvider } from "../voice/SpeechCapabilityContext";
+import {
+  fakeSpeechClient,
+  installFakeMicrophone,
+  speechTestInstances,
+  speechTestSettings,
+  uninstallFakeMicrophone,
+} from "../voice/speechTestSupport";
 
 function renderComposer(overrides: Partial<ChatComposerProps> = {}) {
   const props: ChatComposerProps = {
@@ -41,6 +49,54 @@ function renderComposer(overrides: Partial<ChatComposerProps> = {}) {
 }
 
 describe("ChatComposer", () => {
+  it("offers dictation beside the attach control only when transcription is ready, and appends the words to the draft", async () => {
+    const user = userEvent.setup();
+    renderComposer({ draft: "Please" });
+    expect(screen.queryByRole("button", { name: "Dictate message" })).toBeNull();
+
+    installFakeMicrophone();
+    try {
+      const { client } = fakeSpeechClient({ transcript: "fix the flaky test" });
+      const onDraftChange = vi.fn();
+      const props: ChatComposerProps = {
+        draft: "Please",
+        isSending: false,
+        model: { options: [{ id: "model-a", label: "Model A" }], value: "model-a" },
+        onDraftChange,
+        onFileSelected: vi.fn(),
+        onModelChange: vi.fn(),
+        onProviderChange: vi.fn(),
+        onResearchEnabledChange: vi.fn(),
+        onResearchRoutingChange: vi.fn(),
+        onSend: vi.fn(async () => true),
+        provider: { options: [{ id: "provider-a", label: "Provider A" }], value: "provider-a" },
+        research: {
+          backend: { kind: "selected", backend: "searxng" },
+          enabled: false,
+          routing: "automatic",
+        },
+      };
+      render(
+        <SpeechCapabilityProvider
+          client={client}
+          instances={speechTestInstances()}
+          settings={speechTestSettings()}
+        >
+          <ChatComposer {...props} />
+        </SpeechCapabilityProvider>,
+      );
+      const toolbar = screen.getAllByRole("toolbar", { name: "Composer controls" })[1]!;
+      const mic = within(toolbar).getByRole("button", { name: "Dictate message" });
+      expect(within(toolbar).getByRole("button", { name: "Add attachment" })).toBeVisible();
+      await user.click(mic);
+      await user.click(await within(toolbar).findByRole("button", { name: "Stop dictating" }));
+      await waitFor(() => expect(onDraftChange).toHaveBeenCalledWith("Please fix the flaky test"));
+      expect(props.onSend).not.toHaveBeenCalled();
+    } finally {
+      uninstallFakeMicrophone();
+    }
+  });
+
   it("starts as a compact one-line composer and hides a redundant provider picker", () => {
     renderComposer();
 

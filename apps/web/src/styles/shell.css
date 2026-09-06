@@ -187,7 +187,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   background: transparent;
   color: inherit;
   font: inherit;
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
   text-decoration: underline;
   cursor: pointer;
   padding: 0;
@@ -659,7 +659,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   align-items: center;
   gap: 3px;
   color: var(--oct-meta);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   line-height: 1.3;
 }
 
@@ -750,7 +750,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 .sidebar-navigation__thread-follow-up {
   padding: 0;
   color: var(--oct-meta);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   line-height: 1.4;
   border: 0;
   border-radius: 0;
@@ -871,7 +871,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   align-items: center;
   gap: 2px;
   opacity: 0;
-  transition: opacity 120ms ease;
+  transition: opacity var(--oct-motion-fast) ease;
 }
 
 .sidebar-navigation__thread-row:hover .sidebar-navigation__thread-actions,
@@ -995,6 +995,83 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Linked pull requests close the card as their own group: a rule above them
+   says these are things to open, where the facts above are things to read. */
+.thread-row-info-card__prs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--oct-border-soft);
+}
+
+.thread-row-info-card__pr {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* Number and title on the first line, repository and facts on the second,
+   with the glyph spanning both. The reference is a card-shaped control, so
+   it drops the button recipe's fixed height rather than clipping its second
+   line. */
+.thread-row-info-card__pr-reference {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 8px;
+  row-gap: 1px;
+  align-items: center;
+  min-width: 0;
+  height: auto;
+  min-height: 0;
+  padding: 4px 6px;
+  text-align: left;
+  font-weight: 400;
+}
+
+.thread-row-info-card__pr-reference > svg {
+  grid-row: span 2;
+  color: var(--oct-meta);
+}
+
+.thread-row-info-card__pr-title,
+.thread-row-info-card__pr-meta {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--oct-text-xs);
+  line-height: 1.35;
+}
+
+.thread-row-info-card__pr-title {
+  color: var(--oct-fg);
+  font-weight: 500;
+}
+
+.thread-row-info-card__pr-meta {
+  color: var(--oct-meta);
+}
+
+.thread-row-info-card__pr-github {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  color: var(--oct-meta);
+  border-radius: var(--oct-radius-sm);
+}
+
+.thread-row-info-card__pr-more {
+  padding: 2px 6px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
 .sidebar-navigation__thread-rename {
@@ -1213,7 +1290,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   margin: 0;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
   letter-spacing: 0;
   text-transform: none;
 }
@@ -1221,7 +1298,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 .draft-thread__heading {
   margin: 0;
   color: var(--octant-text-primary);
-  font-size: clamp(25px, 3vw, 31px);
+  font-size: calc(28 * var(--oct-text-step));
   font-weight: 500;
   letter-spacing: -0.035em;
   line-height: 1.1;
@@ -1306,8 +1383,8 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 
 .draft-thread__intent-label {
   color: var(--octant-text-primary);
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
 }
 
 .draft-thread__intent-description {
@@ -1339,7 +1416,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   height: 24px;
   padding: 0 6px;
   color: var(--octant-text-muted);
-  font-size: 11.5px;
+  font-size: var(--oct-text-detail);
 }
 
 .composer-folder-selector__label {
@@ -1468,7 +1545,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   align-items: center;
   gap: 5px;
   color: var(--octant-text-muted);
-  font-size: 11.5px;
+  font-size: var(--oct-text-detail);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -1646,11 +1723,7 @@ form > .work-composer-adapter__attachments {
 
 .work-composer-adapter__attach-btn {
   margin-left: 6px;
-  border: 0;
-  background: transparent;
-  color: var(--octant-text-primary);
-  cursor: pointer;
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   text-decoration: underline;
 }
 
@@ -1849,7 +1922,7 @@ form > .work-composer-adapter__attachments {
   border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
-  font-size: 11.5px;
+  font-size: var(--oct-text-detail);
   font-weight: 500;
 }
 
@@ -1954,7 +2027,7 @@ form > .work-composer-adapter__attachments {
   padding: 8px 12px;
   color: var(--octant-text-secondary);
   border-top: 1px solid var(--octant-border);
-  font-size: 11.5px;
+  font-size: var(--oct-text-detail);
   font-weight: 500;
 }
 
@@ -1971,7 +2044,7 @@ form > .work-composer-adapter__attachments {
   border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
-  font-size: 11.5px;
+  font-size: var(--oct-text-detail);
   font-weight: 500;
 }
 
@@ -2082,7 +2155,7 @@ form > .work-composer-adapter__attachments {
 
 .code-composer-choice__option-detail {
   color: var(--octant-text-muted);
-  font-size: calc(11.5 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   line-height: 1.4;
 }
 
@@ -2094,7 +2167,7 @@ form > .work-composer-adapter__attachments {
   padding: 8px 12px;
   color: var(--octant-text-secondary);
   border-top: 1px solid var(--octant-border);
-  font-size: 11.5px;
+  font-size: var(--oct-text-detail);
   font-weight: 500;
 }
 
@@ -2334,7 +2407,7 @@ form > .work-composer-adapter__attachments {
 .browser-workspace__empty h2 {
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
 }
 
 .browser-workspace__empty p,

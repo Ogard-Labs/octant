@@ -152,7 +152,7 @@ html[data-theme="dark"] .settings-view {
 .settings-view__breadcrumb strong {
   overflow: hidden;
   color: var(--octant-text-secondary);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -167,7 +167,7 @@ html[data-theme="dark"] .settings-view {
 .settings-view__header h1 {
   color: var(--octant-text-primary);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-lg);
+  font-size: var(--oct-text-xl);
   font-weight: 600;
   letter-spacing: -0.025em;
   line-height: 1.2;
@@ -273,7 +273,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   overflow: hidden;
   color: var(--octant-text-primary);
   font-size: var(--oct-text-sm);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -311,7 +311,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   margin: 0;
   color: var(--octant-text-primary);
   font-size: var(--oct-text-sm);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
 }
 
 .settings-view__drawer-body {
@@ -365,7 +365,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   color: var(--octant-text-muted);
   font-family: var(--oct-font-display);
   font-size: calc(12 * var(--oct-text-step));
-  font-weight: 600;
+  font-weight: var(--oct-weight-regular);
   letter-spacing: normal;
   text-transform: none;
 }
@@ -435,9 +435,9 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 }
 
 .settings-panel__header h2 {
-  color: var(--octant-text-primary);
+  color: var(--octant-text-secondary);
   font-size: var(--oct-text-sm);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
   letter-spacing: -0.01em;
   text-transform: none;
 }
@@ -573,7 +573,9 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="chat-default-model"],
 .setrow[data-setting-id="chat-personality"],
 .setrow[data-setting-id="code-editor-arguments"],
-.setrow[data-setting-id="execution-context"] {
+.setrow[data-setting-id="execution-context"],
+.setrow[data-setting-id="transcription"],
+.setrow[data-setting-id="synthesis"] {
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -587,11 +589,27 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="chat-default-model"] > .setrow-control,
 .setrow[data-setting-id="chat-personality"] > .setrow-control,
 .setrow[data-setting-id="code-editor-arguments"] > .setrow-control,
-.setrow[data-setting-id="execution-context"] > .setrow-control {
+.setrow[data-setting-id="execution-context"] > .setrow-control,
+.setrow[data-setting-id="transcription"] > .setrow-control,
+.setrow[data-setting-id="synthesis"] > .setrow-control {
   grid-column: 1;
   grid-row: auto;
   justify-self: stretch;
   margin-top: var(--oct-space-3);
+}
+
+/* A speech endpoint is three fields and two actions; they read as one form
+   stacked under the row's hint, the way the other compound editors do. */
+.voice-settings__form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--oct-space-3);
+  width: 100%;
+}
+
+.voice-settings__form > label {
+  display: grid;
+  gap: var(--oct-space-1);
 }
 
 .setrow-control > .settings-view__setting {
@@ -654,7 +672,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .settings-search-results__scope {
   color: var(--octant-text-muted);
-  font-size: calc(10 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   font-weight: 500;
   text-transform: none;
   letter-spacing: 0;
@@ -839,7 +857,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-card-section > legend {
   margin: 0;
   padding: 20px 20px 0;
-  color: var(--octant-text-primary);
+  color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-display);
@@ -936,7 +954,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   margin: 0;
   color: var(--octant-text-primary);
   font-size: var(--oct-text-sm);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
 }
 
 .settings-profile-disclosure__summary-copy > span {
@@ -1050,10 +1068,10 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setgroup-head {
   min-height: 48px;
   padding: 16px 20px 8px;
-  color: var(--octant-text-primary);
+  color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
 }
 
 .settings-view__field,
@@ -1316,10 +1334,12 @@ textarea.settings-view__text-input {
 
 /* The pane colours are literals on purpose: each card depicts what Light or
    Dark would look like, so they must not follow the theme that is active. */
+/* ui-style-exception: fixed-scheme */
 .settings-scheme__preview-pane--light {
   background: #fafafb;
 }
 
+/* ui-style-exception: fixed-scheme */
 .settings-scheme__preview-pane--dark {
   background: #1e1e1e;
 }
@@ -1329,10 +1349,12 @@ textarea.settings-view__text-input {
   border-radius: 4px;
 }
 
+/* ui-style-exception: fixed-scheme */
 .settings-scheme__preview-pane--light .settings-scheme__preview-sidebar {
   background: #eceded;
 }
 
+/* ui-style-exception: fixed-scheme */
 .settings-scheme__preview-pane--dark .settings-scheme__preview-sidebar {
   background: #191919;
 }
@@ -1350,10 +1372,12 @@ textarea.settings-view__text-input {
   border-radius: 3px;
 }
 
+/* ui-style-exception: fixed-scheme */
 .settings-scheme__preview-pane--light .settings-scheme__preview-content > span {
   background: #dfe1e4;
 }
 
+/* ui-style-exception: fixed-scheme */
 .settings-scheme__preview-pane--dark .settings-scheme__preview-content > span {
   background: #333333;
 }
@@ -1511,7 +1535,7 @@ textarea.settings-view__text-input {
   width: 100%;
   padding: 10px 0 8px;
   border-bottom: 1px solid var(--oct-hairline);
-  color: var(--octant-text-primary);
+  color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-display);
@@ -1942,7 +1966,7 @@ textarea.settings-view__text-input {
   margin: 8px 0 0;
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-xs);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
 }
 
 .host-data-map__related {

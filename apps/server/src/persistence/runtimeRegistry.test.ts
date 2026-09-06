@@ -696,6 +696,7 @@ describe("createPhase1RuntimeRegistries", () => {
           modeSwitcherPresentation,
           workspaceMaterial: "opaque",
           navigatorAssistant: {},
+          voice: {},
           projectViewSwitcherPresentation: "dropdown",
           transcriptTextSize: "medium",
           transcriptWidth: "narrow",
@@ -903,6 +904,7 @@ function validSettingsPayload() {
       modeSwitcherPresentation: "dropdown",
       // Unconfigured Navigator: the section decodes to its empty honest state.
       navigatorAssistant: {},
+      voice: {},
       projectViewSwitcherPresentation: "dropdown",
       transcriptTextSize: "medium",
       transcriptWidth: "narrow",

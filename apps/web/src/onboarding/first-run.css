@@ -144,7 +144,7 @@
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-pill);
   font-size: var(--oct-text-xs);
-  font-weight: 600;
+  font-weight: var(--oct-weight-display);
 }
 
 /* Configured is also written into the marker (the check) and announced by the
@@ -156,7 +156,7 @@
 
 .first-run__rail-title {
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
 }
 
 .first-run__rail-summary {
@@ -194,7 +194,7 @@
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-lg);
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
 }
 
 .first-run__step-count {
@@ -279,7 +279,7 @@
 }
 
 .first-run__summary-headline {
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
 }
 
 .first-run__summary-detail {
@@ -307,7 +307,7 @@
 }
 
 .first-run__provider-name {
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
   overflow-wrap: anywhere;
 }
 

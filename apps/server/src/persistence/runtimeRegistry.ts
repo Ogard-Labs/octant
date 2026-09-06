@@ -188,6 +188,7 @@ import {
 } from "../canvas/canvasEventStore";
 import { registerArtifactMirrorEvents } from "../canvas/artifactMirrorEventStore";
 import { registerGoalLoopEvents } from "../goal/goalLoopEventStore";
+import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
 import { registerShipEvents } from "../ship/shipEventStore";
 import { registerCanvasShareEvents } from "../canvas/canvasShareEventStore";
 import type { HostIdentityMigrationRegistry } from "./hostIdentityMigration";
@@ -358,6 +359,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerCanvasShareEvents(events);
   registerArtifactMirrorEvents(events);
   registerGoalLoopEvents(events);
+  registerNativeHarnessEvents(events);
   registerShipEvents(events);
 
   const hostIdentityMigrations = createRuntimeHostIdentityMigrationRegistry(events);

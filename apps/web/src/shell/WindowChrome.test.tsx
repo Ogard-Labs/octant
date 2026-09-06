@@ -186,7 +186,15 @@ describe("WindowChrome", () => {
         (element) => getComputedStyle(element).fontWeight,
       );
 
-      expect(weights).toEqual(["600", "600", "600", "600", "600"]);
+      // jsdom reports a custom property unresolved; `--oct-weight-display` is 500,
+      // so only the page title and content emphasis stay at 600.
+      expect(weights).toEqual([
+        "600",
+        "var(--oct-weight-display)",
+        "var(--oct-weight-display)",
+        "var(--oct-weight-display)",
+        "600",
+      ]);
     } finally {
       fixture.remove();
       stylesheet.remove();

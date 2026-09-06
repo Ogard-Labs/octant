@@ -3,19 +3,23 @@ import type {
   ProviderToolAnswer,
   ProviderToolDefinition,
 } from "@octant/contracts";
+import { MAX_PROVIDER_TOOL_RESULT_BYTES, MAX_PROVIDER_TOOLS } from "@octant/contracts";
 
 /**
  * OpenAI function name grammar: ^[a-zA-Z0-9_-]{1,64}$
  * The contracts bound tool names to 128 characters; OpenAI-compatible endpoints enforce 64.
  */
 const TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
-const MAX_ENCODED_TOOLS = 8;
+// One bound for every tool set that reaches a provider; the harness alone offers thirteen.
+const MAX_ENCODED_TOOLS = MAX_PROVIDER_TOOLS;
 const MAX_TOOL_CALL_ID_LENGTH = 128;
-const MAX_TOOL_OUTPUT_BYTES = 65_536;
+const MAX_TOOL_OUTPUT_BYTES = MAX_PROVIDER_TOOL_RESULT_BYTES;
 const MAX_TOOL_OUTPUT_DEPTH = 16;
 const MAX_TOOL_OUTPUT_ENTRIES = 256;
 const MAX_TOOL_OUTPUT_KEY_LENGTH = 128;
-const MAX_TOOL_OUTPUT_STRING_LENGTH = 4_096;
+// A read or a command's output is one string; the whole-result byte bound is
+// the real ceiling, and a per-string bound below it only refused honest reads.
+const MAX_TOOL_OUTPUT_STRING_LENGTH = MAX_PROVIDER_TOOL_RESULT_BYTES;
 
 export const OCTANT_CAPABILITY_ECHO_TOOL_NAME = "octant_capability_echo";
 

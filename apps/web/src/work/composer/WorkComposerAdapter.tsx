@@ -17,6 +17,8 @@ import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { clipboardHasImage } from "../../chat/composerImagePaste";
 import { ThreadComposer } from "../../composer/ThreadComposer";
+import { ComposerVoiceButton } from "../../voice/ComposerVoiceButton";
+import { appendTranscript } from "../../voice/appendTranscript";
 import { selectedModelReadsImages, useWorkComposerImages } from "./useWorkComposerImages";
 import { WorkImageAttachmentChips } from "./WorkImageAttachmentChips";
 import {
@@ -159,7 +161,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
             className="work-composer-adapter__attach-btn"
             onClick={props.onAttachFolder}
             type="button"
-            variant="ghost"
+            variant="link"
           >
             Attach folder
           </OctantButton>
@@ -281,6 +283,12 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                   >
                     <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
                   </OctantButton>
+                  <ComposerVoiceButton
+                    disabled={props.creating === true}
+                    onTranscript={(transcript) =>
+                      setPrompt((current) => appendTranscript(current, transcript))
+                    }
+                  />
 
                   <span aria-hidden="true" className="composer-gap" />
                   <ComposerModelPicker

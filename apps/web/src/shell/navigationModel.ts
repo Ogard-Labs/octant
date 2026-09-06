@@ -1,3 +1,4 @@
+import type { ThreadBoardPullRequestSummaries } from "@octant/contracts";
 import type { OctantMode } from "@octant/contracts/modes";
 
 export type NavigationAvailability = "available" | "disabled" | "unavailable" | "unauthorized";
@@ -131,6 +132,14 @@ export interface ChatThreadNavigationItem {
   readonly providerInstanceId?: string;
   readonly navigationId?: string;
   readonly projectId?: string;
+  /**
+   * The exact linked pull requests the host joined for a Code row, from its
+   * cached snapshot. Absent when there are none, when GitHub authority is
+   * gone, or on Chat and Work rows: a Work thread has no authoritative link to
+   * the Code thread that carries its pull request, so it shows none rather
+   * than a guess — the same closed door the Work board keeps.
+   */
+  readonly pullRequests?: ThreadBoardPullRequestSummaries;
   readonly threadId: string;
   readonly title: string;
   readonly unread?: boolean;

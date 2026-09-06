@@ -37,6 +37,8 @@ import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
+import { appendTranscript } from "../voice/appendTranscript";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { useOctantCommands } from "../palette/CommandRegistry";
 import {
@@ -679,6 +681,12 @@ export function ChatComposer(props: ChatComposerProps) {
         >
           <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
         </OctantButton>
+        <ComposerVoiceButton
+          disabled={props.isSending}
+          onTranscript={(transcript) =>
+            props.onDraftChange(appendTranscript(props.draft, transcript))
+          }
+        />
       </div>
       <div className="chat-composer__selectors">
         {props.providerGroups !== undefined && props.onSelectModel !== undefined ? (
