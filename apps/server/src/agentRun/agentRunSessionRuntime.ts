@@ -1,3 +1,5 @@
+import { boundedToolResultJson } from "../providers/toolResultJson";
+import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import {
   decodeCapacityReservationId,
   decodeContextSubjectRef,
@@ -142,6 +144,16 @@ export interface AgentRunSessionRuntimeOptions {
     readonly text: string;
     readonly occurredAt: UtcTimestamp;
   }) => void;
+  /**
+   * The app-managed tools a managed child may offer its provider, composed
+   * from the run's own clamped authority. Absent means the child gets none
+   * and every tool request is declined.
+   */
+  readonly appManagedTools?: (input: {
+    readonly run: AgentRun;
+    readonly authority: AgentRunAuthority;
+    readonly projectRoot: string;
+  }) => AppManagedToolSet | undefined;
   readonly onSessionSettled?: (input: {
     readonly runId: AgentRunId;
     readonly outcome: AgentRunSessionOutcome;
@@ -307,6 +319,9 @@ export function createAgentRunSessionRuntime(
             shutdownTimeoutMs,
             shutdown,
             onTextDelta: options.onTextDelta,
+            ...(options.appManagedTools === undefined
+              ? {}
+              : { appManagedTools: options.appManagedTools({ run, authority, projectRoot }) }),
           }),
         ),
         { signal: controller.signal },
@@ -497,6 +512,7 @@ interface ManagedSessionInput {
   readonly shutdownTimeoutMs: number;
   readonly shutdown: SessionShutdown;
   readonly onTextDelta?: AgentRunSessionRuntimeOptions["onTextDelta"];
+  readonly appManagedTools?: AppManagedToolSet | undefined;
 }
 
 interface ManagedSessionState {
@@ -617,6 +633,9 @@ function runSessionTurn(
     });
     state.acquired = true;
 
+    // A stopped run must also stop a tool call still working for it.
+    const toolAbort = new AbortController();
+    yield* Effect.addFinalizer(() => Effect.sync(() => toolAbort.abort()));
     yield* Effect.addFinalizer(() =>
       shutdownProviderSession(connection, input, state, releaseCapacity),
     );
@@ -631,15 +650,15 @@ function runSessionTurn(
 
     const collected = yield* subscribeThenSend({
       connection,
-      consume: (events) => collectSessionEvents(connection, events, input, state),
+      consume: (events) => collectSessionEvents(connection, events, input, state, toolAbort),
       send: connection.send({
         sessionId: input.sessionId,
         prompt: input.run.task,
         context: [...input.context],
-        // This slice grants a managed child no attachments and no app-managed
-        // tools; requests for either are declined rather than silently served.
+        // A managed child gets no attachments; its tools are whatever the
+        // host composed from the run's own clamped authority, or none.
         attachments: [],
-        tools: [],
+        tools: [...(input.appManagedTools?.definitions ?? [])],
       }),
     });
 
@@ -741,6 +760,7 @@ function collectSessionEvents(
   events: Stream.Stream<ProviderRuntimeEvent, ProviderFailure>,
   input: ManagedSessionInput,
   state: ManagedSessionState,
+  toolAbort: AbortController,
 ): Effect.Effect<void, ProviderFailure> {
   const answeredToolRequestIds = new Set<string>();
   const answeredApprovalRequestIds = new Set<string>();
@@ -805,11 +825,35 @@ function collectSessionEvents(
         if (event.kind === "tool-request") {
           if (answeredToolRequestIds.has(event.requestId)) return;
           answeredToolRequestIds.add(event.requestId);
+          const toolSet = input.appManagedTools;
+          const offered = toolSet?.definitions.some(
+            (definition) => definition.name === event.toolName,
+          );
+          if (toolSet === undefined || offered !== true) {
+            yield* connection.answerTool({
+              sessionId: input.sessionId,
+              requestId: event.requestId,
+              resultJson: JSON.stringify({ error: "tool-unavailable" }),
+              isError: true,
+            });
+            return;
+          }
+          const execution = yield* Effect.promise(async () => {
+            try {
+              return await toolSet.execute({
+                name: event.toolName,
+                inputJson: event.inputJson,
+                signal: toolAbort.signal,
+              });
+            } catch {
+              return { result: { error: "tool-execution-failed" }, isError: true } as const;
+            }
+          });
           yield* connection.answerTool({
             sessionId: input.sessionId,
             requestId: event.requestId,
-            resultJson: JSON.stringify({ error: "tool-unavailable" }),
-            isError: true,
+            resultJson: boundedToolResultJson(execution.result),
+            isError: execution.isError === true,
           });
           return;
         }

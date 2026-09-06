@@ -1,5 +1,7 @@
 {
   "font-size-scale": {
+    "apps/web/src/harness/native-harness.css": 6,
+    "apps/web/src/styles.css": 1,
     "apps/web/src/styles/chat.css": 1,
     "apps/web/src/styles/octant.css": 5
   },
@@ -7,9 +9,8 @@
     "apps/web/src/context/context.css": 2,
     "apps/web/src/styles.css": 1,
     "apps/web/src/styles/canvas.css": 2,
-    "apps/web/src/styles/chat.css": 2,
+    "apps/web/src/styles/chat.css": 4,
     "apps/web/src/styles/octant.css": 5,
-    "apps/web/src/styles/polish.css": 1,
     "apps/web/src/styles/shell.css": 2
   },
   "important": {
@@ -37,7 +38,7 @@
     "apps/web/src/styles/artifacts.css": 10,
     "apps/web/src/styles/automation.css": 23,
     "apps/web/src/styles/canvas.css": 4,
-    "apps/web/src/styles/chat.css": 4,
+    "apps/web/src/styles/chat.css": 5,
     "apps/web/src/styles/code.css": 18,
     "apps/web/src/styles/components.css": 1,
     "apps/web/src/styles/dock.css": 8,
@@ -47,7 +48,7 @@
     "apps/web/src/styles/polish.css": 2,
     "apps/web/src/styles/remote-shell.css": 1,
     "apps/web/src/styles/settings.css": 24,
-    "apps/web/src/styles/shell.css": 53,
+    "apps/web/src/styles/shell.css": 55,
     "apps/web/src/styles/zen.css": 3
   }
 }

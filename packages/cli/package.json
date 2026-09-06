@@ -17,7 +17,10 @@
   },
   "dependencies": {
     "@octant/contracts": "workspace:*",
-    "@octant/host-runtime": "workspace:*"
+    "@octant/domain": "workspace:*",
+    "@octant/host-runtime": "workspace:*",
+    "@octant/theme": "workspace:*",
+    "@opentui/core": "0.5.10"
   },
   "devDependencies": {
     "@types/bun": "catalog:",

@@ -598,6 +598,21 @@
   flex: 1;
 }
 
+/* Read-aloud lives with the transcript it reads; the row keeps the toggle,
+   the stop control while speaking, and the reason when a voice refused. */
+.navigator-panel__read-aloud {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.navigator-panel__read-aloud p {
+  margin: 0;
+  color: var(--octant-danger-text);
+  font-size: var(--oct-text-xs);
+}
+
 @media (prefers-contrast: more) {
   .navigator-panel__notice,
   .navigator-panel__capability {

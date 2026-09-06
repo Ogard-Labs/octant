@@ -318,3 +318,16 @@ describe("ModelPicker", () => {
     expect(screen.getByText(/No providers available|Configure a provider/i)).toBeVisible();
   });
 });
+
+describe("ModelPicker with the native harness", () => {
+  it("nests harness endpoints under one Octant heading", () => {
+    const a = openAiInstance("10000000-0000-4000-8000-0000000000c1", "My OpenAI key");
+    const observedByInstance = new Map([
+      [a.id, observed(a.id, [model({ id: "gpt-x", displayName: "GPT X" })])],
+    ]);
+    render(<ModelPicker groups={groups([a], observedByInstance)} onSelect={vi.fn()} />);
+    expect(screen.getByText("Octant")).toBeVisible();
+    expect(screen.getByText("Native harness")).toBeVisible();
+    expect(screen.getByText("My OpenAI key")).toBeVisible();
+  });
+});

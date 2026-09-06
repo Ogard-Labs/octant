@@ -48,6 +48,15 @@ import type {
 
 const decodeUtcTimestamp = Schema.decodeUnknownSync(UtcTimestampSchema);
 const GITHUB_READ_CONCURRENCY = 4;
+/**
+ * How long a sidebar navigation tick may reuse the last board join. The
+ * sidebar re-reads navigation every two seconds, and a fresh board snapshot
+ * resolves every Project's Git remotes and replays each thread's operation
+ * history; doing that on every tick would contend with the thread switching
+ * the tick exists to keep cheap. A refresh or revocation drops the memo at
+ * once, so the sidebar is never older than the board by more than this.
+ */
+const NAVIGATION_SNAPSHOT_MAX_AGE_MS = 10_000;
 
 export interface CodeProjectPullRequestAuthorizedProject {
   readonly id: ProjectId;
@@ -120,6 +129,13 @@ interface CachedDetail {
   readonly lastSuccessfulRefreshAt: UtcTimestamp;
 }
 
+/** The read-only join input a Work, Code, or sidebar read composes summaries from. */
+export interface BoardSnapshot {
+  readonly rows: ReadonlyArray<CodeProjectPullRequestRow>;
+  readonly freshness: CodeProjectPullRequestFreshness;
+  readonly githubRevoked: boolean;
+}
+
 /**
  * What one background observation of a Project reported, as a value the
  * cadence can pace on. `unconnected` means there was nothing to observe;
@@ -165,6 +181,14 @@ export class CodeProjectPullRequestService {
   #refreshQueue: Promise<unknown> = Promise.resolve();
   #githubRevoked = false;
   /**
+   * The last board join handed to a navigation read, by window, with the
+   * time it was computed. See `NAVIGATION_SNAPSHOT_MAX_AGE_MS`.
+   */
+  readonly #navigationSnapshots = new Map<
+    string,
+    { readonly computedAtMs: number; readonly snapshot: Promise<BoardSnapshot> }
+  >();
+  /**
    * Bumped by every revocation. A refresh captures it before its GitHub reads
    * and refuses to commit if it changed, so a revocation that lands while
    * reads are in flight cannot be undone by the resuming refresh.
@@ -205,6 +229,7 @@ export class CodeProjectPullRequestService {
     this.#githubRevoked = true;
     this.#revocationGeneration += 1;
     this.#cache = undefined;
+    this.#navigationSnapshots.clear();
     this.#detailCache.clear();
     this.#detailFreshness.clear();
     this.#freshness = { status: "stale", staleReason: "disconnected" };
@@ -242,11 +267,7 @@ export class CodeProjectPullRequestService {
    * private refresh cache with bounded exact identities recovered by the
    * thread source from the operation journal.
    */
-  async boardSnapshot(windowId: WindowId): Promise<{
-    readonly rows: ReadonlyArray<CodeProjectPullRequestRow>;
-    readonly freshness: CodeProjectPullRequestFreshness;
-    readonly githubRevoked: boolean;
-  }> {
+  async boardSnapshot(windowId: WindowId): Promise<BoardSnapshot> {
     const [projects, threads] = await Promise.all([
       this.#resolveProjects(windowId),
       this.#threads.list(),
@@ -271,6 +292,29 @@ export class CodeProjectPullRequestService {
       freshness: boardFreshness,
       githubRevoked: this.#githubRevoked,
     };
+  }
+
+  /**
+   * The board join for a sidebar navigation read. Same rows and authority as
+   * `boardSnapshot`, reused for a bounded time so the two-second navigation
+   * tick does not pay the full join each time. A snapshot that failed to
+   * compute is not memoized: the next tick tries again.
+   */
+  navigationSnapshot(windowId: WindowId): Promise<BoardSnapshot> {
+    const key = String(windowId);
+    const nowMs = Date.parse(this.#clock());
+    const memo = this.#navigationSnapshots.get(key);
+    if (memo !== undefined && nowMs - memo.computedAtMs < NAVIGATION_SNAPSHOT_MAX_AGE_MS) {
+      return memo.snapshot;
+    }
+    const snapshot = this.boardSnapshot(windowId);
+    this.#navigationSnapshots.set(key, { computedAtMs: nowMs, snapshot });
+    snapshot.catch(() => {
+      if (this.#navigationSnapshots.get(key)?.snapshot === snapshot) {
+        this.#navigationSnapshots.delete(key);
+      }
+    });
+    return snapshot;
   }
 
   async queryDetail(
@@ -634,6 +678,7 @@ export class CodeProjectPullRequestService {
       repositoriesTruncated: bounded.repositoriesTruncated,
       pullRequestsTruncated,
     };
+    this.#navigationSnapshots.clear();
     for (const repository of bounded.repositories) {
       const projectId = String(repository.projectId);
       const projectRows = rows.filter((row) => String(row.projectId) === projectId);

@@ -573,7 +573,9 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="chat-default-model"],
 .setrow[data-setting-id="chat-personality"],
 .setrow[data-setting-id="code-editor-arguments"],
-.setrow[data-setting-id="execution-context"] {
+.setrow[data-setting-id="execution-context"],
+.setrow[data-setting-id="transcription"],
+.setrow[data-setting-id="synthesis"] {
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -587,11 +589,27 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="chat-default-model"] > .setrow-control,
 .setrow[data-setting-id="chat-personality"] > .setrow-control,
 .setrow[data-setting-id="code-editor-arguments"] > .setrow-control,
-.setrow[data-setting-id="execution-context"] > .setrow-control {
+.setrow[data-setting-id="execution-context"] > .setrow-control,
+.setrow[data-setting-id="transcription"] > .setrow-control,
+.setrow[data-setting-id="synthesis"] > .setrow-control {
   grid-column: 1;
   grid-row: auto;
   justify-self: stretch;
   margin-top: var(--oct-space-3);
+}
+
+/* A speech endpoint is three fields and two actions; they read as one form
+   stacked under the row's hint, the way the other compound editors do. */
+.voice-settings__form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--oct-space-3);
+  width: 100%;
+}
+
+.voice-settings__form > label {
+  display: grid;
+  gap: var(--oct-space-1);
 }
 
 .setrow-control > .settings-view__setting {

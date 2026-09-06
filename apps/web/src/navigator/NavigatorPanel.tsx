@@ -1,7 +1,10 @@
 import type { NavigatorAssistantSnapshot, SettingsDeepLink } from "@octant/contracts";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { appendTranscript } from "../voice/appendTranscript";
+import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
+import { useReadAloud } from "../voice/useReadAloud";
 import type {
   NavigatorAssistantController,
   NavigatorAssistantState,
@@ -41,6 +44,24 @@ export function NavigatorPanel(props: NavigatorPanelProps) {
   const navigator = props.controller;
   const [prompt, setPrompt] = useState("");
   const state = navigator.state;
+  const readAloud = useReadAloud();
+  const [readAloudOn, setReadAloudOn] = useState(false);
+  // The reply on screen when read-aloud was switched on is not read: the
+  // person has already seen it. Only replies that arrive afterwards speak.
+  // `null` is the distinct baseline for "switched on with nothing on screen",
+  // so the first reply of an empty transcript is still read.
+  const lastHeardReply = useRef<string | null | undefined>(undefined);
+  const latestReply = state.kind === "ready" ? latestAssistantReply(state.snapshot) : undefined;
+  useEffect(() => {
+    if (!readAloudOn || latestReply === undefined) return;
+    if (lastHeardReply.current === undefined) {
+      lastHeardReply.current = latestReply.key;
+      return;
+    }
+    if (lastHeardReply.current === latestReply.key) return;
+    lastHeardReply.current = latestReply.key;
+    void readAloud.speak(latestReply.text);
+  }, [latestReply, readAloud, readAloudOn]);
 
   return (
     <section aria-label="Navigator" className="navigator-panel">
@@ -117,6 +138,33 @@ export function NavigatorPanel(props: NavigatorPanelProps) {
         />
       ) : null}
 
+      {state.kind === "ready" && readAloud.voice !== "none" ? (
+        <div className="navigator-panel__read-aloud">
+          <OctantButton
+            aria-pressed={readAloudOn}
+            onClick={() => {
+              const next = !readAloudOn;
+              setReadAloudOn(next);
+              lastHeardReply.current = latestReply?.key ?? null;
+              if (!next) readAloud.stop();
+            }}
+            size="sm"
+            type="button"
+            variant={readAloudOn ? "secondary" : "ghost"}
+          >
+            {readAloud.voice === "provider"
+              ? "Read replies aloud"
+              : "Read replies aloud (system voice)"}
+          </OctantButton>
+          {readAloud.speaking ? (
+            <OctantButton onClick={readAloud.stop} size="sm" type="button" variant="ghost">
+              Stop reading
+            </OctantButton>
+          ) : null}
+          {readAloud.error === undefined ? null : <p role="alert">{readAloud.error}</p>}
+        </div>
+      ) : null}
+
       {state.kind === "ready" || state.kind === "unconfigured" ? (
         <form
           noValidate
@@ -135,6 +183,12 @@ export function NavigatorPanel(props: NavigatorPanelProps) {
             placeholder="Ask Navigator…"
             type="text"
             value={prompt}
+          />
+          <ComposerVoiceButton
+            disabled={navigator.busy || state.kind === "unconfigured"}
+            onTranscript={(transcript) =>
+              setPrompt((current) => appendTranscript(current, transcript))
+            }
           />
           <OctantButton
             disabled={navigator.busy || state.kind === "unconfigured"}
@@ -226,6 +280,19 @@ function describe(state: NavigatorAssistantState): string {
         ? "Ready"
         : `Running on ${String(state.snapshot.defaultProvider.modelId)}`;
   }
+}
+
+/** The newest assistant turn, keyed so a re-read of the same transcript is not a new reply. */
+function latestAssistantReply(
+  snapshot: NavigatorAssistantSnapshot,
+): { readonly key: string; readonly text: string } | undefined {
+  for (let index = snapshot.transcript.length - 1; index >= 0; index -= 1) {
+    const message = snapshot.transcript[index];
+    if (message?.role === "assistant") {
+      return { key: `${message.createdAt}:${index}`, text: message.text };
+    }
+  }
+  return undefined;
 }
 
 /** The host names the destination; an absent one still lands on the section. */

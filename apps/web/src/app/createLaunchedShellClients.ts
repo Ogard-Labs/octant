@@ -38,9 +38,14 @@ import { createGithubClient } from "@octant/client-runtime/github-client";
 import { createGithubCloneClient } from "@octant/client-runtime/github-clone-client";
 import { createGoalClient } from "@octant/client-runtime/goal-client";
 import { createGoalLoopClient } from "@octant/client-runtime/goal-loop-client";
+import {
+  createNativeHarnessClient,
+  type NativeHarnessClient,
+} from "@octant/client-runtime/native-harness-client";
 import { createHostClient, type HostClient } from "@octant/client-runtime/host-client";
 import { createHostControlClient } from "@octant/client-runtime/host-control-client";
 import { createImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import { createSpeechClient } from "@octant/client-runtime/speech-client";
 import { createIntegrationClient } from "@octant/client-runtime/integration-client";
 import { createMachineChangeClient } from "@octant/client-runtime/machine-change-client";
 import {
@@ -70,6 +75,7 @@ export interface CreateLaunchedShellClientsOptions {
   readonly agentProfileClient: AgentProfileClient | undefined;
   readonly agentRunClient: AgentRunClient | undefined;
   readonly agentRunSettingsClient: AgentRunSettingsClient | undefined;
+  readonly nativeHarnessClient: NativeHarnessClient | undefined;
   readonly appleToolchainClient: AppleToolchainClient | undefined;
   readonly automationClient: AutomationClient | undefined;
   readonly browserAutomationClient: BrowserAutomationClient | undefined;
@@ -91,6 +97,7 @@ export interface LaunchedShellClients {
   readonly agentProfileClient: AgentProfileClient;
   readonly agentRunClient: AgentRunClient;
   readonly agentRunSettingsClient: AgentRunSettingsClient;
+  readonly nativeHarnessClient: NativeHarnessClient;
   readonly appleToolchainClient: AppleToolchainClient;
   readonly automationClient: AutomationClient;
   readonly automationNotificationClient: ReturnType<typeof createAutomationNotificationClient>;
@@ -110,6 +117,7 @@ export interface LaunchedShellClients {
   readonly hostClient: HostClient;
   readonly hostControlClient: ReturnType<typeof createHostControlClient>;
   readonly imageGenerationClient: ReturnType<typeof createImageGenerationClient>;
+  readonly speechClient: ReturnType<typeof createSpeechClient>;
   readonly linearTransport: ReturnType<typeof createIntegrationClient>;
   readonly machineChangeClient: ReturnType<typeof createMachineChangeClient>;
   readonly navigatorAssistantClient: NavigatorAssistantClient | undefined;
@@ -187,8 +195,10 @@ export function createLaunchedShellClients(
     hostClient: options.hostClient ?? createHostClient({ baseUrl: options.serverUrl, fetch }),
     hostControlClient: createHostControlClient(port),
     imageGenerationClient: createImageGenerationClient(port),
+    speechClient: createSpeechClient(port),
     linearTransport: createIntegrationClient({ ...port, slug: "linear" }),
     machineChangeClient: createMachineChangeClient(port),
+    nativeHarnessClient: options.nativeHarnessClient ?? createNativeHarnessClient(port),
     navigatorAssistantClient,
     planClient: options.planClient ?? createPlanClient(port),
     previewClient: createPreviewClient(port),

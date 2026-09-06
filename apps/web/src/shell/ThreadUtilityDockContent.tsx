@@ -1,5 +1,7 @@
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
+import type { NativeHarnessFollowUpCreation } from "@octant/contracts";
+import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
@@ -25,6 +27,7 @@ import {
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import { lazy, Suspense } from "react";
 import { AgentRunHierarchy } from "../agents/AgentRunHierarchy";
+import { NativeHarnessSessionCard } from "../harness/NativeHarnessSessionCard";
 import { BrowserWorkspace } from "../browser/BrowserWorkspace";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import type { ChatReadCursorStore } from "../chat/useChatController";
@@ -71,6 +74,12 @@ export interface ThreadUtilityDockSubject {
 export interface ThreadUtilityDockContentProps {
   readonly agentRunClient?: AgentRunClient;
   readonly agentRunSettingsClient?: AgentRunSettingsClient;
+  readonly nativeHarnessClient?: NativeHarnessClient;
+  /** A confirmed follow-up's thread exists; open it with the prompt ready to send. */
+  readonly onFollowUpCreated?: (input: {
+    readonly created: NativeHarnessFollowUpCreation;
+    readonly prompt: string;
+  }) => void;
   readonly appleProjectPath?: string;
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly browserAutomationClient?: BrowserAutomationClient;
@@ -108,14 +117,25 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
       return unavailable("Agents", "This thread has no AgentRun service available.");
     }
     return (
-      <AgentRunHierarchy
-        allowCreation
-        client={props.agentRunClient}
-        parentThreadId={decodeAgentRunParentThreadId(props.subject.threadId)}
-        {...(props.agentRunSettingsClient === undefined
-          ? {}
-          : { settingsClient: props.agentRunSettingsClient })}
-      />
+      <>
+        {props.nativeHarnessClient === undefined ? null : (
+          <NativeHarnessSessionCard
+            client={props.nativeHarnessClient}
+            onFollowUpActivated={({ preview, created }) =>
+              props.onFollowUpCreated?.({ created, prompt: preview.suggestion.prompt })
+            }
+            threadId={props.subject.threadId}
+          />
+        )}
+        <AgentRunHierarchy
+          allowCreation
+          client={props.agentRunClient}
+          parentThreadId={decodeAgentRunParentThreadId(props.subject.threadId)}
+          {...(props.agentRunSettingsClient === undefined
+            ? {}
+            : { settingsClient: props.agentRunSettingsClient })}
+        />
+      </>
     );
   }
 

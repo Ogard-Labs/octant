@@ -33,6 +33,7 @@ import {
   type EventActor,
   type ProviderRuntimeEvent,
   type WindowId,
+  decodeCodeFailure,
 } from "@octant/contracts";
 import { Effect } from "effect";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
@@ -74,6 +75,12 @@ import {
 } from "./codeOperationService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
+import type {
+  NativeHarnessTurnAdmission,
+  NativeHarnessTurnScope,
+} from "../harness/nativeHarnessTurnObserver";
+import type { ProviderContextBlock } from "@octant/contracts";
+import { CodeServiceError } from "./codeService";
 import { RepositoryTestRunner } from "./repositoryTestRunner";
 import { RepositoryTestDiscoveryService } from "./repositoryTestDiscoveryService";
 import { CURATED_SCAFFOLDS, curatedScaffoldTools } from "../scaffold/curatedScaffoldCatalog";
@@ -187,6 +194,28 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
     readonly readThread: (windowId: WindowId, threadId: CodeThreadId) => CodeThread | undefined;
   }) => AppManagedToolSet | undefined;
+  /**
+   * The native harness tool set for a direct-endpoint provider: reads, edits,
+   * the sandboxed shell, and the harness's own reads, each authorized at the
+   * server choke point. Absent for providers that bring their own tools.
+   */
+  readonly nativeHarnessTools?: (input: {
+    readonly thread: CodeThread;
+    readonly checkoutRoot: string;
+    readonly windowId: WindowId;
+  }) => AppManagedToolSet | undefined;
+  /** The harness around a turn: stable instructions in front, the reply observed after. */
+  readonly nativeHarness?: {
+    readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
+    /** Absent means every turn is admitted. */
+    readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
+    readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
+    readonly turnCompleted: (
+      input: NativeHarnessTurnScope & { readonly text: string; readonly toolCalls: number },
+    ) => Promise<void>;
+    /** Settles a harness question the person answered through the Code question surface. */
+    readonly answerQuestion?: (threadId: string, questionId: string, answer: string) => void;
+  };
   readonly recordExternalContentIngestion?: CodeAppManagedToolsOptions["recordExternalContentIngestion"];
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
@@ -259,6 +288,17 @@ export interface CodeOperationRuntime {
   ): Promise<CodeOperationApprovalReceipt | undefined>;
   validateAppleApproval(windowId: WindowId, request: AppleActionRequest): Promise<boolean>;
   revokeApprovals(windowId: WindowId): void;
+  /**
+   * Shows a native-harness question on the thread's running turn so it is
+   * answered through the same inline surface as a provider's own question.
+   * False when the thread has no running turn.
+   */
+  raiseHarnessQuestion?(input: {
+    readonly threadId: string;
+    readonly questionId: string;
+    readonly prompt: string;
+    readonly options: ReadonlyArray<string>;
+  }): boolean;
   close(): Promise<void>;
   reconcile?: () => Promise<void>;
 }
@@ -606,15 +646,49 @@ export function createCodeOperationRuntime(
       });
     },
     revokeApprovals: (windowId) => approvalStore?.revokeWindow(windowId),
-    execute: async (windowId, rawCommand, options) => {
+    execute: async (windowId, rawCommand, executeOptions) => {
       const command = decodeCodeOperationCommand(rawCommand);
-      if (command.kind === "start-provider-turn") turns.noteStart(command);
+      if (command.kind === "start-provider-turn") {
+        const thread = options.persistence.readCodeThread(command.threadId);
+        // The pause state is the thread's own; a window without Open
+        // authority over its Project learns nothing here, not even "paused".
+        if (
+          thread !== undefined &&
+          !(await options.windowAccess.canAccessProject(windowId, thread.projectId))
+        ) {
+          throw new CodeServiceError(
+            decodeCodeFailure({
+              category: "unauthorized",
+              message: "Code operation is unauthorized.",
+            }),
+          );
+        }
+        const admission =
+          thread === undefined
+            ? undefined
+            : options.nativeHarness?.admitTurn?.({
+                threadId: String(thread.id),
+                mode: "code",
+                providerInstanceId: thread.providerInstanceId,
+                modelId: thread.modelId,
+                projectId: thread.projectId,
+              });
+        if (admission?.kind === "paused") {
+          throw new CodeServiceError(
+            decodeCodeFailure({
+              category: "waiting",
+              message: `${admission.status === "paused-by-advisor" ? "The advisor paused this thread" : "This thread is paused"}: ${admission.detail} Resume the harness session to continue.`,
+            }),
+          );
+        }
+        turns.noteStart(command);
+      }
       // Runtime work is opened by the service after its authoritative scope
       // check, while provider turns outlive this call and are opened by the
       // turn controller itself.
       const observed = codeRuntimeWorkObserved(command);
       try {
-        const result = await service.execute(windowId, command, options);
+        const result = await service.execute(windowId, command, executeOptions);
         if (
           command.kind === "start-provider-turn" &&
           result.kind === "provider-turn-state" &&
@@ -657,6 +731,7 @@ export function createCodeOperationRuntime(
       const snapshot = await service.readTerminal(windowId, input);
       return { terminalId: input.terminalId, state: snapshot.status };
     },
+    raiseHarnessQuestion: (input) => turns.raiseHarnessQuestion(input),
     subscribe: (windowId, threadId, operationId, afterCursor, limit) =>
       service.subscribe(windowId, threadId, operationId, afterCursor, limit),
     conversation: async (windowId, threadId, afterCursor, limit) => {
@@ -936,6 +1011,8 @@ interface ActiveTurn {
   readonly abort: AbortController;
   readonly approvals: Map<string, string>;
   readonly questions: Set<string>;
+  /** Questions the native harness asked on this turn; answered by the host, not the provider. */
+  readonly harnessQuestions: Set<string>;
   connection?: ProviderConnection;
   cursor: number;
   state: "running" | "waiting" | "completed" | "interrupted" | "failed";
@@ -1037,6 +1114,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       abort: new AbortController(),
       approvals: new Map(),
       questions: new Set(),
+      harnessQuestions: new Set(),
       cursor: 0,
       state: "running",
     };
@@ -1058,12 +1136,22 @@ class RuntimeTurnController implements CodeOperationTurnPort {
 
   async answerInput(input: Parameters<CodeOperationTurnPort["answerInput"]>[0]) {
     const active = this.#owned(input.thread, input.checkoutRoot);
-    if (
-      active === undefined ||
-      active.connection === undefined ||
-      !active.questions.has(input.requestId)
-    )
+    if (active === undefined || !active.questions.has(input.requestId)) {
       return turnState("failed");
+    }
+    if (active.harnessQuestions.has(input.requestId)) {
+      // A harness question is the host's own; the provider never saw it and
+      // is waiting on the tool call that asked.
+      active.questions.delete(input.requestId);
+      active.harnessQuestions.delete(input.requestId);
+      this.#options.nativeHarness?.answerQuestion?.(
+        String(active.thread.id),
+        input.requestId,
+        input.response,
+      );
+      return turnState(active.state);
+    }
+    if (active.connection === undefined) return turnState("failed");
     active.questions.delete(input.requestId);
     await Effect.runPromise(
       active.connection.answerUserInput({
@@ -1073,6 +1161,37 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       }),
     );
     return turnState(active.state);
+  }
+
+  /**
+   * Shows a native-harness question on this thread's own question surface,
+   * so it is answered exactly where a provider's question would be. Nothing
+   * happens for a thread without a running turn: the harness only asks from
+   * inside one.
+   */
+  raiseHarnessQuestion(input: {
+    readonly threadId: string;
+    readonly questionId: string;
+    readonly prompt: string;
+    readonly options: ReadonlyArray<string>;
+  }): boolean {
+    const active = this.#active.get(input.threadId);
+    if (active === undefined || active.state !== "running") return false;
+    active.questions.add(input.questionId);
+    active.harnessQuestions.add(input.questionId);
+    const frame = this.#events.append({
+      threadId: active.thread.id,
+      operationId: active.operationId,
+      expectedCursor: active.cursor,
+      event: {
+        kind: "input-requested",
+        requestId: input.questionId,
+        prompt: input.prompt,
+        options: input.options,
+      } as never,
+    });
+    active.cursor = frame.cursor;
+    return true;
   }
 
   async answerApproval(input: Parameters<CodeOperationTurnPort["answerApproval"]>[0]) {
@@ -1175,6 +1294,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return;
     }
     active.cursor = replay.nextCursor;
+    const harnessScope: NativeHarnessTurnScope = {
+      threadId: String(active.thread.id),
+      mode: "code",
+      providerInstanceId: active.thread.providerInstanceId,
+      modelId: active.thread.modelId,
+      projectId: active.thread.projectId,
+    };
+    const harnessContext = this.#options.nativeHarness?.contextFor(harnessScope) ?? [];
+    this.#options.nativeHarness?.turnStarted(harnessScope);
+    const fullContext = [...harnessContext, ...(context ?? [])];
     void Effect.runPromise(
       Effect.scoped(
         this.#runner.run({
@@ -1182,7 +1311,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           sessionId: active.sessionId as never,
           checkoutRoot: active.checkoutRoot,
           prompt,
-          ...(context === undefined ? {} : { context }),
+          ...(fullContext.length === 0 ? {} : { context: fullContext }),
+          ...(this.#options.nativeHarness === undefined
+            ? {}
+            : {
+                onTurnCompleted: (completed) =>
+                  this.#options.nativeHarness!.turnCompleted({ ...harnessScope, ...completed }),
+              }),
           ...(attachments === undefined ? {} : { attachments }),
           signal: active.abort.signal,
           provider: {
@@ -1263,6 +1398,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                     windowId: active.windowId,
                     thread: active.thread,
                     readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
+                  }),
+                  this.#options.nativeHarnessTools?.({
+                    thread: active.thread,
+                    checkoutRoot: active.checkoutRoot,
+                    windowId: active.windowId,
                   }),
                 ),
               }

@@ -73,10 +73,10 @@ distilled successor of the earlier long-form design specifications.
 | [0063](0063-agent-to-agent-messaging.md)                                    | Agent-to-agent messaging authority                                                          | Proposed           |
 | [0064](0064-pull-request-observation-cadence.md)                            | Opt-in background refresh of the pull-request snapshot                                      | Accepted           |
 | [0065](0065-project-planner-thread.md)                                      | A Project-scoped planner thread surveys the board and proposes work                         | Accepted           |
-| [0066](0066-native-harness-model-role-slots.md)                             | Native harness model role slots                                                             | Proposed           |
-| [0067](0067-native-harness-turn-loop-and-supervision.md)                    | Native harness turn loop, advisor, and follow-up suggestions                                | Proposed           |
+| [0066](0066-native-harness-model-role-slots.md)                             | Native harness model role slots                                                             | Accepted           |
+| [0067](0067-native-harness-turn-loop-and-supervision.md)                    | Native harness turn loop, advisor, and follow-up suggestions                                | Accepted           |
 | [0068](0068-linux-plan-process-deny.md)                                     | Linux Plan process denial uses seccomp                                                      | Accepted           |
-| [0069](0069-native-harness-context-overflow.md)                             | Native harness context overflow: hard cutover, evidence notes, and journal lookup           | Proposed           |
+| [0069](0069-native-harness-context-overflow.md)                             | Native harness context overflow: hard cutover, evidence notes, and journal lookup           | Accepted           |
 | [0070](0070-setup-surfaces-compose-from-public-blocks.md)                   | Renderer visual language matches public block catalogs                                      | Accepted           |
 | [0071](0071-one-navigation-and-surface-hierarchy.md)                        | One navigation and surface hierarchy                                                        | Accepted           |
 | [0072](0072-settings-collections-stay-open.md)                              | Settings collections stay open                                                              | Accepted           |
@@ -91,6 +91,7 @@ distilled successor of the earlier long-form design specifications.
 | [0081](0081-image-generation-is-its-own-surface.md)                         | Image generation is its own surface                                                         | Accepted           |
 | [0082](0082-provider-events-are-subscribed-before-a-turn-is-sent.md)        | Provider events are subscribed before a turn is sent                                        | Accepted           |
 | [0083](0083-a-work-turn-records-what-changed-in-its-folder.md)              | A Work turn records what changed in its folder                                              | Accepted           |
+| [0084](0084-voice-rides-an-openai-compatible-provider.md)                   | Voice rides an OpenAI-compatible provider                                                   | Accepted           |
 
 ## Adding an ADR
 

@@ -40,8 +40,10 @@ export type StylesheetBaseline = Readonly<
  * such as a light/dark preview swatch, and so must not follow the active theme. */
 const EXCEPTION_MARKER = /ui-style-exception:\s*fixed-scheme/;
 
+// `color-mix()` is how a theme token is tinted, so the call itself is not a raw
+// colour; a literal written inside one is still caught by the alternatives here.
 const COLOR_LITERAL =
-  /(?:#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\b|\b(?:rgb|hsl)a?\([^)]*\))/;
+  /(?:#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\b|\b(?:(?:rgb|hsl)a?|hwb|lab|lch|oklab|oklch|color)\([^)]*\))/;
 
 // The type scale from DESIGN.md plus the token steps octant.css defines
 // (11 xs, 12 detail, 13 sm, 14 base, 17 lg, 20 xl, 26 2xl, 28 hero, 36 3xl).
@@ -50,7 +52,8 @@ const SCALE_TOKEN =
   /^var\(--(?:oct-text-[a-z0-9-]+|oct-fs-[a-z0-9-]+|oct-transcript-font-size|octant-(?:ui|editor|terminal)-font-size)\)$/;
 const SCALE_CALC = /^calc\((\d+) \* var\(--oct-text-step\)\)$/;
 
-const MOTION_PROPERTY = /^(?:transition|transition-duration|animation|animation-duration)$/;
+const MOTION_PROPERTY =
+  /^(?:transition|transition-duration|transition-delay|animation|animation-duration|animation-delay)$/;
 // `0s`, `0ms`, and `0.01ms` are the reduced-motion idiom, not a chosen duration.
 const MOTION_LITERAL = /(?<![\w.-])(?!0(?:\.01)?m?s\b)\d*\.?\d+m?s\b/;
 const MOTION_TOKEN = /var\(--oct-motion-[a-z-]+\)/;
@@ -60,7 +63,26 @@ const ACCESSIBILITY_MEDIA =
 
 // DESIGN.md: nothing is bold except a page title. Content emphasis (`strong`,
 // transcript headings) and the handful of titles are the accepted residue.
-const HEAVY_WEIGHT = /^(?:[6-9]00|bold|bolder|var\(--oct-weight-strong\))$/;
+const HEAVY_WEIGHT = /^(?:bold|bolder|var\(--oct-weight-strong\))$/;
+
+// CSS allows whitespace between `!` and the keyword and matches the keyword
+// case-insensitively, so `! IMPORTANT` is the same annotation as `!important`.
+// Anchoring to the end of the value keeps quoted text such as
+// `content: "Use !important"` and a suffixed `!important-foo` out of the rule.
+const IMPORTANT_ANNOTATION = /!\s*important\s*$/i;
+
+/** `!important` and casing must not let a weight slip past the 500 limit. */
+function isHeavyWeight(value: string): boolean {
+  const weight = value.replace(IMPORTANT_ANNOTATION, "").trim().toLowerCase();
+  const numeric = Number(weight);
+  return Number.isFinite(numeric) && weight !== "" ? numeric > 500 : HEAVY_WEIGHT.test(weight);
+}
+
+/** Only an `@media` rule that names an accessibility feature earns the
+ * `!important` exemption; a selector that merely spells one out does not. */
+function isAccessibilityFallback(headers: ReadonlyArray<string>): boolean {
+  return headers.some((header) => /^@media\b/.test(header) && ACCESSIBILITY_MEDIA.test(header));
+}
 
 // 0046: a feature stylesheet may place or size a shared control, never repaint
 // it. These are the properties that recipe owns.
@@ -209,6 +231,9 @@ export function findStylesheetFindings(
     for (const declaration of readDeclarations(source)) {
       const { property, value, line, exempt, headers } = declaration;
       const isToken = property.startsWith("--");
+      // A standard property name is ASCII case-insensitive; a custom property
+      // name is not, so only the standard names are folded.
+      const name = isToken ? property : property.toLowerCase();
       const push = (rule: StylesheetRule, detail: string): void => {
         findings.push({ rule, file: normalized, line, detail });
       };
@@ -217,17 +242,17 @@ export function findStylesheetFindings(
         const color = COLOR_LITERAL.exec(value);
         if (color) push("color-literal", `${property} uses a raw colour: ${color[0]}`);
       }
-      if (property === "font-size" && !fontSizeOnScale(value)) {
+      if (name === "font-size" && !fontSizeOnScale(value)) {
         push("font-size-scale", `font-size ${value} is not a type-scale token`);
       }
-      if (!isToken && MOTION_PROPERTY.test(property) && !MOTION_TOKEN.test(value)) {
+      if (!isToken && MOTION_PROPERTY.test(name) && !MOTION_TOKEN.test(value)) {
         const literal = MOTION_LITERAL.exec(value);
         if (literal) push("motion-literal", `${property} uses a raw duration: ${literal[0]}`);
       }
-      if (value.includes("!important") && !headers.some((h) => ACCESSIBILITY_MEDIA.test(h))) {
+      if (IMPORTANT_ANNOTATION.test(value) && !isAccessibilityFallback(headers)) {
         push("important", `${property} uses !important outside an accessibility fallback`);
       }
-      if (!isToken && property === "font-weight" && HEAVY_WEIGHT.test(value)) {
+      if (!isToken && name === "font-weight" && isHeavyWeight(value)) {
         push("heavy-weight", `font-weight ${value} is heavier than a page title`);
       }
       if (!isToken && PAINT_PROPERTY.test(property)) {

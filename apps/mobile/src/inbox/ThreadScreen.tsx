@@ -26,6 +26,7 @@ import type { RemoteThreadSurfaceKind } from "@octant/client-runtime";
 import { ApprovalDeferralSheet } from "../approvals/ApprovalDeferralSheet";
 import { BrowserSurfacePanel } from "../surfaces/BrowserSurfacePanel";
 import { ThreadSurfaceSwitcher } from "../surfaces/ThreadSurfaceSwitcher";
+import { NativeHarnessSessionPanel } from "../surfaces/NativeHarnessSessionPanel";
 import { listMobileThreadSurfaces } from "../surfaces/threadSurfacePresentation";
 import { MOBILE_COPY, mobileThreadReadOnlyCopy } from "../copy";
 import { PullRequestReviewPanel } from "../review/PullRequestReviewPanel";
@@ -675,6 +676,9 @@ export function ThreadScreen(props: ThreadScreenProps) {
         ) : null}
         {activeSurface === "browser" ? null : (
           <>
+            {transport === undefined ? null : (
+              <NativeHarnessSessionPanel threadId={props.selected.threadId} transport={transport} />
+            )}
             {busy && activeAttempt === undefined ? (
               <ActivityIndicator color={colors.accent} />
             ) : null}

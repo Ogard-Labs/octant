@@ -20,6 +20,7 @@ import {
 } from "./previews";
 import { MentionableThreadId } from "./threadMention";
 import { NavigatorAssistantSettings } from "./navigatorAssistant";
+import { VoiceSettings } from "./speech";
 import { DEFAULT_AVATAR_ACCENT, DEFAULT_USER_AVATAR, UserProfile } from "./userProfile";
 import { SidebarBackground, DEFAULT_SIDEBAR_BACKGROUND } from "./theme";
 
@@ -346,6 +347,12 @@ export const ShellSettings = Schema.Struct({
   // decodes to the empty section — both roles absent — which the snapshot
   // reports as `unconfigured` rather than inventing a default model.
   navigatorAssistant: Schema.optionalWith(NavigatorAssistantSettings, {
+    default: () => ({}),
+  }),
+  // Voice settings section. A store persisted before voice shipped decodes to
+  // the empty section — no transcription or synthesis endpoint — which the
+  // speech status reports as `unconfigured` rather than guessing an endpoint.
+  voice: Schema.optionalWith(VoiceSettings, {
     default: () => ({}),
   }),
   // Who is using this host. A store persisted before profiles shipped decodes
