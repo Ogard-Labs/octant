@@ -87,7 +87,7 @@ html[data-octant-native-host="true"] .shell--wide-context-open .shell-frame__nat
   z-index: 4;
   display: flex;
   min-width: 0;
-  height: 34px;
+  height: var(--oct-title-rail-h);
   grid-column: 2;
   grid-row: 1;
   align-items: center;
@@ -139,18 +139,11 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
 .window-chrome__leading .window-chrome__button {
   position: relative;
   top: 0;
-  width: 22px;
-  height: 22px;
-  min-width: 22px;
-  min-height: 22px;
+  width: var(--oct-rail-button-h);
+  height: var(--oct-rail-button-h);
+  min-width: var(--oct-rail-button-h);
+  min-height: var(--oct-rail-button-h);
   color: var(--oct-fg-2);
-}
-
-.window-chrome__leading--browser .window-chrome__button {
-  width: 28px;
-  height: 28px;
-  min-width: 28px;
-  min-height: 28px;
 }
 
 /* Same reserve the sidebar keeps for the macOS traffic lights (see
@@ -198,8 +191,8 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   min-width: 0;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
-  padding: 0 10px;
+  gap: 2px;
+  padding: 0 var(--oct-space-2);
   pointer-events: auto;
 }
 
@@ -239,13 +232,13 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   pointer-events: auto;
 }
 
-/* Compact 26px square so the 34px native titlebar row can actually hold
-   the control. Paint stays on the owned icon-button recipe. */
+/* The 28px rail control, centred on the title rail with the thread tabs.
+   Paint stays on the owned icon-button recipe. */
 .window-chrome__button {
   display: grid;
   flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
+  width: var(--oct-rail-button-h);
+  height: var(--oct-rail-button-h);
   padding: 0;
   place-items: center;
   color: var(--oct-muted);
@@ -330,8 +323,8 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
 .sidebar__native-leading {
   display: flex;
   min-width: 0;
-  height: 34px;
-  flex: 0 0 34px;
+  height: var(--oct-title-rail-h);
+  flex: 0 0 var(--oct-title-rail-h);
   align-items: center;
   gap: 6px;
   padding: 0 10px;
@@ -345,10 +338,10 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
 .sidebar__native-collapse {
   position: relative;
   top: 0;
-  width: 22px;
-  height: 22px;
-  min-width: 22px;
-  min-height: 22px;
+  width: var(--oct-rail-button-h);
+  height: var(--oct-rail-button-h);
+  min-width: var(--oct-rail-button-h);
+  min-height: var(--oct-rail-button-h);
   flex: 0 0 auto;
   margin-left: 2px;
 }
@@ -366,7 +359,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  padding: 6px 8px 10px;
+  padding: 0 var(--oct-space-2) var(--oct-space-2);
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-gutter: stable;
@@ -509,9 +502,17 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 
 .sidebar__chrome {
   display: flex;
+  min-height: var(--oct-nav-head-h);
   align-items: center;
-  gap: 8px;
+  gap: var(--oct-space-1);
   min-width: 0;
+}
+
+/* The header names the app on the same 12px inset every row icon keeps, so
+   "Octant" heads the icon column. The system trigger keeps its compact 4px
+   padding for the narrowest sidebar; this row has the room. */
+.sidebar__chrome .mode-trigger {
+  padding-inline: var(--oct-nav-inset);
 }
 
 /* Both presentations fill the row so the action icons keep to its far edge. */
@@ -524,10 +525,10 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 /* Search and Activity use the same compact shell icon recipe. */
 .sidebar__chrome-actions .shell-icon-button,
 .sidebar__chrome-activity .shell-icon-button {
-  width: 30px;
-  min-width: 30px;
-  height: 30px;
-  min-height: 30px;
+  width: var(--oct-rail-button-h);
+  min-width: var(--oct-rail-button-h);
+  height: var(--oct-rail-button-h);
+  min-height: var(--oct-rail-button-h);
 }
 
 .sidebar__chrome-actions,
@@ -556,7 +557,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  margin-top: 8px;
+  margin-top: var(--oct-space-1);
 }
 
 /* Navigation rows must not shrink when the Project tree below them grows. */
@@ -588,7 +589,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
      not three controls, so they sit at glyph spacing. At list spacing the row
      spent 46px before the first letter of the title. */
   gap: var(--oct-space-1);
-  min-height: 28px;
+  min-height: var(--oct-nav-row-h);
   padding-block: 0;
   padding-inline: 8px;
   color: var(--oct-muted);
@@ -603,22 +604,19 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 
 .sidebar-navigation__thread:hover {
   color: var(--oct-fg);
-  background: var(--sidebar-accent);
+  background: var(--oct-fg-soft);
 }
 
-/* The open thread reads louder than a hovered one.
-   Both states shared `--oct-fg-soft` alone, so the row the workspace was
-   actually showing was indistinguishable from the row under the pointer — and
-   this row is the only place that answers "which thread am I in" now that the
-   thread carries no identity header of its own. The fill stays the system's
-   neutral one, because ordinary navigation selection is not accent-filled; the
-   marker rail and the heavier ink are what separate open from hovered. The
-   rail is an inset shadow rather than a border, which would move the title. */
+/* The open thread reads louder than a hovered one: the pointer gets the soft
+   ink wash, the row the workspace is showing gets the selection fill and a
+   hairline edge, the two states the thread tab strip draws. This row is the
+   only place that answers "which thread am I in" now that the thread carries
+   no identity header of its own. The weight stays at 400 so the list keeps
+   one weight; the fill and the primary ink are what say "you are here". */
 .sidebar-navigation__thread[aria-current="page"] {
   color: var(--oct-fg);
-  background: var(--sidebar-accent);
-  box-shadow: none;
-  font-weight: 500;
+  background: var(--oct-selection);
+  box-shadow: inset 0 0 0 1px var(--oct-border);
 }
 
 /* A window can show several threads at once, and exactly one marked row
@@ -795,7 +793,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 
 /* Show more and Show less are one quiet row at the end of a folded list. */
 .project-threads__more {
-  min-height: 26px;
+  min-height: var(--oct-nav-row-h);
   padding: 0 var(--oct-space-2);
   color: var(--oct-meta);
   font-size: var(--oct-text-detail);
@@ -862,27 +860,37 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   font-size: var(--oct-text-xs);
 }
 
-/* The trailing gutter reserves space so the row title does not jump when the
-   actions appear. It is hidden by default and revealed on row hover or focus,
-   and stays visible while any of its popups are open. */
+/* The actions take no room until they are wanted: an invisible gutter at the
+   end of every row read as dead space beside the age. They appear, and take
+   their width, on row hover or focus, and stay while any of their popups is
+   open. */
 .sidebar-navigation__thread-actions {
   display: inline-flex;
   flex: 0 0 auto;
+  width: 0;
+  min-width: 0;
   align-items: center;
   gap: 2px;
+  overflow: hidden;
   opacity: 0;
   transition: opacity var(--oct-motion-fast) ease;
 }
 
+/* The gutter collapses rather than each control: the icon-button recipe's
+   transparent hairline kept a zero-width button two pixels wide. Revealed,
+   it lets its controls' focus rings out again. */
 .sidebar-navigation__thread-row:hover .sidebar-navigation__thread-actions,
 .sidebar-navigation__thread-row:focus-within .sidebar-navigation__thread-actions,
 .sidebar-navigation__thread-actions:has([aria-expanded="true"]),
 .sidebar-navigation__thread-actions:has([data-popup-open]) {
+  width: auto;
+  overflow: visible;
   opacity: 1;
 }
 
 .sidebar-navigation__thread-action {
   width: 24px;
+  min-width: 24px;
   height: 24px;
   min-height: 24px;
   padding: 0;
@@ -904,6 +912,8 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 
 @media (pointer: coarse), (max-width: 560px) {
   .sidebar-navigation__thread-actions {
+    width: auto;
+    overflow: visible;
     opacity: 1;
   }
 
@@ -1123,7 +1133,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   .shell.shell-frame {
     --octant-window-chrome-reserved-width: 4px;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 34px minmax(0, 1fr);
+    grid-template-rows: var(--oct-title-rail-h) minmax(0, 1fr);
   }
 
   .shell-frame > .window-chrome {
@@ -1137,7 +1147,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   .shell-frame > .sidebar {
     position: absolute;
     z-index: 6;
-    inset: 34px auto 0 0;
+    inset: var(--oct-title-rail-h) auto 0 0;
     width: min(var(--octant-sidebar-width, 232px), calc(100vw - 56px));
     max-height: none;
     grid-column: 1;
@@ -1295,21 +1305,12 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   text-transform: none;
 }
 
-.draft-thread__heading {
-  margin: 0;
-  color: var(--octant-text-primary);
-  font-size: calc(28 * var(--oct-text-step));
-  font-weight: 500;
-  letter-spacing: -0.035em;
-  line-height: 1.1;
-}
-
 .draft-thread__description {
   max-width: 58ch;
   margin: 2px 0 0;
   color: var(--octant-text-secondary);
-  font-size: calc(14 * var(--oct-text-step));
-  line-height: 1.65;
+  font-size: var(--oct-text-sm);
+  line-height: 1.5;
 }
 
 /* Recent work under the composer. These rows are the way back into open work
@@ -1320,14 +1321,22 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   order: 4;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--oct-space-2);
   margin-top: 28px;
 }
 
+/* "Continue" is a section label over a hairline, the head every list
+   surface gives a group (DESIGN.md "Page shell"). */
 .draft-thread__recent-title {
   margin: 0;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
+  padding: 0 0 var(--oct-space-2);
+  border-bottom: 1px solid var(--oct-hairline);
+  color: var(--oct-muted);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: var(--oct-tracking-snug);
+  line-height: 1.3;
 }
 
 .draft-thread__recent-list {
@@ -1361,34 +1370,13 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 
 .draft-thread__recent-detail {
   color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-detail);
 }
 
+/* The cards themselves share the Code home's suggestion recipe below. */
 .draft-thread__intent-cards {
   order: 3;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 7px;
   margin-top: 2px;
-}
-
-.draft-thread__intent-card {
-  display: flex;
-  width: auto;
-  min-height: 32px;
-  text-align: start;
-  white-space: normal;
-}
-
-.draft-thread__intent-label {
-  color: var(--octant-text-primary);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
-}
-
-.draft-thread__intent-description {
-  display: none;
 }
 
 .draft-thread__composer {
@@ -2490,15 +2478,25 @@ form > .work-composer-adapter__attachments {
    (Start something new), and where the latest threads stand (Continue).
    Sections are a label, a note, and a hairline panel; Continue's cards lead
    with a tile that names the thread's delivery state. */
-.code-home__suggestions {
+/* One suggestion card for every welcome: the Code prompts, the draft
+   thread's intents, and the Add-a-folder page's two choices. A hairline card
+   on the card fill, a 13px title, and a 12px line saying what it fills in.
+   The button is the card, so the paint keys on the element inside the cards
+   group rather than on a class the button recipe owns. */
+.code-home__suggestions,
+.draft-thread__intent-cards {
   display: grid;
-  width: min(100%, 704px);
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 8px;
+  gap: var(--oct-space-2);
+}
+
+.code-home__suggestions {
+  width: min(100%, 704px);
   margin-inline: auto;
 }
 
-.code-home__suggestions button {
+.code-home__suggestions > button,
+.draft-thread__intent-cards > button {
   display: grid;
   height: auto;
   min-height: 0;
@@ -2514,35 +2512,25 @@ form > .work-composer-adapter__attachments {
   white-space: normal;
 }
 
-.code-home__suggestions button:hover:not(:disabled) {
+.code-home__suggestions > button:hover:not(:disabled),
+.draft-thread__intent-cards > button:hover:not(:disabled) {
   border-color: var(--oct-border-strong);
   background: var(--octant-card);
 }
 
-.code-home__suggestion-label {
+.code-home__suggestion-label,
+.draft-thread__intent-label {
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
 }
 
-.code-home__suggestion-text {
+.code-home__suggestion-text,
+.draft-thread__intent-description {
   color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-regular);
-  line-height: var(--oct-leading-snug);
-}
-
-.code-home__suggestion-label {
-  color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
-}
-
-.code-home__suggestion-text {
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-regular);
-  line-height: var(--oct-leading-snug);
+  line-height: 1.45;
 }
 
 /* The composer is the widest thing on the start screen; everything under it
@@ -2564,11 +2552,16 @@ form > .work-composer-adapter__attachments {
   gap: var(--oct-space-3);
 }
 
+/* Up next, Start something new, and Continue are section labels over a
+   hairline, with their one line of help under the label and the section's
+   ghost action at the trailing edge. */
 .code-home__section-head {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
   gap: var(--oct-space-3);
+  padding-bottom: var(--oct-space-2);
+  border-bottom: 1px solid var(--oct-hairline);
 }
 
 .code-home__section-copy {
@@ -2579,16 +2572,19 @@ form > .work-composer-adapter__attachments {
 
 .code-home__section-title {
   margin: 0;
-  color: var(--oct-fg);
+  color: var(--oct-muted);
+  font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: var(--oct-tracking-snug);
+  line-height: 1.3;
 }
 
 .code-home__section-note,
 .code-home__note {
   margin: 0;
   color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-detail);
 }
 
 .code-home__panel {
