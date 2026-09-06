@@ -26,7 +26,7 @@ export function ToggleGroupItem<Value extends string>({
   return (
     <Toggle<Value>
       className={cn(
-        "inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-transparent px-3 text-sm font-medium whitespace-nowrap text-muted-foreground outline-none transition-[color,box-shadow] hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 data-pressed:bg-(--oct-fg-soft) data-pressed:text-foreground disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex h-7 cursor-pointer items-center justify-center gap-1 rounded-md border border-transparent px-2.5 text-sm font-medium whitespace-nowrap text-muted-foreground outline-none transition-colors hover:text-foreground data-pressed:bg-(--oct-fg-soft) data-pressed:text-foreground disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
       data-slot="toggle-group-item"

@@ -132,6 +132,34 @@ describe("the public-block visual language", () => {
     );
   });
 
+  it("gives a focused button one mark, not an outline and a ring", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const rule = system.match(/\[data-slot="button"\]:focus-visible\s*\{[^}]+\}/)?.[0] ?? "";
+
+    // A button's focus mark is the outline, chosen because the halo read as a
+    // highlighter circle drawn around the label. The shared rule paints a halo
+    // on anything focusable, so the button rule has to clear it or the button
+    // wears both. Only the shell's icon buttons escaped that, and only because
+    // their own CSS zeroes the shadow for unrelated reasons.
+    expect(rule).toMatch(/outline:\s*2px solid var\(--oct-accent-fg\)/);
+    expect(rule).toMatch(/box-shadow:\s*none/);
+  });
+
+  it("paints keyboard focus once, for every control, without reshaping it", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const rule = system.match(/(?:^|\n):focus-visible\s*\{[^}]+\}/)?.[0] ?? "";
+
+    // One app-wide ring (0086). Scoping it away from owned recipes left every
+    // button with no indicator at all, because the recipes do not paint focus
+    // and every one of them carries a `data-slot`.
+    expect(rule).toMatch(/box-shadow:\s*var\(--oct-focus-ring\)/);
+    expect(system).not.toMatch(/:focus-visible:not\(\[data-slot\]\)/);
+
+    // No radius here: a box-shadow already follows the control's own corner,
+    // and naming one snapped a focused control to a shape it does not have.
+    expect(rule).not.toMatch(/border-radius/);
+  });
+
   it("keeps the keyboard focus ring on the switch its own reset would swallow", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const track = system.match(/\.octant-switch\[data-slot="switch"\]\s*\{[^}]+\}/)?.[0] ?? "";

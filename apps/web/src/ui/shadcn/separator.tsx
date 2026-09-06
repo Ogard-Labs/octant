@@ -1,26 +1,25 @@
-import { cva, type VariantProps } from "class-variance-authority";
+import { Separator as SeparatorPrimitive } from "@base-ui/react/separator";
 import type { ComponentProps } from "react";
 import { cn } from "./utils";
 
-const separatorVariants = cva("shrink-0 bg-border", {
-  variants: {
-    orientation: {
-      horizontal: "h-px w-full",
-      vertical: "h-full w-px",
-    },
-  },
-  defaultVariants: { orientation: "horizontal" },
-});
-
-export type SeparatorProps = ComponentProps<"div"> & VariantProps<typeof separatorVariants>;
-
-export function Separator({ className, orientation, ...props }: SeparatorProps) {
+/*
+ * Orientation is read as `data-[orientation=…]`, not the style's shorthand
+ * `data-horizontal:`. That shorthand is a custom variant upstream ships in a
+ * stylesheet this repo does not import; Base UI writes the value form, so the
+ * shorthand would compile to an attribute nothing sets and leave the rule with
+ * no height at all.
+ *
+ * Vertical uses `self-stretch` rather than `h-full`, which measures nothing in
+ * a flex row unless the parent happens to have a resolved height.
+ */
+export function Separator({ className, ...props }: SeparatorPrimitive.Props) {
   return (
-    <div
-      aria-orientation={orientation ?? "horizontal"}
-      className={cn(separatorVariants({ orientation }), className)}
+    <SeparatorPrimitive
+      className={cn(
+        "shrink-0 bg-border data-[orientation=horizontal]:h-px data-[orientation=horizontal]:w-full data-[orientation=vertical]:w-px data-[orientation=vertical]:self-stretch",
+        className,
+      )}
       data-slot="separator"
-      role="separator"
       {...props}
     />
   );
