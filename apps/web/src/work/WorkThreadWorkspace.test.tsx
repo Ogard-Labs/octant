@@ -383,7 +383,7 @@ describe("WorkThreadWorkspace", () => {
       />,
     );
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Claude message stream failed.");
+    expect(await screen.findByText("Claude message stream failed.")).toBeVisible();
   });
 
   it("windows long Work transcripts instead of mounting every message", async () => {

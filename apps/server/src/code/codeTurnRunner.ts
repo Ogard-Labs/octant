@@ -118,7 +118,16 @@ export interface CodeTurnRunnerInput {
     input: CodeObservationInput,
   ) => Effect.Effect<CodeObservationReconciliation, CodeTurnFailure>;
   readonly persistEvent: (event: CodeTurnEvent) => Effect.Effect<void, CodeTurnFailure>;
-  readonly persistOutcome: (outcome: CodeTurnOutcome) => Effect.Effect<void, CodeTurnFailure>;
+  /**
+   * A failed outcome travels with the reason that produced it. Observed: a
+   * turn that failed before the provider said anything was journaled as
+   * `failed` alone, and the transcript could only say "The provider turn
+   * failed" for it.
+   */
+  readonly persistOutcome: (
+    outcome: CodeTurnOutcome,
+    failure?: CodeTurnFailure,
+  ) => Effect.Effect<void, CodeTurnFailure>;
   readonly signal?: AbortSignal;
   /** Observes a completed reply with its full text and the tool calls it made. */
   readonly onTurnCompleted?: (input: {
@@ -155,17 +164,18 @@ export class CodeTurnRunner {
       let responseText = "";
       const answeredToolRequestIds = new Set<string>();
 
-      const persistOutcome = (next: CodeTurnOutcome) =>
+      const persistOutcome = (next: CodeTurnOutcome, failure?: CodeTurnFailure) =>
         Effect.gen(function* () {
           if (outcome === next) return;
           outcome = next;
-          yield* input.persistOutcome(next);
+          yield* input.persistOutcome(next, failure);
         });
 
       const fail = (next: Exclude<CodeTurnOutcome, "completed">, message: string) =>
         Effect.gen(function* () {
-          yield* persistOutcome(next);
-          return yield* Effect.fail(codeTurnFailure(next, message));
+          const failure = codeTurnFailure(next, message);
+          yield* persistOutcome(next, failure);
+          return yield* Effect.fail(failure);
         });
 
       if (input.signal?.aborted) {
