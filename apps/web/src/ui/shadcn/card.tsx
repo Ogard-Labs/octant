@@ -2,18 +2,17 @@ import type { ComponentProps } from "react";
 import { cn } from "./utils";
 
 /*
- * The card stays borderless and carries elevation instead, per 0070: a card is
- * an object with a boundary that means something, and a ring plus a shadow
- * says the same thing twice. Radius is the panel step; padding follows the
- * style down one notch. Semantic elements stay — a card is a section with a
- * heading, not a stack of divs.
+ * A card is bounded by a hairline ring rather than lifted by a shadow (0086):
+ * it sits in the page, and shadow now means something that floats above it.
+ * Semantic elements stay — a card is a section with a heading, not a stack of
+ * divs.
  */
 
 export function Card({ className, ...props }: ComponentProps<"section">) {
   return (
     <section
       className={cn(
-        "flex flex-col gap-4 rounded-xl border-0 bg-card py-4 text-card-foreground shadow-[var(--octant-shadow-sm)]",
+        "flex flex-col gap-4 overflow-hidden rounded-xl border-0 bg-card py-4 text-card-foreground ring-1 ring-foreground/10",
         className,
       )}
       data-slot="card"

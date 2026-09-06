@@ -88,20 +88,24 @@ Titles and the hero use `--oct-tracking-tight` (-0.025em); section labels use
 
 Neutral graphite, a monochrome accent, a monochrome keyboard focus ring, four statuses. Text is three greys (primary,
 secondary, muted) and never a fourth. Hairlines separate; fills select. The
-focus ring is painted once, by the global `:focus-visible` rule, as a
-two-pixel halo of the foreground at reduced opacity on every theme: a
-coloured ring read as a website's link outline, not an app control. A field
-recipe does not add a second border or halo of its own. See
+focus ring is always a halo of the foreground at reduced opacity, never a
+hue: a coloured ring reads as a website's link outline, not an app control.
+An owned recipe paints its own, as part of the same state vocabulary as
+hover and pressed; the global `:focus-visible` rule paints everything that
+is not one, and is scoped away from them so nothing is haloed twice or
+reshaped on focus (0086). See
 "Colour system" for the token table. On the marketing site the same three
 greys and the same hairline carry the hierarchy on a white or graphite ground.
 
 ### Shapes and depth
 
-Radius is 10px for controls, 16px for cards and menus, 20px for the composer
-and dialogs. A surface is flat by default. Elevation means one of three
-things and nothing else: a raised discrete object (`--octant-shadow-sm`), the
-composer (`--octant-shadow-md`), or an overlay (`--octant-shadow-overlay`).
-Groups, lists, empty states, and headers are never cards.
+Radius derives from one `--radius` root: a control is the `lg` step, a card or
+menu the `xl` step, and a compact control clamps below both. The composer and
+dialogs stay at 20px. A surface is flat by default. A discrete object is
+bounded by a hairline ring, not lifted; shadow means something that genuinely
+floats — the composer (`--octant-shadow-md`) or an overlay
+(`--octant-shadow-overlay`). Groups, lists, empty states, and headers are
+never cards.
 
 ### Page shell
 
@@ -383,8 +387,8 @@ is the thread's own state (Running, Done, Waiting, In progress, Ready) with
 changed lines, and the facts line names the Project, the branch (marked
 worktree when managed), the linked pull request with its number and state as
 a chip, and the provider last. Picking an item fills the prompt and attaches
-the issue as the thread's Create from context. The start screen has no image control: image generation lives on
-its own surface.
+the issue as the thread's Create from context. The start screen has no image-generation control: generation lives on
+its own surface. Attaching an image is a composer affordance and is available here.
 The prompt itself is frameless:
 `OctantTextarea` drops the shadcn field recipe when it wears `.composer-input`.
 Composer-row selects drop the same field chrome. Feature CSS must not

@@ -132,6 +132,17 @@ describe("the public-block visual language", () => {
     );
   });
 
+  it("keeps the shared focus ring off the recipes that paint their own", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+
+    // 0086 hands keyboard focus to the recipe. The global rule also sets a
+    // radius, so left unscoped it both stacked a second halo under the
+    // recipe's own and snapped a focused control to a corner it does not
+    // otherwise have. `data-slot` is what marks an owned recipe.
+    expect(system).toMatch(/:focus-visible:not\(\[data-slot\]\)\s*\{/);
+    expect(system).not.toMatch(/(?:^|\n):focus-visible\s*\{/);
+  });
+
   it("keeps the keyboard focus ring on the switch its own reset would swallow", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const track = system.match(/\.octant-switch\[data-slot="switch"\]\s*\{[^}]+\}/)?.[0] ?? "";

@@ -411,7 +411,11 @@ h3,
 h4 {
   text-wrap: balance;
 }
-:focus-visible {
+/* Owned recipes paint their own focus, so this covers everything that is not
+   one (0086). It is excluded from them by `data-slot`, because it also sets a
+   radius: left global, it reshaped a focused control to a corner it does not
+   otherwise have, and stacked a second halo under the recipe's own. */
+:focus-visible:not([data-slot]) {
   outline: none;
   box-shadow: var(--oct-focus-ring);
   border-radius: var(--oct-radius-sm);
