@@ -10,7 +10,7 @@ import type {
 } from "@octant/contracts/chat";
 import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import { activeChatTurns } from "@octant/domain/chat-policy";
-import { Ban, Check, Circle, CircleAlert, CircleX, Clock3, LoaderCircle } from "lucide-react";
+import { TurnHeader, turnWorkedFor } from "../transcript/TurnHeader";
 import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
@@ -479,6 +479,18 @@ function AttemptBlock(props: {
         aria-label={`Assistant response · ${attemptLabels[props.attempt.outcome]}`}
         className="turn-agent"
       >
+        <TurnHeader
+          at={props.attempt.updatedAt}
+          outcome={props.attempt.outcome}
+          {...(() => {
+            const workedFor = turnWorkedFor(
+              props.attempt.outcome,
+              props.attempt.createdAt,
+              props.attempt.updatedAt,
+            );
+            return workedFor === undefined ? {} : { workedFor };
+          })()}
+        />
         {props.attempt.responseRefs.length === 0 ? null : responseBody === undefined ? (
           <p role="alert">Response content is unavailable.</p>
         ) : canQuote ? (
@@ -490,13 +502,6 @@ function AttemptBlock(props: {
         ) : (
           <ChatRichText body={responseBody} />
         )}
-        <AttemptStatus
-          outcome={props.attempt.outcome}
-          {...(() => {
-            const workedFor = attemptWorkedFor(props.attempt);
-            return workedFor === undefined ? {} : { workedFor };
-          })()}
-        />
         {props.attempt.outcome === "failed" ? (
           <SupportCorrelationControl correlationId={String(props.attempt.id)} />
         ) : null}
@@ -614,47 +619,6 @@ function MessageBody(props: {
   return <TrackerReferenceText asParagraph text={props.content.body} />;
 }
 
-/**
- * How long a finished attempt took, from when it was created to its last
- * change. Only a completed attempt reports it: for any other outcome the last
- * change is whatever ended it, which is not the same as time spent working.
- */
-function attemptWorkedFor(attempt: {
-  readonly outcome: ChatAttemptOutcome;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-}): string | undefined {
-  if (attempt.outcome !== "completed") return undefined;
-  const started = Date.parse(attempt.createdAt);
-  const ended = Date.parse(attempt.updatedAt);
-  if (Number.isNaN(started) || Number.isNaN(ended)) return undefined;
-  const seconds = Math.floor((ended - started) / 1000);
-  if (seconds < 1) return undefined;
-  if (seconds < 60) return `Worked for ${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  return `Worked for ${minutes}m ${seconds % 60}s`;
-}
-
-function AttemptStatus(props: {
-  readonly outcome: ChatAttemptOutcome;
-  readonly workedFor?: string;
-}) {
-  const StatusIcon = attemptStatusIcon(props.outcome);
-  return (
-    <p
-      aria-live={props.outcome === "streaming" ? "polite" : undefined}
-      className={`runstatus chat-transcript__attempt-status--${props.outcome}`}
-    >
-      <StatusIcon aria-hidden="true" size={12} strokeWidth={1.8} />
-      <span>{attemptLabels[props.outcome]}</span>
-      <span className="sr-only"> attempt state</span>
-      {props.workedFor === undefined ? null : (
-        <span className="chat-transcript__worked-for">{props.workedFor}</span>
-      )}
-    </p>
-  );
-}
-
 function CitationList(props: { readonly citations: ChatThreadView["citations"] }) {
   return (
     <ul aria-label="Sources" className="chat-transcript__citations">
@@ -707,25 +671,6 @@ function handoffWarningText(
 ): string {
   const names = warning.omittedAttachments.map((attachment) => attachment.displayName).join(", ");
   return `${names} ${warning.omittedAttachments.length === 1 ? "remains" : "remain"} available locally and ${warning.omittedAttachments.length === 1 ? "was" : "were"} not sent to ${warning.targetModelId}.`;
-}
-
-function attemptStatusIcon(outcome: ChatAttemptOutcome) {
-  switch (outcome) {
-    case "queued":
-      return Circle;
-    case "streaming":
-      return LoaderCircle;
-    case "waiting":
-      return Clock3;
-    case "interrupted":
-      return CircleAlert;
-    case "failed":
-      return CircleX;
-    case "cancelled":
-      return Ban;
-    case "completed":
-      return Check;
-  }
 }
 
 function safeCitationUrl(value: string): string | undefined {

@@ -824,3 +824,89 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   font-size: var(--oct-text-xs);
   overflow-wrap: anywhere;
 }
+
+/* ── Turn header ───────────────────────────────────────────────────────────
+   One line above every assistant reply, in every mode: provider, outcome,
+   time. Status colour is the only colour; the interface face, not the code
+   face, because "Failed" is a sentence to the person, not an identifier. */
+.turn-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin: 0 0 6px;
+  color: var(--octant-text-muted);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-regular);
+  line-height: 1.35;
+}
+
+.turn-header__provider {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--octant-text-secondary);
+  font-weight: var(--oct-weight-display);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turn-header__status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.turn-header__worked-for::before {
+  content: "·";
+  margin-inline-end: 4px;
+}
+
+.turn-header[data-outcome="failed"] .turn-header__status,
+.turn-header[data-outcome="interrupted"] .turn-header__status {
+  color: var(--octant-danger-text);
+}
+
+.turn-header[data-outcome="waiting"] .turn-header__status {
+  color: var(--octant-warning-text);
+}
+
+.turn-header[data-outcome="completed"] .turn-header__status {
+  color: var(--octant-success-text);
+}
+
+.turn-header[data-outcome="streaming"] svg,
+.turn-header[data-outcome="running"] svg {
+  animation: turn-header-spin var(--oct-motion-spin) linear infinite;
+}
+
+@keyframes turn-header-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turn-header[data-outcome="streaming"] svg,
+  .turn-header[data-outcome="running"] svg {
+    animation: none;
+  }
+}
+
+html[data-octant-reduced-motion="true"] .turn-header svg {
+  animation: none;
+}
+
+.turn-header__time {
+  margin-inline-start: auto;
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.turn-header__reason {
+  margin: 0 0 8px;
+  max-width: 68ch;
+  color: var(--octant-danger-text);
+  font-size: var(--oct-text-detail);
+}

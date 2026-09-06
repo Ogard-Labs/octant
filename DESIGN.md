@@ -190,6 +190,17 @@ shadcn composition and visual vocabulary. Feature code imports `ui/base`, not
 menus now use the shared `OctantContextMenu` adapter; do not add a new direct
 primitive import.
 
+### Turn header
+
+Every assistant reply in Chat, Work, and Code opens with the same line: who
+answered (provider and model as the picker names them), how the turn stands
+(Working…, Waiting for approval, Completed with how long it took, Failed with
+the host's sanitized reason on the line below), and when it last changed at the
+right edge. It is set in the interface face at the detail size; only the status
+word carries colour. `TurnHeader` in `apps/web/src/transcript/` is the one
+recipe; a mode maps its own lifecycle onto its vocabulary and adds nothing of
+its own.
+
 ## Colour system
 
 The default runtime palette is neutral graphite. The following values are the

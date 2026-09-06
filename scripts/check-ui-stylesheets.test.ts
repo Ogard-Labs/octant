@@ -265,6 +265,18 @@ describe("UI stylesheet check", () => {
     ).toEqual(["control-repaint 1", "control-repaint 2", "control-repaint 3"]);
   });
 
+  it("does not read an arrow function's => as the end of a primitive's attributes", () => {
+    const primitives = collectPrimitiveClasses({
+      "apps/web/src/chat/Support.tsx": [
+        '<OctantButton className="support__copy" onClick={() => copy(id)} type="button">',
+        "  Copy support ID",
+        "</OctantButton>",
+        '<ul aria-label="Sources" className="chat-transcript__citations">',
+      ].join("\n"),
+    });
+    expect([...primitives.keys()]).toEqual(["support__copy"]);
+  });
+
   it("fails closed on any colour literal and ratchets the other rules against the baseline", () => {
     const findings = findStylesheetFindings({
       [CSS]: [".a { color: #fff; font-size: 11.5px; }", ".b { font-size: 12.5px; }"].join("\n"),

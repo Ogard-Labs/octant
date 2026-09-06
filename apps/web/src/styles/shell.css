@@ -1776,12 +1776,6 @@ form > .work-composer-adapter__attachments {
   text-wrap: pretty;
 }
 
-/* A turn that failed is the one transcript line that must not read as quiet
-   metadata: it carries the status colour so the eye lands on it first. */
-.work-thread-workspace__outcome--failed {
-  color: var(--octant-danger-text);
-}
-
 /* What a turn produced, shown as files rather than narrated in prose. It is a
    discrete object in the transcript, so it takes an edge where the messages
    around it take none. */
