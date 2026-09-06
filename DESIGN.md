@@ -364,9 +364,9 @@ and New Project from GitHub repository. Choosing GitHub swaps the menu's body
 for the managed-clone flow in place, so there is no second repository control
 beside the Project. Access is
 a titled menu on the prompt card, next to the model picker, and carries the
-"Remember for this Project" switch. The
-Under the Code composer the start screen reads like GitHub Copilot's and
-Cursor's agent homes: suggested prompts as small cards (a label and the
+"Remember for this Project" switch.
+Under the Code composer the start screen is an agent home rather than a
+blank prompt: suggested prompts as small cards (a label and the
 sentence they fill in), then three sections that share one card grid, two
 across at the composer's width. Each card opens with a badge naming what it
 is (Issue, Pull request, Review requested, Linear, or a thread's delivery
