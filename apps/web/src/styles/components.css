@@ -910,3 +910,7 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
   color: var(--octant-danger-text);
   font-size: var(--oct-text-detail);
 }
+
+.turn-header[data-outcome="waiting"] + .turn-header__reason {
+  color: var(--octant-warning-text);
+}

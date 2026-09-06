@@ -10,6 +10,8 @@ import type {
 } from "@octant/contracts/chat";
 import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import { activeChatTurns } from "@octant/domain/chat-policy";
+import type { PickerGroup } from "@octant/domain";
+import { providerModelLabel } from "../providers/providerModelLabel";
 import { TurnHeader, turnWorkedFor } from "../transcript/TurnHeader";
 import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -57,6 +59,8 @@ export interface ChatTranscriptProps {
    * end of the transcript with every other sent message, not in the composer.
    */
   readonly pendingUserMessage?: string;
+  /** The picker's provider and model names, so a reply can say who answered. */
+  readonly providerGroups?: ReadonlyArray<PickerGroup>;
 }
 
 export interface ChatTranscriptCheckpoints {
@@ -321,6 +325,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   onQuoteSelection={props.onQuoteSelection}
                   onRetryAttempt={props.onRetryAttempt}
                   previousAttempt={turn.attempts[index - 1]}
+                  providerGroups={props.providerGroups}
                   citations={citationsByAttempt.get(String(attempt.id)) ?? []}
                 />
               ))}
@@ -454,6 +459,7 @@ function AttemptBlock(props: {
   readonly onQuoteSelection: ChatTranscriptProps["onQuoteSelection"];
   readonly onRetryAttempt: ChatTranscriptProps["onRetryAttempt"];
   readonly previousAttempt: ChatAttempt | undefined;
+  readonly providerGroups: ChatTranscriptProps["providerGroups"];
 }) {
   const handoff = handoffLabel(props.previousAttempt, props.attempt);
   const responseContents = props.attempt.responseRefs.map((reference) =>
@@ -482,6 +488,9 @@ function AttemptBlock(props: {
         <TurnHeader
           at={props.attempt.updatedAt}
           outcome={props.attempt.outcome}
+          {...(props.providerGroups === undefined
+            ? {}
+            : { provider: providerModelLabel(props.providerGroups, props.attempt) })}
           {...(() => {
             const workedFor = turnWorkedFor(
               props.attempt.outcome,
