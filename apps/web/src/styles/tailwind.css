@@ -1,6 +1,12 @@
 @import "tailwindcss";
 
-@custom-variant dark (&:is(.dark *));
+/* Nothing in the renderer ever adds a `.dark` class, so this variant used to
+   match nothing and every `dark:` utility a recipe shipped was dead. The mode
+   is a fact about the document: `ThemeSettingsProvider` writes the resolved
+   mode to `data-octant-theme-mode`, and the colour blocks in shadcn-theme.css
+   treat dark as the base that an explicit light overrides. Read it the same
+   way `xtermRuntime.ts` does — dark unless something says light. */
+@custom-variant dark (&:is(html:not([data-octant-theme-mode="light"]) *));
 
 @theme inline {
   --color-background: var(--background);

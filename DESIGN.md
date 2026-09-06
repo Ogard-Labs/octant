@@ -145,7 +145,7 @@ There is one runtime theme authority and one owned control layer:
 | Static product system | Layout, shell geometry, type scale, spacing, motion, domain surface recipes, and `--oct-*` consumers              | `apps/web/src/styles/octant.css`                                           |
 | Runtime bridge        | Maps theme-resolvable `--octant-*` roles to the static system's `--oct-*` roles                                   | `apps/web/src/styles/octant-bridge.css`                                    |
 | shadcn projection     | Projects `--octant-*` roles into `--background`, `--primary`, `--border`, and the other shadcn/Tailwind variables | `apps/web/src/styles/shadcn-theme.css`, `apps/web/src/styles/tailwind.css` |
-| Owned recipes         | Editable shadcn New York recipes and the product-facing adapter API                                               | `apps/web/src/ui/shadcn/`, `apps/web/src/ui/base/`                         |
+| Owned recipes         | Editable Base UI-native shadcn recipes and the product-facing adapter API                                         | `apps/web/src/ui/shadcn/`, `apps/web/src/ui/base/`                         |
 
 The import order in `apps/web/src/styles.css` is load-bearing:
 
@@ -182,9 +182,10 @@ skips `composer-input`, the system prompt (0038), because that surface is
 already painted twice; the rule still holds for it — feature CSS must not
 repaint it a third time — it is simply not machine-checked.
 
-The shadcn registry metadata is in `apps/web/components.json` (`new-york`,
+The shadcn registry metadata is in `apps/web/components.json` (`base-nova`,
 Tailwind v4, CSS variables, Lucide). The checked-in recipes are owned source
-and currently use `@base-ui/react` primitives behind the Octant adapters. This
+and use `@base-ui/react` primitives behind the Octant adapters; 0085 settles
+the style, its density, and the three divergences kept from it. This
 keeps the interaction backend accessible and editable while preserving the
 shadcn composition and visual vocabulary. Feature code imports `ui/base`, not
 `ui/shadcn` or `@base-ui/react` directly. Project and split-workspace context
