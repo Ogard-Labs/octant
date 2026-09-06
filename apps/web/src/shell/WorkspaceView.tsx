@@ -530,6 +530,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           fallbackTitle={activeSurface?.title ?? "Workspace"}
           mode={props.mode}
           onActivate={activateThreadTab}
+          onCloseActive={() => void closePane(activePaneId)}
         />
         {props.crossContextOffer === undefined ? null : (
           <CrossContextBanner

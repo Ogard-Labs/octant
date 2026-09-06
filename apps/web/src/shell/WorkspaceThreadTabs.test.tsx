@@ -140,6 +140,29 @@ describe("WorkspaceThreadTabs", () => {
     expect(onActivate).toHaveBeenLastCalledWith(first);
   });
 
+  it("hands the pane back when the only open tab is closed", async () => {
+    const user = userEvent.setup();
+    const onActivate = vi.fn();
+    const onCloseActive = vi.fn();
+    render(
+      <WorkspaceThreadTabs
+        activeTab={first}
+        contextLabel="Planning"
+        fallbackTitle="First thread"
+        mode="chat"
+        onActivate={onActivate}
+        onCloseActive={onCloseActive}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Close First thread" }));
+
+    // Nothing is left to switch to, so the shell closes the pane; before, the
+    // tab disappeared while the thread stayed on screen.
+    expect(onCloseActive).toHaveBeenCalledOnce();
+    expect(onActivate).not.toHaveBeenCalled();
+  });
+
   it("switches pinned threads with the tab keyboard model", async () => {
     const user = userEvent.setup();
     const onActivate = vi.fn();

@@ -59,6 +59,12 @@ export interface WorkspaceThreadTabsProps {
   readonly fallbackTitle: string;
   readonly mode: OctantMode;
   readonly onActivate: (tab: WorkspaceThreadTab) => void;
+  /**
+   * Closing the tab in front with nothing left to fall back to hands the pane
+   * back to the shell. Without it the tab vanished while the thread stayed on
+   * screen, so the close control read as broken.
+   */
+  readonly onCloseActive?: () => void;
 }
 
 export function workspaceThreadTabFromSurface(
@@ -164,6 +170,7 @@ export function WorkspaceThreadTabs(props: WorkspaceThreadTabsProps) {
     if (key !== activeKey) return;
     const fallback = remaining[index] ?? remaining[index - 1];
     if (fallback !== undefined) props.onActivate(fallback.tab);
+    else props.onCloseActive?.();
   }
 
   return (
