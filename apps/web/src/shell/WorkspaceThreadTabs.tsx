@@ -7,10 +7,17 @@ import type {
   WorkThreadId,
 } from "@octant/contracts";
 import type { OctantMode } from "@octant/contracts/modes";
+import type { ThreadBoardPullRequestState } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { Cloud, Laptop, Pin, X } from "lucide-react";
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+
+/** The pull request a thread delivers to, worn on its tab as "PR #n". */
+export interface WorkspaceThreadTabPullRequest {
+  readonly number: number;
+  readonly state: ThreadBoardPullRequestState;
+}
 
 export type WorkspaceThreadTab =
   | {
@@ -38,6 +45,7 @@ export type WorkspaceThreadTab =
       readonly projectId?: ProjectId;
       readonly projectLabel?: string;
       readonly hostId?: HostId;
+      readonly pullRequest?: WorkspaceThreadTabPullRequest;
     };
 
 interface OpenWorkspaceThreadTab {
@@ -58,6 +66,7 @@ export function workspaceThreadTabFromSurface(
   projectId: ProjectId | undefined,
   titleOverride?: string,
   projectLabel?: string,
+  pullRequest?: WorkspaceThreadTabPullRequest,
 ): WorkspaceThreadTab | undefined {
   const title = titleOverride ?? surface.title;
   const container = {
@@ -91,6 +100,7 @@ export function workspaceThreadTabFromSurface(
     title,
     ...container,
     ...(surface.hostId === undefined ? {} : { hostId: surface.hostId }),
+    ...(pullRequest === undefined ? {} : { pullRequest }),
   };
 }
 
@@ -201,6 +211,15 @@ export function WorkspaceThreadTabs(props: WorkspaceThreadTabsProps) {
                   strokeWidth={1.7}
                 />
               )}
+              {entry.tab.mode === "code" && entry.tab.pullRequest !== undefined ? (
+                <span
+                  className="workspace-thread-tabs__pr"
+                  data-state={entry.tab.pullRequest.state}
+                  title={`Pull request #${String(entry.tab.pullRequest.number)} · ${entry.tab.pullRequest.state}`}
+                >
+                  PR #{String(entry.tab.pullRequest.number)}
+                </span>
+              ) : null}
               <span className="workspace-thread-tabs__title">{entry.tab.title}</span>
               {/* The chip repeats what the tab's tooltip already states, so it
                   stays out of the accessible name: joined to the title it read

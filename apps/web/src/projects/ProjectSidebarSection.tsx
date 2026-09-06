@@ -714,6 +714,11 @@ function ProjectGroup(props: {
           </div>
         )}
       </div>
+      {props.projects.length === 0 ? (
+        <p className="project-nav__empty" role="status">
+          No Projects yet.
+        </p>
+      ) : null}
       {props.projects.map((project, index) => {
         const availability = props.availabilityByProject.get(project.id);
         const unavailable = project.type !== "chat" && availability?.status === "unavailable";
