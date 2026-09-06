@@ -31,20 +31,65 @@ class ClaudePortError {
   constructor(readonly failure: ProviderFailure) {}
 }
 
+/**
+ * Every failure this port emits is minted here, so a consumer can tell a
+ * sentence the sanitizer wrote from a raw payload that arrived on a stream.
+ * The driver forwards only the former; anything else is reduced to its own
+ * generic sentence, which is the leak guard the driver tests pin.
+ */
+const sanitizedFailures = new WeakSet<ProviderFailure>();
+
 export function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
-  return { category, message };
+  const minted: ProviderFailure = { category, message };
+  sanitizedFailures.add(minted);
+  return minted;
+}
+
+export function isSanitizedFailure(candidate: ProviderFailure): boolean {
+  return sanitizedFailures.has(candidate);
 }
 
 export function protocol(message = "Claude returned an invalid SDK response."): ClaudePortError {
   return new ClaudePortError(failure("protocol", message));
 }
 
-export function sanitizeFailure(error: unknown, operation: string): ProviderFailure {
-  if (error instanceof ClaudePortError) return error.failure;
-  return failure("provider-failed", `Claude ${operation} failed.`);
+/**
+ * The reason a runtime error is allowed to carry into the person's view.
+ *
+ * Raw error text stays out of every failure (it can quote paths, prompts, or
+ * tokens), so the cause is named only when it matches a known shape, and
+ * then in fixed words. Observed before this: every stream failure reached
+ * the transcript as "Claude message stream failed." whether the binary was
+ * missing, the account was signed out, or the process had crashed.
+ */
+export function runtimeErrorReason(error: unknown): string | undefined {
+  const text = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  if (text === "") return undefined;
+  const exitCode = /(?:exited with|exit) code (\d{1,3})\b/i.exec(text)?.[1];
+  if (exitCode !== undefined) return `the Claude runtime exited with code ${exitCode}`;
+  if (/\bENOENT\b|not found|no such file/i.test(text))
+    return "the Claude runtime binary was not found";
+  if (/\bEACCES\b|permission denied/i.test(text)) return "the Claude runtime could not be started";
+  if (/\b401\b|unauthori[sz]ed|not logged in|please log in|authentication/i.test(text)) {
+    return "Claude is not signed in on this Mac";
+  }
+  if (/\b429\b|rate.?limit/i.test(text)) return "Claude is rate limited";
+  if (/\bECONNREFUSED\b|\bETIMEDOUT\b|\bENOTFOUND\b|fetch failed|network/i.test(text)) {
+    return "the connection to Claude failed";
+  }
+  return undefined;
 }
 
-function object(value: unknown): Record<string, unknown> | undefined {
+export function sanitizeFailure(error: unknown, operation: string): ProviderFailure {
+  if (error instanceof ClaudePortError) return error.failure;
+  const reason = runtimeErrorReason(error);
+  return failure(
+    "provider-failed",
+    reason === undefined ? `Claude ${operation} failed.` : `Claude ${operation} failed: ${reason}.`,
+  );
+}
+
+export function object(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
@@ -162,12 +207,18 @@ function decodeAssistantContent(
   if (block.type === "tool_use") {
     const decodedInput = decodeJsonValue(block.input);
     const decodedInputObject = object(decodedInput);
+    // Claude Code 2.1.26x stamps every tool call with `caller: { type }`; the
+    // annotation changes nothing about the call, and refusing it failed every
+    // tool-using turn while plain chat kept working.
+    const caller = block.caller;
+    const callerIsKnownShape =
+      caller === undefined || caller === null || typeof object(caller)?.type === "string";
     if (
       typeof block.id !== "string" ||
       typeof block.name !== "string" ||
       !allowedTools.includes(block.name) ||
       decodedInputObject === undefined ||
-      block.caller !== undefined
+      !callerIsKnownShape
     ) {
       throw protocol("Claude returned an unsupported runtime message.");
     }
