@@ -230,23 +230,25 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
 
-  it("shows a waiting turn as compact status instead of an alert card", () => {
+  it("shows a waiting turn as compact status that says what it waits on", () => {
     render(
       <CodeThreadWorkspace
         controller={controller({
           turnStatus: "waiting",
-          turnError: "The provider turn is waiting for approval, input, or recovery.",
+          turnError: "Provider completed with unresolved checkout reconciliation.",
         })}
         threadId={threadId}
       />,
     );
 
-    expect(
-      screen.getByText("Waiting for approval or input").closest('[role="status"]'),
-    ).toBeVisible();
-    expect(
-      screen.queryByText("The provider turn is waiting for approval, input, or recovery."),
-    ).not.toBeInTheDocument();
+    // No approval or question is open, so the host's own reason is the only
+    // true thing to say; "waiting for approval" here sent people looking for
+    // a button that did not exist.
+    const status = screen
+      .getByText("Waiting · Provider completed with unresolved checkout reconciliation.")
+      .closest('[role="status"]');
+    expect(status).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("reads a plan the assistant wrote as a plan, not as one long line", () => {

@@ -39,6 +39,7 @@ import {
   type ClaudeOpenQueryInput,
   type ClaudePermissionMode,
   type ClaudeQueryPort,
+  type ClaudePreToolDecision,
   type ClaudeSandboxSettings,
   type ClaudeToolDecision,
 } from "./claudeAgentSdkPort";
@@ -1327,7 +1328,20 @@ function makeConnection(
           if (digest === undefined) {
             return deny("Claude tool request has invalid input.");
           }
-          const grant = (): ClaudeToolDecision => {
+          // Claude Code takes a hook "allow" as the final word and runs the
+          // tool without calling `canUseTool`. Observed 2026-09-06: an
+          // approval-gated thread answered "allow" here for a Project-confined
+          // Edit, the file changed 1.2 s later, and no approval was ever
+          // raised. So the hook may only allow what `canUseTool` would let
+          // through unasked; every call that needs an approval or a question
+          // is answered "ask", which routes it to `canUseTool` with the grant
+          // recorded here. An allowed call holds no grant: nothing will come
+          // to consume it, and sixteen unconsumed grants used to end the turn.
+          const settledUnasked = (): ClaudePreToolDecision => {
+            activeState.settledToolUseIds.add(request.toolUseId);
+            return { behavior: "allow" };
+          };
+          const askThroughGrant = (): ClaudePreToolDecision => {
             if (
               !activeState.preToolRequests.has(request.toolUseId) &&
               activeState.preToolRequests.size >= MAX_PRE_TOOL_GRANTS
@@ -1343,16 +1357,28 @@ function makeConnection(
               inputDigest: digest,
               expiresAt: Date.now() + PRE_TOOL_GRANT_TTL_MS,
             });
-            return { behavior: "allow" };
+            return { behavior: "ask" };
           };
+          const decide = (): ClaudePreToolDecision =>
+            (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") ||
+            (input.executionPolicy === "auto-accept-edits" &&
+              CLAUDE_EDIT_TOOLS.has(request.toolName)) ||
+            (request.toolName !== "AskUserQuestion" && CLAUDE_READ_TOOLS.has(request.toolName))
+              ? settledUnasked()
+              : askThroughGrant();
           if (input.executionPolicy === "full-access") {
-            return grant();
+            return decide();
           }
+          // A shell call carries no cwd of its own: Claude Code runs it in the
+          // session's working directory, which is the Project root, and the
+          // sandbox confines it there. Requiring a cwd field denied every
+          // shell call before it could be asked about (observed 2026-09-06:
+          // "git status" refused four times, then the turn failed).
           const candidate =
             request.toolName === "AskUserQuestion"
               ? projectRoot
               : request.toolName === "Bash"
-                ? requestInput?.cwd
+                ? (requestInput?.cwd ?? projectRoot)
                 : request.toolName === "Glob" || request.toolName === "Grep"
                   ? (requestInput?.path ?? projectRoot)
                   : requestInput?.file_path;
@@ -1370,7 +1396,7 @@ function makeConnection(
           if (!confined) {
             return deny("Claude tool request is outside the Project.");
           }
-          return grant();
+          return decide();
         };
         // The runtime initializes with the first turn, so a new session's id
         // is assigned here and the initialized message is later held to it.
