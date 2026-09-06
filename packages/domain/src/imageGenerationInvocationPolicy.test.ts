@@ -145,6 +145,19 @@ describe("custom image profiles", () => {
       defaultModel: "recraftv3",
     });
   });
+
+  it("bounds a combined displayName to the profile contract's 120-character limit", () => {
+    const instance = recraft();
+    const label = "a".repeat(120);
+    const customSources: ReadonlyArray<ImageGenerationCustomSource> = [
+      { providerInstanceId: instance.id, modelId: "recraftv3" as never, label },
+      { providerInstanceId: instance.id, modelId: "recraftv3-vector" as never, label },
+    ];
+    const profiles = listCustomImageProfiles(customSources, [instance]);
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0]?.displayName.length).toBeLessThanOrEqual(120);
+    expect(profiles[0]?.displayName.endsWith("…")).toBe(true);
+  });
 });
 
 describe("generation options a selected model can honor", () => {

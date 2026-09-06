@@ -38,6 +38,17 @@ export type ImageGenerationHonoredOptions =
       readonly supportsReferences: boolean;
     };
 
+// Matches ImageGenerationProfileView.displayName's own Schema.maxLength(120):
+// two maximum-length labels joined would otherwise exceed it and fail to
+// decode.
+const MAX_PROFILE_DISPLAY_NAME_LENGTH = 120;
+
+function boundedDisplayName(labels: ReadonlyArray<string>): string {
+  const joined = labels.join(", ");
+  if (joined.length <= MAX_PROFILE_DISPLAY_NAME_LENGTH) return joined;
+  return `${joined.slice(0, MAX_PROFILE_DISPLAY_NAME_LENGTH - 1)}…`;
+}
+
 /**
  * Enabled Settings-configured custom image sources, as profile views. Only a
  * `"ready"` resolution is offered here — an `"unavailable"` custom source is
@@ -84,7 +95,7 @@ export function listCustomImageProfiles(
   }
   return [...byInstance.values()].map((group) => ({
     instanceId: group.instanceId,
-    displayName: group.labels.join(", "),
+    displayName: boundedDisplayName(group.labels),
     driverKind: "openai-compatible-image",
     modelAllowlist: group.modelIds,
     defaultModel: group.defaultModel,
