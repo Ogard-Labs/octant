@@ -227,6 +227,25 @@ describe("UI stylesheet check", () => {
     ]);
   });
 
+  it("flags a repaint written in a nested block", () => {
+    const primitives = collectPrimitiveClasses({
+      "apps/web/src/code/A.tsx": '<OctantButton className="feature-action" />',
+    });
+    expect(
+      findStylesheetFindings(
+        {
+          [CSS]: [
+            ".feature-action {",
+            "  &:hover { background-color: var(--oct-fg-soft); }",
+            "  @media (min-width: 600px) { & { color: var(--oct-fg); } }",
+            "}",
+          ].join("\n"),
+        },
+        primitives,
+      ).map((finding) => `${finding.rule} ${String(finding.line)}`),
+    ).toEqual(["control-repaint 2", "control-repaint 3"]);
+  });
+
   it("flags a repaint written on a border side or in another case", () => {
     const primitives = collectPrimitiveClasses({
       "apps/web/src/code/A.tsx": '<OctantButton className="feature-action" />',

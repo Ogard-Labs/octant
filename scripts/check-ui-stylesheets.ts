@@ -183,6 +183,23 @@ function readClassExpression(attributes: string, start: number): string {
   return attributes.slice(start);
 }
 
+/**
+ * The selector a declaration really carries. A nested block resolves its `&`
+ * against the selector that encloses it, and an at-rule contributes none of
+ * its own. A comma-separated parent resolves against its whole text, which
+ * errs toward reporting rather than missing a repaint.
+ */
+function resolvedSelector(headers: ReadonlyArray<string>): string {
+  let resolved = "";
+  for (const header of headers) {
+    if (header.startsWith("@")) continue;
+    if (resolved === "") resolved = header;
+    else if (header.includes("&")) resolved = header.split("&").join(resolved);
+    else resolved = `${resolved} ${header}`;
+  }
+  return resolved;
+}
+
 function repaintedPrimitive(
   header: string,
   primitiveClasses: ReadonlyMap<string, string>,
@@ -319,7 +336,7 @@ export function findStylesheetFindings(
         push("heavy-weight", `font-weight ${value} is heavier than a page title`);
       }
       if (!isToken && PAINT_PROPERTY.test(name)) {
-        const repainted = repaintedPrimitive(headers[headers.length - 1] ?? "", primitiveClasses);
+        const repainted = repaintedPrimitive(resolvedSelector(headers), primitiveClasses);
         if (repainted) {
           push(
             "control-repaint",
