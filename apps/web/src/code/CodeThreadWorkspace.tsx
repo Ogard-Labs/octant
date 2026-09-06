@@ -801,7 +801,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       {props.controller.turnStatus === "waiting" ? (
         <div className="code-thread-workspace__waiting thread-column" role="status">
           <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
-          <span>{waitingTurnLabel(props.controller.providerRequests)}</span>
+          <span>
+            {props.controller.providerRequests.length === 0 &&
+            props.controller.turnError !== undefined
+              ? `Waiting · ${props.controller.turnError}`
+              : waitingTurnLabel(props.controller.providerRequests)}
+          </span>
         </div>
       ) : props.controller.turnError === undefined ||
         (props.controller.turnStatus === "failed" &&
@@ -1013,7 +1018,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         }
                         {...(message.status === undefined || message.status === "completed"
                           ? {}
-                          : { label: turnStatusLabel(message.status) })}
+                          : {
+                              label: turnStatusLabel(
+                                message.status,
+                                props.controller.providerRequests,
+                              ),
+                            })}
                         {...(message.at === undefined ? {} : { at: message.at })}
                       />
                     ) : null}
@@ -1577,7 +1587,7 @@ function waitingTurnLabel(requests: CodeController["providerRequests"]): string 
   const latest = requests.at(-1);
   if (latest?.kind === "approval") return "Waiting for approval";
   if (latest?.kind === "input") return "Waiting for your input";
-  return "Waiting for approval or input";
+  return "Waiting";
 }
 
 function codeTurnSettlement(status: CodeTurnStatus): TurnSettlement | "idle" {
@@ -1638,12 +1648,17 @@ function turnHeaderOutcome(
       : status;
 }
 
-function turnStatusLabel(status: "waiting" | "interrupted" | "failed" | "incomplete"): string {
+function turnStatusLabel(
+  status: "waiting" | "interrupted" | "failed" | "incomplete",
+  requests: CodeController["providerRequests"],
+): string {
   switch (status) {
     case "waiting":
-      // Keep the runstatus slot filled while paused so the transcript does not
-      // jump when the elapsed indicator would otherwise drop.
-      return "Waiting for approval";
+      // A turn waits for an approval or an answer only while the host holds
+      // the request; a turn parked by the host itself (a rate limit, an
+      // unconfirmed checkout, a lost session) is waiting on nothing the
+      // person can click, and used to be mislabelled as an approval.
+      return waitingTurnLabel(requests);
     case "interrupted":
       return "Interrupted";
     case "failed":

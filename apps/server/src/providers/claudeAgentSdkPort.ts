@@ -30,6 +30,14 @@ export type ClaudeToolDecision =
   | { readonly behavior: "allow"; readonly updatedInput?: Readonly<Record<string, unknown>> }
   | { readonly behavior: "deny"; readonly message: string; readonly interrupt?: boolean };
 
+/**
+ * What the PreToolUse hook may answer. Claude Code treats a hook "allow" as
+ * final and runs the tool without consulting `canUseTool`, so the hook can
+ * only say "allow" for a call Octant would let through unasked; "ask" hands
+ * the call to `canUseTool`, where approvals and questions are raised.
+ */
+export type ClaudePreToolDecision = ClaudeToolDecision | { readonly behavior: "ask" };
+
 export interface ClaudeToolRequest {
   readonly toolName: string;
   readonly input: Readonly<Record<string, unknown>>;
@@ -88,7 +96,7 @@ export interface ClaudeOpenQueryInput {
   readonly tools: readonly string[];
   readonly sandbox?: ClaudeSandboxSettings;
   readonly canUseTool: (request: ClaudeToolRequest) => Promise<ClaudeToolDecision>;
-  readonly preToolUse: (request: ClaudePreToolRequest) => Promise<ClaudeToolDecision>;
+  readonly preToolUse: (request: ClaudePreToolRequest) => Promise<ClaudePreToolDecision>;
 }
 
 export interface ClaudeModelInfo {
@@ -351,7 +359,7 @@ interface ClaudeAgentSdkHookOptions {
 interface ClaudeAgentSdkHookOutput {
   readonly hookSpecificOutput: {
     readonly hookEventName: "PreToolUse";
-    readonly permissionDecision: "allow" | "deny";
+    readonly permissionDecision: "allow" | "deny" | "ask";
     readonly permissionDecisionReason?: string;
     readonly updatedInput?: Readonly<Record<string, unknown>>;
   };
@@ -686,9 +694,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                     permissionDecision: decision.behavior,
                     ...(decision.behavior === "deny"
                       ? { permissionDecisionReason: decision.message }
-                      : decision.updatedInput === undefined
-                        ? {}
-                        : { updatedInput: { ...decision.updatedInput } }),
+                      : decision.behavior === "allow" && decision.updatedInput !== undefined
+                        ? { updatedInput: { ...decision.updatedInput } }
+                        : {}),
                   },
                 };
               };
