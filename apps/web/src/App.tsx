@@ -4020,8 +4020,8 @@ function LaunchedShell(
           );
           return;
         }
-        // The delivery outcome must be confirmed by the user in the composer;
-        // never stamp a heuristic suggestion here without that confirmation.
+        // The composer reads the outcome from the prompt and always sends one;
+        // a thread never starts without a delivery target to be Done against.
         if (deliveryOutcome === undefined) {
           setDraftError("Confirm a delivery outcome before starting a Code thread.");
           return;
