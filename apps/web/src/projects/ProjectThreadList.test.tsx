@@ -32,6 +32,31 @@ function pullRequest(
 const identity12 = { projectId, repositoryOwner: "octant", repositoryName: "octant", number: 12 };
 
 describe("ProjectThreadRows", () => {
+  it("shows a thread's age and its pull request on the row itself, not only in the card", () => {
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
+    render(
+      <ProjectThreadRows
+        actions={{}}
+        onSelectThread={vi.fn()}
+        threads={[
+          {
+            ...thread,
+            updatedAt: twoHoursAgo,
+            pullRequests: { items: [pullRequest(12, { state: "open" })], hiddenCount: 0 },
+          },
+        ]}
+      />,
+    );
+
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    expect(within(row).getByText("#12")).toBeVisible();
+    expect(within(row).getByText("2h")).toBeVisible();
+    expect(within(row).getByRole("img", { name: "Pull request #12 · open" })).toHaveAttribute(
+      "data-state",
+      "open",
+    );
+  });
+
   it("keeps a long thread list bounded to the visible window", async () => {
     const threads = Array.from({ length: 80 }, (_, index) => ({
       threadId: `thread-${String(index)}`,

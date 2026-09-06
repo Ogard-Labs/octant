@@ -118,7 +118,8 @@ Surface (reading measure 880px, or wide for boards)
 
 Leaving a reader route is always the ghost "Back to workspace" control in the
 header. Settings is the same shell with a 680px measure and its own
-navigation rail. Rows in Settings are `SettingRow`; rows everywhere else are
+navigation rail; the rail names each group of pages with a quiet label and
+draws no hairline between groups. Rows in Settings are `SettingRow`; rows everywhere else are
 `surface-row`. Both draw the same hairline.
 
 ### Welcome and composer
@@ -189,6 +190,17 @@ shadcn composition and visual vocabulary. Feature code imports `ui/base`, not
 `ui/shadcn` or `@base-ui/react` directly. Project and split-workspace context
 menus now use the shared `OctantContextMenu` adapter; do not add a new direct
 primitive import.
+
+### Turn header
+
+Every assistant reply in Chat, Work, and Code opens with the same line: who
+answered (provider and model as the picker names them), how the turn stands
+(Working…, Waiting for approval, Completed with how long it took, Failed with
+the host's sanitized reason on the line below), and when it last changed at the
+right edge. It is set in the interface face at the detail size; only the status
+word carries colour. `TurnHeader` in `apps/web/src/transcript/` is the one
+recipe; a mode maps its own lifecycle onto its vocabulary and adds nothing of
+its own.
 
 ## Colour system
 
@@ -352,9 +364,9 @@ and New Project from GitHub repository. Choosing GitHub swaps the menu's body
 for the managed-clone flow in place, so there is no second repository control
 beside the Project. Access is
 a titled menu on the prompt card, next to the model picker, and carries the
-"Remember for this Project" switch. The
-Under the Code composer the start screen reads like GitHub Copilot's and
-Cursor's agent homes: suggested prompts as small cards (a label and the
+"Remember for this Project" switch.
+Under the Code composer the start screen is an agent home rather than a
+blank prompt: suggested prompts as small cards (a label and the
 sentence they fill in), then three sections that share one card grid, two
 across at the composer's width. Each card opens with a badge naming what it
 is (Issue, Pull request, Review requested, Linear, or a thread's delivery

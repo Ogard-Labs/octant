@@ -101,10 +101,11 @@
   display: inline-flex;
   flex: none;
   min-width: 0;
-  min-height: 30px;
+  min-height: 28px;
   max-width: 12rem;
-  align-items: stretch;
+  align-items: center;
   overflow: hidden;
+  padding-inline-end: 3px;
   color: var(--oct-muted);
   border-radius: var(--oct-radius-sm);
 }
@@ -119,21 +120,21 @@
    sharing one ground made hovering look like selecting. */
 .dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"]) {
   color: var(--oct-fg);
-  background: var(--oct-surface);
-  box-shadow: inset 0 0 0 1px var(--oct-border);
+  background: var(--octant-selection);
+  box-shadow: inset 0 0 0 1px var(--octant-border);
 }
 
 .dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"]):hover {
-  background: var(--oct-surface);
+  background: var(--octant-selection);
 }
 
 .dock-tool-strip__select {
   display: inline-flex;
   min-width: 0;
-  min-height: 30px;
+  min-height: 28px;
   align-items: center;
-  gap: 5px;
-  padding: 0 4px 0 10px;
+  gap: 6px;
+  padding: 0 4px 0 8px;
   overflow: hidden;
   color: inherit;
   background: transparent;
@@ -144,11 +145,16 @@
   white-space: nowrap;
 }
 
+/* The close control is the same 22px mark the thread tabs carry, so the two
+   strips read as one grammar: a tab, then a quiet × that shows on hover, on
+   focus, and on the tab in front. */
 .dock-tool-strip__close {
-  width: 26px;
-  height: auto;
-  min-height: 30px;
-  border-radius: 0;
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  border-radius: var(--oct-radius-xs, 3px);
   color: var(--oct-muted);
   opacity: 0;
 }

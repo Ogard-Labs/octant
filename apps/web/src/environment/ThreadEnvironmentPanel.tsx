@@ -31,8 +31,24 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
   const shown = active && props.open;
   const facts = summaryFacts(props.summary);
 
+  // The dock host can mount after the panel opens, and the dock replaces it
+  // whenever it re-keys the tool body — the tool tab and the pane's
+  // Environment arrive on different renders. A single lookup left the panel
+  // inline above the transcript, or portalled into a detached element and so
+  // invisible. Follow whatever host the document currently holds.
   useEffect(() => {
-    setDockHost(shown ? document.querySelector("[data-octant-environment-dock]") : null);
+    if (!shown) {
+      setDockHost(null);
+      return;
+    }
+    const sync = () => {
+      const next = document.querySelector("[data-octant-environment-dock]");
+      setDockHost((current) => (current === next ? current : next));
+    };
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
   }, [shown]);
 
   if (!shown) return null;
@@ -55,7 +71,9 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
 function summaryFacts(summary: ThreadEnvironmentSummaryFacts): ReadonlyArray<string> {
   const facts: string[] = [];
   if (summary.branch !== undefined) facts.push(summary.branch);
-  else facts.push(summary.identity.detail);
+  // The detail is the folder; when a Project is named after its folder the
+  // line read "octant · octant", so the repeat is dropped.
+  else if (summary.identity.detail !== summary.identity.label) facts.push(summary.identity.detail);
   if (summary.changes !== undefined) facts.push(summary.changes === "dirty" ? "Dirty" : "Clean");
   // "." is the repository root: saying so adds nothing to the identity line.
   if (summary.workingLocation !== undefined && summary.workingLocation !== ".") {

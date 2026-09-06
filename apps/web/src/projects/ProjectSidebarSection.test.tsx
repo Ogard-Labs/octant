@@ -38,6 +38,8 @@ describe("ProjectSidebarSection chat thread nesting", () => {
 
     expect(screen.getByRole("heading", { name: "Projects" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Add folder" })).toBeVisible();
+    // The heading is not left hanging over nothing: one quiet line says so.
+    expect(screen.getByText("No Projects yet.")).toBeVisible();
     expect(screen.queryByText("No Projects in this mode.")).toBeNull();
     expect(screen.queryByText("Archive")).toBeNull();
   });

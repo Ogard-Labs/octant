@@ -294,17 +294,26 @@ describe("the public-block visual language", () => {
     const settings = readFileSync(join(webRoot, "styles/settings.css"), "utf8");
     const navigation =
       settings.match(/(?:^|\n)\.settings-navigation \.setnav-section\s*\{[^}]+\}/)?.[0] ?? "";
-    const hiddenDesktopGroups =
-      settings.match(
-        /\.settings-view__sidebar \.settings-navigation \.setnav-section\s*\{[^}]+\}/,
-      )?.[0] ?? "";
     const hint = settings.match(/\.setrow-hint\s*\{[^}]+\}/)?.[0] ?? "";
 
     expect(navigation).toMatch(/font-size:\s*calc\(12 \* var\(--oct-text-step\)\)/);
+    expect(navigation).toMatch(/font-weight:\s*var\(--oct-weight-regular\)/);
     expect(navigation).toMatch(/text-transform:\s*none/);
     expect(navigation).toMatch(/letter-spacing:\s*normal/);
-    expect(hiddenDesktopGroups).toMatch(/width:\s*1px/);
-    expect(hiddenDesktopGroups).toMatch(/clip-path:\s*inset\(50%\)/);
+    // The desktop rail shows its group labels; a quiet label is what separates
+    // one group of pages from the next, not a hairline and not a hidden name.
+    // Any way of hiding them counts: the sr-only recipe, display, visibility.
+    const sidebarLabelRules = settings.match(
+      /\.settings-view__sidebar[^{]*\.setnav-section[^{]*\{[^}]*\}/g,
+    );
+    for (const rule of sidebarLabelRules ?? []) {
+      expect(rule).not.toMatch(
+        /clip-path|display:\s*none|visibility:\s*hidden|width:\s*1px|font-size:\s*0/,
+      );
+    }
+    expect(settings).not.toMatch(
+      /\.settings-navigation__group \+ \.settings-navigation__group\s*\{[^}]*border-top/,
+    );
     expect(hint).toMatch(/font-size:\s*calc\(12 \* var\(--oct-text-step\)\)/);
   });
 
