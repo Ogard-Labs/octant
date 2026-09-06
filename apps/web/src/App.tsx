@@ -3213,6 +3213,10 @@ function LaunchedShell(
     if (chatController.status !== "ready") return;
     const thread = chatController.navigation.find((candidate) => candidate.threadId === threadId);
     if (thread === undefined) return;
+    // Picking a thread means "show me this thread": a Board or Inbox that was
+    // open stays out of the way rather than keeping the pane while the row
+    // highlights underneath it.
+    closeWorkspaceReaders();
     markInteraction("renderer", "thread-open-requested");
     markInteractionAfterPaint("thread-open");
     void controller.openChatThread(
@@ -3227,6 +3231,7 @@ function LaunchedShell(
       (candidate) => String(candidate.threadId) === navigationId,
     );
     if (thread === undefined) return;
+    closeWorkspaceReaders();
     markInteraction("renderer", "thread-open-requested");
     markInteractionAfterPaint("thread-open");
     void controller.openCodeThread(
@@ -3242,6 +3247,7 @@ function LaunchedShell(
       (candidate) => String(candidate.threadId) === navigationId,
     );
     if (thread === undefined) return;
+    closeWorkspaceReaders();
     markInteraction("renderer", "thread-open-requested");
     markInteractionAfterPaint("thread-open");
     void controller.openWorkThread(
@@ -3356,8 +3362,11 @@ function LaunchedShell(
 
   // Used right after creation, when the Project is not yet in this render's
   // snapshot; the dialog already knows the mode and name.
-  async function openDraftInKnownProject(projectId: ProjectId, mode: OctantMode, name: string) {
-    await controller.openProject(projectId, mode, name);
+  async function openDraftInKnownProject(projectId: ProjectId, mode: OctantMode, _name: string) {
+    // The draft carries its Project itself. Opening the Project first put its
+    // overview on screen for a frame before the draft replaced it, which read
+    // as an old page flashing past every time a task was started from a row.
+    closeWorkspaceReaders();
     await controller.openDraftThread(mode, projectId);
   }
 
