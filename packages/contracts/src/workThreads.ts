@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { AggregateVersion, UtcTimestamp } from "./events";
+import { ThreadRestFields } from "./threadRest";
 import { GithubIssueContextRequest } from "./githubIssueContext";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { HostId } from "./host";
@@ -33,6 +34,8 @@ export const WorkThread = Schema.Struct({
   providerHandoff: Schema.optional(ThreadProviderHandoff),
   bindingRevisionId: Schema.optional(BindingRevisionId),
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
+  /** Completed and snoozed rest, shared with Chat and Code; see {@link ThreadRestFields}. */
+  ...ThreadRestFields,
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
@@ -75,6 +78,34 @@ export const ChangeWorkThreadLifecycleCommand = Schema.Struct({
 }).annotations(strict);
 export type ChangeWorkThreadLifecycleCommand = typeof ChangeWorkThreadLifecycleCommand.Type;
 
+/**
+ * Put a finished thread away without archiving it. The host refuses while a
+ * turn is running or the thread waits on the person, so a thread never
+ * disappears with work in flight.
+ */
+export const CompleteWorkThreadCommand = Schema.Struct({
+  kind: Schema.Literal("complete-work-thread"),
+  ...WorkThreadCommandFields,
+}).annotations(strict);
+export type CompleteWorkThreadCommand = typeof CompleteWorkThreadCommand.Type;
+export const ReopenWorkThreadCommand = Schema.Struct({
+  kind: Schema.Literal("reopen-work-thread"),
+  ...WorkThreadCommandFields,
+}).annotations(strict);
+export type ReopenWorkThreadCommand = typeof ReopenWorkThreadCommand.Type;
+/** Hide the thread until `until`; the host refuses a wake time that is not ahead. */
+export const SnoozeWorkThreadCommand = Schema.Struct({
+  kind: Schema.Literal("snooze-work-thread"),
+  ...WorkThreadCommandFields,
+  until: UtcTimestamp,
+}).annotations(strict);
+export type SnoozeWorkThreadCommand = typeof SnoozeWorkThreadCommand.Type;
+export const WakeWorkThreadCommand = Schema.Struct({
+  kind: Schema.Literal("wake-work-thread"),
+  ...WorkThreadCommandFields,
+}).annotations(strict);
+export type WakeWorkThreadCommand = typeof WakeWorkThreadCommand.Type;
+
 export const ConfirmWorkThreadCompletionCommand = Schema.Struct({
   kind: Schema.Literal("confirm-work-thread-completion"),
   ...WorkThreadCommandFields,
@@ -105,6 +136,10 @@ export const WorkThreadCommand = Schema.Union(
   CreateWorkThreadCommand,
   RenameWorkThreadCommand,
   ChangeWorkThreadLifecycleCommand,
+  CompleteWorkThreadCommand,
+  ReopenWorkThreadCommand,
+  SnoozeWorkThreadCommand,
+  WakeWorkThreadCommand,
   ConfirmWorkThreadCompletionCommand,
   ChangeWorkThreadWorkingDirectoryCommand,
   ChangeWorkThreadProviderCommand,
@@ -163,6 +198,12 @@ export type WorkThreadCommandResult = typeof WorkThreadCommandResult.Type;
 export const WorkThreadNavigationRuntime = Schema.Struct({
   threadId: WorkThreadId,
   executing: Schema.Boolean,
+  /**
+   * The agent is waiting on the person: a pending approval or question. Lets
+   * the sidebar wake a snoozed row early. Optional so an older host's payload
+   * still decodes; absent reads as not waiting.
+   */
+  awaitingInput: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type WorkThreadNavigationRuntime = typeof WorkThreadNavigationRuntime.Type;
 

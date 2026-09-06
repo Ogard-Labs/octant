@@ -92,6 +92,7 @@ export * from "./workspacePresets";
 export * from "./threadCheckpoints";
 export * from "./threadCreation";
 export * from "./threadRetention";
+export * from "./threadRest";
 export * from "./threadExport";
 export * from "./threadHandOff";
 export * from "./usage";

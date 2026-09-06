@@ -172,6 +172,9 @@ Each thread remembers its open tools and selected tool.
 
 ## Complete and snooze threads
 
+The same actions exist for Chat and Work threads; this section describes
+them once, for Code.
+
 A thread you are done with can be put away without archiving it. Choose
 **Complete** from the row's menu (right-click, or the ⋯ control on hover) and
 the thread leaves its Project group for the collapsed **Completed** shelf at

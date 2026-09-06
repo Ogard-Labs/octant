@@ -81,6 +81,9 @@ export interface ChatThreadNavigationSource {
   readonly threadId: string;
   readonly title: string;
   readonly updatedAt?: string;
+  /** Completed and snoozed rest carried from the host's thread record. */
+  readonly completedAt?: string | undefined;
+  readonly snooze?: ChatThreadNavigationItem["snooze"] | undefined;
 }
 
 /**
@@ -185,6 +188,8 @@ export function buildChatThreadNavigation(
       ? {}
       : { unread: thread.lastSequence > thread.readSequence }),
     ...(thread.updatedAt === undefined ? {} : { updatedAt: thread.updatedAt }),
+    ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
+    ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
   }));
 }
 

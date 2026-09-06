@@ -15,15 +15,19 @@ has no unattended timer. It says nothing about a timer that only files.
 
 ## Decision
 
-- A Code thread has two resting states beside archive, recorded on the thread
-  aggregate as optional fields: `completedAt`, and `snooze` with `until`,
-  `at`, and `duringTurn`. Neither is a lifecycle value and neither needs a
-  migration; an archived thread keeps whatever rest it had.
+- A Chat, Work, or Code thread has two resting states beside archive, recorded
+  on the thread aggregate as the same optional fields: `completedAt`, and
+  `snooze` with `until`, `at`, and `duringTurn`. Neither is a lifecycle value
+  and neither needs a migration; an archived thread keeps whatever rest it had.
 - **Complete** is manual only. The host refuses it while the thread's turn is
   running or while the thread waits on an approval or a question, because
-  completing hides the row and would hide that work. Completing drops the pin
-  and any snooze. **Reopen** is the way back, and a person sending the thread
-  a turn reopens it as well; the host decides that reset, never the renderer.
+  completing hides the row and would hide that work. Each mode answers from
+  its own runtime: Code from its projected runtime work, Work from the board's
+  live activity, Chat from its in-flight attempt (Chat's durable follow-up is
+  the person's own mark as often as the agent's question, so it never blocks
+  a rest). Completing drops the pin and any snooze. **Reopen** is the way
+  back, and a person sending the thread a turn reopens it as well; the host
+  decides that reset, never the renderer.
 - **Snooze** is an overlay on the active list, not a third lifecycle. A
   running thread may be snoozed, a thread waiting on the person may not, and
   the wake time must be ahead. No host timer wakes a snooze: clients derive
@@ -36,16 +40,14 @@ has no unattended timer. It says nothing about a timer that only files.
   the thread surface itself do not change.
 - The host archives a completed thread once its completion is older than
   `completedThreadArchiveAfterDays` in shell settings (default 7 days;
-  `null` means never). The sweep runs hourly in the host process, re-decides
-  each thread against the authoritative record before archiving it, journals
-  the ordinary thread-updated event with the `system` actor, and never
-  purges. This is a scoped exception to 0035's rule that there is no
-  unattended timer: it files, and 0035's rule that only a confirmed purge
-  deletes still stands in full.
-- The shared sidebar renders Complete, Reopen, Snooze, and Wake only for a
-  mode whose service carries these fields and refusals. Chat and Work take
-  the same actions when their services do; until then their rows offer
-  nothing they cannot honour.
+  `null` means never). One sweep runs hourly in the host process over every
+  mode's threads, re-decides each thread against its mode's authoritative
+  record before archiving it, journals the ordinary thread-updated event with
+  the `system` actor, and never purges. This is a scoped exception to 0035's
+  rule that there is no unattended timer: it files, and 0035's rule that only
+  a confirmed purge deletes still stands in full.
+- The shared sidebar renders Complete, Reopen, Snooze, and Wake the same way
+  in every mode, from the actions each mode's service honours.
 
 ## Consequences
 

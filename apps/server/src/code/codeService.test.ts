@@ -3742,9 +3742,9 @@ describe("completing and snoozing a Code thread", () => {
     ).toEqual({ status: "skipped", reason: "not-due" });
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
 
-    expect(fixture.service.archiveCompletedThread(ids.thread, { afterDays: 7, now })).toMatchObject(
-      { status: "archived", thread: { lifecycle: "archived", version: 2 } },
-    );
+    expect(fixture.service.archiveCompletedThread(ids.thread, { afterDays: 7, now })).toEqual({
+      status: "archived",
+    });
     expect(fixture.persistence.journal.append).toHaveBeenLastCalledWith(
       expect.objectContaining({
         expectedVersion: 1,

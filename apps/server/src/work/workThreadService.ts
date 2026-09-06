@@ -26,6 +26,15 @@ import {
 import { Schema } from "effect";
 import { hasWorkToolAuthority } from "@octant/domain";
 import {
+  completedThreadArchiveDue,
+  decideCompleteThread,
+  decideSnoozeThread,
+} from "@octant/domain/thread-completion-policy";
+import type {
+  CompletedThreadArchiveInput,
+  CompletedThreadArchiveOutcome,
+} from "../completedThreadArchiveSweep";
+import {
   issueContextFailureCategory,
   prepareOptionalIssueContext,
   type GithubIssueContextService,
@@ -87,7 +96,7 @@ export interface WorkThreadServiceDependencies {
           readonly eventVersion: 1;
           readonly correlationId: string;
           readonly actor: {
-            readonly kind: "local-user";
+            readonly kind: "local-user" | "system";
             readonly actorId: string;
           };
           readonly occurredAt: string;
@@ -130,7 +139,7 @@ export interface WorkThreadServiceDependencies {
    */
   readonly observeRuntime?: (
     threadId: WorkThreadId,
-  ) => { readonly executing: boolean } | Promise<{ readonly executing: boolean }>;
+  ) => WorkThreadRuntimeActivity | Promise<WorkThreadRuntimeActivity>;
   readonly issueContext?: GithubIssueContextPort;
   readonly linearIssueContext?: LinearIssueContextPort;
 }
@@ -188,7 +197,12 @@ export class WorkThreadService {
         for (const thread of threads) {
           if (thread.lifecycle === "archived" || thread.lifecycle === "deleted") continue;
           const activity = await this.#observeRuntime(thread.id);
-          runtime.push({ threadId: thread.id, executing: activity.executing });
+          runtime.push({
+            threadId: thread.id,
+            executing: activity.executing,
+            // Carried only when true, so an idle row's payload stays as it was.
+            ...(activity.awaitingInput === true ? { awaitingInput: true } : {}),
+          });
         }
       }
       return decodeWorkThreadBootstrap({ threads, runtime });
@@ -239,7 +253,12 @@ export class WorkThreadService {
           this.#observeRuntime === undefined
             ? { executing: false }
             : await this.#observeRuntime(thread.id);
-        runtime.push({ threadId: thread.id, executing: activity.executing });
+        runtime.push({
+          threadId: thread.id,
+          executing: activity.executing,
+          // Carried only when true, so an idle row's payload stays as it was.
+          ...(activity.awaitingInput === true ? { awaitingInput: true } : {}),
+        });
       }
       return decodeWorkThreadNavigation({ threads, runtime });
     } catch (error) {
@@ -419,7 +438,31 @@ export class WorkThreadService {
       ) {
         throw this.#failure("invalid", "Work thread already has that lifecycle.");
       }
+      // Completing or snoozing hides the row, so the host decides from the
+      // runtime it observes — never from what the renderer believed a moment
+      // ago — whether hiding it would hide work in flight.
+      const restSignals =
+        command.kind === "complete-work-thread" || command.kind === "snooze-work-thread"
+          ? await this.#restSignals(current.id)
+          : undefined;
       const updatedAt = decodeTimestamp(this.#clock());
+      if (command.kind === "complete-work-thread" && restSignals !== undefined) {
+        const decision = decideCompleteThread({ lifecycle: current.lifecycle, ...restSignals });
+        if (decision.status === "refused") {
+          throw this.#failure("invalid", WORK_COMPLETE_REFUSALS[decision.reason]);
+        }
+      }
+      if (command.kind === "snooze-work-thread" && restSignals !== undefined) {
+        const decision = decideSnoozeThread({
+          lifecycle: current.lifecycle,
+          awaitingInput: restSignals.awaitingInput,
+          until: command.until,
+          now: updatedAt,
+        });
+        if (decision.status === "refused") {
+          throw this.#failure("invalid", WORK_SNOOZE_REFUSALS[decision.reason]);
+        }
+      }
       const updated = decodeWorkThread(
         command.kind === "rename-work-thread"
           ? {
@@ -435,28 +478,56 @@ export class WorkThreadService {
                 version: command.expectedVersion + 1,
                 updatedAt,
               }
-            : command.kind === "change-work-thread-provider"
-              ? {
-                  ...current,
-                  providerInstanceId: command.providerInstanceId,
-                  modelId: command.modelId,
-                  providerHandoff: {
-                    previousProviderInstanceId: current.providerInstanceId,
-                    previousModelId: current.modelId,
-                    nextProviderInstanceId: command.providerInstanceId,
-                    nextModelId: command.modelId,
-                    changedAt: updatedAt,
-                  },
+            : command.kind === "complete-work-thread"
+              ? // Completing is "I'm done here": any snooze would keep the row
+                // out of the Completed shelf, so it goes.
+                {
+                  ...withoutThreadRest(current),
+                  completedAt: updatedAt,
                   version: command.expectedVersion + 1,
                   updatedAt,
                 }
-              : {
-                  ...current,
-                  workingDirectory: command.workingDirectory,
-                  bindingRevisionId: bindingRevision?.revisionId,
-                  version: command.expectedVersion + 1,
-                  updatedAt,
-                },
+              : command.kind === "reopen-work-thread" || command.kind === "wake-work-thread"
+                ? {
+                    ...withoutThreadRest(current),
+                    version: command.expectedVersion + 1,
+                    updatedAt,
+                  }
+                : command.kind === "snooze-work-thread"
+                  ? {
+                      ...withoutThreadRest(current),
+                      snooze: {
+                        until: command.until,
+                        at: updatedAt,
+                        // A turn running now is what "something happened"
+                        // means later: its end wakes the thread early.
+                        ...(restSignals?.executing === true ? { duringTurn: true } : {}),
+                      },
+                      version: command.expectedVersion + 1,
+                      updatedAt,
+                    }
+                  : command.kind === "change-work-thread-provider"
+                    ? {
+                        ...current,
+                        providerInstanceId: command.providerInstanceId,
+                        modelId: command.modelId,
+                        providerHandoff: {
+                          previousProviderInstanceId: current.providerInstanceId,
+                          previousModelId: current.modelId,
+                          nextProviderInstanceId: command.providerInstanceId,
+                          nextModelId: command.modelId,
+                          changedAt: updatedAt,
+                        },
+                        version: command.expectedVersion + 1,
+                        updatedAt,
+                      }
+                    : {
+                        ...current,
+                        workingDirectory: command.workingDirectory,
+                        bindingRevisionId: bindingRevision?.revisionId,
+                        version: command.expectedVersion + 1,
+                        updatedAt,
+                      },
       );
       this.#append(current.id, command.expectedVersion, "work.thread-updated@1", {
         kind: "thread-updated",
@@ -553,6 +624,84 @@ export class WorkThreadService {
     }
   }
 
+  /**
+   * A person sending the thread a turn is re-engaging with it: a completed
+   * thread comes back to the active list and a snoozed one wakes, the same
+   * way an explicit Reopen or Wake would. Journals nothing for a thread that
+   * was already in play.
+   */
+  noteTurnRequested(threadId: WorkThreadId): void {
+    const current = this.#projection.read(threadId);
+    if (current === undefined) return;
+    if (current.completedAt === undefined && current.snooze === undefined) return;
+    const updated = decodeWorkThread({
+      ...withoutThreadRest(current),
+      version: current.version + 1,
+      updatedAt: decodeTimestamp(this.#clock()),
+    });
+    this.#append(current.id, current.version, "work.thread-updated@1", {
+      kind: "thread-updated",
+      thread: updated,
+    });
+    this.#projection.apply({ kind: "thread-updated", thread: updated });
+  }
+
+  /**
+   * Archive one completed thread on the host's own timer. Re-reads the thread
+   * and re-decides from the authoritative record, so a thread reopened between
+   * the sweep's read and this call is left alone rather than archived on stale
+   * evidence. Archiving keeps everything; it only leaves the shelves.
+   */
+  archiveCompletedThread(
+    threadId: WorkThreadId,
+    input: CompletedThreadArchiveInput,
+  ): CompletedThreadArchiveOutcome {
+    const current = this.#projection.read(threadId);
+    if (current === undefined) return { status: "skipped", reason: "not-found" };
+    if (
+      !completedThreadArchiveDue({
+        lifecycle: current.lifecycle,
+        completedAt: current.completedAt,
+        afterDays: input.afterDays,
+        now: input.now,
+      })
+    ) {
+      return { status: "skipped", reason: "not-due" };
+    }
+    const updated = decodeWorkThread({
+      ...current,
+      lifecycle: "archived",
+      version: current.version + 1,
+      updatedAt: decodeTimestamp(this.#clock()),
+    });
+    this.#append(
+      current.id,
+      current.version,
+      "work.thread-updated@1",
+      { kind: "thread-updated", thread: updated },
+      "system",
+    );
+    this.#projection.apply({ kind: "thread-updated", thread: updated });
+    return { status: "archived" };
+  }
+
+  /**
+   * What the runtime says about the thread's live work. A runtime that cannot
+   * be observed leaves the thread eligible to rest, the same reading the
+   * board takes when it keeps such a thread visible.
+   */
+  async #restSignals(
+    threadId: WorkThreadId,
+  ): Promise<{ readonly executing: boolean; readonly awaitingInput: boolean }> {
+    if (this.#observeRuntime === undefined) return { executing: false, awaitingInput: false };
+    try {
+      const activity = await this.#observeRuntime(threadId);
+      return { executing: activity.executing, awaitingInput: activity.awaitingInput === true };
+    } catch {
+      return { executing: false, awaitingInput: false };
+    }
+  }
+
   #append(
     threadId: WorkThreadId,
     expectedVersion: number,
@@ -561,6 +710,9 @@ export class WorkThreadService {
       | "work.thread-updated@1"
       | "work.thread-completion-confirmed@1",
     payload: unknown,
+    // Everything a person asks for is theirs; only the host's own timer
+    // writes as the system, so a journal reader can tell the two apart.
+    actorKind: "local-user" | "system" = "local-user",
   ): void {
     this.#persistence.journal.append({
       aggregate: {
@@ -574,10 +726,10 @@ export class WorkThreadService {
           eventName,
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#uuid()),
-          actor: {
-            kind: "local-user",
-            actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID),
-          },
+          actor:
+            actorKind === "system"
+              ? { kind: "system", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) }
+              : { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
           occurredAt: decodeTimestamp(this.#clock()),
           payload,
         },
@@ -599,6 +751,36 @@ export class WorkThreadService {
   #failure(category: WorkThreadFailure["category"], message: string): WorkThreadServiceError {
     return new WorkThreadServiceError(decodeWorkThreadFailure({ category, message }));
   }
+}
+
+/** The live signals the board folds; `awaitingInput` is absent from older observers. */
+export interface WorkThreadRuntimeActivity {
+  readonly executing: boolean;
+  readonly awaitingInput?: boolean;
+}
+
+const WORK_COMPLETE_REFUSALS = {
+  archived: "An archived thread cannot be completed.",
+  executing: "Wait for the running turn to finish before completing this thread.",
+  "awaiting-input": "This thread is waiting on you; answer it before completing it.",
+} as const;
+
+const WORK_SNOOZE_REFUSALS = {
+  archived: "An archived thread cannot be snoozed.",
+  "awaiting-input": "This thread is waiting on you; answer it before snoozing it.",
+  "wake-time-not-in-future": "Pick a wake time that is still ahead.",
+} as const;
+
+/**
+ * A thread back in play carries neither rest: completion and snooze are
+ * dropped rather than stored as "not any more", so a thread that was never
+ * put away and one that came back are the same record.
+ */
+function withoutThreadRest<T extends Pick<WorkThread, "completedAt" | "snooze">>(
+  thread: T,
+): Omit<T, "completedAt" | "snooze"> {
+  const { completedAt: _completedAt, snooze: _snooze, ...rest } = thread;
+  return rest;
 }
 
 function lifecycleUpdate(

@@ -1,5 +1,3 @@
-import type { CodeThreadLifecycle } from "@octant/contracts";
-
 /**
  * Pure policy for a thread's two resting states.
  *
@@ -29,6 +27,24 @@ export interface ThreadRestSignals {
 }
 
 export type ThreadShelf = "active" | "snoozed" | "completed";
+
+/**
+ * The lifecycle values the three modes use. Code keeps two legacy values
+ * ("waiting", "interrupted") beside active; Chat and Work pass through
+ * deletion. Only an active thread can rest, and only an archived or deleted
+ * one is closed to the person.
+ */
+export type RestingThreadLifecycle =
+  | "active"
+  | "archived"
+  | "waiting"
+  | "interrupted"
+  | "deleting"
+  | "deleted";
+
+function lifecycleIsClosed(lifecycle: RestingThreadLifecycle): boolean {
+  return lifecycle === "archived" || lifecycle === "deleting" || lifecycle === "deleted";
+}
 
 const MS_PER_MINUTE = 60_000;
 const MS_PER_HOUR = 60 * MS_PER_MINUTE;
@@ -98,9 +114,9 @@ export type CompleteThreadDecision =
  * would never be answered.
  */
 export function decideCompleteThread(
-  input: ThreadRestSignals & { readonly lifecycle: CodeThreadLifecycle },
+  input: ThreadRestSignals & { readonly lifecycle: RestingThreadLifecycle },
 ): CompleteThreadDecision {
-  if (input.lifecycle === "archived") return { status: "refused", reason: "archived" };
+  if (lifecycleIsClosed(input.lifecycle)) return { status: "refused", reason: "archived" };
   if (input.executing) return { status: "refused", reason: "executing" };
   if (input.awaitingInput) return { status: "refused", reason: "awaiting-input" };
   return { status: "ok" };
@@ -120,12 +136,12 @@ export type SnoozeThreadDecision =
  * and awake at once.
  */
 export function decideSnoozeThread(input: {
-  readonly lifecycle: CodeThreadLifecycle;
+  readonly lifecycle: RestingThreadLifecycle;
   readonly awaitingInput: boolean;
   readonly until: string;
   readonly now: string;
 }): SnoozeThreadDecision {
-  if (input.lifecycle === "archived") return { status: "refused", reason: "archived" };
+  if (lifecycleIsClosed(input.lifecycle)) return { status: "refused", reason: "archived" };
   if (input.awaitingInput) return { status: "refused", reason: "awaiting-input" };
   const until = parseInstant(input.until);
   const now = parseInstant(input.now);
@@ -142,7 +158,7 @@ export function decideSnoozeThread(input: {
  * completion time is never due, so bad data cannot archive anything.
  */
 export function completedThreadArchiveDue(input: {
-  readonly lifecycle: CodeThreadLifecycle;
+  readonly lifecycle: RestingThreadLifecycle;
   readonly completedAt: string | undefined;
   readonly afterDays: number | null;
   readonly now: string;

@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { AgentProfileId } from "./agentProfile";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
+import { ThreadRestFields } from "./threadRest";
 import { GithubIssueContextRequest } from "./githubIssueContext";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { BindingRevisionId, ProjectId } from "./projects";
@@ -220,20 +221,6 @@ export const CodeThreadForkOrigin = Schema.Struct({
 }).annotations(strict);
 export type CodeThreadForkOrigin = typeof CodeThreadForkOrigin.Type;
 
-/**
- * A snooze hides a thread from the active list until `until` passes. The
- * thread stays active in every other respect: a running turn keeps running
- * and its transcript keeps journaling. `duringTurn` records that a provider
- * turn was running when the snooze was set, so that turn ending is the
- * "something happened" that wakes the thread early.
- */
-export const CodeThreadSnooze = Schema.Struct({
-  until: UtcTimestamp,
-  at: UtcTimestamp,
-  duringTurn: Schema.optional(Schema.Boolean),
-}).annotations(strict);
-export type CodeThreadSnooze = typeof CodeThreadSnooze.Type;
-
 export const CodeThread = Schema.Struct({
   id: CodeThreadId,
   projectId: ProjectId,
@@ -253,17 +240,8 @@ export const CodeThread = Schema.Struct({
    * thread started on its own.
    */
   forkedFrom: Schema.optional(CodeThreadForkOrigin),
-  /**
-   * When the person completed this thread: put away in the Completed shelf,
-   * still readable, not archived. Optional so a journal written before
-   * completion existed replays as "in play"; absent means the same.
-   */
-  completedAt: Schema.optional(UtcTimestamp),
-  /**
-   * The thread's current snooze, if any. Optional for the same replay reason;
-   * absent means the thread is awake.
-   */
-  snooze: Schema.optional(CodeThreadSnooze),
+  /** Completed and snoozed rest, shared with Chat and Work; see {@link ThreadRestFields}. */
+  ...ThreadRestFields,
   lifecycle: CodeThreadLifecycle,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,

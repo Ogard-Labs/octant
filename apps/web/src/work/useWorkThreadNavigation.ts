@@ -8,23 +8,34 @@ export type WorkThreadNavigationStatus = "loading" | "ready" | "unavailable";
 
 export function buildWorkThreadNavigation(
   threads: ReadonlyArray<WorkThread>,
-  runtime: ReadonlyArray<{ readonly threadId: WorkThread["id"]; readonly executing: boolean }> = [],
+  runtime: ReadonlyArray<{
+    readonly threadId: WorkThread["id"];
+    readonly executing: boolean;
+    readonly awaitingInput?: boolean | undefined;
+  }> = [],
 ): ReadonlyArray<ChatThreadNavigationItem> {
-  const executingByThread = new Map(
-    runtime.map((entry) => [String(entry.threadId), entry.executing] as const),
-  );
+  const runtimeByThread = new Map(runtime.map((entry) => [String(entry.threadId), entry] as const));
   return threads
     .filter((thread) => thread.lifecycle !== "archived" && thread.lifecycle !== "deleted")
-    .map((thread) => ({
-      ...(executingByThread.get(String(thread.id)) === true
-        ? { activity: "working" as const }
-        : {}),
-      threadId: String(thread.id),
-      title: thread.title,
-      projectId: String(thread.projectId),
-      providerInstanceId: String(thread.providerInstanceId),
-      updatedAt: thread.updatedAt,
-    }));
+    .map((thread) => {
+      const live = runtimeByThread.get(String(thread.id));
+      return {
+        // Working outranks attention: a turn that is running is not yet
+        // waiting on anyone, whatever an earlier request left pending.
+        ...(live?.executing === true
+          ? { activity: "working" as const }
+          : live?.awaitingInput === true
+            ? { activity: "attention" as const }
+            : {}),
+        threadId: String(thread.id),
+        title: thread.title,
+        projectId: String(thread.projectId),
+        providerInstanceId: String(thread.providerInstanceId),
+        updatedAt: thread.updatedAt,
+        ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
+        ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
+      };
+    });
 }
 
 export interface UseWorkThreadNavigationOptions {

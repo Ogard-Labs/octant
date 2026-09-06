@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { ContextManifestId } from "./context";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
+import { ThreadRestFields } from "./threadRest";
 import { ExtensionSelection } from "./extensions";
 import { HostId } from "./host";
 import { MultiModelPool, MultiModelRouteDecisionReceipt } from "./multiModelPool";
@@ -257,6 +258,8 @@ export const ChatThread = Schema.Struct({
   multiModelPool: Schema.optional(MultiModelPool),
   /** Present only on threads created by branching another Chat thread. */
   branchedFrom: Schema.optional(ChatThreadBranchOrigin),
+  /** Completed and snoozed rest, shared with Work and Code; see {@link ThreadRestFields}. */
+  ...ThreadRestFields,
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
@@ -335,6 +338,30 @@ export const ChangeChatThreadLifecycleCommand = Schema.Struct({
   kind: Schema.Literal("change-chat-thread-lifecycle"),
   ...ChatThreadCommandFields,
   lifecycle: Schema.Literal("active", "archived"),
+}).annotations(strict);
+
+/**
+ * Put a finished thread away without archiving it. The host refuses while a
+ * turn is running or the thread waits on the person, so a thread never
+ * disappears with work in flight.
+ */
+export const CompleteChatThreadCommand = Schema.Struct({
+  kind: Schema.Literal("complete-chat-thread"),
+  ...ChatThreadCommandFields,
+}).annotations(strict);
+export const ReopenChatThreadCommand = Schema.Struct({
+  kind: Schema.Literal("reopen-chat-thread"),
+  ...ChatThreadCommandFields,
+}).annotations(strict);
+/** Hide the thread until `until`; the host refuses a wake time that is not ahead. */
+export const SnoozeChatThreadCommand = Schema.Struct({
+  kind: Schema.Literal("snooze-chat-thread"),
+  ...ChatThreadCommandFields,
+  until: UtcTimestamp,
+}).annotations(strict);
+export const WakeChatThreadCommand = Schema.Struct({
+  kind: Schema.Literal("wake-chat-thread"),
+  ...ChatThreadCommandFields,
 }).annotations(strict);
 
 /**
@@ -580,6 +607,10 @@ export const ChatCommand = Schema.Union(
   RenameChatThreadCommand,
   MoveChatThreadCommand,
   ChangeChatThreadLifecycleCommand,
+  CompleteChatThreadCommand,
+  ReopenChatThreadCommand,
+  SnoozeChatThreadCommand,
+  WakeChatThreadCommand,
   ChangeChatProviderCommand,
   SelectChatMultiModelPoolCommand,
   ChangeChatResearchCommand,
@@ -758,6 +789,8 @@ export const ChatNavigationThread = Schema.Struct({
   lastSequence: GlobalSequence,
   followUpOpen: Schema.Boolean,
   executing: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /** Completed and snoozed rest, so the sidebar can file the row; absent on an older host. */
+  ...ThreadRestFields,
 }).annotations(strict);
 export type ChatNavigationThread = typeof ChatNavigationThread.Type;
 

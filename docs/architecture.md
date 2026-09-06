@@ -215,17 +215,18 @@ sidebar timer never walks the checkout tree. Inactive modes and hidden windows
 pause those refreshes so background ticks do not contend with the next
 interaction.
 
-A Code thread has two resting states beside archive, both fields on the thread
-aggregate rather than lifecycle values: **completed** (`completedAt`, manual
-only, refused by the server while a turn runs or the thread waits on the
-person) and **snoozed** (`snooze.until`, an overlay that hides the row until
-the wake time and wakes it early when the agent needs the person or a turn that
-was running at snooze time ends). The sidebar files both in collapsed shelves
-below the Project groups and derives snooze visibility from the clock; no host
-timer wakes a snooze. A person sending a thread a turn reopens or wakes it on
-the server. A host sweep archives completed threads once their completion is
-older than the `completedThreadArchiveAfterDays` shell setting (default seven
-days, `null` for never), re-deciding against the authoritative record and
+A Chat, Work, or Code thread has two resting states beside archive, both fields
+on the thread aggregate rather than lifecycle values: **completed**
+(`completedAt`, manual only, refused by each mode's service while a turn runs
+or the thread waits on the person) and **snoozed** (`snooze.until`, an overlay
+that hides the row until the wake time and wakes it early when the agent needs
+the person or a turn that was running at snooze time ends). The sidebar files
+both in collapsed shelves below the Project groups and derives snooze
+visibility from the clock; no host timer wakes a snooze. A person sending a
+thread a turn reopens or wakes it on the server. One host sweep archives
+completed threads of every mode once their completion is older than the
+`completedThreadArchiveAfterDays` shell setting (default seven days, `null`
+for never), re-deciding against each mode's authoritative record and
 journaling the ordinary thread update as the `system` actor. It archives only;
 see [decisions/0085-completed-and-snoozed-threads.md](decisions/0085-completed-and-snoozed-threads.md).
 

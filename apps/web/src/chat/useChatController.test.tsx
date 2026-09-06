@@ -9,6 +9,7 @@ import {
 } from "@octant/contracts/chat";
 import type { ChatEventFrame, ChatThreadId, ChatThreadView } from "@octant/contracts";
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { decodeUtcTimestamp } from "@octant/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   acceptChatEventFrame,
@@ -585,6 +586,85 @@ describe("useChatController", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("takes a thread's rest from the navigation read, so a reopen elsewhere reaches this sidebar", async () => {
+    let completedAt: ReturnType<typeof decodeUtcTimestamp> | undefined = decodeUtcTimestamp(
+      "2026-09-01T10:00:00.000Z",
+    );
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      navigation: vi.fn(async () =>
+        decodeChatNavigation({
+          threads: bootstrap().threads.map((thread) => ({
+            id: thread.id,
+            title: thread.title,
+            providerInstanceId: thread.providerInstanceId,
+            updatedAt: thread.updatedAt,
+            lastSequence: 0,
+            followUpOpen: false,
+            ...(completedAt === undefined ? {} : { completedAt }),
+          })),
+        }),
+      ),
+      thread: vi.fn(async () => threadView(0)),
+      subscribe: vi.fn(async function* () {}),
+    });
+    const { result } = renderHook(() =>
+      useChatController({
+        client,
+        navigationRefreshMs: 10,
+        serverUrl: "http://127.0.0.1",
+        windowCapability: capability,
+      }),
+    );
+    await waitFor(() =>
+      expect(result.current.navigation[0]?.completedAt).toBe("2026-09-01T10:00:00.000Z"),
+    );
+
+    completedAt = undefined;
+    await waitFor(() => expect(result.current.navigation[0]?.completedAt).toBeUndefined());
+  });
+
+  it("completes, snoozes, wakes, and reopens a thread with the version it last saw", async () => {
+    const execute = vi.fn(async (command: { readonly kind: string }) => {
+      const current = bootstrap().threads[0]!;
+      return {
+        kind: "thread-updated",
+        thread: { ...current, version: current.version + 1 },
+      } as never;
+    });
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      thread: vi.fn(async () => threadView(1)),
+      subscribe: vi.fn(async function* () {}),
+      execute,
+    });
+    const { result } = renderHook(() =>
+      useChatController({ client, serverUrl: "http://127.0.0.1", windowCapability: capability }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await result.current.completeThread(threadId);
+    });
+    expect(execute).toHaveBeenLastCalledWith({
+      kind: "complete-chat-thread",
+      threadId,
+      expectedVersion: 1,
+    });
+    await act(async () => {
+      await result.current.snoozeThread(threadId, "2026-09-08T09:00:00.000Z");
+      await result.current.wakeThread(threadId);
+      await result.current.reopenThread(threadId);
+    });
+    expect(execute.mock.calls.map(([command]) => command.kind)).toEqual([
+      "complete-chat-thread",
+      "snooze-chat-thread",
+      "wake-chat-thread",
+      "reopen-chat-thread",
+    ]);
+    expect(execute.mock.calls[1]?.[0]).toMatchObject({ until: "2026-09-08T09:00:00.000Z" });
   });
 
   it("subscribes after the authoritative snapshot cursor and refetches on stream gaps", async () => {

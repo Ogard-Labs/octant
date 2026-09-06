@@ -187,7 +187,10 @@ import {
   type CodeWorktreeSourcePreviewPort,
   type ManagedCodeThreadCreationPort,
 } from "./code/codeService";
-import { CodeCompletedThreadArchiveSweep } from "./code/codeCompletedThreadArchiveSweep";
+import {
+  CompletedThreadArchiveSweep,
+  type CompletedThreadArchiveInput,
+} from "./completedThreadArchiveSweep";
 import { createCodeOperationRuntime, type CodeOperationRuntime } from "./code/codeOperationRuntime";
 import { CodePlannerService } from "./code/codePlannerService";
 import {
@@ -2585,20 +2588,18 @@ export function startOctantServer(
       });
     // Revocation is wired at construction, before any window can hold a watch.
     activeCodeService = codeService;
-    // The host's own timer for completed threads. Only the in-process service
-    // can archive on the host's behalf; an injected route service is a test
-    // double and gets no timer.
-    const completedThreadArchiveSweep =
+    // What the Code service lends the host's completed-thread timer. Only the
+    // in-process service can archive on the host's behalf; an injected route
+    // service is a test double and lends nothing.
+    const codeCompletedThreadSource =
       codeService instanceof CodeService
-        ? new CodeCompletedThreadArchiveSweep({
+        ? {
+            mode: "code" as const,
             threads: () => persistence.readCodeThreads(),
-            archiveAfterDays: () =>
-              (persistence.readShellSettings()?.settings ?? defaultShellSettings())
-                .completedThreadArchiveAfterDays,
-            archive: (threadId, input) => codeService.archiveCompletedThread(threadId, input),
-          })
+            archive: (threadId: string, input: CompletedThreadArchiveInput) =>
+              codeService.archiveCompletedThread(decodeCodeThreadId(threadId), input),
+          }
         : undefined;
-    completedThreadArchiveSweep?.start();
     const codeBoardEventStore = new CodeOperationEventStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -4519,6 +4520,7 @@ export function startOctantServer(
       linearIssueContext: linearIssueContextService,
     });
     const workTurnService = new WorkTurnService({
+      onTurnRequested: (threadId) => workThreadService.noteTurnRequested(threadId),
       persistence,
       resolveAppManagedTools: (input) => nativeHarnessComposition?.forWork(input),
       nativeHarness: nativeHarnessHooks,
@@ -6344,6 +6346,29 @@ export function startOctantServer(
       now: () => new Date().toISOString() as UtcTimestamp,
     });
     automationScheduler.start();
+    // The host's own timer for completed threads, fed by every mode's service
+    // that can archive on the host's behalf (decision 0085).
+    const completedThreadArchiveSweep = new CompletedThreadArchiveSweep({
+      sources: [
+        codeCompletedThreadSource,
+        {
+          mode: "chat" as const,
+          threads: () => persistence.readChatThreads(),
+          archive: (threadId: string, input: CompletedThreadArchiveInput) =>
+            chatService.archiveCompletedThread(decodeChatThreadId(threadId), input),
+        },
+        {
+          mode: "work" as const,
+          threads: () => workThreadProjection.list(),
+          archive: (threadId: string, input: CompletedThreadArchiveInput) =>
+            workThreadService.archiveCompletedThread(decodeWorkThreadId(threadId), input),
+        },
+      ].flatMap((source) => (source === undefined ? [] : [source])),
+      archiveAfterDays: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+          .completedThreadArchiveAfterDays,
+    });
+    completedThreadArchiveSweep.start();
     const automationRoutes = createAutomationRouteHandler({
       projection: persistence.automationProjection,
       commands: {
@@ -6974,7 +6999,7 @@ export function startOctantServer(
           } catch (error) {
             shutdownFailure ??= error;
           }
-          completedThreadArchiveSweep?.stop();
+          completedThreadArchiveSweep.stop();
           providerUsageLimitsService.stop();
           try {
             managedCloneService.close();

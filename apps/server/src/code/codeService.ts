@@ -98,6 +98,10 @@ import {
   type ThreadBoardPullRequestSnapshot,
 } from "./threadBoardPullRequestJoin";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import type {
+  CompletedThreadArchiveInput,
+  CompletedThreadArchiveOutcome,
+} from "../completedThreadArchiveSweep";
 import {
   issueContextFailureCategory,
   prepareOptionalIssueContext,
@@ -611,10 +615,6 @@ const SNOOZE_REFUSALS = {
   "awaiting-input": "This thread is waiting on you; answer it before snoozing it.",
   "wake-time-not-in-future": "Pick a wake time that is still ahead.",
 } as const;
-
-export type CodeCompletedThreadArchiveOutcome =
-  | { readonly status: "archived"; readonly thread: CodeThread }
-  | { readonly status: "skipped"; readonly reason: "not-found" | "not-due" };
 
 export interface CodeSearchFilesInput {
   readonly threadId: CodeThreadId;
@@ -1804,8 +1804,8 @@ export class CodeService {
    */
   archiveCompletedThread(
     threadId: CodeThreadId,
-    input: { readonly afterDays: number | null; readonly now: string },
-  ): CodeCompletedThreadArchiveOutcome {
+    input: CompletedThreadArchiveInput,
+  ): CompletedThreadArchiveOutcome {
     const current = this.#persistence.readCodeThread(threadId);
     if (current === undefined) return { status: "skipped", reason: "not-found" };
     if (
@@ -1836,7 +1836,7 @@ export class CodeService {
     // The same door a person's Archive closes: no window keeps a session
     // grant on a thread that just left the lists.
     this.#sessionAuthority.revokeThreadEverywhere(current.id);
-    return { status: "archived", thread: next };
+    return { status: "archived" };
   }
 
   async *subscribe(
