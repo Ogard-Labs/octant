@@ -2727,6 +2727,18 @@ function LaunchedShell(
   }
   function toggleDock(opener: HTMLElement) {
     dockOpener.current = { element: opener, logicalTarget: "dock" };
+    // With a reader up the dock is stepped aside, not closed: the toggle
+    // leaves the reader so the dock shows again, and opens it if it was
+    // closed. Closing it here instead lost the dock the reader had hidden.
+    if (readerOpen) {
+      closeWorkspaceReaders();
+      if (!dockOpen) {
+        markInteraction("renderer", "dock-open-requested");
+        markInteractionAfterPaint("dock-open");
+        setDockVisible(true);
+      }
+      return;
+    }
     if (dockOpen) {
       closeDock();
       return;
@@ -3350,6 +3362,9 @@ function LaunchedShell(
     automationCenterOpen ||
     agentsCenterOpen ||
     artifactLibraryOpen;
+  // What the shell shows for the dock right now: open, unless a reader has
+  // it step aside. The remembered `dockOpen` is what comes back afterwards.
+  const dockPresentedOpen = dockOpen && !readerOpen;
 
   function closeWorkspaceReaders() {
     setRailPlaceholder(undefined);
@@ -4559,7 +4574,7 @@ function LaunchedShell(
             bottomPanelAvailable={bottomPanelAvailable && !isNarrow}
             bottomPanelExpanded={bottomPanelOpen}
             dockAvailable={dockAvailable}
-            dockExpanded={dockOpen}
+            dockExpanded={dockPresentedOpen}
             dockLabel="Right sidebar"
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             isNarrow={isNarrow}
@@ -5510,7 +5525,7 @@ function LaunchedShell(
               onPreviewWidth={setPreviewContextWidth}
               onOpenTab={addDockTab}
               onSelectSurface={selectDockTab}
-              open={dockOpen && !readerOpen}
+              open={dockPresentedOpen}
               plan={
                 bottomPanelOpen && activeBottomSurface?.id === "plan"
                   ? undefined
