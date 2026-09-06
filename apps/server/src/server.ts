@@ -3599,7 +3599,7 @@ export function startOctantServer(
           bootstrap.checkouts.map((checkout) => [String(checkout.id), checkout] as const),
         );
         const boardThreads: CodeBoardThread[] = bootstrap.threads
-          .filter((thread) => thread.lifecycle !== "archived")
+          .filter((thread) => thread.lifecycle !== "archived" && thread.completedAt === undefined)
           .map((thread) => {
             const project = projectById.get(String(thread.projectId));
             return {
@@ -6518,7 +6518,7 @@ export function startOctantServer(
             projects.active.map((project) => [String(project.id), project] as const),
           );
           const boardThreads: WorkBoardThread[] = bootstrap.threads
-            .filter((thread) => thread.lifecycle !== "archived")
+            .filter((thread) => thread.lifecycle !== "archived" && thread.completedAt === undefined)
             .map((thread) => {
               const project = projectById.get(String(thread.projectId));
               const currentRevisionId =

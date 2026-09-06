@@ -36,8 +36,11 @@ has no unattended timer. It says nothing about a timer that only files.
   ends. A snooze that ended stays on the record and the row says so until the
   thread is opened; opening it is what wakes it.
 - Completed and snoozed threads leave the Project groups for two collapsed
-  shelves at the foot of the sidebar. Search, boards, export, retention, and
-  the thread surface itself do not change.
+  shelves at the foot of the sidebar. The Work and Code boards leave out
+  completed threads as well: a thread the person put away is not work in
+  play, whatever its derived status, and it returns when reopened. Snoozed
+  threads stay on the board. Search, export, retention, and the thread
+  surface itself do not change.
 - The host archives a completed thread once its completion is older than
   `completedThreadArchiveAfterDays` in shell settings (default 7 days;
   `null` means never). One sweep runs hourly in the host process over every

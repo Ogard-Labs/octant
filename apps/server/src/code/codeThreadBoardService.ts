@@ -182,10 +182,12 @@ export class CodeThreadBoardService {
     // the user's to grow — unbounded, a large Project opened one provider
     // read per thread at once.
     //
-    // An archived thread has no card, so observing its runtime buys nothing;
-    // a Project with a long archive would otherwise spend the whole pool on
-    // threads the board is about to drop.
-    const observable = boardThreads.filter((entry) => entry.thread.lifecycle !== "archived");
+    // An archived or completed thread has no card, so observing its runtime
+    // buys nothing; a Project with a long archive would otherwise spend the
+    // whole pool on threads the board is about to drop.
+    const observable = boardThreads.filter(
+      (entry) => entry.thread.lifecycle !== "archived" && entry.thread.completedAt === undefined,
+    );
     const runtimePromise = mapConcurrentOrdered(
       observable,
       RUNTIME_OBSERVATION_CONCURRENCY,
@@ -217,6 +219,9 @@ export class CodeThreadBoardService {
         const metadata = metadataByThread.get(String(entry.thread.id));
         // Archived threads are dropped by the metadata projection; skip them here.
         if (metadata === undefined) return undefined;
+        // A thread the person completed rests in its shelf until they reopen
+        // it; the board is for work in play (decision 0085).
+        if (entry.thread.completedAt !== undefined) return undefined;
         const activity = runtimeByThread.get(String(entry.thread.id));
         if (activity === undefined) return undefined;
         const planProgress = this.#planProgress.read(entry.thread.id);

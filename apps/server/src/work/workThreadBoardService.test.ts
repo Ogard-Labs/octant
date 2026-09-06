@@ -26,6 +26,7 @@ const ids = {
   executing: decodeWorkThreadId("00000000-0000-4000-8000-000000007003"),
   ready: decodeWorkThreadId("00000000-0000-4000-8000-000000007004"),
   archived: decodeWorkThreadId("00000000-0000-4000-8000-000000007005"),
+  completed: decodeWorkThreadId("00000000-0000-4000-8000-000000007006"),
   projectA: decodeProjectId("00000000-0000-4000-8000-0000000070a1"),
   projectB: decodeProjectId("00000000-0000-4000-8000-0000000070a2"),
   providerA: "00000000-0000-4000-8000-000000007011",
@@ -39,12 +40,14 @@ function thread(overrides: {
   readonly providerInstanceId?: string;
   readonly title?: string;
   readonly completionConfirmed?: boolean;
+  readonly completedAt?: string;
 }): WorkThread {
   return decodeWorkThread({
     id: overrides.id,
     projectId: overrides.projectId ?? ids.projectA,
     title: overrides.title ?? "Draft brief",
     lifecycle: overrides.lifecycle ?? "active",
+    ...(overrides.completedAt === undefined ? {} : { completedAt: overrides.completedAt }),
     ...(overrides.completionConfirmed === true
       ? {
           completionConfirmed: true,
@@ -145,11 +148,13 @@ describe("WorkThreadBoardService derivation", () => {
     expect(view.cards.every((card) => card.pullRequestSummaries.items.length === 0)).toBe(true);
   });
 
-  it("resolves one card per non-archived thread with a runtime-derived status", async () => {
+  it("resolves one card per thread in play with a runtime-derived status", async () => {
     const board = service({
       threads: [
         ...allThreads,
         boardThread({ thread: thread({ id: ids.archived, lifecycle: "archived" }) }),
+        // A thread the person completed rests in its shelf, not on the board.
+        boardThread({ thread: thread({ id: ids.completed, completedAt: now }) }),
       ],
       runtime: (threadId) =>
         threadId === ids.executing

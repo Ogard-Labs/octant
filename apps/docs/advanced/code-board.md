@@ -23,7 +23,8 @@ projection over one ordered card set.
   completed model turn is not enough.
 
 **Done** is a first-class visible status in both groupings, with no implicit
-completed-item suppression. Ambiguous evidence becomes **Waiting**, never
+completed-item suppression. A thread you **Complete** from the sidebar is
+different: you put it away, so it leaves the board until you reopen it. Ambiguous evidence becomes **Waiting**, never
 **Done**. Unread is a client overlay and is not part of the server card.
 Board queries never call GitHub; they may show manually refreshed PR evidence
 with freshness. Exact PR identities produced by a Code thread survive restart

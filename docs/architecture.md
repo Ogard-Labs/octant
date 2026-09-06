@@ -222,7 +222,8 @@ or the thread waits on the person) and **snoozed** (`snooze.until`, an overlay
 that hides the row until the wake time and wakes it early when the agent needs
 the person or a turn that was running at snooze time ends). The sidebar files
 both in collapsed shelves below the Project groups and derives snooze
-visibility from the clock; no host timer wakes a snooze. A person sending a
+visibility from the clock; no host timer wakes a snooze. The Work and Code
+boards leave out completed threads until they are reopened. A person sending a
 thread a turn reopens or wakes it on the server. One host sweep archives
 completed threads of every mode once their completion is older than the
 `completedThreadArchiveAfterDays` shell setting (default seven days, `null`
