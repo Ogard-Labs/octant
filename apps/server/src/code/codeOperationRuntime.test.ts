@@ -489,6 +489,47 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("journals how a tool ended so the row it started does not stay open forever", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(21);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: startOperation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({ kind: "tool-start", toolCallId: "call-1", toolName: "Read" }),
+      ),
+    );
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({ kind: "tool-success", toolCallId: "call-1", summary: "Tool completed." }),
+      ),
+    );
+
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
+      const states = frames.flatMap((frame) =>
+        frame.event.kind === "tool-activity" ? [frame.event.state] : [],
+      );
+      expect(states).toEqual(["started", "completed"]);
+      const closed = frames.find(
+        (frame) => frame.event.kind === "tool-activity" && frame.event.state === "completed",
+      );
+      expect(closed?.event).toMatchObject({ toolName: "Read", summary: "Tool completed." });
+    });
+    fixture.close();
+  });
+
   it("sanitizes provider claims before durable frames and authorizes subscriptions", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
