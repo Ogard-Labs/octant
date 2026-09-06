@@ -112,9 +112,47 @@ type WorkTranscriptRow =
       readonly key: string;
       readonly wrote: NonNullable<WorkTurnState["wroteFiles"]>;
     }
-  | { readonly kind: "status"; readonly key: "status"; readonly text: string };
+  | { readonly kind: "status"; readonly key: "status"; readonly text: string }
+  | {
+      readonly kind: "outcome";
+      readonly key: string;
+      readonly outcome: "running" | "failed" | "cancelled";
+      readonly text: string;
+    };
 
 const WORK_TRANSCRIPT_RECONNECTING_MESSAGE = "Work transcript is reconnecting.";
+
+/**
+ * A turn that ended without a reply, or has not replied yet, would otherwise
+ * leave the transcript silent. Observed with a provider stream failure: the
+ * journal recorded the failed turn while the surface showed only the user's
+ * own message, so the person kept waiting for a reply that was never coming.
+ */
+function turnOutcomeRow(
+  turn: WorkTurnState,
+  turnIndex: number,
+  latest: boolean,
+): WorkTranscriptRow | undefined {
+  const key = `${String(turn.requestId)}-${String(turnIndex)}-outcome`;
+  switch (turn.status) {
+    case "failed":
+      return {
+        kind: "outcome",
+        key,
+        outcome: "failed",
+        text: turn.failure?.message ?? "The provider turn failed.",
+      };
+    case "cancelled":
+      return { kind: "outcome", key, outcome: "cancelled", text: "Stopped before a reply." };
+    case "accepted":
+    case "running":
+      return latest && !turn.transcript.some((entry) => entry.role === "assistant")
+        ? { kind: "outcome", key, outcome: "running", text: "Working…" }
+        : undefined;
+    default:
+      return undefined;
+  }
+}
 
 export interface WorkThreadWorkspaceProps {
   readonly title: string;
@@ -339,6 +377,8 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           wrote: turn.wroteFiles,
         });
       }
+      const outcome = turnOutcomeRow(turn, turnIndex, turnIndex === turns.length - 1);
+      if (outcome !== undefined) rows.push(outcome);
     }
     if (steered.pending !== undefined) {
       rows.push({
@@ -971,6 +1011,16 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   </p>
                 )}
               </article>
+            );
+          }
+          if (row.kind === "outcome") {
+            return (
+              <p
+                className={`runstatus work-thread-workspace__outcome work-thread-workspace__outcome--${row.outcome}`}
+                role={row.outcome === "failed" ? "alert" : "status"}
+              >
+                {row.text}
+              </p>
             );
           }
           if (row.kind === "steered") {
