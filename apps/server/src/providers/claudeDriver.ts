@@ -26,6 +26,7 @@ import {
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
 import { Cause, Effect, Exit, Fiber, Option, PubSub, Scope, Stream } from "effect";
+import { isSanitizedFailure } from "./claudeAgentSdkDecoder";
 
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { claudeAuthorityInputDigest, waitForClaudeAuthorityValue } from "./claudeAuthority";
@@ -1027,9 +1028,15 @@ function makeConnection(
         return;
       }
       if (Exit.isFailure(exit)) {
+        // A failure the port's sanitizer wrote already names the cause in safe
+        // words and is forwarded; a raw payload that arrived on the stream is
+        // still reduced to this sentence, which is the leak guard the tests pin.
         terminal(state, {
           kind: "failed",
-          failure: failure("provider-failed", "Claude message stream failed."),
+          failure: Option.getOrElse(
+            Option.filter(Cause.failureOption(exit.cause), isSanitizedFailure),
+            () => failure("provider-failed", "Claude message stream failed."),
+          ),
         });
       } else if (state.pendingTurns > 0) {
         terminal(state, {
