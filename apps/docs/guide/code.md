@@ -47,7 +47,7 @@ its draft.
 Code threads run in one of four server-enforced authority modes:
 
 - **Plan**: strictly read-only. No write-approval path exists. Plan mode remains read-only even when Full access is remembered for the Project.
-- **Approval-gated**: confines work to the bound Project root. Each mutation or command surfaces an approval request that names the file or the command it is for. This is the default for new Code threads.
+- **Approval-gated**: confines work to the bound Project root. Each mutation or command surfaces an approval request. Where it can be derived safely, the request names the file (relative to the checkout) or the command it is for; otherwise it names only the tool. This is the default for new Code threads.
 - **Auto-accept edits**: the same confinement as approval-gated, except file writes inside the bound root proceed without a prompt. Shell commands, network access, destructive actions, credential access, and anything outside the root still ask.
 - **Full access**: unsandboxed execution within the Project root. Starts only when explicitly selected. Use the permission-persistence control to apply to the current session or remember for the Project.
 

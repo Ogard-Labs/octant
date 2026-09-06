@@ -1465,6 +1465,23 @@ describe("mapClaudeToolRequest", () => {
     expect(JSON.stringify(result)).not.toContain("sk-ant-fixture-api-key-must-not-cross");
   });
 
+  it.each(["ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_"])(
+    "keeps a GitHub credential with the %s prefix out of the prompt",
+    (prefix) => {
+      const token = `${prefix}${"A1b2C3d4".repeat(4)}`;
+      const result = mapClaudeToolRequest(
+        context(),
+        toolRequest({ input: { command: `gh auth login --with-token <<< ${token}` } }),
+      );
+      const description =
+        result.kind === "approval" && result.request.event.kind === "approval-request"
+          ? result.request.event.description
+          : undefined;
+      expect(description).toContain("[redacted]");
+      expect(JSON.stringify(result)).not.toContain(token);
+    },
+  );
+
   it("shows a shell command on one bounded line", () => {
     const long = `echo ${"x".repeat(200)}`;
     const result = mapClaudeToolRequest(
