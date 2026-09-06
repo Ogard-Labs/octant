@@ -78,8 +78,6 @@ import {
   waitUntilDocumentVisible,
 } from "../polling/documentVisibility";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
-import { TurnHeader, turnWorkedFor, type TurnHeaderOutcome } from "../transcript/TurnHeader";
-import { providerModelLabel } from "../providers/providerModelLabel";
 
 /**
  * A message the user sent while a turn was still running.
@@ -116,33 +114,43 @@ type WorkTranscriptRow =
     }
   | { readonly kind: "status"; readonly key: "status"; readonly text: string }
   | {
-      readonly kind: "head";
+      readonly kind: "outcome";
       readonly key: string;
-      readonly turn: WorkTurnState;
+      readonly outcome: "running" | "failed" | "cancelled";
+      readonly text: string;
     };
 
 const WORK_TRANSCRIPT_RECONNECTING_MESSAGE = "Work transcript is reconnecting.";
 
 /**
- * Where a turn's header sits: before its first assistant entry, or after the
- * whole turn when no reply exists yet. A turn that ended without a reply used
- * to leave the transcript silent — the journal recorded the failure while the
- * surface showed only the user's own message — so the header is emitted for
- * every turn, reply or not.
+ * A turn that ended without a reply, or has not replied yet, would otherwise
+ * leave the transcript silent. Observed with a provider stream failure: the
+ * journal recorded the failed turn while the surface showed only the user's
+ * own message, so the person kept waiting for a reply that was never coming.
  */
-function turnHeaderOutcome(turn: WorkTurnState): TurnHeaderOutcome {
+function turnOutcomeRow(
+  turn: WorkTurnState,
+  turnIndex: number,
+  latest: boolean,
+): WorkTranscriptRow | undefined {
+  const key = `${String(turn.requestId)}-${String(turnIndex)}-outcome`;
   switch (turn.status) {
+    case "failed":
+      return {
+        kind: "outcome",
+        key,
+        outcome: "failed",
+        text: turn.failure?.message ?? "The provider turn failed.",
+      };
+    case "cancelled":
+      return { kind: "outcome", key, outcome: "cancelled", text: "Stopped before a reply." };
     case "accepted":
     case "running":
-      return "running";
-    case "waiting":
-      return "waiting";
-    case "cancelled":
-      return "cancelled";
-    case "failed":
-      return "failed";
-    case "completed":
-      return "completed";
+      return latest && !turn.transcript.some((entry) => entry.role === "assistant")
+        ? { kind: "outcome", key, outcome: "running", text: "Working…" }
+        : undefined;
+    default:
+      return undefined;
   }
 }
 
@@ -353,24 +361,13 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     const rows: WorkTranscriptRow[] = [];
     if (turns.length === 0) rows.push({ kind: "empty", key: "empty" });
     for (const [turnIndex, turn] of turns.entries()) {
-      const head: WorkTranscriptRow = {
-        kind: "head",
-        key: `${String(turn.requestId)}-${String(turnIndex)}-head`,
-        turn,
-      };
-      let headPlaced = false;
       for (const [index, entry] of turn.transcript.entries()) {
-        if (entry.role === "assistant" && !headPlaced) {
-          rows.push(head);
-          headPlaced = true;
-        }
         rows.push({
           kind: "message",
           key: `${String(turn.requestId)}-${String(turnIndex)}-${entry.role}-${String(index)}`,
           entry,
         });
       }
-      if (!headPlaced) rows.push(head);
       // The files land after the turn that produced them, so the transcript
       // reads as what was said and then what came out of it.
       if (turn.wroteFiles !== undefined) {
@@ -380,6 +377,8 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           wrote: turn.wroteFiles,
         });
       }
+      const outcome = turnOutcomeRow(turn, turnIndex, turnIndex === turns.length - 1);
+      if (outcome !== undefined) rows.push(outcome);
     }
     if (steered.pending !== undefined) {
       rows.push({
@@ -999,23 +998,29 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             }
             return (
               <article aria-label="Assistant message" className="turn-agent">
-                {row.entry.text === "" ? null : (
+                {row.entry.text === "" ? (
+                  <p className="runstatus" role="status">
+                    Working…
+                  </p>
+                ) : (
                   <TrackerReferenceText asParagraph text={row.entry.text} />
+                )}
+                {row.entry.status === undefined ? null : (
+                  <p className="runstatus" role="status">
+                    {row.entry.status}
+                  </p>
                 )}
               </article>
             );
           }
-          if (row.kind === "head") {
-            const outcome = turnHeaderOutcome(row.turn);
-            const workedFor = turnWorkedFor(outcome, row.turn.acceptedAt, row.turn.updatedAt);
+          if (row.kind === "outcome") {
             return (
-              <TurnHeader
-                at={row.turn.updatedAt}
-                outcome={outcome}
-                provider={providerModelLabel(props.providerGroups ?? [], row.turn.authority)}
-                {...(workedFor === undefined ? {} : { workedFor })}
-                {...(row.turn.failure === undefined ? {} : { reason: row.turn.failure.message })}
-              />
+              <p
+                className={`runstatus work-thread-workspace__outcome work-thread-workspace__outcome--${row.outcome}`}
+                role={row.outcome === "failed" ? "alert" : "status"}
+              >
+                {row.text}
+              </p>
             );
           }
           if (row.kind === "steered") {
