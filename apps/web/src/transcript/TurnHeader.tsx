@@ -98,11 +98,10 @@ export function TurnHeader(props: TurnHeaderProps) {
           </time>
         )}
       </header>
-      {props.reason === undefined ? null : (
-        <p className="turn-header__reason" role={props.outcome === "failed" ? "alert" : "status"}>
-          {props.reason}
-        </p>
-      )}
+      {/* Static text on purpose: the transcript window remounts historical rows
+          as the visible range moves, and a live role would re-announce an old
+          failure every time its row scrolled back in. */}
+      {props.reason === undefined ? null : <p className="turn-header__reason">{props.reason}</p>}
     </>
   );
 }

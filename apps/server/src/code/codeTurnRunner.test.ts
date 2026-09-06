@@ -6,6 +6,7 @@ import {
   decodeProviderModelId,
   decodeProviderSessionId,
   type CodeThread,
+  type ProviderFailure,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { Deferred, Effect, Fiber, Queue, Stream } from "effect";
@@ -454,6 +455,31 @@ describe("CodeTurnRunner", () => {
       expect.objectContaining({ category: "failure", text: "Provider process died." }),
     );
     expect(outcomes.at(-1)).toBe("failed");
+  });
+
+  it("journals the provider's reason with a turn that fails before it says anything", async () => {
+    const refused: ProviderFailure = {
+      category: "unavailable",
+      message: "Claude runtime binary was not found on this Mac.",
+    };
+    const outcomes: Array<readonly [CodeTurnOutcome, string | undefined]> = [];
+
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.fail(refused) },
+            persistOutcome: (next, failure) =>
+              Effect.sync(() => {
+                outcomes.push([next, failure?.message]);
+              }),
+          }),
+        ),
+      ),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    expect(outcomes).toEqual([["failed", "Claude runtime binary was not found on this Mac."]]);
   });
 
   it("treats the timeout as provider inactivity, not total turn duration", async () => {
