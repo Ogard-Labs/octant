@@ -518,25 +518,26 @@ describe("CodeComposerAdapter interactions", () => {
     container.remove();
   });
 
-  it("lets the reader confirm what the task delivers instead of taking the prompt's word", async () => {
+  it("reads what the task delivers from the prompt and writes it to the thread", async () => {
     const onCreateThread = vi.fn();
     const user = userEvent.setup();
     render(<CodeComposerAdapter {...defaultProps} onCreateThread={onCreateThread} />);
 
+    // Nothing about delivery is asked up front: the band carries no control for it.
+    expect(screen.queryByRole("button", { name: "Delivers" })).not.toBeInTheDocument();
+
     await user.type(screen.getByLabelText("First message"), "open a pull request for the parser");
-    const trigger = screen.getByRole("button", { name: "Delivers" });
-    // The reading is offered, and said to be a reading.
-    expect(trigger).toHaveTextContent("Opened PR");
-    expect(trigger).toHaveTextContent("read from your prompt");
-
-    await user.click(trigger);
-    await user.click(screen.getByRole("option", { name: /Investigation/ }));
-
-    expect(screen.getByRole("button", { name: "Delivers" })).not.toHaveTextContent(
-      "read from your prompt",
-    );
     await user.click(screen.getByRole("button", { name: "Create thread" }));
-    expect(onCreateThread).toHaveBeenCalledWith(
+    expect(onCreateThread).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        deliveryTarget: expect.objectContaining({ outcomeKind: "opened-pr" }),
+      }),
+    );
+
+    await user.clear(screen.getByLabelText("First message"));
+    await user.type(screen.getByLabelText("First message"), "explain why the parser drops tokens");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    expect(onCreateThread).toHaveBeenLastCalledWith(
       expect.objectContaining({
         deliveryTarget: expect.objectContaining({ outcomeKind: "investigation-result" }),
       }),

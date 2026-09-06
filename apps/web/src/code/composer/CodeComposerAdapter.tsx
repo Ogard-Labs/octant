@@ -42,7 +42,6 @@ import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { CodeBranchSelector } from "./CodeBranchSelector";
 import { CodeComposerAccessMenu } from "./CodeComposerAccessMenu";
 import { CodeWorkspaceSelector } from "./CodeWorkspaceSelector";
-import { CodeDeliveryOutcomeSelector } from "./CodeDeliveryOutcomeSelector";
 import { CodeWorktreeSourceControl } from "./CodeWorktreeSourceControl";
 import { useCodeWorktreeSourcePreview } from "./useCodeWorktreeSourcePreview";
 import { clipboardHasImage } from "../../chat/composerImagePaste";
@@ -309,16 +308,14 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       props.execute !== undefined &&
       resolvedBaseBranch !== undefined,
   });
-  // The outcome decides when this thread may be called Done (decision 0003), so
-  // it is the reader's to confirm. The prompt only proposes it: the reading
-  // stays live until the reader picks one, and their pick then stands however
-  // the prompt is edited afterwards.
-  const suggestedOutcome: CodeDeliveryOutcomeKind = useMemo(
+  // What the task delivers is read from the prompt, not asked up front:
+  // nothing about delivery is a question on the start screen. The thread's
+  // board shows the reading once the thread exists, and an agent may propose
+  // raising it from there.
+  const outcomeKind: CodeDeliveryOutcomeKind = useMemo(
     () => suggestCodeDeliveryOutcome(prompt),
     [prompt],
   );
-  const [outcomeOverride, setOutcomeOverride] = useState<CodeDeliveryOutcomeKind>();
-  const outcomeKind: CodeDeliveryOutcomeKind = outcomeOverride ?? suggestedOutcome;
   const trimmed = prompt.trim();
   // A Code thread belongs to a Project (decision 0037), so the first turn
   // cannot start until one is chosen.
@@ -675,12 +672,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   {environmentControl}
                 </div>
                 <div className="composer-tray__trailing">
-                  <CodeDeliveryOutcomeSelector
-                    onChange={setOutcomeOverride}
-                    suggested={outcomeOverride === undefined}
-                    value={outcomeKind}
-                    {...(props.creating === true ? { disabled: true } : {})}
-                  />
                   {hasProject ? (
                     <CodeWorkspaceSelector
                       onChange={setWorkspaceOverride}
