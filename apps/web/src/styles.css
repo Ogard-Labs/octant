@@ -1577,7 +1577,7 @@ strong {
   padding: 0 6px;
   border-radius: var(--oct-radius-sm);
   color: var(--oct-meta);
-  background: color-mix(in srgb, currentColor 12%, transparent);
+  background: color-mix(in srgb, currentcolor 12%, transparent);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-display);
   font-variant-numeric: tabular-nums;
