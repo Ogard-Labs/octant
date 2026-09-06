@@ -501,6 +501,29 @@ function isHarmlessInformational(message: Record<string, unknown>): boolean {
       typeof message.session_id === "string"
     );
   }
+  // The runtime reports how many tokens a turn is thinking with (Claude Code
+  // 2.1.26x: `thinking_tokens` with an estimate and its delta). Refusing it
+  // ended a tool-using turn as "unsupported runtime message" the moment the
+  // runtime began reasoning about a tool result; the figure changes nothing.
+  if (message.subtype === "thinking_tokens") {
+    return (
+      hasOnlyKeys(message, [
+        "type",
+        "subtype",
+        "estimated_tokens",
+        "estimated_tokens_delta",
+        "user_message_uuid",
+        "uuid",
+        "session_id",
+      ]) &&
+      nonNegativeInteger(message.estimated_tokens) !== undefined &&
+      typeof message.estimated_tokens_delta === "number" &&
+      Number.isFinite(message.estimated_tokens_delta) &&
+      (message.user_message_uuid === undefined || typeof message.user_message_uuid === "string") &&
+      typeof message.uuid === "string" &&
+      typeof message.session_id === "string"
+    );
+  }
   if (message.subtype === "informational") {
     return (
       hasOnlyKeys(message, [

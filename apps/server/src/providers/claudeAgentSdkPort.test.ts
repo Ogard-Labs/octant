@@ -960,6 +960,15 @@ describe("Claude Agent SDK port", () => {
         session_id: "session-1",
         uuid: "b441de81-ec9d-4c62-9be9-9a0b09954fbd",
       },
+      {
+        type: "system",
+        subtype: "thinking_tokens",
+        estimated_tokens: 1200,
+        estimated_tokens_delta: -40,
+        user_message_uuid: "c2f2c1b6-1a0c-4c3a-9a4e-2f2c1b6a1a0c",
+        session_id: "session-1",
+        uuid: "d6e9c8f1-8c2b-4f0f-9a4b-5e2c1b6a1a0c",
+      },
       { type: "keep_alive" },
     ]);
 
@@ -984,6 +993,7 @@ describe("Claude Agent SDK port", () => {
         capabilities: ["interrupt_receipt_v1"],
         runtimeVersion: "2.1.211",
       },
+      { kind: "ignored" },
       { kind: "ignored" },
       { kind: "ignored" },
       { kind: "ignored" },
