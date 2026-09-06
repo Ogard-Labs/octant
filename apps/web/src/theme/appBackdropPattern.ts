@@ -74,7 +74,7 @@ float cloud(vec2 p, float t) {
   float v = 0.0;
   float amp = 0.5;
   for (int i = 0; i < 4; i++) {
-    v += amp * valueNoise(p + vec2(t * 0.11, -t * 0.07));
+    v += amp * valueNoise(p + vec2(t * 0.34, -t * 0.22));
     p = p * 2.03 + vec2(1.7, 9.2);
     amp *= 0.5;
   }

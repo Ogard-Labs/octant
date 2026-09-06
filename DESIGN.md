@@ -88,7 +88,9 @@ Titles and the hero use `--oct-tracking-tight` (-0.025em); section labels use
 
 ### Colour
 
-Neutral graphite, a monochrome accent, a monochrome keyboard focus ring, four statuses. Text is three greys (primary,
+Neutral graphite, a monochrome accent, a monochrome keyboard focus ring, four statuses. That is the default preset;
+the bundled colour presets lean every surface toward one hue and colour the accent and focus ring, and the same
+contrast bars gate them. Text is three greys (primary,
 secondary, muted) and never a fourth. Hairlines separate; fills select. The
 focus ring is painted once, by the global `:focus-visible` rule, as a
 two-pixel halo of the foreground at reduced opacity on every theme: a

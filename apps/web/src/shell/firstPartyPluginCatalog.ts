@@ -217,6 +217,28 @@ const appearancePlugin = firstPartyManifest({
       presetId: "octant",
       label: "Octant",
     },
+    { point: "appearance.preset", componentId: "appearance-pack", presetId: "moss", label: "Moss" },
+    {
+      point: "appearance.preset",
+      componentId: "appearance-pack",
+      presetId: "lagoon",
+      label: "Lagoon",
+    },
+    {
+      point: "appearance.preset",
+      componentId: "appearance-pack",
+      presetId: "harbor",
+      label: "Harbor",
+    },
+    { point: "appearance.preset", componentId: "appearance-pack", presetId: "iris", label: "Iris" },
+    { point: "appearance.preset", componentId: "appearance-pack", presetId: "rose", label: "Rose" },
+    {
+      point: "appearance.preset",
+      componentId: "appearance-pack",
+      presetId: "ember",
+      label: "Ember",
+    },
+    { point: "appearance.preset", componentId: "appearance-pack", presetId: "ink", label: "Ink" },
   ],
 });
 

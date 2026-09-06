@@ -23,8 +23,12 @@ edit it.
 ### Theme mode and presets
 
 Theme mode is **System**, **Light**, or **Dark**. Built-in presets are
-**System** (follows the current system appearance), **Light**, **Dark**, and
-**Octant** (the product's original graphite palette).
+**System** (follows the current system appearance), **Light**, **Dark**,
+**Octant** (the original charcoal-and-brass palette), and seven tinted
+palettes that lean the whole page toward one hue and colour the accent, in
+light and dark: **Moss**, **Lagoon**, **Harbor**, **Iris**, **Rose**,
+**Ember**, and **Ink** (true black for OLED screens). Every preset clears the
+same text and control contrast bars.
 Semantic token roles cover foundation, surface, control, border, text,
 focus, accent, status, and diff colors with contrast validation and safe
 fallback. Theme density is **comfortable** or **compact**.

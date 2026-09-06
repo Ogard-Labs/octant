@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contrastRatio, parseHexColor, relativeLuminance } from "./color";
+import { contrastRatio, oklchToHex, parseHexColor, relativeLuminance } from "./color";
 
 describe("theme color primitives", () => {
   it("parses six-digit hex colors into rgb channels", () => {
@@ -24,5 +24,23 @@ describe("theme color primitives", () => {
     expect(contrastRatio("#000000", "#ffffff")).toBeCloseTo(21, 0);
     expect(contrastRatio("#ffffff", "#000000")).toBeCloseTo(21, 0);
     expect(contrastRatio("#000000", "#000000")).toBeCloseTo(1, 5);
+  });
+});
+
+describe("oklch to hex", () => {
+  it("turns lightness with no chroma into a neutral grey and full lightness into white", () => {
+    expect(oklchToHex({ l: 1, c: 0, h: 0 })).toBe("#ffffff");
+    expect(oklchToHex({ l: 0, c: 0, h: 0 })).toBe("#000000");
+    const grey = parseHexColor(oklchToHex({ l: 0.6, c: 0, h: 200 }));
+    expect(Math.abs(grey.r - grey.g)).toBeLessThanOrEqual(1);
+    expect(Math.abs(grey.g - grey.b)).toBeLessThanOrEqual(1);
+  });
+
+  it("keeps a colour the screen cannot show at its lightness by giving up chroma, not clipping", () => {
+    // A vivid light blue is outside sRGB; the result must stay a valid hex
+    // at about the same luminance rather than a clipped, darker blue.
+    const hex = oklchToHex({ l: 0.85, c: 0.3, h: 260 });
+    expect(hex).toMatch(/^#[0-9a-f]{6}$/);
+    expect(relativeLuminance(parseHexColor(hex))).toBeGreaterThan(0.55);
   });
 });
