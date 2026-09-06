@@ -512,18 +512,19 @@ describe("CodeThreadWorkspace", () => {
     );
 
     expect(screen.getByLabelText("Thread usage")).toHaveTextContent("12.4k in · 3.1k out · $0.42");
-    expect(screen.getByText(/five hour · low · 87% used/)).toBeVisible();
-    expect(screen.getByText(/seven day · 12% used/)).toBeVisible();
+    // A limit is shown once it is worth acting on; a healthy one stays in the
+    // context meter's panel so the strip does not list every window a provider has.
+    expect(screen.getByText(/5-hour limit · low · 87% used/)).toBeVisible();
+    expect(screen.queryByText(/7-day limit/)).not.toBeInTheDocument();
   });
 
-  it("says a provider reported nothing rather than reading as a free thread", () => {
+  it("shows no spend for a provider that has reported nothing, and never a free thread", () => {
     render(<CodeThreadWorkspace controller={controller()} threadId={threadId} />);
 
     // Zero tokens with no report is not the same as a thread that cost
-    // nothing, and the strip must not claim otherwise.
-    expect(screen.getByLabelText("Thread usage")).toHaveTextContent(
-      "This thread's provider has reported no usage yet.",
-    );
+    // nothing: the strip says nothing rather than "$0.00" or a sentence about it.
+    expect(screen.queryByLabelText("Thread usage")).not.toBeInTheDocument();
+    expect(screen.queryByText(/\$0/)).not.toBeInTheDocument();
   });
 
   it("keeps the restore control off a thread that cannot change the checkout", async () => {

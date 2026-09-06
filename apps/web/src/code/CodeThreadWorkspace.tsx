@@ -61,6 +61,7 @@ import { useThreadMentions } from "../chat/useThreadMentions";
 import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
 import { CodeTranscriptRow } from "./CodeTranscriptRow";
 import { providerModelLabel } from "../providers/providerModelLabel";
+import { providerLimitWindowLabel } from "../providers/providerLimitWindow";
 import {
   TurnHeader,
   turnTimeLabel,
@@ -539,9 +540,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     );
     if (sent) {
       attachments.takeForSend();
-      setDraft("");
-      threadMentions.clear();
-      pathMentions.clear();
+      // Only the draft that was sent is cleared: typing during the awaited send
+      // bumps the revision, and that newer draft stays. The host keeps the
+      // draft per thread and hands it back whenever the composer re-syncs, so
+      // the sent message came back into the box until the stored copy was
+      // cleared as well.
+      if (draftRevisionRef.current === draftRevision) {
+        setDraft("");
+        props.controller.setPendingDraft?.("");
+        threadMentions.clear();
+        pathMentions.clear();
+      }
     } else {
       setTurnAccessOverride((current) => current ?? override);
     }
@@ -1395,7 +1404,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 : steered.pending !== undefined
                   ? "Sent · runs when the response in progress finishes"
                   : busy
-                    ? "Enter to send · it runs when this response finishes"
+                    ? "Enter sends when this response finishes"
                     : "Enter to send · Shift+Enter for a new line"}
             </span>
             {accessMessage === undefined ? null : (
@@ -1431,17 +1440,27 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 {forkMessage}
               </span>
             )}
-            <span className="code-thread-workspace__hint" aria-label="Thread usage">
-              {threadUsageLabel(props.controller.threadUsage)}
+            {/* Spend and limits sit at the far end of the same line. A provider
+                that has reported nothing shows nothing here rather than a
+                sentence saying so, and a limit appears only once it is worth
+                acting on; the context meter's panel keeps the full account. */}
+            <span className="code-thread-workspace__usage">
+              {threadUsageLabel(props.controller.threadUsage) === undefined ? null : (
+                <span className="code-thread-workspace__hint" aria-label="Thread usage">
+                  {threadUsageLabel(props.controller.threadUsage)}
+                </span>
+              )}
+              {props.controller.threadUsage.limits
+                .filter((limit) => limit.status !== "allowed")
+                .map((limit) => (
+                  <span
+                    className={`code-thread-workspace__limit code-thread-workspace__limit--${limit.status}`}
+                    key={limit.window}
+                  >
+                    {providerLimitLabel(limit)}
+                  </span>
+                ))}
             </span>
-            {props.controller.threadUsage.limits.map((limit) => (
-              <span
-                className={`code-thread-workspace__limit code-thread-workspace__limit--${limit.status}`}
-                key={limit.window}
-              >
-                {providerLimitLabel(limit)}
-              </span>
-            ))}
           </div>
         }
       />
@@ -1547,10 +1566,9 @@ function forkTitle(sourceTitle: string): string {
     : title;
 }
 
-function threadUsageLabel(usage: CodeController["threadUsage"]): string {
-  if (usage.inputTokens === 0 && usage.outputTokens === 0) {
-    return "This thread's provider has reported no usage yet.";
-  }
+function threadUsageLabel(usage: CodeController["threadUsage"]): string | undefined {
+  // Zero tokens with no report is not a free thread; it is nothing to say yet.
+  if (usage.inputTokens === 0 && usage.outputTokens === 0) return undefined;
   const tokens = `${compactTokens(usage.inputTokens)} in · ${compactTokens(usage.outputTokens)} out`;
   return usage.costUsd === undefined ? tokens : `${tokens} · ${formatUsd(usage.costUsd)}`;
 }
@@ -1567,7 +1585,7 @@ function providerLimitLabel(limit: CodeController["threadUsage"]["limits"][numbe
         })}`;
   const state =
     limit.status === "exhausted" ? "spent" : limit.status === "warning" ? "low" : undefined;
-  const parts = [limit.window.replaceAll("_", " "), state, share, resets].filter(
+  const parts = [providerLimitWindowLabel(limit.window), state, share, resets].filter(
     (part): part is string => part !== undefined,
   );
   return parts.join(" · ");
