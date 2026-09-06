@@ -353,6 +353,35 @@ describe("ProjectOverview", () => {
     expect(screen.getByText(/Stale snapshot · read-only/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /relink/i })).not.toBeInTheDocument();
   });
+
+  it("offers no relink while the snapshot is stale, even where relinking is otherwise allowed", () => {
+    render(
+      <ProjectOverview
+        connectionStale={true}
+        onArchive={vi.fn()}
+        onRelink={vi.fn()}
+        onRename={vi.fn()}
+        project={
+          {
+            id: "20000000-0000-4000-8000-000000000006",
+            name: "Knowledge work",
+            lifecycle: "active",
+            pinned: true,
+            rank: "0/1",
+            version: 1,
+            createdAt: "2026-07-21T12:00:00.000Z",
+            updatedAt: "2026-07-21T12:00:00.000Z",
+            type: "work",
+            binding: { canonicalRoot: "/opaque/work-root" },
+          } as never
+        }
+      />,
+    );
+
+    // The page says mutations are disabled; a control that would change the
+    // binding anyway must not be there to press.
+    expect(screen.queryByRole("button", { name: /relink|new root/i })).not.toBeInTheDocument();
+  });
 });
 
 describe("ProjectOverview threads and recent activity", () => {

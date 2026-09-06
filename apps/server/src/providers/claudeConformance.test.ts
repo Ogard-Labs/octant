@@ -317,8 +317,10 @@ class ConformanceQuery implements ClaudeQueryPort {
       toolUseId: "approval-1",
       signal,
     } as const;
+    // Claude Code consults the permission callback only for a hook "ask";
+    // a hook "allow" runs the tool without it.
     const gate = await this.input.preToolUse(request);
-    if (gate.behavior === "allow") {
+    if (gate.behavior === "ask") {
       void this.input.canUseTool({
         toolName: request.toolName,
         input,
@@ -347,8 +349,10 @@ class ConformanceQuery implements ClaudeQueryPort {
       toolUseId: "question-1",
       signal,
     } as const;
+    // Claude Code consults the permission callback only for a hook "ask";
+    // a hook "allow" runs the tool without it.
     const gate = await this.input.preToolUse(request);
-    if (gate.behavior === "allow") {
+    if (gate.behavior === "ask") {
       void this.input.canUseTool({
         toolName: request.toolName,
         input,

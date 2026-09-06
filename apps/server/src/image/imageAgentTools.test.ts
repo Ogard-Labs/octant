@@ -125,6 +125,26 @@ describe("createImageAgentTools", () => {
     );
   });
 
+  it("reaches the second of two models registered on the same custom instance", async () => {
+    const customSources: ReadonlyArray<ImageGenerationCustomSource> = [
+      { providerInstanceId: compatibleId, modelId: "recraftv3" as never, label: "Square" },
+      { providerInstanceId: compatibleId, modelId: "recraftv3-vector" as never, label: "Vector" },
+    ];
+    const { set, enqueue } = tools([compatibleInstance()], [], customSources);
+    const outcome = await set!.execute({
+      name: IMAGE_TOOL_NAME,
+      inputJson: JSON.stringify({
+        prompt: "a red cube",
+        profileInstanceId: compatibleId,
+        modelId: "recraftv3-vector",
+      }),
+    });
+    expect(outcome.isError).toBeUndefined();
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ profileInstanceId: compatibleId, modelId: "recraftv3-vector" }),
+    );
+  });
+
   it("refuses credentials, endpoints, and filesystem paths", async () => {
     const { set, enqueue } = tools([imageProfile()]);
     const outcome = await set!.execute({

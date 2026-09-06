@@ -1298,10 +1298,10 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             {completionLocked
               ? "Reactivate this task before creating another file or changing its provider."
               : turnRunning
-                ? "Press Enter to send · it runs when this response finishes · Shift+Enter for a new line"
+                ? "Enter sends when this response finishes"
                 : props.turnClient === undefined
-                  ? "Press Enter to save a markdown artifact · Shift+Enter for a new line"
-                  : "Press Enter to send · Shift+Enter for a new line · Type # to mention a thread, @ to mention a file"}
+                  ? "Enter saves a Markdown artifact · Shift+Enter for a new line"
+                  : "Enter to send · Shift+Enter for a new line · # mentions a thread · @ mentions a file"}
           </p>
         </div>
       </div>

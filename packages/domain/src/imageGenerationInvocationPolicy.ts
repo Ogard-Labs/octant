@@ -48,29 +48,68 @@ export type ImageGenerationHonoredOptions =
       readonly supportsReferences: boolean;
     };
 
+// Matches ImageGenerationProfileView.displayName's own Schema.maxLength(120):
+// two maximum-length labels joined would otherwise exceed it and fail to
+// decode.
+const MAX_PROFILE_DISPLAY_NAME_LENGTH = 120;
+
+function boundedDisplayName(labels: ReadonlyArray<string>): string {
+  const joined = labels.join(", ");
+  if (joined.length <= MAX_PROFILE_DISPLAY_NAME_LENGTH) return joined;
+  return `${joined.slice(0, MAX_PROFILE_DISPLAY_NAME_LENGTH - 1)}…`;
+}
+
 /**
  * Enabled Settings-configured custom image sources, as profile views. Only a
  * `"ready"` resolution is offered here — an `"unavailable"` custom source is
  * Settings' job to surface with its reason, not the picker's
  * (`docs/decisions/0085`).
+ *
+ * `instanceId` is the real routing key a caller passes straight back to
+ * `enqueue` — it cannot be a synthetic per-source identity. Two sources on
+ * the same instance (different models) therefore fold into one profile with
+ * a combined allowlist, never two profiles sharing one `instanceId`: a
+ * second profile at the same id would be unreachable by
+ * `profiles.find((p) => p.instanceId === id)` and its model silently
+ * rejected against the first profile's one-model allowlist instead.
  */
 export function listCustomImageProfiles(
   customSources: ReadonlyArray<ImageGenerationCustomSource>,
   instances: ReadonlyArray<ProviderInstance>,
 ): ReadonlyArray<ImageGenerationProfileView> {
-  const profiles: Array<ImageGenerationProfileView> = [];
+  const byInstance = new Map<
+    string,
+    {
+      readonly instanceId: ImageGenerationProfileView["instanceId"];
+      readonly defaultModel: ImageGenerationProfileView["defaultModel"];
+      readonly labels: Array<string>;
+      readonly modelIds: Array<ImageGenerationProfileView["defaultModel"]>;
+    }
+  >();
   for (const source of customSources) {
     const resolution = resolveImageCustomSource(source, instances);
     if (resolution.status !== "ready") continue;
-    profiles.push({
-      instanceId: resolution.instance.id,
-      displayName: resolution.label,
-      driverKind: "openai-compatible-image",
-      modelAllowlist: [resolution.modelId],
-      defaultModel: resolution.modelId,
-    });
+    const key = String(resolution.instance.id);
+    const group = byInstance.get(key);
+    if (group === undefined) {
+      byInstance.set(key, {
+        instanceId: resolution.instance.id,
+        defaultModel: resolution.modelId,
+        labels: [resolution.label],
+        modelIds: [resolution.modelId],
+      });
+      continue;
+    }
+    group.labels.push(resolution.label);
+    group.modelIds.push(resolution.modelId);
   }
-  return profiles;
+  return [...byInstance.values()].map((group) => ({
+    instanceId: group.instanceId,
+    displayName: boundedDisplayName(group.labels),
+    driverKind: "openai-compatible-image",
+    modelAllowlist: group.modelIds,
+    defaultModel: group.defaultModel,
+  }));
 }
 
 /**

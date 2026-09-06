@@ -2838,12 +2838,15 @@ input.switch:checked::after {
 .board-card-title {
   /* Two lines, then ellipsis — a long title must not make one card tower
      over its column. The element carries the full title in its title
-     attribute so the clamped text is still discoverable. */
+     attribute so the clamped text is still discoverable. The card is a
+     button, whose recipe forbids wrapping; white-space inherits, so without
+     this the clamp never got a second line and the title was cut mid-word. */
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
   min-width: 0;
+  white-space: normal;
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
@@ -4121,6 +4124,7 @@ input.switch:checked::after {
    above it split one object into two stacked boxes. */
 .composer-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   min-height: 36px;
   gap: 6px;
@@ -4129,6 +4133,13 @@ input.switch:checked::after {
 }
 .composer-row .composer-gap {
   flex: 1;
+}
+/* A narrow column shortens the model's name before anything else moves, and
+   when even that is not enough the row wraps rather than pushing the send
+   control past the frame's edge, where it went missing at 430px. */
+.composer-row .composer-model-picker {
+  min-width: 0;
+  flex: 0 1 auto;
 }
 /* One control size and one label size across the whole row. Measured before
    this rule, a single row carried heights of 26, 28 and 29 and label sizes of
