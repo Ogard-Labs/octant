@@ -66,6 +66,7 @@ describe("provider registry contracts", () => {
     "azure-foundry",
     "openai-image",
     "gemini-native-image",
+    "bfl-image",
   ] as const)("decodes the %s driver kind", (driverKind) => {
     expect(Schema.decodeUnknownSync(ProviderDriverKind)(driverKind)).toBe(driverKind);
   });
@@ -362,6 +363,47 @@ describe("provider registry contracts", () => {
       }),
     ).toThrow();
     expect(decodeProviderInstanceConfigurationChanged({ instance })).toEqual({ instance });
+  });
+
+  it("decodes a BFL image profile without a base URL or secret", () => {
+    const instance = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000433",
+      displayName: "FLUX",
+      driverKind: "bfl-image",
+      configuration: {
+        kind: "bfl-image-http",
+        modelAllowlist: ["flux-pro-1.1", "flux-dev"],
+        defaultModel: "flux-pro-1.1",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-08-28T10:00:00.000Z",
+      updatedAt: "2026-08-28T10:00:00.000Z",
+    });
+
+    expect(instance.driverKind).toBe("bfl-image");
+    expect(JSON.stringify(instance)).not.toMatch(/api.?key|credential|token|baseUrl/i);
+    expect(() =>
+      decodeProviderInstance({
+        ...instance,
+        configuration: { ...instance.configuration, baseUrl: "https://api.bfl.ai" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...instance,
+        configuration: { ...instance.configuration, defaultModel: "flux-kontext-pro" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...instance,
+        configuration: { ...instance.configuration, modelAllowlist: ["flux-dev", "flux-dev"] },
+      }),
+    ).toThrow();
+    expect(decodeProviderInstanceConfigurationChanged({ instance })).toEqual({ instance });
+    expect(() => decodeProviderInstanceBinaryChanged({ instance })).toThrow();
   });
 
   it("decodes a strict non-secret Codex instance and creation command", () => {
@@ -1409,6 +1451,50 @@ describe("provider registry contracts", () => {
         expectedVersion: 0,
         displayName: "GPT Image",
         configuration: { ...openAiImageConfiguration, defaultModel: "gpt-image-1" },
+      }),
+    ).toThrow();
+
+    const bflImageConfiguration = {
+      kind: "bfl-image-http",
+      modelAllowlist: ["flux-pro-1.1"],
+      defaultModel: "flux-pro-1.1",
+    } as const;
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "create-bfl-image-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: "FLUX",
+        configuration: bflImageConfiguration,
+      }),
+    ).toMatchObject({
+      kind: "create-bfl-image-provider",
+      configuration: bflImageConfiguration,
+    });
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "change-bfl-image-configuration",
+        instanceId: ids.instance,
+        expectedVersion: 1,
+        configuration: { ...bflImageConfiguration, defaultModel: "flux-pro-1.1" },
+      }),
+    ).toMatchObject({ kind: "change-bfl-image-configuration" });
+    expect(() =>
+      decodeProviderRegistryCommand({
+        kind: "create-bfl-image-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: "FLUX",
+        configuration: { ...bflImageConfiguration, baseUrl: "https://api.bfl.ai" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderRegistryCommand({
+        kind: "create-bfl-image-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: "FLUX",
+        configuration: { ...bflImageConfiguration, defaultModel: "flux-dev" },
       }),
     ).toThrow();
 

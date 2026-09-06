@@ -9,6 +9,7 @@ import {
   decodeImageArtifactId,
   decodeImageGenerationEnqueueRequest,
   decodeImageGenerationEvidence,
+  decodeImageGenerationProfileView,
   decodeImageGenerationScopeId,
   decodeImageJob,
   decodeImageJobId,
@@ -187,6 +188,35 @@ describe("ImageUsageUnits", () => {
 
   it("rejects a zero image count", () => {
     expect(() => decodeImageUsageUnits({ count: 0, quality: "exact" })).toThrow();
+  });
+});
+
+describe("ImageGenerationProfileView", () => {
+  it("decodes a BFL profile view with no quality, size, aspect ratio, or resolution", () => {
+    const view = decodeImageGenerationProfileView({
+      instanceId: ids.profile,
+      displayName: "FLUX",
+      driverKind: "bfl-image",
+      modelAllowlist: ["flux-pro-1.1"],
+      defaultModel: "flux-pro-1.1",
+    });
+    expect(view.driverKind).toBe("bfl-image");
+    expect(view.quality).toBeUndefined();
+    expect(view.size).toBeUndefined();
+    expect(view.aspectRatio).toBeUndefined();
+    expect(view.resolution).toBeUndefined();
+  });
+
+  it("rejects an empty model allowlist regardless of driver kind", () => {
+    expect(() =>
+      decodeImageGenerationProfileView({
+        instanceId: ids.profile,
+        displayName: "FLUX",
+        driverKind: "bfl-image",
+        modelAllowlist: [],
+        defaultModel: "flux-pro-1.1",
+      }),
+    ).toThrow();
   });
 });
 

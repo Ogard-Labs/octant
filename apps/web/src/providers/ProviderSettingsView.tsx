@@ -2,6 +2,7 @@ import type {
   AgentEligibleModelRef,
   AnthropicCompatibleProviderConfiguration,
   AzureFoundryProviderConfiguration,
+  BflImageProviderConfiguration,
   ClaudeProviderConfiguration,
   DevinProviderConfiguration,
   DiscoverySnapshot,
@@ -86,6 +87,11 @@ export interface ProviderSettingsViewProps {
     configuration: GeminiImageProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
+  readonly onCreateBflImage: (
+    displayName: string,
+    configuration: BflImageProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
   readonly onCreateClaude: (
     displayName: string,
     configuration: ClaudeProviderConfiguration,
@@ -150,6 +156,11 @@ export interface ProviderSettingsViewProps {
   readonly onChangeGeminiImageConfiguration: (
     instanceId: ProviderInstanceId,
     configuration: GeminiImageProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onChangeBflImageConfiguration: (
+    instanceId: ProviderInstanceId,
+    configuration: BflImageProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
   readonly onChangeClaudeConfiguration: (
@@ -286,6 +297,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
             onCreateOpenAiCompatible={props.onCreateOpenAiCompatible}
             onCreateOpenAiImage={props.onCreateOpenAiImage}
             onCreateGeminiImage={props.onCreateGeminiImage}
+            onCreateBflImage={props.onCreateBflImage}
           />
         }
         credentialManagementAvailable={props.credentialManagementAvailable}
@@ -316,6 +328,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangeOpenAiCompatibleConfiguration={props.onChangeOpenAiCompatibleConfiguration}
         onChangeOpenAiImageConfiguration={props.onChangeOpenAiImageConfiguration}
         onChangeGeminiImageConfiguration={props.onChangeGeminiImageConfiguration}
+        onChangeBflImageConfiguration={props.onChangeBflImageConfiguration}
         onChangePiConfiguration={props.onChangePiConfiguration}
         onClearProviderCredential={props.onClearProviderCredential}
         onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}

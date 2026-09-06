@@ -179,6 +179,8 @@ describe("shell settings policy", () => {
       navigatorAssistant: {},
       // Voice starts unconfigured: no transcription or synthesis endpoint.
       voice: {},
+      // Image generation starts with no custom OpenAI-compatible sources.
+      imageGeneration: { customSources: [] },
       // The host has not been told who is using it, so the profile carries no
       // name and no address — only the accent the initials avatar falls back to.
       userProfile: { accent: "indigo", avatar: { kind: "initials" } },

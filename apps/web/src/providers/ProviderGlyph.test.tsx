@@ -22,4 +22,14 @@ describe("ProviderGlyph", () => {
 
     expect(screen.getByText("IG")).toHaveClass("provider-glyph--monogram");
   });
+
+  it("draws an original mark for the BFL image kind instead of falling back to a monogram", () => {
+    const { container } = render(
+      <ProviderGlyph displayName="FLUX" driverKind="bfl-image" size={14} />,
+    );
+
+    const glyph = container.querySelector("svg.provider-glyph");
+    expect(glyph).toHaveAttribute("data-driver-kind", "bfl-image");
+    expect(container.querySelector(".provider-glyph--monogram")).toBeNull();
+  });
 });
