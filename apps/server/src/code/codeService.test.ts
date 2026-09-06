@@ -3726,6 +3726,37 @@ describe("completing and snoozing a Code thread", () => {
     expect(inPlay.persistence.journal.append).not.toHaveBeenCalled();
   });
 
+  it("re-reads once when the thread changed under the reset, and gives up after that", () => {
+    const raced = serviceFixture({ threads: [thread({ completedAt: nowAt })] });
+    raced.persistence.readCodeThread
+      .mockReturnValueOnce(thread({ completedAt: nowAt }))
+      .mockReturnValueOnce(thread({ completedAt: nowAt, version: 2 as never }));
+    raced.persistence.journal.append.mockImplementationOnce(() => {
+      throw new ConcurrencyConflict({
+        aggregateType: "code-thread",
+        aggregateId: String(ids.thread),
+        expectedVersion: 1,
+        actualVersion: 2,
+      });
+    });
+    raced.service.noteProviderTurnRequested(ids.thread);
+    expect(raced.persistence.journal.append).toHaveBeenCalledTimes(2);
+    expect(raced.persistence.journal.append).toHaveBeenLastCalledWith(
+      expect.objectContaining({ expectedVersion: 2 }),
+    );
+
+    const stuck = serviceFixture({ threads: [thread({ completedAt: nowAt })] });
+    stuck.persistence.journal.append.mockImplementation(() => {
+      throw new ConcurrencyConflict({
+        aggregateType: "code-thread",
+        aggregateId: String(ids.thread),
+        expectedVersion: 1,
+        actualVersion: 3,
+      });
+    });
+    expect(() => stuck.service.noteProviderTurnRequested(ids.thread)).toThrow();
+  });
+
   it("archives a completed thread on the host's timer only once its completion is old enough", () => {
     const sessionAuthority = new CodeSessionAuthorityStore();
     const revoke = vi.spyOn(sessionAuthority, "revokeThreadEverywhere");

@@ -46,6 +46,7 @@ export function providerLimitsReporting(kind: ProviderDriverKind): ProviderLimit
     case "qwen":
     case "openai-image":
     case "gemini-native-image":
+    case "bfl-image":
       return "runtime-does-not-report";
   }
 }

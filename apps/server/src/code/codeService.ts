@@ -1781,19 +1781,28 @@ export class CodeService {
    * the neutral reset, and never on a turn the thread did not ask for.
    */
   noteProviderTurnRequested(threadId: CodeThreadId): void {
-    const current = this.#persistence.readCodeThread(threadId);
-    if (current === undefined) return;
-    if (current.completedAt === undefined && current.snooze === undefined) return;
-    const updatedAt = decodeTimestamp(this.#clock());
-    const next = decodeCodeThread({
-      ...withoutRest(current),
-      version: current.version + 1,
-      updatedAt,
-    });
-    this.#append("code-thread", current.id, current.version, "code.thread-updated@1", {
-      kind: "thread-updated",
-      thread: next,
-    });
+    // The person's own Complete or Snooze may land a moment before their
+    // message does, so one version race is expected and re-read once; any
+    // other failure propagates and refuses the turn.
+    for (let attempt = 0; ; attempt += 1) {
+      const current = this.#persistence.readCodeThread(threadId);
+      if (current === undefined) return;
+      if (current.completedAt === undefined && current.snooze === undefined) return;
+      const next = decodeCodeThread({
+        ...withoutRest(current),
+        version: current.version + 1,
+        updatedAt: decodeTimestamp(this.#clock()),
+      });
+      try {
+        this.#append("code-thread", current.id, current.version, "code.thread-updated@1", {
+          kind: "thread-updated",
+          thread: next,
+        });
+        return;
+      } catch (error) {
+        if (!(error instanceof ConcurrencyConflict) || attempt > 0) throw error;
+      }
+    }
   }
 
   /**

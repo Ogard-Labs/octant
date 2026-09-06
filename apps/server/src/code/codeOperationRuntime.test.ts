@@ -297,6 +297,32 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("refuses to start a turn when the thread cannot be brought back, and records no work for it", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+      onProviderTurnRequested: () => {
+        throw new Error("journal is unavailable");
+      },
+    });
+
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(12),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).rejects.toThrow("journal is unavailable");
+    expect(connection.send).not.toHaveBeenCalled();
+    expect(fixture.runtimeWorks()).toEqual([]);
+    fixture.close();
+  });
+
   it("runs a provider turn asynchronously and owns exact input, approval, and cancellation", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);

@@ -150,7 +150,7 @@ export class WorkThreadBoardService {
     for (const entry of boardThreads) {
       if (entry.thread.lifecycle === "archived" || entry.thread.lifecycle === "deleted") continue;
       // A thread the person completed rests in its shelf until they reopen
-      // it; the board is for work in play (decision 0085).
+      // it; the board is for work in play (decision 0087).
       if (entry.thread.completedAt !== undefined) continue;
       const evidence = await this.#evidence.forThread(entry);
       const activity = await this.#observeRuntime(entry.thread.id);

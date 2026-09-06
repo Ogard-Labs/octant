@@ -171,7 +171,8 @@ export interface WorkTurnServiceDependencies {
    * A person asked the thread for a turn. Fires once the thread and its
    * Project are known to be reachable from this window and before the turn
    * starts, so a completed or snoozed thread comes back the moment it is
-   * spoken to rather than only once the turn runs.
+   * spoken to. A throw refuses the turn: a thread left completed or snoozed
+   * while its turn ran would be a half-applied state.
    */
   readonly onTurnRequested?: (threadId: WorkThreadId) => void;
   readonly nativeHarness?: {
@@ -319,14 +320,7 @@ export class WorkTurnService {
     if (!accessible) {
       throw this.#failure("unauthorized", "Work Project is unavailable for this window.");
     }
-    if (thread !== undefined) {
-      try {
-        this.#onTurnRequested?.(thread.id);
-      } catch {
-        // Waking the row is a courtesy to the sidebar; the turn itself must
-        // not fail because the thread record could not be bumped.
-      }
-    }
+    if (thread !== undefined) this.#onTurnRequested?.(thread.id);
     const project = this.#persistence.readProject(command.authority.projectId);
     const decision = decideWorkTurnAuthority({
       authority: command.authority,

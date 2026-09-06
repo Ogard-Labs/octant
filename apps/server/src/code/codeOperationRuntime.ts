@@ -148,8 +148,11 @@ export interface CodeOperationRuntimeOptions {
   readonly reportRuntimeWorkFailure?: (failure: CodeRuntimeWorkRecordFailure) => void;
   /**
    * A person asked the thread for a turn. Fires once per new turn, after the
-   * scope check and before approval, so a completed or snoozed thread can come
-   * back the moment it is spoken to rather than only once the turn runs.
+   * scope check and before any runtime work is recorded, so a completed or
+   * snoozed thread comes back the moment it is spoken to. A throw refuses the
+   * turn: a thread that stayed completed or snoozed while its turn ran would
+   * be a half-applied state, so the host starts nothing on a record it could
+   * not bring back.
    */
   readonly onProviderTurnRequested?: (threadId: CodeThreadId) => void;
   readonly ghExecutable?: string;
@@ -497,19 +500,16 @@ export function createCodeOperationRuntime(
       // replay lookup, but before approval or the operation side effect. That
       // keeps inaccessible commands out of the durable runtime-work journal
       // while still recording work that waits on approval.
+      // Bringing the thread back comes before any runtime-work record: a
+      // reset that fails must leave no "running" record behind for a turn
+      // that never starts.
+      if (command.kind === "start-provider-turn")
+        options.onProviderTurnRequested?.(command.threadId);
       const started = codeRuntimeWorkStarted(command);
       if (started !== undefined)
         observeRuntimeWorkOutcome(
           runtimeWork.open({ id: started.id, threadId: command.threadId, kind: started.kind }),
         );
-      if (command.kind === "start-provider-turn") {
-        try {
-          options.onProviderTurnRequested?.(command.threadId);
-        } catch {
-          // Waking the row is a courtesy to the sidebar; the turn itself must
-          // not fail because the thread record could not be bumped.
-        }
-      }
     },
     ...(approvalValidator === undefined ? {} : { approvals: approvalValidator }),
     terminals: terminal,

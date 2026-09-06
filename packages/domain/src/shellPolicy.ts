@@ -162,6 +162,7 @@ export function defaultShellSettings(): ShellSettings {
     showThreadProviderIcons: true,
     navigatorAssistant: {},
     voice: {},
+    imageGeneration: { customSources: [] },
     userProfile: { accent: DEFAULT_AVATAR_ACCENT, avatar: DEFAULT_USER_AVATAR },
   };
 }

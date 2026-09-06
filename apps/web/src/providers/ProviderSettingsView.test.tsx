@@ -1065,6 +1065,70 @@ describe("ProviderSettingsView", () => {
     expect(document.body.textContent).not.toContain("gemini-secret");
   });
 
+  it("creates a BFL image profile with a write-only key, no base URL, and no quality or size fields", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: geminiImageProvider() });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    await chooseSelectFieldOption(
+      user,
+      screen.getByLabelText("Provider type"),
+      "Black Forest Labs Image",
+    );
+    const create = screen.getByRole("form", { name: "Add Black Forest Labs image profile" });
+    expect(within(create).queryByLabelText("API base URL")).not.toBeInTheDocument();
+    expect(within(create).queryByLabelText("Quality")).not.toBeInTheDocument();
+    expect(within(create).queryByLabelText("Size")).not.toBeInTheDocument();
+    expect(within(create).queryByLabelText("Aspect ratio")).not.toBeInTheDocument();
+    await user.type(within(create).getByLabelText("Provider name"), "FLUX");
+    await user.type(within(create).getByLabelText("Model allowlist"), "flux-pro-1.1, flux-dev");
+    await user.type(within(create).getByLabelText("Default model"), "flux-pro-1.1");
+    await user.type(within(create).getByLabelText("API key"), "bfl-secret");
+    await user.click(screen.getByRole("button", { name: "Add Black Forest Labs image profile" }));
+
+    expect(props.onCreateBflImage).toHaveBeenCalledOnce();
+    const [name, configuration, credential] = vi.mocked(props.onCreateBflImage).mock.calls[0]!;
+    expect(name).toBe("FLUX");
+    expect(configuration).toMatchObject({
+      kind: "bfl-image-http",
+      modelAllowlist: ["flux-pro-1.1", "flux-dev"],
+      defaultModel: "flux-pro-1.1",
+    });
+    expect("baseUrl" in configuration).toBe(false);
+    expect("quality" in configuration).toBe(false);
+    expect(credential.value).toBe("bfl-secret");
+    credential.clear();
+    expect(document.body.textContent).not.toContain("bfl-secret");
+  });
+
+  it("saves BFL image configuration and clears the stored key on remove", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: bflImageProvider() });
+    renderExpanded(<ProviderSettingsView {...props} />);
+    const card = screen.getByRole("article", { name: "FLUX" });
+    await user.clear(within(card).getByLabelText("Model allowlist for FLUX"));
+    await user.type(within(card).getByLabelText("Model allowlist for FLUX"), "flux-dev");
+    await user.clear(within(card).getByLabelText("Default model for FLUX"));
+    await user.type(within(card).getByLabelText("Default model for FLUX"), "flux-dev");
+    await user.type(within(card).getByLabelText("API key for FLUX"), "rotated-bfl");
+    await user.click(
+      within(card).getByRole("button", { name: "Save Black Forest Labs image settings for FLUX" }),
+    );
+    expect(props.onChangeBflImageConfiguration).toHaveBeenCalledOnce();
+    const [, configuration, credential] = vi.mocked(props.onChangeBflImageConfiguration).mock
+      .calls[0]!;
+    expect(configuration).toMatchObject({
+      kind: "bfl-image-http",
+      modelAllowlist: ["flux-dev"],
+      defaultModel: "flux-dev",
+    });
+    expect(credential.value).toBe("rotated-bfl");
+    expect(document.body.textContent).not.toContain("rotated-bfl");
+
+    await user.click(within(card).getByRole("button", { name: "Remove FLUX" }));
+    expect(props.onRemove).toHaveBeenCalledWith(id);
+  });
+
   it("resets stale api-key auth back to bearer when switching from Anthropic to OpenAI-compatible", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: anthropicProvider() });
@@ -1753,6 +1817,7 @@ function ControllerBackedProviderSettings(props: {
       onChangeAzureFoundryConfiguration={controller.changeAzureFoundryConfiguration}
       onChangeOpenAiImageConfiguration={controller.changeOpenAiImageConfiguration}
       onChangeGeminiImageConfiguration={controller.changeGeminiImageConfiguration}
+      onChangeBflImageConfiguration={controller.changeBflImageConfiguration}
       onClearProviderCredential={controller.clearProviderCredential}
       onBeginProviderAuthentication={controller.beginProviderAuthentication}
       onCompleteProviderAuthentication={controller.completeProviderAuthentication}
@@ -1770,6 +1835,7 @@ function ControllerBackedProviderSettings(props: {
       onCreateAzureFoundry={controller.createAzureFoundry}
       onCreateOpenAiImage={controller.createOpenAiImage}
       onCreateGeminiImage={controller.createGeminiImage}
+      onCreateBflImage={controller.createBflImage}
       onPermissionPersistenceChange={controller.updatePermissionPersistence}
       onProbe={controller.probe}
       onProviderOrderChange={controller.updateProviderOrder}
@@ -1904,6 +1970,10 @@ function fixture(
       credential.clear();
       return true;
     }),
+    onCreateBflImage: vi.fn(async (_name, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
     onRename: vi.fn(async () => true),
     onChangeBinary: vi.fn(async () => true),
     onChangeClaudeConfiguration: vi.fn(async (_id, _configuration, credential) => {
@@ -1964,6 +2034,10 @@ function fixture(
       return true;
     }),
     onChangeGeminiImageConfiguration: vi.fn(async (_id, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
+    onChangeBflImageConfiguration: vi.fn(async (_id, _configuration, credential) => {
       credential.clear();
       return true;
     }),
@@ -2165,6 +2239,24 @@ function geminiImageProvider(): ProviderInstance {
       kind: "gemini-native-image-http",
       modelAllowlist: ["gemini-3.1-flash-image" as never],
       defaultModel: "gemini-3.1-flash-image" as never,
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1 as never,
+    createdAt: "2026-08-28T10:00:00.000Z" as never,
+    updatedAt: "2026-08-28T10:00:00.000Z" as never,
+  };
+}
+
+function bflImageProvider(): ProviderInstance {
+  return {
+    id,
+    displayName: "FLUX",
+    driverKind: "bfl-image",
+    configuration: {
+      kind: "bfl-image-http",
+      modelAllowlist: ["flux-pro-1.1" as never],
+      defaultModel: "flux-pro-1.1" as never,
     },
     enabled: true,
     environmentPolicy: "inherit-host",

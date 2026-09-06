@@ -4222,6 +4222,9 @@ export function startOctantServer(
               scopeId: decodeImageGenerationScopeId(String(thread.id)),
               port: {
                 listInstances: () => persistence.readProviderInstances(),
+                readImageGenerationCustomSources: () =>
+                  (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                    .imageGeneration.customSources,
                 enqueue: (input) => imageJobService.enqueue(input),
                 listJobs: (scopeId) => imageJobService.listByScope(scopeId),
               },
@@ -4332,6 +4335,9 @@ export function startOctantServer(
       projection: persistence.imageJobProjection,
       attachments: generatedImageStore,
       readProviderInstance: (id) => persistence.readProviderInstance(id),
+      readImageGenerationCustomSources: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration
+          .customSources,
       credentialResolver:
         credentialResolver ??
         ({
@@ -5171,6 +5177,8 @@ export function startOctantServer(
     const imageRoutes = createImageRouteHandler({
       jobs: imageJobService,
       listInstances: () => persistence.readProviderInstances(),
+      readImageGenerationSettings: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration,
       authorizeScope: async (windowId, threadKind, scopeId) => {
         const threadId = String(scopeId);
         // The library is host-wide: window capability already proved the
@@ -6347,7 +6355,7 @@ export function startOctantServer(
     });
     automationScheduler.start();
     // The host's own timer for completed threads, fed by every mode's service
-    // that can archive on the host's behalf (decision 0085).
+    // that can archive on the host's behalf (decision 0087).
     const completedThreadArchiveSweep = new CompletedThreadArchiveSweep({
       sources: [
         codeCompletedThreadSource,
@@ -6368,7 +6376,6 @@ export function startOctantServer(
         (persistence.readShellSettings()?.settings ?? defaultShellSettings())
           .completedThreadArchiveAfterDays,
     });
-    completedThreadArchiveSweep.start();
     const automationRoutes = createAutomationRouteHandler({
       projection: persistence.automationProjection,
       commands: {
@@ -6931,6 +6938,10 @@ export function startOctantServer(
                   : "bind-failed";
             }
           }
+          // The completed-thread timer starts only once the host is serving,
+          // so a host that fails to bind never archives anything on its own,
+          // and the stop below is registered before the first pass runs.
+          completedThreadArchiveSweep.start();
           return {
             url: localServer.url,
             ...(remoteListener === undefined ? {} : { remoteListener }),

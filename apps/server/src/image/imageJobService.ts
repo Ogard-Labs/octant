@@ -28,11 +28,13 @@ import {
   type ImageArtifactId,
   type ImageArtifactMediaType,
   type ImageArtifactRecord,
+  type ImageGenerationCustomSource,
   type ImageGenerationScopeId,
   type ImageJob,
   type ImageJobId,
   type ImageJobStatus,
   type ImageJobThreadKind,
+  type OpenAiCompatibleProviderInstance,
   type OpenAiImageProviderInstance,
   type OpenAiImageQuality,
   type OpenAiImageSize,
@@ -42,6 +44,7 @@ import {
   type UtcTimestamp,
 } from "@octant/contracts";
 import {
+  assertCustomImageSourceEligible,
   assertImageJobExpectedVersion,
   assertImageJobProfileEligible,
   assertImageJobTransitionAllowed,
@@ -52,11 +55,13 @@ import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
+import { makeBflImageAdapter } from "./bflImageAdapter";
 import { makeGeminiImageAdapter } from "./geminiImageAdapter";
 import type { GeneratedImageStore } from "./generatedImageStore";
 import type { ImageAdapterRequest, ImageGenerationAdapter } from "./imageAdapter";
 import type { ImageHttpFetch } from "./imageHttp";
 import { ImageJobProjection } from "./imageJobProjection";
+import { makeOpenAiCompatibleImageAdapter } from "./openAiCompatibleImageAdapter";
 import { makeOpenAiImageAdapter } from "./openAiImageAdapter";
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
@@ -97,6 +102,7 @@ export interface ImageJobServiceOptions {
   readonly projection: ImageJobProjection;
   readonly attachments: GeneratedImageStore;
   readonly readProviderInstance: (id: ProviderInstanceId) => ProviderInstance | undefined;
+  readonly readImageGenerationCustomSources: () => ReadonlyArray<ImageGenerationCustomSource>;
   readonly credentialResolver: ProviderCredentialResolver;
   readonly uuid: () => string;
   readonly clock: () => string;
@@ -117,6 +123,7 @@ export class ImageJobService {
   readonly #projection: ImageJobProjection;
   readonly #attachments: GeneratedImageStore;
   readonly #readProviderInstance: ImageJobServiceOptions["readProviderInstance"];
+  readonly #readImageGenerationCustomSources: ImageJobServiceOptions["readImageGenerationCustomSources"];
   readonly #credentialResolver: ProviderCredentialResolver;
   readonly #uuid: () => string;
   readonly #clock: () => string;
@@ -136,6 +143,7 @@ export class ImageJobService {
     this.#projection = options.projection;
     this.#attachments = options.attachments;
     this.#readProviderInstance = options.readProviderInstance;
+    this.#readImageGenerationCustomSources = options.readImageGenerationCustomSources;
     this.#credentialResolver = options.credentialResolver;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
@@ -253,7 +261,15 @@ export class ImageJobService {
       throw new ImageJobServiceError("ineligible", "The image profile does not exist.");
     }
     try {
-      assertImageJobProfileEligible(instance, input.modelId);
+      if (instance.driverKind === "openai-compatible") {
+        assertCustomImageSourceEligible(
+          instance,
+          input.modelId,
+          this.#readImageGenerationCustomSources(),
+        );
+      } else {
+        assertImageJobProfileEligible(instance, input.modelId);
+      }
     } catch (error) {
       throw new ImageJobServiceError(
         "ineligible",
@@ -352,6 +368,16 @@ export class ImageJobService {
     }
     if (instance.configuration.kind === "gemini-native-image-http") {
       return makeGeminiImageAdapter(options);
+    }
+    if (instance.configuration.kind === "bfl-image-http") {
+      return makeBflImageAdapter(options);
+    }
+    if (instance.configuration.kind === "openai-compatible-http") {
+      return makeOpenAiCompatibleImageAdapter({
+        instance: instance as OpenAiCompatibleProviderInstance,
+        credentialResolver: this.#credentialResolver,
+        ...(this.#fetch === undefined ? {} : { fetch: this.#fetch }),
+      });
     }
     throw new ImageJobServiceError("ineligible", "The selected provider is not an image profile.");
   }

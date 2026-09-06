@@ -174,6 +174,8 @@ describe("snoozeWakeLabel", () => {
     expect(snoozeWakeLabel("2026-09-07T12:30:00.000Z", now)).toBe("3h");
     expect(snoozeWakeLabel("2026-09-07T11:02:00.000Z", now)).toBe("1h");
     expect(snoozeWakeLabel("2026-09-09T09:00:00.000Z", now)).toBe("2d");
+    // Twenty-three and a half hours rounds to a day, never to "24h".
+    expect(snoozeWakeLabel("2026-09-08T09:30:00.000Z", now)).toBe("1d");
     expect(snoozeWakeLabel("2026-09-10T10:00:00.000Z", now)).toBe("3d");
     expect(snoozeWakeLabel(earlier, now)).toBe("now");
   });

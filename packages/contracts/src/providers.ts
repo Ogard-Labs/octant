@@ -46,6 +46,7 @@ export const ProviderDriverKind = Schema.Literal(
   "azure-foundry",
   "openai-image",
   "gemini-native-image",
+  "bfl-image",
 );
 export type ProviderDriverKind = typeof ProviderDriverKind.Type;
 
@@ -465,6 +466,30 @@ export const GeminiImageProviderConfiguration = Schema.Struct({
   .pipe(Schema.filter(imageAllowlistContainsDefault))
   .annotations(strict);
 export type GeminiImageProviderConfiguration = typeof GeminiImageProviderConfiguration.Type;
+
+/**
+ * Black Forest Labs FLUX endpoint-path names (`docs/decisions/0086`). BFL
+ * encodes the model in the URL path, never a body field, so these are the
+ * literal path segments, not a vendor catalog Octant maintains. Allowlists
+ * stay manual-entry and are never rewritten on save.
+ */
+export const BFL_IMAGE_MODEL_PRESETS = [
+  "flux-pro-1.1",
+  "flux-pro-1.1-ultra",
+  "flux-dev",
+  "flux-kontext-pro",
+  "flux-kontext-max",
+  "flux-2-pro",
+  "flux-2-flex",
+] as const;
+export const BflImageProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("bfl-image-http"),
+  modelAllowlist: UniqueManualModelIds,
+  defaultModel: ProviderModelId,
+})
+  .pipe(Schema.filter(imageAllowlistContainsDefault))
+  .annotations(strict);
+export type BflImageProviderConfiguration = typeof BflImageProviderConfiguration.Type;
 export const CodexProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("codex-cli"),
   binaryPath: Schema.NonEmptyTrimmedString,
@@ -640,6 +665,13 @@ export const GeminiImageProviderInstance = Schema.Struct({
 }).annotations(strict);
 export type GeminiImageProviderInstance = typeof GeminiImageProviderInstance.Type;
 
+export const BflImageProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("bfl-image"),
+  configuration: BflImageProviderConfiguration,
+}).annotations(strict);
+export type BflImageProviderInstance = typeof BflImageProviderInstance.Type;
+
 export const ProviderInstance = Schema.Union(
   OpenCodeProviderInstance,
   CodexProviderInstance,
@@ -663,6 +695,7 @@ export const ProviderInstance = Schema.Union(
   AzureFoundryProviderInstance,
   OpenAiImageProviderInstance,
   GeminiImageProviderInstance,
+  BflImageProviderInstance,
 );
 export type ProviderInstance = typeof ProviderInstance.Type;
 
@@ -725,6 +758,7 @@ export const ProviderInstanceConfigurationChanged = Schema.Struct({
     AzureFoundryProviderInstance,
     OpenAiImageProviderInstance,
     GeminiImageProviderInstance,
+    BflImageProviderInstance,
     ClaudeProviderInstance,
     MistralVibeProviderInstance,
     GrokProviderInstance,
@@ -1088,6 +1122,12 @@ export const ProviderRegistryCommand = Schema.Union(
     configuration: GeminiImageProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("create-bfl-image-provider"),
+    ...CreateProviderCommandFields,
+    displayName: Schema.NonEmptyTrimmedString,
+    configuration: BflImageProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("create-codex-provider"),
     ...CreateProviderCommandFields,
     displayName: Schema.NonEmptyTrimmedString,
@@ -1217,6 +1257,11 @@ export const ProviderRegistryCommand = Schema.Union(
     kind: Schema.Literal("change-gemini-native-image-configuration"),
     ...ProviderInstanceCommandFields,
     configuration: GeminiImageProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-bfl-image-configuration"),
+    ...ProviderInstanceCommandFields,
+    configuration: BflImageProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-claude-configuration"),

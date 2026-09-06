@@ -1,11 +1,18 @@
 import { decodeProviderInstance, decodeProviderObservedState } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import {
+  driverLabel,
   incompatibleReadinessFacts,
   providerRowReadinessLabel,
 } from "./providerSettingsPresentation";
 
 describe("provider Settings presentation", () => {
+  it("names every image profile driver kind, not only chat and code runtimes", () => {
+    expect(driverLabel("openai-image")).toBe("OpenAI Image");
+    expect(driverLabel("gemini-native-image")).toBe("Gemini Image");
+    expect(driverLabel("bfl-image")).toBe("Black Forest Labs Image");
+  });
+
   it("turns technical readiness states into compact next-action labels", () => {
     expect(providerRowReadinessLabel("unauthenticated", 0)).toBe("Sign in required");
     expect(providerRowReadinessLabel("incompatible", 0)).toBe("Update required");

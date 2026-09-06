@@ -9,6 +9,7 @@ import {
   decodeImageGenerationScopeId,
   decodeProviderInstanceId,
   decodeProviderModelId,
+  type ImageGenerationCustomSource,
   type ProviderInstance,
 } from "@octant/contracts";
 import { Journal } from "../persistence/journal";
@@ -19,6 +20,7 @@ import { openSqlite } from "../persistence/sqlitePort";
 import { readUsageDashboard } from "../usageDashboardService";
 import { GeneratedImageStore } from "./generatedImageStore";
 import type { ImageGenerationAdapter } from "./imageAdapter";
+import type { ImageHttpFetch } from "./imageHttp";
 import { ImageJobService, ImageJobServiceError } from "./imageJobService";
 
 const now = "2026-08-28T12:00:00.000Z";
@@ -32,6 +34,10 @@ const png = Uint8Array.from(
 const profileId = decodeProviderInstanceId("a3000000-0000-4000-8000-000000000001");
 const scopeId = decodeImageGenerationScopeId("a3000000-0000-4000-8000-000000000002");
 const modelId = decodeProviderModelId("gpt-image-2");
+const compatibleId = decodeProviderInstanceId("a3000000-0000-4000-8000-000000000005");
+const compatibleModelId = decodeProviderModelId("recraftv3");
+const bflId = decodeProviderInstanceId("a3000000-0000-4000-8000-000000000006");
+const bflModelId = decodeProviderModelId("flux-pro-1.1");
 const actor = {
   kind: "system" as const,
   actorId: "00000000-0000-4000-8000-000000000002" as never,
@@ -61,12 +67,54 @@ function imageProfile(): ProviderInstance {
   };
 }
 
+function compatibleInstance(enabled = true): ProviderInstance {
+  return {
+    id: compatibleId,
+    displayName: "Recraft",
+    enabled,
+    environmentPolicy: "inherit-host",
+    version: 1 as ProviderInstance["version"],
+    createdAt: now as ProviderInstance["createdAt"],
+    updatedAt: now as ProviderInstance["updatedAt"],
+    driverKind: "openai-compatible",
+    configuration: {
+      kind: "openai-compatible-http",
+      baseUrl: "https://api.recraft.ai/v1",
+      authentication: "bearer",
+      protocol: "auto",
+      manualModelIds: [],
+    },
+  };
+}
+
+function bflInstance(): ProviderInstance {
+  return {
+    id: bflId,
+    displayName: "FLUX",
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1 as ProviderInstance["version"],
+    createdAt: now as ProviderInstance["createdAt"],
+    updatedAt: now as ProviderInstance["updatedAt"],
+    driverKind: "bfl-image",
+    configuration: {
+      kind: "bfl-image-http",
+      modelAllowlist: [bflModelId],
+      defaultModel: bflModelId,
+    },
+  };
+}
+
 function openHarness(
-  adapter: ImageGenerationAdapter,
+  adapter?: ImageGenerationAdapter,
   options: {
     readonly concurrency?: number;
     readonly failAppendAfter?: number;
     readonly failToStatus?: "running";
+    readonly customSources?: ReadonlyArray<ImageGenerationCustomSource>;
+    readonly compatibleInstance?: ProviderInstance;
+    readonly bflInstance?: ProviderInstance;
+    readonly fetch?: ImageHttpFetch;
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-image-job-"));
@@ -111,12 +159,26 @@ function openHarness(
     journal,
     projection: runtime.imageJobProjection,
     attachments,
-    readProviderInstance: (id) => (String(id) === String(profileId) ? imageProfile() : undefined),
+    readProviderInstance: (id) => {
+      if (String(id) === String(profileId)) return imageProfile();
+      if (
+        options.compatibleInstance !== undefined &&
+        String(id) === String(options.compatibleInstance.id)
+      ) {
+        return options.compatibleInstance;
+      }
+      if (options.bflInstance !== undefined && String(id) === String(options.bflInstance.id)) {
+        return options.bflInstance;
+      }
+      return undefined;
+    },
+    readImageGenerationCustomSources: () => options.customSources ?? [],
     credentialResolver: { has: async () => true, resolve: async () => "sk-test" },
     uuid: () => crypto.randomUUID(),
     clock: () => new Date(clockMs++).toISOString(),
     actor,
-    createAdapter: () => adapter,
+    ...(adapter === undefined ? {} : { createAdapter: () => adapter }),
+    ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
   });
   return { directory, connection, journal: innerJournal, runtime, attachments, service };
@@ -536,6 +598,7 @@ describe("image job service", () => {
       projection: restartedRuntime.imageJobProjection,
       attachments: new GeneratedImageStore(first.directory),
       readProviderInstance: () => imageProfile(),
+      readImageGenerationCustomSources: () => [],
       credentialResolver: { has: async () => true, resolve: async () => "sk-test" },
       uuid: () => crypto.randomUUID(),
       clock: () => "2026-08-28T12:01:00.000Z",
@@ -548,6 +611,129 @@ describe("image job service", () => {
     expect(interrupted[0]?.failure?.message).toBe(IMAGE_JOB_RESTART_INTERRUPTION_MESSAGE);
     expect(secondGenerate).not.toHaveBeenCalled();
     void hangingResolve;
+  });
+});
+
+describe("custom image sources", () => {
+  it("enqueues against a registered custom source", async () => {
+    const customSources: ReadonlyArray<ImageGenerationCustomSource> = [
+      { providerInstanceId: compatibleId, modelId: compatibleModelId, label: "Recraft" },
+    ];
+    const { service } = openHarness(successfulAdapter(), {
+      compatibleInstance: compatibleInstance(),
+      customSources,
+    });
+    const queued = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: compatibleId,
+      modelId: compatibleModelId,
+      prompt: "a red cube",
+    });
+    const completed = await service.whenTerminal(queued.id);
+    expect(completed.status).toBe("completed");
+  });
+
+  it("refuses a provider and model pair that was never registered as a custom source", async () => {
+    const { service } = openHarness(successfulAdapter(), {
+      compatibleInstance: compatibleInstance(),
+      customSources: [],
+    });
+    await expect(
+      service.enqueue({
+        threadKind: "chat-thread",
+        scopeId,
+        profileInstanceId: compatibleId,
+        modelId: compatibleModelId,
+        prompt: "a red cube",
+      }),
+    ).rejects.toMatchObject({ category: "ineligible" });
+  });
+
+  it("refuses a disabled compatible instance even when it is a registered custom source", async () => {
+    const customSources: ReadonlyArray<ImageGenerationCustomSource> = [
+      { providerInstanceId: compatibleId, modelId: compatibleModelId, label: "Recraft" },
+    ];
+    const { service } = openHarness(successfulAdapter(), {
+      compatibleInstance: compatibleInstance(false),
+      customSources,
+    });
+    await expect(
+      service.enqueue({
+        threadKind: "chat-thread",
+        scopeId,
+        profileInstanceId: compatibleId,
+        modelId: compatibleModelId,
+        prompt: "a red cube",
+      }),
+    ).rejects.toMatchObject({ category: "ineligible" });
+  });
+
+  it("dispatches a registered custom source to the OpenAI-compatible image adapter", async () => {
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      expect(String(url)).toBe("https://api.recraft.ai/v1/images/generations");
+      return Response.json({ data: [{ b64_json: Buffer.from(png).toString("base64") }] });
+    });
+    const customSources: ReadonlyArray<ImageGenerationCustomSource> = [
+      { providerInstanceId: compatibleId, modelId: compatibleModelId, label: "Recraft" },
+    ];
+    // No `adapter` argument: the service must pick the real default adapter
+    // for this configuration kind, not a test double.
+    const { service } = openHarness(undefined, {
+      compatibleInstance: compatibleInstance(),
+      customSources,
+      fetch,
+    });
+    const queued = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: compatibleId,
+      modelId: compatibleModelId,
+      prompt: "a red cube",
+    });
+    const completed = await service.whenTerminal(queued.id);
+    expect(completed.status).toBe("completed");
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("dispatches to the BFL image adapter through submit, poll, and the approved-URL fetch", async () => {
+    let callCount = 0;
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      callCount += 1;
+      if (callCount === 1) {
+        expect(String(url)).toBe("https://api.bfl.ai/v1/flux-pro-1.1");
+        return Response.json({
+          id: "job-1",
+          polling_url: "https://api.bfl.ai/v1/poll/job-1",
+          cost: null,
+          input_mp: null,
+          output_mp: null,
+        });
+      }
+      if (callCount === 2) {
+        expect(String(url)).toBe("https://api.bfl.ai/v1/poll/job-1");
+        return Response.json({
+          id: "job-1",
+          status: "Ready",
+          result: { sample: "https://signed.example/generated.png?token=secret" },
+        });
+      }
+      expect(String(url)).toBe("https://signed.example/generated.png?token=secret");
+      return new Response(png, { status: 200 });
+    });
+    // No `adapter` argument: the service must pick the real default adapter
+    // for this configuration kind, not a test double.
+    const { service } = openHarness(undefined, { bflInstance: bflInstance(), fetch });
+    const queued = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: bflId,
+      modelId: bflModelId,
+      prompt: "a red cube",
+    });
+    const completed = await service.whenTerminal(queued.id);
+    expect(completed.status).toBe("completed");
+    expect(fetch).toHaveBeenCalledTimes(3);
   });
 });
 

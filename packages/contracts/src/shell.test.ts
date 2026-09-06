@@ -71,6 +71,7 @@ const settings = {
   completedThreadArchiveAfterDays: 7,
   navigatorAssistant: {},
   voice: {},
+  imageGeneration: { customSources: [] },
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
 

@@ -268,6 +268,7 @@ export function snoozeWakeLabel(until: string, now: string): string {
   const remaining = untilMs - nowMs;
   if (remaining <= 0) return "now";
   if (remaining < MS_PER_HOUR) return `${Math.max(1, Math.ceil(remaining / MS_PER_MINUTE))}m`;
-  if (remaining < MS_PER_DAY) return `${Math.max(1, Math.round(remaining / MS_PER_HOUR))}h`;
+  const hours = Math.max(1, Math.round(remaining / MS_PER_HOUR));
+  if (hours < 24) return `${hours}h`;
   return `${Math.max(1, Math.round(remaining / MS_PER_DAY))}d`;
 }
