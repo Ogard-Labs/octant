@@ -88,12 +88,12 @@ Titles and the hero use `--oct-tracking-tight` (-0.025em); section labels use
 
 Neutral graphite, a monochrome accent, a monochrome keyboard focus ring, four statuses. Text is three greys (primary,
 secondary, muted) and never a fourth. Hairlines separate; fills select. The
-focus ring is always a halo of the foreground at reduced opacity, never a
-hue: a coloured ring reads as a website's link outline, not an app control.
-An owned recipe paints its own, as part of the same state vocabulary as
-hover and pressed; the global `:focus-visible` rule paints everything that
-is not one, and is scoped away from them so nothing is haloed twice or
-reshaped on focus (0086). See
+focus ring is painted once, by the global `:focus-visible` rule, as a
+hairline gap in the background then a muted ring tight to the control: a
+coloured ring reads as a website's link outline, and a wide soft halo reads
+as a web page, not an app. A recipe does not add a focus treatment of its
+own, and the shared rule imposes no radius — the ring follows whatever
+corner the control already has (0086). See
 "Colour system" for the token table. On the marketing site the same three
 greys and the same hairline carry the hierarchy on a white or graphite ground.
 

@@ -18,13 +18,13 @@ describe("OctantTextarea", () => {
     expect(field.className).not.toContain("border-input");
   });
 
-  it("paints its own keyboard focus, which the global rule then leaves alone", () => {
-    // The recipe owns focus as ordinary state (0086). The global
-    // `:focus-visible` rule is scoped away from anything carrying a
-    // `data-slot`, so this halo is the only one and the field keeps its shape.
+  it("leaves keyboard focus to the one ring the app paints", () => {
+    // Focus is a single global treatment (0086). A recipe that painted its own
+    // would swap an app control's crisp ring for the style's wide soft halo,
+    // one control at a time.
     render(<OctantTextarea aria-label="Notes" />);
     const field = screen.getByRole("textbox", { name: "Notes" });
-    expect(field).toHaveAttribute("data-slot", "textarea");
-    expect(field.className).toContain("focus-visible:ring-ring/50");
+    expect(field.className).not.toContain("focus-visible:ring");
+    expect(field.className).not.toContain("focus-visible:border");
   });
 });

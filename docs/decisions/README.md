@@ -93,7 +93,7 @@ distilled successor of the earlier long-form design specifications.
 | [0083](0083-a-work-turn-records-what-changed-in-its-folder.md)              | A Work turn records what changed in its folder                                              | Accepted           |
 | [0084](0084-voice-rides-an-openai-compatible-provider.md)                   | Voice rides an OpenAI-compatible provider                                                   | Accepted           |
 | [0085](0085-base-ui-native-shadcn-style.md)                                 | Product controls follow the Base UI-native shadcn style                                     | Accepted           |
-| [0086](0086-recipes-own-their-own-shape-and-focus.md)                       | Recipes own their own shape, elevation, and focus                                           | Accepted           |
+| [0086](0086-recipes-own-their-own-shape-and-focus.md)                       | Recipes own their shape; the app owns its focus ring                                        | Accepted           |
 
 ## Adding an ADR
 

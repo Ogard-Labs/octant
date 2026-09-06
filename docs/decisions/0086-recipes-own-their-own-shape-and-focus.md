@@ -1,4 +1,4 @@
-# 0086. Recipes own their own shape, elevation, and focus
+# 0086. Recipes own their shape; the app owns its focus ring
 
 **Status:** Accepted
 
@@ -25,13 +25,20 @@ Holding 0070's values meant reconciling each of these by hand on every recipe,
 in perpetuity, against a style that will keep moving. That is the hand-port
 0085 exists to stop.
 
-The global focus rule turns out to be the one place where 0070's reasoning no
-longer holds on its own terms. DESIGN.md justifies the single ring by saying a
-coloured ring reads as a website's link outline rather than an app control. But
-`--ring` is projected from `--oct-fg` in `shadcn-theme.css`, so a recipe ring is
-already monochrome here. What the global rule actually prevents is a _doubled_
-ring — and it prevents it by also setting `border-radius` on focus, which snaps
-a focused control to a shape it does not otherwise have.
+Focus is the exception, and it is worth stating why, because the obvious reading
+of "take the style whole" gets it wrong.
+
+The style paints focus per control as a wide, soft, translucent halo. That is a
+web idiom: it reads as a page element that happens to be focusable. An app
+control is expected to show a crisp indicator tight to its own edge, which is
+what `--oct-focus-ring` already draws — a hairline gap in the background colour,
+then a muted ring. Handing focus to the recipes replaced an app treatment with a
+website one, and did it inconsistently, one recipe at a time.
+
+The genuine defect in the old rule was smaller than it looked: it set
+`border-radius` alongside the shadow, which snapped a focused control to a
+corner it does not otherwise have. A box-shadow already follows the element's
+own radius, so that line bought nothing and cost the control its shape.
 
 ## Decision
 
@@ -44,14 +51,16 @@ a focused control to a shape it does not otherwise have.
   ring. Shadow is reserved for something that genuinely floats above the page:
   the composer (`--octant-shadow-md`) and overlays (`--octant-shadow-overlay`).
   `--octant-shadow-sm` is no longer the way a card says it is an object.
-- **Recipes paint their own focus.** Keyboard focus is part of a recipe's state
-  vocabulary. The global `:focus-visible` rule no longer applies to an owned
-  recipe — it is scoped away from elements carrying a `data-slot`, so it still
-  covers every surface that is not one, and no control is painted twice or
-  reshaped on focus.
-- **The ring stays monochrome.** `--ring` remains a projection of the
-  foreground. A recipe may not introduce a hue for focus, and the token
-  ownership rules in 0016 and 0085 are unchanged.
+- **The app owns one focus ring.** Keyboard focus stays a single global
+  `:focus-visible` treatment: a hairline gap then a muted ring, tight to the
+  control. A recipe does not paint focus, and the style's own
+  `focus-visible:ring-*` utilities are stripped on import. This is the rule
+  0070 and DESIGN.md already had, and it is kept deliberately rather than by
+  omission — a per-control soft halo is what makes an interface read as a web
+  page rather than an app.
+- **That rule imposes no shape.** The global rule sets no `border-radius`; the
+  shadow follows whatever corner the control has. Correcting this, not moving
+  ownership, is what fixes a focused control changing shape.
 - **A badge is a filled pill.** It reads as a status token, sized on the type
   ramp rather than below it.
 - 0073's type hierarchy is unchanged and still binding. The style's occasional
@@ -68,16 +77,16 @@ a focused control to a shape it does not otherwise have.
 - Controls round slightly more, cards trade a shadow for a hairline, and focused
   controls keep their own shape. The change is visible across every surface and
   is verified by rendered review.
-- The switch and the GitHub search field currently re-assert the global ring
-  because their own `box-shadow` outranks it. With focus scoped to the recipe,
-  those become recipe state rather than stylesheet corrections.
-- Surfaces that are not owned recipes — the shell, Monaco, the terminal, the
-  dock — keep the global ring unchanged, so the rule that a focused thing always
-  shows focus still holds everywhere.
+- Every focusable thing keeps exactly one indicator, drawn the same way, whether
+  or not it is an owned recipe. The switch and the GitHub search field still
+  re-assert the ring where their own `box-shadow` outranks it.
+- A focused control now keeps its own corner, which is the only behaviour that
+  changes here.
 
 ## Related
 
-- 0070 is superseded on radius, elevation, and the single-owner focus ring. Its
+- 0070 is superseded on radius and elevation. Its single-owner focus ring is
+  kept, minus the radius it imposed. Its
   stack, token, shell, and dual-paint rules are carried forward here.
 - 0085 settles which style the recipes follow.
 - 0073 owns the type hierarchy a recipe's sizes land on.

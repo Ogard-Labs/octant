@@ -411,14 +411,17 @@ h3,
 h4 {
   text-wrap: balance;
 }
-/* Owned recipes paint their own focus, so this covers everything that is not
-   one (0086). It is excluded from them by `data-slot`, because it also sets a
-   radius: left global, it reshaped a focused control to a corner it does not
-   otherwise have, and stacked a second halo under the recipe's own. */
-:focus-visible:not([data-slot]) {
+/* One focus treatment for the whole app: a hairline gap then a muted ring, so
+   a focused control reads as an app control rather than a page element with a
+   soft web halo (0086).
+
+   It deliberately sets no radius. A box-shadow already follows the element's
+   own corner, so naming one here only reshaped a focused control to a corner
+   it does not otherwise have — which is the defect that made this rule look
+   like it needed replacing. */
+:focus-visible {
   outline: none;
   box-shadow: var(--oct-focus-ring);
-  border-radius: var(--oct-radius-sm);
 }
 
 /* ─── layout primitives ─────────────────────────────────────────────── */
