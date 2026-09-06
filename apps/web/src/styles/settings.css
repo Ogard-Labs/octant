@@ -343,20 +343,12 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   gap: 0;
 }
 
+/* The group label is what separates one group of pages from the next; a
+   hairline on top of it drew two dividers where the eye needs one. The label
+   was screen-reader-only here, which left the rail as one undifferentiated
+   list of eleven pages. */
 .settings-view__sidebar .settings-navigation__group + .settings-navigation__group {
-  padding-top: var(--oct-space-2);
-  border-top: 1px solid var(--octant-border-soft);
-}
-
-.settings-view__sidebar .settings-navigation .setnav-section {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
+  padding-top: var(--oct-space-3);
 }
 
 .settings-navigation .setnav-section {
