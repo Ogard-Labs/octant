@@ -793,7 +793,7 @@ strong {
 
 .project-nav {
   min-height: 0;
-  margin: 12px 0 0;
+  margin: var(--oct-space-2) 0 0;
   overflow-y: auto;
   scrollbar-width: thin;
 }
@@ -801,7 +801,7 @@ strong {
 .project-nav__empty,
 .project-nav__status {
   margin: 0;
-  padding: 10px;
+  padding: 6px var(--oct-nav-inset);
   color: var(--octant-text-muted);
   font-size: calc(12 * var(--oct-text-step));
   line-height: 1.45;
@@ -820,15 +820,16 @@ strong {
    rather than floating midway between the navigation and the first heading. */
 .code-project-views {
   display: grid;
+  min-height: var(--oct-nav-row-h);
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 4px;
-  margin: 0 0 4px;
+  margin: 0;
 }
 
 .code-project-views__filter {
-  width: 28px;
-  min-height: 28px;
+  width: var(--oct-rail-button-h);
+  min-height: var(--oct-rail-button-h);
   color: var(--octant-text-muted);
   border-radius: var(--oct-radius-sm);
 }
@@ -855,7 +856,7 @@ strong {
 
 .code-project-views__row .octant-menu__trigger {
   width: 100%;
-  min-height: 28px;
+  min-height: var(--oct-nav-row-h);
   justify-content: flex-start;
   padding: 0;
   text-align: start;
@@ -866,10 +867,10 @@ strong {
   min-width: 0;
   align-items: center;
   justify-content: flex-start;
-  gap: 6px;
-  padding: 0 8px;
+  gap: var(--oct-space-2);
+  padding: 0 var(--oct-nav-inset);
   color: var(--octant-text-secondary);
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   font-weight: 500;
   text-align: start;
 }
@@ -1144,20 +1145,25 @@ strong {
 .project-section > .sidebar-section {
   color: var(--octant-text-muted);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-detail);
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
 }
 
 /* The header's controls answer for the section the pointer is already on, so
-   they appear with it. Kept in flow and only faded, so focus still reaches
-   them and the heading never shifts when they arrive. An open menu holds them
-   visible: they must not vanish out from under the cursor that opened one. */
+   they appear with it, and take no room until then: kept in flow and in the
+   tab order, so focus still reaches them and reveals them, but zero width
+   until the pointer or focus is on the section, so a quiet label is only a
+   label. An open menu holds them visible: they must not vanish out from
+   under the cursor that opened one. */
 .project-section__header-actions {
   display: flex;
+  width: 0;
+  min-width: 0;
   align-items: center;
   gap: 2px;
+  overflow: hidden;
   opacity: 0;
   transition: opacity var(--oct-motion-fast) ease;
 }
@@ -1166,6 +1172,8 @@ strong {
 .project-section:focus-within .project-section__header-actions,
 .project-section__header-actions:has([aria-expanded="true"]),
 .project-section__header-actions:has([data-popup-open]) {
+  width: auto;
+  overflow: visible;
   opacity: 1;
 }
 
@@ -1205,9 +1213,17 @@ strong {
      and nothing wraps to a second line when it is not. */
   grid-template-columns: minmax(0, 1fr) repeat(3, auto);
   align-items: center;
-  min-height: 28px;
+  min-height: var(--oct-nav-row-h);
   border: 0;
-  color: var(--oct-meta);
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-muted);
+}
+
+/* The whole row, name and trailing controls together, takes the soft wash
+   under the pointer; the name button inside paints nothing of its own, so
+   the row never shows a second, smaller fill. */
+.project-row:hover {
+  background: var(--oct-fg-soft);
 }
 
 /* The active Project is marked by its label's ink alone: a filled pill would
@@ -1219,14 +1235,17 @@ strong {
 .project-row__select {
   display: grid;
   min-width: 0;
-  grid-template-columns: 15px minmax(0, 1fr);
-  gap: 5px;
+  grid-template-columns: var(--oct-icon-md) minmax(0, 1fr);
+  gap: var(--oct-space-2);
   align-items: center;
-  min-height: 28px;
-  padding: 0 var(--oct-space-2);
-  color: inherit;
+  min-height: var(--oct-nav-row-h);
+  padding: 0 var(--oct-nav-inset);
   cursor: pointer;
   text-align: left;
+}
+
+.project-row__select:hover {
+  background: transparent;
 }
 
 .project-row__folder-icon {
@@ -1247,12 +1266,13 @@ strong {
 }
 
 /* Project names belong to the navigation tree, not to a code or metadata
-   register. Hierarchy comes from the disclosure and nesting. */
+   register: the 13px row label, one step heavier than the thread titles
+   filed under it. */
 .project-row__copy > span {
   overflow: hidden;
   font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
-  font-weight: 400;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1265,7 +1285,7 @@ strong {
 }
 
 .project-row__action {
-  min-height: 28px;
+  min-height: var(--oct-nav-row-h);
   padding: 0 var(--oct-space-2);
   color: var(--oct-meta);
   border-radius: var(--oct-radius-sm);
@@ -1284,11 +1304,15 @@ strong {
   opacity: 0.18 !important;
 }
 
+/* Zero width until wanted, like the section header's controls: the row is
+   the name alone until the pointer or focus arrives. */
 .project-row__action--icon {
-  width: 24px;
-  height: 28px;
+  width: 0;
+  min-width: 0;
+  height: var(--oct-nav-row-h);
   min-height: 0;
   padding: 0;
+  overflow: hidden;
   opacity: 0;
 }
 
@@ -1300,22 +1324,26 @@ strong {
 .project-row__action--icon:has([aria-expanded="true"]),
 .project-row__action--icon[aria-expanded="true"],
 .project-row__action--icon[data-popup-open] {
+  width: 24px;
+  min-width: 24px;
   opacity: 1;
 }
 
 .project-archive {
-  margin-top: var(--oct-space-4);
+  margin-top: var(--oct-space-3);
 }
 
+/* Archive heads its rows the way Projects and Chats head theirs. */
 .project-archive summary {
   display: flex;
   min-height: 24px;
   align-items: center;
   justify-content: space-between;
-  padding: 0 var(--oct-space-2);
+  padding: 0 var(--oct-nav-inset);
   color: var(--oct-meta);
   cursor: pointer;
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-detail);
+  font-weight: 500;
   list-style: none;
 }
 
@@ -1348,6 +1376,15 @@ strong {
   margin-top: auto;
 }
 
+/* The account row is the sidebar's 40px foot. Its avatar is two pixels
+   short of the icon boxes above it, so it sits two pixels further in and
+   its centre lands on the icon column. */
+.sidebar-profile .sidebar-item {
+  min-height: var(--oct-nav-head-h);
+  padding-inline: 10px;
+  gap: 6px;
+}
+
 .sidebar-profile__chevron {
   flex: none;
   margin-left: auto;
@@ -1356,10 +1393,10 @@ strong {
 
 .shell-icon-button {
   display: inline-grid;
-  width: 28px;
-  height: 28px;
-  min-width: 28px;
-  min-height: 28px;
+  width: var(--oct-rail-button-h);
+  height: var(--oct-rail-button-h);
+  min-width: var(--oct-rail-button-h);
+  min-height: var(--oct-rail-button-h);
   padding: 0;
   background: transparent;
   border: 1px solid transparent;
@@ -1451,19 +1488,21 @@ strong {
   background: var(--octant-workspace);
 }
 
-/* The title band shares the 34px rail with the dock head beside it, and its
-   hairline runs to the window's edge: the space reserved for the native
-   window controls is padding inside the band, not a margin outside it, which
-   stopped the rule short and left a gap before the dock's own rule. */
+/* The title band is the title rail the dock head and the window controls
+   share: 30px tabs 4px down, and the hairline closing the band at exactly the
+   rail height so it meets the dock's rule. The hairline runs to the window's
+   edge: the space reserved for the native window controls is padding inside
+   the band, not a margin outside it, which stopped the rule short and left a
+   gap before the dock's own rule. */
 .workspace-thread-tabs {
   position: relative;
   z-index: 5;
   display: flex;
   min-width: 0;
-  min-height: 38px;
+  min-height: var(--oct-title-rail-h);
   align-items: center;
   gap: 6px;
-  padding: 4px var(--octant-window-chrome-reserved-width, 148px) 4px var(--oct-space-3);
+  padding: 4px var(--octant-window-chrome-reserved-width, 148px) 3px var(--oct-space-3);
   border-bottom: 1px solid var(--octant-border);
   background: color-mix(in srgb, var(--octant-workspace) 96%, var(--octant-control));
 }
@@ -1482,7 +1521,7 @@ strong {
   overflow: hidden;
   color: var(--octant-text-muted);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-sm);
   white-space: nowrap;
 }
 
@@ -1507,7 +1546,7 @@ strong {
   max-width: min(1040px, 80%);
   flex: 0 1 auto;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -1552,15 +1591,17 @@ strong {
 .workspace-thread-tabs__select {
   min-width: 0;
   max-width: 440px;
-  height: 30px;
+  height: var(--oct-rail-tab-h);
   flex: 1 1 auto;
-  gap: 7px;
+  gap: 6px;
   padding: 0 10px;
   color: inherit;
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-sm);
 }
 
 .workspace-thread-tabs__where {
+  width: var(--oct-icon-sm);
+  height: var(--oct-icon-sm);
   flex: 0 0 auto;
   opacity: 0.7;
 }
@@ -3831,7 +3872,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .thread-environment-dock .environment-group__header {
   min-height: 36px;
   padding: 0;
-  color: var(--oct-fg);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
   letter-spacing: normal;
@@ -4235,10 +4275,11 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   font-size: calc(11 * var(--oct-text-step));
 }
 
-/* Collapsible groups are ordinary product rows. Their icon and disclosure state
-   provide enough hierarchy, so the title stays in sentence-case interface type. */
-.environment-group + .environment-group {
-  border-top: 1px solid var(--oct-border);
+/* Collapsible groups are ordinary product rows: each group's name is a
+   section label over a hairline, the head every list surface gives a group,
+   in sentence-case interface type, and its rows follow under the rule. */
+.environment-group__head {
+  border-bottom: 1px solid var(--oct-hairline);
 }
 
 .environment-group__header {
@@ -4250,7 +4291,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   padding: 0 2px;
   border: none;
   background: transparent;
-  color: var(--oct-fg-2);
+  color: var(--oct-muted);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
   font-weight: 500;
@@ -7787,7 +7828,7 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   display: flex;
   align-items: center;
   gap: 7px;
-  height: 30px;
+  height: var(--oct-rail-button-h);
   padding: 0 9px;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-sm);
@@ -7803,6 +7844,7 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
 .code-board__search input[type="search"] {
   width: 100%;
   min-width: 0;
+  height: 100%;
   padding: 0;
   border: 0;
   outline: 0;
@@ -7817,7 +7859,7 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
 
 .code-board__filters-toggle {
   gap: 6px;
-  height: 32px;
+  height: var(--oct-rail-button-h);
   padding: 0 12px;
   color: var(--oct-fg-2);
 }
@@ -7975,10 +8017,28 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
 
 .code-board__view-toggle {
   display: inline-flex;
-  height: 28px;
+  height: var(--oct-rail-button-h);
   align-items: center;
   gap: 5px;
   padding: 0 9px;
+}
+
+/* Every control on the Board toolbar is one 28px rail control: the Board
+   and Group segmented choices, the search, Filters, Refresh, and View. The
+   segmented track keeps a 2px inset around 24px items so it lands on the
+   same height as the buttons beside it. */
+.code-board .surface-toolbar > button {
+  height: var(--oct-rail-button-h);
+  min-height: var(--oct-rail-button-h);
+}
+
+.code-board .surface-toolbar [data-slot="toggle-group"] {
+  padding: 2px;
+}
+
+.code-board .surface-toolbar [data-slot="toggle-group-item"] {
+  height: calc(var(--oct-rail-button-h) - 4px);
+  min-height: 0;
 }
 
 .code-board__view-toggle[aria-expanded="true"] svg {
@@ -8333,6 +8393,11 @@ ul.board-col-body {
   padding: 10px 0 8px;
   margin-bottom: var(--oct-space-2);
   border-bottom: 1px solid var(--oct-hairline);
+}
+
+.code-board__list-head > .oct-section-label {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
 }
 
 .code-board__list-head .count {
