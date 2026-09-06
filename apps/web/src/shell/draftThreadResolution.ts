@@ -60,3 +60,19 @@ export function resolveWorkProviderChoice(
     ) ?? choices[0]
   );
 }
+
+/**
+ * What to say when Code has nothing loaded yet.
+ *
+ * "Still loading" is only true while it is loading. A disconnected or refused
+ * host was reporting itself as a slow one, so the user waited for something
+ * that was never going to arrive; its own reason is the useful thing to show.
+ */
+export function codeUnavailableMessage(input: {
+  readonly status: "loading" | "ready" | "disconnected" | "conflict-reload";
+  readonly errorMessage?: string;
+}): string {
+  return input.status === "loading" || input.status === "conflict-reload"
+    ? "Code is still loading on this host. Try again in a moment."
+    : (input.errorMessage ?? "Code is unavailable on this host. Reconnect and try again.");
+}

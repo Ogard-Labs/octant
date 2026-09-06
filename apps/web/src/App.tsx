@@ -175,6 +175,7 @@ import {
 } from "./shell/shellLaunch";
 import {
   checkoutNotPreparedMessage,
+  codeUnavailableMessage,
   resolveDraftProject,
   resolveWorkProviderChoice,
   UNRESOLVED_DRAFT_PROJECT_MESSAGE,
@@ -706,6 +707,15 @@ function LaunchedShell(
   // The Project an unbound draft composer targets, per mode. The draft lives
   // in local state and unmounts while Settings covers the workspace; this is
   // what lets it come back with the same Project instead of "Choose a Project".
+  /**
+   * The in-flight round trip that records a chosen Project on the draft
+   * surface. Sending is what asks the host for a checkout, and the host only
+   * authorizes one for a Project the window's persisted workspace already
+   * names — so a send that overtakes this binding asks for a checkout the
+   * window is not yet allowed to have, which is the refusal this whole path
+   * exists to remove.
+   */
+  const draftProjectBinding = useRef<Promise<void> | undefined>(undefined);
   const [draftProjectSelection, setDraftProjectSelection] = useState<
     Partial<Readonly<Record<OctantMode, ProjectId>>>
   >({});
@@ -3682,9 +3692,26 @@ function LaunchedShell(
         return false;
       }
       if (codeController.bootstrap === undefined) {
-        setDraftError("Code is still loading on this host. Try again in a moment.");
+        setDraftError(
+          codeUnavailableMessage({
+            status: codeController.status,
+            ...(codeController.errorMessage === undefined
+              ? {}
+              : { errorMessage: codeController.errorMessage }),
+          }),
+        );
         return false;
       }
+      // A send can outrun the Project the user just chose. Wait for that
+      // binding before asking for a checkout, so the request carries the
+      // authority the selection was meant to grant.
+      try {
+        await draftProjectBinding.current;
+      } catch {
+        setDraftError("That Project could not be selected. Choose it again before starting.");
+        return false;
+      }
+
       const prepared = await codeController.execute({
         kind: "prepare-code-project-checkout",
         projectId: project.id,
@@ -3902,9 +3929,26 @@ function LaunchedShell(
           return;
         }
         if (codeController.bootstrap === undefined) {
-          setDraftError("Code is still loading on this host. Try again in a moment.");
+          setDraftError(
+            codeUnavailableMessage({
+              status: codeController.status,
+              ...(codeController.errorMessage === undefined
+                ? {}
+                : { errorMessage: codeController.errorMessage }),
+            }),
+          );
           return;
         }
+        // A send can outrun the Project the user just chose. Wait for that
+        // binding before asking for a checkout, so the request carries the
+        // authority the selection was meant to grant.
+        try {
+          await draftProjectBinding.current;
+        } catch {
+          setDraftError("That Project could not be selected. Choose it again before starting.");
+          return;
+        }
+
         const prepared = await codeController.execute({
           kind: "prepare-code-project-checkout",
           projectId: project.id,
@@ -5033,7 +5077,9 @@ function LaunchedShell(
                       // persisted workspace does not name. Re-opening the draft
                       // with the Project records it on the surface the server
                       // reads.
-                      void controller.openDraftThread(mode, projectId);
+                      const binding = controller.openDraftThread(mode, projectId);
+                      draftProjectBinding.current = binding;
+                      void binding.catch(() => undefined);
                     }}
                     onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
                     appleToolchainClient={appleToolchainClient}
