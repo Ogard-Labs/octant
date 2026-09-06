@@ -400,7 +400,9 @@ describe("Claude execution policy", () => {
         signal: authorizedRequest.signal,
       }),
     ).resolves.toEqual({ behavior: "allow" });
-    await expect(open.canUseTool(authorizedRequest)).resolves.toEqual({ behavior: "allow" });
+    // Claude Code runs a hook-allowed tool without asking again, so a
+    // permission callback arriving for it anyway is refused, never granted.
+    await expect(open.canUseTool(authorizedRequest)).resolves.toMatchObject({ behavior: "deny" });
     await expect(
       open.preToolUse({
         sessionId: "sdk-session-1",
@@ -542,24 +544,29 @@ describe("Claude execution policy", () => {
       ),
     );
     await Promise.resolve();
+    const edit = (name: string) => ({
+      file_path: `${projectRoot}/${name}.txt`,
+      old_string: "before",
+      new_string: "after",
+    });
     for (let index = 0; index < 16; index += 1) {
       await expect(
         open.preToolUse({
           sessionId: "sdk-session-1",
           projectRoot,
-          toolName: "Read",
-          input: { file_path: `${projectRoot}/${index}.txt` },
+          toolName: "Edit",
+          input: edit(String(index)),
           toolUseId: `missing-${index}`,
           signal,
         }),
-      ).resolves.toEqual({ behavior: "allow" });
+      ).resolves.toEqual({ behavior: "ask" });
     }
     await expect(
       open.preToolUse({
         sessionId: "sdk-session-1",
         projectRoot,
-        toolName: "Read",
-        input: { file_path: `${projectRoot}/overflow.txt` },
+        toolName: "Edit",
+        input: edit("overflow"),
         toolUseId: "missing-overflow",
         signal,
       }),
@@ -571,8 +578,8 @@ describe("Claude execution policy", () => {
       open.preToolUse({
         sessionId: "sdk-session-1",
         projectRoot,
-        toolName: "Read",
-        input: { file_path: `${projectRoot}/late.txt` },
+        toolName: "Edit",
+        input: edit("late"),
         toolUseId: "late-after-overflow",
         signal,
       }),
@@ -602,9 +609,6 @@ describe("Claude execution policy", () => {
           toolUseId: `budget-${index}`,
           signal,
         }),
-      ).resolves.toEqual({ behavior: "allow" });
-      await expect(
-        open.canUseTool({ toolName: "Read", input, toolUseId: `budget-${index}`, signal }),
       ).resolves.toEqual({ behavior: "allow" });
     }
     await expect(
@@ -781,7 +785,7 @@ describe("Claude execution policy", () => {
         toolUseId: "read",
         signal,
       }),
-    ).resolves.toEqual({ behavior: "allow" });
+    ).resolves.toMatchObject({ behavior: "deny" });
     await planConnection.close();
 
     const gated = harness();
@@ -803,7 +807,7 @@ describe("Claude execution policy", () => {
         toolUseId: "edit-inside",
         signal,
       }),
-    ).resolves.toEqual({ behavior: "allow" });
+    ).resolves.toEqual({ behavior: "ask" });
     await expect(
       gatedOpen.preToolUse({
         sessionId: "sdk-session-1",
@@ -815,6 +819,74 @@ describe("Claude execution policy", () => {
       }),
     ).resolves.toMatchObject({ behavior: "deny" });
     await gatedConnection.close();
+  });
+
+  it("asks for a Project-confined Edit under Ask for approvals so the approval is raised before the file changes", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    const input = { file_path: `${projectRoot}/greet.js`, old_string: "a", new_string: "b" };
+    const approvalEvent = Effect.runPromise(
+      Stream.runHead(
+        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+          Stream.filter((event) => event.kind === "approval-request"),
+        ),
+      ),
+    );
+    // A hook "allow" would end the matter: Claude Code runs the tool without
+    // ever calling the permission callback. Observed 2026-09-06: greet.js
+    // changed with no approval in the journal.
+    await expect(
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Edit",
+        input,
+        toolUseId: "edit-gated",
+        signal,
+      }),
+    ).resolves.toEqual({ behavior: "ask" });
+    const callback = open.canUseTool({ toolName: "Edit", input, toolUseId: "edit-gated", signal });
+    const first = await Promise.race([
+      approvalEvent.then((event) => ({ kind: "approval" as const, event })),
+      callback.then((decision) => ({ kind: "decision" as const, decision })),
+    ]);
+    expect(first.kind).toBe("approval");
+    await Effect.runPromise(
+      acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
+    );
+    await expect(callback).resolves.toEqual({ behavior: "allow" });
+    await acquired.close();
+  });
+
+  it("allows reads from the hook alone, so a read-heavy turn never trips the grant cap", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    // Sixteen unconsumed grants used to fail the turn; an allowed read is
+    // never asked about again, so it must not hold one.
+    for (let index = 0; index < 20; index += 1) {
+      await expect(
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Read",
+          input: { file_path: `${projectRoot}/${index}.txt` },
+          toolUseId: `read-${index}`,
+          signal,
+        }),
+      ).resolves.toEqual({ behavior: "allow" });
+    }
+    expect(f.queries[0]?.close).not.toHaveBeenCalled();
+    await acquired.close();
   });
 
   it.each([
@@ -846,7 +918,7 @@ describe("Claude execution policy", () => {
         toolUseId: "bash-escape",
         signal,
       }),
-    ).resolves.toEqual({ behavior: "allow" });
+    ).resolves.toEqual({ behavior: "ask" });
     const callback = open.canUseTool({
       toolName: "Bash",
       input,
@@ -1625,7 +1697,7 @@ describe("Claude execution policy", () => {
           toolUseId: "exact-question-boundary",
           signal,
         }),
-      ).resolves.toEqual({ behavior: "allow" });
+      ).resolves.toEqual({ behavior: "ask" });
       await expect(
         open.preToolUse({
           sessionId: "sdk-session-1",
@@ -1828,7 +1900,7 @@ describe("Claude execution policy", () => {
       acquired.connection.send({ sessionId, prompt: "second", attachments: [], tools: [] }),
     );
     await expect(open.preToolUse({ ...request, toolUseId: "next-turn" })).resolves.toEqual({
-      behavior: "allow",
+      behavior: "ask",
     });
     await acquired.close();
     expect(f.queries[0]?.close).toHaveBeenCalledOnce();
