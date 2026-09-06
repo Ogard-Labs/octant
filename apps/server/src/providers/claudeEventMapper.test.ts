@@ -77,7 +77,7 @@ function toolRequest(overrides: Partial<ClaudeToolRequest> = {}): ClaudeToolRequ
     toolName: "Bash",
     toolUseId: "sdk-tool-private",
     requestId: "sdk-request-private",
-    input: { command: "printf raw-command-must-not-cross" },
+    input: { command: "printf hello" },
     blockedPath: "/outside/private-must-not-cross",
     title: "Raw title must-not-cross",
     displayName: "Raw display must-not-cross",
@@ -1392,7 +1392,7 @@ describe("mapClaudeToolRequest", () => {
           kind: "approval-request",
           requestId: "request-1",
           action: "Bash",
-          description: "Claude requests permission to use Bash.",
+          description: "Bash · printf hello",
           instanceId,
           sessionId,
           sequence: 41,
@@ -1402,8 +1402,70 @@ describe("mapClaudeToolRequest", () => {
       },
     });
     expect(JSON.stringify(result)).not.toMatch(
-      /raw-command|outside\/private|Raw title|Raw display|Raw description|sdk-request-private/,
+      /outside\/private|Raw title|Raw display|Raw description|sdk-request-private/,
     );
+  });
+
+  it("names the file a write is for, relative to the checkout, and nothing outside it", () => {
+    const inside = mapClaudeToolRequest(
+      context(),
+      toolRequest({
+        toolName: "Edit",
+        input: { file_path: `${projectRoot}/src/app.ts`, old_string: "a", new_string: "b" },
+      }),
+    );
+    expect(inside).toMatchObject({
+      request: { event: { action: "Edit", description: "Edit · src/app.ts" } },
+    });
+    expect(JSON.stringify(inside)).not.toContain(projectRoot);
+
+    const outside = mapClaudeToolRequest(
+      context(),
+      toolRequest({
+        toolName: "Write",
+        toolUseId: "sdk-tool-outside",
+        input: { file_path: "/outside/private-must-not-cross.ts", content: "x" },
+      }),
+    );
+    expect(outside).toMatchObject({
+      request: { event: { description: "Claude requests permission to use Write." } },
+    });
+    expect(JSON.stringify(outside)).not.toContain("private-must-not-cross");
+  });
+
+  it("keeps a token-shaped literal out of the prompt while still naming the command", () => {
+    const result = mapClaudeToolRequest(
+      context(),
+      toolRequest({
+        input: {
+          command:
+            "curl -H 'Authorization: Bearer sk-ant-fixture-api-key-must-not-cross' https://x",
+        },
+      }),
+    );
+    const description =
+      result.kind === "approval" && result.request.event.kind === "approval-request"
+        ? result.request.event.description
+        : undefined;
+    expect(description?.startsWith("Bash · curl -H '")).toBe(true);
+    expect(description).toContain("[redacted]");
+    expect(JSON.stringify(result)).not.toContain("sk-ant-fixture-api-key-must-not-cross");
+  });
+
+  it("shows a shell command on one bounded line", () => {
+    const long = `echo ${"x".repeat(200)}`;
+    const result = mapClaudeToolRequest(
+      context(),
+      toolRequest({ input: { command: `git  status\n  --short ${long}` } }),
+    );
+    const description =
+      result.kind === "approval" && result.request.event.kind === "approval-request"
+        ? result.request.event.description
+        : undefined;
+    expect(description?.startsWith("Bash · git status --short echo xxx")).toBe(true);
+    expect(description).not.toContain("\n");
+    expect(Array.from(description ?? "").length).toBeLessThanOrEqual("Bash · ".length + 120);
+    expect(description?.endsWith("…")).toBe(true);
   });
 
   it("maps one AskUserQuestion callback to a sanitized user-input request", () => {
@@ -1563,16 +1625,17 @@ describe("mapClaudeToolRequest", () => {
 
   it("never serializes raw prompt, command output, account, API key, transcript, or SDK object", () => {
     const secrets = [
-      "fixture-prompt-must-not-cross",
       "fixture-command-output-must-not-cross",
       "fixture-account-must-not-cross",
       "sk-ant-fixture-api-key-must-not-cross",
       "/private/transcript-must-not-cross.jsonl",
       "fixture-sdk-object-must-not-cross",
     ];
+    // The command itself is what the prompt shows; every other field the
+    // runtime attaches to the input still stays out.
     const request = toolRequest({
       input: {
-        command: "printf fixture-prompt-must-not-cross",
+        command: "printf ok",
         output: "fixture-command-output-must-not-cross",
         account: "fixture-account-must-not-cross",
         apiKey: "sk-ant-fixture-api-key-must-not-cross",
