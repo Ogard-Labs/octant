@@ -53,7 +53,7 @@ distilled successor of the earlier long-form design specifications.
 | [0043](0043-simulator-follows-the-active-thread.md)                         | Simulator follows the active thread in the right sidebar                                    | Accepted           |
 | [0044](0044-the-dock-hosts-live-thread-owned-tools.md)                      | The dock hosts live thread-owned tools                                                      | Proposed           |
 | [0045](0045-environment-summarizes-the-active-thread.md)                    | Environment summarizes the active thread                                                    | Accepted           |
-| [0046](0046-shadcn-recipes-own-product-controls.md)                         | shadcn recipes own product controls                                                         | Accepted           |
+| [0046](0046-shadcn-recipes-own-product-controls.md)                         | shadcn recipes own product controls                                                         | Superseded by 0085 |
 | [0047](0047-workspace-translucency-opt-in.md)                               | Workspace translucency opt-in                                                               | Accepted           |
 | [0048](0048-linux-stations-and-execution-capsules.md)                       | Linux Stations isolate Code work in execution capsules                                      | Proposed           |
 | [0049](0049-thread-dialogue-lane.md)                                        | Explicit Chat thread dialogue                                                               | Accepted           |
@@ -92,6 +92,7 @@ distilled successor of the earlier long-form design specifications.
 | [0082](0082-provider-events-are-subscribed-before-a-turn-is-sent.md)        | Provider events are subscribed before a turn is sent                                        | Accepted           |
 | [0083](0083-a-work-turn-records-what-changed-in-its-folder.md)              | A Work turn records what changed in its folder                                              | Accepted           |
 | [0084](0084-voice-rides-an-openai-compatible-provider.md)                   | Voice rides an OpenAI-compatible provider                                                   | Accepted           |
+| [0085](0085-base-ui-native-shadcn-style.md)                                 | Product controls follow the Base UI-native shadcn style                                     | Accepted           |
 
 ## Adding an ADR
 
