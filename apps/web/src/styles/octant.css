@@ -1950,6 +1950,11 @@ input.switch:checked::after {
 [data-slot="button"]:focus-visible {
   outline: 2px solid var(--oct-accent-fg);
   outline-offset: 1px;
+  /* One mark, not two. The shared rule above paints a halo on anything
+     focusable, so without this a button carried both an outline and a ring —
+     only the icon buttons escaped it, because the shell zeroes their shadow
+     for other reasons. */
+  box-shadow: none;
 }
 
 .octant-tooltip {
