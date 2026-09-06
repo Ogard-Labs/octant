@@ -135,7 +135,10 @@ describe("ProjectMemoryInspector", () => {
     renderInspector({ embedded: true });
 
     expect(screen.getByRole("heading", { name: "Memory" })).toBeVisible();
-    expect(screen.getByText("Source")).toBeVisible();
+    // The page it sits on already names the Project; the embedded heading
+    // is one section label among the others and repeats nothing.
+    expect(screen.queryByText("Source")).not.toBeInTheDocument();
+    expect(screen.queryByText("Project context")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Close Project memory" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add memory" })).toBeVisible();
   });
