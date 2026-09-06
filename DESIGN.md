@@ -32,7 +32,9 @@ star is a quiet graphite workbench:
 Avoid dashboard walls, decorative gradients, neon developer styling, permanent
 low-frequency controls, oversized setup cards, pill-shaped everything, and
 invented data. A feature that is not available must explain why and offer the
-next useful action, or stay out of the primary layout.
+next useful action, or stay out of the primary layout. The one thing allowed
+to be decorative is the application ground (0085): the theme's own dither, or
+a person's photo under it, behind the start screens or behind everything.
 
 ## Language
 
@@ -133,6 +135,18 @@ The band is part of the card, ruled off by a hairline, and it wraps rather
 than grows: a control that needs a list ("Create from…") floats over the
 page. Nothing about delivery is asked up front; it is derived from the band
 and shown on the thread once it exists.
+
+The screen sits on the application ground (0085): an ordered-dither cloud
+drawn in `--octant-accent` at one cell per three pixels, or a person's photo
+printed through the same dither with the cloud over it, or the plain page.
+Behind a start screen the ground is masked away behind the composer and fades
+out below it, so the prompt and the recent-thread list read on the plain
+page. A person may instead put the ground behind everything, sidebar
+included, where the workspace layer and its page surfaces go translucent over
+it the way workspace translucency does; the pattern's opacity, speed, and
+intensity and a photo's opacity are dials on the same row. Increased contrast
+turns the ground off; reduced motion holds it still. It is chosen in
+Settings › Appearance › Background.
 
 ## Source of truth and CSS layers
 
@@ -642,7 +656,10 @@ an approximate brand mark. Unknown providers use a compact truthful monogram.
 ## Motion and interaction
 
 Functional feedback uses 120–160ms transitions; the base system duration is
-200ms. Use standard easing and no decorative entrance animation. Running state
+200ms. Use standard easing and no decorative entrance animation. The
+application ground's cloud (0085) is the one ambient motion: at most 24
+frames a second, paused while the document is hidden or the pane is off
+screen, still under reduced motion or at speed zero. Running state
 must have a textual or shape distinction in addition to motion. `prefers-reduced-
 motion` and the persisted reduced-motion setting disable transitions and
 animations without removing state information.

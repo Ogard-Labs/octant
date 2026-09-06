@@ -401,3 +401,123 @@
     justify-content: flex-start;
   }
 }
+
+/* ── Welcome ground ───────────────────────────────────────────────────
+   The start screen sits on the theme's ground: an ordered-dither cloud in
+   the accent, or a person's photo under it. The stage paints the page once
+   and the surface inside goes transparent so the ground shows through; the
+   ground is masked away behind the composer and fades out below it, so the
+   prompt and the recent-thread list keep the plain page. */
+.welcome-stage {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  height: 100%;
+  flex: 1 1 auto;
+  flex-direction: column;
+  background: var(--octant-app-background);
+}
+
+.welcome-stage > .draft-thread,
+.welcome-stage > .chat-welcome {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+}
+
+/* The masks only read alpha, so currentColor stands in for "keep". */
+.app-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--octant-text-primary);
+}
+
+/* Under one start screen the ground clears a hole for the composer. The hole
+   is measured in pixels because the composer is: it sits under a capped top
+   padding, so its place does not scale with the pane. */
+.app-backdrop[data-placement="welcome"] {
+  mask-image:
+    radial-gradient(
+      ellipse 680px 380px at 50% 290px,
+      transparent 42%,
+      color-mix(in srgb, currentColor 40%, transparent) 70%,
+      currentColor 100%
+    ),
+    linear-gradient(
+      to bottom,
+      currentColor 30%,
+      color-mix(in srgb, currentColor 35%, transparent) 58%,
+      transparent 86%
+    );
+  mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+  mask-composite: intersect;
+  -webkit-mask-composite: source-in;
+}
+
+/* Under the whole shell there is no composer to clear; the ground only
+   softens toward the bottom, where transcripts and lists do their reading. */
+.app-backdrop[data-placement="shell"] {
+  z-index: -1;
+  mask-image: linear-gradient(
+    to bottom,
+    currentColor 40%,
+    color-mix(in srgb, currentColor 45%, transparent) 75%,
+    color-mix(in srgb, currentColor 20%, transparent) 100%
+  );
+}
+
+.app-backdrop__photo,
+.app-backdrop__pattern {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+
+/* Screen lifts the accent out of a dark ground; multiply presses it into a
+   light one. Either way the cloud tints the page instead of covering it.
+   Both layers take their opacity from the setting, inline. */
+.app-backdrop__pattern {
+  mix-blend-mode: screen;
+}
+
+.app-backdrop__pattern[data-blend="multiply"] {
+  mix-blend-mode: multiply;
+}
+
+/* The shell as a stage for the ground: the layers over it that painted the
+   opaque page go translucent, the same way workspace translucency (0047)
+   lets the native glass through, so the ground shows without a second set
+   of surface rules. The sidebar keeps its own paint unless asked. */
+.shell--app-backdrop.shell-frame {
+  position: relative;
+  isolation: isolate;
+  background: var(--octant-app-background);
+}
+
+.shell--app-backdrop.shell-frame > .workspace-layer {
+  background: var(--octant-workspace-translucent-subtle);
+}
+
+.shell--app-backdrop.shell-frame .workspace,
+.shell--app-backdrop.shell-frame .workspace-pane,
+.shell--app-backdrop.shell-frame .workspace-thread-tabs,
+.shell--app-backdrop.shell-frame .draft-thread,
+.shell--app-backdrop.shell-frame .chat-welcome,
+.shell--app-backdrop.shell-frame .chat-workspace,
+.shell--app-backdrop.shell-frame .work-composer-adapter,
+.shell--app-backdrop.shell-frame .work-thread-workspace {
+  background: transparent;
+}
+
+.shell--app-backdrop-sidebar.shell-frame .sidebar {
+  background: var(--octant-sidebar-translucent-subtle);
+}

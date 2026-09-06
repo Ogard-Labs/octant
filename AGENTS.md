@@ -64,7 +64,7 @@ Read the record that owns your change before editing, not all of them:
 | Computer-use destinations                                      | `docs/decisions/0053`                                                                      |
 | Shell, navigation, workspace layout                            | `docs/decisions/0015`, `docs/decisions/0041`–`docs/decisions/0045`, `docs/decisions/0077`  |
 | Components and theme                                           | `docs/decisions/0016`, `docs/decisions/0046`                                               |
-| Visual language (Settings, first-run, welcome, palette)        | `docs/decisions/0070`, `docs/decisions/0072`, `docs/decisions/0073`                        |
+| Visual language (Settings, first-run, welcome, palette)        | `docs/decisions/0070`, `docs/decisions/0072`, `docs/decisions/0073`, `docs/decisions/0085` |
 
 A change that contradicts an `Accepted` record is not a code change. Supersede
 the record first, in the same pull request, per `docs/decisions/README.md`. A

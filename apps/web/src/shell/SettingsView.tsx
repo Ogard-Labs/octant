@@ -8,6 +8,7 @@ import {
   type SettingsSettingId,
 } from "@octant/contracts";
 import {
+  DEFAULT_APP_BACKGROUND,
   decodeSidebarBackgroundPresetId,
   decodeThemeHexColor,
   type SidebarBackground,
@@ -68,6 +69,10 @@ import { NavigatorAssistantSettingsView } from "../settings/NavigatorAssistantSe
 import { VoiceSettingsView } from "../settings/VoiceSettingsView";
 import { UserProfileSettingsView } from "../profile/UserProfileSettingsView";
 import { SettingRow } from "../settings/primitives";
+import {
+  AppBackgroundSettings,
+  type BackgroundImageLibrary,
+} from "../settings/AppBackgroundSettings";
 import { SettingsSearchResults } from "../settings/SettingsSearchResults";
 import { useSettingsRoute } from "../settings/useSettingsRoute";
 import { ExtensionsSettingsView } from "../extensions/ExtensionsSettingsView";
@@ -134,6 +139,8 @@ export interface SettingsViewProps {
   readonly pendingDeepLink?: SettingsDeepLink | undefined;
   readonly onDeepLinkApplied?: () => void;
   readonly themeController?: ThemeController;
+  /** The host's photo library for the welcome background; absent on hosts without one. */
+  readonly backgroundImageLibrary?: BackgroundImageLibrary;
   readonly executionProfiles?: ReactNode;
   readonly agentRunSettingsClient?: AgentRunSettingsClient;
   readonly nativeHarnessClient?: NativeHarnessClient;
@@ -1124,6 +1131,30 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
                   }
                 }}
                 sidebarVibrancySupported={props.sidebarVibrancySupported}
+              />
+            </SettingRow>
+          ) : null}
+          {isAvailable("app-background") && props.themeController !== undefined ? (
+            <SettingRow
+              description="The theme's own pattern or a photo of yours behind the start screen, or behind everything."
+              focused={focusedSetting === settingId("app-background")}
+              label="Background"
+              scope="app"
+              settingId="app-background"
+            >
+              <AppBackgroundSettings
+                background={
+                  (props.themeController.draft ?? props.themeController.settings)?.appBackground ??
+                  DEFAULT_APP_BACKGROUND
+                }
+                increasedContrast={
+                  (props.themeController.draft ?? props.themeController.settings)
+                    ?.increasedContrast === true
+                }
+                library={props.backgroundImageLibrary}
+                onChange={(appBackground) => {
+                  void props.themeController?.applyPatch({ appBackground });
+                }}
               />
             </SettingRow>
           ) : null}

@@ -289,6 +289,8 @@ export interface WorkspaceViewProps {
   readonly onRelinkProject: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
   readonly onRenameProject: (projectId: ProjectId, name: string) => Promise<boolean>;
   readonly statusBar?: ReactNode;
+  /** The theme's ground behind the welcome and draft-thread surfaces, when one is set. */
+  readonly welcomeBackdrop?: ReactNode;
   /** Session record of which tabs the person activated, opened, or created. */
   readonly tabActivation?: TabActivationRegistry;
   /** Starts a fresh thread in a Project, offered when a checkout is unusable. */
@@ -565,7 +567,11 @@ export function WorkspaceView(props: WorkspaceViewProps) {
                 offersThreadComposer(surface)
               }
             >
-              {renderTab(surface, props, paneId, canvasContext)}
+              {onWelcomeGround(
+                surface,
+                props.welcomeBackdrop,
+                renderTab(surface, props, paneId, canvasContext),
+              )}
             </ComposerContextMeterGate>
           )}
           {...(props.providerByThreadId === undefined
@@ -583,6 +589,22 @@ export function WorkspaceView(props: WorkspaceViewProps) {
         {props.statusBar}
       </main>
     </TabActivationProvider>
+  );
+}
+
+/**
+ * The start screens sit on the theme's ground; every other surface paints
+ * its own. The stage exists only while a ground is configured, so a person
+ * who chose "None" keeps the exact page they had.
+ */
+function onWelcomeGround(surface: WorkspaceTab, backdrop: ReactNode, content: ReactNode) {
+  if (backdrop === undefined || backdrop === null) return content;
+  if (surface.kind !== "welcome" && surface.kind !== "draft-thread") return content;
+  return (
+    <div className="welcome-stage" data-octant-welcome-stage>
+      {backdrop}
+      {content}
+    </div>
   );
 }
 
