@@ -413,6 +413,16 @@ export class CodeTurnRunner {
   }
 }
 
+/**
+ * Whether a description already says which tool it is about: the action as a
+ * whole word, in any case, so "edit" counts for Edit and "Writer" does not
+ * count for Write.
+ */
+function namesAction(description: string, action: string): boolean {
+  const escaped = action.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, "iu").test(description);
+}
+
 function claimsMutation(event: ProviderRuntimeEvent): boolean {
   return event.kind === "file-change" || event.kind === "diff";
 }
@@ -536,7 +546,14 @@ function normalizeProviderEvent(
         ...base,
         category: "approval",
         requestId: text(event.requestId),
-        text: text(`${event.action}: ${event.description}`),
+        // A description that already names the tool is not prefixed with it
+        // again; "Edit: Claude requests permission to use Edit." said the same
+        // word twice on every prompt.
+        text: text(
+          namesAction(event.description, event.action)
+            ? event.description
+            : `${event.action}: ${event.description}`,
+        ),
         executionPolicy: input.thread.executionPolicy,
         permissionPersistence: input.thread.permissionPersistence,
       });
