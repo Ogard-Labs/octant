@@ -118,7 +118,8 @@ Surface (reading measure 880px, or wide for boards)
 
 Leaving a reader route is always the ghost "Back to workspace" control in the
 header. Settings is the same shell with a 680px measure and its own
-navigation rail. Rows in Settings are `SettingRow`; rows everywhere else are
+navigation rail; the rail names each group of pages with a quiet label and
+draws no hairline between groups. Rows in Settings are `SettingRow`; rows everywhere else are
 `surface-row`. Both draw the same hairline.
 
 ### Welcome and composer

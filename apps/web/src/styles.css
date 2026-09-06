@@ -1535,9 +1535,13 @@ strong {
   background: var(--oct-fg-soft);
 }
 
+/* The tab in front is a different thing from the tab under the pointer: it
+   takes the selection fill and a hairline edge, the same treatment the dock's
+   tool tabs use, so the two strips read as one grammar. */
 .workspace-thread-tabs__item[data-active="true"] {
   color: var(--octant-text-primary);
   background: var(--octant-selection);
+  box-shadow: inset 0 0 0 1px var(--octant-border);
 }
 
 .workspace-thread-tabs__select {
