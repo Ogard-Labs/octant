@@ -478,9 +478,18 @@ function ContinueFacts(props: {
         </span>
       )}
       {pullRequest === undefined ? null : (
-        <span className="code-home__fact code-home__fact--chip" data-tone={pullRequest.state}>
+        <span
+          className="code-home__fact code-home__fact--chip"
+          data-checks={pullRequest.state === "open" ? card.checks.state : undefined}
+          data-tone={pullRequest.state}
+        >
           <GitPullRequest aria-hidden="true" size={12} strokeWidth={1.8} />#{pullRequest.number}{" "}
           {PULL_REQUEST_STATE_LABELS[pullRequest.state]}
+          {checksNote(pullRequest.state, card.checks.state) === undefined ? null : (
+            <span className="code-home__fact-checks">
+              {checksNote(pullRequest.state, card.checks.state)}
+            </span>
+          )}
         </span>
       )}
       {provider === undefined ? null : (
@@ -488,6 +497,21 @@ function ContinueFacts(props: {
       )}
     </span>
   );
+}
+
+/**
+ * What the checks say about an open pull request, in words beside the chip's
+ * mark. A merged or closed request has nothing left to check, and a passing
+ * or unknown run says nothing a person needs to act on.
+ */
+function checksNote(
+  pullRequestState: "open" | "merged" | "closed",
+  checks: CodeBoardCard["checks"]["state"],
+): string | undefined {
+  if (pullRequestState !== "open") return undefined;
+  if (checks === "failing") return "checks failing";
+  if (checks === "pending") return "checks pending";
+  return undefined;
 }
 
 async function readAssignedGithub(

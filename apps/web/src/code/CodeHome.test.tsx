@@ -373,6 +373,77 @@ describe("CodeHome", () => {
     expect(screen.queryByRole("region", { name: "Continue" })).not.toBeInTheDocument();
   });
 
+  it("marks an open pull request's checks on its chip and keeps merged and closed quiet", async () => {
+    const board: CodeBoardView = {
+      version: 1,
+      query: { version: 1 },
+      cards: [
+        card({
+          title: "Failing checks",
+          linkedPullRequest: {
+            kind: "linked",
+            freshness: { status: "fresh" },
+            number: 12,
+            url: "https://github.com/octant/app/pull/12",
+            baseRepository: "octant/app",
+            baseBranch: "main",
+            headBranch: "octant/checks",
+            state: "open",
+            matchesDeliveryBranch: true,
+          } as never,
+          checks: { freshness: { status: "fresh" }, state: "failing" } as never,
+        }),
+        card({
+          threadId: "10000000-0000-4000-8000-000000000002" as never,
+          title: "Pending checks",
+          linkedPullRequest: {
+            kind: "linked",
+            freshness: { status: "fresh" },
+            number: 13,
+            url: "https://github.com/octant/app/pull/13",
+            baseRepository: "octant/app",
+            baseBranch: "main",
+            headBranch: "octant/pending",
+            state: "open",
+            matchesDeliveryBranch: true,
+          } as never,
+          checks: { freshness: { status: "fresh" }, state: "pending" } as never,
+        }),
+        card({
+          threadId: "10000000-0000-4000-8000-000000000003" as never,
+          title: "Merged with a failing run",
+          checks: { freshness: { status: "fresh" }, state: "failing" } as never,
+        }),
+      ],
+      generatedAt: "2026-08-06T03:00:00.000Z",
+    } as unknown as CodeBoardView;
+
+    render(
+      <CodeHome
+        loadBoard={async () => board}
+        onOpenThread={vi.fn()}
+        onPickGithub={vi.fn()}
+        onPickIssue={vi.fn()}
+        projectNames={new Map([["20000000-0000-4000-8000-000000000001", "Octant"]])}
+      />,
+    );
+
+    const next = await screen.findByRole("region", { name: "Continue" });
+    const rows = within(next).getAllByRole("button");
+    expect(rows[0]).toHaveTextContent("#12 Open");
+    expect(rows[0]).toHaveTextContent("checks failing");
+    expect(rows[0]!.querySelector(".code-home__fact--chip")).toHaveAttribute(
+      "data-checks",
+      "failing",
+    );
+    expect(rows[1]).toHaveTextContent("#13 Open");
+    expect(rows[1]).toHaveTextContent("checks pending");
+    // A merged request has nothing left to check; its chip never says so.
+    expect(rows[2]).toHaveTextContent("#273 Merged");
+    expect(rows[2]).not.toHaveTextContent("checks");
+    expect(rows[2]!.querySelector(".code-home__fact--chip")).not.toHaveAttribute("data-checks");
+  });
+
   it("names the thread's own state and leaves the pull request to the facts", () => {
     expect(cardBadge(card({}))).toEqual({ label: "Done", tone: "done", detail: "+610 −0" });
     expect(cardBadge(card({ executing: true })).label).toBe("Running");
