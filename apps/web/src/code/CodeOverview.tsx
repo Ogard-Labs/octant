@@ -16,7 +16,6 @@ import {
   Pin,
   PinOff,
   RefreshCw,
-  ShieldAlert,
   Terminal,
 } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
@@ -345,10 +344,6 @@ function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projec
 
   return (
     <section aria-label="Code Project Overview" className="code-project-overview">
-      <CodeProjectFacts
-        cards={cards}
-        {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
-      />
       <CodeProjectSessions
         boardState={boardState}
         cards={cards}
@@ -401,46 +396,6 @@ type ProjectBoardState =
   | { readonly kind: "unavailable"; readonly message: string };
 
 /**
- * Project-level truth rendered exactly once: the bound repository and the
- * authority rule for this surface. Per-thread facts live on the thread rows
- * below, so nothing here repeats per thread.
- */
-function CodeProjectFacts(props: {
-  readonly cards: ReadonlyArray<CodeBoardCard>;
-  readonly projectRoot?: string;
-}) {
-  const waiting = props.cards.filter((card) => card.status === "waiting").length;
-  return (
-    <section aria-label="Project scope and authority" className="code-project-overview__facts">
-      {props.projectRoot === undefined ? null : (
-        <dl className="kv">
-          <dt>Repository</dt>
-          <dd>{props.projectRoot}</dd>
-        </dl>
-      )}
-      {waiting > 0 ? (
-        <div className="callout callout-warn" role="status">
-          <ShieldAlert aria-hidden="true" size={16} />
-          <div>
-            <p className="callout-title">
-              {waiting === 1 ? "1 thread is waiting" : `${waiting} threads are waiting`}
-            </p>
-            <p>
-              Waiting for server-reported approval, input, or recovery. The overview does not grant
-              authority.
-            </p>
-          </div>
-        </div>
-      ) : (
-        <p className="code-project-overview__authority">
-          Read-only host projection. The overview does not grant authority.
-        </p>
-      )}
-    </section>
-  );
-}
-
-/**
  * One row per thread. The navigation projection orders the rows and carries
  * rename and pin; a board card whose thread the navigation does not carry
  * still gets a row, so no reported fact is lost.
@@ -474,17 +429,23 @@ function CodeProjectSessions(props: {
       .filter((card) => !navigationIds.has(String(card.threadId)))
       .map((card) => ({ threadId: String(card.threadId), title: card.title, card })),
   ].slice(0, MAX_PROJECT_OVERVIEW_CARDS);
+  const waiting = props.cards.filter((card) => card.status === "waiting").length;
+  const count =
+    rows.length === 0
+      ? undefined
+      : `${rows.length} ${rows.length === 1 ? "thread" : "threads"}${
+          waiting === 0 ? "" : ` · ${waiting} waiting`
+        }`;
   return (
     <section aria-label="Code sessions" className="code-project-overview__sessions">
       <header className="code-project-overview__section-header">
-        <div>
-          <span className="code-project-overview__eyebrow">Exact Project scope</span>
-          <h2>Code sessions</h2>
-        </div>
-        <span className="code-project-overview__scope-label">Host-authorized</span>
+        <h2>Threads</h2>
+        {count === undefined ? null : <span className="code-project-overview__count">{count}</span>}
       </header>
       {props.boardState.kind === "loading" ? (
-        <p role="status">Loading authoritative Code projections…</p>
+        <p className="code-project-overview__note" role="status">
+          Loading threads…
+        </p>
       ) : props.boardState.kind === "unavailable" ? (
         <div className="callout callout-warn code-project-overview__state" role="alert">
           <CircleAlert aria-hidden="true" size={16} />
@@ -497,7 +458,9 @@ function CodeProjectSessions(props: {
           </OctantButton>
         </div>
       ) : rows.length === 0 ? (
-        <p role="status">No Code threads in this Project.</p>
+        <p className="code-project-overview__note" role="status">
+          No threads yet. Start one below.
+        </p>
       ) : (
         <ul className="code-project-overview__threads">
           {rows.map((row) => (
@@ -534,7 +497,7 @@ function CodeProjectThreadRow(props: {
   const facts = collapsedThreadFacts(row.card);
   const detail = detailThreadFacts(row.card);
   return (
-    <article className="setgroup code-project-thread">
+    <article className="code-project-thread">
       {renaming && props.onRename !== undefined ? (
         <ThreadRenameField
           label="Rename Code thread"
@@ -595,18 +558,18 @@ function CodeProjectThreadRow(props: {
         </div>
       )}
       {facts.length === 0 ? null : (
-        <dl className="kv code-project-thread__facts">
+        <ul className="code-project-thread__facts" aria-label="Thread facts">
           {facts.map((fact) => (
-            <Fragment key={fact.label}>
-              <dt>{fact.label}</dt>
-              <dd>{fact.value}</dd>
-            </Fragment>
+            <li key={fact.label}>
+              <span className="code-project-thread__fact-label">{fact.label}</span>
+              <span>{fact.value}</span>
+            </li>
           ))}
-        </dl>
+        </ul>
       )}
       {detail.length === 0 ? null : (
         <details className="code-project-thread__more">
-          <summary>Full detail</summary>
+          <summary>Details</summary>
           <dl className="kv">
             {detail.map((fact) => (
               <Fragment key={fact.label}>
@@ -815,30 +778,20 @@ function CodeProjectQuickStart(props: {
   return (
     <section aria-label="Code quick start" className="code-project-overview__quick-start">
       <header className="code-project-overview__section-header">
-        <div>
-          <span className="code-project-overview__eyebrow">Ordinary Code creation</span>
-          <h2>Start a Code thread</h2>
-        </div>
-        <span className="code-project-overview__scope-label">Approval gated by default</span>
+        <h2>Start a Code thread</h2>
       </header>
       {props.onCreateThread === undefined ? (
-        <p role="status">
-          Code quick start is unavailable until server creation authority is connected.
+        <p className="code-project-overview__note" role="status">
+          Starting a thread here needs the host connection.
         </p>
       ) : props.controller.status !== "ready" || props.controller.bootstrap === undefined ? (
-        <p role="status">Code creation is waiting for the authoritative host connection.</p>
+        <p className="code-project-overview__note" role="status">
+          Waiting for the host connection.
+        </p>
       ) : (
         <>
-          <p className="code-project-overview__quick-start-copy">
-            Host, Project, provider/model, checkout/worktree, delivery target, and permission
-            persistence are confirmed by the Code service before the first turn. The overview is
-            read-only.
-          </p>
-          <p className="code-project-overview__quick-start-copy">
-            Checkout and worktree are confirmed by the Code service before creation.
-          </p>
           {onChangeNewThreadWorkspace === undefined ? null : (
-            <label className="code-project-overview__quick-start-copy">
+            <label className="code-project-overview__habit">
               <span>New threads start in</span>
               <OctantSelectField
                 aria-label="New threads start in"

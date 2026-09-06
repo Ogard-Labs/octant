@@ -127,9 +127,6 @@ export function ProjectOverview(props: ProjectOverviewProps) {
       ) : null}
       <header className="project-overview__toolbar">
         <div className="project-overview__identity">
-          {props.project.type === "chat" ? null : (
-            <span className="project-overview__type">{label(props.project.type)} Project</span>
-          )}
           <form
             noValidate
             onSubmit={(event) => {
@@ -140,17 +137,52 @@ export function ProjectOverview(props: ProjectOverviewProps) {
             <label className="sr-only" htmlFor={`project-name-${props.project.id}`}>
               Project name
             </label>
-            <OctantInput
-              className="project-overview__name"
-              defaultValue={props.project.name}
-              id={`project-name-${props.project.id}`}
-              onBlur={() => void commitName()}
-              readOnly={archived || connectionStale}
-              ref={nameInput}
-            />
+            {/* The name is the page title, edited in place: the heading carries
+                the title role and the field inherits its type. */}
+            <h1 className="oct-title project-overview__title">
+              <OctantInput
+                className="project-overview__name"
+                defaultValue={props.project.name}
+                id={`project-name-${props.project.id}`}
+                onBlur={() => void commitName()}
+                readOnly={archived || connectionStale}
+                ref={nameInput}
+              />
+            </h1>
           </form>
+          {props.project.type === "chat" ? null : (
+            <span className="project-overview__type">{label(props.project.type)} Project</span>
+          )}
         </div>
-        {props.project.type === "chat" ? null : <p>{authorityCopy(props.project.type)}</p>}
+        <div className="project-overview__actions" aria-label="Project actions">
+          <p
+            aria-live={relinkFailed ? "assertive" : "polite"}
+            className="project-overview__status"
+            {...(relinkFailed ? { role: "alert" } : {})}
+          >
+            {relinkStatus}
+          </p>
+          {props.project.type !== "chat" && !archived && allowRootRelink ? (
+            <OctantButton onClick={() => void relink()} size="sm" type="button" variant="ghost">
+              {unavailable ? "Choose new root" : "Relink folder"}
+            </OctantButton>
+          ) : null}
+          {archived || connectionStale ? (
+            <span className="project-overview__archived">
+              {archived ? "Archived Project · read-only" : "Stale snapshot · read-only"}
+            </span>
+          ) : (
+            <OctantButton
+              className="project-overview__archive"
+              onClick={() => props.onArchive(props.project.id)}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              {props.project.type === "chat" ? "Archive" : "Archive Project"}
+            </OctantButton>
+          )}
+        </div>
       </header>
       {props.project.type !== "chat" ? (
         <section className="project-overview__context" aria-label="Project binding">
@@ -176,39 +208,9 @@ export function ProjectOverview(props: ProjectOverviewProps) {
           )}
         </section>
       ) : null}
-      <div className="project-overview__actions" aria-label="Project actions">
-        {props.project.type !== "chat" && !archived && allowRootRelink ? (
-          <OctantButton
-            className="project-button"
-            onClick={() => void relink()}
-            type="button"
-            variant="secondary"
-          >
-            {unavailable ? "Choose new root" : "Relink folder"}
-          </OctantButton>
-        ) : null}
-        <p
-          aria-live={relinkFailed ? "assertive" : "polite"}
-          className="project-overview__status"
-          {...(relinkFailed ? { role: "alert" } : {})}
-        >
-          {relinkStatus}
-        </p>
-        {archived || connectionStale ? (
-          <span className="project-overview__archived">
-            {archived ? "Archived Project · read-only" : "Stale snapshot · read-only"}
-          </span>
-        ) : (
-          <OctantButton
-            className="project-button project-button--quiet project-overview__archive"
-            onClick={() => props.onArchive(props.project.id)}
-            type="button"
-            variant="ghost"
-          >
-            {props.project.type === "chat" ? "Archive" : "Archive Project"}
-          </OctantButton>
-        )}
-      </div>
+      {props.project.type === "chat" ? null : (
+        <p className="project-overview__description">{authorityCopy(props.project.type)}</p>
+      )}
       {props.projectClient === undefined ? null : (
         <ProjectMemorySection
           client={props.projectClient}
@@ -279,5 +281,5 @@ function authorityCopy(type: ProjectSummary["type"]): string {
     return "Virtual organization with approved memory and no implicit host access.";
   if (type === "work")
     return "Bound to one confined directory. Knowledge-work stays inside the Project root.";
-  return "Bound to one Git repository. New Code sessions will start with current-session permission defaults.";
+  return "Bound to one Git repository. New Code work starts approval-gated.";
 }

@@ -3145,11 +3145,18 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   justify-content: flex-end;
 }
 
+/* The Project page is a document with a measure, not a full-bleed control
+   panel: one title, a quiet line of facts under it, and sections that read
+   as sentence-case labels over hairlines. Measured before this pass it had
+   mono eyebrows, three bordered strips before any content, and two copies of
+   the repository path. */
 .project-overview {
   display: flex;
-  width: 100%;
+  width: min(100% - 48px, 920px);
   min-height: 100%;
   flex-direction: column;
+  margin-inline: auto;
+  padding: 20px 0 48px;
 }
 
 .project-overview__toolbar {
@@ -3158,53 +3165,59 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   justify-content: space-between;
   min-width: 0;
   gap: 18px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--octant-border);
+  padding: 0 0 6px;
 }
 
 .project-overview__identity {
   display: flex;
   min-width: 0;
+  flex: 1 1 auto;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
 }
 
 .project-overview__identity form {
   min-width: 0;
+  flex: 0 1 auto;
 }
 
+/* The type is a chip after the name, the answer to "which kind is this",
+   not an eyebrow above it. */
 .project-overview__type {
   flex: none;
-  font-size: calc(12 * var(--oct-text-step));
-  letter-spacing: 0.06em;
+  padding: 1px 7px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-pill);
+  color: var(--oct-meta);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* The name is the page title, editable in place: it wears no field chrome
+   until pointed at, and takes the ordinary focus ring when edited. */
+.project-overview__title {
+  min-width: 0;
 }
 
 .project-overview__name {
-  width: min(32vw, 280px);
-  min-width: 120px;
-  padding: 3px 5px;
+  width: min(48vw, 520px);
+  min-width: 160px;
+  height: auto;
+  min-height: 0;
+  padding: 2px 6px;
+  margin-inline-start: -6px;
   background: transparent;
   border-color: transparent;
   border-radius: var(--oct-radius-sm);
-  font-size: calc(14 * var(--oct-text-step));
-  font-weight: 500;
-  letter-spacing: -0.01em;
+  font: inherit;
+  letter-spacing: inherit;
 }
 
 .project-overview__name:hover {
   border-color: var(--octant-border);
-}
-
-.project-overview__toolbar p {
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  color: var(--octant-text-muted);
-  font-size: calc(11 * var(--oct-text-step));
-  line-height: 1.4;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .project-overview__context {
@@ -3213,21 +3226,33 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   justify-content: space-between;
   min-width: 0;
   gap: 16px;
-  padding: 9px 16px;
-  border-bottom: 1px solid var(--octant-border);
+  padding: 0;
 }
 
 .project-overview__root {
-  display: grid;
+  display: flex;
   min-width: 0;
-  gap: 3px;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--oct-text-xs);
+}
+
+.project-overview__root > span {
+  flex: none;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .project-overview__root strong {
   overflow: hidden;
   color: var(--octant-text-secondary);
-  font-size: calc(11 * var(--oct-text-step));
-  font-weight: 500;
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3236,6 +3261,13 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   flex: none;
   color: var(--octant-success-text);
   font-size: var(--oct-text-xs);
+}
+
+.project-overview__description {
+  margin: 4px 0 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: 1.5;
 }
 
 .project-overview__warning {
@@ -3256,11 +3288,9 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .project-overview__actions {
   display: flex;
-  min-height: 48px;
+  flex: none;
   align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--octant-border);
+  gap: 4px;
 }
 
 .project-overview__status {
@@ -3269,9 +3299,13 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   font-size: calc(11 * var(--oct-text-step));
 }
 
-.project-overview__archive,
+.project-overview__status:empty {
+  display: none;
+}
+
 .project-overview__archived {
-  margin-left: auto;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
 .project-memory-inspector {
@@ -3296,13 +3330,31 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .project-overview__memory {
   min-width: 0;
   min-height: 0;
-  border-bottom: 1px solid var(--octant-border);
+  margin-top: 28px;
 }
 
 .project-overview__memory .project-memory-inspector {
   height: auto;
-  min-height: 240px;
+  min-height: 0;
   max-height: min(70vh, 560px);
+  background: transparent;
+  border-left: 0;
+  box-shadow: none;
+}
+
+/* On the Project page the memory heading is one section label among the
+   others, not the panel's own title block. */
+.project-overview__memory .project-memory-inspector__header {
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.project-overview__memory .project-memory-inspector__header h2 {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: 0;
 }
 
 .project-memory-inspector--embedded {
@@ -4827,76 +4879,152 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   display: flex;
   min-width: 0;
   flex-direction: column;
+  gap: 32px;
+  margin-top: 28px;
 }
 
-.code-project-overview__facts,
 .code-project-overview__sessions,
 .code-project-overview__quick-start {
   min-width: 0;
-  padding: 20px 28px;
-  border-bottom: 1px solid var(--octant-border);
 }
 
-.code-project-overview__facts {
-  display: grid;
-  gap: 12px;
-}
-
-.code-project-overview__authority {
-  max-width: 72ch;
-  margin: 0;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-  line-height: 1.5;
-}
-
-.code-project-overview__quick-start {
-  background: var(--octant-surface-inset);
-}
-
+/* Section labels follow Settings: sentence case, the secondary weight, a
+   hairline underneath, and a count at the far end where there is one. */
 .code-project-overview__section-header {
   display: flex;
-  align-items: flex-start;
+  align-items: baseline;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 12px;
+  margin-bottom: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--oct-border);
 }
 
-.code-project-overview__section-header > div {
+.code-project-overview__section-header h2 {
+  margin: 0;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.code-project-overview__count,
+.code-project-overview__note {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-project-overview__note {
+  margin: 12px 0 0;
+}
+
+.code-project-overview__habit {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-project-overview__habit > span {
+  flex: none;
+}
+
+.code-project-overview__threads {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One thread per row, hairlines between rows, no card: the list is a table
+   of the Project's work, and a card around every row made a page of boxes. */
+.code-project-thread {
+  display: grid;
+  gap: 4px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.code-project-thread__row {
   display: flex;
   min-width: 0;
   align-items: center;
   gap: 8px;
 }
 
-.code-project-overview__section-header h2 {
-  margin: 0;
-  color: var(--octant-text-primary);
-  font-size: var(--oct-text-base);
-  font-weight: var(--oct-weight-display);
-  letter-spacing: -0.02em;
+.code-project-thread__title {
+  min-width: 0;
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  justify-content: flex-start;
+  padding: 2px 0;
+  margin-inline-start: 0;
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+  text-align: left;
 }
 
-.code-project-overview__eyebrow,
-.code-project-overview__scope-label {
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-display);
-  letter-spacing: 0;
-  text-transform: none;
+.code-project-thread__title > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.code-project-overview__scope-label {
+.code-project-thread__chips {
+  display: inline-flex;
   flex: none;
-  color: var(--octant-success-text);
+  align-items: center;
+  gap: 6px;
 }
 
-.code-project-overview__threads {
-  display: grid;
-  gap: 10px;
+.code-project-thread__pin {
+  flex: none;
+  opacity: 0;
+}
+
+.code-project-thread:hover .code-project-thread__pin,
+.code-project-thread:focus-within .code-project-thread__pin,
+.code-project-thread__pin[aria-pressed="true"] {
+  opacity: 1;
+}
+
+/* Facts read as one quiet line: "Branch main · Changes 1 changed file". */
+.code-project-thread__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
   margin: 0;
   padding: 0;
   list-style: none;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+}
+
+.code-project-thread__facts li {
+  display: inline-flex;
+  min-width: 0;
+  gap: 5px;
+}
+
+.code-project-thread__fact-label {
+  color: var(--oct-meta);
+}
+
+.code-project-thread__more {
+  font-size: var(--oct-text-xs);
+}
+
+.code-project-thread__more summary {
+  cursor: pointer;
+  color: var(--oct-meta);
+}
+
+.code-project-thread__more .kv {
+  margin-top: 8px;
 }
 
 .code-project-overview__sessions > p,
