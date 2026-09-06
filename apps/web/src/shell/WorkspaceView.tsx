@@ -1613,6 +1613,7 @@ function renderNonCodeTab(
   }
   return (
     <AgentModeWelcome
+      hasProjects={props.projects.some((project) => project.type === tab.mode)}
       mode={tab.mode === "code" ? "code" : "work"}
       onAddFolder={props.onAttachFolder ?? (() => {})}
       {...(props.onOpenDraftThread === undefined
