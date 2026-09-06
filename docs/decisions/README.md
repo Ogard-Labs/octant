@@ -53,7 +53,7 @@ distilled successor of the earlier long-form design specifications.
 | [0043](0043-simulator-follows-the-active-thread.md)                         | Simulator follows the active thread in the right sidebar                                    | Accepted           |
 | [0044](0044-the-dock-hosts-live-thread-owned-tools.md)                      | The dock hosts live thread-owned tools                                                      | Proposed           |
 | [0045](0045-environment-summarizes-the-active-thread.md)                    | Environment summarizes the active thread                                                    | Accepted           |
-| [0046](0046-shadcn-recipes-own-product-controls.md)                         | shadcn recipes own product controls                                                         | Accepted           |
+| [0046](0046-shadcn-recipes-own-product-controls.md)                         | shadcn recipes own product controls                                                         | Superseded by 0085 |
 | [0047](0047-workspace-translucency-opt-in.md)                               | Workspace translucency opt-in                                                               | Accepted           |
 | [0048](0048-linux-stations-and-execution-capsules.md)                       | Linux Stations isolate Code work in execution capsules                                      | Proposed           |
 | [0049](0049-thread-dialogue-lane.md)                                        | Explicit Chat thread dialogue                                                               | Accepted           |
@@ -77,7 +77,7 @@ distilled successor of the earlier long-form design specifications.
 | [0067](0067-native-harness-turn-loop-and-supervision.md)                    | Native harness turn loop, advisor, and follow-up suggestions                                | Accepted           |
 | [0068](0068-linux-plan-process-deny.md)                                     | Linux Plan process denial uses seccomp                                                      | Accepted           |
 | [0069](0069-native-harness-context-overflow.md)                             | Native harness context overflow: hard cutover, evidence notes, and journal lookup           | Accepted           |
-| [0070](0070-setup-surfaces-compose-from-public-blocks.md)                   | Renderer visual language matches public block catalogs                                      | Accepted           |
+| [0070](0070-setup-surfaces-compose-from-public-blocks.md)                   | Renderer visual language matches public block catalogs                                      | Superseded by 0086 |
 | [0071](0071-one-navigation-and-surface-hierarchy.md)                        | One navigation and surface hierarchy                                                        | Accepted           |
 | [0072](0072-settings-collections-stay-open.md)                              | Settings collections stay open                                                              | Accepted           |
 | [0073](0073-one-surface-language.md)                                        | One surface language across the renderer and the site                                       | Accepted           |
@@ -92,6 +92,8 @@ distilled successor of the earlier long-form design specifications.
 | [0082](0082-provider-events-are-subscribed-before-a-turn-is-sent.md)        | Provider events are subscribed before a turn is sent                                        | Accepted           |
 | [0083](0083-a-work-turn-records-what-changed-in-its-folder.md)              | A Work turn records what changed in its folder                                              | Accepted           |
 | [0084](0084-voice-rides-an-openai-compatible-provider.md)                   | Voice rides an OpenAI-compatible provider                                                   | Accepted           |
+| [0085](0085-base-ui-native-shadcn-style.md)                                 | Product controls follow the Base UI-native shadcn style                                     | Accepted           |
+| [0086](0086-recipes-own-their-own-shape-and-focus.md)                       | Recipes own their shape; the app owns its focus ring                                        | Accepted           |
 
 ## Adding an ADR
 

@@ -1,6 +1,6 @@
 # 0070. Renderer visual language matches public block catalogs
 
-**Status:** Accepted
+**Status:** Superseded by 0086
 
 ## Context
 
@@ -70,3 +70,5 @@ _how those owned surfaces look_.
 - 0019 User profile and first-run setup
 - 0033 First run asks what to call you
 - 0046 shadcn recipes own product controls
+- 0086 supersedes this record on radius, elevation, and the single-owner focus
+  ring. Its stack, token, shell, and dual-paint rules are carried forward there.

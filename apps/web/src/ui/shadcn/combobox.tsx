@@ -44,7 +44,7 @@ export function ComboboxTrigger({
   return (
     <ComboboxPrimitive.Trigger
       className={cn(
-        "mr-1 inline-flex size-7 cursor-pointer items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 [&_svg]:pointer-events-none [&_svg]:size-4",
+        "mr-1 inline-flex size-7 cursor-pointer items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:size-4",
         className,
       )}
       data-slot="combobox-trigger"
