@@ -277,6 +277,18 @@ describe("UI stylesheet check", () => {
     expect([...primitives.keys()]).toEqual(["support__copy"]);
   });
 
+  it("does not collect classes from a JSX fragment passed as a prop", () => {
+    const primitives = collectPrimitiveClasses({
+      "apps/web/src/code/Fragment.tsx": [
+        '<OctantButton className="fragment__trigger" content={<><span className="fragment__inner" /></>}>',
+        "  Open",
+        "</OctantButton>",
+        '<ul className="fragment__list" />',
+      ].join("\n"),
+    });
+    expect([...primitives.keys()]).toEqual(["fragment__trigger"]);
+  });
+
   it("fails closed on any colour literal and ratchets the other rules against the baseline", () => {
     const findings = findStylesheetFindings({
       [CSS]: [".a { color: #fff; font-size: 11.5px; }", ".b { font-size: 12.5px; }"].join("\n"),
