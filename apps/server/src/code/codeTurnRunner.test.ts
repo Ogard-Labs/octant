@@ -115,6 +115,42 @@ describe("CodeTurnRunner", () => {
     );
   });
 
+  it("names the tool once in an approval prompt", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "approval-request",
+            requestId: "request-1",
+            action: "Edit",
+            description: "Claude requests permission to use Edit.",
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const observed: CodeTurnEvent[] = [];
+
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+            persistOutcome: () => Effect.void,
+          }),
+        ),
+      ),
+    );
+
+    expect(observed).toContainEqual(
+      expect.objectContaining({
+        category: "approval",
+        text: "Claude requests permission to use Edit.",
+      }),
+    );
+  });
+
   it("keeps the turn waiting when provider completion follows unresolved reconciliation", async () => {
     const connection = fakeConnection({
       subscribe: Effect.succeed(

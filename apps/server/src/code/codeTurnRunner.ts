@@ -506,7 +506,14 @@ function normalizeProviderEvent(
         ...base,
         category: "approval",
         requestId: text(event.requestId),
-        text: text(`${event.action}: ${event.description}`),
+        // A description that already names the tool is not prefixed with it
+        // again; "Edit: Claude requests permission to use Edit." said the same
+        // word twice on every prompt.
+        text: text(
+          event.description.includes(event.action)
+            ? event.description
+            : `${event.action}: ${event.description}`,
+        ),
         executionPolicy: input.thread.executionPolicy,
         permissionPersistence: input.thread.permissionPersistence,
       });
