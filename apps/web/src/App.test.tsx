@@ -3548,6 +3548,60 @@ describe("App", () => {
     expect(screen.getByRole("region", { name: "Workspace pane: Second thread" })).toBeVisible();
   });
 
+  it("hands the pane to the Board and gives the dock back afterwards, toggle included", async () => {
+    const user = userEvent.setup();
+    const initial = codeShellBootstrap();
+    const workspaceWithContext = {
+      ...initial.workspace,
+      contextByMode: {
+        ...initial.workspace.contextByMode,
+        code: {
+          ...initial.workspace.contextByMode.code,
+          projectId,
+          boundRoot: "/Users/example/Dev/Repos/octant",
+        },
+      },
+    } as typeof initial.workspace;
+    render(
+      <App
+        codeClient={codes()}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client({
+          ...initial,
+          workspace: workspaceWithContext,
+          workspaceVersion: workspaceWithContext.version,
+        })}
+      />,
+    );
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    await showRightUtilityDock(user);
+    await screen.findByRole("complementary", { name: "Right Utility Dock" });
+
+    // The Board is a page about many threads; while it is up the dock steps
+    // aside and the page has the pane.
+    await user.click(screen.getByRole("button", { name: "Board" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("complementary", { name: "Right Utility Dock" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "Open Right sidebar" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+
+    // The toggle leaves the Board and shows the dock again rather than
+    // closing a dock that was only stepped aside.
+    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
+    expect(await screen.findByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Back to workspace" })).not.toBeInTheDocument();
+  });
+
   it("restores a thread's dock tools after the window reloads", async () => {
     writeUtilityDockPresentation(globalThis, String(windowId), {
       open: true,
