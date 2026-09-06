@@ -124,6 +124,27 @@ describe("custom image profiles", () => {
     ];
     expect(listCustomImageProfiles(customSources, [disabled])).toEqual([]);
   });
+
+  it("folds two models on the same instance into one profile, never two profiles at one instanceId", () => {
+    const instance = recraft();
+    const customSources: ReadonlyArray<ImageGenerationCustomSource> = [
+      { providerInstanceId: instance.id, modelId: "recraftv3" as never, label: "Recraft square" },
+      {
+        providerInstanceId: instance.id,
+        modelId: "recraftv3-vector" as never,
+        label: "Recraft vector",
+      },
+    ];
+    const profiles = listCustomImageProfiles(customSources, [instance]);
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0]).toMatchObject({
+      instanceId: instance.id,
+      displayName: "Recraft square, Recraft vector",
+      driverKind: "openai-compatible-image",
+      modelAllowlist: ["recraftv3", "recraftv3-vector"],
+      defaultModel: "recraftv3",
+    });
+  });
 });
 
 describe("generation options a selected model can honor", () => {

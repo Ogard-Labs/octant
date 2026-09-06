@@ -160,7 +160,8 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   code: "Defaults for Code threads and delivery.",
   "navigator-assistant": "The models Navigator uses to converse and to review images.",
   voice: "The providers that turn speech into text and text into speech.",
-  "image-generation": "Add your own image API and key, for providers Octant doesn't ship built in.",
+  "image-generation":
+    "Pick an already-connected provider and model to also generate images. Add the provider itself, with its endpoint and key, under Providers & Models first.",
   providers: "Connect providers, manage authentication, and pick default models.",
   profiles: "Reusable execution profiles for agent runs.",
   agents: "How agent runs behave in this app.",

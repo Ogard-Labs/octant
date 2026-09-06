@@ -70,7 +70,7 @@ second credential or base URL is needed — the instance's own endpoint keeps
 serving chat, voice, and images at once. Recraft is a working example: its
 API matches OpenAI's image format, so it needs no dedicated Octant support —
 just add it as an OpenAI-compatible endpoint and register it as a custom
-image source. Any number of custom sources may be configured alongside the
+image source. Up to 20 custom sources may be configured alongside the
 dedicated OpenAI Image and Gemini Image profiles.
 
 ### Credentials

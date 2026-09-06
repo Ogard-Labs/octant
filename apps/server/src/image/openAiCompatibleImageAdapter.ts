@@ -32,7 +32,10 @@ import {
 const DEFAULT_LIMITS: CompatibleHttpLimits = {
   connectionTimeoutMs: 120_000,
   requestBodyBytes: MAX_GENERATED_IMAGE_BYTES * 2,
-  responseBodyBytes: MAX_GENERATED_IMAGE_BYTES * MAX_IMAGE_VARIANTS + 262_144,
+  // Base64 expands decoded bytes by 4/3: bound the encoded JSON response by
+  // that expansion, not by the decoded image ceiling, or a valid maximal
+  // response gets rejected before decodeOpenAiImageResponse ever sees it.
+  responseBodyBytes: 4 * Math.ceil(MAX_GENERATED_IMAGE_BYTES / 3) * MAX_IMAGE_VARIANTS + 262_144,
   streamIdleTimeoutMs: 30_000,
 };
 
