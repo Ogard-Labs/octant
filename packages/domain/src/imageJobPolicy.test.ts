@@ -132,7 +132,11 @@ describe("custom image source eligibility", () => {
       { providerInstanceId: instance.id, modelId: "gpt-image-2" as never, label: "Not compatible" },
     ];
     expect(() =>
-      assertCustomImageSourceEligible(instance, "gpt-image-2" as ImageJob["modelId"], customSources),
+      assertCustomImageSourceEligible(
+        instance,
+        "gpt-image-2" as ImageJob["modelId"],
+        customSources,
+      ),
     ).toThrow(ImageJobPolicyRejected);
   });
 
