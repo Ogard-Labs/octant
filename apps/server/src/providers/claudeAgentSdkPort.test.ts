@@ -701,6 +701,44 @@ describe("Claude Agent SDK port", () => {
     );
   });
 
+  test("passes a pre-tool ask through to Claude Code so the permission callback is consulted", async () => {
+    const canUseTool = vi.fn(async () => ({ behavior: "deny" as const, message: "denied" }));
+    const preToolUse = vi.fn(async () => ({ behavior: "ask" as const }));
+    const harness = makeHarness();
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery({ ...openInput, canUseTool, preToolUse });
+          yield* Stream.runHead(query.messages);
+          const preTool = harness.invocation?.options.hooks.PreToolUse[0]?.hooks[0];
+          if (preTool === undefined) {
+            throw new Error("Expected injected pre-tool hook.");
+          }
+          const signal = new AbortController().signal;
+          expect(
+            yield* Effect.promise(() =>
+              preTool(
+                {
+                  hook_event_name: "PreToolUse",
+                  session_id: "session-1",
+                  cwd: "/repo",
+                  tool_name: "Read",
+                  tool_input: { file_path: "/repo/file.ts" },
+                  tool_use_id: "tool-1",
+                },
+                "tool-1",
+                { signal },
+              ),
+            ),
+          ).toEqual({
+            hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "ask" },
+          });
+        }),
+      ),
+    );
+  });
+
   test("denies subagent-marked permission and pre-tool callbacks before delegation", async () => {
     const canUseTool = vi.fn(async () => ({ behavior: "allow" as const }));
     const preToolUse = vi.fn(async () => ({ behavior: "allow" as const }));
