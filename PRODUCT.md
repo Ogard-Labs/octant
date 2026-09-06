@@ -35,7 +35,7 @@ Users work across repositories and document projects with long-running threads, 
 
 ## Brand Commitments
 
-The product name is Octant. The interface should remain an original quiet graphite workbench. Compact structure, information density, dark-surface discipline, restrained borders, and low-noise controls are binding requirements. No external product's assets, terminology, or distinctive structure enters the interface. Octant must avoid too much chrome, low contrast, and sparse screens that hide useful project or orchestration state.
+The product name is Octant. The interface should remain an original quiet graphite workbench. Compact structure, information density, dark-surface discipline, restrained borders, and low-noise controls are binding requirements. No external product's assets, branding, or distinctive structure is copied into the interface; provider and service names appear only where they identify an integration. Octant must avoid too much chrome, low contrast, and sparse screens that hide useful project or orchestration state.
 
 ## Evidence on Hand
 
