@@ -914,3 +914,53 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
 .turn-header[data-outcome="waiting"] + .turn-header__reason {
   color: var(--octant-warning-text);
 }
+
+/* The mark for the owned checkbox recipe. `appearance: none` removes the
+   control the operating system drew for itself — which ignored the theme — so
+   the tick has to be drawn here. Two borders on a rotated box keep it a shape
+   rather than an asset: no icon font, no data URI, and no colour of its own
+   beyond the recipe's own foreground token. */
+.octant-checkbox {
+  display: inline-grid;
+  place-content: center;
+}
+.octant-checkbox::after {
+  content: "";
+  inline-size: 4px;
+  block-size: 8px;
+  border: solid var(--primary-foreground);
+  border-width: 0 2px 2px 0;
+  transform: translateY(-1px) rotate(45deg);
+  opacity: 0;
+}
+.octant-checkbox:checked::after {
+  opacity: 1;
+}
+
+/* The thumb for the owned slider recipe. `appearance: none` removes the one the
+   browser drew, so each engine's thumb pseudo-element has to be named — they
+   cannot be combined into one selector list, because an engine drops the whole
+   rule when it does not recognise a selector in it. */
+.octant-slider::-webkit-slider-thumb {
+  appearance: none;
+  inline-size: 14px;
+  block-size: 14px;
+  border-radius: 50%;
+  background: var(--primary);
+  border: 2px solid var(--background);
+  cursor: grab;
+}
+.octant-slider::-moz-range-thumb {
+  inline-size: 14px;
+  block-size: 14px;
+  border-radius: 50%;
+  background: var(--primary);
+  border: 2px solid var(--background);
+  cursor: grab;
+}
+.octant-slider:active::-webkit-slider-thumb {
+  cursor: grabbing;
+}
+.octant-slider:active::-moz-range-thumb {
+  cursor: grabbing;
+}
