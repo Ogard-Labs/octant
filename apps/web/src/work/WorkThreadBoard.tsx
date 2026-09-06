@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ShellState } from "../shell/ShellState";
 import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
+import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
@@ -593,6 +594,9 @@ function WorkBoardCardView(props: {
       data-follow-up={card.followUp ? "true" : "false"}
       data-status={card.status}
     >
+      {props.layout === "card" && props.projectName !== undefined ? (
+        <span className="board-card-eyebrow">{props.projectName}</span>
+      ) : null}
       <span className={props.layout === "list" ? "issuerow-main" : "board-card-top"}>
         {props.unread ? <span className="sr-only">Unread</span> : null}
         <OctantButton
@@ -619,9 +623,16 @@ function WorkBoardCardView(props: {
       {props.layout === "card" && card.childRuns.latestSummary !== undefined ? (
         <span className="board-card-activity">{card.childRuns.latestSummary}</span>
       ) : null}
+      {/* A card says what the task is doing now, who runs it, and when it last
+          moved; the folder, model, delivery, and artifact facts live in the
+          list view and on the task. Stacked on the card they made every task a
+          wall of metadata with the same weight as its title. */}
       <span className={props.layout === "list" ? "issuerow-meta" : "board-card-facts"}>
-        {cardFacts(card, props.projectName, props.providerLabel).map((fact) => (
-          <span className={fact.className ?? "fact"} key={fact.key}>
+        {(props.layout === "list"
+          ? cardFacts(card, props.projectName, props.providerLabel)
+          : cardSummary(card, props.providerLabel, waitingReason)
+        ).map((fact) => (
+          <span className={fact.className ?? "fact"} key={fact.key} title={fact.title}>
             {fact.icon}
             {fact.text}
           </span>
@@ -633,23 +644,25 @@ function WorkBoardCardView(props: {
           : { onSelect: props.onSelectPullRequest })}
         summaries={card.pullRequestSummaries}
       />
-      {waitingReason === undefined ? null : (
+      {props.layout === "list" && waitingReason !== undefined ? (
         <span className="board-card-blocked">{waitingReason}</span>
-      )}
-      <details className="code-board__card-details">
-        <summary aria-label={`Details for ${card.title}`}>
-          <span>Details</span>
-          <ChevronDown aria-hidden="true" size={12} strokeWidth={1.8} />
-        </summary>
-        <dl className="code-board__card-meta">
-          {cardDetailRows(card, props.projectName, props.providerLabel).map((row) => (
-            <div key={row.label}>
-              <dt>{row.label}</dt>
-              <dd>{row.value}</dd>
-            </div>
-          ))}
-        </dl>
-      </details>
+      ) : null}
+      {props.layout === "list" ? (
+        <details className="code-board__card-details">
+          <summary aria-label={`Details for ${card.title}`}>
+            <span>Details</span>
+            <ChevronDown aria-hidden="true" size={12} strokeWidth={1.8} />
+          </summary>
+          <dl className="code-board__card-meta">
+            {cardDetailRows(card, props.projectName, props.providerLabel).map((row) => (
+              <div key={row.label}>
+                <dt>{row.label}</dt>
+                <dd>{row.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      ) : null}
     </article>
   );
 }
@@ -721,6 +734,8 @@ interface CardFact {
   readonly text: string;
   readonly className?: string;
   readonly icon?: ReactNode;
+  /** Hover text, e.g. the absolute time behind a relative one. */
+  readonly title?: string;
 }
 
 function cardFacts(
@@ -801,6 +816,41 @@ function cardFacts(
   }
   if (card.lastMeaningfulActivityAt !== null) {
     facts.push({ key: "activity", text: activityLabel(card.lastMeaningfulActivityAt) });
+  }
+  return facts;
+}
+
+/**
+ * The card face: what needs the person, who is running the task, and when it
+ * last moved. Everything else waits in the list view's facts.
+ */
+function cardSummary(
+  card: WorkBoardCard,
+  providerLabel: string | undefined,
+  waitingReason: string | undefined,
+): ReadonlyArray<CardFact> {
+  const facts: CardFact[] = [];
+  if (waitingReason !== undefined) facts.push({ key: "waiting", text: waitingReason });
+  if (card.activeRequest.kind === "pending") {
+    facts.push({
+      key: "request",
+      text:
+        card.activeRequest.requestKind === "approval"
+          ? `Approval: ${card.activeRequest.summary}`
+          : `Input: ${card.activeRequest.summary}`,
+      className: "fact warn",
+    });
+  }
+  if (card.followUp) facts.push({ key: "follow-up", text: "Follow-up", className: "fact warn" });
+  if (card.recovery.kind === "recovering") facts.push({ key: "recovery", text: "Recovering" });
+  if (card.goal.kind === "present") facts.push({ key: "goal", text: `Goal · ${card.goal.status}` });
+  if (providerLabel !== undefined) facts.push({ key: "provider", text: providerLabel });
+  if (card.lastMeaningfulActivityAt !== null) {
+    facts.push({
+      key: "activity-at",
+      text: relativeTimeLabel(card.lastMeaningfulActivityAt),
+      title: absoluteTimeFormatter.format(new Date(card.lastMeaningfulActivityAt)),
+    });
   }
   return facts;
 }
