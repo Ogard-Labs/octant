@@ -160,6 +160,7 @@ export class CodeTurnRunner {
       let outcome: CodeTurnOutcome | undefined;
       let handledEvents = 0;
       let unresolvedReconciliation = false;
+      const toolNames = new Map<string, string>();
       let providerCompleted = false;
       let responseText = "";
       const answeredToolRequestIds = new Set<string>();
@@ -256,11 +257,20 @@ export class CodeTurnRunner {
                 if (!isSanitizedEventValid(boundedEvent, sanitizedEvent, input.checkoutRoot)) {
                   return yield* fail("failed", "Provider event sanitization failed closed.");
                 }
-                const normalized = yield* normalizeProviderEvent(input, sanitizedEvent);
+                const normalized = withToolName(
+                  toolNames,
+                  yield* normalizeProviderEvent(input, sanitizedEvent),
+                );
                 if (serializedBytes(normalized) > MAX_CODE_TURN_EVENT_BYTES) {
                   return yield* fail("failed", "Normalized Code event exceeded its byte budget.");
                 }
+                // Only a claimed mutation has something the checkout can confirm.
+                // A read or a shell claim is observational by nature, and its
+                // "not-confirmed" status used to hold every tool-using turn in
+                // "waiting" after the provider had completed, which also dropped
+                // the resume cursor so the next turn started with no memory.
                 if (
+                  claimsMutation(sanitizedEvent) &&
                   normalized.reconciliation !== undefined &&
                   normalized.reconciliation.status !== "confirmed"
                 ) {
@@ -403,6 +413,36 @@ export class CodeTurnRunner {
   }
 }
 
+/**
+ * Whether a description already says which tool it is about: the action as a
+ * whole word, in any case, so "edit" counts for Edit and "Writer" does not
+ * count for Write.
+ */
+function namesAction(description: string, action: string): boolean {
+  const escaped = action.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, "iu").test(description);
+}
+
+function claimsMutation(event: ProviderRuntimeEvent): boolean {
+  return event.kind === "file-change" || event.kind === "diff";
+}
+
+/**
+ * A tool's outcome arrives without its name, so the name is remembered from
+ * the start of the same call and carried on the outcome; the journal then
+ * closes the tool row it opened instead of leaving it forever "started".
+ */
+function withToolName(toolNames: Map<string, string>, event: CodeTurnEvent): CodeTurnEvent {
+  if (event.toolCallId === undefined) return event;
+  if (event.category === "tool" && event.status === "started" && event.toolName !== undefined) {
+    toolNames.set(event.toolCallId, event.toolName);
+    return event;
+  }
+  if (event.category !== "observation" || event.toolName !== undefined) return event;
+  const toolName = toolNames.get(event.toolCallId);
+  return toolName === undefined ? event : { ...event, toolName };
+}
+
 function normalizeProviderEvent(
   input: CodeTurnRunnerInput,
   event: ProviderRuntimeEvent,
@@ -510,7 +550,7 @@ function normalizeProviderEvent(
         // again; "Edit: Claude requests permission to use Edit." said the same
         // word twice on every prompt.
         text: text(
-          event.description.includes(event.action)
+          namesAction(event.description, event.action)
             ? event.description
             : `${event.action}: ${event.description}`,
         ),

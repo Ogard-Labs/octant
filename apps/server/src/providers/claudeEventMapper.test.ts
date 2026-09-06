@@ -1233,6 +1233,26 @@ describe("mapClaudeMessage", () => {
     ]);
   });
 
+  it("completes a turn in which a tool was denied instead of calling it contradictory", () => {
+    const ctx = context();
+    const results = mapped(ctx, {
+      kind: "result",
+      sessionId: claudeSessionId,
+      outcome: "success",
+      subtype: "success",
+      stopReason: null,
+      terminalReason: "completed",
+      usage,
+      permissionDenials: [{ toolName: "Bash", toolUseId: "sdk-denied" }],
+    });
+
+    // The person said no at the approval and the model finished without the
+    // tool; that is an ordinary end, not a protocol failure.
+    expect(
+      results.map((result) => (result.kind === "event" ? result.event.kind : result.kind)),
+    ).toEqual(["usage", "completed"]);
+  });
+
   it.each([
     {
       name: "success subtype with error outcome",
@@ -1240,13 +1260,6 @@ describe("mapClaudeMessage", () => {
       subtype: "success" as const,
       terminalReason: "completed",
       permissionDenials: [],
-    },
-    {
-      name: "success with permission denial",
-      outcome: "success" as const,
-      subtype: "success" as const,
-      terminalReason: "completed",
-      permissionDenials: [{ toolName: "Read", toolUseId: "sdk-denied" }],
     },
     {
       name: "success with interruption reason",

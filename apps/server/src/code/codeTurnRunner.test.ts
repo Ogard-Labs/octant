@@ -115,6 +115,51 @@ describe("CodeTurnRunner", () => {
     );
   });
 
+  it("completes a turn whose only unconfirmed claims are reads, and closes the tool row by name", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({ kind: "tool-start", toolCallId: "call-1", toolName: "Read" }),
+          event({ kind: "tool-success", toolCallId: "call-1", summary: "Tool completed." }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const outcomes: CodeTurnOutcome[] = [];
+    const observed: CodeTurnEvent[] = [];
+
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            // A read claims nothing the checkout could confirm; the host says so
+            // rather than pretending to have checked.
+            reconcileObservation: () =>
+              Effect.succeed({
+                status: "not-confirmed",
+                summary: "Provider tool claim is observational.",
+              }),
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+            persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+          }),
+        ),
+      ),
+    );
+
+    expect(outcomes).toEqual(["completed"]);
+    expect(observed).toContainEqual(expect.objectContaining({ category: "completion" }));
+    expect(observed).toContainEqual(
+      expect.objectContaining({
+        category: "observation",
+        providerKind: "tool-success",
+        toolCallId: "call-1",
+        toolName: "Read",
+        status: "provider-claimed-success",
+      }),
+    );
+  });
+
   it("names the tool once in an approval prompt", async () => {
     const connection = fakeConnection({
       subscribe: Effect.succeed(
@@ -143,12 +188,56 @@ describe("CodeTurnRunner", () => {
       ),
     );
 
-    expect(observed).toContainEqual(
-      expect.objectContaining({
-        category: "approval",
-        text: "Claude requests permission to use Edit.",
-      }),
+    const approvals = observed.filter((event) => event.category === "approval");
+    expect(approvals).toEqual([
+      expect.objectContaining({ text: "Claude requests permission to use Edit." }),
+    ]);
+  });
+
+  it.each([
+    {
+      name: "the tool name in another case",
+      action: "Edit",
+      description: "Claude requests permission to use edit.",
+      expected: "Claude requests permission to use edit.",
+    },
+    {
+      name: "a longer word that only starts with the tool name",
+      action: "Write",
+      description: "Writer wants the file.",
+      expected: "Write: Writer wants the file.",
+    },
+  ])("prefixes the tool name unless the description names it as a word: $name", async (row) => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "approval-request",
+            requestId: "request-1",
+            action: row.action,
+            description: row.description,
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const observed: CodeTurnEvent[] = [];
+
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+            persistOutcome: () => Effect.void,
+          }),
+        ),
+      ),
     );
+
+    expect(observed.filter((next) => next.category === "approval")).toEqual([
+      expect.objectContaining({ text: row.expected }),
+    ]);
   });
 
   it("keeps the turn waiting when provider completion follows unresolved reconciliation", async () => {

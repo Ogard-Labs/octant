@@ -506,9 +506,11 @@ function resultMetadataIsValid(
 ): boolean {
   const noPermissionDenials = message.permissionDenials.length === 0;
   if (message.subtype === "success") {
+    // A denied tool is an ordinary way for a turn to end: the person said no
+    // at the approval and the model finished without it. Reading the denial
+    // list as a contradiction failed every turn that was ever refused.
     return (
       message.outcome === "success" &&
-      noPermissionDenials &&
       (message.terminalReason === undefined || message.terminalReason === "completed")
     );
   }
