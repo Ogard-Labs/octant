@@ -5127,6 +5127,7 @@ function LaunchedShell(
                   <ComposerContextMeterShortcut />
                   <WorkspaceView
                     {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}
+                    greetingName={controller.settings?.userProfile.displayName}
                     draftResetRevision={draftResetRevision}
                     draftProjectSelection={draftProjectSelection}
                     onDraftSelectProject={(mode, projectId) => {

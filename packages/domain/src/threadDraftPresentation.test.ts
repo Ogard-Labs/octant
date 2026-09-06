@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { draftThreadModePresentation } from "./threadDraftPresentation";
+import { draftThreadModePresentation, welcomeGreeting } from "./threadDraftPresentation";
 
 describe("draftThreadModePresentation", () => {
   it("returns chat-specific welcome copy", () => {
@@ -32,5 +32,16 @@ describe("draftThreadModePresentation", () => {
       const ids = presentation.intentCards.map((card) => card.id);
       expect(new Set(ids).size).toBe(ids.length);
     }
+  });
+});
+
+describe("welcome greeting", () => {
+  it("greets by the hour and by name, and stays polite without a name", () => {
+    expect(welcomeGreeting({ hour: 7, name: "Henrik" })).toBe("Good morning, Henrik");
+    expect(welcomeGreeting({ hour: 12, name: "Henrik" })).toBe("Good afternoon, Henrik");
+    expect(welcomeGreeting({ hour: 18, name: "Henrik" })).toBe("Good evening, Henrik");
+    expect(welcomeGreeting({ hour: 2, name: "Henrik" })).toBe("Good evening, Henrik");
+    expect(welcomeGreeting({ hour: 9 })).toBe("Good morning");
+    expect(welcomeGreeting({ hour: 9, name: "  " })).toBe("Good morning");
   });
 });

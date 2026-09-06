@@ -1364,13 +1364,15 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   font-size: var(--oct-text-xs);
 }
 
+/* The cards sit a clear step below the composer: pressed up against its
+   band they read as part of the card, and the prompt lost its edge. */
 .draft-thread__intent-cards {
   order: 3;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 7px;
-  margin-top: 2px;
+  margin-top: 26px;
 }
 
 .draft-thread__intent-card {

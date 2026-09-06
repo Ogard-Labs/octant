@@ -291,6 +291,8 @@ export interface WorkspaceViewProps {
   readonly statusBar?: ReactNode;
   /** The theme's ground behind the welcome and draft-thread surfaces, when one is set. */
   readonly welcomeBackdrop?: ReactNode;
+  /** The person's name from their profile, for the greeting on every start screen. */
+  readonly greetingName?: string | undefined;
   /** Session record of which tabs the person activated, opened, or created. */
   readonly tabActivation?: TabActivationRegistry;
   /** Starts a fresh thread in a Project, offered when a checkout is unusable. */
@@ -968,6 +970,7 @@ function renderNonCodeTab(
     const draftProjectId = tab.projectId ?? props.draftProjectSelection?.[tab.mode];
     return (
       <DraftThreadWorkspace
+        greetingName={props.greetingName}
         key={`${String(tab.id)}:${String(tab.projectId ?? "unbound")}:${String(props.draftResetRevision ?? 0)}`}
         {...(recentThreads.length === 0 ? {} : { recentThreads })}
         mode={tab.mode}
@@ -1595,6 +1598,7 @@ function renderNonCodeTab(
     const recentThreads = draftRecentThreads("chat", props);
     return (
       <ChatWelcome
+        greetingName={props.greetingName}
         {...(recentThreads.length === 0 ? {} : { recentThreads })}
         {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
         {...(props.selectedCreateHostId === undefined

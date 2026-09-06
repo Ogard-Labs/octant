@@ -17,6 +17,7 @@ import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { clipboardHasImage } from "../../chat/composerImagePaste";
 import { ThreadComposer } from "../../composer/ThreadComposer";
+import { WelcomeHeading } from "../../composer/WelcomeHeading";
 import { ComposerVoiceButton } from "../../voice/ComposerVoiceButton";
 import { appendTranscript } from "../../voice/appendTranscript";
 import { selectedModelReadsImages, useWorkComposerImages } from "./useWorkComposerImages";
@@ -31,6 +32,8 @@ import { TrackerReferenceComposerHints } from "../../tracker/TrackerReferenceCom
 import type { MentionableThreadId } from "@octant/contracts";
 
 export interface WorkComposerAdapterProps {
+  /** The person's name from their profile, for the greeting on the hero. */
+  readonly greetingName?: string | undefined;
   readonly projectId?: ProjectId;
   readonly projectName?: string;
   readonly projectRoot?: string;
@@ -187,7 +190,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     <section aria-label="New task" className="work-composer-adapter">
       <div className="welcome">
         <div className="welcome__heading">
-          <h1 className="oct-title oct-title--hero">What are we working on?</h1>
+          <WelcomeHeading greetingName={props.greetingName} question="What are we working on?" />
         </div>
 
         <div className="composer-stack">
