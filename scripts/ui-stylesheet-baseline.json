@@ -2,7 +2,6 @@
   "font-size-scale": {
     "apps/web/src/harness/native-harness.css": 6,
     "apps/web/src/styles.css": 1,
-    "apps/web/src/styles/chat.css": 1,
     "apps/web/src/styles/octant.css": 5
   },
   "motion-literal": {
@@ -20,7 +19,6 @@
   "heavy-weight": {
     "apps/web/src/styles.css": 6,
     "apps/web/src/styles/canvas.css": 1,
-    "apps/web/src/styles/chat.css": 1,
     "apps/web/src/styles/octant.css": 1,
     "apps/web/src/styles/remote-pairing.css": 1,
     "apps/web/src/styles/remote-shell.css": 1,
@@ -34,7 +32,7 @@
     "apps/web/src/context/context.css": 8,
     "apps/web/src/onboarding/first-run.css": 3,
     "apps/web/src/profile/profile.css": 9,
-    "apps/web/src/styles.css": 161,
+    "apps/web/src/styles.css": 159,
     "apps/web/src/styles/artifacts.css": 10,
     "apps/web/src/styles/automation.css": 23,
     "apps/web/src/styles/canvas.css": 4,
