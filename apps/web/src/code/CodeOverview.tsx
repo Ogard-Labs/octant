@@ -429,7 +429,9 @@ function CodeProjectSessions(props: {
       .filter((card) => !navigationIds.has(String(card.threadId)))
       .map((card) => ({ threadId: String(card.threadId), title: card.title, card })),
   ].slice(0, MAX_PROJECT_OVERVIEW_CARDS);
-  const waiting = props.cards.filter((card) => card.status === "waiting").length;
+  // Counted from the rows on the page, not every card the board holds: the
+  // list is capped, and "24 threads · 25 waiting" is not a sentence.
+  const waiting = rows.filter((row) => row.card?.status === "waiting").length;
   const count =
     rows.length === 0
       ? undefined

@@ -308,6 +308,32 @@ describe("CodeOverview", () => {
     expect(screen.queryByText(/does not grant authority/)).not.toBeInTheDocument();
   });
 
+  it("counts waiting threads among the rows it shows, not every card the board holds", async () => {
+    const value = controller();
+    value.navigation = [];
+    value.client = {
+      queryBoard: vi.fn(async () =>
+        boardView(
+          Array.from({ length: 26 }, (_, index) =>
+            boardCard({
+              threadId:
+                `10000000-0000-4000-8000-0000000001${String(index).padStart(2, "0")}` as never,
+              title: `Thread ${index}`,
+              status: "waiting",
+              executing: false,
+            }),
+          ),
+        ),
+      ),
+    } as never;
+    render(
+      <CodeOverview controller={value} onOpenThread={vi.fn()} projectId={ids.project as never} />,
+    );
+
+    // The list is capped at 24 rows; the count describes those rows.
+    expect(await screen.findByText("24 threads · 24 waiting")).toBeVisible();
+  });
+
   it("renames a thread from the keyboard without leaving the overview", async () => {
     const value = controller();
     value.navigation = [navigationThread({ threadId: ids.thread, title: "Controller foundation" })];

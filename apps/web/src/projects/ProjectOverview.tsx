@@ -162,7 +162,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
           >
             {relinkStatus}
           </p>
-          {props.project.type !== "chat" && !archived && allowRootRelink ? (
+          {props.project.type !== "chat" && !archived && !connectionStale && allowRootRelink ? (
             <OctantButton onClick={() => void relink()} size="sm" type="button" variant="ghost">
               {unavailable ? "Choose new root" : "Relink folder"}
             </OctantButton>
