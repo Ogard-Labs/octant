@@ -189,6 +189,38 @@ export const ImageUsageUnits = Schema.Struct({
 export type ImageUsageUnits = typeof ImageUsageUnits.Type;
 export const decodeImageUsageUnits = Schema.decodeUnknownSync(ImageUsageUnits);
 
+export const IMAGE_GENERATION_MAX_CUSTOM_SOURCES = 20;
+
+/**
+ * A user-named (providerInstanceId, modelId) pair on an enabled
+ * `openai-compatible-http` instance that may also generate images
+ * (`docs/decisions/0085`). The instance's own base URL and credential are
+ * reused unchanged; nothing here can point at an arbitrary URL.
+ */
+export const ImageGenerationCustomSource = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(120)),
+}).annotations(strict);
+export type ImageGenerationCustomSource = typeof ImageGenerationCustomSource.Type;
+
+/**
+ * Image generation settings section. Unlike Voice's two fixed slots, a custom
+ * image source has no fixed cardinality, so this is a bounded list rather than
+ * named settings.
+ */
+export const ImageGenerationSettings = Schema.Struct({
+  customSources: Schema.Array(ImageGenerationCustomSource).pipe(
+    Schema.maxItems(IMAGE_GENERATION_MAX_CUSTOM_SOURCES),
+  ),
+}).annotations(strict);
+export type ImageGenerationSettings = typeof ImageGenerationSettings.Type;
+
+export const decodeImageGenerationCustomSource = Schema.decodeUnknownSync(
+  ImageGenerationCustomSource,
+);
+export const decodeImageGenerationSettings = Schema.decodeUnknownSync(ImageGenerationSettings);
+
 /**
  * An enabled image profile the renderer may name. Credentials never appear:
  * only the identity, allowlist, and generation defaults the sheet can honor.
@@ -196,7 +228,7 @@ export const decodeImageUsageUnits = Schema.decodeUnknownSync(ImageUsageUnits);
 export const ImageGenerationProfileView = Schema.Struct({
   instanceId: ProviderInstanceId,
   displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(120)),
-  driverKind: Schema.Literal("openai-image", "gemini-native-image"),
+  driverKind: Schema.Literal("openai-image", "gemini-native-image", "openai-compatible-image"),
   modelAllowlist: Schema.Array(ProviderModelId).pipe(Schema.minItems(1)),
   defaultModel: ProviderModelId,
   quality: Schema.optional(OpenAiImageQuality),

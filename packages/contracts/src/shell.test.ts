@@ -70,6 +70,7 @@ const settings = {
   marketplaceFetchesEnabled: true,
   navigatorAssistant: {},
   voice: {},
+  imageGeneration: { customSources: [] },
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
 

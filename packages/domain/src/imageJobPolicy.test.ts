@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { ImageJob, ProviderInstance } from "@octant/contracts";
+import type { ImageGenerationCustomSource, ImageJob, ProviderInstance } from "@octant/contracts";
 import {
   ImageJobPolicyRejected,
+  assertCustomImageSourceEligible,
   assertImageJobProfileEligible,
   assertImageJobTransitionAllowed,
   isImageJobTerminalStatus,
@@ -83,5 +84,66 @@ describe("image job profile eligibility", () => {
     expect(() => assertImageJobProfileEligible(chat, "gpt-image-2" as ImageJob["modelId"])).toThrow(
       ImageJobPolicyRejected,
     );
+  });
+});
+
+function compatibleInstance(enabled = true): ProviderInstance {
+  return {
+    id: "a1000000-0000-4000-8000-000000000006" as ProviderInstance["id"],
+    displayName: "Recraft",
+    enabled,
+    environmentPolicy: "inherit-host",
+    version: 1 as ProviderInstance["version"],
+    createdAt: timestamp as ProviderInstance["createdAt"],
+    updatedAt: timestamp as ProviderInstance["updatedAt"],
+    driverKind: "openai-compatible",
+    configuration: {
+      kind: "openai-compatible-http",
+      baseUrl: "https://api.recraft.ai/v1",
+      authentication: "bearer",
+      protocol: "auto",
+      manualModelIds: [],
+    },
+  };
+}
+
+describe("custom image source eligibility", () => {
+  it("accepts an enabled compatible instance registered as a custom source", () => {
+    const instance = compatibleInstance();
+    const customSources: ReadonlyArray<ImageGenerationCustomSource> = [
+      { providerInstanceId: instance.id, modelId: "recraftv3" as never, label: "Recraft" },
+    ];
+    assertCustomImageSourceEligible(instance, "recraftv3" as ImageJob["modelId"], customSources);
+  });
+
+  it("refuses a disabled compatible instance", () => {
+    const instance = compatibleInstance(false);
+    const customSources: ReadonlyArray<ImageGenerationCustomSource> = [
+      { providerInstanceId: instance.id, modelId: "recraftv3" as never, label: "Recraft" },
+    ];
+    expect(() =>
+      assertCustomImageSourceEligible(instance, "recraftv3" as ImageJob["modelId"], customSources),
+    ).toThrow(ImageJobPolicyRejected);
+  });
+
+  it("refuses a driver kind that is not openai-compatible", () => {
+    const instance = imageProfile();
+    const customSources: ReadonlyArray<ImageGenerationCustomSource> = [
+      { providerInstanceId: instance.id, modelId: "gpt-image-2" as never, label: "Not compatible" },
+    ];
+    expect(() =>
+      assertCustomImageSourceEligible(
+        instance,
+        "gpt-image-2" as ImageJob["modelId"],
+        customSources,
+      ),
+    ).toThrow(ImageJobPolicyRejected);
+  });
+
+  it("refuses a provider and model pair that was never registered", () => {
+    const instance = compatibleInstance();
+    expect(() =>
+      assertCustomImageSourceEligible(instance, "recraftv3" as ImageJob["modelId"], []),
+    ).toThrow(ImageJobPolicyRejected);
   });
 });
