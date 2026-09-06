@@ -74,8 +74,10 @@ describe("ThemeTypographyProvider", () => {
     expect(systemStyles).toMatch(
       /\.board-card-title\s*\{[^}]*font-size:\s*var\(--octant-ui-font-size\);/s,
     );
+    // Section labels sit on the 12px detail step of the same scale since the
+    // shell frame pass; the step still follows the selected interface size.
     expect(appStyles).toMatch(
-      /\.project-section > \.sidebar-section\s*\{[^}]*font-size:\s*var\(--oct-text-xs\);/s,
+      /\.project-section > \.sidebar-section\s*\{[^}]*font-size:\s*var\(--oct-text-detail\);/s,
     );
     expect(appStyles).toMatch(
       /\.workspace-pane__grip\s*\{[^}]*font-family:\s*var\(--oct-font-display\);[^}]*font-size:\s*var\(--oct-text-xs\);/s,
