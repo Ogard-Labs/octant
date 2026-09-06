@@ -89,19 +89,23 @@ Titles and the hero use `--oct-tracking-tight` (-0.025em); section labels use
 Neutral graphite, a monochrome accent, a monochrome keyboard focus ring, four statuses. Text is three greys (primary,
 secondary, muted) and never a fourth. Hairlines separate; fills select. The
 focus ring is painted once, by the global `:focus-visible` rule, as a
-two-pixel halo of the foreground at reduced opacity on every theme: a
-coloured ring read as a website's link outline, not an app control. A field
-recipe does not add a second border or halo of its own. See
+hairline gap in the background then a muted ring tight to the control: a
+coloured ring reads as a website's link outline, and a wide soft halo reads
+as a web page, not an app. A recipe does not add a focus treatment of its
+own, and the shared rule imposes no radius — the ring follows whatever
+corner the control already has (0086). See
 "Colour system" for the token table. On the marketing site the same three
 greys and the same hairline carry the hierarchy on a white or graphite ground.
 
 ### Shapes and depth
 
-Radius is 10px for controls, 16px for cards and menus, 20px for the composer
-and dialogs. A surface is flat by default. Elevation means one of three
-things and nothing else: a raised discrete object (`--octant-shadow-sm`), the
-composer (`--octant-shadow-md`), or an overlay (`--octant-shadow-overlay`).
-Groups, lists, empty states, and headers are never cards.
+Radius derives from one `--radius` root: a control is the `lg` step, a card or
+menu the `xl` step, and a compact control clamps below both. The composer and
+dialogs stay at 20px. A surface is flat by default. A discrete object is
+bounded by a hairline ring, not lifted; shadow means something that genuinely
+floats — the composer (`--octant-shadow-md`) or an overlay
+(`--octant-shadow-overlay`). Groups, lists, empty states, and headers are
+never cards.
 
 ### Page shell
 
@@ -145,7 +149,7 @@ There is one runtime theme authority and one owned control layer:
 | Static product system | Layout, shell geometry, type scale, spacing, motion, domain surface recipes, and `--oct-*` consumers              | `apps/web/src/styles/octant.css`                                           |
 | Runtime bridge        | Maps theme-resolvable `--octant-*` roles to the static system's `--oct-*` roles                                   | `apps/web/src/styles/octant-bridge.css`                                    |
 | shadcn projection     | Projects `--octant-*` roles into `--background`, `--primary`, `--border`, and the other shadcn/Tailwind variables | `apps/web/src/styles/shadcn-theme.css`, `apps/web/src/styles/tailwind.css` |
-| Owned recipes         | Editable shadcn New York recipes and the product-facing adapter API                                               | `apps/web/src/ui/shadcn/`, `apps/web/src/ui/base/`                         |
+| Owned recipes         | Editable Base UI-native shadcn recipes and the product-facing adapter API                                         | `apps/web/src/ui/shadcn/`, `apps/web/src/ui/base/`                         |
 
 The import order in `apps/web/src/styles.css` is load-bearing:
 
@@ -182,9 +186,10 @@ skips `composer-input`, the system prompt (0038), because that surface is
 already painted twice; the rule still holds for it — feature CSS must not
 repaint it a third time — it is simply not machine-checked.
 
-The shadcn registry metadata is in `apps/web/components.json` (`new-york`,
+The shadcn registry metadata is in `apps/web/components.json` (`base-nova`,
 Tailwind v4, CSS variables, Lucide). The checked-in recipes are owned source
-and currently use `@base-ui/react` primitives behind the Octant adapters. This
+and use `@base-ui/react` primitives behind the Octant adapters; 0085 settles
+the style, its density, and the three divergences kept from it. This
 keeps the interaction backend accessible and editable while preserving the
 shadcn composition and visual vocabulary. Feature code imports `ui/base`, not
 `ui/shadcn` or `@base-ui/react` directly. Project and split-workspace context
@@ -382,8 +387,8 @@ is the thread's own state (Running, Done, Waiting, In progress, Ready) with
 changed lines, and the facts line names the Project, the branch (marked
 worktree when managed), the linked pull request with its number and state as
 a chip, and the provider last. Picking an item fills the prompt and attaches
-the issue as the thread's Create from context. The start screen has no image control: image generation lives on
-its own surface.
+the issue as the thread's Create from context. The start screen has no image-generation control: generation lives on
+its own surface. Attaching an image is a composer affordance and is available here.
 The prompt itself is frameless:
 `OctantTextarea` drops the shadcn field recipe when it wears `.composer-input`.
 Composer-row selects drop the same field chrome. Feature CSS must not
@@ -574,11 +579,10 @@ Switch, Slider, Checkbox, ToggleGroup, Tabs, DropdownMenu, ContextMenu, Dialog,
 and Tooltip. Composition rules:
 
 - Buttons use `OctantButton` or `OctantIconButton`; variants are default,
-  destructive, destructive-outline, outline, secondary, ghost, and link.
-  Destructive-outline names a risky action on an ordinary page; the filled
-  destructive variant is reserved for the final confirmation. Sizes are
-  default, sm, lg, and icon. Icon-only buttons always have an accessible label
-  and tooltip/title.
+  destructive, outline, secondary, ghost, and link. Destructive is a tonal
+  fill, not a solid one: a red slab reads as the page's subject rather than one
+  action on it. Sizes are xs, sm, default, lg, icon, icon-xs, and icon-sm.
+  Icon-only buttons always have an accessible label and tooltip/title.
 - Form layouts use `OctantFieldGroup` and `OctantField`; labels, descriptions,
   and errors remain associated with their controls. Invalid state uses
   `data-invalid` and `aria-invalid`.

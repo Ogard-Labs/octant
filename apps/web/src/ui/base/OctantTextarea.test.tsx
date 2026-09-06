@@ -6,8 +6,7 @@ describe("OctantTextarea", () => {
   it("wears the field recipe on an ordinary form field", () => {
     render(<OctantTextarea aria-label="Notes" />);
     const field = screen.getByRole("textbox", { name: "Notes" });
-    expect(field.className).toContain("rounded-md");
-    expect(field.className).toContain("shadow-xs");
+    expect(field.className).toContain("rounded-lg");
     expect(field.className).toContain("border-input");
   });
 
@@ -15,9 +14,17 @@ describe("OctantTextarea", () => {
     render(<OctantTextarea aria-label="First message" className="composer-input" />);
     const field = screen.getByRole("textbox", { name: "First message" });
     expect(field.className).toContain("composer-input");
-    expect(field.className).not.toContain("rounded-md");
-    expect(field.className).not.toContain("shadow-xs");
+    expect(field.className).not.toContain("rounded-lg");
     expect(field.className).not.toContain("border-input");
-    expect(field.className).not.toContain("focus-visible:ring-[3px]");
+  });
+
+  it("leaves keyboard focus to the one ring the app paints", () => {
+    // Focus is a single global treatment (0086). A recipe that painted its own
+    // would swap an app control's crisp ring for the style's wide soft halo,
+    // one control at a time.
+    render(<OctantTextarea aria-label="Notes" />);
+    const field = screen.getByRole("textbox", { name: "Notes" });
+    expect(field.className).not.toContain("focus-visible:ring");
+    expect(field.className).not.toContain("focus-visible:border");
   });
 });
