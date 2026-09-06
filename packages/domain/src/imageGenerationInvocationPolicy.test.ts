@@ -59,6 +59,20 @@ function bflImage(): ProviderInstance {
   };
 }
 
+function ideogramImage(): ProviderInstance {
+  return {
+    ...openAiImage(),
+    id: "a1000000-0000-4000-8000-000000000009" as ProviderInstance["id"],
+    displayName: "Ideogram",
+    driverKind: "ideogram-image",
+    configuration: {
+      kind: "ideogram-image-http",
+      modelAllowlist: ["ideogram-v3" as never],
+      defaultModel: "ideogram-v3" as never,
+    },
+  };
+}
+
 function chatProvider(enabled = true): ProviderInstance {
   return {
     ...openAiImage(enabled),
@@ -83,12 +97,14 @@ describe("eligible image profiles", () => {
       openAiImage(),
       geminiImage(),
       bflImage(),
+      ideogramImage(),
       chatProvider(),
     ]);
     expect(profiles.map((profile) => profile.displayName)).toEqual([
       "OpenAI Image",
       "Gemini Image",
       "FLUX",
+      "Ideogram",
     ]);
     expect(hasEligibleImageProfile([chatProvider(), openAiImage(false)])).toBe(false);
     expect(hasEligibleImageProfile([openAiImage()])).toBe(true);
@@ -103,6 +119,19 @@ describe("eligible image profiles", () => {
         driverKind: "bfl-image",
         modelAllowlist: ["flux-pro-1.1"],
         defaultModel: "flux-pro-1.1",
+      },
+    ]);
+  });
+
+  it("lists an Ideogram image profile with no quality, size, or aspect ratio fields", () => {
+    const profiles = listEligibleImageProfiles([ideogramImage()]);
+    expect(profiles).toEqual([
+      {
+        instanceId: ideogramImage().id,
+        displayName: "Ideogram",
+        driverKind: "ideogram-image",
+        modelAllowlist: ["ideogram-v3"],
+        defaultModel: "ideogram-v3",
       },
     ]);
   });
@@ -196,6 +225,15 @@ describe("generation options a selected model can honor", () => {
       supportsReferences: false,
     });
   });
+
+  it("allows Ideogram up to Octant's own variant ceiling, unlike BFL's single-image constraint", () => {
+    const options = honoredImageGenerationOptions("ideogram-image-http");
+    expect(options).toEqual({
+      kind: "ideogram-image-http",
+      maxVariants: 4,
+      supportsReferences: false,
+    });
+  });
 });
 
 describe("image generation configuration kind", () => {
@@ -208,6 +246,7 @@ describe("image generation configuration kind", () => {
       "openai-compatible-http",
     );
     expect(imageGenerationConfigurationKind("bfl-image")).toBe("bfl-image-http");
+    expect(imageGenerationConfigurationKind("ideogram-image")).toBe("ideogram-image-http");
   });
 });
 

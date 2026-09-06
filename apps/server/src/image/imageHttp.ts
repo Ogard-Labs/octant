@@ -6,6 +6,7 @@ const MAX_RETRY_AFTER_MS = 3_600_000;
 export const OPENAI_IMAGE_API_BASE_URL = "https://api.openai.com/v1";
 export const GEMINI_IMAGE_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 export const BFL_IMAGE_API_BASE_URL = "https://api.bfl.ai";
+export const IDEOGRAM_IMAGE_API_BASE_URL = "https://api.ideogram.ai";
 
 /**
  * How a provider's credential becomes a request header. A plain union of
@@ -13,11 +14,13 @@ export const BFL_IMAGE_API_BASE_URL = "https://api.bfl.ai";
  * prefix) joined `Authorization: Bearer` and `x-goog-api-key`: this
  * descriptor lets `performImageHttpRequest` build any of them generically
  * instead of growing another hardcoded literal and if-branch per vendor.
+ * `Api-Key` is Ideogram's own raw header (`docs/decisions/0087`).
  */
 export type ImageHttpAuth =
   | { readonly header: "authorization"; readonly scheme: "Bearer" }
   | { readonly header: "x-goog-api-key" }
-  | { readonly header: "x-key" };
+  | { readonly header: "x-key" }
+  | { readonly header: "Api-Key" };
 
 export type ImageHttpFetch = (
   input: string | URL | Request,
@@ -132,7 +135,7 @@ export async function performImageHttpRequest(request: ImageHttpRequest): Promis
 /**
  * The one bounded exception to "reject URL forms" (`docs/decisions/0086`): a
  * single GET to a URL a provider's own just-completed authenticated call
- * returned (BFL's `result.sample`, and Ideogram's equivalent next). No
+ * returned (BFL's `result.sample`, and Ideogram's `data[].url`). No
  * redirects, the same size and time bounds as any other image fetch, and the
  * URL itself never outlives this call — callers must not log or store it.
  */

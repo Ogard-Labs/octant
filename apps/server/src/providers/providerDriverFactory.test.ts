@@ -139,7 +139,7 @@ describe("makeProviderDriver", () => {
     expect(fixture.piStart).not.toHaveBeenCalled();
   });
 
-  it.each(["openai-image", "gemini-native-image", "bfl-image"] as const)(
+  it.each(["openai-image", "gemini-native-image", "bfl-image", "ideogram-image"] as const)(
     "refuses to construct a chat driver for an %s image profile",
     (driverKind) => {
       const fixture = factoryFixture();
@@ -148,7 +148,9 @@ describe("makeProviderDriver", () => {
           ? "GPT Image"
           : driverKind === "gemini-native-image"
             ? "Gemini Image"
-            : "FLUX";
+            : driverKind === "bfl-image"
+              ? "FLUX"
+              : "Ideogram";
       const configuration =
         driverKind === "openai-image"
           ? {
@@ -162,11 +164,17 @@ describe("makeProviderDriver", () => {
                 modelAllowlist: ["gemini-3.1-flash-image"],
                 defaultModel: "gemini-3.1-flash-image",
               }
-            : {
-                kind: "bfl-image-http" as const,
-                modelAllowlist: ["flux-pro-1.1"],
-                defaultModel: "flux-pro-1.1",
-              };
+            : driverKind === "bfl-image"
+              ? {
+                  kind: "bfl-image-http" as const,
+                  modelAllowlist: ["flux-pro-1.1"],
+                  defaultModel: "flux-pro-1.1",
+                }
+              : {
+                  kind: "ideogram-image-http" as const,
+                  modelAllowlist: ["ideogram-v3"],
+                  defaultModel: "ideogram-v3",
+                };
       const instance = decodeProviderInstance({
         id: instanceId,
         displayName,
