@@ -172,6 +172,63 @@ export const DEFAULT_SIDEBAR_BACKGROUND: SidebarBackground = Schema.decodeSync(S
   vibrancyMode: "subtle",
 });
 
+// The application ground: the theme's own animated pattern, a photo from the
+// shared background image store, or the plain page. A photo reuses the sidebar
+// background id because both point at one image library on the host; the
+// ground does not keep a second copy. The tuning fields travel with every
+// kind so switching away and back keeps what a person dialled in; each is
+// optional on the wire so rows written before it existed still decode.
+export const AppBackgroundKind = Schema.Literal("theme", "photo", "none");
+export type AppBackgroundKind = typeof AppBackgroundKind.Type;
+
+/** Where the ground shows: behind the start screens only, or behind everything. */
+export const AppBackgroundScope = Schema.Literal("welcome", "everywhere");
+export type AppBackgroundScope = typeof AppBackgroundScope.Type;
+
+export const AppBackgroundPercent = Schema.Int.pipe(Schema.between(0, 100));
+export type AppBackgroundPercent = typeof AppBackgroundPercent.Type;
+
+const AppBackgroundTuning = {
+  /** How much of the pattern shows over the ground; 0 hides it. */
+  patternOpacity: Schema.optionalWith(AppBackgroundPercent, { default: () => 55 }),
+  /** How fast the pattern drifts; 0 holds it still. */
+  patternSpeed: Schema.optionalWith(AppBackgroundPercent, { default: () => 50 }),
+  /** How much of the field the pattern fills at its densest. */
+  patternIntensity: Schema.optionalWith(AppBackgroundPercent, { default: () => 60 }),
+  /** How much of a photo shows through the page. */
+  photoOpacity: Schema.optionalWith(AppBackgroundPercent, { default: () => 42 }),
+  scope: Schema.optionalWith(AppBackgroundScope, { default: () => "welcome" as const }),
+  /** Whether an everywhere ground also runs under the sidebar. */
+  coversSidebar: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+};
+
+const ThemeAppBackground = Schema.Struct({
+  kind: Schema.Literal("theme"),
+  ...AppBackgroundTuning,
+}).annotations(strict);
+
+const PhotoAppBackground = Schema.Struct({
+  kind: Schema.Literal("photo"),
+  backgroundId: SidebarBackgroundId,
+  ...AppBackgroundTuning,
+}).annotations(strict);
+
+const NoneAppBackground = Schema.Struct({
+  kind: Schema.Literal("none"),
+  ...AppBackgroundTuning,
+}).annotations(strict);
+
+export const AppBackground = Schema.Union(
+  ThemeAppBackground,
+  PhotoAppBackground,
+  NoneAppBackground,
+);
+export type AppBackground = typeof AppBackground.Type;
+
+export const DEFAULT_APP_BACKGROUND: AppBackground = Schema.decodeSync(AppBackground)({
+  kind: "theme",
+});
+
 export const ThemeSettings = Schema.Struct({
   mode: ThemeMode,
   lightPresetId: Schema.optional(ThemePresetId),
@@ -183,6 +240,11 @@ export const ThemeSettings = Schema.Struct({
   typography: ThemeTypography,
   semanticOverrides: ThemeSemanticOverrides,
   sidebarBackground: SidebarBackground,
+  // Optional on the wire so journal events and projection rows written before
+  // the application background existed still replay; they decode to the default.
+  appBackground: Schema.optionalWith(AppBackground, {
+    default: () => DEFAULT_APP_BACKGROUND,
+  }),
   increasedContrast: Schema.Boolean,
   reducedMotion: Schema.Boolean,
   reducedTransparency: Schema.Boolean,
@@ -223,6 +285,7 @@ export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   },
   semanticOverrides: [],
   sidebarBackground: DEFAULT_SIDEBAR_BACKGROUND,
+  appBackground: DEFAULT_APP_BACKGROUND,
   increasedContrast: false,
   reducedMotion: false,
   reducedTransparency: false,
@@ -369,6 +432,7 @@ export const decodeThemeFailure = Schema.decodeUnknownSync(ThemeFailure);
 export const decodeSidebarBackgroundId = Schema.decodeUnknownSync(SidebarBackgroundId);
 export const decodeSidebarBackgroundPresetId = Schema.decodeUnknownSync(SidebarBackgroundPresetId);
 export const decodeSidebarBackground = Schema.decodeUnknownSync(SidebarBackground);
+export const decodeAppBackground = Schema.decodeUnknownSync(AppBackground);
 export const decodeSidebarBackgroundMetadata = Schema.decodeUnknownSync(SidebarBackgroundMetadata);
 export const decodeSidebarBackgroundUploadResult = Schema.decodeUnknownSync(
   SidebarBackgroundUploadResult,

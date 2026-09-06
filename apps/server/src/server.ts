@@ -6551,6 +6551,7 @@ export function startOctantServer(
       windowAuthorityStore,
       currentSidebarBackground: () =>
         persistence.readShellSettings()?.settings.sidebarBackground ?? null,
+      currentAppBackground: () => persistence.readThemeSettings()?.settings.appBackground ?? null,
     });
 
     // One route chain is shared by the loopback listener and the authenticated

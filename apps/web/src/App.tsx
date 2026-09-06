@@ -95,6 +95,7 @@ import {
   enforceAccessibilitySettings,
   enforceSidebarBackgroundAccessibility,
   resolveEffectiveSidebarBackground,
+  resolveAppBackground,
 } from "@octant/domain/theme-policy";
 import {
   buildModelPickerGroups,
@@ -199,12 +200,15 @@ import {
   useReleaseRingSync,
   useHostReportedSidebarVibrancy,
   useNarrowViewport,
+  useBackgroundImageLibrary,
+  usePrefersReducedMotion,
   useResolvedMaterial,
   useSidebarBackgroundFetcher,
   useSidebarVibrancyModeSync,
   useSidebarVibrancySupported,
   writeSidebarCollapsed,
 } from "./shell/useShellPresentation";
+import { AppBackdrop } from "./theme/AppBackdrop";
 import { useThreadUtilityPresentation } from "./shell/useThreadUtilityPresentation";
 import {
   codeThreadActivity,
@@ -685,6 +689,48 @@ function LaunchedShell(
     presentedShellSettings?.sidebarBackground.vibrancyMode ?? "off",
     sidebarVibrancySupported,
   );
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const resolvedAppBackground = useMemo(
+    () =>
+      accessibleThemeDraft === undefined
+        ? undefined
+        : resolveAppBackground(accessibleThemeDraft, prefersReducedMotion),
+    [accessibleThemeDraft, prefersReducedMotion],
+  );
+  const backgroundImageLibrary = useBackgroundImageLibrary(
+    props.launch.serverUrl,
+    props.projectWindowCapability,
+    sidebarBackgroundFetcher,
+  );
+  // One ground, drawn in one place: under each start screen when its scope
+  // is the welcome, or once under the whole shell when it is everywhere.
+  const welcomeBackdrop = useMemo(
+    () =>
+      resolvedAppBackground === undefined ||
+      resolvedAppBackground.kind === "none" ||
+      resolvedAppBackground.scope !== "welcome" ? undefined : (
+        <AppBackdrop
+          fetcher={sidebarBackgroundFetcher}
+          placement="welcome"
+          resolved={resolvedAppBackground}
+        />
+      ),
+    [resolvedAppBackground, sidebarBackgroundFetcher],
+  );
+  const shellBackdrop = useMemo(
+    () =>
+      resolvedAppBackground === undefined ||
+      resolvedAppBackground.kind === "none" ||
+      resolvedAppBackground.scope !== "everywhere" ? undefined : (
+        <AppBackdrop
+          fetcher={sidebarBackgroundFetcher}
+          placement="shell"
+          resolved={resolvedAppBackground}
+        />
+      ),
+    [resolvedAppBackground, sidebarBackgroundFetcher],
+  );
+  const shellBackdropCoversSidebar = resolvedAppBackground?.coversSidebar === true;
   const zen = useZenController({
     ...(props.zenClient === undefined ? {} : { client: props.zenClient }),
     serverUrl: props.launch.serverUrl,
@@ -4376,6 +4422,7 @@ function LaunchedShell(
       usageClient={usageClient}
       {...(providerUsageLimitsClient === undefined ? {} : { providerUsageLimitsClient })}
       visibleSettings={controller.visibleSettings}
+      backgroundImageLibrary={backgroundImageLibrary}
       announcement={controller.announcement}
       announcementSequence={controller.announcementSequence}
     />
@@ -4540,6 +4587,9 @@ function LaunchedShell(
         standaloneSurface={
           controller.settingsOpen ? settingsSurface : usageOpen ? usageSurface : undefined
         }
+        {...(shellBackdrop === undefined
+          ? {}
+          : { backdrop: shellBackdrop, backdropCoversSidebar: shellBackdropCoversSidebar })}
         {...(props.availableFonts === undefined ? {} : { availableFonts: props.availableFonts })}
         {...(themeController.draft?.typography === undefined && props.typography === undefined
           ? {}
@@ -5076,6 +5126,7 @@ function LaunchedShell(
                 >
                   <ComposerContextMeterShortcut />
                   <WorkspaceView
+                    {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}
                     draftResetRevision={draftResetRevision}
                     draftProjectSelection={draftProjectSelection}
                     onDraftSelectProject={(mode, projectId) => {

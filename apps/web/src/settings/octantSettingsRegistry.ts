@@ -120,6 +120,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "sidebar background image preset gradient custom upload overlay color opacity vibrancy",
         },
         {
+          id: settingId("app-background"),
+          label: "Background",
+          scope: "app",
+          keywords:
+            "background ground welcome start screen everywhere sidebar theme pattern dither photo image upload opacity speed intensity none",
+        },
+        {
           id: settingId("theme-mode"),
           label: "Theme mode",
           scope: "app",

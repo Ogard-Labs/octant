@@ -247,7 +247,10 @@ export class SidebarBackgroundStore {
     if (!(await exists(metaPath)) || !(await exists(binPath))) {
       throw new SidebarBackgroundNotFound(decodedId);
     }
-    return this.readMetadata(decodedId);
+    // The sidecar carries the content hash for the store's own integrity
+    // check; the wire contract does not, and a strict client refuses the
+    // extra field, so the upload reply is the contract shape only.
+    return toContractMetadata(await this.readMetadata(decodedId));
   }
 
   private async readMetadata(decodedId: SidebarBackgroundId): Promise<BackgroundSidecar> {

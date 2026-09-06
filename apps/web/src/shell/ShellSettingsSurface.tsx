@@ -24,6 +24,7 @@ import type { ImplementedSettingId } from "./useShellController";
 import { ShellState } from "./ShellState";
 import { ShellThemeRoot } from "./ShellFrame";
 import type { OctantHostBridge } from "./hostBridge";
+import type { BackgroundImageLibrary } from "../settings/AppBackgroundSettings";
 
 const LazySettingsView = lazy(async () => {
   const module = await import("./SettingsView");
@@ -67,6 +68,7 @@ export interface ShellSettingsSurfaceProps {
   readonly usageClient: UsageClient;
   readonly providerUsageLimitsClient?: ProviderUsageLimitsClient;
   readonly visibleSettings: ReadonlyArray<ImplementedSettingId>;
+  readonly backgroundImageLibrary?: BackgroundImageLibrary;
   readonly announcement: string;
   readonly announcementSequence: number;
   readonly extensionClient: ExtensionClient;
@@ -120,6 +122,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             settings={props.settings}
             sidebarVibrancySupported={props.sidebarVibrancySupported}
             themeController={props.themeController}
+            {...(props.backgroundImageLibrary === undefined
+              ? {}
+              : { backgroundImageLibrary: props.backgroundImageLibrary })}
             diagnosticsExportClient={props.diagnosticsExportClient}
             hostControlClient={props.hostControlClient}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}

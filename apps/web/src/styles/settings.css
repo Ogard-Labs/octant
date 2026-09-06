@@ -2091,3 +2091,63 @@ textarea.settings-view__text-input {
 .code-settings .settings-card-section--open > .provider-settings__alert {
   margin-top: var(--oct-space-3);
 }
+
+/* Welcome background: the photo in use is a small frame beside two icon
+   buttons, upload and library; the library opens as a popover grid whose
+   pictures reuse the preset swatch as a radio, sized for a picture. */
+.settings-app-background__photo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-app-background__thumb {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 28px;
+  overflow: hidden;
+  color: var(--octant-text-secondary);
+  background: var(--octant-control);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+.settings-app-background__thumb img,
+.settings-view__preset-swatch--photo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.settings-app-background__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 64px);
+  gap: 8px;
+  padding: 4px;
+}
+
+.settings-view__preset-swatch--photo {
+  width: 64px;
+  height: 40px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.settings-app-background__note {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: calc(11 * var(--oct-text-step));
+  line-height: 1.4;
+}
+
+.settings-app-background__file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
