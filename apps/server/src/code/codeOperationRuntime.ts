@@ -1408,7 +1408,18 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               }
             : {}),
           persistEvent: (event) => Effect.sync(() => this.#persistNormalized(active, event)),
-          persistOutcome: (outcome) => Effect.sync(() => this.#persistOutcome(active, outcome)),
+          persistOutcome: (outcome, failure) =>
+            Effect.sync(() => {
+              const message =
+                failure === undefined || outcome !== "failed"
+                  ? undefined
+                  : boundProviderFailureMessage(failure.message);
+              this.#persistOutcome(
+                active,
+                outcome,
+                message === undefined ? undefined : { category: "failed", message },
+              );
+            }),
         }),
       ),
     )
