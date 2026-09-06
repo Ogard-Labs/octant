@@ -7,6 +7,7 @@ import {
   decodeCodeFileId,
   decodeCodeFileReference,
   decodeCodeRepositoryId,
+  decodeCodeRuntimeWork,
   decodeCodeThread,
   decodeCodeThreadId,
   decodeCodeWorktreeSourcePreview,
@@ -3550,3 +3551,252 @@ function eventEnvelope(
     payload,
   };
 }
+
+describe("completing and snoozing a Code thread", () => {
+  const providerTurn = (state: "running" | "waiting" | "completed") => [
+    {
+      work: decodeCodeRuntimeWork({
+        id: testUuid(31),
+        threadId: ids.thread,
+        kind: "provider-turn",
+        state,
+        updatedAt: now,
+      }),
+      firstSequence: 1,
+    },
+  ];
+  const later = "2026-07-21T09:00:00.000Z";
+  const laterAt = decodeUtcTimestamp(later);
+  const nowAt = decodeUtcTimestamp(now);
+
+  it("puts a finished thread away: completion is stamped and the pin and snooze are dropped", async () => {
+    const fixture = serviceFixture({
+      threads: [thread({ pinned: true, snooze: { until: laterAt, at: nowAt } })],
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "complete-code-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).resolves.toMatchObject({
+      kind: "thread-updated",
+      thread: { completedAt: now, version: 2 },
+    });
+    const appended = fixture.persistence.journal.append.mock.calls.at(-1)?.[0];
+    expect(appended).toMatchObject({ expectedVersion: 1 });
+    const recorded = (appended as { events: Array<{ payload: { thread: unknown } }> }).events[0]
+      ?.payload.thread as Record<string, unknown>;
+    expect(recorded.completedAt).toBe(now);
+    expect("pinned" in recorded).toBe(false);
+    expect("snooze" in recorded).toBe(false);
+  });
+
+  it("refuses to complete a thread while its turn runs or while it waits on the person", async () => {
+    const running = serviceFixture();
+    running.persistence.readCodeRuntimeWorks.mockReturnValue(providerTurn("running"));
+    await expect(
+      running.service.execute(ids.window, {
+        kind: "complete-code-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid", message: /running turn/ } });
+
+    const waiting = serviceFixture();
+    waiting.persistence.readCodeRuntimeWorks.mockReturnValue(providerTurn("waiting"));
+    await expect(
+      waiting.service.execute(ids.window, {
+        kind: "complete-code-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid", message: /waiting on you/ } });
+    expect(running.persistence.journal.append).not.toHaveBeenCalled();
+    expect(waiting.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("reopens a completed thread and wakes a snoozed one back into play", async () => {
+    const completed = serviceFixture({ threads: [thread({ completedAt: nowAt })] });
+    await expect(
+      completed.service.execute(ids.window, {
+        kind: "reopen-code-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).resolves.toMatchObject({ kind: "thread-updated", thread: { version: 2 } });
+    const reopened = (
+      completed.persistence.journal.append.mock.calls.at(-1)?.[0] as {
+        events: Array<{ payload: { thread: Record<string, unknown> } }>;
+      }
+    ).events[0]?.payload.thread;
+    expect(reopened).not.toHaveProperty("completedAt");
+
+    const snoozed = serviceFixture({
+      threads: [thread({ snooze: { until: laterAt, at: nowAt } })],
+    });
+    await expect(
+      snoozed.service.execute(ids.window, {
+        kind: "wake-code-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).resolves.toMatchObject({ kind: "thread-updated", thread: { version: 2 } });
+    const woken = (
+      snoozed.persistence.journal.append.mock.calls.at(-1)?.[0] as {
+        events: Array<{ payload: { thread: Record<string, unknown> } }>;
+      }
+    ).events[0]?.payload.thread;
+    expect(woken).not.toHaveProperty("snooze");
+  });
+
+  it("snoozes a running thread and remembers that a turn was under way", async () => {
+    const fixture = serviceFixture();
+    fixture.persistence.readCodeRuntimeWorks.mockReturnValue(providerTurn("running"));
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "snooze-code-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        until: later,
+      }),
+    ).resolves.toMatchObject({
+      kind: "thread-updated",
+      thread: { snooze: { until: later, at: now, duringTurn: true }, version: 2 },
+    });
+
+    const idle = serviceFixture();
+    await expect(
+      idle.service.execute(ids.window, {
+        kind: "snooze-code-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        until: later,
+      }),
+    ).resolves.toMatchObject({ thread: { snooze: { until: later, at: now } } });
+    const recorded = (
+      idle.persistence.journal.append.mock.calls.at(-1)?.[0] as {
+        events: Array<{ payload: { thread: { snooze: Record<string, unknown> } } }>;
+      }
+    ).events[0]?.payload.thread.snooze;
+    expect(recorded).not.toHaveProperty("duringTurn");
+  });
+
+  it("refuses to snooze a thread that waits on the person or past a wake time already gone", async () => {
+    const waiting = serviceFixture();
+    waiting.persistence.readCodeRuntimeWorks.mockReturnValue(providerTurn("waiting"));
+    await expect(
+      waiting.service.execute(ids.window, {
+        kind: "snooze-code-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        until: later,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid", message: /waiting on you/ } });
+
+    const stale = serviceFixture();
+    await expect(
+      stale.service.execute(ids.window, {
+        kind: "snooze-code-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        until: "2026-07-20T22:00:00.000Z",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid", message: /still ahead/ } });
+  });
+
+  it("brings a completed or snoozed thread back when a person sends it a turn, and journals nothing otherwise", () => {
+    const resting = serviceFixture({
+      threads: [thread({ completedAt: nowAt, snooze: { until: laterAt, at: nowAt } })],
+    });
+    resting.service.noteProviderTurnRequested(ids.thread);
+    const appended = resting.persistence.journal.append.mock.calls.at(-1)?.[0] as {
+      expectedVersion: number;
+      events: Array<{ eventName: string; payload: { thread: Record<string, unknown> } }>;
+    };
+    expect(appended.expectedVersion).toBe(1);
+    expect(appended.events[0]?.eventName).toBe("code.thread-updated@1");
+    expect(appended.events[0]?.payload.thread).not.toHaveProperty("completedAt");
+    expect(appended.events[0]?.payload.thread).not.toHaveProperty("snooze");
+    expect(appended.events[0]?.payload.thread.version).toBe(2);
+
+    const inPlay = serviceFixture();
+    inPlay.service.noteProviderTurnRequested(ids.thread);
+    expect(inPlay.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("re-reads once when the thread changed under the reset, and gives up after that", () => {
+    const raced = serviceFixture({ threads: [thread({ completedAt: nowAt })] });
+    raced.persistence.readCodeThread
+      .mockReturnValueOnce(thread({ completedAt: nowAt }))
+      .mockReturnValueOnce(thread({ completedAt: nowAt, version: 2 as never }));
+    raced.persistence.journal.append.mockImplementationOnce(() => {
+      throw new ConcurrencyConflict({
+        aggregateType: "code-thread",
+        aggregateId: String(ids.thread),
+        expectedVersion: 1,
+        actualVersion: 2,
+      });
+    });
+    raced.service.noteProviderTurnRequested(ids.thread);
+    expect(raced.persistence.journal.append).toHaveBeenCalledTimes(2);
+    expect(raced.persistence.journal.append).toHaveBeenLastCalledWith(
+      expect.objectContaining({ expectedVersion: 2 }),
+    );
+
+    const stuck = serviceFixture({ threads: [thread({ completedAt: nowAt })] });
+    stuck.persistence.journal.append.mockImplementation(() => {
+      throw new ConcurrencyConflict({
+        aggregateType: "code-thread",
+        aggregateId: String(ids.thread),
+        expectedVersion: 1,
+        actualVersion: 3,
+      });
+    });
+    expect(() => stuck.service.noteProviderTurnRequested(ids.thread)).toThrow();
+  });
+
+  it("archives a completed thread on the host's timer only once its completion is old enough", () => {
+    const sessionAuthority = new CodeSessionAuthorityStore();
+    const revoke = vi.spyOn(sessionAuthority, "revokeThreadEverywhere");
+    const fixture = serviceFixture({
+      threads: [thread({ completedAt: decodeUtcTimestamp("2026-07-13T23:00:00.000Z") })],
+      sessionAuthority,
+    });
+
+    expect(
+      fixture.service.archiveCompletedThread(ids.thread, {
+        afterDays: 7,
+        now: "2026-07-20T22:00:00.000Z",
+      }),
+    ).toEqual({ status: "skipped", reason: "not-due" });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+
+    expect(fixture.service.archiveCompletedThread(ids.thread, { afterDays: 7, now })).toEqual({
+      status: "archived",
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        expectedVersion: 1,
+        events: [
+          expect.objectContaining({
+            eventName: "code.thread-updated@1",
+            // The host's timer writes as the system, not as the person.
+            actor: expect.objectContaining({ kind: "system" }),
+            payload: expect.objectContaining({
+              thread: expect.objectContaining({
+                lifecycle: "archived",
+                completedAt: "2026-07-13T23:00:00.000Z",
+              }),
+            }),
+          }),
+        ],
+      }),
+    );
+    expect(revoke).toHaveBeenCalledWith(ids.thread);
+    expect(
+      fixture.service.archiveCompletedThread(ids.unauthorizedThread, { afterDays: 7, now }),
+    ).toEqual({ status: "skipped", reason: "not-found" });
+  });
+});

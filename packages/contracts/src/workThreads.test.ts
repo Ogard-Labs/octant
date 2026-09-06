@@ -228,3 +228,44 @@ describe("work thread contracts", () => {
     expect(() => decodeWorkspaceTab({ ...tab, mode: "chat" })).toThrow();
   });
 });
+
+describe("Work thread rest commands", () => {
+  it("decodes complete, reopen, snooze, and wake, and a thread that carries its rest", () => {
+    for (const kind of [
+      "complete-work-thread",
+      "reopen-work-thread",
+      "wake-work-thread",
+    ] as const) {
+      expect(decodeWorkThreadCommand({ kind, threadId: ids.thread, expectedVersion: 1 })).toEqual({
+        kind,
+        threadId: ids.thread,
+        expectedVersion: 1,
+      });
+    }
+    expect(
+      decodeWorkThreadCommand({
+        kind: "snooze-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        until: "2026-01-02T09:00:00.000Z",
+      }),
+    ).toMatchObject({ kind: "snooze-work-thread", until: "2026-01-02T09:00:00.000Z" });
+    expect(() =>
+      decodeWorkThreadCommand({
+        kind: "snooze-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).toThrow();
+    expect(
+      decodeWorkThread({
+        ...threadFixture,
+        completedAt: "2026-01-01T09:00:00.000Z",
+        snooze: { until: "2026-01-02T09:00:00.000Z", at: "2026-01-01T09:00:00.000Z" },
+      }),
+    ).toMatchObject({
+      completedAt: "2026-01-01T09:00:00.000Z",
+      snooze: { until: "2026-01-02T09:00:00.000Z" },
+    });
+  });
+});

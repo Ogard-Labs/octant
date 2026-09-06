@@ -180,6 +180,7 @@ describe("Journal", () => {
         firstRunOnboarding: "pending",
         automaticUpdateChecks: true,
         marketplaceFetchesEnabled: true,
+        completedThreadArchiveAfterDays: 7,
         lastContextSurface: "project-memory",
         sidebarMaterial: "system",
         workspaceMaterial: "opaque",

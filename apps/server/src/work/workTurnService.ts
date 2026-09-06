@@ -167,6 +167,14 @@ export interface WorkTurnServiceDependencies {
     readonly windowId: WindowId;
   }) => AppManagedToolSet | undefined;
   /** The harness around a turn: stable instructions in front, the reply observed after. */
+  /**
+   * A person asked the thread for a turn. Fires once the thread and its
+   * Project are known to be reachable from this window and before the turn
+   * starts, so a completed or snoozed thread comes back the moment it is
+   * spoken to. A throw refuses the turn: a thread left completed or snoozed
+   * while its turn ran would be a half-applied state.
+   */
+  readonly onTurnRequested?: (threadId: WorkThreadId) => void;
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
     /** Absent means every turn is admitted. */
@@ -226,6 +234,7 @@ export class WorkTurnService {
   readonly #turnRuntime: WorkTurnRuntimePort;
   readonly #resolveAppManagedTools: WorkTurnServiceDependencies["resolveAppManagedTools"];
   readonly #nativeHarness: WorkTurnServiceDependencies["nativeHarness"];
+  readonly #onTurnRequested: WorkTurnServiceDependencies["onTurnRequested"];
   readonly #turnFileObserver: WorkTurnFileObserver | undefined;
   readonly #resolveThreadMentionContext: WorkTurnServiceDependencies["resolveThreadMentionContext"];
   readonly #resolveFileMentionContext: WorkTurnServiceDependencies["resolveFileMentionContext"];
@@ -253,6 +262,7 @@ export class WorkTurnService {
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
     this.#resolveAppManagedTools = dependencies.resolveAppManagedTools;
     this.#nativeHarness = dependencies.nativeHarness;
+    this.#onTurnRequested = dependencies.onTurnRequested;
     this.#turnFileObserver = dependencies.turnFileObserver;
     this.#resolveThreadMentionContext = dependencies.resolveThreadMentionContext;
     this.#resolveFileMentionContext = dependencies.resolveFileMentionContext;
@@ -310,6 +320,7 @@ export class WorkTurnService {
     if (!accessible) {
       throw this.#failure("unauthorized", "Work Project is unavailable for this window.");
     }
+    if (thread !== undefined) this.#onTurnRequested?.(thread.id);
     const project = this.#persistence.readProject(command.authority.projectId);
     const decision = decideWorkTurnAuthority({
       authority: command.authority,

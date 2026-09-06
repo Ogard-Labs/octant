@@ -1,3 +1,4 @@
+import { snoozeWakeLabel, threadShelf, threadWoke } from "@octant/domain";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectThreadsAccess } from "../projects/ProjectThreadsSection";
 import type { ChatThreadNavigationItem, ThreadRowActivity } from "./navigationModel";
@@ -21,6 +22,42 @@ export function codeThreadActivity(thread: {
   if (thread.lifecycle === "waiting" || thread.lifecycle === "interrupted") return "attention";
   if (thread.unread === true) return "unread";
   return "idle";
+}
+
+/**
+ * Where a row rests and whether its snooze has ended, from what the row
+ * already carries, for Chat, Work, and Code alike. A thread waiting on the
+ * person, and a turn ending after a mid-turn snooze, both wake the row early;
+ * a follow-up mark does not, or a marked thread could never be snoozed at all.
+ */
+export function threadRest(
+  thread: {
+    readonly completedAt?: string | undefined;
+    readonly snooze?:
+      | { readonly until: string; readonly at: string; readonly duringTurn?: boolean | undefined }
+      | undefined;
+    readonly executing?: boolean | undefined;
+    /** A row that already carries its status dot says "working" while a turn runs. */
+    readonly activity?: ThreadRowActivity | undefined;
+    /** Code keeps two legacy lifecycle values that mean the thread waits on the person. */
+    readonly lifecycle?: "active" | "waiting" | "interrupted" | "archived" | undefined;
+  },
+  input: { readonly now: Date; readonly awaitingInput: boolean },
+): Pick<ChatThreadNavigationItem, "shelf" | "woke" | "wakeLabel"> {
+  const signals = {
+    now: input.now.toISOString(),
+    executing: thread.executing === true || thread.activity === "working",
+    awaitingInput:
+      input.awaitingInput || thread.lifecycle === "waiting" || thread.lifecycle === "interrupted",
+  };
+  const shelf = threadShelf(thread, signals);
+  return {
+    ...(shelf === "active" ? {} : { shelf }),
+    ...(threadWoke(thread, signals) ? { woke: true } : {}),
+    ...(shelf === "snoozed" && thread.snooze !== undefined
+      ? { wakeLabel: snoozeWakeLabel(thread.snooze.until, signals.now) }
+      : {}),
+  };
 }
 
 export function threadSearchListingForStatus(

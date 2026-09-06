@@ -43,6 +43,7 @@ export * from "./workResearchPolicy";
 export * from "./workTurnPolicy";
 export * from "./dataLifecyclePolicy";
 export * from "./threadRetentionPolicy";
+export * from "./threadCompletionPolicy";
 export * from "./threadExportPolicy";
 export * from "./threadHandOffPolicy";
 export * from "./eventPolicy";

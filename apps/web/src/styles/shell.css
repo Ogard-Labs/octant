@@ -2821,3 +2821,16 @@ form > .work-composer-adapter__attachments {
 .sidebar-navigation__thread-age + .sidebar-navigation__thread-unread-dot {
   margin-left: 0;
 }
+
+/* A row whose snooze ended says so in a word beside its age: it reappears
+   where it was, so the mark is what makes the return noticeable. */
+.sidebar-navigation__thread-woke {
+  flex: none;
+  margin-left: var(--oct-space-2);
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-xs);
+}
+
+.sidebar-navigation__thread-woke + .sidebar-navigation__thread-unread-dot {
+  margin-left: var(--oct-space-2);
+}

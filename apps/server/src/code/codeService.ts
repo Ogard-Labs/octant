@@ -82,6 +82,11 @@ import {
 } from "@octant/domain/agent-profile-policy";
 import { ACCESS_POSTURE_RANK, authorizeCodeOperation } from "@octant/domain/code-policy";
 import { evaluateCodeDeliveryOutcomeProposal } from "@octant/domain/delivery-target-policy";
+import {
+  completedThreadArchiveDue,
+  decideCompleteThread,
+  decideSnoozeThread,
+} from "@octant/domain/thread-completion-policy";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
@@ -93,6 +98,10 @@ import {
   type ThreadBoardPullRequestSnapshot,
 } from "./threadBoardPullRequestJoin";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import type {
+  CompletedThreadArchiveInput,
+  CompletedThreadArchiveOutcome,
+} from "../completedThreadArchiveSweep";
 import {
   issueContextFailureCategory,
   prepareOptionalIssueContext,
@@ -582,6 +591,30 @@ function withoutPinned(thread: CodeThread): Omit<CodeThread, "pinned"> {
   const { pinned: _pinned, ...rest } = thread;
   return rest;
 }
+
+/**
+ * A thread back in play carries neither rest: completion and snooze are
+ * dropped rather than stored as "not any more", so a thread that was never
+ * put away and one that came back are the same record.
+ */
+function withoutRest<T extends Pick<CodeThread, "completedAt" | "snooze">>(
+  thread: T,
+): Omit<T, "completedAt" | "snooze"> {
+  const { completedAt: _completedAt, snooze: _snooze, ...rest } = thread;
+  return rest;
+}
+
+const COMPLETE_REFUSALS = {
+  archived: "An archived thread cannot be completed.",
+  executing: "Wait for the running turn to finish before completing this thread.",
+  "awaiting-input": "This thread is waiting on you; answer it before completing it.",
+} as const;
+
+const SNOOZE_REFUSALS = {
+  archived: "An archived thread cannot be snoozed.",
+  "awaiting-input": "This thread is waiting on you; answer it before snoozing it.",
+  "wake-time-not-in-future": "Pick a wake time that is still ahead.",
+} as const;
 
 export interface CodeSearchFilesInput {
   readonly threadId: CodeThreadId;
@@ -1559,6 +1592,34 @@ export class CodeService {
           );
         }
       }
+      // Completing or snoozing hides the row, so the host decides from the
+      // runtime work it projects — never from what the renderer believed a
+      // moment ago — whether hiding it would hide work in flight.
+      const restSignals =
+        command.kind === "complete-code-thread" || command.kind === "snooze-code-thread"
+          ? boardRuntimeActivityFromWorks(this.#persistence.readCodeRuntimeWorks(current.id))
+          : undefined;
+      if (command.kind === "complete-code-thread" && restSignals !== undefined) {
+        const decision = decideCompleteThread({
+          lifecycle: current.lifecycle,
+          executing: restSignals.executing,
+          awaitingInput: restSignals.awaitingInput,
+        });
+        if (decision.status === "refused") {
+          throw this.#failure("invalid", COMPLETE_REFUSALS[decision.reason]);
+        }
+      }
+      if (command.kind === "snooze-code-thread" && restSignals !== undefined) {
+        const decision = decideSnoozeThread({
+          lifecycle: current.lifecycle,
+          awaitingInput: restSignals.awaitingInput,
+          until: command.until,
+          now: updatedAt,
+        });
+        if (decision.status === "refused") {
+          throw this.#failure("invalid", SNOOZE_REFUSALS[decision.reason]);
+        }
+      }
       const requestedNext = decodeCodeThread(
         command.kind === "rename-code-thread"
           ? { ...current, title: command.title, version: command.expectedVersion + 1, updatedAt }
@@ -1578,65 +1639,93 @@ export class CodeService {
                   version: command.expectedVersion + 1,
                   updatedAt,
                 }
-              : command.kind === "change-code-thread-access"
-                ? {
-                    ...current,
-                    executionPolicy: command.executionPolicy,
-                    permissionPersistence: command.permissionPersistence,
+              : command.kind === "complete-code-thread"
+                ? // Completing is "I'm done here": the pin and any snooze
+                  // would keep the row out of the Completed shelf, so both go.
+                  {
+                    ...withoutPinned(withoutRest(current)),
+                    completedAt: updatedAt,
                     version: command.expectedVersion + 1,
                     updatedAt,
                   }
-                : command.kind === "change-code-thread-provider"
+                : command.kind === "reopen-code-thread" || command.kind === "wake-code-thread"
                   ? {
-                      ...current,
-                      providerInstanceId: command.providerInstanceId,
-                      modelId: command.modelId,
-                      providerHandoff: {
-                        previousProviderInstanceId: current.providerInstanceId,
-                        previousModelId: current.modelId,
-                        nextProviderInstanceId: command.providerInstanceId,
-                        nextModelId: command.modelId,
-                        changedAt: updatedAt,
-                      },
+                      ...withoutRest(current),
                       version: command.expectedVersion + 1,
                       updatedAt,
                     }
-                  : command.kind === "propose-code-delivery-outcome"
+                  : command.kind === "snooze-code-thread"
                     ? {
-                        ...current,
-                        deliveryTarget: {
-                          ...current.deliveryTarget,
-                          proposedOutcome: {
-                            outcomeKind: command.outcomeKind,
-                            ...(command.rationale === undefined
-                              ? {}
-                              : { rationale: command.rationale }),
-                            proposedAt: updatedAt,
-                          },
+                        ...withoutRest(current),
+                        snooze: {
+                          until: command.until,
+                          at: updatedAt,
+                          // A turn running now is what "something happened"
+                          // means later: its end wakes the thread early.
+                          ...(restSignals?.executing === true ? { duringTurn: true } : {}),
                         },
                         version: command.expectedVersion + 1,
                         updatedAt,
                       }
-                    : command.kind === "confirm-code-delivery-outcome"
+                    : command.kind === "change-code-thread-access"
                       ? {
                           ...current,
-                          // The user confirms the outcome kind: the Git-level
-                          // delivery fields stay immutable and any pending agent
-                          // proposal is cleared once resolved.
-                          deliveryTarget: {
-                            ...stripProposedOutcome(current.deliveryTarget),
-                            outcomeKind: command.outcomeKind,
-                            confirmedAt: updatedAt,
-                          },
+                          executionPolicy: command.executionPolicy,
+                          permissionPersistence: command.permissionPersistence,
                           version: command.expectedVersion + 1,
                           updatedAt,
                         }
-                      : {
-                          ...current,
-                          workingDirectory: command.workingDirectory,
-                          version: command.expectedVersion + 1,
-                          updatedAt,
-                        },
+                      : command.kind === "change-code-thread-provider"
+                        ? {
+                            ...current,
+                            providerInstanceId: command.providerInstanceId,
+                            modelId: command.modelId,
+                            providerHandoff: {
+                              previousProviderInstanceId: current.providerInstanceId,
+                              previousModelId: current.modelId,
+                              nextProviderInstanceId: command.providerInstanceId,
+                              nextModelId: command.modelId,
+                              changedAt: updatedAt,
+                            },
+                            version: command.expectedVersion + 1,
+                            updatedAt,
+                          }
+                        : command.kind === "propose-code-delivery-outcome"
+                          ? {
+                              ...current,
+                              deliveryTarget: {
+                                ...current.deliveryTarget,
+                                proposedOutcome: {
+                                  outcomeKind: command.outcomeKind,
+                                  ...(command.rationale === undefined
+                                    ? {}
+                                    : { rationale: command.rationale }),
+                                  proposedAt: updatedAt,
+                                },
+                              },
+                              version: command.expectedVersion + 1,
+                              updatedAt,
+                            }
+                          : command.kind === "confirm-code-delivery-outcome"
+                            ? {
+                                ...current,
+                                // The user confirms the outcome kind: the Git-level
+                                // delivery fields stay immutable and any pending agent
+                                // proposal is cleared once resolved.
+                                deliveryTarget: {
+                                  ...stripProposedOutcome(current.deliveryTarget),
+                                  outcomeKind: command.outcomeKind,
+                                  confirmedAt: updatedAt,
+                                },
+                                version: command.expectedVersion + 1,
+                                updatedAt,
+                              }
+                            : {
+                                ...current,
+                                workingDirectory: command.workingDirectory,
+                                version: command.expectedVersion + 1,
+                                updatedAt,
+                              },
       );
       const next =
         command.kind === "change-code-thread-access" &&
@@ -1682,6 +1771,81 @@ export class CodeService {
     } catch (error) {
       throw this.#mapFailure(error);
     }
+  }
+
+  /**
+   * A person sending a thread a message is re-engaging with it: a completed
+   * thread comes back to the active list and a snoozed one wakes, the same
+   * way an explicit Reopen or Wake would. Journals nothing for a thread that
+   * was already in play. Decided here on the host so a renderer cannot forge
+   * the neutral reset, and never on a turn the thread did not ask for.
+   */
+  noteProviderTurnRequested(threadId: CodeThreadId): void {
+    // The person's own Complete or Snooze may land a moment before their
+    // message does, so one version race is expected and re-read once; any
+    // other failure propagates and refuses the turn.
+    for (let attempt = 0; ; attempt += 1) {
+      const current = this.#persistence.readCodeThread(threadId);
+      if (current === undefined) return;
+      if (current.completedAt === undefined && current.snooze === undefined) return;
+      const next = decodeCodeThread({
+        ...withoutRest(current),
+        version: current.version + 1,
+        updatedAt: decodeTimestamp(this.#clock()),
+      });
+      try {
+        this.#append("code-thread", current.id, current.version, "code.thread-updated@1", {
+          kind: "thread-updated",
+          thread: next,
+        });
+        return;
+      } catch (error) {
+        if (!(error instanceof ConcurrencyConflict) || attempt > 0) throw error;
+      }
+    }
+  }
+
+  /**
+   * Archive one completed thread on the host's own timer. Re-reads the thread
+   * and re-decides from the authoritative record, so a thread reopened between
+   * the sweep's read and this call is left alone rather than archived on stale
+   * evidence. Archiving keeps everything; it only leaves the shelves.
+   */
+  archiveCompletedThread(
+    threadId: CodeThreadId,
+    input: CompletedThreadArchiveInput,
+  ): CompletedThreadArchiveOutcome {
+    const current = this.#persistence.readCodeThread(threadId);
+    if (current === undefined) return { status: "skipped", reason: "not-found" };
+    if (
+      !completedThreadArchiveDue({
+        lifecycle: current.lifecycle,
+        completedAt: current.completedAt,
+        afterDays: input.afterDays,
+        now: input.now,
+      })
+    ) {
+      return { status: "skipped", reason: "not-due" };
+    }
+    const updatedAt = decodeTimestamp(this.#clock());
+    const next = decodeCodeThread({
+      ...current,
+      lifecycle: "archived",
+      version: current.version + 1,
+      updatedAt,
+    });
+    this.#append(
+      "code-thread",
+      current.id,
+      current.version,
+      "code.thread-updated@1",
+      { kind: "thread-updated", thread: next },
+      "system",
+    );
+    // The same door a person's Archive closes: no window keeps a session
+    // grant on a thread that just left the lists.
+    this.#sessionAuthority.revokeThreadEverywhere(current.id);
+    return { status: "archived" };
   }
 
   async *subscribe(
@@ -2401,6 +2565,9 @@ export class CodeService {
     expectedVersion: number,
     eventName: string,
     payload: unknown,
+    // Everything a person asks for is theirs; only the host's own timer
+    // writes as the system, so a journal reader can tell the two apart.
+    actorKind: "local-user" | "system" = "local-user",
   ): void {
     this.#persistence.journal.append({
       aggregate: { aggregateType, aggregateId },
@@ -2411,7 +2578,7 @@ export class CodeService {
           eventName,
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#uuid()),
-          actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+          actor: { kind: actorKind, actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
           occurredAt: decodeTimestamp(this.#clock()),
           payload,
         },

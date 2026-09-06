@@ -18,6 +18,7 @@ import type {
   ChatThreadView,
 } from "@octant/contracts/chat";
 import { decodeChatSubmissionId } from "@octant/contracts/chat";
+import { decodeUtcTimestamp } from "@octant/contracts";
 import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
 import type { PreviewContextSelection } from "@octant/contracts/previews";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
@@ -130,6 +131,14 @@ export function createChatReadCursorStore(
     storageKey: CHAT_READ_CURSOR_STORAGE_KEY,
     ...(storage === undefined ? {} : { storage }),
   });
+}
+
+function sameSnooze(
+  left: ChatThread["snooze"] | undefined,
+  right: ChatThread["snooze"] | undefined,
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return left.until === right.until && left.at === right.at && left.duringTurn === right.duringTurn;
 }
 
 export function useChatController(options: ChatControllerOptions) {
@@ -308,6 +317,33 @@ export function useChatController(options: ChatControllerOptions) {
         }
       }
       return changed ? next : current;
+    });
+    // A thread's rest can change without this window asking for it — a
+    // message sent from another window reopens it, a wake command lands
+    // elsewhere — so the navigation read is what keeps the bootstrap rows
+    // honest about it, the way it already does for their activity.
+    setBootstrap((current) => {
+      if (current === undefined) return current;
+      const byId = new Map(threads.map((thread) => [String(thread.id), thread] as const));
+      let changed = false;
+      const nextThreads = current.threads.map((thread) => {
+        const reported = byId.get(String(thread.id));
+        if (reported === undefined) return thread;
+        if (
+          thread.completedAt === reported.completedAt &&
+          sameSnooze(thread.snooze, reported.snooze)
+        ) {
+          return thread;
+        }
+        changed = true;
+        const { completedAt: _completedAt, snooze: _snooze, ...rest } = thread;
+        return {
+          ...rest,
+          ...(reported.completedAt === undefined ? {} : { completedAt: reported.completedAt }),
+          ...(reported.snooze === undefined ? {} : { snooze: reported.snooze }),
+        };
+      });
+      return changed ? { ...current, threads: nextThreads } : current;
     });
   }, []);
 
@@ -570,6 +606,8 @@ export function useChatController(options: ChatControllerOptions) {
           threadId: String(thread.id),
           title: thread.title,
           updatedAt: updatedAtByThread.get(String(thread.id)) ?? thread.updatedAt,
+          ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
+          ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
         });
       }
     }
@@ -802,9 +840,74 @@ export function useChatController(options: ChatControllerOptions) {
       ? activeView
       : undefined;
 
+  /**
+   * Complete, reopen, snooze, and wake carry the thread's current version,
+   * read from the host first: the navigation read keeps a row's rest current
+   * but not its version, so a change made in another window would otherwise
+   * make the next command stale. Whether completing or snoozing would hide
+   * work in flight is the host's call; a refusal comes back as an ordinary
+   * failure.
+   */
+  const restCommand = useCallback(
+    async (
+      threadId: ChatThreadId,
+      command: (expectedVersion: ChatThread["version"]) => ChatCommand,
+    ): Promise<boolean> => {
+      const listed = bootstrap?.threads.find(
+        (candidate) => String(candidate.id) === String(threadId),
+      );
+      if (listed === undefined) return false;
+      const current = await client.thread(threadId).catch(() => undefined);
+      const result = await execute(command(current?.thread.version ?? listed.version));
+      return result !== undefined;
+    },
+    [bootstrap, client, execute],
+  );
+  const completeThread = useCallback(
+    (threadId: ChatThreadId) =>
+      restCommand(threadId, (expectedVersion) => ({
+        kind: "complete-chat-thread",
+        threadId,
+        expectedVersion,
+      })),
+    [restCommand],
+  );
+  const reopenThread = useCallback(
+    (threadId: ChatThreadId) =>
+      restCommand(threadId, (expectedVersion) => ({
+        kind: "reopen-chat-thread",
+        threadId,
+        expectedVersion,
+      })),
+    [restCommand],
+  );
+  const snoozeThread = useCallback(
+    (threadId: ChatThreadId, until: string) =>
+      restCommand(threadId, (expectedVersion) => ({
+        kind: "snooze-chat-thread",
+        threadId,
+        expectedVersion,
+        until: decodeUtcTimestamp(until),
+      })),
+    [restCommand],
+  );
+  const wakeThread = useCallback(
+    (threadId: ChatThreadId) =>
+      restCommand(threadId, (expectedVersion) => ({
+        kind: "wake-chat-thread",
+        threadId,
+        expectedVersion,
+      })),
+    [restCommand],
+  );
+
   return {
     activeView: visibleActiveView,
     bootstrap,
+    completeThread,
+    reopenThread,
+    snoozeThread,
+    wakeThread,
     errorMessage,
     discard,
     execute,

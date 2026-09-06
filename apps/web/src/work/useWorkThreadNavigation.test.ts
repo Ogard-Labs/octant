@@ -245,3 +245,36 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+
+describe("buildWorkThreadNavigation rest and attention", () => {
+  it("carries a thread's rest and says attention when the host reports it waiting on the person", () => {
+    const resting = workThread();
+    const rows = buildWorkThreadNavigation(
+      [
+        { ...resting, completedAt: "2026-09-01T10:00:00.000Z" as never },
+        {
+          ...resting,
+          id: "72000000-0000-4000-8000-000000000777" as never,
+          snooze: { until: "2026-09-08T09:00:00.000Z", at: "2026-09-07T10:00:00.000Z" } as never,
+        },
+      ],
+      [
+        { threadId: resting.id, executing: false, awaitingInput: true },
+        {
+          threadId: "72000000-0000-4000-8000-000000000777" as never,
+          executing: true,
+          awaitingInput: true,
+        },
+      ],
+    );
+    expect(rows[0]).toMatchObject({
+      activity: "attention",
+      completedAt: "2026-09-01T10:00:00.000Z",
+    });
+    // Working outranks attention while the turn still runs.
+    expect(rows[1]).toMatchObject({
+      activity: "working",
+      snooze: { until: "2026-09-08T09:00:00.000Z" },
+    });
+  });
+});
