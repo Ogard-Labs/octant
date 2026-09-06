@@ -36,6 +36,11 @@ export type ImageGenerationHonoredOptions =
       readonly kind: "openai-compatible-http";
       readonly maxVariants: number;
       readonly supportsReferences: boolean;
+    }
+  | {
+      readonly kind: "bfl-image-http";
+      readonly maxVariants: number;
+      readonly supportsReferences: boolean;
     };
 
 // Matches ImageGenerationProfileView.displayName's own Schema.maxLength(120):
@@ -139,6 +144,16 @@ export function listEligibleImageProfiles(
           : { aspectRatio: configuration.aspectRatio }),
         ...(configuration.resolution === undefined ? {} : { resolution: configuration.resolution }),
       });
+      continue;
+    }
+    if (configuration.kind === "bfl-image-http") {
+      profiles.push({
+        instanceId: instance.id,
+        displayName: instance.displayName,
+        driverKind: "bfl-image",
+        modelAllowlist: configuration.modelAllowlist,
+        defaultModel: configuration.defaultModel,
+      });
     }
   }
   return [...profiles, ...listCustomImageProfiles(customSources, instances)];
@@ -158,7 +173,11 @@ export function hasEligibleImageProfile(
  * size options of its own.
  */
 export function honoredImageGenerationOptions(
-  kind: "openai-image-http" | "gemini-native-image-http" | "openai-compatible-http",
+  kind:
+    | "openai-image-http"
+    | "gemini-native-image-http"
+    | "openai-compatible-http"
+    | "bfl-image-http",
 ): ImageGenerationHonoredOptions {
   switch (kind) {
     case "openai-image-http":
@@ -179,12 +198,16 @@ export function honoredImageGenerationOptions(
       };
     case "openai-compatible-http":
       return { kind, maxVariants: MAX_IMAGE_VARIANTS, supportsReferences: true };
+    case "bfl-image-http":
+      // BFL generates exactly one image per submit call: this is a real
+      // constraint the provider enforces, not a placeholder ceiling.
+      return { kind, maxVariants: 1, supportsReferences: false };
   }
 }
 
 export function imageGenerationConfigurationKind(
   driverKind: ImageGenerationProfileView["driverKind"],
-): "openai-image-http" | "gemini-native-image-http" | "openai-compatible-http" {
+): "openai-image-http" | "gemini-native-image-http" | "openai-compatible-http" | "bfl-image-http" {
   switch (driverKind) {
     case "openai-image":
       return "openai-image-http";
@@ -192,6 +215,8 @@ export function imageGenerationConfigurationKind(
       return "gemini-native-image-http";
     case "openai-compatible-image":
       return "openai-compatible-http";
+    case "bfl-image":
+      return "bfl-image-http";
   }
 }
 

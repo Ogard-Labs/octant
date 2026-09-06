@@ -16,6 +16,7 @@ import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { ProviderGlyph } from "./ProviderGlyph";
 import {
   AnthropicConfigurationForm,
+  BflImageConfigurationForm,
   ClaudeConfigurationForm,
   DevinConfigurationForm,
   FoundryConfigurationForm,
@@ -77,6 +78,7 @@ export type ProviderSettingsListProps = Pick<
   | "onChangeAzureFoundryConfiguration"
   | "onChangeOpenAiImageConfiguration"
   | "onChangeGeminiImageConfiguration"
+  | "onChangeBflImageConfiguration"
   | "onProviderCredentialStatus"
   | "onClearProviderCredential"
   | "onBeginProviderAuthentication"
@@ -207,6 +209,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
                 onChangeAzureFoundryConfiguration={props.onChangeAzureFoundryConfiguration}
                 onChangeOpenAiImageConfiguration={props.onChangeOpenAiImageConfiguration}
                 onChangeGeminiImageConfiguration={props.onChangeGeminiImageConfiguration}
+                onChangeBflImageConfiguration={props.onChangeBflImageConfiguration}
                 onClearProviderCredential={props.onClearProviderCredential}
                 onBeginProviderAuthentication={props.onBeginProviderAuthentication}
                 onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}
@@ -424,6 +427,7 @@ interface ProviderRowProps {
   readonly onChangeAzureFoundryConfiguration: ProviderSettingsViewProps["onChangeAzureFoundryConfiguration"];
   readonly onChangeOpenAiImageConfiguration: ProviderSettingsViewProps["onChangeOpenAiImageConfiguration"];
   readonly onChangeGeminiImageConfiguration: ProviderSettingsViewProps["onChangeGeminiImageConfiguration"];
+  readonly onChangeBflImageConfiguration: ProviderSettingsViewProps["onChangeBflImageConfiguration"];
   readonly onProviderCredentialStatus: ProviderSettingsViewProps["onProviderCredentialStatus"];
   readonly onClearProviderCredential: ProviderSettingsViewProps["onClearProviderCredential"];
   readonly onBeginProviderAuthentication: ProviderSettingsViewProps["onBeginProviderAuthentication"];
@@ -466,7 +470,8 @@ function ProviderRow(props: ProviderRowProps) {
   const isFoundry = props.instance.driverKind === "azure-foundry";
   const isOpenAiImage = props.instance.driverKind === "openai-image";
   const isGeminiImage = props.instance.driverKind === "gemini-native-image";
-  const isImageProfile = isOpenAiImage || isGeminiImage;
+  const isBflImage = props.instance.driverKind === "bfl-image";
+  const isImageProfile = isOpenAiImage || isGeminiImage || isBflImage;
   const usesCredential =
     isHttp ||
     isAnthropicHttp ||
@@ -826,6 +831,15 @@ function ProviderRow(props: ProviderRowProps) {
               </span>
             </div>
           )}
+          {!isBflImage ? null : (
+            <div className="provider-card__facts provider-card__facts--image">
+              <span>Default model: {props.instance.configuration.defaultModel}</span>
+              <span>Allowlist: {props.instance.configuration.modelAllowlist.join(", ")}</span>
+              <span>
+                Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
+              </span>
+            </div>
+          )}
           {autoRegisteredDisabled ? (
             <p className="provider-card__guidance">Detected on this host — enable to use</p>
           ) : null}
@@ -1113,6 +1127,16 @@ function ProviderRow(props: ProviderRowProps) {
                   instance={props.instance}
                   key={`gemini-image:${props.instance.version}`}
                   onChange={props.onChangeGeminiImageConfiguration}
+                  onClearCredential={props.onClearProviderCredential}
+                />
+              ) : isBflImage ? (
+                <BflImageConfigurationForm
+                  credential={credential}
+                  credentialManagementAvailable={props.credentialManagementAvailable}
+                  disabled={disabled}
+                  instance={props.instance}
+                  key={`bfl-image:${props.instance.version}`}
+                  onChange={props.onChangeBflImageConfiguration}
                   onClearCredential={props.onClearProviderCredential}
                 />
               ) : isHttp ? (

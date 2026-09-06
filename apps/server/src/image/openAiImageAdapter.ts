@@ -133,7 +133,7 @@ async function generateOpenAiImage(input: {
     response = await performImageHttpRequest({
       url,
       method: "POST",
-      auth: "bearer",
+      auth: { header: "authorization", scheme: "Bearer" },
       instanceId: String(input.adapterInstanceId),
       credentialResolver: input.credentialResolver,
       body: JSON.stringify(body),
@@ -158,7 +158,7 @@ async function generateOpenAiImage(input: {
     response = await performImageHttpRequest({
       url,
       method: "POST",
-      auth: "bearer",
+      auth: { header: "authorization", scheme: "Bearer" },
       instanceId: String(input.adapterInstanceId),
       credentialResolver: input.credentialResolver,
       form,

@@ -437,6 +437,56 @@ describe("useProviderController", () => {
     expect(host.clearProviderCredential).toHaveBeenCalledWith(createdId);
   });
 
+  it("creates a BFL image profile before storing its write-only credential and purges it on remove", async () => {
+    const calls: string[] = [];
+    const created = bflImageProvider();
+    const api = client();
+    vi.mocked(api.execute).mockImplementation(async (command) => {
+      if (command.kind === "create-bfl-image-provider") {
+        calls.push("provider.create");
+        return { kind: "provider-created", instance: { ...created, id: command.instanceId } };
+      }
+      if (command.kind !== "remove-provider") {
+        throw new Error(`unexpected provider command ${command.kind}`);
+      }
+      calls.push("provider.remove");
+      return { kind: "provider-removed", instanceId: command.instanceId, version: 2 as never };
+    });
+    const host = credentialHost(calls);
+    const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.createBflImage(
+          "FLUX",
+          created.configuration,
+          transientCredential("bfl-secret", calls),
+        ),
+      ).resolves.toBe(true);
+    });
+    expect(calls).toEqual(["provider.create", "credential.set", "field.clear"]);
+    expect(JSON.stringify(result.current)).not.toContain("bfl-secret");
+
+    const createdId = result.current.instances.find(
+      (instance) => instance.driverKind === "bfl-image",
+    )?.id;
+    expect(createdId).toBeDefined();
+    if (createdId === undefined) throw new Error("expected created image profile");
+
+    await act(async () => {
+      await expect(result.current.remove(createdId)).resolves.toBe(true);
+    });
+    expect(calls).toEqual([
+      "provider.create",
+      "credential.set",
+      "field.clear",
+      "provider.remove",
+      "credential.clear",
+    ]);
+    expect(host.clearProviderCredential).toHaveBeenCalledWith(createdId);
+  });
+
   it("creates Claude subscription configuration without credential mutation", async () => {
     const calls: string[] = [];
     const api = client();
@@ -1857,6 +1907,27 @@ function openAiImageProvider(
     updatedAt: "2026-08-28T10:00:00.000Z" as ProviderInstance["updatedAt"],
     ...patch,
   } as Extract<ProviderInstance, { driverKind: "openai-image" }>;
+}
+
+function bflImageProvider(
+  patch: Partial<ProviderInstance> = {},
+): Extract<ProviderInstance, { driverKind: "bfl-image" }> {
+  return {
+    id,
+    displayName: "FLUX",
+    driverKind: "bfl-image",
+    configuration: {
+      kind: "bfl-image-http",
+      modelAllowlist: ["flux-pro-1.1" as never],
+      defaultModel: "flux-pro-1.1" as never,
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1 as ProviderInstance["version"],
+    createdAt: "2026-08-28T10:00:00.000Z" as ProviderInstance["createdAt"],
+    updatedAt: "2026-08-28T10:00:00.000Z" as ProviderInstance["updatedAt"],
+    ...patch,
+  } as Extract<ProviderInstance, { driverKind: "bfl-image" }>;
 }
 
 function httpProvider(

@@ -45,6 +45,20 @@ function geminiImage(): ProviderInstance {
   };
 }
 
+function bflImage(): ProviderInstance {
+  return {
+    ...openAiImage(),
+    id: "a1000000-0000-4000-8000-000000000008" as ProviderInstance["id"],
+    displayName: "FLUX",
+    driverKind: "bfl-image",
+    configuration: {
+      kind: "bfl-image-http",
+      modelAllowlist: ["flux-pro-1.1" as never],
+      defaultModel: "flux-pro-1.1" as never,
+    },
+  };
+}
+
 function chatProvider(enabled = true): ProviderInstance {
   return {
     ...openAiImage(enabled),
@@ -65,13 +79,32 @@ function recraft(enabled = true): ProviderInstance {
 
 describe("eligible image profiles", () => {
   it("lists only enabled image profiles, never a chat driver", () => {
-    const profiles = listEligibleImageProfiles([openAiImage(), geminiImage(), chatProvider()]);
+    const profiles = listEligibleImageProfiles([
+      openAiImage(),
+      geminiImage(),
+      bflImage(),
+      chatProvider(),
+    ]);
     expect(profiles.map((profile) => profile.displayName)).toEqual([
       "OpenAI Image",
       "Gemini Image",
+      "FLUX",
     ]);
     expect(hasEligibleImageProfile([chatProvider(), openAiImage(false)])).toBe(false);
     expect(hasEligibleImageProfile([openAiImage()])).toBe(true);
+  });
+
+  it("lists a BFL image profile with no quality, size, or aspect ratio fields", () => {
+    const profiles = listEligibleImageProfiles([bflImage()]);
+    expect(profiles).toEqual([
+      {
+        instanceId: bflImage().id,
+        displayName: "FLUX",
+        driverKind: "bfl-image",
+        modelAllowlist: ["flux-pro-1.1"],
+        defaultModel: "flux-pro-1.1",
+      },
+    ]);
   });
 
   it("omits a disabled image profile", () => {
@@ -188,6 +221,15 @@ describe("generation options a selected model can honor", () => {
       supportsReferences: true,
     });
   });
+
+  it("caps BFL at one variant and no reference support, a real provider constraint", () => {
+    const options = honoredImageGenerationOptions("bfl-image-http");
+    expect(options).toEqual({
+      kind: "bfl-image-http",
+      maxVariants: 1,
+      supportsReferences: false,
+    });
+  });
 });
 
 describe("image generation configuration kind", () => {
@@ -199,6 +241,7 @@ describe("image generation configuration kind", () => {
     expect(imageGenerationConfigurationKind("openai-compatible-image")).toBe(
       "openai-compatible-http",
     );
+    expect(imageGenerationConfigurationKind("bfl-image")).toBe("bfl-image-http");
   });
 });
 

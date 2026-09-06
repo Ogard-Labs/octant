@@ -824,6 +824,64 @@ describe("ProviderService", () => {
     });
   });
 
+  it("creates and updates a BFL image profile through the journal", async () => {
+    const fixture = serviceFixture();
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "create-bfl-image-provider",
+        instanceId,
+        expectedVersion: 0,
+        displayName: "FLUX",
+        configuration: {
+          kind: "bfl-image-http",
+          modelAllowlist: ["flux-pro-1.1", "flux-dev"],
+          defaultModel: "flux-pro-1.1",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-created",
+      instance: {
+        displayName: "FLUX",
+        driverKind: "bfl-image",
+        configuration: {
+          kind: "bfl-image-http",
+          modelAllowlist: ["flux-pro-1.1", "flux-dev"],
+          defaultModel: "flux-pro-1.1",
+        },
+        version: 1,
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-bfl-image-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "bfl-image-http",
+          modelAllowlist: ["flux-dev"],
+          defaultModel: "flux-dev",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        driverKind: "bfl-image",
+        configuration: {
+          modelAllowlist: ["flux-dev"],
+          defaultModel: "flux-dev",
+        },
+        version: 2,
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "remove-provider",
+        instanceId,
+        expectedVersion: 2,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-removed", instanceId, version: 3 });
+  });
+
   it("creates and returns the authoritative strict Codex provider instance", async () => {
     const fixture = serviceFixture();
     const expected = decodeProviderInstance({

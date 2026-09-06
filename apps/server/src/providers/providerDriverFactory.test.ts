@@ -139,26 +139,39 @@ describe("makeProviderDriver", () => {
     expect(fixture.piStart).not.toHaveBeenCalled();
   });
 
-  it.each(["openai-image", "gemini-native-image"] as const)(
+  it.each(["openai-image", "gemini-native-image", "bfl-image"] as const)(
     "refuses to construct a chat driver for an %s image profile",
     (driverKind) => {
       const fixture = factoryFixture();
-      const instance = decodeProviderInstance({
-        id: instanceId,
-        displayName: driverKind === "openai-image" ? "GPT Image" : "Gemini Image",
-        driverKind,
-        configuration:
-          driverKind === "openai-image"
+      const displayName =
+        driverKind === "openai-image"
+          ? "GPT Image"
+          : driverKind === "gemini-native-image"
+            ? "Gemini Image"
+            : "FLUX";
+      const configuration =
+        driverKind === "openai-image"
+          ? {
+              kind: "openai-image-http" as const,
+              modelAllowlist: ["gpt-image-2"],
+              defaultModel: "gpt-image-2",
+            }
+          : driverKind === "gemini-native-image"
             ? {
-                kind: "openai-image-http",
-                modelAllowlist: ["gpt-image-2"],
-                defaultModel: "gpt-image-2",
-              }
-            : {
-                kind: "gemini-native-image-http",
+                kind: "gemini-native-image-http" as const,
                 modelAllowlist: ["gemini-3.1-flash-image"],
                 defaultModel: "gemini-3.1-flash-image",
-              },
+              }
+            : {
+                kind: "bfl-image-http" as const,
+                modelAllowlist: ["flux-pro-1.1"],
+                defaultModel: "flux-pro-1.1",
+              };
+      const instance = decodeProviderInstance({
+        id: instanceId,
+        displayName,
+        driverKind,
+        configuration,
         enabled: true,
         environmentPolicy: "inherit-host",
         version: 1,

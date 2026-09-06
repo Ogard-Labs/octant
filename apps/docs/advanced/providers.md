@@ -52,11 +52,16 @@ manual form:
 - **OpenAI Image** (`gpt-image-2` and related GPT Image models as suggestions)
 - **Gemini Image** (Gemini 3.1 image models as suggestions, with
   `gemini-2.5-flash-image` as a legacy suggestion)
+- **Black Forest Labs Image** (`flux-pro-1.1`, `flux-pro-1.1-ultra`,
+  `flux-dev`, `flux-kontext-pro`, `flux-kontext-max`, `flux-2-pro`, and
+  `flux-2-flex` as suggestions)
 
 Allowlists are manual-entry; suggested IDs are not the only values Octant
 accepts. Image profiles have no editable base URL. GPT Image models require
-OpenAI Organization Verification. They never appear in the Chat, Work, or Code
-model picker — they are not thread drivers.
+OpenAI Organization Verification. Black Forest Labs generates exactly one
+image per request and does not accept reference images; it has no quality,
+size, or aspect ratio controls of its own. They never appear in the Chat,
+Work, or Code model picker — they are not thread drivers.
 
 Provider-specific setup guidance is documented in Settings, including the
 Amazon Bedrock Mantle regional endpoint and API-key credential.
@@ -71,7 +76,7 @@ serving chat, voice, and images at once. Recraft is a working example: its
 API matches OpenAI's image format, so it needs no dedicated Octant support —
 just add it as an OpenAI-compatible endpoint and register it as a custom
 image source. Up to 20 custom sources may be configured alongside the
-dedicated OpenAI Image and Gemini Image profiles.
+dedicated OpenAI Image, Gemini Image, and Black Forest Labs Image profiles.
 
 ### Credentials
 

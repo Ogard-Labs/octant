@@ -36,6 +36,8 @@ const scopeId = decodeImageGenerationScopeId("a3000000-0000-4000-8000-0000000000
 const modelId = decodeProviderModelId("gpt-image-2");
 const compatibleId = decodeProviderInstanceId("a3000000-0000-4000-8000-000000000005");
 const compatibleModelId = decodeProviderModelId("recraftv3");
+const bflId = decodeProviderInstanceId("a3000000-0000-4000-8000-000000000006");
+const bflModelId = decodeProviderModelId("flux-pro-1.1");
 const actor = {
   kind: "system" as const,
   actorId: "00000000-0000-4000-8000-000000000002" as never,
@@ -85,6 +87,24 @@ function compatibleInstance(enabled = true): ProviderInstance {
   };
 }
 
+function bflInstance(): ProviderInstance {
+  return {
+    id: bflId,
+    displayName: "FLUX",
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1 as ProviderInstance["version"],
+    createdAt: now as ProviderInstance["createdAt"],
+    updatedAt: now as ProviderInstance["updatedAt"],
+    driverKind: "bfl-image",
+    configuration: {
+      kind: "bfl-image-http",
+      modelAllowlist: [bflModelId],
+      defaultModel: bflModelId,
+    },
+  };
+}
+
 function openHarness(
   adapter?: ImageGenerationAdapter,
   options: {
@@ -93,6 +113,7 @@ function openHarness(
     readonly failToStatus?: "running";
     readonly customSources?: ReadonlyArray<ImageGenerationCustomSource>;
     readonly compatibleInstance?: ProviderInstance;
+    readonly bflInstance?: ProviderInstance;
     readonly fetch?: ImageHttpFetch;
   } = {},
 ) {
@@ -145,6 +166,9 @@ function openHarness(
         String(id) === String(options.compatibleInstance.id)
       ) {
         return options.compatibleInstance;
+      }
+      if (options.bflInstance !== undefined && String(id) === String(options.bflInstance.id)) {
+        return options.bflInstance;
       }
       return undefined;
     },
@@ -670,6 +694,46 @@ describe("custom image sources", () => {
     const completed = await service.whenTerminal(queued.id);
     expect(completed.status).toBe("completed");
     expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("dispatches to the BFL image adapter through submit, poll, and the approved-URL fetch", async () => {
+    let callCount = 0;
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      callCount += 1;
+      if (callCount === 1) {
+        expect(String(url)).toBe("https://api.bfl.ai/v1/flux-pro-1.1");
+        return Response.json({
+          id: "job-1",
+          polling_url: "https://api.bfl.ai/v1/poll/job-1",
+          cost: null,
+          input_mp: null,
+          output_mp: null,
+        });
+      }
+      if (callCount === 2) {
+        expect(String(url)).toBe("https://api.bfl.ai/v1/poll/job-1");
+        return Response.json({
+          id: "job-1",
+          status: "Ready",
+          result: { sample: "https://signed.example/generated.png?token=secret" },
+        });
+      }
+      expect(String(url)).toBe("https://signed.example/generated.png?token=secret");
+      return new Response(png, { status: 200 });
+    });
+    // No `adapter` argument: the service must pick the real default adapter
+    // for this configuration kind, not a test double.
+    const { service } = openHarness(undefined, { bflInstance: bflInstance(), fetch });
+    const queued = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: bflId,
+      modelId: bflModelId,
+      prompt: "a red cube",
+    });
+    const completed = await service.whenTerminal(queued.id);
+    expect(completed.status).toBe("completed");
+    expect(fetch).toHaveBeenCalledTimes(3);
   });
 });
 

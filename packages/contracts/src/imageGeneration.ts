@@ -228,7 +228,12 @@ export const decodeImageGenerationSettings = Schema.decodeUnknownSync(ImageGener
 export const ImageGenerationProfileView = Schema.Struct({
   instanceId: ProviderInstanceId,
   displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(120)),
-  driverKind: Schema.Literal("openai-image", "gemini-native-image", "openai-compatible-image"),
+  driverKind: Schema.Literal(
+    "openai-image",
+    "gemini-native-image",
+    "openai-compatible-image",
+    "bfl-image",
+  ),
   modelAllowlist: Schema.Array(ProviderModelId).pipe(Schema.minItems(1)),
   defaultModel: ProviderModelId,
   quality: Schema.optional(OpenAiImageQuality),

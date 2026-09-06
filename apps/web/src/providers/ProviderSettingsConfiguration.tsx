@@ -1,10 +1,12 @@
 import {
+  BFL_IMAGE_MODEL_PRESETS,
   GEMINI_IMAGE_MODEL_PRESETS,
   OPENAI_IMAGE_MODEL_PRESETS,
   type AnthropicCompatibleAuthentication,
   type AnthropicCompatibleProtocol,
   type AnthropicCompatibleProviderConfiguration,
   type AzureFoundryProviderConfiguration,
+  type BflImageProviderConfiguration,
   type ClaudeAuthentication,
   type ClaudeProviderConfiguration,
   type GeminiImageAspectRatio,
@@ -55,6 +57,7 @@ export type ProviderCreateFormProps = Pick<
   | "onCreateAzureFoundry"
   | "onCreateOpenAiImage"
   | "onCreateGeminiImage"
+  | "onCreateBflImage"
   | "onCreateClaude"
   | "onCreateMistralVibe"
   | "onCreateGrok"
@@ -91,6 +94,7 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
     | "azure-foundry"
     | "openai-image"
     | "gemini-native-image"
+    | "bfl-image"
   >("opencode");
   const [claudeAuthentication, setClaudeAuthentication] =
     useState<ClaudeAuthentication>("subscription");
@@ -141,19 +145,21 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
                       ? "Add OpenAI image profile"
                       : providerType === "gemini-native-image"
                         ? "Add Gemini image profile"
-                        : providerType === "ollama"
-                          ? "Add Ollama provider"
-                          : providerType === "claude"
-                            ? "Add Claude provider"
-                            : providerType === "mistral-vibe"
-                              ? "Add Mistral Vibe provider"
-                              : providerType === "grok"
-                                ? "Add Grok Build provider"
-                                : providerType === "goose"
-                                  ? "Add Goose provider"
-                                  : providerType === "glm"
-                                    ? "Add GLM Agent provider"
-                                    : "Add provider"
+                        : providerType === "bfl-image"
+                          ? "Add Black Forest Labs image profile"
+                          : providerType === "ollama"
+                            ? "Add Ollama provider"
+                            : providerType === "claude"
+                              ? "Add Claude provider"
+                              : providerType === "mistral-vibe"
+                                ? "Add Mistral Vibe provider"
+                                : providerType === "grok"
+                                  ? "Add Grok Build provider"
+                                  : providerType === "goose"
+                                    ? "Add Goose provider"
+                                    : providerType === "glm"
+                                      ? "Add GLM Agent provider"
+                                      : "Add provider"
             }
             className={`provider-settings__create provider-settings__create--${providerType}`}
             noValidate
@@ -304,6 +310,14 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
                   configuration,
                   enteredCredential,
                 );
+              } else if (providerType === "bfl-image") {
+                const configuration = bflImageConfigurationFrom(data);
+                const enteredCredential = transientCredential(credentialInput.current);
+                operation = props.onCreateBflImage(
+                  String(data.get("displayName") ?? ""),
+                  configuration,
+                  enteredCredential,
+                );
               } else {
                 const configuration = configurationFrom(data);
                 const enteredCredential = transientCredential(credentialInput.current);
@@ -352,6 +366,7 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
                   { id: "azure-foundry", label: "Azure AI Foundry" },
                   { id: "openai-image", label: "OpenAI Image" },
                   { id: "gemini-native-image", label: "Gemini Image" },
+                  { id: "bfl-image", label: "Black Forest Labs Image" },
                 ]}
                 value={providerType}
               />
@@ -370,6 +385,7 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
             providerType !== "azure-foundry" &&
             providerType !== "openai-image" &&
             providerType !== "gemini-native-image" &&
+            providerType !== "bfl-image" &&
             providerType !== "ollama" ? (
               <label>
                 <span>
@@ -546,6 +562,11 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
               />
             ) : providerType === "gemini-native-image" ? (
               <GeminiImageFields
+                credentialInput={credentialInput}
+                credentialManagementAvailable={props.credentialManagementAvailable}
+              />
+            ) : providerType === "bfl-image" ? (
+              <BflImageFields
                 credentialInput={credentialInput}
                 credentialManagementAvailable={props.credentialManagementAvailable}
               />
@@ -765,7 +786,9 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
                   providerType === "cline" ||
                   providerType === "qwen") &&
                   !props.credentialManagementAvailable) ||
-                ((providerType === "openai-image" || providerType === "gemini-native-image") &&
+                ((providerType === "openai-image" ||
+                  providerType === "gemini-native-image" ||
+                  providerType === "bfl-image") &&
                   !props.credentialManagementAvailable)
               }
               type="submit"
@@ -782,7 +805,9 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
                         ? "Add OpenAI image profile"
                         : providerType === "gemini-native-image"
                           ? "Add Gemini image profile"
-                          : `Add ${selectedDriverLabel}`}
+                          : providerType === "bfl-image"
+                            ? "Add Black Forest Labs image profile"
+                            : `Add ${selectedDriverLabel}`}
             </OctantButton>
           </form>
           {providerType === "openai-compatible" ? <BedrockMantleGuide /> : null}
@@ -2257,6 +2282,78 @@ function GeminiImageFields(props: {
   );
 }
 
+function BflImageFields(props: {
+  readonly credentialInput: RefObject<HTMLInputElement | null>;
+  readonly credentialManagementAvailable: boolean;
+  readonly instance?: Extract<ProviderInstance, { driverKind: "bfl-image" }>;
+}) {
+  const configuration = props.instance?.configuration;
+  return (
+    <>
+      <label className="provider-settings__models-field">
+        <span>Model allowlist</span>
+        <OctantTextarea
+          aria-label={
+            props.instance === undefined
+              ? "Model allowlist"
+              : `Model allowlist for ${props.instance.displayName}`
+          }
+          className="settings-view__text-input window-no-drag"
+          defaultValue={configuration?.modelAllowlist.join(", ")}
+          name="modelAllowlist"
+          placeholder={BFL_IMAGE_MODEL_PRESETS.join(", ")}
+          required
+          rows={2}
+        />
+      </label>
+      <label>
+        <span>Default model</span>
+        <OctantInput
+          aria-label={
+            props.instance === undefined
+              ? "Default model"
+              : `Default model for ${props.instance.displayName}`
+          }
+          className="settings-view__text-input window-no-drag"
+          defaultValue={configuration?.defaultModel}
+          name="defaultModel"
+          placeholder="flux-pro-1.1"
+          required
+        />
+      </label>
+      <label>
+        <span>
+          {props.instance === undefined ? "API key" : "API key (leave blank to preserve)"}
+        </span>
+        <OctantInput
+          aria-label={
+            props.instance === undefined ? "API key" : `API key for ${props.instance.displayName}`
+          }
+          autoComplete="new-password"
+          className="settings-view__text-input window-no-drag"
+          disabled={!props.credentialManagementAvailable}
+          name="credential"
+          ref={props.credentialInput}
+          spellCheck={false}
+          type="password"
+        />
+      </label>
+      <p className="provider-settings__field-guidance">
+        Suggested models are data, not a catalog Octant maintains:{" "}
+        {BFL_IMAGE_MODEL_PRESETS.join(", ")}. Enter any model IDs. The API key is stored write-only
+        in Keychain. This profile has no editable base URL, quality, or size — Black Forest Labs
+        generates one image per request with its own defaults.
+      </p>
+      {!props.credentialManagementAvailable ? (
+        <p className="provider-settings__field-guidance">
+          Manage credentials in the Octant host app. Credential changes are unavailable in this
+          browser.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 interface OpenAiImageConfigurationFormProps {
   readonly instance: Extract<ProviderInstance, { driverKind: "openai-image" }>;
   readonly disabled: boolean;
@@ -2387,6 +2484,71 @@ export function GeminiImageConfigurationForm(props: GeminiImageConfigurationForm
   );
 }
 
+interface BflImageConfigurationFormProps {
+  readonly instance: Extract<ProviderInstance, { driverKind: "bfl-image" }>;
+  readonly disabled: boolean;
+  readonly credentialManagementAvailable: boolean;
+  readonly credential: CredentialStatusController;
+  readonly onChange: ProviderSettingsViewProps["onChangeBflImageConfiguration"];
+  readonly onClearCredential: ProviderSettingsViewProps["onClearProviderCredential"];
+}
+
+export function BflImageConfigurationForm(props: BflImageConfigurationFormProps) {
+  const credentialInput = useRef<HTMLInputElement>(null);
+  return (
+    <form
+      className="provider-card__edit provider-card__edit--image"
+      noValidate
+      onSubmit={(event) => {
+        event.preventDefault();
+        const configuration = bflImageConfigurationFrom(new FormData(event.currentTarget));
+        const enteredCredential = transientCredential(credentialInput.current);
+        const generation =
+          enteredCredential.value.length > 0 ? props.credential.beginMutation() : undefined;
+        void props.onChange(props.instance.id, configuration, enteredCredential).then(
+          (updated) => {
+            if (generation !== undefined)
+              props.credential.finishMutation(generation, updated, "stored");
+          },
+          () => {
+            if (generation !== undefined)
+              props.credential.finishMutation(generation, false, "stored");
+          },
+        );
+      }}
+    >
+      <BflImageFields
+        credentialInput={credentialInput}
+        credentialManagementAvailable={props.credentialManagementAvailable}
+        instance={props.instance}
+      />
+      <div className="provider-card__credential-actions">
+        <OctantButton disabled={props.disabled} type="submit">
+          Save Black Forest Labs image settings for {props.instance.displayName}
+        </OctantButton>
+        {props.credentialManagementAvailable ? (
+          <OctantButton
+            disabled={props.disabled || props.credential.status !== "stored"}
+            onClick={() => {
+              const generation = props.credential.beginMutation();
+              void props.onClearCredential(props.instance.id).then(
+                (cleared) => {
+                  props.credential.finishMutation(generation, cleared, "missing");
+                },
+                () => props.credential.finishMutation(generation, false, "missing"),
+              );
+            }}
+            type="button"
+            variant="destructive"
+          >
+            Clear stored API key for {props.instance.displayName}
+          </OctantButton>
+        ) : null}
+      </div>
+    </form>
+  );
+}
+
 function configurationFrom(data: FormData): OpenAiCompatibleProviderConfiguration {
   return {
     kind: "openai-compatible-http",
@@ -2471,5 +2633,16 @@ function geminiImageConfigurationFrom(data: FormData): GeminiImageProviderConfig
     defaultModel: defaultModel as GeminiImageProviderConfiguration["defaultModel"],
     ...(aspectRatio === undefined ? {} : { aspectRatio }),
     ...(resolution === undefined ? {} : { resolution }),
+  };
+}
+
+function bflImageConfigurationFrom(data: FormData): BflImageProviderConfiguration {
+  const modelAllowlist = parseManualModelIds(String(data.get("modelAllowlist") ?? ""));
+  const enteredDefault = String(data.get("defaultModel") ?? "").trim();
+  const defaultModel = enteredDefault.length > 0 ? enteredDefault : (modelAllowlist[0] ?? "");
+  return {
+    kind: "bfl-image-http",
+    modelAllowlist: modelAllowlist as unknown as BflImageProviderConfiguration["modelAllowlist"],
+    defaultModel: defaultModel as BflImageProviderConfiguration["defaultModel"],
   };
 }

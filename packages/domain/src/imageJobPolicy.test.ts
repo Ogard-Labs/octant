@@ -28,6 +28,24 @@ function imageProfile(enabled = true): ProviderInstance {
   };
 }
 
+function bflImageProfile(enabled = true): ProviderInstance {
+  return {
+    id: "a1000000-0000-4000-8000-000000000005" as ProviderInstance["id"],
+    displayName: "FLUX",
+    enabled,
+    environmentPolicy: "inherit-host",
+    version: 1 as ProviderInstance["version"],
+    createdAt: timestamp as ProviderInstance["createdAt"],
+    updatedAt: timestamp as ProviderInstance["updatedAt"],
+    driverKind: "bfl-image",
+    configuration: {
+      kind: "bfl-image-http",
+      modelAllowlist: ["flux-pro-1.1" as never],
+      defaultModel: "flux-pro-1.1" as never,
+    },
+  };
+}
+
 describe("image job transitions", () => {
   it("allows the AgentRun lifecycle subset queued → running → completed", () => {
     assertImageJobTransitionAllowed("queued", "running");
@@ -66,6 +84,16 @@ describe("image job profile eligibility", () => {
   it("refuses a model outside the profile allowlist", () => {
     expect(() =>
       assertImageJobProfileEligible(imageProfile(), "dall-e-3" as ImageJob["modelId"]),
+    ).toThrow(ImageJobPolicyRejected);
+  });
+
+  it("accepts an enabled BFL image profile whose allowlist contains the model", () => {
+    assertImageJobProfileEligible(bflImageProfile(), "flux-pro-1.1" as ImageJob["modelId"]);
+  });
+
+  it("refuses a model outside the BFL profile allowlist", () => {
+    expect(() =>
+      assertImageJobProfileEligible(bflImageProfile(), "flux-dev" as ImageJob["modelId"]),
     ).toThrow(ImageJobPolicyRejected);
   });
 
