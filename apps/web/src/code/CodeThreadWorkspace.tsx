@@ -540,13 +540,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     );
     if (sent) {
       attachments.takeForSend();
-      setDraft("");
-      // The host keeps the draft per thread and hands it back whenever the
-      // composer re-syncs, so a sent message came back into the box until the
-      // stored copy was cleared as well.
-      props.controller.setPendingDraft?.("");
-      threadMentions.clear();
-      pathMentions.clear();
+      // Only the draft that was sent is cleared: typing during the awaited send
+      // bumps the revision, and that newer draft stays. The host keeps the
+      // draft per thread and hands it back whenever the composer re-syncs, so
+      // the sent message came back into the box until the stored copy was
+      // cleared as well.
+      if (draftRevisionRef.current === draftRevision) {
+        setDraft("");
+        props.controller.setPendingDraft?.("");
+        threadMentions.clear();
+        pathMentions.clear();
+      }
     } else {
       setTurnAccessOverride((current) => current ?? override);
     }

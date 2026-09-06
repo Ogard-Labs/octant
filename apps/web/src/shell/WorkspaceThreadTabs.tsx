@@ -62,9 +62,10 @@ export interface WorkspaceThreadTabsProps {
   /**
    * Closing the tab in front with nothing left to fall back to hands the pane
    * back to the shell. Without it the tab vanished while the thread stayed on
-   * screen, so the close control read as broken.
+   * screen, so the close control read as broken. A shell that could not close
+   * the pane answers `false`, and the tab stays with the pane it names.
    */
-  readonly onCloseActive?: () => void;
+  readonly onCloseActive?: () => Promise<boolean | void> | boolean | void;
 }
 
 export function workspaceThreadTabFromSurface(
@@ -162,15 +163,23 @@ export function WorkspaceThreadTabs(props: WorkspaceThreadTabsProps) {
     props.onActivate(next.tab);
   }
 
-  function closeTab(key: string) {
+  async function closeTab(key: string) {
     const index = open.findIndex((entry) => entry.tab.key === key);
     if (index < 0) return;
     const remaining = open.filter((entry) => entry.tab.key !== key);
-    setOpen(remaining);
-    if (key !== activeKey) return;
+    if (key !== activeKey) {
+      setOpen(remaining);
+      return;
+    }
     const fallback = remaining[index] ?? remaining[index - 1];
-    if (fallback !== undefined) props.onActivate(fallback.tab);
-    else props.onCloseActive?.();
+    if (fallback !== undefined) {
+      setOpen(remaining);
+      props.onActivate(fallback.tab);
+      return;
+    }
+    const closed = await props.onCloseActive?.();
+    if (closed === false) return;
+    setOpen(remaining);
   }
 
   return (
@@ -260,7 +269,7 @@ export function WorkspaceThreadTabs(props: WorkspaceThreadTabsProps) {
             <OctantButton
               aria-label={`Close ${entry.tab.title}`}
               className="workspace-thread-tabs__close"
-              onClick={() => closeTab(entry.tab.key)}
+              onClick={() => void closeTab(entry.tab.key)}
               size="icon"
               title={`Close ${entry.tab.title}`}
               type="button"
