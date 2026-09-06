@@ -5,6 +5,7 @@ import {
   decodeProviderModelId,
   type AnthropicCompatibleProviderInstance,
   type AzureFoundryProviderInstance,
+  type BflImageProviderInstance,
   type GeminiImageProviderInstance,
   type OpenAiCompatibleProviderInstance,
   type OpenAiImageProviderInstance,
@@ -17,6 +18,7 @@ import {
   ProviderPolicyRejected,
   changeAnthropicCompatibleConfiguration,
   changeAzureFoundryConfiguration,
+  changeBflImageConfiguration,
   changeClaudeConfiguration,
   changeGeminiImageConfiguration,
   changeOpenAiCompatibleConfiguration,
@@ -24,6 +26,7 @@ import {
   changeProviderBinary,
   createAnthropicCompatibleProvider,
   createAzureFoundryProvider,
+  createBflImageProvider,
   createClaudeProvider,
   createGeminiImageProvider,
   createOpenAiCompatibleProvider,
@@ -163,6 +166,29 @@ function openAiImageProvider(overrides: Record<string, unknown> = {}): OpenAiIma
   });
   if (instance.driverKind !== "openai-image") {
     throw new Error("expected OpenAI image provider fixture");
+  }
+  return instance;
+}
+
+function bflImageProvider(overrides: Record<string, unknown> = {}): BflImageProviderInstance {
+  const instance = decodeProviderInstance({
+    id: ids.local,
+    displayName: "FLUX",
+    driverKind: "bfl-image",
+    configuration: {
+      kind: "bfl-image-http",
+      modelAllowlist: ["flux-pro-1.1", "flux-dev"],
+      defaultModel: "flux-pro-1.1",
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt,
+    updatedAt: createdAt,
+    ...overrides,
+  });
+  if (instance.driverKind !== "bfl-image") {
+    throw new Error("expected BFL image provider fixture");
   }
   return instance;
 }
@@ -747,6 +773,91 @@ describe("provider instance policy", () => {
     expect(original).toEqual(openAiImageProvider());
   });
 
+  it("creates a BFL image profile with a normalized allowlist and default model", () => {
+    expect(
+      createBflImageProvider({
+        id: ids.local,
+        displayName: "  FLUX  ",
+        configuration: {
+          kind: "bfl-image-http",
+          modelAllowlist: [" flux-pro-1.1 ", "flux-pro-1.1", " flux-dev "],
+          defaultModel: " flux-pro-1.1 ",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }),
+    ).toEqual(
+      bflImageProvider({
+        displayName: "FLUX",
+        configuration: {
+          kind: "bfl-image-http",
+          modelAllowlist: ["flux-pro-1.1", "flux-dev"],
+          defaultModel: "flux-pro-1.1",
+        },
+      }),
+    );
+  });
+
+  it("rejects a BFL image profile whose default model is not in the allowlist", () => {
+    expect(() =>
+      createBflImageProvider({
+        id: ids.local,
+        displayName: "FLUX",
+        configuration: {
+          kind: "bfl-image-http",
+          modelAllowlist: ["flux-pro-1.1"],
+          defaultModel: "flux-dev",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }),
+    ).toThrow("Default model must be a member of the model allowlist.");
+  });
+
+  it("rejects a BFL image profile with no model IDs", () => {
+    expect(() =>
+      createBflImageProvider({
+        id: ids.local,
+        displayName: "FLUX",
+        configuration: {
+          kind: "bfl-image-http",
+          modelAllowlist: [],
+          defaultModel: "flux-pro-1.1",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }),
+    ).toThrow("Image profiles require at least one model ID.");
+  });
+
+  it("returns a complete immutable BFL image configuration update", () => {
+    const original = bflImageProvider();
+    const changed = changeBflImageConfiguration(
+      original,
+      {
+        kind: "bfl-image-http",
+        modelAllowlist: [" flux-dev ", "flux-dev"],
+        defaultModel: " flux-dev ",
+      },
+      updatedAt,
+    );
+
+    expect(changed).toEqual({
+      ...original,
+      configuration: {
+        kind: "bfl-image-http",
+        modelAllowlist: ["flux-dev"],
+        defaultModel: "flux-dev",
+      },
+      version: 2,
+      updatedAt,
+    });
+    expect(original).toEqual(bflImageProvider());
+  });
+
   it("creates a Gemini image profile with a normalized allowlist and default model", () => {
     expect(
       createGeminiImageProvider({
@@ -828,6 +939,7 @@ describe("provider instance policy", () => {
   it("classifies image profiles separately from chat drivers", () => {
     expect(isImageProfileDriverKind("openai-image")).toBe(true);
     expect(isImageProfileDriverKind("gemini-native-image")).toBe(true);
+    expect(isImageProfileDriverKind("bfl-image")).toBe(true);
     expect(isImageProfileDriverKind("openai-compatible")).toBe(false);
   });
 

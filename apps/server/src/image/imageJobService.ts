@@ -55,6 +55,7 @@ import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
+import { makeBflImageAdapter } from "./bflImageAdapter";
 import { makeGeminiImageAdapter } from "./geminiImageAdapter";
 import type { GeneratedImageStore } from "./generatedImageStore";
 import type { ImageAdapterRequest, ImageGenerationAdapter } from "./imageAdapter";
@@ -367,6 +368,9 @@ export class ImageJobService {
     }
     if (instance.configuration.kind === "gemini-native-image-http") {
       return makeGeminiImageAdapter(options);
+    }
+    if (instance.configuration.kind === "bfl-image-http") {
+      return makeBflImageAdapter(options);
     }
     if (instance.configuration.kind === "openai-compatible-http") {
       return makeOpenAiCompatibleImageAdapter({

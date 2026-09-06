@@ -26,6 +26,16 @@ function geminiProfile(): ImageGenerationProfileView {
   };
 }
 
+function bflProfile(): ImageGenerationProfileView {
+  return {
+    instanceId: "a3000000-0000-4000-8000-000000000006" as ImageGenerationProfileView["instanceId"],
+    displayName: "FLUX",
+    driverKind: "bfl-image",
+    modelAllowlist: ["flux-pro-1.1" as never],
+    defaultModel: "flux-pro-1.1" as never,
+  };
+}
+
 function runningJob(): ImageJob {
   return {
     id: "a3000000-0000-4000-8000-000000000003" as ImageJob["id"],
@@ -71,6 +81,44 @@ describe("ImageGenerationSheet", () => {
     expect(screen.getByLabelText("Resolution")).toBeVisible();
     expect(screen.queryByLabelText("Quality")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Size")).not.toBeInTheDocument();
+  });
+
+  it("shows no extra options for a BFL profile, which has neither quality nor aspect ratio", () => {
+    render(
+      <ImageGenerationSheet onClose={vi.fn()} onSubmit={vi.fn()} open profiles={[bflProfile()]} />,
+    );
+    expect(screen.queryByLabelText("Quality")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Size")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Aspect ratio")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Resolution")).not.toBeInTheDocument();
+  });
+
+  it("offers only one variant for a BFL profile, which generates one image per request", async () => {
+    const user = userEvent.setup();
+    render(
+      <ImageGenerationSheet onClose={vi.fn()} onSubmit={vi.fn()} open profiles={[bflProfile()]} />,
+    );
+    await user.click(screen.getByLabelText("Variant count"));
+    expect(screen.getByRole("option", { name: "1" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "2" })).not.toBeInTheDocument();
+  });
+
+  it("submits a BFL draft without a quality, size, aspect ratio, or resolution field", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <ImageGenerationSheet onClose={vi.fn()} onSubmit={onSubmit} open profiles={[bflProfile()]} />,
+    );
+    await user.type(screen.getByLabelText("Image prompt"), "a red cube");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    expect(onSubmit).toHaveBeenCalledOnce();
+    const draft = onSubmit.mock.calls[0]![0];
+    expect(draft).toMatchObject({ modelId: "flux-pro-1.1", prompt: "a red cube", variantCount: 1 });
+    expect("quality" in draft).toBe(false);
+    expect("size" in draft).toBe(false);
+    expect("aspectRatio" in draft).toBe(false);
+    expect("resolution" in draft).toBe(false);
   });
 
   it("offers variant counts up to four", async () => {
