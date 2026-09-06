@@ -73,7 +73,7 @@ export function ComboboxPopup({
   return (
     <ComboboxPrimitive.Popup
       className={cn(
-        "max-h-[min(320px,var(--available-height))] overflow-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-ending-style:opacity-0 data-starting-style:opacity-0",
+        "max-h-[min(320px,var(--available-height))] overflow-auto rounded-xl bg-popover p-1 text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none data-ending-style:opacity-0 data-starting-style:opacity-0",
         className,
       )}
       data-slot="combobox-content"
@@ -104,7 +104,7 @@ export function ComboboxItem({
   return (
     <ComboboxPrimitive.Item
       className={cn(
-        "relative flex min-h-9 cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground",
+        "relative flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground",
         className,
       )}
       data-slot="combobox-item"

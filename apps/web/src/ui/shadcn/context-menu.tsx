@@ -28,7 +28,7 @@ export function ContextMenuContent({
       <ContextMenuPrimitive.Positioner className="outline-none window-no-drag">
         <ContextMenuPrimitive.Popup
           className={cn(
-            "window-no-drag min-w-48 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none",
+            "window-no-drag min-w-48 rounded-xl bg-popover p-1 text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
             className,
           )}
           {...props}
@@ -62,7 +62,7 @@ export function ContextMenuItem({
   return (
     <ContextMenuPrimitive.Item
       className={cn(
-        "window-no-drag relative flex cursor-default items-center rounded-sm px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground",
+        "window-no-drag relative flex cursor-default items-center rounded-md px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground",
         className,
       )}
       closeOnClick={closeOnClick}
@@ -108,7 +108,7 @@ export function ShadcnContextMenu(props: ShadcnContextMenuProps) {
         {props.items.map((item) => (
           <ContextMenuItem
             className={cn(
-              "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag",
+              "relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag",
             )}
             closeOnClick
             key={item.value}

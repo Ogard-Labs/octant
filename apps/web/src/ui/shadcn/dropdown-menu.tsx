@@ -31,7 +31,7 @@ export function DropdownMenuPopup({
   return (
     <MenuPrimitive.Popup
       className={cn(
-        "z-50 min-w-48 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-ending-style:opacity-0 data-starting-style:opacity-0",
+        "z-50 min-w-48 rounded-xl bg-popover p-1 text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none data-ending-style:opacity-0 data-starting-style:opacity-0",
         className,
       )}
       data-slot="dropdown-menu-content"
@@ -41,7 +41,7 @@ export function DropdownMenuPopup({
 }
 
 const dropdownMenuItemClassName =
-  "relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag";
+  "relative flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag";
 
 export function DropdownMenuPortal(props: ComponentProps<typeof MenuPrimitive.Portal>) {
   return <MenuPrimitive.Portal {...props} />;
@@ -251,7 +251,7 @@ export function ShadcnDropdownMenu(props: ShadcnDropdownMenuProps) {
                     ? {}
                     : { "aria-describedby": descriptionId(index) })}
                   className={cn(
-                    "relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag",
+                    "relative flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag",
                   )}
                   closeOnClick
                   key={item.value}
@@ -295,7 +295,7 @@ export function ShadcnDropdownMenu(props: ShadcnDropdownMenuProps) {
                       ? {}
                       : { "aria-describedby": descriptionId(index) })}
                     className={cn(
-                      "relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag",
+                      "relative flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag",
                     )}
                     closeOnClick
                     key={item.value}
@@ -337,7 +337,7 @@ export function ShadcnDropdownMenu(props: ShadcnDropdownMenuProps) {
                 <MenuPrimitive.Separator className="-mx-1 my-1 h-px bg-border" />
                 {props.actions.map((action) => (
                   <MenuPrimitive.Item
-                    className="relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag"
+                    className="relative flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag"
                     closeOnClick
                     key={action.label}
                     {...(action.disabled === true ? { disabled: true } : {})}
