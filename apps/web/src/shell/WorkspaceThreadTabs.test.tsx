@@ -140,6 +140,50 @@ describe("WorkspaceThreadTabs", () => {
     expect(onActivate).toHaveBeenLastCalledWith(first);
   });
 
+  it("hands the pane back when the only open tab is closed", async () => {
+    const user = userEvent.setup();
+    const onActivate = vi.fn();
+    const onCloseActive = vi.fn();
+    render(
+      <WorkspaceThreadTabs
+        activeTab={first}
+        contextLabel="Planning"
+        fallbackTitle="First thread"
+        mode="chat"
+        onActivate={onActivate}
+        onCloseActive={onCloseActive}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Close First thread" }));
+
+    // Nothing is left to switch to, so the shell closes the pane; before, the
+    // tab disappeared while the thread stayed on screen.
+    expect(onCloseActive).toHaveBeenCalledOnce();
+    expect(onActivate).not.toHaveBeenCalled();
+  });
+
+  it("keeps the only tab when the shell could not close its pane", async () => {
+    const user = userEvent.setup();
+    const onCloseActive = vi.fn(async () => false);
+    render(
+      <WorkspaceThreadTabs
+        activeTab={first}
+        contextLabel="Planning"
+        fallbackTitle="First thread"
+        mode="chat"
+        onActivate={vi.fn()}
+        onCloseActive={onCloseActive}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Close First thread" }));
+
+    // A pane that refused to close is still on screen, so its tab stays with it.
+    expect(onCloseActive).toHaveBeenCalledOnce();
+    expect(screen.getByRole("tab", { name: "First thread" })).toBeVisible();
+  });
+
   it("switches pinned threads with the tab keyboard model", async () => {
     const user = userEvent.setup();
     const onActivate = vi.fn();

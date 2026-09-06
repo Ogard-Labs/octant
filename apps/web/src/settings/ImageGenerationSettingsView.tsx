@@ -13,6 +13,11 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 
+// Matches ImageGenerationCustomSource.label's Schema.maxLength(120): reject
+// here so a too-long label never reaches the replace-settings command that
+// would otherwise refuse the whole patch after the form already cleared.
+const MAX_LABEL_LENGTH = 120;
+
 export interface ImageGenerationSettingsViewProps {
   readonly settings: ImageGenerationSettings;
   readonly providerSnapshot?: ProviderRegistrySnapshot | undefined;
@@ -140,6 +145,10 @@ function CustomImageSourceForm(props: {
           setProblem("Enter a label.");
           return;
         }
+        if (label.length > MAX_LABEL_LENGTH) {
+          setProblem(`The label must be ${MAX_LABEL_LENGTH} characters or fewer.`);
+          return;
+        }
         if (providerInstanceId.length === 0) {
           setProblem("Choose a provider.");
           return;
@@ -171,6 +180,7 @@ function CustomImageSourceForm(props: {
         <OctantInput
           aria-label="Image source label"
           className="settings-view__text-input window-no-drag"
+          maxLength={MAX_LABEL_LENGTH}
           name="label"
           placeholder="Recraft"
           spellCheck={false}
