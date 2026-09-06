@@ -220,6 +220,20 @@ export const CodeThreadForkOrigin = Schema.Struct({
 }).annotations(strict);
 export type CodeThreadForkOrigin = typeof CodeThreadForkOrigin.Type;
 
+/**
+ * A snooze hides a thread from the active list until `until` passes. The
+ * thread stays active in every other respect: a running turn keeps running
+ * and its transcript keeps journaling. `duringTurn` records that a provider
+ * turn was running when the snooze was set, so that turn ending is the
+ * "something happened" that wakes the thread early.
+ */
+export const CodeThreadSnooze = Schema.Struct({
+  until: UtcTimestamp,
+  at: UtcTimestamp,
+  duringTurn: Schema.optional(Schema.Boolean),
+}).annotations(strict);
+export type CodeThreadSnooze = typeof CodeThreadSnooze.Type;
+
 export const CodeThread = Schema.Struct({
   id: CodeThreadId,
   projectId: ProjectId,
@@ -239,6 +253,17 @@ export const CodeThread = Schema.Struct({
    * thread started on its own.
    */
   forkedFrom: Schema.optional(CodeThreadForkOrigin),
+  /**
+   * When the person completed this thread: put away in the Completed shelf,
+   * still readable, not archived. Optional so a journal written before
+   * completion existed replays as "in play"; absent means the same.
+   */
+  completedAt: Schema.optional(UtcTimestamp),
+  /**
+   * The thread's current snooze, if any. Optional for the same replay reason;
+   * absent means the thread is awake.
+   */
+  snooze: Schema.optional(CodeThreadSnooze),
   lifecycle: CodeThreadLifecycle,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
@@ -501,6 +526,32 @@ export const CodeCommand = Schema.Union(
     kind: Schema.Literal("pin-code-thread"),
     ...CodeThreadCommandFields,
     pinned: Schema.Boolean,
+  }).annotations(strict),
+  /**
+   * Put a finished thread away without archiving it. The host refuses while a
+   * turn is running or the thread waits on the person, so a thread never
+   * disappears with work in flight.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("complete-code-thread"),
+    ...CodeThreadCommandFields,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("reopen-code-thread"),
+    ...CodeThreadCommandFields,
+  }).annotations(strict),
+  /**
+   * Hide the thread until `until`. The wake time is the first kind of wake
+   * condition; the host refuses one that is not in the future.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("snooze-code-thread"),
+    ...CodeThreadCommandFields,
+    until: UtcTimestamp,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("wake-code-thread"),
+    ...CodeThreadCommandFields,
   }).annotations(strict),
   /**
    * Move a thread onto the checkout its Project binds now.

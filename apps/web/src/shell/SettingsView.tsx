@@ -749,6 +749,38 @@ interface SectionProps {
   readonly props: SettingsViewProps;
 }
 
+const COMPLETED_THREAD_ARCHIVE_CHOICES: ReadonlyArray<number> = [1, 3, 7, 14, 30, 90];
+
+/**
+ * The window before a completed thread is archived, as a short list of
+ * choices plus Never. A value chosen elsewhere that the list lacks is still
+ * shown as itself rather than snapping to the nearest choice.
+ */
+function CompletedThreadArchiveSelect(props: {
+  readonly afterDays: number | null;
+  readonly onChange: (afterDays: number | null) => void;
+}) {
+  const days =
+    props.afterDays === null || COMPLETED_THREAD_ARCHIVE_CHOICES.includes(props.afterDays)
+      ? COMPLETED_THREAD_ARCHIVE_CHOICES
+      : [...COMPLETED_THREAD_ARCHIVE_CHOICES, props.afterDays].sort((left, right) => left - right);
+  return (
+    <OctantSelectField
+      aria-label="Archive completed threads"
+      id="completed-thread-archive"
+      onValueChange={(value) => props.onChange(value === "never" ? null : Number(value))}
+      options={[
+        { id: "never", label: "Never" },
+        ...days.map((count) => ({
+          id: String(count),
+          label: count === 1 ? "After 1 day" : `After ${String(count)} days`,
+        })),
+      ]}
+      value={props.afterDays === null ? "never" : String(props.afterDays)}
+    />
+  );
+}
+
 function GeneralSection({ focusedSetting, props }: SectionProps) {
   return (
     <section aria-label="General" className="settings-section-stack" id="settings-general">
@@ -825,6 +857,25 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             }
             onReleaseRingChange={(ring) => props.onSettingsChange({ releaseRing: ring })}
           />
+        </div>
+      </div>
+      <div className="settings-card-section settings-card-section--open">
+        <h2>Threads</h2>
+        <div className="setgroup">
+          <SettingRow
+            description="A completed thread rests in its shelf, then moves to the archive. Archiving keeps everything."
+            focused={focusedSetting === settingId("completed-thread-archive")}
+            label="Archive completed threads"
+            scope="host"
+            settingId="completed-thread-archive"
+          >
+            <CompletedThreadArchiveSelect
+              afterDays={props.settings.completedThreadArchiveAfterDays}
+              onChange={(afterDays) =>
+                props.onSettingsChange({ completedThreadArchiveAfterDays: afterDays })
+              }
+            />
+          </SettingRow>
         </div>
       </div>
       <div className="settings-card-section settings-card-section--open">

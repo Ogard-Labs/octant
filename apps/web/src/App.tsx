@@ -65,6 +65,7 @@ import {
 } from "@octant/contracts";
 import { pastedImageName } from "./chat/composerImagePaste";
 import { markInteraction, markInteractionAfterPaint } from "./polling/interactionTrace";
+import { useMinuteTick } from "./polling/useMinuteTick";
 import { useMachineChangeFeed } from "./polling/useMachineChangeFeed";
 import type { CodeOperationId, ProviderInstance, VoiceSettings } from "@octant/contracts";
 import type {
@@ -208,6 +209,7 @@ import {
 import { useThreadUtilityPresentation } from "./shell/useThreadUtilityPresentation";
 import {
   codeThreadActivity,
+  codeThreadRest,
   projectThreadsAccessForMode,
   sidebarThreadGroupsForMode,
   threadSearchArchivedListingForStatus,
@@ -742,6 +744,8 @@ function LaunchedShell(
   const [automationCenterOpen, setAutomationCenterOpen] = useState(false);
   const [agentsCenterOpen, setAgentsCenterOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
+  // Snoozed rows wake on the clock, so the sidebar keeps a minute-coarse one.
+  const minuteNow = useMinuteTick();
   const [artifactLibraryOpen, setArtifactLibraryOpen] = useState(false);
   const [imageLibraryOpen, setImageLibraryOpen] = useState(false);
   const [draftProviderInstanceId, setDraftProviderInstanceId] =
@@ -3029,6 +3033,13 @@ function LaunchedShell(
           ...(thread.lineageParentThreadId === undefined
             ? {}
             : { lineageParentThreadId: thread.lineageParentThreadId }),
+          ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
+          ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
+          ...codeThreadRest(thread, {
+            now: minuteNow,
+            awaitingInput:
+              (codeProviderRequestsByThreadId[String(thread.threadId)]?.length ?? 0) > 0,
+          }),
         }))
       : [];
   const workProjectThreads = workNavigation.navigation;
@@ -3173,6 +3184,12 @@ function LaunchedShell(
     ...(exportCodeThread === undefined ? {} : { onExportThread: exportCodeThread }),
     ...(handOffCodeThread === undefined ? {} : { onHandOffThread: handOffCodeThread }),
     onArchiveThread: (threadId) => void codeController.archiveThread(decodeCodeThreadId(threadId)),
+    onCompleteThread: (threadId) =>
+      void codeController.completeThread(decodeCodeThreadId(threadId)),
+    onReopenThread: (threadId) => void codeController.reopenThread(decodeCodeThreadId(threadId)),
+    onSnoozeThread: (threadId, until) =>
+      void codeController.snoozeThread(decodeCodeThreadId(threadId), until),
+    onWakeThread: (threadId) => void codeController.wakeThread(decodeCodeThreadId(threadId)),
     onCompleteFollowUp: (threadId) =>
       void codeController.completeFollowUp(decodeCodeThreadId(threadId)),
     onMarkFollowUp: (threadId) => void codeController.markFollowUp(decodeCodeThreadId(threadId)),
@@ -3231,6 +3248,11 @@ function LaunchedShell(
       (candidate) => String(candidate.threadId) === navigationId,
     );
     if (thread === undefined) return;
+    // Opening a thread whose snooze ended is the acknowledgement: the host
+    // drops the stale snooze so the row stops saying "Woke". A thread opened
+    // from inside the Snoozed shelf keeps its snooze; peeking is not waking.
+    const row = codeProjectThreads.find((candidate) => candidate.threadId === navigationId);
+    if (row?.woke === true) void codeController.wakeThread(decodeCodeThreadId(navigationId));
     closeWorkspaceReaders();
     markInteraction("renderer", "thread-open-requested");
     markInteractionAfterPaint("thread-open");

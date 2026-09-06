@@ -176,6 +176,16 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("combobox", { name: "Subagent creation" })).not.toBeInTheDocument();
   });
 
+  it("offers the completed-thread archive window in General and reports Never as off", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings();
+    const select = screen.getByRole("combobox", { name: "Archive completed threads" });
+    expect(select).toHaveTextContent("After 7 days");
+    await user.click(select);
+    await user.click(await screen.findByRole("option", { name: "Never" }));
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ completedThreadArchiveAfterDays: null });
+  });
+
   it("presents one section at a time, defaulting to General", () => {
     renderSettings();
 

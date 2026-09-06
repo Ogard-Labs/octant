@@ -175,6 +175,8 @@ describe("shell settings policy", () => {
       firstRunOnboarding: "pending",
       automaticUpdateChecks: true,
       marketplaceFetchesEnabled: true,
+      // A completed thread rests a week before the host archives it.
+      completedThreadArchiveAfterDays: 7,
       // Navigator starts honestly unconfigured: no default model, no reviewer.
       navigatorAssistant: {},
       // Voice starts unconfigured: no transcription or synthesis endpoint.

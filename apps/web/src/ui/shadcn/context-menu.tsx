@@ -1,4 +1,5 @@
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
+import { ChevronRight } from "lucide-react";
 import { useState, type ComponentProps, type ReactNode } from "react";
 import { cn } from "./utils";
 import type { ShadcnMenuItem } from "./dropdown-menu";
@@ -54,6 +55,9 @@ export function ContextMenuLabel({
   );
 }
 
+const contextMenuItemClassName =
+  "window-no-drag relative flex cursor-default items-center rounded-sm px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground";
+
 export function ContextMenuItem({
   className,
   closeOnClick = true,
@@ -61,13 +65,55 @@ export function ContextMenuItem({
 }: ComponentProps<typeof ContextMenuPrimitive.Item>) {
   return (
     <ContextMenuPrimitive.Item
-      className={cn(
-        "window-no-drag relative flex cursor-default items-center rounded-sm px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground",
-        className,
-      )}
+      className={cn(contextMenuItemClassName, className)}
       closeOnClick={closeOnClick}
       {...props}
     />
+  );
+}
+
+export function ContextMenuSub(props: ComponentProps<typeof ContextMenuPrimitive.SubmenuRoot>) {
+  return <ContextMenuPrimitive.SubmenuRoot data-slot="context-menu-sub" {...props} />;
+}
+
+export function ContextMenuSubTrigger({
+  className,
+  children,
+  ...props
+}: ComponentProps<typeof ContextMenuPrimitive.SubmenuTrigger>) {
+  return (
+    <ContextMenuPrimitive.SubmenuTrigger
+      className={cn(contextMenuItemClassName, className)}
+      data-slot="context-menu-sub-trigger"
+      {...props}
+    >
+      {children}
+      <ChevronRight aria-hidden="true" className="ml-auto" size={14} strokeWidth={1.8} />
+    </ContextMenuPrimitive.SubmenuTrigger>
+  );
+}
+
+export function ContextMenuSubContent({
+  className,
+  ...props
+}: ComponentProps<typeof ContextMenuPrimitive.Popup>) {
+  return (
+    <ContextMenuPrimitive.Portal>
+      <ContextMenuPrimitive.Positioner
+        align="start"
+        className="outline-none window-no-drag"
+        side="right"
+        sideOffset={0}
+      >
+        <ContextMenuPrimitive.Popup
+          className={cn(
+            "window-no-drag min-w-48 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none",
+            className,
+          )}
+          {...props}
+        />
+      </ContextMenuPrimitive.Positioner>
+    </ContextMenuPrimitive.Portal>
   );
 }
 

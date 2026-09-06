@@ -146,6 +146,12 @@ export interface CodeOperationRuntimeOptions {
   readonly uuid: () => string;
   /** Reports a board-record failure without exposing journal or provider details. */
   readonly reportRuntimeWorkFailure?: (failure: CodeRuntimeWorkRecordFailure) => void;
+  /**
+   * A person asked the thread for a turn. Fires once per new turn, after the
+   * scope check and before approval, so a completed or snoozed thread can come
+   * back the moment it is spoken to rather than only once the turn runs.
+   */
+  readonly onProviderTurnRequested?: (threadId: CodeThreadId) => void;
   readonly ghExecutable?: string;
   readonly pullRequestPort?: CodeOperationPullRequestPort;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
@@ -496,6 +502,14 @@ export function createCodeOperationRuntime(
         observeRuntimeWorkOutcome(
           runtimeWork.open({ id: started.id, threadId: command.threadId, kind: started.kind }),
         );
+      if (command.kind === "start-provider-turn") {
+        try {
+          options.onProviderTurnRequested?.(command.threadId);
+        } catch {
+          // Waking the row is a courtesy to the sidebar; the turn itself must
+          // not fail because the thread record could not be bumped.
+        }
+      }
     },
     ...(approvalValidator === undefined ? {} : { approvals: approvalValidator }),
     terminals: terminal,

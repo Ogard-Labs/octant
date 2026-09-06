@@ -17,6 +17,7 @@ import type {
   CodeThreadView,
 } from "@octant/contracts/code";
 import { decodeCodeThread } from "@octant/contracts/code";
+import { decodeUtcTimestamp } from "@octant/contracts";
 import {
   decodeCodeOperationId,
   decodeProviderSessionId,
@@ -160,6 +161,10 @@ export interface CodeThreadNavigationItem {
   readonly unread?: boolean;
   /** Whether the user pinned this thread to the top of the list. */
   readonly pinned?: boolean;
+  /** When the person completed the thread; absent while it is in play. */
+  readonly completedAt?: NonNullable<CodeThread["completedAt"]>;
+  /** The host's record of the thread's snooze; absent while it is awake. */
+  readonly snooze?: NonNullable<CodeThread["snooze"]>;
   /**
    * The visible thread this one was forked from. Absent when the thread
    * started on its own.
@@ -1359,6 +1364,8 @@ export function useCodeController(options: CodeControllerOptions) {
               ? {}
               : { pullRequestSummaries: runtime.pullRequestSummaries }),
             ...(thread.pinned === true ? { pinned: true } : {}),
+            ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
+            ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
             ...(thread.forkedFrom === undefined
               ? {}
               : { lineageParentThreadId: String(thread.forkedFrom.threadId) }),
@@ -1756,6 +1763,63 @@ export function useCodeController(options: CodeControllerOptions) {
     [execute],
   );
 
+  /**
+   * Complete, reopen, snooze, and wake all carry the version the renderer
+   * last saw, like archiving. Whether completing or snoozing would hide work
+   * in flight is the host's call; a refusal comes back as an ordinary failure.
+   */
+  const restCommand = useCallback(
+    async (
+      threadId: CodeThreadId,
+      command: (expectedVersion: CodeThread["version"]) => CodeCommand,
+    ): Promise<boolean> => {
+      const thread = bootstrapRef.current?.threads.find(
+        (candidate) => String(candidate.id) === String(threadId),
+      );
+      if (thread === undefined) return false;
+      const result = await execute(command(thread.version));
+      return result !== undefined;
+    },
+    [execute],
+  );
+  const completeThread = useCallback(
+    (threadId: CodeThreadId) =>
+      restCommand(threadId, (expectedVersion) => ({
+        kind: "complete-code-thread",
+        threadId,
+        expectedVersion,
+      })),
+    [restCommand],
+  );
+  const reopenThread = useCallback(
+    (threadId: CodeThreadId) =>
+      restCommand(threadId, (expectedVersion) => ({
+        kind: "reopen-code-thread",
+        threadId,
+        expectedVersion,
+      })),
+    [restCommand],
+  );
+  const snoozeThread = useCallback(
+    (threadId: CodeThreadId, until: string) =>
+      restCommand(threadId, (expectedVersion) => ({
+        kind: "snooze-code-thread",
+        threadId,
+        expectedVersion,
+        until: decodeUtcTimestamp(until),
+      })),
+    [restCommand],
+  );
+  const wakeThread = useCallback(
+    (threadId: CodeThreadId) =>
+      restCommand(threadId, (expectedVersion) => ({
+        kind: "wake-code-thread",
+        threadId,
+        expectedVersion,
+      })),
+    [restCommand],
+  );
+
   const markFollowUp = useCallback(
     async (threadId: CodeThreadId, reason?: string): Promise<boolean> => {
       const view = followUps.get(String(threadId)) ?? (await refreshFollowUp(threadId));
@@ -2149,6 +2213,10 @@ export function useCodeController(options: CodeControllerOptions) {
     activeView: activeView?.thread.id === options.activeThreadId ? activeView : undefined,
     answerProviderRequest,
     archiveThread,
+    completeThread,
+    reopenThread,
+    snoozeThread,
+    wakeThread,
     bootstrap,
     client,
     conversation,

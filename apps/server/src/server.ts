@@ -187,6 +187,7 @@ import {
   type CodeWorktreeSourcePreviewPort,
   type ManagedCodeThreadCreationPort,
 } from "./code/codeService";
+import { CodeCompletedThreadArchiveSweep } from "./code/codeCompletedThreadArchiveSweep";
 import { createCodeOperationRuntime, type CodeOperationRuntime } from "./code/codeOperationRuntime";
 import { CodePlannerService } from "./code/codePlannerService";
 import {
@@ -2584,6 +2585,20 @@ export function startOctantServer(
       });
     // Revocation is wired at construction, before any window can hold a watch.
     activeCodeService = codeService;
+    // The host's own timer for completed threads. Only the in-process service
+    // can archive on the host's behalf; an injected route service is a test
+    // double and gets no timer.
+    const completedThreadArchiveSweep =
+      codeService instanceof CodeService
+        ? new CodeCompletedThreadArchiveSweep({
+            threads: () => persistence.readCodeThreads(),
+            archiveAfterDays: () =>
+              (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                .completedThreadArchiveAfterDays,
+            archive: (threadId, input) => codeService.archiveCompletedThread(threadId, input),
+          })
+        : undefined;
+    completedThreadArchiveSweep?.start();
     const codeBoardEventStore = new CodeOperationEventStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -3330,6 +3345,9 @@ export function startOctantServer(
         },
         nativeHarnessTools: (input) => nativeHarnessComposition?.forCode(input),
         nativeHarness: nativeHarnessHooks,
+        onProviderTurnRequested: (threadId) => {
+          if (codeService instanceof CodeService) codeService.noteProviderTurnRequested(threadId);
+        },
         supportsAppManagedTools: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
           return (
@@ -6956,6 +6974,7 @@ export function startOctantServer(
           } catch (error) {
             shutdownFailure ??= error;
           }
+          completedThreadArchiveSweep?.stop();
           providerUsageLimitsService.stop();
           try {
             managedCloneService.close();

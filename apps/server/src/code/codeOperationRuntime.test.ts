@@ -17,6 +17,7 @@ import {
   type CodeOperationEventFrame as OperationFrame,
   type CodeRuntimeWork,
   type CodeThread,
+  type CodeThreadId,
   type ProviderRuntimeEvent,
   type WindowId,
 } from "@octant/contracts";
@@ -265,6 +266,34 @@ describe("CodeOperationRuntime", () => {
     expect(restore?.detail).toContain(
       "Uncommitted work not saved in this checkpoint is overwritten.",
     );
+    fixture.close();
+  });
+
+  it("tells the host once that a person asked the thread for a turn, and not again on replay", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const onProviderTurnRequested = vi.fn();
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+      onProviderTurnRequested,
+    });
+    const startOperation = operationId(11);
+    const command = {
+      kind: "start-provider-turn",
+      operationId: startOperation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    } as const;
+
+    await fixture.runtime.execute(windowId, command);
+    expect(onProviderTurnRequested).toHaveBeenCalledTimes(1);
+    expect(onProviderTurnRequested).toHaveBeenCalledWith(threadId);
+
+    await fixture.runtime.execute(windowId, command);
+    expect(onProviderTurnRequested).toHaveBeenCalledTimes(1);
     fixture.close();
   });
 
@@ -1257,6 +1286,7 @@ function runtimeFixture(options: {
   approvalValidator?: boolean | (() => boolean);
   failRuntimeWorkJournal?: boolean;
   throwRuntimeWorkReporter?: boolean;
+  onProviderTurnRequested?: (threadId: CodeThreadId) => void;
   evidencePut?: (
     content: string,
     metadata?: { readonly truncated?: boolean },
@@ -1360,6 +1390,9 @@ function runtimeFixture(options: {
     actor,
     clock: () => now,
     uuid: () => `90000000-0000-4000-8000-${(++uuidCounter).toString().padStart(12, "0")}`,
+    ...(options.onProviderTurnRequested === undefined
+      ? {}
+      : { onProviderTurnRequested: options.onProviderTurnRequested }),
     reportRuntimeWorkFailure: (failure) => {
       runtimeWorkFailures.push(failure.kind);
       if (options.throwRuntimeWorkReporter === true) throw new Error("diagnostic reporter failed");

@@ -7,7 +7,11 @@ import {
   OctantContextMenuItem,
   OctantContextMenuLabel,
   OctantContextMenuSeparator,
+  OctantContextMenuSub,
+  OctantContextMenuSubContent,
+  OctantContextMenuSubTrigger,
 } from "../ui/base/OctantContextMenu";
+import { resolveSnoozePresets } from "@octant/domain";
 
 /**
  * What a thread row can be asked to do without leaving the sidebar.
@@ -20,6 +24,19 @@ import {
 export interface ThreadRowActions {
   /** Absent when the host cannot archive this thread. */
   readonly onArchiveThread?: (threadId: string) => void;
+  /**
+   * Puts a finished thread away in the Completed shelf without archiving it.
+   * Paired with {@link onReopenThread}: the menu offers whichever of the two
+   * would change the thread. Absent when the host cannot complete threads.
+   */
+  readonly onCompleteThread?: (threadId: string) => void;
+  readonly onReopenThread?: (threadId: string) => void;
+  /**
+   * Hides the thread until the ISO wake time. Paired with
+   * {@link onWakeThread} the same way. Absent when the host cannot snooze.
+   */
+  readonly onSnoozeThread?: (threadId: string, until: string) => void;
+  readonly onWakeThread?: (threadId: string) => void;
   /**
    * Clears the thread's open follow-up. Paired with {@link onMarkFollowUp}: a
    * host that can set the mark can clear it, so the menu offers whichever of
@@ -65,6 +82,10 @@ export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boo
   if (actions === undefined) return true;
   return (
     actions.onArchiveThread === undefined &&
+    actions.onCompleteThread === undefined &&
+    actions.onReopenThread === undefined &&
+    actions.onSnoozeThread === undefined &&
+    actions.onWakeThread === undefined &&
     actions.onCompleteFollowUp === undefined &&
     actions.onMarkFollowUp === undefined &&
     actions.onExportThread === undefined &&
@@ -160,6 +181,53 @@ export function ThreadRowMenu(props: {
         >
           Mark for follow-up
         </OctantContextMenuItem>
+      )}
+      {/* Complete and Snooze put a thread to rest; each offers the one action
+              that would change the thread, like the read-state pair. Snooze
+              lists its wake times right here so the choice is one gesture. */}
+      {props.thread.completedAt !== undefined ? (
+        props.actions.onReopenThread === undefined ? null : (
+          <OctantContextMenuItem
+            label="Reopen"
+            onClick={() => props.actions.onReopenThread?.(threadId)}
+          >
+            Reopen
+          </OctantContextMenuItem>
+        )
+      ) : props.actions.onCompleteThread === undefined ? null : (
+        <OctantContextMenuItem
+          label="Complete"
+          onClick={() => props.actions.onCompleteThread?.(threadId)}
+        >
+          Complete
+        </OctantContextMenuItem>
+      )}
+      {props.thread.snooze !== undefined ? (
+        props.actions.onWakeThread === undefined ? null : (
+          <OctantContextMenuItem
+            label="Wake"
+            onClick={() => props.actions.onWakeThread?.(threadId)}
+          >
+            Wake
+          </OctantContextMenuItem>
+        )
+      ) : props.actions.onSnoozeThread === undefined ? null : (
+        <OctantContextMenuSub>
+          <OctantContextMenuSubTrigger label="Snooze">Snooze</OctantContextMenuSubTrigger>
+          <OctantContextMenuSubContent>
+            {resolveSnoozePresets(new Date()).map((preset) => (
+              <OctantContextMenuItem
+                className="gap-4"
+                key={preset.id}
+                label={preset.label}
+                onClick={() => props.actions.onSnoozeThread?.(threadId, preset.until)}
+              >
+                <span className="min-w-0 flex-1">{preset.label}</span>
+                <span className="text-xs text-muted-foreground">{preset.whenLabel}</span>
+              </OctantContextMenuItem>
+            ))}
+          </OctantContextMenuSubContent>
+        </OctantContextMenuSub>
       )}
       {/* Every destination the hover card offers is here too, because the
               menu is where keyboard and touch reach them. */}

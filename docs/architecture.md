@@ -215,6 +215,20 @@ sidebar timer never walks the checkout tree. Inactive modes and hidden windows
 pause those refreshes so background ticks do not contend with the next
 interaction.
 
+A Code thread has two resting states beside archive, both fields on the thread
+aggregate rather than lifecycle values: **completed** (`completedAt`, manual
+only, refused by the server while a turn runs or the thread waits on the
+person) and **snoozed** (`snooze.until`, an overlay that hides the row until
+the wake time and wakes it early when the agent needs the person or a turn that
+was running at snooze time ends). The sidebar files both in collapsed shelves
+below the Project groups and derives snooze visibility from the clock; no host
+timer wakes a snooze. A person sending a thread a turn reopens or wakes it on
+the server. A host sweep archives completed threads once their completion is
+older than the `completedThreadArchiveAfterDays` shell setting (default seven
+days, `null` for never), re-deciding against the authoritative record and
+journaling the ordinary thread update as the `system` actor. It archives only;
+see [decisions/0085-completed-and-snoozed-threads.md](decisions/0085-completed-and-snoozed-threads.md).
+
 **Current shipped behavior.** The central workspace is one persistent recursive
 split tree. A leaf holds exactly one surface — a thread, a draft, a Project
 overview, a utility surface, or a mode welcome — with no tab strip; the sidebar
@@ -445,7 +459,11 @@ flowchart LR
   `code.checkout-observed@1` event only when the next event of the same
   checkout observes the identical state; it preserves every answer a
   projection, rebuild, subscription, or export can give and reports how many
-  events it removed. See `docs/decisions/0039`. A thread the caller
+  events it removed. See `docs/decisions/0039`. The other self-applying
+  exception files rather than erases: the completed-thread sweep archives a
+  thread the person completed once the Settings window has passed, keeping
+  its transcript, checkout, and journal in place (`docs/decisions/0085`).
+  A thread the caller
   may already Open can be exported as an `octant.thread-bundle/1` JSON cut
   of the journal — transcript, evidence, and provenance, named with the
   instant it was taken. Secrets, raw provider payloads, and filesystem

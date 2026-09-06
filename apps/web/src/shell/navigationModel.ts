@@ -146,6 +146,24 @@ export interface ChatThreadNavigationItem {
   /** Whether the user pinned this thread to the top of the sidebar. */
   readonly pinned?: boolean;
   readonly updatedAt?: string;
+  /** When the person completed the thread. Absent while it is in play. */
+  readonly completedAt?: string;
+  /** The thread's snooze as the host recorded it. Absent while it is awake. */
+  readonly snooze?: {
+    readonly until: string;
+    readonly at: string;
+    readonly duringTurn?: boolean | undefined;
+  };
+  /** Where the sidebar files the row now. Absent means the active list. */
+  readonly shelf?: "snoozed" | "completed";
+  /**
+   * The snooze ended — its time passed, or the thread needed the person —
+   * but the record still carries it. The row says so until the thread is
+   * opened, because it reappears where it was rather than at the top.
+   */
+  readonly woke?: boolean;
+  /** Compact time until a snoozed row wakes, such as "2h" or "3d". */
+  readonly wakeLabel?: string;
 }
 
 export function buildChatThreadNavigation(
