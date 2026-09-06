@@ -161,9 +161,7 @@ describe("CodeOverview", () => {
       />,
     );
 
-    await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Code sessions" })).toBeVisible(),
-    );
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Threads" })).toBeVisible());
     // The thread title appears once, on its own row — never repeated by a
     // facet section, because there are no facet sections any more.
     expect(screen.getAllByText("Controller foundation")).toHaveLength(1);
@@ -179,15 +177,12 @@ describe("CodeOverview", () => {
     expect(screen.getByText("Approval gated")).toBeVisible();
     expect(screen.getByText("Follow-up")).toBeVisible();
     // Rarely-glanced facts stay reachable behind the per-thread disclosure.
-    fireEvent.click(screen.getByText("Full detail"));
+    fireEvent.click(screen.getByText("Details"));
     expect(screen.getByText("/opaque/worktree")).toBeVisible();
     expect(screen.getByText("Opened pull request · Pending")).toBeVisible();
     expect(screen.getByText("Reviewing the checkout")).toBeVisible();
     expect(screen.getByRole("region", { name: "Code quick start" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Approval");
-    expect(
-      screen.getByText("Checkout and worktree are confirmed by the Code service before creation."),
-    ).toBeVisible();
     const message = screen.getByLabelText("First message");
     fireEvent.change(message, { target: { value: "Keep the draft" } });
     expect(message).toHaveValue("Keep the draft");
@@ -270,7 +265,7 @@ describe("CodeOverview", () => {
     expect(screen.queryByText("Agents")).not.toBeInTheDocument();
   });
 
-  it("states the repository and authority note once at project level, never per thread", async () => {
+  it("counts waiting threads in the section label and never repeats the repository per thread", async () => {
     const value = controller();
     value.navigation = [
       navigationThread({ threadId: ids.thread, title: "Controller foundation" }),
@@ -306,13 +301,37 @@ describe("CodeOverview", () => {
       />,
     );
 
-    expect(await screen.findByText("2 threads are waiting")).toBeVisible();
-    expect(
-      screen.getAllByText(
-        "Waiting for server-reported approval, input, or recovery. The overview does not grant authority.",
+    expect(await screen.findByText("2 threads · 2 waiting")).toBeVisible();
+    // The repository is the page's, stated once in its header; the list
+    // carries no copy of it and no lecture about what the page may grant.
+    expect(screen.queryByText("/opaque/repository")).not.toBeInTheDocument();
+    expect(screen.queryByText(/does not grant authority/)).not.toBeInTheDocument();
+  });
+
+  it("counts waiting threads among the rows it shows, not every card the board holds", async () => {
+    const value = controller();
+    value.navigation = [];
+    value.client = {
+      queryBoard: vi.fn(async () =>
+        boardView(
+          Array.from({ length: 26 }, (_, index) =>
+            boardCard({
+              threadId:
+                `10000000-0000-4000-8000-0000000001${String(index).padStart(2, "0")}` as never,
+              title: `Thread ${index}`,
+              status: "waiting",
+              executing: false,
+            }),
+          ),
+        ),
       ),
-    ).toHaveLength(1);
-    expect(screen.getAllByText("/opaque/repository")).toHaveLength(1);
+    } as never;
+    render(
+      <CodeOverview controller={value} onOpenThread={vi.fn()} projectId={ids.project as never} />,
+    );
+
+    // The list is capped at 24 rows; the count describes those rows.
+    expect(await screen.findByText("24 threads · 24 waiting")).toBeVisible();
   });
 
   it("renames a thread from the keyboard without leaving the overview", async () => {
@@ -391,9 +410,7 @@ describe("CodeOverview", () => {
     );
 
     expect(
-      await screen.findByText(
-        "Code quick start is unavailable until server creation authority is connected.",
-      ),
+      await screen.findByText("Starting a thread here needs the host connection."),
     ).toBeVisible();
     expect(screen.queryByRole("textbox", { name: "First message" })).not.toBeInTheDocument();
   });
