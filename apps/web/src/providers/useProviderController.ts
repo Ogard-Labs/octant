@@ -13,6 +13,7 @@ import {
   type ClineProviderConfiguration,
   type QwenProviderConfiguration,
   type GooseProviderConfiguration,
+  type IdeogramImageProviderConfiguration,
   type KiloProviderConfiguration,
   type MistralVibeProviderConfiguration,
   type GeminiImageProviderConfiguration,
@@ -640,6 +641,59 @@ export function useProviderController(options: ProviderControllerOptions) {
             applyResult(
               await client.execute({
                 kind: "create-bfl-image-provider",
+                instanceId,
+                expectedVersion: 0 as ProviderDefaults["version"],
+                displayName,
+                configuration,
+              }),
+              current,
+              install,
+            );
+          } catch (error) {
+            await recoverRegistryFailure(error, "Provider configuration could not be created.");
+            return false;
+          }
+          try {
+            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            return true;
+          } catch {
+            if (mounted.current) {
+              setMessage("The provider was created, but its credential could not be stored.");
+            }
+            return false;
+          }
+        }),
+      );
+    },
+    [client, hostBridge, install, recoverRegistryFailure],
+  );
+  const createIdeogramImage = useCallback(
+    (
+      displayName: string,
+      configuration: IdeogramImageProviderConfiguration,
+      credential: TransientProviderCredential,
+    ) => {
+      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
+      return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
+        withTransientCredential(credential, async (credentialValue) => {
+          if (hostBridge === undefined) {
+            if (mounted.current) {
+              setMessage("Provider credential management is unavailable on this host.");
+            }
+            return false;
+          }
+          if (credentialValue.length === 0) {
+            if (mounted.current) {
+              setMessage("Enter an Ideogram API key before creating this image profile.");
+            }
+            return false;
+          }
+          const current = authoritative.current;
+          if (client === undefined || current === undefined) return false;
+          try {
+            applyResult(
+              await client.execute({
+                kind: "create-ideogram-image-provider",
                 instanceId,
                 expectedVersion: 0 as ProviderDefaults["version"],
                 displayName,
@@ -2126,6 +2180,60 @@ export function useProviderController(options: ProviderControllerOptions) {
       ),
     [client, hostBridge, install, recoverRegistryFailure],
   );
+  const changeIdeogramImageConfiguration = useCallback(
+    (
+      instanceId: ProviderInstanceId,
+      configuration: IdeogramImageProviderConfiguration,
+      credential: TransientProviderCredential,
+    ) =>
+      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
+        withTransientCredential(credential, async (credentialValue) => {
+          const current = authoritative.current;
+          const instance = current === undefined ? undefined : findProvider(current, instanceId);
+          if (
+            client === undefined ||
+            current === undefined ||
+            instance?.driverKind !== "ideogram-image"
+          ) {
+            return false;
+          }
+          try {
+            applyResult(
+              await client.execute({
+                kind: "change-ideogram-image-configuration",
+                instanceId,
+                expectedVersion: instance.version,
+                configuration,
+              }),
+              current,
+              install,
+            );
+          } catch (error) {
+            await recoverRegistryFailure(error, "Provider configuration could not be updated.");
+            return false;
+          }
+          if (credentialValue.length === 0) return true;
+          if (hostBridge === undefined) {
+            if (mounted.current) {
+              setMessage("Provider credential management is unavailable on this host.");
+            }
+            return false;
+          }
+          try {
+            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            return true;
+          } catch {
+            if (mounted.current) {
+              setMessage(
+                "Provider configuration was saved, but its credential could not be stored.",
+              );
+            }
+            return false;
+          }
+        }),
+      ),
+    [client, hostBridge, install, recoverRegistryFailure],
+  );
   const changeAnthropicCompatibleConfiguration = useCallback(
     (
       instanceId: ProviderInstanceId,
@@ -2329,6 +2437,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           instance.driverKind === "openai-image" ||
           instance.driverKind === "gemini-native-image" ||
           instance.driverKind === "bfl-image" ||
+          instance.driverKind === "ideogram-image" ||
           (instance.driverKind === "anthropic-compatible" &&
             (instance.configuration.authentication === "api-key" ||
               instance.configuration.authentication === "bearer" ||
@@ -2576,6 +2685,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     createOpenAiImage,
     createGeminiImage,
     createBflImage,
+    createIdeogramImage,
     rename,
     changeBinary,
     changeClaudeConfiguration,
@@ -2596,6 +2706,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     changeOpenAiImageConfiguration,
     changeGeminiImageConfiguration,
     changeBflImageConfiguration,
+    changeIdeogramImageConfiguration,
     changeAnthropicCompatibleConfiguration,
     changeAzureFoundryConfiguration,
     setEnabled,

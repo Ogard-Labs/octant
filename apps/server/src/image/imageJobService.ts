@@ -58,6 +58,7 @@ import type { ProviderCredentialResolver } from "../providers/credentialBrokerCl
 import { makeBflImageAdapter } from "./bflImageAdapter";
 import { makeGeminiImageAdapter } from "./geminiImageAdapter";
 import type { GeneratedImageStore } from "./generatedImageStore";
+import { makeIdeogramImageAdapter } from "./ideogramImageAdapter";
 import type { ImageAdapterRequest, ImageGenerationAdapter } from "./imageAdapter";
 import type { ImageHttpFetch } from "./imageHttp";
 import { ImageJobProjection } from "./imageJobProjection";
@@ -371,6 +372,9 @@ export class ImageJobService {
     }
     if (instance.configuration.kind === "bfl-image-http") {
       return makeBflImageAdapter(options);
+    }
+    if (instance.configuration.kind === "ideogram-image-http") {
+      return makeIdeogramImageAdapter(options);
     }
     if (instance.configuration.kind === "openai-compatible-http") {
       return makeOpenAiCompatibleImageAdapter({

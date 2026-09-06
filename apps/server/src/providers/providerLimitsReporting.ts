@@ -47,6 +47,7 @@ export function providerLimitsReporting(kind: ProviderDriverKind): ProviderLimit
     case "openai-image":
     case "gemini-native-image":
     case "bfl-image":
+    case "ideogram-image":
       return "runtime-does-not-report";
   }
 }

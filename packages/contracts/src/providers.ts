@@ -47,6 +47,7 @@ export const ProviderDriverKind = Schema.Literal(
   "openai-image",
   "gemini-native-image",
   "bfl-image",
+  "ideogram-image",
 );
 export type ProviderDriverKind = typeof ProviderDriverKind.Type;
 
@@ -490,6 +491,22 @@ export const BflImageProviderConfiguration = Schema.Struct({
   .pipe(Schema.filter(imageAllowlistContainsDefault))
   .annotations(strict);
 export type BflImageProviderConfiguration = typeof BflImageProviderConfiguration.Type;
+
+/**
+ * Ideogram model-version endpoint-path names (`docs/decisions/0087`). Like
+ * BFL, Ideogram encodes the model version in the URL path, never a body
+ * field, so these are the literal path segments, not a vendor catalog Octant
+ * maintains. Allowlists stay manual-entry and are never rewritten on save.
+ */
+export const IDEOGRAM_IMAGE_MODEL_PRESETS = ["ideogram-v3", "ideogram-v4"] as const;
+export const IdeogramImageProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("ideogram-image-http"),
+  modelAllowlist: UniqueManualModelIds,
+  defaultModel: ProviderModelId,
+})
+  .pipe(Schema.filter(imageAllowlistContainsDefault))
+  .annotations(strict);
+export type IdeogramImageProviderConfiguration = typeof IdeogramImageProviderConfiguration.Type;
 export const CodexProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("codex-cli"),
   binaryPath: Schema.NonEmptyTrimmedString,
@@ -672,6 +689,13 @@ export const BflImageProviderInstance = Schema.Struct({
 }).annotations(strict);
 export type BflImageProviderInstance = typeof BflImageProviderInstance.Type;
 
+export const IdeogramImageProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("ideogram-image"),
+  configuration: IdeogramImageProviderConfiguration,
+}).annotations(strict);
+export type IdeogramImageProviderInstance = typeof IdeogramImageProviderInstance.Type;
+
 export const ProviderInstance = Schema.Union(
   OpenCodeProviderInstance,
   CodexProviderInstance,
@@ -696,6 +720,7 @@ export const ProviderInstance = Schema.Union(
   OpenAiImageProviderInstance,
   GeminiImageProviderInstance,
   BflImageProviderInstance,
+  IdeogramImageProviderInstance,
 );
 export type ProviderInstance = typeof ProviderInstance.Type;
 
@@ -759,6 +784,7 @@ export const ProviderInstanceConfigurationChanged = Schema.Struct({
     OpenAiImageProviderInstance,
     GeminiImageProviderInstance,
     BflImageProviderInstance,
+    IdeogramImageProviderInstance,
     ClaudeProviderInstance,
     MistralVibeProviderInstance,
     GrokProviderInstance,
@@ -1128,6 +1154,12 @@ export const ProviderRegistryCommand = Schema.Union(
     configuration: BflImageProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("create-ideogram-image-provider"),
+    ...CreateProviderCommandFields,
+    displayName: Schema.NonEmptyTrimmedString,
+    configuration: IdeogramImageProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("create-codex-provider"),
     ...CreateProviderCommandFields,
     displayName: Schema.NonEmptyTrimmedString,
@@ -1262,6 +1294,11 @@ export const ProviderRegistryCommand = Schema.Union(
     kind: Schema.Literal("change-bfl-image-configuration"),
     ...ProviderInstanceCommandFields,
     configuration: BflImageProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-ideogram-image-configuration"),
+    ...ProviderInstanceCommandFields,
+    configuration: IdeogramImageProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-claude-configuration"),

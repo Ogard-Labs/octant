@@ -84,7 +84,8 @@ export function assertImageJobProfileEligible(
   if (
     configuration.kind !== "openai-image-http" &&
     configuration.kind !== "gemini-native-image-http" &&
-    configuration.kind !== "bfl-image-http"
+    configuration.kind !== "bfl-image-http" &&
+    configuration.kind !== "ideogram-image-http"
   ) {
     reject("profile-ineligible", "The selected provider is not an image profile.");
   }

@@ -119,10 +119,11 @@ export function ImageGenerationSheet(props: ImageGenerationSheetProps) {
           ...(resolution === OPTION_DEFAULT ? {} : { resolution }),
         });
         return;
-      // Neither a custom OpenAI-compatible source nor BFL has a
-      // Settings-configured quality, size, or aspect ratio of its own.
+      // A custom OpenAI-compatible source, BFL, and Ideogram have no
+      // Settings-configured quality, size, or aspect ratio of their own.
       case "openai-compatible-http":
       case "bfl-image-http":
+      case "ideogram-image-http":
         await props.onSubmit(draft);
         return;
     }
