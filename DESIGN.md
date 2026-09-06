@@ -174,6 +174,13 @@ never repaint it; pick a recipe variant instead) ratchet against
 re-record the lower count with `--write-baseline` so the baseline never
 overstates.
 
+The `control-repaint` rule reads the classes feature code hands to an Octant
+primitive. A control marked `unstyled` is feature-owned paint by design and is
+skipped; `unstyled={false}` is not, and stays under the rule. The checker also
+skips `composer-input`, the system prompt (0038), because that surface is
+already painted twice; the rule still holds for it — feature CSS must not
+repaint it a third time — it is simply not machine-checked.
+
 The shadcn registry metadata is in `apps/web/components.json` (`new-york`,
 Tailwind v4, CSS variables, Lucide). The checked-in recipes are owned source
 and currently use `@base-ui/react` primitives behind the Octant adapters. This

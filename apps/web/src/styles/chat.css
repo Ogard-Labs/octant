@@ -453,7 +453,7 @@
 }
 
 .chat-transcript__attempt-status--streaming svg {
-  animation: chat-status-spin 900ms linear infinite;
+  animation: chat-status-spin var(--oct-motion-spin) linear infinite;
 }
 
 /* The spinner already names live state; keep its label readable and still. */
@@ -711,7 +711,7 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .chat-composer__status--live::before {
-    animation: chat-composer-live 1.6s ease-in-out infinite;
+    animation: chat-composer-live var(--oct-motion-pulse) ease-in-out infinite;
   }
 }
 
@@ -1193,7 +1193,7 @@ html[data-octant-reduced-motion="true"]
 
 .composer-voice__button[data-recording="true"] {
   color: var(--oct-danger-fg);
-  animation: chat-composer-live 1.4s ease-in-out infinite;
+  animation: chat-composer-live var(--oct-motion-pulse) ease-in-out infinite;
 }
 
 .composer-voice__timer {
@@ -1203,7 +1203,7 @@ html[data-octant-reduced-motion="true"]
 }
 
 .composer-voice__spin {
-  animation: chat-status-spin 1s linear infinite;
+  animation: chat-status-spin var(--oct-motion-spin) linear infinite;
 }
 
 .composer-voice__error {

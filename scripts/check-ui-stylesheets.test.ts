@@ -210,6 +210,42 @@ describe("UI stylesheet check", () => {
     ]);
   });
 
+  it("collects a class past an arrow function, from every literal, and when unstyled is off", () => {
+    const primitives = collectPrimitiveClasses({
+      "apps/web/src/code/A.tsx":
+        '<OctantButton onClick={() => save()} className="feature-action" />',
+      "apps/web/src/code/B.tsx":
+        '<OctantButton className={cn("feature-first", open && "feature-second")} />',
+      "apps/web/src/code/C.tsx": '<OctantButton unstyled={false} className="feature-third" />',
+      "apps/web/src/code/D.tsx": '<OctantButton unstyled className="feature-owned" />',
+    });
+    expect([...primitives.keys()].sort()).toEqual([
+      "feature-action",
+      "feature-first",
+      "feature-second",
+      "feature-third",
+    ]);
+  });
+
+  it("flags a repaint written on a border side or in another case", () => {
+    const primitives = collectPrimitiveClasses({
+      "apps/web/src/code/A.tsx": '<OctantButton className="feature-action" />',
+    });
+    expect(
+      findStylesheetFindings(
+        {
+          [CSS]: [
+            ".feature-action { border-top: 1px solid var(--oct-border); }",
+            ".feature-action { border-inline-color: var(--oct-border); }",
+            ".feature-action { BACKGROUND: var(--oct-fg-soft); }",
+            ".feature-action { padding: 8px; }",
+          ].join("\n"),
+        },
+        primitives,
+      ).map((finding) => `${finding.rule} ${String(finding.line)}`),
+    ).toEqual(["control-repaint 1", "control-repaint 2", "control-repaint 3"]);
+  });
+
   it("fails closed on any colour literal and ratchets the other rules against the baseline", () => {
     const findings = findStylesheetFindings({
       [CSS]: [".a { color: #fff; font-size: 11.5px; }", ".b { font-size: 12.5px; }"].join("\n"),

@@ -191,6 +191,10 @@
 
   --oct-motion-fast: 150ms;
   --oct-motion-base: 200ms;
+  /* Ambient loops, not interaction durations: a spinner turn and the breathing
+     dot that says something is live. */
+  --oct-motion-spin: 900ms;
+  --oct-motion-pulse: 1.6s;
   --oct-ease-standard: ease;
 
   --oct-container-max: 1200px;

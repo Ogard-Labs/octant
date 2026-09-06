@@ -87,10 +87,14 @@ function isAccessibilityFallback(headers: ReadonlyArray<string>): boolean {
 // 0046: a feature stylesheet may place or size a shared control, never repaint
 // it. These are the properties that recipe owns.
 const PAINT_PROPERTY =
-  /^(?:background|background-color|background-image|border|border-color|border-width|border-style|border-radius|box-shadow|color|outline)$/;
-const PRIMITIVE_ELEMENT =
-  /<(Octant(?:Button|IconButton|Card|Badge|Input|Select|Textarea|Checkbox|Switch))\b([^>]*)>/g;
-const CLASS_ATTRIBUTE = /className=(?:["']([^"']+)["']|\{\s*(?:cn\(\s*)?["'`]([^"'`$]+)["'`$])/;
+  /^(?:background(?:-color|-image)?|border(?:-(?:top|right|bottom|left|block|inline|block-start|block-end|inline-start|inline-end))?(?:-(?:color|width|style))?|border-(?:top|bottom)-(?:left|right)-radius|border-(?:start-start|start-end|end-start|end-end)-radius|border-radius|box-shadow|color|outline(?:-color|-width|-style)?)$/;
+const PRIMITIVE_OPENING =
+  /<(Octant(?:Button|IconButton|Card|Badge|Input|Select|Textarea|Checkbox|Switch))\b/g;
+// `unstyled` hands the paint to the feature, but only when it is statically on:
+// `unstyled={false}` leaves the recipe in charge.
+const UNSTYLED_ON = /\bunstyled(?![\w-])(?!\s*=\s*\{\s*false\s*\})/;
+const CLASS_ATTRIBUTE = /\bclassName\s*=\s*/;
+const STRING_LITERAL = /"([^"]*)"|'([^']*)'|`([^`$]*)`/g;
 
 /**
  * Classes that feature code hands to an Octant primitive, so a stylesheet
@@ -101,16 +105,13 @@ export function collectPrimitiveClasses(
 ): ReadonlyMap<string, string> {
   const classes = new Map<string, string>();
   for (const source of Object.values(sources)) {
-    for (const match of source.matchAll(PRIMITIVE_ELEMENT)) {
+    for (const match of source.matchAll(PRIMITIVE_OPENING)) {
       const primitive = match[1] ?? "";
-      const attributes = match[2] ?? "";
+      const attributes = readAttributes(source, match.index + match[0].length);
       // `unstyled` hands the paint to the feature on purpose; OctantTextarea
       // does the same for `composer-input`, the system prompt (0038).
-      if (/\bunstyled\b/.test(attributes) || /\bcomposer-input\b/.test(attributes)) continue;
-      const attribute = CLASS_ATTRIBUTE.exec(attributes);
-      const literal = attribute?.[1] ?? attribute?.[2];
-      if (literal === undefined) continue;
-      for (const className of literal.trim().split(/\s+/)) {
+      if (UNSTYLED_ON.test(attributes) || /\bcomposer-input\b/.test(attributes)) continue;
+      for (const className of classNamesIn(attributes)) {
         if (/^[a-z][\w-]*$/.test(className) && className !== "window-no-drag") {
           classes.set(className, primitive);
         }
@@ -118,6 +119,68 @@ export function collectPrimitiveClasses(
     }
   }
   return classes;
+}
+
+/**
+ * The attribute text of one JSX element. A regex cannot stop at the right `>`
+ * — an arrow function, a generic, or a nested element inside a prop all carry
+ * one — so braces, brackets, quotes, and nested elements are counted instead.
+ */
+function readAttributes(source: string, start: number): string {
+  let depth = 0;
+  let quote: string | undefined;
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (quote !== undefined) {
+      if (char === "\\") index += 1;
+      else if (char === quote) quote = undefined;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") {
+      quote = char;
+      continue;
+    }
+    if (char === "{" || char === "(" || char === "[" || char === "<") depth += 1;
+    else if (char === "}" || char === ")" || char === "]") depth -= 1;
+    else if (char === ">") {
+      if (depth === 0) return source.slice(start, index);
+      depth -= 1;
+    }
+  }
+  return source.slice(start);
+}
+
+/** Every static class literal a `className` expression can contribute. */
+function classNamesIn(attributes: string): ReadonlyArray<string> {
+  const at = CLASS_ATTRIBUTE.exec(attributes);
+  if (at === null) return [];
+  const expression = readClassExpression(attributes, at.index + at[0].length);
+  const names: string[] = [];
+  for (const literal of expression.matchAll(STRING_LITERAL)) {
+    const text = literal[1] ?? literal[2] ?? literal[3] ?? "";
+    names.push(...text.trim().split(/\s+/).filter(Boolean));
+  }
+  return names;
+}
+
+/** The value of one `className=`, whether it is a string or a braced call. */
+function readClassExpression(attributes: string, start: number): string {
+  const first = attributes[start];
+  if (first === '"' || first === "'") {
+    const end = attributes.indexOf(first, start + 1);
+    return end === -1 ? attributes.slice(start) : attributes.slice(start, end + 1);
+  }
+  if (first !== "{") return "";
+  let depth = 0;
+  for (let index = start; index < attributes.length; index += 1) {
+    const char = attributes[index];
+    if (char === "{") depth += 1;
+    else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return attributes.slice(start, index + 1);
+    }
+  }
+  return attributes.slice(start);
 }
 
 function repaintedPrimitive(
@@ -255,7 +318,7 @@ export function findStylesheetFindings(
       if (!isToken && name === "font-weight" && isHeavyWeight(value)) {
         push("heavy-weight", `font-weight ${value} is heavier than a page title`);
       }
-      if (!isToken && PAINT_PROPERTY.test(property)) {
+      if (!isToken && PAINT_PROPERTY.test(name)) {
         const repainted = repaintedPrimitive(headers[headers.length - 1] ?? "", primitiveClasses);
         if (repainted) {
           push(
