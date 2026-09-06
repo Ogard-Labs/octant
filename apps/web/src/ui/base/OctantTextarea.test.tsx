@@ -7,7 +7,6 @@ describe("OctantTextarea", () => {
     render(<OctantTextarea aria-label="Notes" />);
     const field = screen.getByRole("textbox", { name: "Notes" });
     expect(field.className).toContain("rounded-md");
-    expect(field.className).toContain("shadow-xs");
     expect(field.className).toContain("border-input");
   });
 
@@ -16,8 +15,13 @@ describe("OctantTextarea", () => {
     const field = screen.getByRole("textbox", { name: "First message" });
     expect(field.className).toContain("composer-input");
     expect(field.className).not.toContain("rounded-md");
-    expect(field.className).not.toContain("shadow-xs");
     expect(field.className).not.toContain("border-input");
-    expect(field.className).not.toContain("focus-visible:ring-[3px]");
+  });
+
+  it("leaves keyboard focus to the one global rule that paints it", () => {
+    render(<OctantTextarea aria-label="Notes" />);
+    const field = screen.getByRole("textbox", { name: "Notes" });
+    expect(field.className).not.toContain("focus-visible:ring");
+    expect(field.className).not.toContain("focus-visible:border");
   });
 });

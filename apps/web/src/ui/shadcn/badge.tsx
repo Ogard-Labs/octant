@@ -2,8 +2,15 @@ import { cva, type VariantProps } from "class-variance-authority";
 import type { ComponentProps } from "react";
 import { cn } from "./utils";
 
+/*
+ * The badge stays an outline-only status label rather than the style's filled
+ * pill: it marks state next to a row of text, and a filled pill at that size
+ * reads as a button. Padding tightens beside an icon the way the style does.
+ * No focus ring here either — the global `:focus-visible` rule owns that.
+ */
+
 const badgeVariants = cva(
-  "inline-flex min-h-4 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-[4px] border px-1.5 py-px text-[10px] leading-4 font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[2px] focus-visible:ring-ring/50 [&>svg]:pointer-events-none [&>svg]:size-3",
+  "inline-flex min-h-4 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-[4px] border px-1.5 py-px text-[10px] leading-4 font-medium whitespace-nowrap transition-colors has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 [&>svg]:pointer-events-none [&>svg]:size-3",
   {
     variants: {
       variant: {
