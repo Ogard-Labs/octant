@@ -2582,7 +2582,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   text-align: center;
 }
 
-.workspace-pane__panel > [data-slot="empty-state"] {
+.workspace-pane__panel > [data-slot="empty"] {
   margin: clamp(36px, 8vh, 72px) clamp(28px, 6vw, 72px);
 }
 
@@ -2605,7 +2605,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 /* Without the card around it, a filled well would be the only raised shape
    left in the state; the glyph carries the severity on its own. */
-.shell-state [data-slot="empty-state-media"] {
+.shell-state [data-slot="empty-media"] {
   width: 38px;
   height: 38px;
   border: 0;
@@ -2613,7 +2613,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   background: transparent;
 }
 
-.shell-state [data-slot="empty-state-eyebrow"] {
+.shell-state [data-slot="empty-eyebrow"] {
   margin-bottom: 4px;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
@@ -2622,23 +2622,23 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   text-transform: none;
 }
 
-.shell-state [data-slot="empty-state-title"] {
+.shell-state [data-slot="empty-title"] {
   font-size: var(--oct-text-sm);
   line-height: 1.35;
 }
 
-.shell-state [data-slot="empty-state-description"] {
+.shell-state [data-slot="empty-description"] {
   max-width: 48ch;
   margin-top: 4px;
   font-size: var(--oct-text-sm);
   line-height: 1.5;
 }
 
-.shell-state [data-slot="empty-state-actions"] {
+.shell-state [data-slot="empty-content"] {
   margin-top: 8px;
 }
 
-.shell-state [data-slot="empty-state-actions"] button {
+.shell-state [data-slot="empty-content"] button {
   min-height: 32px;
   padding-inline: 10px;
 }
@@ -2662,19 +2662,19 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--oct-meta);
 }
 
-.shell-state[data-state="loading"] [data-slot="empty-state-media"] {
+.shell-state[data-state="loading"] [data-slot="empty-media"] {
   width: 16px;
   height: 16px;
   background: transparent;
 }
 
-.shell-state[data-state="loading"] [data-slot="empty-state-title"] {
+.shell-state[data-state="loading"] [data-slot="empty-title"] {
   color: var(--oct-meta);
   font-weight: 400;
 }
 
-.shell-state[data-state="loading"] [data-slot="empty-state-eyebrow"],
-.shell-state[data-state="loading"] [data-slot="empty-state-description"] {
+.shell-state[data-state="loading"] [data-slot="empty-eyebrow"],
+.shell-state[data-state="loading"] [data-slot="empty-description"] {
   display: none;
 }
 

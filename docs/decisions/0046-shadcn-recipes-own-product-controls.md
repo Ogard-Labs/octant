@@ -1,6 +1,6 @@
 # 0046. shadcn recipes own product controls
 
-**Status:** Accepted
+**Status:** Superseded by 0085
 
 ## Context
 
@@ -52,3 +52,5 @@ or button.
 - 0016 defines the Base UI, shadcn, adapter, and theme stack.
 - 0038 is superseded where it made `.btn`, `.setrow`, and similar visual
   recipes the component source of truth.
+- 0085 supersedes this record where it names New York as the owning style.
+  Everything else here is carried forward there unchanged.
