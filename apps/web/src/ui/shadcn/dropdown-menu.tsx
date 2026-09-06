@@ -15,7 +15,7 @@ export function DropdownMenuTrigger({
   return (
     <MenuPrimitive.Trigger
       className={cn(
-        "inline-flex cursor-pointer items-center justify-center rounded-md outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
+        "inline-flex cursor-pointer items-center justify-center rounded-md outline-none",
         className,
       )}
       data-slot="dropdown-menu-trigger"

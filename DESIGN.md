@@ -579,11 +579,10 @@ Switch, Slider, Checkbox, ToggleGroup, Tabs, DropdownMenu, ContextMenu, Dialog,
 and Tooltip. Composition rules:
 
 - Buttons use `OctantButton` or `OctantIconButton`; variants are default,
-  destructive, destructive-outline, outline, secondary, ghost, and link.
-  Destructive-outline names a risky action on an ordinary page; the filled
-  destructive variant is reserved for the final confirmation. Sizes are
-  default, sm, lg, and icon. Icon-only buttons always have an accessible label
-  and tooltip/title.
+  destructive, outline, secondary, ghost, and link. Destructive is a tonal
+  fill, not a solid one: a red slab reads as the page's subject rather than one
+  action on it. Sizes are xs, sm, default, lg, icon, icon-xs, and icon-sm.
+  Icon-only buttons always have an accessible label and tooltip/title.
 - Form layouts use `OctantFieldGroup` and `OctantField`; labels, descriptions,
   and errors remain associated with their controls. Invalid state uses
   `data-invalid` and `aria-invalid`.
