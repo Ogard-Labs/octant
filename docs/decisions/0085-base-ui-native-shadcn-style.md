@@ -46,10 +46,15 @@ that is no longer where the work happens.
   this renderer records its mode. The variant reads `data-octant-theme-mode` and
   treats dark as the base an explicit light overrides, matching both
   `shadcn-theme.css` and the terminal runtime.
-- Upstream's shared stylesheet is not a dependency. Base UI emits presence-only
-  state attributes, so Tailwind's own `data-*` variants already match; the
-  utilities the stylesheet adds beyond that are copied into the Tailwind entry
-  only when a recipe here actually uses one.
+- Upstream's shared stylesheet is not a dependency. Most of what it defines are
+  shorthand variants for state Base UI writes as a presence attribute, which
+  Tailwind's own `data-*` variants already match. The exceptions are read in
+  their value form: orientation is `data-[orientation=…]`, because Base UI
+  writes the value and the shorthand would compile to an attribute nothing
+  sets. A recipe that reaches for one of these shorthands is checked against
+  what Base UI actually emits before it lands, and the handful of utilities the
+  stylesheet adds beyond variants are copied into the Tailwind entry only when
+  a recipe here uses one.
 - Recipes hold recipes. Composed product components, their accessibility wiring,
   and their focus behaviour live in the adapter layer, where a style change does
   not reach them.
