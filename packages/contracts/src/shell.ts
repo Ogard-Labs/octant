@@ -21,6 +21,7 @@ import {
 import { MentionableThreadId } from "./threadMention";
 import { NavigatorAssistantSettings } from "./navigatorAssistant";
 import { VoiceSettings } from "./speech";
+import { ImageGenerationSettings } from "./imageGeneration";
 import { DEFAULT_AVATAR_ACCENT, DEFAULT_USER_AVATAR, UserProfile } from "./userProfile";
 import { SidebarBackground, DEFAULT_SIDEBAR_BACKGROUND } from "./theme";
 
@@ -354,6 +355,12 @@ export const ShellSettings = Schema.Struct({
   // speech status reports as `unconfigured` rather than guessing an endpoint.
   voice: Schema.optionalWith(VoiceSettings, {
     default: () => ({}),
+  }),
+  // Custom image-generation settings section. A store persisted before this
+  // shipped decodes to no custom sources — the same OpenAI-compatible-only
+  // reuse Voice already uses, so nothing here can point at an arbitrary URL.
+  imageGeneration: Schema.optionalWith(ImageGenerationSettings, {
+    default: () => ({ customSources: [] }),
   }),
   // Who is using this host. A store persisted before profiles shipped decodes
   // to the empty profile rather than a name guessed from the OS account: the

@@ -6,6 +6,7 @@ import {
   OPENAI_IMAGE_SIZES,
   type GeminiImageAspectRatio,
   type GeminiImageResolution,
+  type ImageGenerationCustomSource,
   type ImageGenerationProfileView,
   type ImageJob,
   type OpenAiImageQuality,
@@ -14,6 +15,7 @@ import {
   type ThreadExportAttachment,
 } from "@octant/contracts";
 import { isImageProfileDriverKind } from "./providerPolicy";
+import { resolveImageCustomSource } from "./imageSourcePolicy";
 
 export type ImageGenerationHonoredOptions =
   | {
@@ -29,7 +31,37 @@ export type ImageGenerationHonoredOptions =
       readonly resolutions: ReadonlyArray<GeminiImageResolution>;
       readonly maxVariants: number;
       readonly supportsReferences: boolean;
+    }
+  | {
+      readonly kind: "openai-compatible-http";
+      readonly maxVariants: number;
+      readonly supportsReferences: boolean;
     };
+
+/**
+ * Enabled Settings-configured custom image sources, as profile views. Only a
+ * `"ready"` resolution is offered here — an `"unavailable"` custom source is
+ * Settings' job to surface with its reason, not the picker's
+ * (`docs/decisions/0085`).
+ */
+export function listCustomImageProfiles(
+  customSources: ReadonlyArray<ImageGenerationCustomSource>,
+  instances: ReadonlyArray<ProviderInstance>,
+): ReadonlyArray<ImageGenerationProfileView> {
+  const profiles: Array<ImageGenerationProfileView> = [];
+  for (const source of customSources) {
+    const resolution = resolveImageCustomSource(source, instances);
+    if (resolution.status !== "ready") continue;
+    profiles.push({
+      instanceId: resolution.instance.id,
+      displayName: resolution.label,
+      driverKind: "openai-compatible-image",
+      modelAllowlist: [resolution.modelId],
+      defaultModel: resolution.modelId,
+    });
+  }
+  return profiles;
+}
 
 /**
  * Image generation is bound to enabled Settings profiles. Disabled or
@@ -37,6 +69,7 @@ export type ImageGenerationHonoredOptions =
  */
 export function listEligibleImageProfiles(
   instances: ReadonlyArray<ProviderInstance>,
+  customSources: ReadonlyArray<ImageGenerationCustomSource> = [],
 ): ReadonlyArray<ImageGenerationProfileView> {
   const profiles: Array<ImageGenerationProfileView> = [];
   for (const instance of instances) {
@@ -69,42 +102,58 @@ export function listEligibleImageProfiles(
       });
     }
   }
-  return profiles;
+  return [...profiles, ...listCustomImageProfiles(customSources, instances)];
 }
 
-export function hasEligibleImageProfile(instances: ReadonlyArray<ProviderInstance>): boolean {
-  return listEligibleImageProfiles(instances).length > 0;
+export function hasEligibleImageProfile(
+  instances: ReadonlyArray<ProviderInstance>,
+  customSources: ReadonlyArray<ImageGenerationCustomSource> = [],
+): boolean {
+  return listEligibleImageProfiles(instances, customSources).length > 0;
 }
 
 /**
  * Options a generation sheet may show for the selected profile kind. Gemini
- * never sees OpenAI quality/size, and OpenAI never sees aspect ratio/resolution.
+ * never sees OpenAI quality/size, OpenAI never sees aspect ratio/resolution,
+ * and a custom source sees neither — it has no Settings-configured quality or
+ * size options of its own.
  */
 export function honoredImageGenerationOptions(
-  kind: "openai-image-http" | "gemini-native-image-http",
+  kind: "openai-image-http" | "gemini-native-image-http" | "openai-compatible-http",
 ): ImageGenerationHonoredOptions {
-  if (kind === "openai-image-http") {
-    return {
-      kind,
-      qualities: OPENAI_IMAGE_QUALITIES,
-      sizes: OPENAI_IMAGE_SIZES,
-      maxVariants: MAX_IMAGE_VARIANTS,
-      supportsReferences: true,
-    };
+  switch (kind) {
+    case "openai-image-http":
+      return {
+        kind,
+        qualities: OPENAI_IMAGE_QUALITIES,
+        sizes: OPENAI_IMAGE_SIZES,
+        maxVariants: MAX_IMAGE_VARIANTS,
+        supportsReferences: true,
+      };
+    case "gemini-native-image-http":
+      return {
+        kind,
+        aspectRatios: GEMINI_IMAGE_ASPECT_RATIOS,
+        resolutions: GEMINI_IMAGE_RESOLUTIONS,
+        maxVariants: MAX_IMAGE_VARIANTS,
+        supportsReferences: true,
+      };
+    case "openai-compatible-http":
+      return { kind, maxVariants: MAX_IMAGE_VARIANTS, supportsReferences: true };
   }
-  return {
-    kind,
-    aspectRatios: GEMINI_IMAGE_ASPECT_RATIOS,
-    resolutions: GEMINI_IMAGE_RESOLUTIONS,
-    maxVariants: MAX_IMAGE_VARIANTS,
-    supportsReferences: true,
-  };
 }
 
 export function imageGenerationConfigurationKind(
   driverKind: ImageGenerationProfileView["driverKind"],
-): "openai-image-http" | "gemini-native-image-http" {
-  return driverKind === "openai-image" ? "openai-image-http" : "gemini-native-image-http";
+): "openai-image-http" | "gemini-native-image-http" | "openai-compatible-http" {
+  switch (driverKind) {
+    case "openai-image":
+      return "openai-image-http";
+    case "gemini-native-image":
+      return "gemini-native-image-http";
+    case "openai-compatible-image":
+      return "openai-compatible-http";
+  }
 }
 
 /**

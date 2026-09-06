@@ -186,6 +186,7 @@ describe("Journal", () => {
         modeSwitcherPresentation: "dropdown",
         navigatorAssistant: {},
         voice: {},
+        imageGeneration: { customSources: [] },
         projectViewSwitcherPresentation: "dropdown",
         transcriptTextSize: "medium",
         transcriptWidth: "narrow",

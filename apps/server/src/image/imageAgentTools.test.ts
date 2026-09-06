@@ -1,11 +1,32 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ImageJob, ProviderInstance } from "@octant/contracts";
+import type { ImageGenerationCustomSource, ImageJob, ProviderInstance } from "@octant/contracts";
 import { createImageAgentTools, IMAGE_TOOL_NAME } from "./imageAgentTools";
 
 const now = "2026-08-28T12:00:00.000Z";
 const scopeId = "a3000000-0000-4000-8000-000000000002" as never;
 const profileId = "a3000000-0000-4000-8000-000000000001" as ProviderInstance["id"];
 const parentAttachmentId = "a3000000-0000-4000-8000-000000000010";
+const compatibleId = "a3000000-0000-4000-8000-000000000011" as ProviderInstance["id"];
+
+function compatibleInstance(): ProviderInstance {
+  return {
+    id: compatibleId,
+    displayName: "Recraft",
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1 as ProviderInstance["version"],
+    createdAt: now as ProviderInstance["createdAt"],
+    updatedAt: now as ProviderInstance["updatedAt"],
+    driverKind: "openai-compatible",
+    configuration: {
+      kind: "openai-compatible-http",
+      baseUrl: "https://api.recraft.ai/v1",
+      authentication: "bearer",
+      protocol: "auto",
+      manualModelIds: [],
+    },
+  };
+}
 
 function imageProfile(enabled = true): ProviderInstance {
   return {
@@ -57,13 +78,18 @@ function job(status: ImageJob["status"] = "queued"): ImageJob {
   };
 }
 
-function tools(instances: ReadonlyArray<ProviderInstance>, jobs: ReadonlyArray<ImageJob> = []) {
+function tools(
+  instances: ReadonlyArray<ProviderInstance>,
+  jobs: ReadonlyArray<ImageJob> = [],
+  customSources: ReadonlyArray<ImageGenerationCustomSource> = [],
+) {
   const enqueue = vi.fn(async () => job());
   const set = createImageAgentTools({
     threadKind: "chat-thread",
     scopeId,
     port: {
       listInstances: () => instances,
+      readImageGenerationCustomSources: () => customSources,
       enqueue,
       listJobs: () => jobs,
     },
@@ -81,6 +107,22 @@ describe("createImageAgentTools", () => {
     const { set } = tools([imageProfile()]);
     expect(set?.definitions.map((definition) => definition.name)).toEqual([IMAGE_TOOL_NAME]);
     expect(set?.definitions[0]?.description).toMatch(/explicitly asked/i);
+  });
+
+  it("offers the tool from a registered custom image source alone", async () => {
+    const customSources: ReadonlyArray<ImageGenerationCustomSource> = [
+      { providerInstanceId: compatibleId, modelId: "recraftv3" as never, label: "Recraft" },
+    ];
+    const { set, enqueue } = tools([compatibleInstance()], [], customSources);
+    expect(set?.definitions.map((definition) => definition.name)).toEqual([IMAGE_TOOL_NAME]);
+    const outcome = await set!.execute({
+      name: IMAGE_TOOL_NAME,
+      inputJson: JSON.stringify({ prompt: "a red cube" }),
+    });
+    expect(outcome.isError).toBeUndefined();
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ profileInstanceId: compatibleId, modelId: "recraftv3" }),
+    );
   });
 
   it("refuses credentials, endpoints, and filesystem paths", async () => {

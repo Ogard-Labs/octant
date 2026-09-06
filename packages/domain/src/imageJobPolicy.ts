@@ -1,5 +1,6 @@
 import type {
   AggregateVersion,
+  ImageGenerationCustomSource,
   ImageJob,
   ImageJobStatus,
   ProviderInstance,
@@ -89,6 +90,32 @@ export function assertImageJobProfileEligible(
   const allowlist = configuration.modelAllowlist;
   if (!allowlist.some((id) => String(id) === String(modelId))) {
     reject("model-not-allowed", "The selected model is not on this image profile's allowlist.");
+  }
+}
+
+/**
+ * A custom image source has no allowlist of its own: eligibility is exact
+ * membership in the Settings-configured list, never an arbitrary model
+ * string the caller happens to supply (`docs/decisions/0085`).
+ */
+export function assertCustomImageSourceEligible(
+  instance: ProviderInstance,
+  modelId: ProviderModelId,
+  customSources: ReadonlyArray<ImageGenerationCustomSource>,
+): void {
+  if (!instance.enabled) {
+    reject("profile-ineligible", "The image source is disabled.");
+  }
+  if (instance.driverKind !== "openai-compatible") {
+    reject("profile-ineligible", "The selected provider is not an image source.");
+  }
+  const isRegistered = customSources.some(
+    (source) =>
+      String(source.providerInstanceId) === String(instance.id) &&
+      String(source.modelId) === String(modelId),
+  );
+  if (!isRegistered) {
+    reject("model-not-allowed", "This provider and model is not a configured image source.");
   }
 }
 

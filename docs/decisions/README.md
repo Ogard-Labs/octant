@@ -92,6 +92,7 @@ distilled successor of the earlier long-form design specifications.
 | [0082](0082-provider-events-are-subscribed-before-a-turn-is-sent.md)        | Provider events are subscribed before a turn is sent                                        | Accepted           |
 | [0083](0083-a-work-turn-records-what-changed-in-its-folder.md)              | A Work turn records what changed in its folder                                              | Accepted           |
 | [0084](0084-voice-rides-an-openai-compatible-provider.md)                   | Voice rides an OpenAI-compatible provider                                                   | Accepted           |
+| [0085](0085-image-generation-rides-an-openai-compatible-provider-too.md)    | Image generation rides an OpenAI-compatible provider too                                    | Accepted           |
 
 ## Adding an ADR
 

@@ -10,6 +10,7 @@ import {
   decodeImageJobId,
   type ImageGenerationSaveResult,
   type ImageGenerationScopeId,
+  type ImageGenerationSettings,
   type ImageJobId,
   type ImageJobThreadKind,
   type ProviderInstance,
@@ -30,6 +31,7 @@ const ARTIFACT_PATH =
 export interface ImageRouteDependencies {
   readonly jobs: ImageJobService;
   readonly listInstances: () => ReadonlyArray<ProviderInstance>;
+  readonly readImageGenerationSettings: () => ImageGenerationSettings;
   readonly authorizeScope: (
     windowId: WindowId,
     threadKind: ImageJobThreadKind,
@@ -88,8 +90,12 @@ export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
 
     try {
       if (route === "profiles" && request.method === "GET") {
+        const instances = dependencies.listInstances();
         const body = decodeImageGenerationProfilesResponse({
-          profiles: listEligibleImageProfiles(dependencies.listInstances()),
+          profiles: listEligibleImageProfiles(
+            instances,
+            dependencies.readImageGenerationSettings().customSources,
+          ),
         });
         return json(body, 200, origin);
       }
