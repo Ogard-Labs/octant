@@ -2,106 +2,104 @@ import {
   MAX_GENERATED_IMAGE_BYTES,
   MAX_IMAGE_PROMPT_CHARACTERS,
   MAX_IMAGE_VARIANTS,
-  type OpenAiImageQuality,
-  type OpenAiImageSize,
-  type ProviderInstanceId,
+  type OpenAiCompatibleProviderInstance,
 } from "@octant/contracts";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
+import {
+  classifyCompatibleHttpFailure,
+  isProviderFailure,
+  makeOpenAiCompatibleEndpoint,
+  performCompatibleRequest,
+  sanitizeCompatibleFailure,
+  type CompatibleEndpointPath,
+  type CompatibleFetch,
+  type CompatibleHttpLimits,
+  type OpenAiCompatibleEndpoint,
+} from "../providers/openAiCompatibleEndpoint";
 import { sniffGeneratedImageMediaType } from "./generatedImageStore";
 import type {
   ImageAdapterRequest,
   ImageAdapterResult,
   ImageGenerationAdapter,
 } from "./imageAdapter";
-import {
-  OPENAI_IMAGE_API_BASE_URL,
-  classifyImageHttpFailure,
-  fail,
-  interrupted,
-  isProviderFailure,
-  performImageHttpRequest,
-  readImageJson,
-  sanitizeImageFailure,
-  type ImageHttpFetch,
-  type ImageHttpLimits,
-} from "./imageHttp";
+import { fail, interrupted, readImageJson } from "./imageHttp";
 import {
   decodeBase64Image,
   decodeOpenAiImageResponse,
   safetyMessageFromUnknown,
 } from "./openAiImageResponseCodec";
 
-const DEFAULT_LIMITS: ImageHttpLimits = {
+const DEFAULT_LIMITS: CompatibleHttpLimits = {
   connectionTimeoutMs: 120_000,
   requestBodyBytes: MAX_GENERATED_IMAGE_BYTES * 2,
   // Base64 expands decoded bytes by 4/3: bound the encoded JSON response by
   // that expansion, not by the decoded image ceiling, or a valid maximal
   // response gets rejected before decodeOpenAiImageResponse ever sees it.
   responseBodyBytes: 4 * Math.ceil(MAX_GENERATED_IMAGE_BYTES / 3) * MAX_IMAGE_VARIANTS + 262_144,
+  streamIdleTimeoutMs: 30_000,
 };
 
-export interface OpenAiImageAdapterOptions {
-  readonly instanceId: ProviderInstanceId;
+export interface OpenAiCompatibleImageAdapterOptions {
+  readonly instance: OpenAiCompatibleProviderInstance;
   readonly credentialResolver: ProviderCredentialResolver;
-  readonly fetch?: ImageHttpFetch;
-  readonly limits?: Partial<ImageHttpLimits>;
+  readonly fetch?: CompatibleFetch;
+  readonly limits?: Partial<CompatibleHttpLimits>;
 }
 
 /**
- * OpenAI Image API adapter. The base URL is fixed; a user-supplied endpoint
- * cannot appear here, which closes SSRF. Results are base64 only — a URL form
- * is a protocol failure, never an artifact.
+ * Image generation over an OpenAI-compatible HTTP instance
+ * (`docs/decisions/0085`). The instance's own base URL, credential, and
+ * endpoint policy are reused unchanged, exactly like the speech adapter
+ * reuses them for `/audio/*`; this adapter only adds the two `images/*`
+ * paths. Results are base64 only — a URL form is a protocol failure, never an
+ * artifact, the same as the fixed OpenAI Image adapter.
  */
-export function makeOpenAiImageAdapter(options: OpenAiImageAdapterOptions): ImageGenerationAdapter {
-  const fetch = options.fetch ?? globalThis.fetch;
-  const limits: ImageHttpLimits = { ...DEFAULT_LIMITS, ...options.limits };
+export function makeOpenAiCompatibleImageAdapter(
+  options: OpenAiCompatibleImageAdapterOptions,
+): ImageGenerationAdapter {
+  const limits: CompatibleHttpLimits = { ...DEFAULT_LIMITS, ...options.limits };
+  const endpoint = makeOpenAiCompatibleEndpoint({
+    instanceId: String(options.instance.id),
+    configuration: options.instance.configuration,
+    credentialResolver: options.credentialResolver,
+    ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+    limits,
+  });
   return {
     generate: async (request) => {
       try {
-        return await generateOpenAiImage({
-          adapterInstanceId: options.instanceId,
-          credentialResolver: options.credentialResolver,
-          fetch,
-          limits,
-          request,
-        });
+        return await generateCompatibleImage(endpoint, request);
       } catch (error) {
         if (isProviderFailure(error)) {
           if (error.category === "interrupted") return { status: "failed", providerFailure: error };
-          return { status: "failed", providerFailure: sanitizeImageFailure(error) };
+          return { status: "failed", providerFailure: sanitizeCompatibleFailure(error) };
         }
-        return {
-          status: "failed",
-          providerFailure: sanitizeImageFailure(error),
-        };
+        return { status: "failed", providerFailure: sanitizeCompatibleFailure(error) };
       }
     },
   };
 }
 
-async function generateOpenAiImage(input: {
-  readonly adapterInstanceId: ProviderInstanceId;
-  readonly credentialResolver: ProviderCredentialResolver;
-  readonly fetch: ImageHttpFetch;
-  readonly limits: ImageHttpLimits;
-  readonly request: ImageAdapterRequest;
-}): Promise<ImageAdapterResult> {
-  if (input.request.signal?.aborted) {
+async function generateCompatibleImage(
+  endpoint: OpenAiCompatibleEndpoint,
+  request: ImageAdapterRequest,
+): Promise<ImageAdapterResult> {
+  if (request.signal?.aborted) {
     return { status: "failed", providerFailure: interrupted() };
   }
-  if (input.request.prompt.trim().length === 0) {
+  if (request.prompt.trim().length === 0) {
     return {
       status: "failed",
       providerFailure: fail("invalid-configuration", "The image prompt must not be empty."),
     };
   }
-  if (input.request.prompt.length > MAX_IMAGE_PROMPT_CHARACTERS) {
+  if (request.prompt.length > MAX_IMAGE_PROMPT_CHARACTERS) {
     return {
       status: "failed",
       providerFailure: fail("invalid-configuration", "The image prompt exceeded the length limit."),
     };
   }
-  const variantCount = input.request.variantCount ?? 1;
+  const variantCount = request.variantCount ?? 1;
   if (
     !Number.isSafeInteger(variantCount) ||
     variantCount < 1 ||
@@ -116,38 +114,24 @@ async function generateOpenAiImage(input: {
     };
   }
 
-  const references = input.request.references ?? [];
-  const url =
-    references.length === 0
-      ? `${OPENAI_IMAGE_API_BASE_URL}/images/generations`
-      : `${OPENAI_IMAGE_API_BASE_URL}/images/edits`;
+  const references = request.references ?? [];
+  const path: CompatibleEndpointPath =
+    references.length === 0 ? "images/generations" : "images/edits";
 
-  let response;
+  let response: Response;
   if (references.length === 0) {
-    const body: Record<string, unknown> = {
-      model: input.request.modelId,
-      prompt: input.request.prompt,
-      n: variantCount,
-    };
-    assignOpenAiOptions(body, input.request.quality, input.request.size);
-    response = await performImageHttpRequest({
-      url,
+    const body = { model: String(request.modelId), prompt: request.prompt, n: variantCount };
+    response = await performCompatibleRequest(endpoint, path, {
       method: "POST",
-      auth: { header: "authorization", scheme: "Bearer" },
-      instanceId: String(input.adapterInstanceId),
-      credentialResolver: input.credentialResolver,
+      headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
-      fetch: input.fetch,
-      limits: input.limits,
-      ...(input.request.signal === undefined ? {} : { signal: input.request.signal }),
+      ...(request.signal === undefined ? {} : { signal: request.signal }),
     });
   } else {
     const form = new FormData();
-    form.set("model", String(input.request.modelId));
-    form.set("prompt", input.request.prompt);
+    form.set("model", String(request.modelId));
+    form.set("prompt", request.prompt);
     form.set("n", String(variantCount));
-    if (input.request.quality !== undefined) form.set("quality", input.request.quality);
-    if (input.request.size !== undefined) form.set("size", input.request.size);
     for (const [index, reference] of references.entries()) {
       form.append(
         "image[]",
@@ -155,25 +139,21 @@ async function generateOpenAiImage(input: {
         `reference-${index}${extensionFor(reference.mediaType)}`,
       );
     }
-    response = await performImageHttpRequest({
-      url,
+    // No content-type header on the form branch — fetch sets the multipart
+    // boundary itself, the same as the speech adapter's transcribe call.
+    response = await performCompatibleRequest(endpoint, path, {
       method: "POST",
-      auth: { header: "authorization", scheme: "Bearer" },
-      instanceId: String(input.adapterInstanceId),
-      credentialResolver: input.credentialResolver,
-      form,
-      fetch: input.fetch,
-      limits: input.limits,
-      ...(input.request.signal === undefined ? {} : { signal: input.request.signal }),
+      body: form,
+      ...(request.signal === undefined ? {} : { signal: request.signal }),
     });
   }
 
   if (!response.ok) {
-    const refusal = await readOpenAiSafetyRefusal(response);
+    const refusal = await readCompatibleSafetyRefusal(response);
     if (refusal !== undefined) return { status: "refused", safetyRefusal: refusal };
     return {
       status: "failed",
-      providerFailure: sanitizeImageFailure(classifyImageHttpFailure(response)),
+      providerFailure: sanitizeCompatibleFailure(classifyCompatibleHttpFailure(response)),
     };
   }
 
@@ -238,15 +218,6 @@ async function generateOpenAiImage(input: {
   };
 }
 
-function assignOpenAiOptions(
-  body: Record<string, unknown>,
-  quality: OpenAiImageQuality | undefined,
-  size: OpenAiImageSize | undefined,
-): void {
-  if (quality !== undefined) body.quality = quality;
-  if (size !== undefined) body.size = size;
-}
-
 function extensionFor(mediaType: string): string {
   switch (mediaType) {
     case "image/jpeg":
@@ -260,7 +231,7 @@ function extensionFor(mediaType: string): string {
   }
 }
 
-async function readOpenAiSafetyRefusal(response: Response): Promise<string | undefined> {
+async function readCompatibleSafetyRefusal(response: Response): Promise<string | undefined> {
   try {
     const payload = await readImageJson(response);
     return safetyMessageFromUnknown(payload);

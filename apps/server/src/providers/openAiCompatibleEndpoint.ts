@@ -51,17 +51,20 @@ export interface OpenAiCompatibleEndpoint {
 }
 
 /**
- * The paths one OpenAI-compatible base URL serves. Speech rides the same
- * instance as chat: `/audio/*` is resolved against the same base URL with the
- * same credential and endpoint policy, so a voice profile never needs a second
- * URL a person could point somewhere else.
+ * The paths one OpenAI-compatible base URL serves. Speech and image
+ * generation both ride the same instance as chat: `/audio/*` and
+ * `/images/*` resolve against the same base URL with the same credential and
+ * endpoint policy, so neither capability ever needs a second URL a person
+ * could point somewhere else (`docs/decisions/0084`, `docs/decisions/0085`).
  */
 export type CompatibleEndpointPath =
   | "models"
   | "responses"
   | "chat/completions"
   | "audio/transcriptions"
-  | "audio/speech";
+  | "audio/speech"
+  | "images/generations"
+  | "images/edits";
 
 export type CompatibleFetch = (
   input: string | URL | Request,

@@ -4203,6 +4203,9 @@ export function startOctantServer(
               scopeId: decodeImageGenerationScopeId(String(thread.id)),
               port: {
                 listInstances: () => persistence.readProviderInstances(),
+                readImageGenerationCustomSources: () =>
+                  (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                    .imageGeneration.customSources,
                 enqueue: (input) => imageJobService.enqueue(input),
                 listJobs: (scopeId) => imageJobService.listByScope(scopeId),
               },
@@ -4313,6 +4316,9 @@ export function startOctantServer(
       projection: persistence.imageJobProjection,
       attachments: generatedImageStore,
       readProviderInstance: (id) => persistence.readProviderInstance(id),
+      readImageGenerationCustomSources: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration
+          .customSources,
       credentialResolver:
         credentialResolver ??
         ({
@@ -5151,6 +5157,8 @@ export function startOctantServer(
     const imageRoutes = createImageRouteHandler({
       jobs: imageJobService,
       listInstances: () => persistence.readProviderInstances(),
+      readImageGenerationSettings: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration,
       authorizeScope: async (windowId, threadKind, scopeId) => {
         const threadId = String(scopeId);
         // The library is host-wide: window capability already proved the

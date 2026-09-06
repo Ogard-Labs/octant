@@ -31,6 +31,7 @@ import {
   ProviderPolicyRejected,
   changeAnthropicCompatibleConfiguration,
   changeAzureFoundryConfiguration,
+  changeBflImageConfiguration,
   changeClaudeConfiguration,
   changeDevinConfiguration,
   changeGeminiImageConfiguration,
@@ -50,6 +51,7 @@ import {
   changeProviderBinary,
   createAnthropicCompatibleProvider,
   createAzureFoundryProvider,
+  createBflImageProvider,
   createClaudeProvider,
   createDevinProvider,
   createGeminiImageProvider,
@@ -520,7 +522,8 @@ export class ProviderService implements ProviderServiceApi {
           command.kind === "create-anthropic-compatible-provider" ||
           command.kind === "create-azure-foundry-provider" ||
           command.kind === "create-openai-image-provider" ||
-          command.kind === "create-gemini-native-image-provider"
+          command.kind === "create-gemini-native-image-provider" ||
+          command.kind === "create-bfl-image-provider"
         ) {
           if (current !== undefined || command.expectedVersion !== 0) {
             throw this.#invalid("Provider configuration changed; reload and retry.");
@@ -659,6 +662,12 @@ export class ProviderService implements ProviderServiceApi {
                 configuration: command.configuration,
               });
               break;
+            case "create-bfl-image-provider":
+              instance = createBflImageProvider({
+                ...common,
+                configuration: command.configuration,
+              });
+              break;
           }
           this.#assertDriverPluginEffective(instance);
           this.#appendInstance(command.expectedVersion, "provider.instance-created@1", instance);
@@ -768,6 +777,13 @@ export class ProviderService implements ProviderServiceApi {
             throw this.#unsupported("This provider does not use Gemini image configuration.");
           }
           instance = changeGeminiImageConfiguration(current, command.configuration, updatedAt);
+          await this.#runtime.invalidateRuntime(current.id);
+          eventName = "provider.instance-configuration-changed@1";
+        } else if (command.kind === "change-bfl-image-configuration") {
+          if (current.driverKind !== "bfl-image") {
+            throw this.#unsupported("This provider does not use BFL image configuration.");
+          }
+          instance = changeBflImageConfiguration(current, command.configuration, updatedAt);
           await this.#runtime.invalidateRuntime(current.id);
           eventName = "provider.instance-configuration-changed@1";
         } else if (command.kind === "change-claude-configuration") {

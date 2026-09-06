@@ -19,6 +19,7 @@ describe("SettingsSectionId", () => {
       "code",
       "navigator-assistant",
       "voice",
+      "image-generation",
       "providers",
       "profiles",
       "agents",

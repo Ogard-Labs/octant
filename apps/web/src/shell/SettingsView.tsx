@@ -66,6 +66,7 @@ import { octantSettingsRegistry } from "../settings/octantSettingsRegistry";
 import { KeybindingSettings } from "../keybindings/KeybindingSettings";
 import { NavigatorAssistantSettingsView } from "../settings/NavigatorAssistantSettingsView";
 import { VoiceSettingsView } from "../settings/VoiceSettingsView";
+import { ImageGenerationSettingsView } from "../settings/ImageGenerationSettingsView";
 import { UserProfileSettingsView } from "../profile/UserProfileSettingsView";
 import { SettingRow } from "../settings/primitives";
 import { SettingsSearchResults } from "../settings/SettingsSearchResults";
@@ -159,6 +160,8 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   code: "Defaults for Code threads and delivery.",
   "navigator-assistant": "The models Navigator uses to converse and to review images.",
   voice: "The providers that turn speech into text and text into speech.",
+  "image-generation":
+    "Pick an already-connected provider and model to also generate images. Add the provider itself, with its endpoint and key, under Providers & Models first.",
   providers: "Connect providers, manage authentication, and pick default models.",
   profiles: "Reusable execution profiles for agent runs.",
   agents: "How agent runs behave in this app.",
@@ -526,6 +529,16 @@ function ActiveSectionContent({
           settings={props.settings.voice}
         />
       );
+    case "image-generation":
+      return (
+        <ImageGenerationSettingsView
+          onSettingsChange={props.onSettingsChange}
+          {...(props.providerController?.snapshot === undefined
+            ? {}
+            : { providerSnapshot: props.providerController.snapshot })}
+          settings={props.settings.imageGeneration}
+        />
+      );
     case "providers":
       return props.providerController !== undefined ? (
         <ProvidersSection
@@ -706,6 +719,7 @@ function ProvidersSection(props: {
         }
         onChangeOpenAiImageConfiguration={props.providerController.changeOpenAiImageConfiguration}
         onChangeGeminiImageConfiguration={props.providerController.changeGeminiImageConfiguration}
+        onChangeBflImageConfiguration={props.providerController.changeBflImageConfiguration}
         onChangeAnthropicCompatibleConfiguration={
           props.providerController.changeAnthropicCompatibleConfiguration
         }
@@ -727,6 +741,7 @@ function ProvidersSection(props: {
         onCreateAzureFoundry={props.providerController.createAzureFoundry}
         onCreateOpenAiImage={props.providerController.createOpenAiImage}
         onCreateGeminiImage={props.providerController.createGeminiImage}
+        onCreateBflImage={props.providerController.createBflImage}
         onPermissionPersistenceChange={props.providerController.updatePermissionPersistence}
         onProbe={props.providerController.probe}
         onProviderOrderChange={props.providerController.updateProviderOrder}

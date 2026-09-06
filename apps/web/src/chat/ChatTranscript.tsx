@@ -12,7 +12,7 @@ import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import { activeChatTurns } from "@octant/domain/chat-policy";
 import type { PickerGroup } from "@octant/domain";
 import { providerModelLabel } from "../providers/providerModelLabel";
-import { TurnHeader, turnWorkedFor } from "../transcript/TurnHeader";
+import { TurnHeader, TurnTime, turnWorkedFor } from "../transcript/TurnHeader";
 import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
@@ -123,10 +123,13 @@ export function ChatTranscript(props: ChatTranscriptProps) {
     (decision) => !turnIds.has(String(decision.turnId)),
   );
 
+  // The scroll frame spans the pane so its scrollbar sits at the pane's edge,
+  // as it does in Work and Code; each piece of content takes the thread
+  // column itself.
   const lead = (
     <>
       {props.connectionStatus === "disconnected" ? (
-        <p aria-live="polite" className="chat-transcript__connection" role="status">
+        <p aria-live="polite" className="chat-transcript__connection thread-column" role="status">
           Disconnected — reconnecting to the authoritative transcript.
         </p>
       ) : null}
@@ -134,24 +137,24 @@ export function ChatTranscript(props: ChatTranscriptProps) {
         <p
           aria-label="Historical attachment warning"
           aria-live="polite"
-          className="chat-transcript__handoff-warning"
+          className="chat-transcript__handoff-warning thread-column"
           role="status"
         >
           {handoffWarningText(props.view.thread.handoffWarning)}
         </p>
       )}
       {props.view.thread.branchedFrom === undefined ? null : (
-        <p className="chat-transcript__provenance" role="status">
+        <p className="chat-transcript__provenance thread-column" role="status">
           {branchOriginText(props.view.thread.branchedFrom)}
         </p>
       )}
       {props.checkpoints?.message === undefined ? null : (
-        <p className="chat-transcript__provenance" role="status">
+        <p className="chat-transcript__provenance thread-column" role="status">
           {props.checkpoints.message}
         </p>
       )}
       {revisedTurnCount === 0 ? null : (
-        <p className="chat-transcript__provenance" role="status">
+        <p className="chat-transcript__provenance thread-column" role="status">
           {revisedTurnCount === 1
             ? "1 earlier message was revised. This is the conversation as it now stands; the earlier version stays in this thread's history."
             : `${revisedTurnCount} earlier messages were revised. This is the conversation as it now stands; the earlier versions stay in this thread's history.`}
@@ -171,18 +174,24 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       </div>
     );
 
+  const trail = (
+    <div className="thread-column">
+      {orphanedRouteDecisions.map((decision) => (
+        <RouteReceipt decision={decision} key={String(decision.turnId)} />
+      ))}
+      {pendingMessage}
+    </div>
+  );
+
   if (turns.length === 0) {
     return (
-      <section aria-label="Conversation" className="chat-transcript thread-column">
+      <section aria-label="Conversation" className="chat-transcript transcript-scroll">
         {lead}
         <div className="chat-transcript__empty" role="status">
           <h2>Start the conversation</h2>
           <p>Ask a question, draft something, or explore an idea.</p>
         </div>
-        {orphanedRouteDecisions.map((decision) => (
-          <RouteReceipt decision={decision} key={String(decision.turnId)} />
-        ))}
-        {pendingMessage}
+        {trail}
       </section>
     );
   }
@@ -190,15 +199,15 @@ export function ChatTranscript(props: ChatTranscriptProps) {
   return (
     <TranscriptWindow
       ariaLabel="Conversation"
-      className="chat-transcript thread-column"
+      className="chat-transcript transcript-scroll"
       estimateSize={160}
-      gap={36}
+      gap={20}
       itemKey={(turn) => String(turn.id)}
       items={turns}
       itemTag="li"
       key={String(props.view.thread.id)}
       lead={lead}
-      listClassName="chat-transcript__turns"
+      listClassName="chat-transcript__turns thread-column"
       listLabel="Chat transcript"
       listTag="ol"
       {...(editingTurnId === undefined ? {} : { pinnedKeys: [editingTurnId] })}
@@ -291,10 +300,16 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                     {attachmentList}
                   </>
                 ) : (
-                  <div className="bubble">
-                    <MessageBody content={userContent} missing="Message content is unavailable." />
-                    {attachmentList}
-                  </div>
+                  <>
+                    <div className="bubble">
+                      <MessageBody
+                        content={userContent}
+                        missing="Message content is unavailable."
+                      />
+                      {attachmentList}
+                    </div>
+                    <TurnTime at={turn.createdAt} />
+                  </>
                 )}
                 {editing || checkpoints === undefined ? null : (
                   <ThreadCheckpointControls
@@ -336,14 +351,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       restoreKey={String(props.view.thread.id)}
       {...(props.revealTurnId === undefined ? {} : { revealKey: String(props.revealTurnId) })}
       role="region"
-      trail={
-        <>
-          {orphanedRouteDecisions.map((decision) => (
-            <RouteReceipt decision={decision} key={String(decision.turnId)} />
-          ))}
-          {pendingMessage}
-        </>
-      }
+      trail={trail}
     />
   );
 }

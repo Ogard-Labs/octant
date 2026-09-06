@@ -823,11 +823,11 @@ export function ChatComposer(props: ChatComposerProps) {
     <ThreadComposer
       ariaLabel="Chat composer"
       chips={chips}
-      className={`chat-composer thread-column${props.isSending ? " chat-composer--running" : ""}`}
+      className={`thread-composer chat-composer thread-column${props.isSending ? " chat-composer--running" : ""}`}
       footer={
         <div
           aria-live="polite"
-          className={`chat-composer__status${quietStatus ? " chat-composer__status--quiet" : ""}${
+          className={`composer-status chat-composer__status${quietStatus ? " chat-composer__status--quiet" : ""}${
             props.isSending && !quietStatus ? " chat-composer__status--live" : ""
           }`}
           id={statusId}

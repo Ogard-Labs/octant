@@ -5,8 +5,19 @@ const MAX_RETRY_AFTER_MS = 3_600_000;
 
 export const OPENAI_IMAGE_API_BASE_URL = "https://api.openai.com/v1";
 export const GEMINI_IMAGE_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
+export const BFL_IMAGE_API_BASE_URL = "https://api.bfl.ai";
 
-export type ImageHttpAuth = "bearer" | "goog-api-key";
+/**
+ * How a provider's credential becomes a request header. A plain union of
+ * string literals stopped scaling once BFL's raw `x-key` header (no scheme
+ * prefix) joined `Authorization: Bearer` and `x-goog-api-key`: this
+ * descriptor lets `performImageHttpRequest` build any of them generically
+ * instead of growing another hardcoded literal and if-branch per vendor.
+ */
+export type ImageHttpAuth =
+  | { readonly header: "authorization"; readonly scheme: "Bearer" }
+  | { readonly header: "x-goog-api-key" }
+  | { readonly header: "x-key" };
 
 export type ImageHttpFetch = (
   input: string | URL | Request,
@@ -21,7 +32,7 @@ export interface ImageHttpLimits {
 
 export interface ImageHttpRequest {
   readonly url: string;
-  readonly method: "POST";
+  readonly method: "POST" | "GET";
   readonly auth: ImageHttpAuth;
   readonly instanceId: string;
   readonly credentialResolver: ProviderCredentialResolver;
@@ -51,10 +62,10 @@ export async function performImageHttpRequest(request: ImageHttpRequest): Promis
     if (credential.length === 0) {
       throw fail("unauthenticated", "The provider credential is missing or unavailable.");
     }
-    if (request.auth === "goog-api-key") {
-      headers.set("x-goog-api-key", credential);
+    if ("scheme" in request.auth) {
+      headers.set(request.auth.header, `${request.auth.scheme} ${credential}`);
     } else {
-      headers.set("authorization", `Bearer ${credential}`);
+      headers.set(request.auth.header, credential);
     }
 
     if (request.body !== undefined) {
@@ -113,6 +124,85 @@ export async function performImageHttpRequest(request: ImageHttpRequest): Promis
       throw fail("invalid-configuration", "The configured endpoint returned a redirect.");
     }
     return boundResponse(response, request.limits, request.signal);
+  } finally {
+    deadline.close();
+  }
+}
+
+/**
+ * The one bounded exception to "reject URL forms" (`docs/decisions/0086`): a
+ * single GET to a URL a provider's own just-completed authenticated call
+ * returned (BFL's `result.sample`, and Ideogram's equivalent next). No
+ * redirects, the same size and time bounds as any other image fetch, and the
+ * URL itself never outlives this call — callers must not log or store it.
+ */
+export async function fetchApprovedImageUrl(input: {
+  readonly url: string;
+  readonly fetch: ImageHttpFetch;
+  readonly maxBytes: number;
+  readonly timeoutMs: number;
+  readonly signal?: AbortSignal;
+}): Promise<{ readonly bytes: Uint8Array } | { readonly failure: ProviderFailure }> {
+  if (isAborted(input.signal)) return { failure: interrupted() };
+  const deadline = makeRequestDeadline(input.signal, input.timeoutMs);
+  try {
+    let response: Response;
+    try {
+      const fetchRequest = Promise.resolve().then(async () =>
+        input.fetch(input.url, {
+          method: "GET",
+          redirect: "manual",
+          signal: deadline.signal,
+        }),
+      );
+      const outcome = await Promise.race([
+        fetchRequest.then(
+          (value) => ({ kind: "response", value }) as const,
+          (error: unknown) => ({ kind: "fetch-failure", error }) as const,
+        ),
+        deadline.failure.catch(
+          (failure: ProviderFailure) => ({ kind: "deadline-failure", failure }) as const,
+        ),
+      ]);
+      if (outcome.kind === "deadline-failure") {
+        safelyCancelLateResponse(fetchRequest);
+        throw outcome.failure;
+      }
+      if (outcome.kind === "fetch-failure") throw outcome.error;
+      response = outcome.value;
+    } catch (error) {
+      if (isProviderFailure(error)) throw error;
+      if (isAborted(input.signal)) throw interrupted();
+      throw fail("unavailable", "The provider image could not be reached.");
+    }
+    if (response.status >= 300 && response.status < 400) {
+      await cancelResponseBody(response);
+      throw fail("protocol", "The provider's approved image URL returned a redirect.");
+    }
+    if (!response.ok) {
+      await cancelResponseBody(response);
+      throw fail(
+        "provider-failed",
+        `The provider image fetch failed with HTTP ${response.status}.`,
+      );
+    }
+    const bounded = boundResponse(
+      response,
+      {
+        connectionTimeoutMs: input.timeoutMs,
+        requestBodyBytes: 0,
+        responseBodyBytes: input.maxBytes,
+      },
+      input.signal,
+    );
+    const bytes = new Uint8Array(await bounded.arrayBuffer());
+    return { bytes };
+  } catch (error) {
+    return {
+      failure: isProviderFailure(error)
+        ? error
+        : fail("provider-failed", "The provider image fetch failed."),
+    };
   } finally {
     deadline.close();
   }
@@ -316,7 +406,7 @@ function safelyCancel(body: ReadableStream<Uint8Array> | null): void {
   if (body !== null) void body.cancel().catch(() => undefined);
 }
 
-function parseRetryAfter(value: string | null, now: number): number | undefined {
+export function parseRetryAfter(value: string | null, now: number): number | undefined {
   if (value === null) return undefined;
   if (/^\d+$/.test(value)) {
     const seconds = Number(value);

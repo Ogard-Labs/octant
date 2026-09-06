@@ -284,7 +284,11 @@
      because a transcript interleaves code and tool output that wrap
      badly at prose width. */
   --oct-thread-measure: 760px;
-  --oct-transcript-font-size: 14px;
+  /* The transcript's own text size (Appearance › Transcript text size).
+     Medium is the body size the rest of the interface reads at: a reply set
+     one step larger than the question above it and the composer below it
+     read as three sizes on one surface. */
+  --oct-transcript-font-size: 13px;
 
   /* app shell. The sidebar width is a token rather than a literal because
      the drag handle writes to it — resizing and the default come from the
@@ -850,11 +854,11 @@ h4 {
 }
 
 .shell[data-transcript-text-size="small"] {
-  --oct-transcript-font-size: 13px;
+  --oct-transcript-font-size: 12px;
 }
 
 .shell[data-transcript-text-size="medium"] {
-  --oct-transcript-font-size: 14px;
+  --oct-transcript-font-size: 13px;
 }
 
 .shell[data-transcript-text-size="large"] {
@@ -2383,30 +2387,56 @@ input.switch:checked::after {
    reading prose, with the machinery available but never in the way.
    ══════════════════════════════════════════════════════════════════════ */
 
-/* the user's turn: a bubble, right-aligned, deliberately narrow */
-/* A right-aligned bubble makes a long agent session read as a messaging app.
-   The user's turn is the instruction that produced everything under it, so it
-   spans the column and pins to the top while its answer scrolls past. */
+/* The one transcript rhythm, in Chat, Work, and Code alike. A person's
+   message is a quiet right-aligned bubble with its time beneath it; the
+   reply is bare prose under its turn header. Each mode lays these rows in
+   its own transcript window, so the vertical rhythm lives on the pieces
+   themselves: the window keeps 20px between rows, and a person's message
+   carries 12px more above it so a new question stands off the reply before
+   it. Before this, the same message was a full-width sticky slab in Work, a
+   78% bubble with a doubled edge in Chat, and an 88% bubble with the time
+   inside it in Code. */
+.transcript-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 12px 0 32px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
 .turn-user {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  justify-content: stretch;
-  padding-block: var(--oct-space-3);
-  background: var(--oct-bg);
+  display: grid;
+  min-width: 0;
+  justify-items: end;
+  gap: 4px;
+  padding: 12px 0 0;
+}
+/* A mode may wrap the turn in its action-menu trigger; the wrapper takes the
+   whole column so the bubble still sits at the right edge. */
+.turn-user > .turn-action-menu {
+  display: grid;
+  width: 100%;
+  justify-items: end;
+  gap: 4px;
 }
 .turn-user .bubble {
-  width: 100%;
-  padding: var(--oct-space-3) var(--oct-space-4);
+  width: auto;
+  max-width: min(80%, 620px);
+  justify-self: end;
+  padding: 10px 14px;
+  border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
-  background: var(--oct-fill-4);
-  box-shadow: inset 0 0 0 1px var(--oct-hairline);
+  background: var(--oct-surface-warm);
+  box-shadow: none;
   color: var(--oct-fg);
   font-family: var(--oct-font-transcript);
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-transcript-font-size);
   line-height: var(--oct-leading-body);
   overflow-wrap: anywhere;
+}
+/* What a person typed keeps the line breaks they typed. */
+.turn-user .bubble p {
+  margin: 0;
+  white-space: pre-wrap;
 }
 .turn-user .thumb {
   display: block;
@@ -2416,30 +2446,99 @@ input.switch:checked::after {
   border-radius: var(--oct-radius-md);
   overflow: hidden;
 }
+/* When a turn changed, at the right edge: under a person's bubble and at the
+   end of the turn header, in the detail size and the interface face. */
+.turn-time {
+  margin: 0;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-detail);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+  text-align: end;
+}
 
 /* the agent's turn: no avatar, no rail, no bubble — just the text */
 .turn-agent {
-  padding-block: var(--oct-space-2);
-  color: var(--oct-fg-2);
+  min-width: 0;
+  padding: 0;
+  color: var(--oct-fg);
   font-family: var(--oct-font-transcript);
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-transcript-font-size);
   line-height: var(--oct-leading-body);
 }
 .turn-agent > p {
-  margin: 0 0 var(--oct-space-4);
-  max-width: 78ch;
-}
-.turn-agent > ul,
-.turn-agent > ol {
-  margin: 0 0 var(--oct-space-4);
-  padding-left: var(--oct-space-5);
-  max-width: 78ch;
-}
-.turn-agent li {
-  margin-bottom: var(--oct-space-2);
+  margin: 0 0 var(--oct-space-3);
 }
 .turn-agent > :last-child {
   margin-bottom: 0;
+}
+
+/* A turn paused on the person — an approval, a question — is a card row in
+   the thread column: one icon, one sentence, the answer controls at the end.
+   The semantic colour is a 2px tick inside the hairline, not a bar down the
+   side, so the row still reads as part of the transcript. */
+.approval-row {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+  padding: 8px 12px 8px 14px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  line-height: 1.45;
+}
+.approval-row::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--oct-warn-fg);
+}
+.approval-row > svg {
+  flex: 0 0 auto;
+  color: var(--oct-warn-fg);
+}
+.approval-row__text {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.approval-row__detail {
+  display: block;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+}
+.approval-row__code {
+  flex: 1 1 100%;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-muted);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-detail);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.approval-row__actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: auto;
+}
+
+@media (max-width: 680px) {
+  .turn-user .bubble {
+    max-width: 94%;
+  }
 }
 
 /* ─── diff stat ───────────────────────────────────────────────────────
@@ -4175,8 +4274,8 @@ input.switch:checked::after {
 .composer-row button,
 .composer-row [role="button"],
 .composer-row [role="combobox"] {
-  min-height: 32px;
-  height: 32px;
+  min-height: 30px;
+  height: 30px;
   border-radius: var(--oct-radius-sm);
 }
 /* The composer is one raised object, so nothing riding its row draws a second
@@ -4202,8 +4301,8 @@ input.switch:checked::after {
 }
 /* The send control is the row's one filled affordance, so it stays a circle. */
 .composer-row button[data-size="icon"] {
-  width: 32px;
-  min-width: 32px;
+  width: 30px;
+  min-width: 30px;
   padding: 0;
   border-radius: var(--oct-radius-pill);
 }
@@ -4214,7 +4313,7 @@ input.switch:checked::after {
 .composer-row [role="combobox"] {
   width: auto;
   max-width: 190px;
-  min-height: 32px;
+  min-height: 30px;
   padding-inline: 8px 22px;
   border-color: transparent;
   border-radius: var(--oct-radius-sm);
@@ -4229,7 +4328,7 @@ input.switch:checked::after {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  min-height: 32px;
+  min-height: 30px;
   padding-block: 0;
   padding-inline: 8px 6px;
   color: var(--oct-muted);
@@ -4242,7 +4341,7 @@ input.switch:checked::after {
    field inside the raised prompt. The disabled trigger keeps the truthful
    state and settings route while the row keeps one continuous surface. */
 .composer-row .composer-model-picker--empty {
-  min-height: 32px;
+  min-height: 30px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -4252,6 +4351,57 @@ input.switch:checked::after {
    shrink-wraps it to the typed text). */
 .composer > label {
   display: block;
+}
+/* A typeahead sits between the input and the row so the open list never
+   covers the message; the frameless child carries the frame's gutter. */
+.composer > .thread-mention__typeahead,
+.composer > .chat-composer__command-typeahead {
+  margin: var(--oct-space-2) var(--oct-space-3) 0;
+}
+/* The frame at the foot of an open thread, in every mode: it takes the
+   thread column, floats over the transcript's scroll edge, and keeps one
+   distance from the window's bottom. Chat, Work, and Code each placed it
+   with their own margins before this. */
+.composer.thread-composer {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 auto;
+  margin: 0 auto 12px;
+}
+/* The quiet line under the composer's toolbar: the keyboard hint or a
+   receipt on the left, spend and limits on the right. One recipe replaces
+   the three footers Chat, Work, and Code drew under the same frame (and, in
+   Work, outside it). */
+.composer-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px 12px;
+  min-height: 18px;
+  margin: 0;
+  padding: 0 14px 10px;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  line-height: 1.35;
+}
+.composer-status__hint {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.composer-status__notice {
+  min-width: 0;
+  color: var(--oct-danger-fg);
+}
+.composer-status__trailing {
+  display: inline-flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 10px;
+  margin-inline-start: auto;
+  white-space: nowrap;
 }
 /* an attachment, a mentioned file, a scoped folder */
 .chip {
