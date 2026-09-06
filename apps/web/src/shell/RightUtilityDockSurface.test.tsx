@@ -18,18 +18,20 @@ function surface(id: "browser" | "terminal" | "files") {
 }
 
 describe("the right sidebar surface", () => {
-  it("keeps Add tool beside the visible tabs and draws the tab in front as a raised one", () => {
+  it("keeps Add tool beside the visible tabs and draws the tab in front like a thread tab", () => {
     expect(ruleBody(dockStylesheet, ".dock-tool-strip")).toMatch(/flex:\s*0\s+1\s+auto/);
-    // Selected and hovered shared one tint, so pointing at a tab looked the
-    // same as being on it. The tab in front is a surface with an edge.
+    // Selected and hovered must not share one tint, or pointing at a tab looks
+    // the same as being on it. The tab in front takes the selection fill and a
+    // hairline edge: the same treatment the workspace thread tabs use, so the
+    // two strips read as one grammar.
     const selected = ruleBody(
       dockStylesheet,
       '.dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"])',
     );
-    expect(selected).toMatch(/background:\s*var\(--oct-surface\)/);
-    expect(selected).toMatch(/box-shadow:\s*inset 0 0 0 1px var\(--oct-border\)/);
+    expect(selected).toMatch(/background:\s*var\(--octant-selection\)/);
+    expect(selected).toMatch(/box-shadow:\s*inset 0 0 0 1px var\(--octant-border\)/);
     expect(ruleBody(dockStylesheet, ".dock-tool-strip__tab:hover")).not.toMatch(
-      /var\(--oct-surface\)/,
+      /var\(--octant-selection\)/,
     );
   });
   it("shows the active thread work map with no tool open", async () => {

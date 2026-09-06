@@ -135,6 +135,24 @@ function threadRowStates(thread: ChatThreadNavigationItem): ReadonlyArray<string
  * header carries recency without the reader parsing a date. Falls back to the
  * absolute date past a year, where "14mo ago" stops being useful.
  */
+/**
+ * The row's own age: the shortest true reading, because the row has one word
+ * of room at its edge and the card beside it spells the rest out.
+ */
+function threadRowShortAge(updatedAt: string | undefined): string | undefined {
+  if (updatedAt === undefined) return undefined;
+  const date = new Date(updatedAt);
+  if (Number.isNaN(date.getTime())) return undefined;
+  const minutes = Math.round((Date.now() - date.getTime()) / 60000);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.round(hours / 24);
+  if (days < 365) return `${days}d`;
+  return date.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+}
+
 function threadRowAge(updatedAt: string | undefined): string | undefined {
   if (updatedAt === undefined) return undefined;
   const date = new Date(updatedAt);
@@ -661,6 +679,8 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
       />
     );
   }
+  const rowPullRequest = props.thread.pullRequests?.items[0];
+  const rowAge = threadRowShortAge(props.thread.updatedAt);
   const row = (
     <OctantButton
       aria-current={props.activeThreadId === rowId ? "page" : undefined}
@@ -711,7 +731,14 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
         </span>
       )}
       <span className="sidebar-navigation__thread-copy">
-        <span className="sidebar-navigation__thread-title">{props.thread.title}</span>
+        <span className="sidebar-navigation__thread-headline">
+          <span className="sidebar-navigation__thread-title">{props.thread.title}</span>
+          {rowPullRequest === undefined ? null : (
+            <span className="sidebar-navigation__thread-pr">
+              #{String(rowPullRequest.identity.number)}
+            </span>
+          )}
+        </span>
         {props.thread.checkoutChip === undefined ? null : (
           <span
             className="sidebar-navigation__thread-checkout"
@@ -724,6 +751,25 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
           </span>
         )}
       </span>
+      {rowPullRequest === undefined ? null : (
+        <span
+          aria-label={`Pull request #${String(rowPullRequest.identity.number)} · ${rowPullRequest.state}`}
+          className="sidebar-navigation__thread-pr-mark"
+          data-state={rowPullRequest.state}
+          role="img"
+          title={`Pull request #${String(rowPullRequest.identity.number)} · ${rowPullRequest.state}`}
+        >
+          <GitPullRequest aria-hidden="true" size={12} strokeWidth={1.8} />
+        </span>
+      )}
+      {rowAge === undefined ? null : (
+        <span
+          className="sidebar-navigation__thread-age"
+          title={threadRowAge(props.thread.updatedAt)}
+        >
+          {rowAge}
+        </span>
+      )}
       {unread ? (
         <span
           aria-label={ACTIVITY_LABELS.unread}

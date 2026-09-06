@@ -452,15 +452,6 @@
   white-space: nowrap;
 }
 
-.chat-transcript__attempt-status--streaming svg {
-  animation: chat-status-spin var(--oct-motion-spin) linear infinite;
-}
-
-/* The spinner already names live state; keep its label readable and still. */
-.chat-transcript__attempt-status--streaming > span:first-of-type {
-  color: var(--oct-muted);
-}
-
 .chat-transcript__quoteable {
   position: relative;
 }
@@ -1016,28 +1007,6 @@
     width: 100%;
     max-width: none;
   }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .chat-transcript__attempt-status--streaming svg {
-    animation: none;
-  }
-
-  .chat-transcript__attempt-status--streaming > span:first-of-type {
-    color: var(--oct-meta);
-    animation: none;
-  }
-}
-
-html[data-octant-reduced-motion="true"] .chat-transcript__attempt-status--streaming svg {
-  animation: none;
-}
-
-html[data-octant-reduced-motion="true"]
-  .chat-transcript__attempt-status--streaming
-  > span:first-of-type {
-  color: var(--oct-meta);
-  animation: none;
 }
 
 @media (prefers-contrast: more) {
