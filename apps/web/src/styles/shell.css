@@ -2770,13 +2770,52 @@ form > .work-composer-adapter__attachments {
   background: var(--octant-control);
 }
 
+/* The chip spends colour on the request's state: open in the accent, merged
+   in green, closed in grey. */
+.code-home__fact--chip[data-tone="open"] {
+  color: var(--oct-accent-fg);
+  background: var(--oct-accent-soft);
+}
+
+.code-home__fact--chip[data-tone="closed"] {
+  color: var(--oct-muted);
+}
+
 .code-home__fact--chip[data-tone="merged"] {
   color: var(--octant-success-text);
   background: var(--octant-success-surface);
 }
 
-.code-home__fact--chip[data-tone="merged"] > svg {
+.code-home__fact--chip > svg {
   color: inherit;
+}
+
+/* An open request's checks ride the same chip as a mark before the words:
+   a filled dot when they fail, a hollow one while they run. Passing checks
+   ask nothing of the reader and show nothing. */
+.code-home__fact--chip[data-checks="failing"]::before,
+.code-home__fact--chip[data-checks="pending"]::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.code-home__fact--chip[data-checks="failing"]::before {
+  background: var(--octant-danger-text);
+}
+
+.code-home__fact--chip[data-checks="pending"]::before {
+  border: 1px solid currentColor;
+}
+
+.code-home__fact--chip[data-checks="failing"] {
+  color: var(--octant-danger-text);
+}
+
+.code-home__fact-checks::before {
+  content: "· ";
 }
 
 /* The row's second line of truth: a pull request number beside the title, the
