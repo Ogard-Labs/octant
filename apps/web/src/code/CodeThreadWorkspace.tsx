@@ -61,6 +61,7 @@ import { useThreadMentions } from "../chat/useThreadMentions";
 import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
 import { CodeTranscriptRow } from "./CodeTranscriptRow";
 import { providerModelLabel } from "../providers/providerModelLabel";
+import { providerLimitWindowLabel } from "../providers/providerLimitWindow";
 import {
   TurnHeader,
   turnTimeLabel,
@@ -539,9 +540,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     );
     if (sent) {
       attachments.takeForSend();
-      setDraft("");
-      threadMentions.clear();
-      pathMentions.clear();
+      // Only the draft that was sent is cleared: typing during the awaited send
+      // bumps the revision, and that newer draft stays. The host keeps the
+      // draft per thread and hands it back whenever the composer re-syncs, so
+      // the sent message came back into the box until the stored copy was
+      // cleared as well.
+      if (draftRevisionRef.current === draftRevision) {
+        setDraft("");
+        props.controller.setPendingDraft?.("");
+        threadMentions.clear();
+        pathMentions.clear();
+      }
     } else {
       setTurnAccessOverride((current) => current ?? override);
     }
@@ -801,7 +810,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       {props.controller.turnStatus === "waiting" ? (
         <div className="code-thread-workspace__waiting thread-column" role="status">
           <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
-          <span>{waitingTurnLabel(props.controller.providerRequests)}</span>
+          <span>
+            {props.controller.providerRequests.length === 0 &&
+            props.controller.turnError !== undefined
+              ? `Waiting · ${props.controller.turnError}`
+              : waitingTurnLabel(props.controller.providerRequests)}
+          </span>
         </div>
       ) : props.controller.turnError === undefined ||
         (props.controller.turnStatus === "failed" &&
@@ -1013,7 +1027,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         }
                         {...(message.status === undefined || message.status === "completed"
                           ? {}
-                          : { label: turnStatusLabel(message.status) })}
+                          : {
+                              label: turnStatusLabel(
+                                message.status,
+                                props.controller.providerRequests,
+                              ),
+                            })}
                         {...(message.at === undefined ? {} : { at: message.at })}
                       />
                     ) : null}
@@ -1385,7 +1404,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 : steered.pending !== undefined
                   ? "Sent · runs when the response in progress finishes"
                   : busy
-                    ? "Enter to send · it runs when this response finishes"
+                    ? "Enter sends when this response finishes"
                     : "Enter to send · Shift+Enter for a new line"}
             </span>
             {accessMessage === undefined ? null : (
@@ -1421,17 +1440,27 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 {forkMessage}
               </span>
             )}
-            <span className="code-thread-workspace__hint" aria-label="Thread usage">
-              {threadUsageLabel(props.controller.threadUsage)}
+            {/* Spend and limits sit at the far end of the same line. A provider
+                that has reported nothing shows nothing here rather than a
+                sentence saying so, and a limit appears only once it is worth
+                acting on; the context meter's panel keeps the full account. */}
+            <span className="code-thread-workspace__usage">
+              {threadUsageLabel(props.controller.threadUsage) === undefined ? null : (
+                <span className="code-thread-workspace__hint" aria-label="Thread usage">
+                  {threadUsageLabel(props.controller.threadUsage)}
+                </span>
+              )}
+              {props.controller.threadUsage.limits
+                .filter((limit) => limit.status !== "allowed")
+                .map((limit) => (
+                  <span
+                    className={`code-thread-workspace__limit code-thread-workspace__limit--${limit.status}`}
+                    key={limit.window}
+                  >
+                    {providerLimitLabel(limit)}
+                  </span>
+                ))}
             </span>
-            {props.controller.threadUsage.limits.map((limit) => (
-              <span
-                className={`code-thread-workspace__limit code-thread-workspace__limit--${limit.status}`}
-                key={limit.window}
-              >
-                {providerLimitLabel(limit)}
-              </span>
-            ))}
           </div>
         }
       />
@@ -1537,10 +1566,9 @@ function forkTitle(sourceTitle: string): string {
     : title;
 }
 
-function threadUsageLabel(usage: CodeController["threadUsage"]): string {
-  if (usage.inputTokens === 0 && usage.outputTokens === 0) {
-    return "This thread's provider has reported no usage yet.";
-  }
+function threadUsageLabel(usage: CodeController["threadUsage"]): string | undefined {
+  // Zero tokens with no report is not a free thread; it is nothing to say yet.
+  if (usage.inputTokens === 0 && usage.outputTokens === 0) return undefined;
   const tokens = `${compactTokens(usage.inputTokens)} in · ${compactTokens(usage.outputTokens)} out`;
   return usage.costUsd === undefined ? tokens : `${tokens} · ${formatUsd(usage.costUsd)}`;
 }
@@ -1557,7 +1585,7 @@ function providerLimitLabel(limit: CodeController["threadUsage"]["limits"][numbe
         })}`;
   const state =
     limit.status === "exhausted" ? "spent" : limit.status === "warning" ? "low" : undefined;
-  const parts = [limit.window.replaceAll("_", " "), state, share, resets].filter(
+  const parts = [providerLimitWindowLabel(limit.window), state, share, resets].filter(
     (part): part is string => part !== undefined,
   );
   return parts.join(" · ");
@@ -1577,7 +1605,7 @@ function waitingTurnLabel(requests: CodeController["providerRequests"]): string 
   const latest = requests.at(-1);
   if (latest?.kind === "approval") return "Waiting for approval";
   if (latest?.kind === "input") return "Waiting for your input";
-  return "Waiting for approval or input";
+  return "Waiting";
 }
 
 function codeTurnSettlement(status: CodeTurnStatus): TurnSettlement | "idle" {
@@ -1638,12 +1666,17 @@ function turnHeaderOutcome(
       : status;
 }
 
-function turnStatusLabel(status: "waiting" | "interrupted" | "failed" | "incomplete"): string {
+function turnStatusLabel(
+  status: "waiting" | "interrupted" | "failed" | "incomplete",
+  requests: CodeController["providerRequests"],
+): string {
   switch (status) {
     case "waiting":
-      // Keep the runstatus slot filled while paused so the transcript does not
-      // jump when the elapsed indicator would otherwise drop.
-      return "Waiting for approval";
+      // A turn waits for an approval or an answer only while the host holds
+      // the request; a turn parked by the host itself (a rate limit, an
+      // unconfirmed checkout, a lost session) is waiting on nothing the
+      // person can click, and used to be mislabelled as an approval.
+      return waitingTurnLabel(requests);
     case "interrupted":
       return "Interrupted";
     case "failed":

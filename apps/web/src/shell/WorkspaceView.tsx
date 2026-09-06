@@ -430,10 +430,10 @@ export function WorkspaceView(props: WorkspaceViewProps) {
         const cleaned =
           stopped?.kind === "terminal-state" ||
           (stopped?.kind === "operation-failed" && stopped.failure.category === "unavailable");
-        if (!cleaned) return;
+        if (!cleaned) return false;
       }
       const closed = await props.onClosePane(paneId);
-      if (closed === false) return;
+      if (closed === false) return false;
       if (
         surface?.kind === "browser" &&
         surface.threadId !== undefined &&
@@ -450,6 +450,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
             : props.browserAutomationClient.stop({ contextId, threadId })
         ).catch(() => undefined);
       }
+      return true;
     },
     [props.browserAutomationClient, props.codeController, props.onClosePane, props.workspace],
   );
@@ -530,6 +531,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           fallbackTitle={activeSurface?.title ?? "Workspace"}
           mode={props.mode}
           onActivate={activateThreadTab}
+          onCloseActive={() => closePane(activePaneId)}
         />
         {props.crossContextOffer === undefined ? null : (
           <CrossContextBanner

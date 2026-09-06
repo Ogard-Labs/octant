@@ -1,4 +1,5 @@
 import type { ServiceLimitBucket } from "@octant/contracts/context";
+import { providerLimitWindowLabel } from "../providers/providerLimitWindow";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { matchKeybinding } from "@octant/domain";
 import { useEffect, useRef, useState } from "react";
@@ -404,7 +405,7 @@ function ProviderLimitRow(props: {
   return (
     <>
       <p className="context-window-popover__limit-state">
-        <span>{limit.window.replaceAll("_", " ")}</span>
+        <span>{providerLimitWindowLabel(limit.window)}</span>
         <span>{codeProviderLimitLabel(limit)}</span>
       </p>
       {share === undefined ? null : (

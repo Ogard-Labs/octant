@@ -115,6 +115,51 @@ describe("CodeTurnRunner", () => {
     );
   });
 
+  it("completes a turn whose only unconfirmed claims are reads, and closes the tool row by name", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({ kind: "tool-start", toolCallId: "call-1", toolName: "Read" }),
+          event({ kind: "tool-success", toolCallId: "call-1", summary: "Tool completed." }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const outcomes: CodeTurnOutcome[] = [];
+    const observed: CodeTurnEvent[] = [];
+
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            // A read claims nothing the checkout could confirm; the host says so
+            // rather than pretending to have checked.
+            reconcileObservation: () =>
+              Effect.succeed({
+                status: "not-confirmed",
+                summary: "Provider tool claim is observational.",
+              }),
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+            persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+          }),
+        ),
+      ),
+    );
+
+    expect(outcomes).toEqual(["completed"]);
+    expect(observed).toContainEqual(expect.objectContaining({ category: "completion" }));
+    expect(observed).toContainEqual(
+      expect.objectContaining({
+        category: "observation",
+        providerKind: "tool-success",
+        toolCallId: "call-1",
+        toolName: "Read",
+        status: "provider-claimed-success",
+      }),
+    );
+  });
+
   it("keeps the turn waiting when provider completion follows unresolved reconciliation", async () => {
     const connection = fakeConnection({
       subscribe: Effect.succeed(

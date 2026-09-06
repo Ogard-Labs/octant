@@ -701,6 +701,44 @@ describe("Claude Agent SDK port", () => {
     );
   });
 
+  test("passes a pre-tool ask through to Claude Code so the permission callback is consulted", async () => {
+    const canUseTool = vi.fn(async () => ({ behavior: "deny" as const, message: "denied" }));
+    const preToolUse = vi.fn(async () => ({ behavior: "ask" as const }));
+    const harness = makeHarness();
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery({ ...openInput, canUseTool, preToolUse });
+          yield* Stream.runHead(query.messages);
+          const preTool = harness.invocation?.options.hooks.PreToolUse[0]?.hooks[0];
+          if (preTool === undefined) {
+            throw new Error("Expected injected pre-tool hook.");
+          }
+          const signal = new AbortController().signal;
+          expect(
+            yield* Effect.promise(() =>
+              preTool(
+                {
+                  hook_event_name: "PreToolUse",
+                  session_id: "session-1",
+                  cwd: "/repo",
+                  tool_name: "Read",
+                  tool_input: { file_path: "/repo/file.ts" },
+                  tool_use_id: "tool-1",
+                },
+                "tool-1",
+                { signal },
+              ),
+            ),
+          ).toEqual({
+            hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "ask" },
+          });
+        }),
+      ),
+    );
+  });
+
   test("denies subagent-marked permission and pre-tool callbacks before delegation", async () => {
     const canUseTool = vi.fn(async () => ({ behavior: "allow" as const }));
     const preToolUse = vi.fn(async () => ({ behavior: "allow" as const }));
@@ -960,6 +998,15 @@ describe("Claude Agent SDK port", () => {
         session_id: "session-1",
         uuid: "b441de81-ec9d-4c62-9be9-9a0b09954fbd",
       },
+      {
+        type: "system",
+        subtype: "thinking_tokens",
+        estimated_tokens: 1200,
+        estimated_tokens_delta: -40,
+        user_message_uuid: "c2f2c1b6-1a0c-4c3a-9a4e-2f2c1b6a1a0c",
+        session_id: "session-1",
+        uuid: "d6e9c8f1-8c2b-4f0f-9a4b-5e2c1b6a1a0c",
+      },
       { type: "keep_alive" },
     ]);
 
@@ -984,6 +1031,7 @@ describe("Claude Agent SDK port", () => {
         capabilities: ["interrupt_receipt_v1"],
         runtimeVersion: "2.1.211",
       },
+      { kind: "ignored" },
       { kind: "ignored" },
       { kind: "ignored" },
       { kind: "ignored" },

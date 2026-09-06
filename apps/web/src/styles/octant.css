@@ -4124,6 +4124,7 @@ input.switch:checked::after {
    above it split one object into two stacked boxes. */
 .composer-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   min-height: 36px;
   gap: 6px;
@@ -4132,6 +4133,13 @@ input.switch:checked::after {
 }
 .composer-row .composer-gap {
   flex: 1;
+}
+/* A narrow column shortens the model's name before anything else moves, and
+   when even that is not enough the row wraps rather than pushing the send
+   control past the frame's edge, where it went missing at 430px. */
+.composer-row .composer-model-picker {
+  min-width: 0;
+  flex: 0 1 auto;
 }
 /* One control size and one label size across the whole row. Measured before
    this rule, a single row carried heights of 26, 28 and 29 and label sizes of
