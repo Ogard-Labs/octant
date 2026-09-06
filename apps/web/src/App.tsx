@@ -175,6 +175,7 @@ import {
 } from "./shell/shellLaunch";
 import {
   checkoutNotPreparedMessage,
+  codeUnavailableMessage,
   resolveDraftProject,
   resolveWorkProviderChoice,
   UNRESOLVED_DRAFT_PROJECT_MESSAGE,
@@ -706,6 +707,15 @@ function LaunchedShell(
   // The Project an unbound draft composer targets, per mode. The draft lives
   // in local state and unmounts while Settings covers the workspace; this is
   // what lets it come back with the same Project instead of "Choose a Project".
+  /**
+   * The in-flight round trip that records a chosen Project on the draft
+   * surface. Sending is what asks the host for a checkout, and the host only
+   * authorizes one for a Project the window's persisted workspace already
+   * names — so a send that overtakes this binding asks for a checkout the
+   * window is not yet allowed to have, which is the refusal this whole path
+   * exists to remove.
+   */
+  const draftProjectBinding = useRef<Promise<void> | undefined>(undefined);
   const [draftProjectSelection, setDraftProjectSelection] = useState<
     Partial<Readonly<Record<OctantMode, ProjectId>>>
   >({});
@@ -3677,16 +3687,40 @@ function LaunchedShell(
         return false;
       }
       const project = resolution.project;
-      if (project?.type !== "code" || codeController.bootstrap === undefined) {
-        setDraftError("No active Code Project is available.");
+      if (project?.type !== "code") {
+        setDraftError("Choose a Code Project before starting a thread.");
         return false;
       }
+      if (codeController.bootstrap === undefined) {
+        setDraftError(
+          codeUnavailableMessage({
+            status: codeController.status,
+            ...(codeController.errorMessage === undefined
+              ? {}
+              : { errorMessage: codeController.errorMessage }),
+          }),
+        );
+        return false;
+      }
+      // A send can outrun the Project the user just chose. Wait for that
+      // binding before asking for a checkout, so the request carries the
+      // authority the selection was meant to grant.
+      try {
+        await draftProjectBinding.current;
+      } catch {
+        setDraftError("That Project could not be selected. Choose it again before starting.");
+        return false;
+      }
+
       const prepared = await codeController.execute({
         kind: "prepare-code-project-checkout",
         projectId: project.id,
       });
       if (prepared?.kind !== "checkout-prepared") {
-        setDraftError(checkoutNotPreparedMessage(project.name));
+        setDraftError(
+          codeController.lastExecuteError.current?.message ??
+            checkoutNotPreparedMessage(project.name),
+        );
         return false;
       }
       const codeSelection = resolveDraftProviderSelection(
@@ -3887,16 +3921,43 @@ function LaunchedShell(
           return;
         }
         const project = resolution.project;
-        if (project?.type !== "code" || codeController.bootstrap === undefined) {
-          setDraftError("No active Code Project is available.");
+        // Two different problems wore one sentence. "No active Code Project"
+        // sent the user hunting for a Project they had already chosen when the
+        // real answer was that Code had not finished loading on this host.
+        if (project?.type !== "code") {
+          setDraftError("Choose a Code Project before starting a thread.");
           return;
         }
+        if (codeController.bootstrap === undefined) {
+          setDraftError(
+            codeUnavailableMessage({
+              status: codeController.status,
+              ...(codeController.errorMessage === undefined
+                ? {}
+                : { errorMessage: codeController.errorMessage }),
+            }),
+          );
+          return;
+        }
+        // A send can outrun the Project the user just chose. Wait for that
+        // binding before asking for a checkout, so the request carries the
+        // authority the selection was meant to grant.
+        try {
+          await draftProjectBinding.current;
+        } catch {
+          setDraftError("That Project could not be selected. Choose it again before starting.");
+          return;
+        }
+
         const prepared = await codeController.execute({
           kind: "prepare-code-project-checkout",
           projectId: project.id,
         });
         if (prepared?.kind !== "checkout-prepared") {
-          setDraftError(checkoutNotPreparedMessage(project.name));
+          setDraftError(
+            codeController.lastExecuteError.current?.message ??
+              checkoutNotPreparedMessage(project.name),
+          );
           return;
         }
         if (prepared.checkout.head.kind !== "branch") {
@@ -5008,9 +5069,18 @@ function LaunchedShell(
                   <WorkspaceView
                     draftResetRevision={draftResetRevision}
                     draftProjectSelection={draftProjectSelection}
-                    onDraftSelectProject={(mode, projectId) =>
-                      setDraftProjectSelection((current) => ({ ...current, [mode]: projectId }))
-                    }
+                    onDraftSelectProject={(mode, projectId) => {
+                      setDraftProjectSelection((current) => ({ ...current, [mode]: projectId }));
+                      // Choosing a folder in the composer is the authority
+                      // transition, not a renderer preference: the window is
+                      // refused every Code command about a Project its
+                      // persisted workspace does not name. Re-opening the draft
+                      // with the Project records it on the surface the server
+                      // reads.
+                      const binding = controller.openDraftThread(mode, projectId);
+                      draftProjectBinding.current = binding;
+                      void binding.catch(() => undefined);
+                    }}
                     onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
                     appleToolchainClient={appleToolchainClient}
                     agentRunClient={agentRunClient}

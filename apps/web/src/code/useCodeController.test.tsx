@@ -67,6 +67,54 @@ describe("useCodeController", () => {
     expect(result.current.bootstrap).toBeDefined();
   });
 
+  it("preserves bootstrap after listing worktree refs", async () => {
+    // The composer lists refs as soon as a Project is chosen. A result the
+    // bootstrap reducer did not name fell out of its switch and returned
+    // undefined, erasing everything Code had loaded while the controller went
+    // on reporting "ready" — so the composer refused every thread afterwards
+    // with nothing to point at.
+    const client = fakeClient({
+      execute: vi.fn(async (command: CodeCommand): Promise<CodeCommandResult> => {
+        if (command.kind === "list-code-worktree-refs") {
+          return {
+            kind: "worktree-refs-listed",
+            projectId: command.projectId,
+            refs: [],
+          };
+        }
+        return command as unknown as CodeCommandResult;
+      }),
+    });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.bootstrap).toBeDefined());
+
+    await act(async () => {
+      await result.current.execute({ kind: "list-code-worktree-refs", projectId: ids.project });
+    });
+
+    expect(result.current.bootstrap).toBeDefined();
+  });
+
+  it("keeps bootstrap when a result kind the reducer does not name arrives", async () => {
+    // The guard that matters is the fallthrough itself: a host one version
+    // ahead can answer with a kind this renderer has never heard of, and that
+    // must leave Code's loaded state alone rather than wipe it.
+    const client = fakeClient({
+      execute: vi.fn(
+        async (): Promise<CodeCommandResult> =>
+          ({ kind: "a-kind-this-renderer-has-never-heard-of" }) as unknown as CodeCommandResult,
+      ),
+    });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.bootstrap).toBeDefined());
+
+    await act(async () => {
+      await result.current.execute({ kind: "list-code-worktree-refs", projectId: ids.project });
+    });
+
+    expect(result.current.bootstrap).toBeDefined();
+  });
+
   it("updates new-thread defaults with the observed settings version", async () => {
     const client = fakeClient({
       execute: vi.fn(

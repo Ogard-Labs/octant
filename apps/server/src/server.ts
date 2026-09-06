@@ -1,3 +1,4 @@
+import type { RepositoryIdentityObservation } from "./code/repositoryIdentity";
 import { IMAGE_LIBRARY_SCOPE_ID } from "@octant/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync, realpathSync } from "node:fs";
@@ -1022,6 +1023,34 @@ export function createExistingWorktreeCodeFileRootAuthority(options: {
   };
 }
 
+/**
+ * What to tell the user about a checkout that could not be observed.
+ *
+ * `not-repository` is the only reason `git init` answers; naming the others
+ * plainly stops the composer from prescribing it for a bare repository, a
+ * submodule, or a folder that has simply moved.
+ */
+function unavailableCheckoutMessage(
+  observation: Exclude<RepositoryIdentityObservation, { status: "available" }>,
+): string {
+  if (observation.status === "failed") {
+    return "The bound Code folder could not be inspected. Check that Octant still has access to it.";
+  }
+  if (observation.status === "unavailable") {
+    return observation.reason === "not-repository"
+      ? "This folder is not a Git repository. Run git init in it, or choose another Project."
+      : "The bound Code folder is missing or has moved. Rebind the Project to its current location.";
+  }
+  switch (observation.reason) {
+    case "bare":
+      return "This folder is a bare Git repository, which has no working tree to edit.";
+    case "submodule":
+      return "This folder is a Git submodule. Bind the superproject instead.";
+    default:
+      return "This folder is inside a Git repository but is not one of its checkouts.";
+  }
+}
+
 export function createExistingWorktreeCodeCheckoutObservation(options: {
   readonly projects: Pick<ProjectService, "bootstrap">;
   readonly readProject: PersistenceService["readProject"];
@@ -1050,8 +1079,13 @@ export function createExistingWorktreeCodeCheckoutObservation(options: {
 
       const root = project.binding.canonicalRoot;
       const observation = await options.repository.observe(root, new AbortController().signal);
+      // Say which of these it is. Every one of them used to arrive at the
+      // composer as "this folder has no Git checkout, run git init", which is
+      // true of exactly one and misleading advice for the rest.
+      if (observation.status !== "available") {
+        throw new Error(unavailableCheckoutMessage(observation));
+      }
       if (
-        observation.status !== "available" ||
         observation.repositoryRoot !== root ||
         observation.checkout.canonicalPath !== root ||
         observation.checkout.locked !== undefined ||

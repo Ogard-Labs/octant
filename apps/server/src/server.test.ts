@@ -1402,6 +1402,67 @@ describe("startOctantServer", () => {
     ).rejects.toThrow(/unavailable/i);
   });
 
+  it("names why a Code checkout could not be observed instead of always prescribing git init", async () => {
+    // Every one of these used to reach the composer as "this folder has no Git
+    // checkout, run git init in it", which is true of exactly one of them.
+    const projectId = "00000000-0000-4000-8000-000000001321";
+    const revisionId = "00000000-0000-4000-8000-000000001322";
+    const root = "/private/some-code-project";
+    const authorityFor = (observed: unknown) =>
+      createExistingWorktreeCodeCheckoutObservation({
+        projects: {
+          bootstrap: vi.fn(
+            async () =>
+              ({
+                active: [{ id: projectId, type: "code", binding: { canonicalRoot: root } }],
+                archived: [],
+                availability: [],
+                memory: [],
+              }) as never,
+          ),
+        },
+        readProject: vi.fn(
+          () =>
+            ({
+              id: projectId,
+              type: "code",
+              lifecycle: "active",
+              binding: { canonicalRoot: root },
+              bindingHistory: [{ revisionId, currentBinding: { canonicalRoot: root } }],
+            }) as never,
+        ),
+        repository: { observe: vi.fn(async () => observed as never) },
+        clock: () => "2026-07-21T17:00:00.000Z",
+      });
+    const observing = (observed: unknown) =>
+      authorityFor(observed).observe(
+        "00000000-0000-4000-8000-000000001325" as never,
+        projectId as never,
+      );
+
+    await expect(observing({ status: "unavailable", reason: "not-repository" })).rejects.toThrow(
+      /not a Git repository.*git init/i,
+    );
+    await expect(
+      observing({ status: "unavailable", reason: "root-missing-or-moved" }),
+    ).rejects.toThrow(/missing or has moved/i);
+    await expect(observing({ status: "ineligible", reason: "bare" })).rejects.toThrow(/bare/i);
+    await expect(observing({ status: "ineligible", reason: "submodule" })).rejects.toThrow(
+      /submodule/i,
+    );
+    await expect(observing({ status: "failed" })).rejects.toThrow(/could not be inspected/i);
+
+    // Only the genuinely repository-less folder is told to run git init.
+    for (const observed of [
+      { status: "unavailable", reason: "root-missing-or-moved" },
+      { status: "ineligible", reason: "bare" },
+      { status: "ineligible", reason: "submodule" },
+      { status: "failed" },
+    ]) {
+      await expect(observing(observed)).rejects.not.toThrow(/git init/i);
+    }
+  });
+
   it("owns and closes a configured Code file helper transport", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-server-code-helper-"));
     directories.push(directory);

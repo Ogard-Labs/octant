@@ -1,6 +1,10 @@
 import { decodeProjectId } from "@octant/contracts/projects";
 import { describe, expect, it } from "vitest";
-import { resolveDraftProject, resolveWorkProviderChoice } from "./draftThreadResolution";
+import {
+  codeUnavailableMessage,
+  resolveDraftProject,
+  resolveWorkProviderChoice,
+} from "./draftThreadResolution";
 
 const projectId = decodeProjectId("00000000-0000-4000-8000-000000000801");
 const otherProjectId = decodeProjectId("00000000-0000-4000-8000-000000000802");
@@ -66,5 +70,21 @@ describe("resolveDraftProject", () => {
         activeProject: undefined,
       }),
     ).toEqual({ kind: "project", project: undefined });
+  });
+});
+
+describe("codeUnavailableMessage", () => {
+  it("says Code is loading only while it is actually loading", () => {
+    expect(codeUnavailableMessage({ status: "loading" })).toMatch(/still loading/i);
+    expect(codeUnavailableMessage({ status: "conflict-reload" })).toMatch(/still loading/i);
+  });
+
+  it("gives a stalled host its own reason instead of asking the user to keep waiting", () => {
+    expect(
+      codeUnavailableMessage({ status: "disconnected", errorMessage: "The host went away." }),
+    ).toBe("The host went away.");
+    expect(codeUnavailableMessage({ status: "disconnected" })).toMatch(/unavailable/i);
+    expect(codeUnavailableMessage({ status: "disconnected" })).not.toMatch(/still loading/i);
+    expect(codeUnavailableMessage({ status: "ready" })).not.toMatch(/still loading/i);
   });
 });
