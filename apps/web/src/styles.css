@@ -1460,10 +1460,10 @@ strong {
   z-index: 5;
   display: flex;
   min-width: 0;
-  min-height: 34px;
+  min-height: 38px;
   align-items: center;
-  gap: 4px;
-  padding: 2px var(--octant-window-chrome-reserved-width, 148px) 2px var(--oct-space-3);
+  gap: 6px;
+  padding: 4px var(--octant-window-chrome-reserved-width, 148px) 4px var(--oct-space-3);
   border-bottom: 1px solid var(--octant-border);
   background: color-mix(in srgb, var(--octant-workspace) 96%, var(--octant-control));
 }
@@ -1504,10 +1504,10 @@ strong {
 .workspace-thread-tabs__list {
   display: flex;
   min-width: 0;
-  max-width: min(760px, 72%);
+  max-width: min(1040px, 80%);
   flex: 0 1 auto;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -1524,6 +1524,7 @@ strong {
   min-width: 0;
   flex: 0 1 auto;
   align-items: center;
+  padding-inline-end: 2px;
   border: 0;
   border-radius: var(--oct-radius-sm);
   color: var(--octant-text-muted);
@@ -1544,17 +1545,19 @@ strong {
   box-shadow: inset 0 0 0 1px var(--octant-border);
 }
 
+/* The title is what the tab is for, so it gets the width: it grows into the
+   tab and yields to the chips only when the tab itself has run out of room.
+   Measured before this rule a 30ch tab cut "Add a one-line JSDoc comment" to
+   "Add a one-li…" while the Project chip beside it kept every letter. */
 .workspace-thread-tabs__select {
   min-width: 0;
-  max-width: 30ch;
-  height: 28px;
-  padding: 0 8px;
+  max-width: 440px;
+  height: 30px;
+  flex: 1 1 auto;
+  gap: 7px;
+  padding: 0 10px;
   color: inherit;
   font-size: var(--oct-text-xs);
-}
-
-.workspace-thread-tabs__select {
-  gap: 6px;
 }
 
 .workspace-thread-tabs__where {
@@ -1597,6 +1600,8 @@ strong {
 }
 
 .workspace-thread-tabs__title {
+  flex: 1 1 auto;
+  min-width: 6ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1608,9 +1613,9 @@ strong {
    "which one is this". */
 .workspace-thread-tabs__project {
   flex: 0 0 auto;
-  max-width: 14ch;
+  max-width: 16ch;
   overflow: hidden;
-  padding: 1px 5px 2px;
+  padding: 1px 6px 2px;
   border-radius: var(--oct-radius-xs, 3px);
   color: var(--octant-text-muted);
   background: var(--oct-fg-soft);
@@ -1619,13 +1624,18 @@ strong {
   white-space: nowrap;
 }
 
+/* The controls take no room until they are wanted: an invisible 44px at the
+   end of every tab read as dead space and pushed the next tab along. The
+   tab in front always shows its close, the way a tab bar is expected to;
+   the others reveal theirs on hover or focus, and a pinned tab keeps its pin. */
 .workspace-thread-tabs__pin,
 .workspace-thread-tabs__close {
-  width: 22px;
-  min-width: 22px;
+  width: 0;
+  min-width: 0;
   height: 22px;
   min-height: 22px;
   padding: 0;
+  overflow: hidden;
   color: var(--octant-text-muted);
   opacity: 0;
 }
@@ -1634,7 +1644,10 @@ strong {
 .workspace-thread-tabs__item:hover .workspace-thread-tabs__close,
 .workspace-thread-tabs__item:focus-within .workspace-thread-tabs__pin,
 .workspace-thread-tabs__item:focus-within .workspace-thread-tabs__close,
+.workspace-thread-tabs__item[data-active="true"] .workspace-thread-tabs__close,
 .workspace-thread-tabs__item[data-pinned="true"] .workspace-thread-tabs__pin {
+  width: 22px;
+  min-width: 22px;
   opacity: 1;
 }
 
@@ -6486,11 +6499,24 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 2px 10px;
+  justify-content: space-between;
+  gap: 2px 12px;
   min-height: 16px;
   margin: 0;
-  padding: 1px 12px 6px;
+  padding: 0 14px 8px;
   line-height: 1.3;
+}
+
+/* Spend and limits keep to the far end of the status line, so the keyboard
+   hint reads first and the figures never interleave with a receipt. */
+.code-thread-workspace__usage {
+  display: inline-flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 10px;
+  margin-inline-start: auto;
+  white-space: nowrap;
 }
 
 .code-thread-workspace__hint {
