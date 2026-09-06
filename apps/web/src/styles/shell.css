@@ -1323,7 +1323,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 44px;
+  margin-top: 56px;
 }
 
 .draft-thread__recent-title {
@@ -1374,7 +1374,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   flex-wrap: wrap;
   justify-content: center;
   gap: 7px;
-  margin-top: 44px;
+  margin-top: 56px;
 }
 
 .draft-thread__intent-card {
@@ -2501,7 +2501,7 @@ form > .work-composer-adapter__attachments {
   width: min(100%, 704px);
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 8px;
-  margin: 26px auto 0;
+  margin: 40px auto 0;
 }
 
 .code-home__suggestions button {
@@ -2559,7 +2559,7 @@ form > .work-composer-adapter__attachments {
   display: grid;
   width: min(100%, 704px);
   gap: var(--oct-space-6);
-  margin: 30px auto 0;
+  margin: 44px auto 0;
 }
 
 .code-home .draft-thread__recent {
