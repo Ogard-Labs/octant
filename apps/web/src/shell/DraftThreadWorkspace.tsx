@@ -725,7 +725,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     <section aria-label={`New ${presentation.eyebrow} thread`} className="draft-thread">
       <div className="draft-thread__canvas">
         <div className="draft-thread__welcome">
-          <h1 className="draft-thread__heading">{presentation.heading}</h1>
+          <h1 className="oct-title oct-title--hero">{presentation.heading}</h1>
         </div>
 
         <div className="draft-thread__composer">
@@ -793,7 +793,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                 className="draft-thread__intent-card"
                 key={card.id}
                 onClick={() => applyIntentCard(card)}
-                size="sm"
                 type="button"
                 variant="ghost"
               >
