@@ -54,10 +54,7 @@ function providerSnapshot(options: { readonly enabled?: boolean } = {}): Provide
 describe("ImageGenerationSettingsView", () => {
   it("explains what is needed when no eligible provider is configured", () => {
     render(
-      <ImageGenerationSettingsView
-        onSettingsChange={vi.fn()}
-        settings={{ customSources: [] }}
-      />,
+      <ImageGenerationSettingsView onSettingsChange={vi.fn()} settings={{ customSources: [] }} />,
     );
     expect(
       screen.getByText(/Image generation needs an enabled OpenAI-compatible HTTP provider/),
@@ -67,10 +64,7 @@ describe("ImageGenerationSettingsView", () => {
 
   it("mentions Recraft as a working example", () => {
     render(
-      <ImageGenerationSettingsView
-        onSettingsChange={vi.fn()}
-        settings={{ customSources: [] }}
-      />,
+      <ImageGenerationSettingsView onSettingsChange={vi.fn()} settings={{ customSources: [] }} />,
     );
     expect(screen.getByText(/Recraft/)).toBeVisible();
   });
@@ -92,10 +86,7 @@ describe("ImageGenerationSettingsView", () => {
     expect(onSettingsChange).not.toHaveBeenCalled();
 
     await user.type(within(form).getByRole("textbox", { name: "Image source label" }), "Recraft");
-    await user.type(
-      within(form).getByRole("textbox", { name: "Image source model" }),
-      "recraftv3",
-    );
+    await user.type(within(form).getByRole("textbox", { name: "Image source model" }), "recraftv3");
     await user.click(within(form).getByRole("button", { name: "Add image source" }));
 
     expect(onSettingsChange).toHaveBeenCalledWith({
@@ -112,7 +103,11 @@ describe("ImageGenerationSettingsView", () => {
     const onSettingsChange = vi.fn<(patch: Partial<ShellSettings>) => void>();
     const settings: ImageGenerationSettings = {
       customSources: [
-        { providerInstanceId: compatibleId as never, modelId: "recraftv3" as never, label: "Recraft" },
+        {
+          providerInstanceId: compatibleId as never,
+          modelId: "recraftv3" as never,
+          label: "Recraft",
+        },
       ],
     };
     render(
@@ -124,10 +119,7 @@ describe("ImageGenerationSettingsView", () => {
     );
     const form = screen.getByRole("form", { name: "Add image source" });
     await user.type(within(form).getByRole("textbox", { name: "Image source label" }), "Again");
-    await user.type(
-      within(form).getByRole("textbox", { name: "Image source model" }),
-      "recraftv3",
-    );
+    await user.type(within(form).getByRole("textbox", { name: "Image source model" }), "recraftv3");
     await user.click(within(form).getByRole("button", { name: "Add image source" }));
 
     expect(within(form).getByRole("alert").textContent).toBe(
@@ -141,7 +133,11 @@ describe("ImageGenerationSettingsView", () => {
     const onSettingsChange = vi.fn<(patch: Partial<ShellSettings>) => void>();
     const settings: ImageGenerationSettings = {
       customSources: [
-        { providerInstanceId: compatibleId as never, modelId: "recraftv3" as never, label: "Recraft" },
+        {
+          providerInstanceId: compatibleId as never,
+          modelId: "recraftv3" as never,
+          label: "Recraft",
+        },
       ],
     };
     render(

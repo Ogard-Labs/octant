@@ -45,7 +45,7 @@ dedicated OpenAI Image or Gemini Image profiles.
   profiles.
 - **A custom source is validated by exact membership, not by an arbitrary
   model string.** Generation checks the requested `(providerInstanceId,
-  modelId)` pair against the configured list at request time. A model ID that
+modelId)` pair against the configured list at request time. A model ID that
   merely looks plausible is not enough, and removing or disabling the named
   instance never falls back to a different one — the request fails closed with
   a reason, the same posture 0084 established for voice.

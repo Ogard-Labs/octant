@@ -53,7 +53,10 @@ function resolver(credential = SECRET): ProviderCredentialResolver {
 
 function adapter(
   fetch: CompatibleFetch,
-  overrides: { readonly credentialResolver?: ProviderCredentialResolver; readonly compatible?: OpenAiCompatibleProviderInstance } = {},
+  overrides: {
+    readonly credentialResolver?: ProviderCredentialResolver;
+    readonly compatible?: OpenAiCompatibleProviderInstance;
+  } = {},
 ) {
   return makeOpenAiCompatibleImageAdapter({
     instance: overrides.compatible ?? instance(),

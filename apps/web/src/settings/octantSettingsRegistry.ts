@@ -246,7 +246,8 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       id: "image-generation",
       label: "Image Generation",
       scope: "app",
-      keywords: "image generation custom provider api key recraft openai-compatible bring your own endpoint",
+      keywords:
+        "image generation custom provider api key recraft openai-compatible bring your own endpoint",
       settings: [],
     },
     {

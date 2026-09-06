@@ -61,7 +61,11 @@ describe("image source policy", () => {
 
   it("resolves a configured source to the instance and model it names", () => {
     const resolution = resolveImageCustomSource(
-      { providerInstanceId: compatibleId as never, modelId: "recraftv3" as never, label: "Recraft" },
+      {
+        providerInstanceId: compatibleId as never,
+        modelId: "recraftv3" as never,
+        label: "Recraft",
+      },
       instances,
     );
     expect(resolution.status).toBe("ready");
@@ -80,7 +84,11 @@ describe("image source policy", () => {
     ).toEqual({ status: "unavailable", label: "Off", reason: "The chosen provider is disabled." });
     expect(
       resolveImageCustomSource(
-        { providerInstanceId: imageId as never, modelId: "recraftv3" as never, label: "Wrong kind" },
+        {
+          providerInstanceId: imageId as never,
+          modelId: "recraftv3" as never,
+          label: "Wrong kind",
+        },
         instances,
       ),
     ).toEqual({
@@ -103,7 +111,11 @@ describe("image source policy", () => {
   it("resolves every configured source in order", () => {
     const resolved = resolveImageCustomSources(
       [
-        { providerInstanceId: compatibleId as never, modelId: "recraftv3" as never, label: "Ready" },
+        {
+          providerInstanceId: compatibleId as never,
+          modelId: "recraftv3" as never,
+          label: "Ready",
+        },
         { providerInstanceId: disabledId as never, modelId: "recraftv3" as never, label: "Off" },
       ],
       instances,

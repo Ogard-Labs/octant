@@ -97,8 +97,8 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
           )}
           {atLimit ? (
             <p className="provider-settings__field-guidance" role="status">
-              Up to {IMAGE_GENERATION_MAX_CUSTOM_SOURCES} custom image sources are supported.
-              Remove one to add another.
+              Up to {IMAGE_GENERATION_MAX_CUSTOM_SOURCES} custom image sources are supported. Remove
+              one to add another.
             </p>
           ) : (
             <CustomImageSourceForm
