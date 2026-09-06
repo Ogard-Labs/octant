@@ -1,4 +1,4 @@
-import { ChevronRight, CircleAlert } from "lucide-react";
+import { Check, ChevronRight, Circle, CircleX, Clock3, LoaderCircle } from "lucide-react";
 import { useState, type KeyboardEvent, type ReactNode, type ToggleEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
@@ -44,6 +44,27 @@ function outcomeLabel(row: CodeActivityRow): string {
       return "done";
     case "failed":
       return "failed";
+  }
+}
+
+/**
+ * The mark beside the state word: the same vocabulary the turn header uses,
+ * so a running tool and a running turn spin the same way and a finished one
+ * carries the same check.
+ */
+function outcomeIcon(row: CodeActivityRow) {
+  switch (row.state) {
+    case "started":
+    case "running":
+      return LoaderCircle;
+    case "pending":
+      return Circle;
+    case "waiting":
+      return Clock3;
+    case "completed":
+      return Check;
+    case "failed":
+      return CircleX;
   }
 }
 
@@ -230,7 +251,7 @@ function ActivityDisclosure(props: {
   readonly onReveal: () => void;
 }) {
   const { row } = props;
-  const failed = row.state === "failed";
+  const StateIcon = outcomeIcon(row);
   return (
     <details
       className="code-transcript-row__disclosure"
@@ -253,14 +274,12 @@ function ActivityDisclosure(props: {
         />
         <span className="code-transcript-row__name">{collapsedName(row)}</span>
         <span className="code-transcript-row__outcome">{outcomeLabel(row)}</span>
-        {failed ? (
-          <CircleAlert
-            aria-hidden="true"
-            className="code-transcript-row__status-icon"
-            size={12}
-            strokeWidth={2}
-          />
-        ) : null}
+        <StateIcon
+          aria-hidden="true"
+          className="code-transcript-row__status-icon"
+          size={12}
+          strokeWidth={1.8}
+        />
       </summary>
       <div className="code-transcript-row__body">{activityDetail(row, props)}</div>
     </details>

@@ -202,6 +202,29 @@ word carries colour. `TurnHeader` in `apps/web/src/transcript/` is the one
 recipe; a mode maps its own lifecycle onto its vocabulary and adds nothing of
 its own.
 
+### Transcript
+
+The rest of the thread view is one set of recipes in `octant.css` and the
+reply prose in `chat.css`, worn by Chat, Work, and Code alike; a mode positions
+them and repaints nothing. The scroll frame (`transcript-scroll`) keeps 20px
+between rows. A person's message is a right-aligned bubble (`turn-user`,
+`bubble`: control fill, hairline, 16px radius, no shadow) with its time beneath
+it (`turn-time`: detail size, muted, right edge), and carries 12px more air
+above it than the reply before it. A reply (`turn-agent`) is bare prose at the
+transcript size with 1.5 leading; markdown headings inside it are labels
+(14/13/13, weight 500), lists sit 4px apart, and a fenced block is a
+`CodeBlock`: a 28px header strip naming the language with a ghost copy control,
+then detail-size mono on the application ground. Tool rows are 28px each, the
+name at the body size and the state at the right as detail text with a 12px
+mark (spinner, check, cross), parted by hairlines and indented together; a
+settled turn folds them behind "N tool calls". A turn paused on the person is
+an `approval-row`: a card row with a 14px icon, one sentence, Approve as the
+small default button and Deny as the small ghost, and a 2px semantic tick
+inside the hairline rather than a bar. The composer at the foot of a thread is
+`thread-composer`: the same frame in every mode, 30px controls on its row, and
+one `composer-status` line under it (11px meta, hint left, spend and notices
+right).
+
 ## Colour system
 
 The default runtime palette is neutral graphite. The following values are the
@@ -311,10 +334,11 @@ Static type tokens in `octant.css` are:
 - Mono metadata uses positive tracking (`--oct-tracking-wide`); display
   headings use restrained negative tracking.
 
-Transcript settings are explicit and centered: Small is 13px, Medium 14px,
-Large 16px; Narrow is 680px, Medium 800px, Wide 1040px. The default thread
-measure is 760px and the column uses `width: min(100% - 40px, measure)` with
-automatic horizontal margins. Welcome composers share a 768px maximum so
+Transcript settings are explicit and centered on the body size: Small is
+12px, Medium 13px, Large 16px; Narrow is 680px, Medium 800px, Wide 1040px. A
+fresh install reads Medium and Narrow, so a question, its reply, and the
+composer under them all read at 13px. The column uses
+`width: min(100% - 40px, measure)` with automatic horizontal margins. Welcome composers share a 768px maximum so
 Chat, Work, and Code start from the same prompt geometry independently of the
 reading-width preference. Canvas documents use a 62ch measure.
 

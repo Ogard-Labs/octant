@@ -23,7 +23,8 @@ projection over one ordered card set.
 
 **Done** is a first-class visible status in both groupings, with no implicit
 completed-item suppression. A thread you **Complete** from the sidebar is
-different: you put it away, so it leaves the board until you reopen it. Ambiguous evidence becomes **Waiting**, never
+different: you put it away, so it leaves the board until you reopen it or
+send it a new message. Ambiguous evidence becomes **Waiting**, never
 **Done**. Unread is a client overlay and is not part of the server card.
 Refresh re-queries local authoritative state and keeps the last useful view
 while refreshing or on failure.

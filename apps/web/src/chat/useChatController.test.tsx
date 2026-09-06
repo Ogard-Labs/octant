@@ -626,7 +626,7 @@ describe("useChatController", () => {
     await waitFor(() => expect(result.current.navigation[0]?.completedAt).toBeUndefined());
   });
 
-  it("completes, snoozes, wakes, and reopens a thread with the version it last saw", async () => {
+  it("completes, snoozes, wakes, and reopens a thread with the version the host holds now", async () => {
     const execute = vi.fn(async (command: { readonly kind: string }) => {
       const current = bootstrap().threads[0]!;
       return {
@@ -634,9 +634,16 @@ describe("useChatController", () => {
         thread: { ...current, version: current.version + 1 },
       } as never;
     });
+    // Another window moved the thread on: the host's copy is at version 5
+    // while this window's bootstrap still lists version 1.
     const client = createMockClient({
       bootstrap: vi.fn(async () => bootstrap()),
-      thread: vi.fn(async () => threadView(1)),
+      thread: vi.fn(async () =>
+        decodeChatThreadView({
+          ...threadView(1),
+          thread: { ...bootstrap().threads[0]!, version: 5 },
+        }),
+      ),
       subscribe: vi.fn(async function* () {}),
       execute,
     });
@@ -651,7 +658,7 @@ describe("useChatController", () => {
     expect(execute).toHaveBeenLastCalledWith({
       kind: "complete-chat-thread",
       threadId,
-      expectedVersion: 1,
+      expectedVersion: 5,
     });
     await act(async () => {
       await result.current.snoozeThread(threadId, "2026-09-08T09:00:00.000Z");

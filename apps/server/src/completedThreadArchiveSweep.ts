@@ -3,6 +3,7 @@ import {
   completedThreadArchiveDue,
   type RestingThreadLifecycle,
 } from "@octant/domain/thread-completion-policy";
+import { ConcurrencyConflict } from "./persistence/journalErrors";
 
 /** Once an hour is plenty for a window measured in days. */
 export const COMPLETED_THREAD_ARCHIVE_SWEEP_INTERVAL_MS = 60 * 60 * 1_000;
@@ -39,9 +40,20 @@ export interface CompletedThreadArchiveSweepOptions {
   readonly intervalMs?: number;
 }
 
+/**
+ * Why a due thread was not archived this pass: the service's own answer, a
+ * version race ("changed": the next pass re-decides), or a failure of the
+ * mode's service on this thread alone while the rest of the pass still ran.
+ */
+export type CompletedThreadArchiveSkipReason = "not-found" | "not-due" | "changed" | "failed";
+
 export interface CompletedThreadArchiveSweepSummary {
   readonly archived: ReadonlyArray<{ readonly mode: OctantMode; readonly threadId: string }>;
-  readonly skipped: ReadonlyArray<{ readonly mode: OctantMode; readonly threadId: string }>;
+  readonly skipped: ReadonlyArray<{
+    readonly mode: OctantMode;
+    readonly threadId: string;
+    readonly reason: CompletedThreadArchiveSkipReason;
+  }>;
 }
 
 /**
@@ -89,7 +101,11 @@ export class CompletedThreadArchiveSweep {
   pass(): CompletedThreadArchiveSweepSummary {
     const afterDays = this.#archiveAfterDays();
     const archived: Array<{ mode: OctantMode; threadId: string }> = [];
-    const skipped: Array<{ mode: OctantMode; threadId: string }> = [];
+    const skipped: Array<{
+      mode: OctantMode;
+      threadId: string;
+      reason: CompletedThreadArchiveSkipReason;
+    }> = [];
     if (afterDays === null) return { archived, skipped };
     const now = new Date(this.#clock()).toISOString();
     for (const source of this.#sources) {
@@ -107,11 +123,24 @@ export class CompletedThreadArchiveSweep {
         }
         // Each mode's archive re-reads and re-decides against its authoritative
         // record, so a thread reopened since this list was read is skipped.
-        const outcome = source.archive(thread.id, { afterDays, now });
-        (outcome.status === "archived" ? archived : skipped).push({
-          mode: source.mode,
-          threadId: thread.id,
-        });
+        // One thread's failure is its own: a version race or a refusing
+        // service must not end the pass before the threads after it.
+        let outcome: CompletedThreadArchiveOutcome;
+        try {
+          outcome = source.archive(thread.id, { afterDays, now });
+        } catch (error) {
+          skipped.push({
+            mode: source.mode,
+            threadId: thread.id,
+            reason: error instanceof ConcurrencyConflict ? "changed" : "failed",
+          });
+          continue;
+        }
+        if (outcome.status === "archived") {
+          archived.push({ mode: source.mode, threadId: thread.id });
+        } else {
+          skipped.push({ mode: source.mode, threadId: thread.id, reason: outcome.reason });
+        }
       }
     }
     return { archived, skipped };

@@ -841,23 +841,27 @@ export function useChatController(options: ChatControllerOptions) {
       : undefined;
 
   /**
-   * Complete, reopen, snooze, and wake carry the version the renderer last
-   * saw. Whether completing or snoozing would hide work in flight is the
-   * host's call; a refusal comes back as an ordinary failure.
+   * Complete, reopen, snooze, and wake carry the thread's current version,
+   * read from the host first: the navigation read keeps a row's rest current
+   * but not its version, so a change made in another window would otherwise
+   * make the next command stale. Whether completing or snoozing would hide
+   * work in flight is the host's call; a refusal comes back as an ordinary
+   * failure.
    */
   const restCommand = useCallback(
     async (
       threadId: ChatThreadId,
       command: (expectedVersion: ChatThread["version"]) => ChatCommand,
     ): Promise<boolean> => {
-      const thread = bootstrap?.threads.find(
+      const listed = bootstrap?.threads.find(
         (candidate) => String(candidate.id) === String(threadId),
       );
-      if (thread === undefined) return false;
-      const result = await execute(command(thread.version));
+      if (listed === undefined) return false;
+      const current = await client.thread(threadId).catch(() => undefined);
+      const result = await execute(command(current?.thread.version ?? listed.version));
       return result !== undefined;
     },
-    [bootstrap, execute],
+    [bootstrap, client, execute],
   );
   const completeThread = useCallback(
     (threadId: ChatThreadId) =>

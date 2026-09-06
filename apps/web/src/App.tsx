@@ -3268,9 +3268,16 @@ function LaunchedShell(
       if ("kind" in result && result.kind === "thread-updated") {
         workNavigation.applyThread(result.thread);
       }
-    } catch {
-      // The host refused (a running turn, a wake time already gone) or is
-      // away; the next navigation read shows the thread as the host has it.
+    } catch (error) {
+      // The host refused (a running turn, a wake time already gone) or the
+      // row was stale: say so where thread notices already appear, and read
+      // the list again so the row shows the thread as the host has it.
+      setThreadExportNotice(
+        error instanceof Error && error.message.trim() !== ""
+          ? error.message
+          : "The host could not change this thread.",
+      );
+      void workNavigation.refresh();
     }
   };
   const workThreadRowActions: ThreadRowActions = {

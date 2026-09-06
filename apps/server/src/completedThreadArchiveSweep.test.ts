@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { ConcurrencyConflict } from "./persistence/journalErrors";
 import {
   CompletedThreadArchiveSweep,
   type CompletedThreadArchiveOutcome,
@@ -70,8 +71,30 @@ describe("completed thread archive sweep", () => {
     archive.mockReturnValueOnce({ status: "skipped", reason: "not-due" });
     expect(sweep.pass()).toEqual({
       archived: [{ mode: "chat", threadId: chatOldEnough.id }],
-      skipped: [{ mode: "code", threadId: oldEnough.id }],
+      skipped: [{ mode: "code", threadId: oldEnough.id, reason: "not-due" }],
     });
+  });
+
+  it("keeps the pass going when one thread changed under it or its service failed", () => {
+    const { sweep, archive } = fixture({});
+    archive.mockImplementationOnce(() => {
+      throw new ConcurrencyConflict({
+        aggregateType: "code-thread",
+        aggregateId: oldEnough.id,
+        expectedVersion: 1,
+        actualVersion: 2,
+      });
+    });
+    expect(sweep.pass()).toEqual({
+      archived: [{ mode: "chat", threadId: chatOldEnough.id }],
+      skipped: [{ mode: "code", threadId: oldEnough.id, reason: "changed" }],
+    });
+    archive.mockImplementationOnce(() => {
+      throw new Error("store busy");
+    });
+    expect(sweep.pass().skipped).toEqual([
+      { mode: "code", threadId: oldEnough.id, reason: "failed" },
+    ]);
   });
 
   it("runs a pass on start, again each interval, and never after stop", () => {

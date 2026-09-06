@@ -6119,10 +6119,17 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   min-height: 28px;
   align-items: center;
   gap: var(--oct-space-2);
-  margin: var(--oct-space-2) auto 0;
+  margin: 12px auto 0;
   padding-inline: var(--oct-space-1);
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-sm);
+}
+
+/* Placement only: the recipe is the system's `.approval-row`, the measure the
+   shared `.thread-column`, the distance the same one a notice keeps. */
+.code-thread-workspace > .approval-row {
+  flex: 0 0 auto;
+  margin: 12px auto 0;
 }
 
 .code-thread-workspace__waiting svg {
@@ -6143,34 +6150,17 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   flex: 1 1 auto;
 }
 
-.code-thread-workspace__provider-request {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.code-thread-workspace__provider-request > span {
-  flex: 1 1 240px;
-}
-
+/* A provider's question takes the approval row with its answer field. */
 .code-thread-workspace__provider-request > input {
   flex: 1 1 200px;
-  padding: 4px 8px;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  background: var(--oct-surface);
-  color: inherit;
 }
 
+/* The scroll frame and its padding are the system's `.transcript-scroll`. */
 .code-thread-workspace__conversation {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
-  padding: clamp(22px, 3vh, 40px) 0 34px;
-  overflow: auto;
-  overscroll-behavior: contain;
 }
 
 .code-thread-workspace__transcript {
@@ -6181,7 +6171,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .code-thread-workspace__conversation:not([data-transcript-window])
   .code-thread-workspace__transcript {
   display: grid;
-  gap: 18px;
+  gap: 20px;
 }
 
 .code-thread-workspace__empty {
@@ -6259,90 +6249,21 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   padding-inline: 8px;
 }
 
-/* A user turn has no byline to hang the time from, so it trails the bubble on
-   the same side the bubble is aligned to. */
-.code-thread-workspace__turn-time--user {
-  display: block;
-  margin: 6px 0 0;
-  text-align: end;
-  font-size: var(--oct-text-xs);
-}
-
-.code-thread-workspace__message p {
+/* The message's bubble, time, reply prose, and their rhythm are the system's
+   (`.turn-user`, `.bubble`, `.turn-time`, `.turn-agent`, as in Chat and
+   Work). Only the access receipt under a person's message is Code's own: a
+   line of meta under the time, on the same edge. */
+.code-thread-workspace__turn-access {
   margin: 0;
-  color: var(--oct-fg);
-  font-family: var(--oct-font-transcript);
-  font-size: var(--oct-transcript-font-size);
-  line-height: var(--oct-leading-body);
-  white-space: pre-wrap;
-  text-wrap: pretty;
+  color: var(--octant-text-muted);
+  font-size: calc(11 * var(--oct-text-step));
+  text-align: end;
 }
 
-.code-thread-workspace__message--user {
-  width: fit-content;
-  max-width: min(88%, 600px);
-  justify-self: end;
-  padding: 11px 14px;
-  background: var(--oct-surface-warm);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-hairline);
-}
-
-.code-thread-workspace__message--agent {
-  justify-self: stretch;
-  padding: 0 2px;
-}
-
-/* The composer's frame, focus border, input, chips, bottom row, and send
-   control are the system's (`.composer` vocabulary, as in Chat); this block
-   only places the composer in the workspace column and pads the pieces the
-   system does not know about. */
-.code-thread-workspace__composer {
-  position: relative;
-  z-index: 2;
-  flex: 0 0 auto;
-  margin: 0 auto 12px;
-}
-
-.code-thread-workspace__composer .composer-input {
-  min-height: 48px;
-  max-height: 180px;
-  padding: 12px 14px 10px;
-}
-
-.code-thread-workspace__composer .composer-row {
-  min-height: 40px;
-  gap: 6px;
-  padding: 4px 8px 4px 12px;
-}
-
-.code-thread-workspace__composer .composer-row [role="combobox"],
-.code-thread-workspace__composer .composer-row .composer-model-picker__trigger {
-  height: 30px;
-  min-height: 30px;
-  padding-inline: 8px;
-}
-
-.code-thread-workspace__composer
-  .composer-row
-  .composer-model-picker__trigger:hover:not(:disabled) {
-  background: var(--oct-fg-soft);
-  border-color: var(--oct-border);
-}
-
-.code-thread-workspace__composer .composer-row > button[data-size="icon"] {
-  width: 30px;
-  height: 30px;
-  min-width: 30px;
-  min-height: 30px;
-}
-
-/* The typeaheads sit between the input and the row so the open list never
-   covers the message; the frameless children carry the frame's gutter. */
-.code-thread-workspace__composer .thread-mention__typeahead {
-  margin: var(--oct-space-2) var(--oct-space-3) 0;
-}
+/* The composer's frame, placement, focus border, input, chips, bottom row,
+   controls, and status line are the system's (`.composer`,
+   `.thread-composer`, `.composer-row`, `.composer-status`, as in Chat and
+   Work); this block only pads the pieces the system does not know about. */
 
 /* Chips, queued turns, and attachments are frameless rows of the frame, so
    they take the same gutter the system gives `.composer-chips`. */
@@ -6408,55 +6329,39 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   min-width: 0;
 }
 
+/* Tool rows: what a turn did, one 28px row per call, between the turn header
+   and the reply. The name reads at the body size; the state sits at the
+   right edge as quiet detail text with a 12px mark (a spinner while it runs,
+   a check when it is done, a cross when it failed). Rows are parted by
+   hairlines and share one indent, so a tool row is the same object in every
+   mode that grows one. Before this a dotted rail ran down the left, the name
+   was 11px, and the state word was larger than the name. */
 .code-transcript-row {
-  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 2px;
   min-width: 0;
-  margin: 0 0 5px;
-  padding-left: 16px;
-}
-
-.code-transcript-row::before {
-  position: absolute;
-  top: 14px;
-  bottom: -6px;
-  left: 4px;
-  width: 1px;
-  content: "";
-  background: var(--oct-border-soft);
-}
-
-.code-transcript-row:last-child::before {
-  bottom: 12px;
-}
-
-.code-transcript-row__disclosure > summary::before {
-  position: absolute;
-  top: 10px;
-  left: 1px;
-  width: 7px;
-  height: 7px;
-  content: "";
-  background: var(--oct-bg);
-  border: 1px solid var(--oct-meta);
-  border-radius: 50%;
+  margin: 0 0 8px;
 }
 
 .code-transcript-row__disclosure {
   min-width: 0;
 }
 
+.code-transcript-row__disclosure + .code-transcript-row__disclosure {
+  border-top: 1px solid var(--oct-border-soft);
+}
+
 .code-transcript-row__disclosure > summary {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   min-width: 0;
-  min-height: 26px;
+  min-height: 28px;
   overflow: hidden;
+  padding: 0 2px;
   cursor: default;
   color: var(--oct-muted);
+  font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
   list-style: none;
 }
@@ -6475,87 +6380,89 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   transform: rotate(90deg);
 }
 
-.code-transcript-row__disclosure--toolchain > summary .code-transcript-row__name {
-  color: var(--oct-muted);
-  font-family: var(--oct-font-mono);
-  font-weight: 400;
-}
-
-.code-transcript-row__toolchain {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-top: 2px;
-}
-
 .code-transcript-row__name {
   flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   color: var(--oct-fg-2);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-sm);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.code-transcript-row__disclosure--thinking > summary .code-transcript-row__name {
-  font-family: inherit;
-  font-style: italic;
-  font-weight: 500;
+/* The settled fold ("2 tool calls · 1 file edited") is a summary, so it keeps
+   the quiet colour; the rows it opens onto indent by one chevron. */
+.code-transcript-row__disclosure--toolchain > summary .code-transcript-row__name {
   color: var(--oct-muted);
+}
+
+.code-transcript-row__toolchain {
+  display: flex;
+  flex-direction: column;
+  padding-left: 20px;
+}
+
+.code-transcript-row__toolchain > .code-transcript-row__disclosure:first-child {
+  border-top: 1px solid var(--oct-border-soft);
+}
+
+.code-transcript-row__disclosure--thinking > summary .code-transcript-row__name {
+  color: var(--oct-muted);
+  font-style: italic;
 }
 
 .code-transcript-row__outcome {
   flex: none;
   color: var(--oct-meta);
-}
-
-.code-transcript-row__disclosure[data-state="failed"] > summary {
-  color: var(--oct-danger-fg);
-}
-
-.code-transcript-row__disclosure[data-state="failed"] .code-transcript-row__outcome {
-  color: var(--oct-danger-fg);
-  font-weight: var(--oct-weight-display);
+  font-size: var(--oct-text-detail);
 }
 
 .code-transcript-row__status-icon {
   flex: none;
+  color: var(--oct-meta);
+}
+
+.code-transcript-row__disclosure[data-state="failed"] .code-transcript-row__outcome,
+.code-transcript-row__disclosure[data-state="failed"] .code-transcript-row__status-icon {
   color: var(--oct-danger-fg);
 }
 
+.code-transcript-row__disclosure[data-state="started"] .code-transcript-row__status-icon,
+.code-transcript-row__disclosure[data-state="running"] .code-transcript-row__status-icon {
+  animation: turn-header-spin var(--oct-motion-spin) linear infinite;
+}
+
+/* The journaled summary, expanded: detail-size mono on a surface set into
+   the row, indented to where the name starts. */
 .code-transcript-row__body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 0 0 4px;
-  padding: 2px 8px 8px 22px;
+  margin: 0 0 8px 20px;
+  padding: 8px 10px;
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-fill-4);
 }
 
 .code-transcript-row__pre {
   margin: 0;
   color: var(--oct-fg);
   font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  line-height: 1.45;
+  font-size: var(--oct-text-detail);
+  line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.code-transcript-row__disclosure--thinking {
-  margin: 0 0 2px;
-  border-left: 1px solid var(--oct-border);
-  padding-left: 8px;
-}
-
 .code-transcript-row__thinking-body {
-  margin: 0;
-  padding: 2px 8px 8px 22px;
+  margin: 0 0 8px 20px;
+  padding: 8px 10px;
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-fill-4);
   color: var(--oct-muted);
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-text-detail);
   font-style: italic;
-  line-height: 1.45;
+  line-height: 1.5;
   white-space: pre-wrap;
 }
 
@@ -6568,13 +6475,21 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .code-transcript-row__empty-detail {
   margin: 0;
   color: var(--oct-meta);
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-text-detail);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .code-transcript-row__chevron {
     transition: none;
   }
+
+  .code-transcript-row__status-icon {
+    animation: none;
+  }
+}
+
+html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
+  animation: none;
 }
 
 .code-thread-workspace__queue {
@@ -6627,41 +6542,11 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   font-size: var(--oct-text-xs);
 }
 
-/* Quiet meta line under the composer row: keyboard hint, access/restore/fork
-   receipts, usage, and provider limits share one unobtrusive strip. */
-.code-thread-workspace__status {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 2px 12px;
-  min-height: 16px;
-  margin: 0;
-  padding: 0 14px 8px;
-  line-height: 1.3;
-}
-
-/* Spend and limits keep to the far end of the status line, so the keyboard
-   hint reads first and the figures never interleave with a receipt. */
-.code-thread-workspace__usage {
-  display: inline-flex;
-  min-width: 0;
-  flex: 0 1 auto;
-  align-items: center;
-  gap: 10px;
-  margin-inline-start: auto;
-  white-space: nowrap;
-}
-
+/* The status line under the composer row is the system's `.composer-status`:
+   keyboard hint and receipts on the left, spend and limits trailing. */
 .code-thread-workspace__hint {
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
-}
-
-.code-thread-workspace__turn-access {
-  color: var(--octant-text-muted);
-  font-size: calc(11 * var(--oct-text-step));
-  margin: 4px 0 0;
 }
 
 .code-thread-workspace__limit {
