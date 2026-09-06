@@ -1593,6 +1593,22 @@ function normalizedOperationEvent(
       reconciled: event.reconciliation?.status === "confirmed",
     };
   }
+  // The provider's word on how a tool ended is an observation, never proof,
+  // but it is still the only thing that closes the tool row the start opened.
+  if (
+    event.category === "observation" &&
+    (event.providerKind === "tool-success" || event.providerKind === "tool-failure") &&
+    event.toolCallId !== undefined &&
+    event.toolName !== undefined
+  ) {
+    return {
+      kind: "tool-activity",
+      toolCallId: event.toolCallId,
+      toolName: event.toolName,
+      state: event.providerKind === "tool-success" ? "completed" : "failed",
+      ...(event.text === undefined ? {} : { summary: event.text }),
+    };
+  }
   if (event.category === "usage")
     return {
       kind: "usage",
