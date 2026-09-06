@@ -403,6 +403,16 @@ export class CodeTurnRunner {
   }
 }
 
+/**
+ * Whether a description already says which tool it is about: the action as a
+ * whole word, in any case, so "edit" counts for Edit and "Writer" does not
+ * count for Write.
+ */
+function namesAction(description: string, action: string): boolean {
+  const escaped = action.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, "iu").test(description);
+}
+
 function normalizeProviderEvent(
   input: CodeTurnRunnerInput,
   event: ProviderRuntimeEvent,
@@ -510,7 +520,7 @@ function normalizeProviderEvent(
         // again; "Edit: Claude requests permission to use Edit." said the same
         // word twice on every prompt.
         text: text(
-          event.description.includes(event.action)
+          namesAction(event.description, event.action)
             ? event.description
             : `${event.action}: ${event.description}`,
         ),
