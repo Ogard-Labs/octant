@@ -233,6 +233,7 @@ export const ImageGenerationProfileView = Schema.Struct({
     "gemini-native-image",
     "openai-compatible-image",
     "bfl-image",
+    "ideogram-image",
   ),
   modelAllowlist: Schema.Array(ProviderModelId).pipe(Schema.minItems(1)),
   defaultModel: ProviderModelId,

@@ -41,6 +41,11 @@ export type ImageGenerationHonoredOptions =
       readonly kind: "bfl-image-http";
       readonly maxVariants: number;
       readonly supportsReferences: boolean;
+    }
+  | {
+      readonly kind: "ideogram-image-http";
+      readonly maxVariants: number;
+      readonly supportsReferences: boolean;
     };
 
 // Matches ImageGenerationProfileView.displayName's own Schema.maxLength(120):
@@ -154,6 +159,16 @@ export function listEligibleImageProfiles(
         modelAllowlist: configuration.modelAllowlist,
         defaultModel: configuration.defaultModel,
       });
+      continue;
+    }
+    if (configuration.kind === "ideogram-image-http") {
+      profiles.push({
+        instanceId: instance.id,
+        displayName: instance.displayName,
+        driverKind: "ideogram-image",
+        modelAllowlist: configuration.modelAllowlist,
+        defaultModel: configuration.defaultModel,
+      });
     }
   }
   return [...profiles, ...listCustomImageProfiles(customSources, instances)];
@@ -177,7 +192,8 @@ export function honoredImageGenerationOptions(
     | "openai-image-http"
     | "gemini-native-image-http"
     | "openai-compatible-http"
-    | "bfl-image-http",
+    | "bfl-image-http"
+    | "ideogram-image-http",
 ): ImageGenerationHonoredOptions {
   switch (kind) {
     case "openai-image-http":
@@ -202,12 +218,21 @@ export function honoredImageGenerationOptions(
       // BFL generates exactly one image per submit call: this is a real
       // constraint the provider enforces, not a placeholder ceiling.
       return { kind, maxVariants: 1, supportsReferences: false };
+    case "ideogram-image-http":
+      // Unlike BFL, Ideogram genuinely supports up to Octant's own variant
+      // ceiling in one request; it has no per-call constraint below it.
+      return { kind, maxVariants: MAX_IMAGE_VARIANTS, supportsReferences: false };
   }
 }
 
 export function imageGenerationConfigurationKind(
   driverKind: ImageGenerationProfileView["driverKind"],
-): "openai-image-http" | "gemini-native-image-http" | "openai-compatible-http" | "bfl-image-http" {
+):
+  | "openai-image-http"
+  | "gemini-native-image-http"
+  | "openai-compatible-http"
+  | "bfl-image-http"
+  | "ideogram-image-http" {
   switch (driverKind) {
     case "openai-image":
       return "openai-image-http";
@@ -217,6 +242,8 @@ export function imageGenerationConfigurationKind(
       return "openai-compatible-http";
     case "bfl-image":
       return "bfl-image-http";
+    case "ideogram-image":
+      return "ideogram-image-http";
   }
 }
 

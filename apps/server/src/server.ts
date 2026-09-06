@@ -6355,7 +6355,7 @@ export function startOctantServer(
     });
     automationScheduler.start();
     // The host's own timer for completed threads, fed by every mode's service
-    // that can archive on the host's behalf (decision 0087).
+    // that can archive on the host's behalf (decision 0088).
     const completedThreadArchiveSweep = new CompletedThreadArchiveSweep({
       sources: [
         codeCompletedThreadSource,

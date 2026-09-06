@@ -94,7 +94,8 @@ distilled successor of the earlier long-form design specifications.
 | [0084](0084-voice-rides-an-openai-compatible-provider.md)                    | Voice rides an OpenAI-compatible provider                                                   | Accepted           |
 | [0085](0085-image-generation-rides-an-openai-compatible-provider-too.md)     | Image generation rides an OpenAI-compatible provider too                                    | Accepted           |
 | [0086](0086-black-forest-labs-and-a-bounded-provider-image-url-exception.md) | Black Forest Labs and a bounded provider-image-URL exception                                | Accepted           |
-| [0087](0087-completed-and-snoozed-threads.md)                                | Completed and snoozed threads rest in shelves; completion archives on a timer               | Accepted           |
+| [0087](0087-ideogram-and-a-second-per-image-safety-signal.md)                | Ideogram and a second, per-image safety signal                                              | Accepted           |
+| [0088](0088-completed-and-snoozed-threads.md)                               | Completed and snoozed threads rest in shelves; completion archives on a timer               | Accepted           |
 
 ## Adding an ADR
 

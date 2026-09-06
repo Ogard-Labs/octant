@@ -720,6 +720,9 @@ function ProvidersSection(props: {
         onChangeOpenAiImageConfiguration={props.providerController.changeOpenAiImageConfiguration}
         onChangeGeminiImageConfiguration={props.providerController.changeGeminiImageConfiguration}
         onChangeBflImageConfiguration={props.providerController.changeBflImageConfiguration}
+        onChangeIdeogramImageConfiguration={
+          props.providerController.changeIdeogramImageConfiguration
+        }
         onChangeAnthropicCompatibleConfiguration={
           props.providerController.changeAnthropicCompatibleConfiguration
         }
@@ -742,6 +745,7 @@ function ProvidersSection(props: {
         onCreateOpenAiImage={props.providerController.createOpenAiImage}
         onCreateGeminiImage={props.providerController.createGeminiImage}
         onCreateBflImage={props.providerController.createBflImage}
+        onCreateIdeogramImage={props.providerController.createIdeogramImage}
         onPermissionPersistenceChange={props.providerController.updatePermissionPersistence}
         onProbe={props.providerController.probe}
         onProviderOrderChange={props.providerController.updateProviderOrder}

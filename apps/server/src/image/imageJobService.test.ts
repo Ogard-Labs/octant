@@ -38,6 +38,8 @@ const compatibleId = decodeProviderInstanceId("a3000000-0000-4000-8000-000000000
 const compatibleModelId = decodeProviderModelId("recraftv3");
 const bflId = decodeProviderInstanceId("a3000000-0000-4000-8000-000000000006");
 const bflModelId = decodeProviderModelId("flux-pro-1.1");
+const ideogramId = decodeProviderInstanceId("a3000000-0000-4000-8000-000000000007");
+const ideogramModelId = decodeProviderModelId("ideogram-v3");
 const actor = {
   kind: "system" as const,
   actorId: "00000000-0000-4000-8000-000000000002" as never,
@@ -105,6 +107,24 @@ function bflInstance(): ProviderInstance {
   };
 }
 
+function ideogramInstance(): ProviderInstance {
+  return {
+    id: ideogramId,
+    displayName: "Ideogram",
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1 as ProviderInstance["version"],
+    createdAt: now as ProviderInstance["createdAt"],
+    updatedAt: now as ProviderInstance["updatedAt"],
+    driverKind: "ideogram-image",
+    configuration: {
+      kind: "ideogram-image-http",
+      modelAllowlist: [ideogramModelId],
+      defaultModel: ideogramModelId,
+    },
+  };
+}
+
 function openHarness(
   adapter?: ImageGenerationAdapter,
   options: {
@@ -114,6 +134,7 @@ function openHarness(
     readonly customSources?: ReadonlyArray<ImageGenerationCustomSource>;
     readonly compatibleInstance?: ProviderInstance;
     readonly bflInstance?: ProviderInstance;
+    readonly ideogramInstance?: ProviderInstance;
     readonly fetch?: ImageHttpFetch;
   } = {},
 ) {
@@ -169,6 +190,12 @@ function openHarness(
       }
       if (options.bflInstance !== undefined && String(id) === String(options.bflInstance.id)) {
         return options.bflInstance;
+      }
+      if (
+        options.ideogramInstance !== undefined &&
+        String(id) === String(options.ideogramInstance.id)
+      ) {
+        return options.ideogramInstance;
       }
       return undefined;
     },
@@ -734,6 +761,44 @@ describe("custom image sources", () => {
     const completed = await service.whenTerminal(queued.id);
     expect(completed.status).toBe("completed");
     expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("dispatches to the Ideogram image adapter through the multipart request and the approved-URL fetch", async () => {
+    let callCount = 0;
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      callCount += 1;
+      if (callCount === 1) {
+        expect(String(url)).toBe("https://api.ideogram.ai/v1/ideogram-v3/generate");
+        return Response.json({
+          created: "2026-08-28T12:00:00.000Z",
+          data: [
+            {
+              url: "https://signed.example/generated.png?token=secret",
+              prompt: "a red cube",
+              resolution: "1024x1024",
+              is_image_safe: true,
+              seed: 1,
+              style_type: "AUTO",
+            },
+          ],
+        });
+      }
+      expect(String(url)).toBe("https://signed.example/generated.png?token=secret");
+      return new Response(png, { status: 200 });
+    });
+    // No `adapter` argument: the service must pick the real default adapter
+    // for this configuration kind, not a test double.
+    const { service } = openHarness(undefined, { ideogramInstance: ideogramInstance(), fetch });
+    const queued = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: ideogramId,
+      modelId: ideogramModelId,
+      prompt: "a red cube",
+    });
+    const completed = await service.whenTerminal(queued.id);
+    expect(completed.status).toBe("completed");
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 });
 

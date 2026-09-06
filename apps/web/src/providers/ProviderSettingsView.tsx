@@ -13,6 +13,7 @@ import type {
   ClineProviderConfiguration,
   QwenProviderConfiguration,
   GooseProviderConfiguration,
+  IdeogramImageProviderConfiguration,
   KiloProviderConfiguration,
   MistralVibeProviderConfiguration,
   GeminiImageProviderConfiguration,
@@ -92,6 +93,11 @@ export interface ProviderSettingsViewProps {
     configuration: BflImageProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
+  readonly onCreateIdeogramImage: (
+    displayName: string,
+    configuration: IdeogramImageProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
   readonly onCreateClaude: (
     displayName: string,
     configuration: ClaudeProviderConfiguration,
@@ -161,6 +167,11 @@ export interface ProviderSettingsViewProps {
   readonly onChangeBflImageConfiguration: (
     instanceId: ProviderInstanceId,
     configuration: BflImageProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onChangeIdeogramImageConfiguration: (
+    instanceId: ProviderInstanceId,
+    configuration: IdeogramImageProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
   readonly onChangeClaudeConfiguration: (
@@ -298,6 +309,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
             onCreateOpenAiImage={props.onCreateOpenAiImage}
             onCreateGeminiImage={props.onCreateGeminiImage}
             onCreateBflImage={props.onCreateBflImage}
+            onCreateIdeogramImage={props.onCreateIdeogramImage}
           />
         }
         credentialManagementAvailable={props.credentialManagementAvailable}
@@ -329,6 +341,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangeOpenAiImageConfiguration={props.onChangeOpenAiImageConfiguration}
         onChangeGeminiImageConfiguration={props.onChangeGeminiImageConfiguration}
         onChangeBflImageConfiguration={props.onChangeBflImageConfiguration}
+        onChangeIdeogramImageConfiguration={props.onChangeIdeogramImageConfiguration}
         onChangePiConfiguration={props.onChangePiConfiguration}
         onClearProviderCredential={props.onClearProviderCredential}
         onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}

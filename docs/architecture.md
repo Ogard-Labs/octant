@@ -229,7 +229,7 @@ completed threads of every mode once their completion is older than the
 `completedThreadArchiveAfterDays` shell setting (default seven days, `null`
 for never), re-deciding against each mode's authoritative record and
 journaling the ordinary thread update as the `system` actor. It archives only;
-see [decisions/0087-completed-and-snoozed-threads.md](decisions/0087-completed-and-snoozed-threads.md).
+see [decisions/0088-completed-and-snoozed-threads.md](decisions/0088-completed-and-snoozed-threads.md).
 
 **Current shipped behavior.** The central workspace is one persistent recursive
 split tree. A leaf holds exactly one surface — a thread, a draft, a Project
@@ -464,7 +464,7 @@ flowchart LR
   events it removed. See `docs/decisions/0039`. The other self-applying
   exception files rather than erases: the completed-thread sweep archives a
   thread the person completed once the Settings window has passed, keeping
-  its transcript, checkout, and journal in place (`docs/decisions/0087`).
+  its transcript, checkout, and journal in place (`docs/decisions/0088`).
   A thread the caller
   may already Open can be exported as an `octant.thread-bundle/1` JSON cut
   of the journal — transcript, evidence, and provenance, named with the

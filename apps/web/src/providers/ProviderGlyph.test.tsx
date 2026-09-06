@@ -32,4 +32,14 @@ describe("ProviderGlyph", () => {
     expect(glyph).toHaveAttribute("data-driver-kind", "bfl-image");
     expect(container.querySelector(".provider-glyph--monogram")).toBeNull();
   });
+
+  it("draws an original mark for the Ideogram image kind instead of falling back to a monogram", () => {
+    const { container } = render(
+      <ProviderGlyph displayName="Ideogram" driverKind="ideogram-image" size={14} />,
+    );
+
+    const glyph = container.querySelector("svg.provider-glyph");
+    expect(glyph).toHaveAttribute("data-driver-kind", "ideogram-image");
+    expect(container.querySelector(".provider-glyph--monogram")).toBeNull();
+  });
 });

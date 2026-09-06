@@ -218,6 +218,21 @@ describe("ImageGenerationProfileView", () => {
       }),
     ).toThrow();
   });
+
+  it("decodes an Ideogram profile view with no quality, size, aspect ratio, or resolution", () => {
+    const view = decodeImageGenerationProfileView({
+      instanceId: ids.profile,
+      displayName: "Ideogram",
+      driverKind: "ideogram-image",
+      modelAllowlist: ["ideogram-v3"],
+      defaultModel: "ideogram-v3",
+    });
+    expect(view.driverKind).toBe("ideogram-image");
+    expect(view.quality).toBeUndefined();
+    expect(view.size).toBeUndefined();
+    expect(view.aspectRatio).toBeUndefined();
+    expect(view.resolution).toBeUndefined();
+  });
 });
 
 describe("image generation invocation requests", () => {

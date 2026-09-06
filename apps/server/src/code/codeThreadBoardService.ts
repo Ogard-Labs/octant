@@ -220,7 +220,7 @@ export class CodeThreadBoardService {
         // Archived threads are dropped by the metadata projection; skip them here.
         if (metadata === undefined) return undefined;
         // A thread the person completed rests in its shelf until they reopen
-        // it; the board is for work in play (decision 0087).
+        // it; the board is for work in play (decision 0088).
         if (entry.thread.completedAt !== undefined) return undefined;
         const activity = runtimeByThread.get(String(entry.thread.id));
         if (activity === undefined) return undefined;

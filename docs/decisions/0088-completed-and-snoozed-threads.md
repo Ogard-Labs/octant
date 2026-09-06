@@ -1,4 +1,4 @@
-# 0087. Completed and snoozed threads rest in shelves; completion archives on a timer
+# 0088. Completed and snoozed threads rest in shelves; completion archives on a timer
 
 **Status:** Accepted
 
