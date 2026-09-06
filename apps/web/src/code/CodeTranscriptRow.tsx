@@ -30,11 +30,14 @@ export const ACCESSIBLE_SUMMARY_LIMIT = 120;
 
 function outcomeLabel(row: CodeActivityRow): string {
   switch (row.state) {
+    // A started tool is running: the host journals "started" when the call
+    // begins and "completed" or "failed" when the provider reports its end.
+    // Before the end was journaled every finished tool read "queued" forever.
     case "started":
-    case "pending":
-      return "queued";
     case "running":
       return "running";
+    case "pending":
+      return "queued";
     case "waiting":
       return "waiting";
     case "completed":
