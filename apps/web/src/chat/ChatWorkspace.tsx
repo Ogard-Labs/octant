@@ -995,6 +995,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           connectionStatus={
             props.controller.status === "disconnected" ? "disconnected" : "connected"
           }
+          {...(props.providerGroups === undefined ? {} : { providerGroups: props.providerGroups })}
           onQuoteSelection={({ turnId, text }) => {
             setPendingQuotes((current) => [
               ...current,
