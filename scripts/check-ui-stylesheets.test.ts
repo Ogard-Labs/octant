@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  collectPrimitiveClasses,
   compareWithBaseline,
   findStylesheetFindings,
   serializeBaseline,
@@ -182,6 +183,86 @@ describe("UI stylesheet check", () => {
         ].join("\n"),
       }).map((finding) => `${finding.rule} ${String(finding.line)}`),
     ).toEqual(["heavy-weight 2", "heavy-weight 3"]);
+  });
+
+  it("flags feature rules that repaint a shared control instead of placing it", () => {
+    const primitives = collectPrimitiveClasses({
+      "apps/web/src/code/CodeHome.tsx":
+        '<OctantButton className="code-home__card window-no-drag" variant="ghost" />',
+      "apps/web/src/code/CodeRail.tsx": '<OctantButton className={cn("code-rail__item", extra)} />',
+    });
+    expect(
+      findStylesheetFindings(
+        {
+          [CSS]: [
+            ".code-home__card { min-height: 0; padding: 12px; border: 1px solid var(--oct-border); }",
+            ".code-home__card:hover { background: var(--oct-fg-soft); }",
+            ".code-rail__item { color: var(--oct-muted); }",
+            ".code-home__card .code-home__title { color: var(--oct-fg); }",
+          ].join("\n"),
+        },
+        primitives,
+      ).map((finding) => `${finding.rule} ${String(finding.line)} ${finding.detail}`),
+    ).toEqual([
+      "control-repaint 1 border repaints OctantButton through .code-home__card",
+      "control-repaint 2 background repaints OctantButton through .code-home__card",
+      "control-repaint 3 color repaints OctantButton through .code-rail__item",
+    ]);
+  });
+
+  it("collects a class past an arrow function, from every literal, and when unstyled is off", () => {
+    const primitives = collectPrimitiveClasses({
+      "apps/web/src/code/A.tsx":
+        '<OctantButton onClick={() => save()} className="feature-action" />',
+      "apps/web/src/code/B.tsx":
+        '<OctantButton className={cn("feature-first", open && "feature-second")} />',
+      "apps/web/src/code/C.tsx": '<OctantButton unstyled={false} className="feature-third" />',
+      "apps/web/src/code/D.tsx": '<OctantButton unstyled className="feature-owned" />',
+    });
+    expect([...primitives.keys()].sort()).toEqual([
+      "feature-action",
+      "feature-first",
+      "feature-second",
+      "feature-third",
+    ]);
+  });
+
+  it("flags a repaint written in a nested block", () => {
+    const primitives = collectPrimitiveClasses({
+      "apps/web/src/code/A.tsx": '<OctantButton className="feature-action" />',
+    });
+    expect(
+      findStylesheetFindings(
+        {
+          [CSS]: [
+            ".feature-action {",
+            "  &:hover { background-color: var(--oct-fg-soft); }",
+            "  @media (min-width: 600px) { & { color: var(--oct-fg); } }",
+            "}",
+          ].join("\n"),
+        },
+        primitives,
+      ).map((finding) => `${finding.rule} ${String(finding.line)}`),
+    ).toEqual(["control-repaint 2", "control-repaint 3"]);
+  });
+
+  it("flags a repaint written on a border side or in another case", () => {
+    const primitives = collectPrimitiveClasses({
+      "apps/web/src/code/A.tsx": '<OctantButton className="feature-action" />',
+    });
+    expect(
+      findStylesheetFindings(
+        {
+          [CSS]: [
+            ".feature-action { border-top: 1px solid var(--oct-border); }",
+            ".feature-action { border-inline-color: var(--oct-border); }",
+            ".feature-action { BACKGROUND: var(--oct-fg-soft); }",
+            ".feature-action { padding: 8px; }",
+          ].join("\n"),
+        },
+        primitives,
+      ).map((finding) => `${finding.rule} ${String(finding.line)}`),
+    ).toEqual(["control-repaint 1", "control-repaint 2", "control-repaint 3"]);
   });
 
   it("fails closed on any colour literal and ratchets the other rules against the baseline", () => {

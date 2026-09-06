@@ -879,7 +879,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             <OctantButton
               className="code-thread-workspace__tool window-no-drag"
               onClick={props.onOpenBrowser}
+              size="sm"
               type="button"
+              variant="outline"
             >
               <Globe2 aria-hidden="true" size={14} strokeWidth={1.7} />
               <span>Browser</span>

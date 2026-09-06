@@ -165,11 +165,21 @@ block that must depict one fixed scheme regardless of theme, such as the
 light/dark preview swatches in Settings, carries
 `/* ui-style-exception: fixed-scheme */` on the line before it. Off-scale
 `font-size` values, raw `transition`/`animation` durations, and `!important`
-outside an accessibility fallback, and any `font-weight` heavier than 500 (only a
-page title and content emphasis such as `strong` are 600) ratchet against
+outside an accessibility fallback, any `font-weight` heavier than 500 (only a
+page title and content emphasis such as `strong` are 600), and any paint
+(colour, background, border, radius, shadow, outline) that a feature rule puts
+on a class handed to an Octant primitive (0046: place or size a shared control,
+never repaint it; pick a recipe variant instead) ratchet against
 `scripts/ui-stylesheet-baseline.json`: a file may not add one, and a fix must
 re-record the lower count with `--write-baseline` so the baseline never
 overstates.
+
+The `control-repaint` rule reads the classes feature code hands to an Octant
+primitive. A control marked `unstyled` is feature-owned paint by design and is
+skipped; `unstyled={false}` is not, and stays under the rule. The checker also
+skips `composer-input`, the system prompt (0038), because that surface is
+already painted twice; the rule still holds for it — feature CSS must not
+repaint it a third time — it is simply not machine-checked.
 
 The shadcn registry metadata is in `apps/web/components.json` (`new-york`,
 Tailwind v4, CSS variables, Lucide). The checked-in recipes are owned source
@@ -549,7 +559,7 @@ track, underline recipe, or persistent active border.
 Use the Octant adapter names in feature code. The owned recipe list includes
 Button, Card, Badge, Input, Textarea, Field/FieldGroup, Select, Combobox,
 Switch, Slider, Checkbox, ToggleGroup, Tabs, DropdownMenu, ContextMenu, Dialog,
-Tooltip, and PreviewCard. Composition rules:
+and Tooltip. Composition rules:
 
 - Buttons use `OctantButton` or `OctantIconButton`; variants are default,
   destructive, destructive-outline, outline, secondary, ghost, and link.
@@ -568,11 +578,6 @@ Tooltip, and PreviewCard. Composition rules:
 - Menus, popovers, dialogs, and overlays are opaque, keyboard dismissible, and
   titled for assistive technology. Use `OctantDialog` with a real label even
   when the title is visually hidden.
-- A hover card that only describes its trigger is an `OctantTooltip`; one that
-  holds a control the pointer must reach is an `OctantPreviewCard`, which stays
-  open while the pointer crosses into it and carries no tooltip role. Every
-  action a preview card offers is also reachable from a menu, because keyboard
-  and touch never open the card.
 - Use Badge for status labels, Alert for callouts, Empty for empty states,
   Skeleton for loading, and the shared `.toast-stack` notification owner for
   transient acknowledgements. Do not add another toast package or recreate

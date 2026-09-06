@@ -161,7 +161,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
             className="work-composer-adapter__attach-btn"
             onClick={props.onAttachFolder}
             type="button"
-            variant="ghost"
+            variant="link"
           >
             Attach folder
           </OctantButton>

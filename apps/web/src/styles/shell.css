@@ -1723,11 +1723,7 @@ form > .work-composer-adapter__attachments {
 
 .work-composer-adapter__attach-btn {
   margin-left: 6px;
-  border: 0;
-  background: transparent;
-  color: var(--octant-text-primary);
-  cursor: pointer;
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   text-decoration: underline;
 }
 
