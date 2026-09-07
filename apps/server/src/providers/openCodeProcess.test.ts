@@ -136,6 +136,14 @@ describe("probeOpenCodeBinary", () => {
     });
   });
 
+  it("preserves the beta runtime label instead of parsing it as a v1 semantic version", async () => {
+    const fixture = probeWrapper("probe-v2");
+    await expect(Effect.runPromise(probeOpenCodeBinary(fixture.binaryPath))).resolves.toEqual({
+      binaryPath: fixture.binaryPath,
+      version: "opencode2 v0.0.0-beta-18721",
+    });
+  });
+
   it("preserves a successful fast probe when receipt persistence loses the exit race", async () => {
     await expect(
       Effect.runPromise(
@@ -240,6 +248,19 @@ describe("OpenCodeProcessPort", () => {
       ),
     );
     expect(second).not.toBe(observed.authorization);
+  });
+
+  it("starts the beta runtime with its own readiness line and auth identity", async () => {
+    const fixture = probeWrapper("v2-ready");
+    const observed = await Effect.runPromise(
+      Effect.scoped(makePort().start({ binaryPath: fixture.binaryPath, cwd: fixture.root })),
+    );
+
+    expect(observed.url.hostname).toBe("127.0.0.1");
+    expect(observed.runtime).toBe("beta");
+    expect(observed.version).toBe("opencode2 v0.0.0-beta-18721");
+    expect(observed.routes).toEqual({ apiPrefix: "/api", healthPath: "/api/health" });
+    expect(observed.authorization).toMatch(/^Basic b3BlbmNvZGU6/);
   });
 
   it("does not expose managed-server authority to the provider session", async () => {

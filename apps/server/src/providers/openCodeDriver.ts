@@ -135,6 +135,14 @@ function resultData<A>(result: { readonly data: A | undefined }): A {
   return result.data;
 }
 
+const BETA_API_TIMEOUT_MS = 5_000;
+const BETA_INCOMPATIBILITY_MESSAGE =
+  "OpenCode 2 preview is discovery-only: its API cannot carry Octant's session permission rules yet.";
+
+function betaRequestOptions() {
+  return { throwOnError: true as const, signal: AbortSignal.timeout(BETA_API_TIMEOUT_MS) };
+}
+
 export function openCodePromptParts(prompt: string, attachments: ProviderTurnInput["attachments"]) {
   const parts: Array<
     | { readonly type: "text"; readonly text: string }
@@ -161,21 +169,46 @@ export function makeOfficialOpenCodeClient(
   server: OpenCodeServerConnection,
   projectRoot: string,
 ): OpenCodeClientPort {
+  const beta = server.runtime === "beta" || server.routes?.apiPrefix === "/api";
   const client = createOpencodeClient({
     baseUrl: server.url.toString(),
     directory: projectRoot,
     headers: { authorization: server.authorization },
   });
   return {
-    health: async () => resultData(await client.global.health({ throwOnError: true })),
-    providers: async () => resultData(await client.provider.list({}, { throwOnError: true })),
+    health: async () =>
+      beta
+        ? {
+            ...resultData(await client.v2.health.get(betaRequestOptions())),
+            version: server.version ?? "unknown",
+          }
+        : resultData(await client.global.health({ throwOnError: true })),
+    providers: async () => {
+      if (beta) throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+      return resultData(await client.provider.list({}, { throwOnError: true }));
+    },
     subscribe: async (signal) =>
-      (await client.event.subscribe({}, { throwOnError: true, signal })).stream,
+      beta
+        ? (() => {
+            throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+          })()
+        : (await client.event.subscribe({}, { throwOnError: true, signal })).stream,
     createSession: async ({ permission }) =>
-      resultData(await client.session.create({ permission }, { throwOnError: true })),
+      beta
+        ? (() => {
+            throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+          })()
+        : resultData(await client.session.create({ permission }, { throwOnError: true })),
     getSession: async (sessionId) =>
-      resultData(await client.session.get({ sessionID: sessionId }, { throwOnError: true })),
+      beta
+        ? (() => {
+            throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+          })()
+        : resultData(await client.session.get({ sessionID: sessionId }, { throwOnError: true })),
     prompt: async ({ sessionId, providerId, modelId, prompt, attachments = [] }) => {
+      if (beta) {
+        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+      }
       await client.session.promptAsync(
         {
           sessionID: sessionId,
@@ -186,12 +219,21 @@ export function makeOfficialOpenCodeClient(
       );
     },
     abort: async (sessionId) => {
+      if (beta) {
+        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+      }
       await client.session.abort({ sessionID: sessionId }, { throwOnError: true });
     },
     replyPermission: async (requestId, reply) => {
+      if (beta) {
+        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+      }
       await client.permission.reply({ requestID: requestId, reply }, { throwOnError: true });
     },
     replyQuestion: async (requestId, answer) => {
+      if (beta) {
+        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+      }
       await client.question.reply(
         { requestID: requestId, answers: [[answer]] },
         { throwOnError: true },

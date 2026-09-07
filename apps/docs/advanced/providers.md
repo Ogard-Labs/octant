@@ -35,6 +35,13 @@ OpenCode CLI, Kilo ACP, Pi RPC, Oh My Pi, Devin ACP, Mistral Vibe ACP,
 Ollama, Kimi Code ACP, Grok Build ACP, Goose ACP, GLM Agent, Gemini CLI ACP,
 GitHub Copilot ACP, Cline ACP, and Qwen Code ACP.
 
+The beta `opencode2` executable appears separately as **OpenCode 2 preview**.
+Octant can discover it and run a bounded loopback health check, but keeps its
+provider catalog and thread sessions unavailable until the runtime can carry
+Octant's per-session permission rules. This preview status is explicit; it
+never falls back to an unconfined session or treats the beta version as the
+legacy OpenCode runtime.
+
 ### API endpoints
 
 Direct API endpoints use the short **Add API endpoint** flow. Supported

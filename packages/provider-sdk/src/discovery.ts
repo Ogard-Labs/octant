@@ -10,6 +10,8 @@ export interface ProviderDiscoveryDescriptor {
   readonly driverKind: ProviderDriverKind;
   /** Human-readable provider name for display. */
   readonly displayName: string;
+  /** Optional executable-specific display name for runtimes in one family. */
+  readonly displayNameForExecutable?: (executableName: string) => string;
   /** Executable names to search for (e.g. ["codex", "codex-cli"]). */
   readonly executableNames: ReadonlyArray<string>;
   /**
@@ -69,7 +71,9 @@ export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> =
   {
     driverKind: "opencode",
     displayName: "OpenCode CLI",
-    executableNames: ["opencode"],
+    displayNameForExecutable: (executableName) =>
+      executableName === "opencode2" ? "OpenCode 2 preview" : "OpenCode CLI",
+    executableNames: ["opencode", "opencode2"],
     approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
     versionProbeArgs: ["--version"],
     onboardingGuidance: "Authenticate with OpenCode, then check the connection again.",

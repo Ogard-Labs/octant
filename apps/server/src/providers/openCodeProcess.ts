@@ -13,9 +13,22 @@ export interface OpenCodeBinaryProbe {
   readonly version: string;
 }
 
+export type OpenCodeRuntime = "legacy" | "beta";
+
+export interface OpenCodeApiRoutes {
+  readonly apiPrefix: "" | "/api";
+  readonly healthPath: "/global/health" | "/api/health";
+}
+
 export interface OpenCodeServerConnection {
   readonly authorization: string;
   readonly pid: number;
+  /** Runtime protocol attested by the binary version probe before startup. */
+  readonly runtime?: OpenCodeRuntime;
+  /** Version emitted by the same probe that selected the runtime protocol. */
+  readonly version?: string;
+  /** Routes selected from the same runtime attestation; no path rewriting for v1. */
+  readonly routes?: OpenCodeApiRoutes;
   readonly url: URL;
 }
 
@@ -46,8 +59,14 @@ export interface OpenCodeProcessDependencies {
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 2_000;
 const DEFAULT_STARTUP_TIMEOUT_MS = 10_000;
 const VERSION_TIMEOUT_MS = 5_000;
-const VERSION_PATTERN = /^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\r?\n?$/;
-const READINESS_PATTERN = /^opencode server listening on (http:\/\/[^\s]+)$/;
+const LEGACY_VERSION_PATTERN = /^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
+const BETA_VERSION_PATTERN = /^opencode2 (v\d+\.\d+\.\d+-[0-9A-Za-z.-]+)$/;
+const READINESS_PATTERN = /^(?:opencode )?server listening on (http:\/\/[^\s]+)$/;
+
+interface ParsedOpenCodeVersion {
+  readonly runtime: OpenCodeRuntime;
+  readonly version: string;
+}
 
 type OpenCodeChild = ChildProcessByStdio<null, Readable, Readable>;
 
@@ -62,6 +81,19 @@ interface ResolvedOpenCodeProcessOptions {
 interface ManagedOpenCodeServer {
   readonly connection: OpenCodeServerConnection;
   readonly terminate: () => Promise<void>;
+}
+
+function parseOpenCodeVersion(output: string): ParsedOpenCodeVersion | undefined {
+  const firstLine = output.split(/\r?\n/)[0]?.trim();
+  if (firstLine === undefined) return undefined;
+  const beta = BETA_VERSION_PATTERN.exec(firstLine)?.[1];
+  if (beta !== undefined) return { runtime: "beta", version: firstLine };
+  if (LEGACY_VERSION_PATTERN.test(firstLine)) return { runtime: "legacy", version: firstLine };
+  return undefined;
+}
+
+function runtimeForVersion(version: string): OpenCodeRuntime {
+  return version.startsWith("opencode2 ") ? "beta" : "legacy";
 }
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
@@ -230,7 +262,7 @@ export function probeOpenCodeBinary(
         finish(Effect.fail(failure("unavailable", "OpenCode binary probe did not succeed.")));
         return;
       }
-      const version = VERSION_PATTERN.exec(output)?.[1];
+      const version = parseOpenCodeVersion(output)?.version;
       finish(
         version === undefined
           ? Effect.fail(failure("protocol", "OpenCode binary returned an unrecognized version."))
@@ -257,6 +289,8 @@ export function probeOpenCodeBinary(
 function acquireOpenCodeServer(
   input: OpenCodeProcessStartInput,
   options: ResolvedOpenCodeProcessOptions,
+  runtime: OpenCodeRuntime,
+  version: string,
   onProcessStarted?: ProviderProcessStartedListener,
 ): Effect.Effect<ManagedOpenCodeServer, ProviderFailure> {
   const invalid = validateBinaryPath(input.binaryPath);
@@ -264,13 +298,14 @@ function acquireOpenCodeServer(
 
   return Effect.async<ManagedOpenCodeServer, ProviderFailure>((resume) => {
     const password = randomBytes(32).toString("base64url");
-    const authorization = `Basic ${Buffer.from(`octant:${password}`).toString("base64")}`;
+    const username = runtime === "beta" ? "opencode" : "octant";
+    const authorization = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
     const child = spawn(input.binaryPath, ["serve", "--hostname", "127.0.0.1", "--port", "0"], {
       cwd: input.cwd,
       detached: process.platform !== "win32",
       env: {
         ...childProcessEnvironment(options.inheritedEnvironment ?? process.env),
-        OPENCODE_SERVER_USERNAME: "octant",
+        OPENCODE_SERVER_USERNAME: username,
         OPENCODE_SERVER_PASSWORD: password,
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -345,7 +380,17 @@ function acquireOpenCodeServer(
         () =>
           resume(
             Effect.succeed({
-              connection: { authorization, pid: child.pid!, url },
+              connection: {
+                authorization,
+                pid: child.pid!,
+                routes:
+                  runtime === "beta"
+                    ? { apiPrefix: "/api", healthPath: "/api/health" }
+                    : { apiPrefix: "", healthPath: "/global/health" },
+                runtime,
+                version,
+                url,
+              },
               terminate,
             }),
           ),
@@ -417,10 +462,21 @@ export function makeOpenCodeProcessLive(
 
   return {
     start: (input) =>
-      Effect.suspend(() => {
+      Effect.gen(function* () {
+        // Probe first so the server command and auth identity follow the
+        // runtime that actually answered, rather than treating the beta
+        // label as a legacy semantic version.
+        const probe = yield* probeOpenCodeBinary(input.binaryPath);
+        const runtime = runtimeForVersion(probe.version);
         let terminate: (() => Promise<void>) | undefined;
-        return Effect.acquireReleaseInterruptible(
-          acquireOpenCodeServer(input, resolvedOptions, input.onProcessStarted).pipe(
+        return yield* Effect.acquireReleaseInterruptible(
+          acquireOpenCodeServer(
+            input,
+            resolvedOptions,
+            runtime,
+            probe.version,
+            input.onProcessStarted,
+          ).pipe(
             Effect.tap((managed) =>
               Effect.sync(() => {
                 terminate = managed.terminate;

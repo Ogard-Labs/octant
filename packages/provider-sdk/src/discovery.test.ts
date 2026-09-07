@@ -31,6 +31,14 @@ describe("provider discovery descriptors", () => {
     expect(new Set(kinds).size).toBe(kinds.length);
   });
 
+  it("discovers the beta OpenCode runtime under the shared driver with a distinct label", () => {
+    const descriptor = DISCOVERY_DESCRIPTORS.find((entry) => entry.driverKind === "opencode");
+    expect(descriptor).toBeDefined();
+    expect(descriptor?.executableNames).toContain("opencode2");
+    expect(descriptor?.displayNameForExecutable?.("opencode2")).toBe("OpenCode 2 preview");
+    expect(descriptor?.displayNameForExecutable?.("opencode")).toBe("OpenCode CLI");
+  });
+
   it("marks direct HTTP endpoints correctly", () => {
     const directKinds = DISCOVERY_DESCRIPTORS.filter((d) => d.isDirectEndpoint).map(
       (d) => d.driverKind,
