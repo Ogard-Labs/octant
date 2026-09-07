@@ -1,4 +1,4 @@
-import { useCallback, type ReactNode } from "react";
+import { useCallback, type ComponentProps, type ReactNode } from "react";
 import { buttonVariants } from "../shadcn/button";
 import { cn } from "../shadcn/utils";
 import {
@@ -16,6 +16,8 @@ export interface OctantPopoverProps {
   readonly align?: "start" | "center" | "end";
   readonly children: ReactNode;
   readonly className?: string;
+  /** Keeps a tall picker on its preferred axis instead of falling back to a side rail. */
+  readonly collisionAvoidance?: ComponentProps<typeof PopoverPositioner>["collisionAvoidance"];
   readonly description?: string;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
@@ -110,6 +112,9 @@ export function OctantPopover(props: OctantPopoverProps) {
         <PopoverPositioner
           align={props.align ?? "start"}
           className="z-50 window-no-drag"
+          {...(props.collisionAvoidance === undefined
+            ? {}
+            : { collisionAvoidance: props.collisionAvoidance })}
           side={props.side ?? "bottom"}
           sideOffset={props.sideOffset ?? 4}
         >

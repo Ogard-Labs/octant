@@ -338,6 +338,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     <div className="composer-model-picker">
       <OctantPopover
         className="composer-model-picker__menu"
+        collisionAvoidance={{ side: "flip", align: "shift", fallbackAxisSide: "none" }}
         onOpenChange={(next) => {
           if (next) {
             setQuery("");

@@ -5684,8 +5684,9 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .composer-model-picker__menu {
+  box-sizing: border-box;
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
+  grid-template-columns: 40px minmax(0, 1fr);
   width: min(640px, 90vw);
   /* A fixed box, not a cap. The rail switches provider inside one open menu,
      and provider lists differ wildly in length — a twelve-model list next to
@@ -5693,6 +5694,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
      jump under the pointer. A stable height costs some empty space on short
      lists and buys a menu that holds still. The list pane scrolls. */
   height: min(60vh, 520px);
+  max-height: calc(100dvh - 24px);
   padding: 0;
   overflow: hidden;
   background: var(--octant-surface);
@@ -5732,7 +5734,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   height: 100%;
   padding: 8px 0;
   overflow-y: auto;
@@ -5749,8 +5751,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .composer-model-picker__rail-item {
   position: relative;
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   flex: 0 0 auto;
   place-items: center;
   padding: 0;
@@ -5782,10 +5784,10 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .composer-model-picker__rail-status {
   position: absolute;
-  right: 4px;
-  bottom: 4px;
-  width: 8px;
-  height: 8px;
+  right: 3px;
+  bottom: 3px;
+  width: 7px;
+  height: 7px;
   background: var(--octant-warning-text);
   border: 1.5px solid var(--octant-surface);
   border-radius: 50%;
@@ -5840,8 +5842,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
-  min-height: 34px;
-  margin: 10px 10px 6px;
+  min-height: 32px;
+  margin: 8px 10px 6px;
   padding: 0 12px;
   color: var(--octant-text-muted);
   background: var(--octant-control);
@@ -5957,9 +5959,9 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  min-height: 40px;
+  min-height: 38px;
   min-width: 0;
-  padding: 6px 4px 6px 10px;
+  padding: 5px 4px 5px 10px;
   color: var(--octant-text-primary);
   background: transparent;
   border: 0;
@@ -6007,8 +6009,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .composer-model-picker__star {
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   place-items: center;
   padding: 0;
   color: var(--octant-text-muted);
