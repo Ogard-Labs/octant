@@ -382,8 +382,10 @@ then the title) on the page ground, never a raised card: a card with a title
 and a sentence reads as a finished empty state.
 
 Navigation panes stay compact hairline rails. Routine form layouts stay open
-and unshadowed; setup objects, discrete settings objects, welcome composers,
-and cards use the raised card recipe (`OctantCard` / `--octant-shadow-sm`).
+and unshadowed; setup objects, discrete settings objects, and cards use the
+card recipe (`OctantCard`), which draws a hairline ring rather than a shadow —
+a card sits in the page, and shadow is reserved for something that floats
+above it (0090). Welcome composers keep their raised frame.
 Chat, Work, and Code welcome composers share the `.composer` frame (20px,
 `--octant-shadow-md`) and one first-read hierarchy: one question, then the
 composer. Starter actions appear only when recent work does not already give
@@ -435,7 +437,8 @@ Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
 `--octant-shadow-sm`, `--octant-shadow-md`, `--octant-shadow-lg`,
 `--octant-shadow-overlay`, and `--octant-shadow-pop`. Use the smallest level
 that establishes a genuine layer: navigation panes and open form layouts stay
-unshadowed; compact state and grouped cards use `--octant-shadow-sm`; composers
+unshadowed; the card recipe uses a hairline ring instead of a shadow (0090);
+compact state and grouped surfaces use `--octant-shadow-sm`; composers
 use the catalog-calibrated `--octant-shadow-md`; focused or promoted raised
 objects may use `--octant-shadow-lg`; overlays use only their overlay or pop
 token. A shadow must explain depth, not decorate a flat row.

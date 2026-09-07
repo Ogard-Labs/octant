@@ -147,13 +147,20 @@ describe("the public-block visual language", () => {
 
   it("paints keyboard focus once, for every control, without reshaping it", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
-    const rule = system.match(/(?:^|\n):focus-visible\s*\{[^}]+\}/)?.[0] ?? "";
+    const withoutComments = system.replace(/\/\*[\s\S]*?\*\//g, "");
+    const rule = withoutComments.match(/(?:^|\n)\s*:focus-visible\s*\{[^}]+\}/)?.[0] ?? "";
+
+    // Assert the rule was found before asserting about it. Matching only a
+    // column-zero selector let the negative checks below pass on an empty
+    // string, so an indented or listed rule would have slipped through saying
+    // whatever it liked.
+    expect(rule).not.toBe("");
 
     // One app-wide ring (0090). Scoping it away from owned recipes left every
     // button with no indicator at all, because the recipes do not paint focus
     // and every one of them carries a `data-slot`.
     expect(rule).toMatch(/box-shadow:\s*var\(--oct-focus-ring\)/);
-    expect(system).not.toMatch(/:focus-visible:not\(\[data-slot\]\)/);
+    expect(withoutComments).not.toMatch(/:focus-visible:not\(\[data-slot\]\)/);
 
     // No radius here: a box-shadow already follows the control's own corner,
     // and naming one snapped a focused control to a shape it does not have.
