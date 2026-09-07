@@ -84,19 +84,25 @@ describe("WorkspaceView welcome", () => {
       codeAccessPersistence: "current-session",
     }) as never;
 
-  it("asks for a folder, not a task, when the only Code Project is archived", async () => {
+  it("uses the shared Code composer when the only Code Project is archived", async () => {
     render(<WorkspaceView {...propsFor(welcome)} projects={[codeProject("archived")]} />);
 
-    // An archived Project is not somewhere a task can start, so the page
-    // reads as it does with no Project at all.
-    expect(await screen.findByRole("heading", { name: "Add a folder to start" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "What should we build?" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Start a Code thread" })).not.toBeInTheDocument();
   });
 
-  it("leads with a task once an active Code Project is bound", async () => {
-    render(<WorkspaceView {...propsFor(welcome)} projects={[codeProject("active")]} />);
+  it("keeps the selected Code Project context in the shared composer", async () => {
+    render(
+      <WorkspaceView
+        {...propsFor(welcome)}
+        draftProjectSelection={{ code: ids.project }}
+        projects={[codeProject("active")]}
+      />,
+    );
 
-    expect(await screen.findByRole("heading", { name: "Start a Code thread" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "What should we build?" })).toBeVisible();
+    expect(screen.getByText("Octant")).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Start a Code thread" })).not.toBeInTheDocument();
   });
 });
 

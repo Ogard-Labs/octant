@@ -114,7 +114,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
           <ShellState
             message={unavailableMessage()}
             state="neutral"
-            title={`${activeSurface?.label ?? "Tool"} has nothing to describe here`}
+            title={`${activeSurface?.label ?? "Tool"} is unavailable`}
           />
         ) : activeTab === undefined ? null : (
           <div
@@ -157,8 +157,8 @@ function DockWorkMap(props: {
   return (
     <section aria-labelledby="dock-work-map-title" className="dock-work-map">
       <header className="dock-work-map__header">
-        <h2 id="dock-work-map-title">Current work</h2>
-        <p>Tools available for the active thread.</p>
+        <h2 id="dock-work-map-title">Tools</h2>
+        <p>Available for the active thread.</p>
       </header>
       {props.surfaces.length === 0 ? (
         <p className="dock-work-map__empty">This thread has no additional tools available.</p>
@@ -199,5 +199,5 @@ function workMapDetail(surface: RightUtilityDockSurfaceId): string {
   if (surface === "plan") return "Inspect the current plan";
   if (surface === "side-chat") return "Ask about this thread";
   if (surface === "terminal") return "Open the repository shell";
-  return "Run discovered repository tests";
+  return "Open this tool";
 }

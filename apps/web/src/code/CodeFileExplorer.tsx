@@ -78,12 +78,12 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
   return (
     <section aria-label="Code file explorer" className="code-file-explorer">
       <label className="code-file-explorer__search">
-        <span className="sr-only">Search files</span>
+        <span className="sr-only">Filter files</span>
         <Search aria-hidden="true" size={14} strokeWidth={1.8} />
         <OctantInput
-          aria-label="Search files"
+          aria-label="Filter files"
           onChange={(event) => setQuery(event.currentTarget.value)}
-          placeholder="Filter relative paths"
+          placeholder="Filter files"
           ref={search}
           type="search"
           value={query}

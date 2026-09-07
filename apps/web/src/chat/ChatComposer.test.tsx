@@ -437,7 +437,11 @@ describe("ChatComposer", () => {
     const list = screen.getByRole("list", { name: "Attached preview selections" });
     expect(list).toBeVisible();
     expect(list).toHaveTextContent("report.pdf");
-    await user.click(screen.getByRole("button", { name: "Remove report.pdf selection" }));
+    const remove = screen.getByRole("button", { name: "Remove report.pdf selection" });
+    expect(remove).toHaveClass("chip-x");
+    expect(remove.querySelector("svg")).not.toBeNull();
+    expect(remove).not.toHaveTextContent("Remove");
+    await user.click(remove);
     expect(onRemovePreviewSelection).toHaveBeenCalledWith(selectionId);
   });
 
@@ -471,6 +475,9 @@ describe("ChatComposer", () => {
     expect(list).toHaveTextContent("Build guidance");
     expect(list).toHaveTextContent("Selection verified");
     const remove = screen.getByRole("button", { name: "Remove Build guidance extension" });
+    expect(remove).toHaveClass("chip-x");
+    expect(remove.querySelector("svg")).not.toBeNull();
+    expect(remove).not.toHaveTextContent("Remove");
     remove.focus();
     await user.keyboard("{Enter}");
     expect(onRemoveExtensionSelection).toHaveBeenCalledWith("@build-tools");

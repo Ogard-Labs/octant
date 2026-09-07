@@ -215,7 +215,6 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                   outcomeKind,
                 });
               }}
-              suggested={false}
               value={props.deliveryOutcome}
             />
           </EnvironmentGroup>

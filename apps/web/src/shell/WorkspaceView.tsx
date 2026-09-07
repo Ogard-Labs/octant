@@ -955,6 +955,28 @@ function renderNonCodeTab(
   },
   openProviderSettings: (() => void) | undefined,
 ): React.ReactNode {
+  // Code's welcome tab is only a routing placeholder. Keep one start surface
+  // so a split or restored fallback never sends the reader through a second
+  // "Start a Code thread" screen before reaching the real composer.
+  if (tab.kind === "welcome" && tab.mode === "code") {
+    const projectId =
+      props.draftProjectSelection?.code ??
+      props.workspace.contextByMode.code.projectId ??
+      undefined;
+    return renderNonCodeTab(
+      {
+        kind: "draft-thread",
+        id: tab.id,
+        mode: "code",
+        title: "New Code thread",
+        ...(projectId === undefined ? {} : { projectId }),
+      },
+      props,
+      paneId,
+      canvasContext,
+      openProviderSettings,
+    );
+  }
   if (tab.kind === "draft-thread") {
     const recentThreads = draftRecentThreads(tab.mode, props);
     const draftProjectId = tab.projectId ?? props.draftProjectSelection?.[tab.mode];

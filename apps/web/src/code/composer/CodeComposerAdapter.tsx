@@ -67,13 +67,6 @@ import type {
 } from "@octant/contracts";
 import type { CodeCommand, CodeCommandResult, CodeWorktreeRef } from "@octant/contracts/code";
 
-export const CODE_DELIVERY_OUTCOME_LABELS: Record<CodeDeliveryOutcomeKind, string> = {
-  "investigation-result": "Investigation result",
-  "local-implementation": "Local implementation",
-  "opened-pr": "Opened pull request",
-  "merged-pr": "Merged pull request",
-};
-
 export interface CodeComposerAdapterProps {
   /** The person's name from their profile, for the greeting on the hero. */
   readonly greetingName?: string | undefined;

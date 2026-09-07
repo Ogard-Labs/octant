@@ -476,12 +476,11 @@ export function ChatComposer(props: ChatComposerProps) {
               {props.onRemovePreviewSelection === undefined ? null : (
                 <OctantButton
                   aria-label={`Remove ${selection.displayName} selection`}
+                  className="chip-x window-no-drag"
                   onClick={() => props.onRemovePreviewSelection?.(selection.id)}
-                  size="sm"
                   type="button"
-                  variant="ghost"
                 >
-                  Remove
+                  <X aria-hidden="true" size={12} strokeWidth={1.8} />
                 </OctantButton>
               )}
             </li>
@@ -499,12 +498,11 @@ export function ChatComposer(props: ChatComposerProps) {
               {props.onRemoveCanvasSelection === undefined ? null : (
                 <OctantButton
                   aria-label={`Remove ${selection.displayName} canvas selection`}
+                  className="chip-x window-no-drag"
                   onClick={() => props.onRemoveCanvasSelection?.(selection.id)}
-                  size="sm"
                   type="button"
-                  variant="ghost"
                 >
-                  Remove
+                  <X aria-hidden="true" size={12} strokeWidth={1.8} />
                 </OctantButton>
               )}
             </li>
@@ -546,12 +544,11 @@ export function ChatComposer(props: ChatComposerProps) {
               {props.onRemoveExtensionSelection === undefined ? null : (
                 <OctantButton
                   aria-label={`Remove ${item.label} extension`}
+                  className="chip-x window-no-drag"
                   onClick={() => props.onRemoveExtensionSelection?.(item.reference)}
-                  size="sm"
                   type="button"
-                  variant="ghost"
                 >
-                  Remove
+                  <X aria-hidden="true" size={12} strokeWidth={1.8} />
                 </OctantButton>
               )}
             </li>

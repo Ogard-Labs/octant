@@ -1835,20 +1835,6 @@ form > .work-composer-adapter__attachments {
   overflow-wrap: anywhere;
 }
 
-.work-thread-workspace__composer {
-  display: grid;
-  width: min(100%, var(--oct-thread-measure));
-  gap: 7px;
-  padding: 8px clamp(16px, 3vw, 28px) 12px;
-  margin: 0 auto;
-  background: var(--octant-workspace);
-}
-
-.work-thread-workspace__composer-shell {
-  display: grid;
-  gap: 7px;
-}
-
 /* Names the model control for assistive technology without repeating the
    selection as text: the picker's own trigger already shows it. */
 .work-thread-workspace__bound-model {
@@ -1899,30 +1885,6 @@ form > .work-composer-adapter__attachments {
 
 .code-composer-adapter__context-picker {
   margin-inline-start: auto;
-}
-
-/* Native select in the composer rows: the same quiet combobox the chat bar
-   gives its selects — transparent, muted, xs, a border only on hover. */
-.code-composer-adapter__policy-select {
-  width: auto;
-  min-width: 7rem;
-  padding: 0 6px;
-}
-
-/* Control sizing on the composer row belongs to the shared row, not to the
-   surface that happens to host it (0038). Sizing icon buttons here is what
-   left one row carrying three different control heights. */
-
-.code-composer-adapter__composer-bar .code-composer-adapter__policy-select {
-  min-width: 0;
-  color: var(--oct-muted);
-  background: transparent;
-  border-color: transparent;
-}
-
-.code-composer-adapter__composer-bar .code-composer-adapter__policy-select:hover:not(:disabled) {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
 }
 
 /* ── Branch / worktree source selector ─────────────────────────────── */
@@ -2035,17 +1997,6 @@ form > .work-composer-adapter__attachments {
   border-inline-start: 0;
 }
 
-/* Says the value is a reading, not a decision, until the reader makes it one. */
-.code-composer-choice__hint {
-  color: var(--octant-text-muted);
-  font-weight: 400;
-  /* Measured at 800px: without a truncation rule the hint wrapped the whole
-     pill onto two lines, so the one reading in the band looked like two. */
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .code-composer-choice__menu {
   display: flex;
   flex-direction: column;
@@ -2146,16 +2097,6 @@ form > .work-composer-adapter__attachments {
   margin: 0;
   color: var(--oct-danger-fg);
   font-size: var(--oct-text-sm);
-}
-
-.code-composer-adapter__hint {
-  margin: 0;
-  padding: 0;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-  line-height: 1.4;
-  opacity: 0.7;
-  text-align: center;
 }
 
 /* Quiet worktree-source status line below the context strip. */

@@ -103,6 +103,34 @@ describe("thread utility dock content", () => {
     expect(screen.getByRole("heading", { name: "iOS Simulator is unavailable" })).toBeVisible();
   });
 
+  it("explains that Files opens from a Code thread when the active thread is Chat", () => {
+    render(
+      <ThreadUtilityDockContent
+        {...props()}
+        subject={{ mode: "chat", threadId }}
+        surface="files"
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Files is unavailable" })).toBeVisible();
+    expect(screen.getByText("Files opens from a Code thread.")).toBeVisible();
+  });
+
+  it("uses a loading state while Code utility data is still arriving", () => {
+    render(
+      <ThreadUtilityDockContent
+        {...props()}
+        codeController={{ client: {} } as never}
+        surface="terminal"
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("Loading Terminal");
+    expect(
+      screen.queryByRole("heading", { name: "Terminal is unavailable" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("states why iOS Simulator is unavailable when the Apple toolchain client is missing", () => {
     const { appleToolchainClient: _missing, ...withoutClient } = props();
     render(<ThreadUtilityDockContent {...withoutClient} />);
@@ -117,7 +145,7 @@ describe("thread utility dock content", () => {
         subject={{ mode: "code", threadId: "10000000-0000-4000-8000-000000000099" }}
       />,
     );
-    expect(screen.getByRole("heading", { name: "iOS Simulator is unavailable" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Loading iOS Simulator" })).toBeVisible();
     expect(screen.queryByText("apple-workbench:App/App.xcodeproj")).not.toBeInTheDocument();
   });
 

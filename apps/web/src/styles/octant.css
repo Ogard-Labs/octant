@@ -2761,43 +2761,6 @@ input.switch:checked::after {
   color: var(--oct-fg-2);
 }
 
-/* ─── composer context strip ──────────────────────────────────────────
-   What the next message will act on — repo, branch, pending diff — sat
-   above the input rather than described inside it. */
-.composer-context {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-3);
-  padding: var(--oct-space-2) var(--oct-space-2) var(--oct-space-2) var(--oct-space-3);
-  border: 1px solid var(--oct-border);
-  border-bottom: 0;
-  border-radius: var(--oct-radius-lg) var(--oct-radius-lg) 0 0;
-  background: var(--oct-surface-warm);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  color: var(--oct-muted);
-}
-.composer-context + .composer {
-  border-radius: 0 0 var(--oct-radius-lg) var(--oct-radius-lg);
-}
-.composer-context .composer-gap {
-  flex: 1;
-}
-/* a standing mode that changes what happens when you send */
-.mode-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--oct-space-1);
-  min-height: 22px;
-  padding-inline: var(--oct-space-2);
-  border-radius: var(--oct-radius-sm);
-  background: var(--oct-warn-soft);
-  color: var(--oct-warn-fg);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-}
-/* Send/stop is an OctantButton icon; the composer row sizes it to a circle. */
-
 /* ══════════════════════════════════════════════════════════════════════
    Thread board
 

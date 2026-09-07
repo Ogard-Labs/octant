@@ -71,8 +71,8 @@ describe("the right sidebar surface", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Current work" })).toBeVisible();
-    expect(screen.getByText("Tools available for the active thread.")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Tools" })).toBeVisible();
+    expect(screen.getByText("Available for the active thread.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Browser" })).toHaveTextContent(
       "Inspect live web activity",
     );
@@ -155,9 +155,23 @@ describe("the right sidebar surface", () => {
     );
 
     expect(screen.queryByText("Previous thread Browser")).toBeNull();
-    expect(
-      screen.getByRole("heading", { name: "Browser has nothing to describe here" }),
-    ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Browser is unavailable" })).toBeVisible();
+  });
+
+  it("uses a generic detail for an unknown launchable tool", () => {
+    render(
+      <RightUtilityDockSurface
+        launchableSurfaces={[{ id: "unknown-tool" as never, label: "Custom tool" }]}
+        onCloseTab={vi.fn()}
+        onOpenTab={vi.fn()}
+        onSelectSurface={vi.fn()}
+        resolution={{ kind: "closed", reason: "no-surface" }}
+        tabs={[]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Custom tool" })).toHaveTextContent("Open this tool");
+    expect(screen.queryByText("Run discovered repository tests")).not.toBeInTheDocument();
   });
 });
 

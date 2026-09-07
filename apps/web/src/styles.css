@@ -6308,10 +6308,9 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
    `.thread-composer`, `.composer-row`, `.composer-status`, as in Chat and
    Work); this block only pads the pieces the system does not know about. */
 
-/* Chips, queued turns, and attachments are frameless rows of the frame, so
-   they take the same gutter the system gives `.composer-chips`. */
+/* Chips and attachments are frameless rows of the frame, so they take the
+   same gutter the system gives `.composer-chips`. */
 .code-thread-workspace__composer .thread-mention__chips,
-.code-thread-workspace__queue,
 .code-thread-workspace__attachments {
   margin: 0;
   padding: var(--oct-space-3) var(--oct-composer-gutter) 0;
@@ -6533,40 +6532,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   animation: none;
-}
-
-.code-thread-workspace__queue {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  list-style: none;
-}
-
-.code-thread-workspace__queue-chip {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-2);
-  padding: 4px 4px 4px 8px;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  background: var(--oct-surface-warm);
-  font-size: var(--oct-text-xs);
-}
-
-.code-thread-workspace__queue-position {
-  flex: none;
-  min-width: 16px;
-  color: var(--oct-muted);
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
-
-.code-thread-workspace__queue-prompt {
-  flex: 1;
-  overflow: hidden;
-  color: var(--oct-fg);
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 .code-thread-workspace__access {
