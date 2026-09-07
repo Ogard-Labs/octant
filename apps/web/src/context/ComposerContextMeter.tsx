@@ -70,7 +70,8 @@ export function ComposerContextMeter() {
 
   const windowModel = snapshot === undefined ? undefined : contextWindowModel(snapshot);
   const health = snapshot === undefined ? undefined : snapshot.next.plan.health;
-  const percent = windowModel === undefined ? 0 : windowModel.percent;
+  const reported = fallback === undefined ? undefined : reportedWindow(fallback);
+  const percent = windowModel === undefined ? (reported?.percent ?? 0) : windowModel.percent;
   const usedArc = (Math.max(0, Math.min(100, percent)) / 100) * METER_CIRCUMFERENCE;
   const label = meterLabel({
     open,
@@ -88,7 +89,9 @@ export function ComposerContextMeter() {
     windowModel === undefined || snapshot === undefined
       ? fallback === undefined
         ? "Context usage"
-        : "Provider usage"
+        : reported === undefined
+          ? "Provider usage"
+          : "Context window"
       : "Context window";
 
   return (
@@ -177,17 +180,60 @@ export function ComposerContextMeter() {
   );
 }
 
+/**
+ * The share of the model's window the provider itself reported with its last
+ * turn. A runtime the host does not plan has no context plan to measure, so
+ * the provider's own figure is the window the meter shows.
+ */
+function reportedWindow(
+  fallback: ComposerContextUsageFallback,
+): { readonly percent: number; readonly label: string } | undefined {
+  if (fallback.contextWindow === undefined || fallback.contextTokens === undefined)
+    return undefined;
+  const percent = Math.max(
+    0,
+    Math.min(100, (fallback.contextTokens / fallback.contextWindow) * 100),
+  );
+  return {
+    percent,
+    label: `${compactTokens(fallback.contextTokens)} of ${compactTokens(fallback.contextWindow)} (${String(Math.round(percent))}%)`,
+  };
+}
+
 function ContextUsageFallback(props: { readonly fallback: ComposerContextUsageFallback }) {
+  const reported = reportedWindow(props.fallback);
   return (
     <>
       <header className="context-window-popover__header">
-        <span>Provider usage</span>
-        <strong>{formatTokens(props.fallback.inputTokens)} in</strong>
+        <span>{reported === undefined ? "Provider usage" : "Context window"}</span>
+        <strong>
+          {reported === undefined
+            ? `${formatTokens(props.fallback.inputTokens)} in`
+            : reported.label}
+        </strong>
       </header>
-      <p className="context-window-popover__source">
-        This provider reports what a turn spent, but not a context-window maximum, so there is no
-        share of a window to show.
-      </p>
+      {reported === undefined ? (
+        <p className="context-window-popover__source">
+          This provider reports what a turn spent, but not a context-window maximum, so there is no
+          share of a window to show.
+        </p>
+      ) : (
+        <>
+          <div
+            aria-label="Context window used"
+            aria-valuemax={100}
+            aria-valuemin={0}
+            aria-valuenow={Math.round(reported.percent)}
+            className="context-window-popover__meter"
+            role="progressbar"
+          >
+            <span style={{ width: `${String(reported.percent)}%` }} />
+          </div>
+          <p className="context-window-popover__source">
+            Reported by the provider with its last turn.
+          </p>
+        </>
+      )}
       <dl className="context-window-popover__facts">
         <Fact label="Input" value={formatTokens(props.fallback.inputTokens)} />
         <Fact label="Output" value={formatTokens(props.fallback.outputTokens)} />
@@ -377,6 +423,10 @@ function meterLabel(input: {
   const action = input.open ? "Hide" : "Show";
   if (input.windowModel === undefined) {
     if (input.fallback !== undefined) {
+      const reported = reportedWindow(input.fallback);
+      if (reported !== undefined) {
+        return `${action} context usage. Context window ${reported.label}, as the provider reported it.`;
+      }
       return `${action} context usage. Provider reported ${compactTokens(input.fallback.inputTokens)} input and ${compactTokens(input.fallback.outputTokens)} output. Context window maximum unavailable.`;
     }
     return `${action} context usage. ${emptyMessage(input.status)}`;
@@ -444,6 +494,10 @@ function liveLabel(input: {
 }): string {
   if (input.windowModel === undefined) {
     if (input.fallback !== undefined) {
+      const reported = reportedWindow(input.fallback);
+      if (reported !== undefined) {
+        return `Context window ${reported.label}, as the provider reported it.`;
+      }
       return `Provider reported ${compactTokens(input.fallback.inputTokens)} input and ${compactTokens(input.fallback.outputTokens)} output. Context window maximum unavailable.`;
     }
     return emptyMessage(input.status);

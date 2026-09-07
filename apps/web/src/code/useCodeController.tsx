@@ -249,6 +249,9 @@ export interface CodeThreadUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly costUsd?: number;
+  /** The model's window and its fill after the latest turn that named them. */
+  readonly contextWindow?: number;
+  readonly contextTokens?: number;
   readonly limits: ReadonlyArray<CodeProviderLimit>;
 }
 
@@ -258,6 +261,8 @@ interface CodeTurnUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly costUsd?: number | undefined;
+  readonly contextWindow?: number | undefined;
+  readonly contextTokens?: number | undefined;
 }
 
 /**
@@ -273,16 +278,29 @@ function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>): {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly costUsd?: number;
+  readonly contextWindow?: number;
+  readonly contextTokens?: number;
 } {
   let inputTokens = 0;
   let outputTokens = 0;
   let costUsd: number | undefined;
+  // Tokens and cost add up across turns; the window is a state, so the
+  // latest turn that reported one speaks for the thread.
+  let window: { readonly contextWindow: number; readonly contextTokens: number } | undefined;
   for (const usage of byOperation.values()) {
     inputTokens += usage.inputTokens;
     outputTokens += usage.outputTokens;
     if (usage.costUsd !== undefined) costUsd = (costUsd ?? 0) + usage.costUsd;
+    if (usage.contextWindow !== undefined && usage.contextTokens !== undefined) {
+      window = { contextWindow: usage.contextWindow, contextTokens: usage.contextTokens };
+    }
   }
-  return { inputTokens, outputTokens, ...(costUsd === undefined ? {} : { costUsd }) };
+  return {
+    inputTokens,
+    outputTokens,
+    ...(costUsd === undefined ? {} : { costUsd }),
+    ...(window ?? {}),
+  };
 }
 
 export interface CodeControllerOptions {
@@ -417,11 +435,13 @@ export function useCodeController(options: CodeControllerOptions) {
   const usageByOperation = useRef(new Map<string, CodeTurnUsage>());
   const noteUsage = useCallback((operationId: CodeOperationId, event: CodeOperationEvent) => {
     if (event.kind === "usage") {
-      const { inputTokens, outputTokens, costUsd } = event;
+      const { inputTokens, outputTokens, costUsd, contextWindow, contextTokens } = event;
       usageByOperation.current.set(String(operationId), {
         inputTokens,
         outputTokens,
         ...(costUsd === undefined ? {} : { costUsd }),
+        ...(contextWindow === undefined ? {} : { contextWindow }),
+        ...(contextTokens === undefined ? {} : { contextTokens }),
       });
       setThreadUsage((current) => ({
         ...totalTurnUsage(usageByOperation.current),

@@ -1543,6 +1543,14 @@ export const ProviderRuntimeEvent = Schema.Union(
      * this absent rather than showing an invented number.
      */
     costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
+    /**
+     * The model's context window and how much of it the last request occupied,
+     * when the provider reports them alongside usage. A runtime the host does
+     * not plan a context for (a CLI it drives) has no other account of the
+     * window, so this is what its meter shows.
+     */
+    contextWindow: Schema.optional(Schema.Int.pipe(Schema.positive())),
+    contextTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,

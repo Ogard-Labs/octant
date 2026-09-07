@@ -580,6 +580,8 @@ function normalizeProviderEvent(
         inputTokens: event.inputTokens,
         outputTokens: event.outputTokens,
         ...(event.costUsd === undefined ? {} : { costUsd: event.costUsd }),
+        ...(event.contextWindow === undefined ? {} : { contextWindow: event.contextWindow }),
+        ...(event.contextTokens === undefined ? {} : { contextTokens: event.contextTokens }),
       });
     case "rate-limit-window":
       return Effect.succeed({

@@ -383,9 +383,12 @@ export const THEME_PRESETS: ReadonlyArray<ThemePreset> = Object.freeze([
     tokens: { dark: DEFAULT_DARK_TOKENS },
   }),
   makePreset({
+    // The id stays "octant" because it is persisted in settings; the name
+    // no longer claims to be the product's own look. Octant's default is the
+    // monochrome graphite above; this is one accent among the others.
     id: "octant" as ThemePresetId,
-    displayName: "Octant",
-    description: "The original warm charcoal-and-brass Octant palette.",
+    displayName: "Brass",
+    description: "Warm charcoal with a brass accent.",
     supportedModes: ["light", "dark"],
     tokens: { light: LIGHT_OCTANT_TOKENS, dark: DARK_OCTANT_TOKENS },
   }),

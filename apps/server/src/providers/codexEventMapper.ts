@@ -604,6 +604,20 @@ function mapNotification(
           outputTokens: message.params.tokenUsage.total.outputTokens,
           reasoningTokens: message.params.tokenUsage.total.reasoningOutputTokens,
           cacheReadInputTokens: message.params.tokenUsage.total.cachedInputTokens,
+          // The app-server names the model's window with every report. What
+          // sits in it is the last request less its reasoning output, which
+          // the model does not keep between turns.
+          ...(message.params.tokenUsage.modelContextWindow === null ||
+          message.params.tokenUsage.modelContextWindow === 0
+            ? {}
+            : {
+                contextWindow: message.params.tokenUsage.modelContextWindow,
+                contextTokens: Math.max(
+                  0,
+                  message.params.tokenUsage.last.totalTokens -
+                    message.params.tokenUsage.last.reasoningOutputTokens,
+                ),
+              }),
         }),
       ];
     case "account/rateLimits/updated":

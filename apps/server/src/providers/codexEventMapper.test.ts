@@ -945,7 +945,7 @@ describe("mapCodexMessage", () => {
     expect(reordered.map(({ taskId }) => taskId)).toEqual(["task-1", "task-3", "task-2"]);
   });
 
-  it("maps only numeric total usage", () => {
+  it("maps total usage and the window the last request sat in", () => {
     expect(
       map(
         context(),
@@ -972,7 +972,17 @@ describe("mapCodexMessage", () => {
         }),
       ),
     ).toMatchObject([
-      { kind: "event", event: { kind: "usage", inputTokens: 12, outputTokens: 8 } },
+      {
+        kind: "event",
+        event: {
+          kind: "usage",
+          inputTokens: 12,
+          outputTokens: 8,
+          contextWindow: 200_000,
+          // The last request's total less its reasoning output.
+          contextTokens: 6,
+        },
+      },
     ]);
   });
 
