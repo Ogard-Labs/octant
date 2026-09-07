@@ -77,9 +77,7 @@ export function DockCanvasTool(props: DockCanvasToolProps) {
   }, [props.client, props.mode, props.preferredCanvasId, props.projectId, props.threadId]);
 
   if (status === "loading") {
-    return (
-      <ShellState message="Loading this thread's Canvas." state="loading" title="Loading Canvas" />
-    );
+    return <ShellState state="loading" title="Loading Canvas" />;
   }
   if (status === "unavailable" || cards.length === 0) {
     return (
@@ -141,9 +139,7 @@ export function DockCanvasTool(props: DockCanvasToolProps) {
             All canvases
           </OctantButton>
         )}
-        <Suspense
-          fallback={<ShellState message="Loading canvas." state="loading" title="Loading Canvas" />}
-        >
+        <Suspense fallback={<ShellState state="loading" title="Loading Canvas" />}>
           <CanvasWorkspaceTab client={props.client} tab={tab} />
         </Suspense>
       </div>

@@ -219,9 +219,7 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
       );
     }
     return (
-      <Suspense
-        fallback={<ShellState message="Loading files." state="loading" title="Loading Files" />}
-      >
+      <Suspense fallback={<ShellState state="loading" title="Loading Files" />}>
         <CodeFileExplorerPanel
           {...(props.subject.checkoutId === undefined
             ? {}
@@ -297,9 +295,7 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
       return unavailable("Review", "Review is not yet available for this thread type.");
     }
     return (
-      <Suspense
-        fallback={<ShellState message="Loading review." state="loading" title="Loading Review" />}
-      >
+      <Suspense fallback={<ShellState state="loading" title="Loading Review" />}>
         <DockReviewTool
           {...(props.codeController === undefined ? {} : { controller: props.codeController })}
           threadId={decodeCodeThreadId(props.subject.threadId)}
@@ -348,13 +344,7 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
   const tab = codeUtilityTab(props.surface, threadId, props.appleProjectPath, props.utilityTabId);
   return (
     <Suspense
-      fallback={
-        <ShellState
-          message={`Loading ${surfaceLabel(props.surface).toLocaleLowerCase()}.`}
-          state="loading"
-          title={`Loading ${surfaceLabel(props.surface)}`}
-        />
-      }
+      fallback={<ShellState state="loading" title={`Loading ${surfaceLabel(props.surface)}`} />}
     >
       <CodeWorkspaceTab
         {...(props.appleToolchainClient === undefined

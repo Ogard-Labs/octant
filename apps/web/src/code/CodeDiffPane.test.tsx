@@ -148,7 +148,7 @@ describe("CodeDiffPane", () => {
   });
 
   it.each([
-    [{ state: "loading" }, "Loading Git diff…"],
+    [{ state: "loading" }, "Loading diff"],
     [{ state: "stale", message: "Git state changed; refresh the diff." }, "Git state changed"],
     [{ state: "unavailable", message: "Git observation is unavailable." }, "unavailable"],
   ] as const)("renders purposeful $state state", (diff, message) => {

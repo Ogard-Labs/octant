@@ -47,7 +47,7 @@ describe("Review beside the active thread", () => {
     const fixture = runtime();
     render(<DockReviewTool {...bound()} loadRuntime={fixture.loadRuntime} />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("Loading Git diff");
+    expect(screen.getByRole("status")).toHaveTextContent("Loading diff");
     await chooseSideBySide();
     const files = await screen.findByRole("navigation", { name: "Changed files" });
     expect(
@@ -167,7 +167,7 @@ describe("Review beside the active thread", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: /src\/index\.ts/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Loading Git diff");
+    expect(screen.getByRole("status")).toHaveTextContent("Loading diff");
     resolveNext(dirtyObservation(ids.operation));
     await chooseSideBySide();
     expect(await screen.findByRole("navigation", { name: "Changed files" })).toBeVisible();

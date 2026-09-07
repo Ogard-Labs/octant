@@ -21,6 +21,12 @@ describe("ShellState", () => {
     expect(container.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
   });
 
+  it("renders a loading line as the title alone when no sentence is given", () => {
+    const { container } = render(<ShellState state="loading" title="Loading Files" />);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading Files");
+    expect(container.querySelector('[data-slot="empty-description"]')).toBeNull();
+  });
+
   it("keeps failure recovery visible and keyboard operable", async () => {
     const user = userEvent.setup();
     const onAction = vi.fn();

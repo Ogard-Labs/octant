@@ -45,13 +45,7 @@ export function DockReviewTool(props: DockReviewToolProps) {
       : undefined;
   const checkoutId = props.checkoutId ?? view?.checkout.id;
   if (props.controller === undefined || view === undefined || checkoutId === undefined) {
-    return (
-      <ShellState
-        message="This Code thread is still loading its Review state."
-        state="loading"
-        title="Loading Review"
-      />
-    );
+    return <ShellState state="loading" title="Loading Review" />;
   }
   return (
     <BoundReview

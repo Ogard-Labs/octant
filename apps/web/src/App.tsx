@@ -2452,14 +2452,7 @@ function LaunchedShell(
   function threadUtility(surface: RightUtilityDockSurfaceId, utilityTab?: ThreadUtilityDockTab) {
     if (dockThread === undefined || dockThreadKey === undefined) return null;
     if (dockThread.mode === "code" && !activeCodeThreadDisplayReady) {
-      return (
-        <ShellState
-          eyebrow="Thread tools"
-          message="The selected tool will open after the transcript is ready."
-          state="loading"
-          title="Loading thread first"
-        />
-      );
+      return <ShellState state="loading" title="Loading thread" />;
     }
     const sidecarThreadId = dockSidecarsByThread.get(dockThreadKey);
     const appleProjectPath = appleProjects[0]?.projectPath;

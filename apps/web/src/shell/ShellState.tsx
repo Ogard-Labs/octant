@@ -36,7 +36,8 @@ const stateTones: Record<ShellStateKind, "neutral" | "warning"> = {
 export interface ShellStateProps {
   readonly action?: { readonly label: string; readonly onClick: () => void };
   readonly eyebrow?: string;
-  readonly message: string;
+  /** One sentence under the title; a loading line is the title alone. */
+  readonly message?: string;
   readonly role?: "alert" | "status";
   readonly state: ShellStateKind;
   readonly title: string;
@@ -63,7 +64,9 @@ export function ShellState(props: ShellStateProps) {
           <OctantEmptyEyebrow>{props.eyebrow}</OctantEmptyEyebrow>
         )}
         <OctantEmptyTitle>{props.title}</OctantEmptyTitle>
-        <OctantEmptyDescription>{props.message}</OctantEmptyDescription>
+        {props.message === undefined ? null : (
+          <OctantEmptyDescription>{props.message}</OctantEmptyDescription>
+        )}
       </OctantEmptyHeader>
       {props.action === undefined ? null : (
         <OctantEmptyContent>

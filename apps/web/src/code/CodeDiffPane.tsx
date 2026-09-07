@@ -102,7 +102,7 @@ export function CodeDiffPane(props: CodeDiffPaneProps) {
     }
     return <AvailableDiff {...props} diff={props.diff} snapshot={summary} />;
   }
-  if (props.diff.state === "loading") return <p role="status">Loading Git diff…</p>;
+  if (props.diff.state === "loading") return <ShellState state="loading" title="Loading diff" />;
   return <p role="alert">{props.diff.message}</p>;
 }
 
@@ -269,7 +269,7 @@ function AvailableDiff(
         </div>
       ) : null}
 
-      {content.kind === "loading" ? <p role="status">Loading diff evidence…</p> : null}
+      {content.kind === "loading" ? <ShellState state="loading" title="Loading diff" /> : null}
       {content.kind === "unavailable" ? <p role="alert">{content.message}</p> : null}
       {content.kind === "ready" && files.length === 0 ? (
         <p role="status">This checkout has no textual changes.</p>
