@@ -4,9 +4,9 @@ import type { ComponentProps } from "react";
 import { cn } from "./utils";
 
 /*
- * No focus treatment here: the app paints one ring for every control, globally
- * (0090). The style's own `focus-visible:ring-*` is a wide soft halo, which is
- * what makes an interface read as a web page rather than an app.
+ * Focus stays free of outline and ring utilities. Ghost and outline controls
+ * use a quiet focus fill so keyboard navigation remains visible without a
+ * drawn halo (0094).
  *
  * A press moves the button down a pixel, except where it opens something — a
  * menu trigger that sinks while its menu appears reads as a glitch, not a
@@ -20,11 +20,11 @@ const buttonVariants = cva(
         default: "bg-primary text-primary-foreground hover:bg-primary/80",
         destructive: "bg-destructive/10 text-destructive hover:bg-destructive/20",
         outline:
-          "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground",
+          "border-border bg-background hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         ghost:
-          "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground",
+          "hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground",
         link: "h-auto p-0 text-foreground underline-offset-4 hover:underline",
       },
       size: {

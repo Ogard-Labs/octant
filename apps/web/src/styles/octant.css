@@ -1067,6 +1067,9 @@ input.switch:checked::after {
   box-shadow: none;
   transition: background var(--oct-motion-base) var(--oct-ease-standard);
 }
+.octant-switch[data-slot="switch"]:focus-visible:not([data-checked]) {
+  background: var(--octant-control-hover);
+}
 .octant-switch[data-slot="switch"][data-checked] {
   background: var(--oct-fg);
 }
@@ -3536,6 +3539,9 @@ input.switch:checked::after {
 .split-handle:hover {
   background: var(--oct-accent-fg);
 }
+.split-handle:focus-visible {
+  background: var(--oct-accent-fg);
+}
 /* while dragging, stop the pointer selecting text in the panes it crosses */
 .is-dragging,
 .is-dragging * {
@@ -3666,7 +3672,8 @@ input.switch:checked::after {
    strip draws them: a soft ink wash under the pointer, the selection fill
    with a hairline edge on the row the workspace is showing. Both used to
    share the selection fill, so the row under the pointer looked selected. */
-.sidebar-item:hover {
+.sidebar-item:hover,
+.sidebar-item:focus-visible {
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
 }

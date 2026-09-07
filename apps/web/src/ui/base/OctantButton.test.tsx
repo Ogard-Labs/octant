@@ -54,6 +54,9 @@ describe("OctantButton", () => {
 
     expect(screen.getByRole("button", { name: "Cancel" })).toHaveAttribute("data-variant", "ghost");
     expect(screen.getByRole("button", { name: "Cancel" }).className).not.toContain("bg-primary");
+    expect(screen.getByRole("button", { name: "Cancel" }).className).toContain(
+      "focus-visible:bg-muted",
+    );
     expect(screen.getByRole("button", { name: "Close dock" })).toHaveClass("shell-icon-button");
     expect(screen.getByRole("button", { name: "Close dock" })).toHaveAttribute("data-size", "icon");
     expect(screen.getByRole("button", { name: "Close dock" }).className).not.toContain("btn-send");

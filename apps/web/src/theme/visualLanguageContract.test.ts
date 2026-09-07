@@ -214,7 +214,9 @@ describe("the public-block visual language", () => {
     // The track drops the adapter's drop shadow and does not reintroduce a
     // focus halo; checked state remains the visible switch cue.
     expect(track).toMatch(/box-shadow:\s*none/);
-    expect(system).not.toMatch(/\.octant-switch\[data-slot="switch"\]:focus-visible/);
+    expect(system).toMatch(
+      /\.octant-switch\[data-slot="switch"\]:focus-visible:not\(\[data-checked\]\)/,
+    );
   });
 
   it("does not add a wrapper focus halo around the Issues search", () => {

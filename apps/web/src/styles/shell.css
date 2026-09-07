@@ -408,7 +408,8 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
 
 /* The same feedback the system's .split-handle gives: the hairline takes the
    accent ink while grabbed. Keyboard focus remains visually quiet. */
-.shell-frame__sidebar-resize:hover::before {
+.shell-frame__sidebar-resize:hover::before,
+.shell-frame__sidebar-resize:focus-visible::before {
   background: var(--oct-accent-fg);
 }
 

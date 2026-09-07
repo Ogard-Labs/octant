@@ -1643,7 +1643,8 @@ strong {
   height: 1px;
 }
 
-.workspace-split__resize:hover::before {
+.workspace-split__resize:hover::before,
+.workspace-split__resize:focus-visible::before {
   background: color-mix(in srgb, var(--octant-focus-ring) 35%, var(--octant-border));
 }
 
