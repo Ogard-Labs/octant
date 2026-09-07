@@ -19,13 +19,13 @@ import { LoaderCircle } from "lucide-react";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import {
-  OctantEmptyStateCopy,
-  OctantEmptyStateDescription,
-  OctantEmptyStateEyebrow,
-  OctantEmptyStateMedia,
-  OctantEmptyStateRoot,
-  OctantEmptyStateTitle,
-} from "../ui/base/OctantEmptyState";
+  OctantEmptyHeader,
+  OctantEmptyDescription,
+  OctantEmptyEyebrow,
+  OctantEmptyMedia,
+  OctantEmptyRoot,
+  OctantEmptyTitle,
+} from "../ui/base/OctantEmpty";
 import { CodeGitPane } from "./CodeGitPane";
 import type { CodeEditorFileProjection } from "./MonacoEditorPane";
 import { CodeOverview, type CodeOverviewSurfaceKind } from "./CodeOverview";
@@ -827,18 +827,18 @@ function PullRequestWorkspaceSurface(
 
 function GitObservationLoading() {
   return (
-    <OctantEmptyStateRoot role="status">
-      <OctantEmptyStateMedia tone="neutral">
+    <OctantEmptyRoot role="status">
+      <OctantEmptyMedia tone="neutral">
         <LoaderCircle aria-hidden="true" className="shell-state__spinner" size={16} />
-      </OctantEmptyStateMedia>
-      <OctantEmptyStateCopy>
-        <OctantEmptyStateEyebrow>Git workspace</OctantEmptyStateEyebrow>
-        <OctantEmptyStateTitle>Loading Git state</OctantEmptyStateTitle>
-        <OctantEmptyStateDescription>
+      </OctantEmptyMedia>
+      <OctantEmptyHeader>
+        <OctantEmptyEyebrow>Git workspace</OctantEmptyEyebrow>
+        <OctantEmptyTitle>Loading Git state</OctantEmptyTitle>
+        <OctantEmptyDescription>
           Loading exact checkout status and diff evidence.
-        </OctantEmptyStateDescription>
-      </OctantEmptyStateCopy>
-    </OctantEmptyStateRoot>
+        </OctantEmptyDescription>
+      </OctantEmptyHeader>
+    </OctantEmptyRoot>
   );
 }
 

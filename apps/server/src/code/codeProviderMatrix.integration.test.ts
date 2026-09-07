@@ -38,18 +38,23 @@ const CODE_OUTCOMES = {
   "openai-image": "unavailable",
   "gemini-native-image": "unavailable",
   "bfl-image": "unavailable",
+  "ideogram-image": "unavailable",
 } as const satisfies Readonly<Record<ProviderDriverKind, CodeOutcome>>;
 
 describe("Code provider matrix", () => {
   it("classifies every declared provider kind with conformance or explicit unavailability", () => {
-    expect(Object.keys(CODE_OUTCOMES)).toHaveLength(23);
+    expect(Object.keys(CODE_OUTCOMES)).toHaveLength(24);
     for (const [providerKind, outcome] of Object.entries(CODE_OUTCOMES) as Array<
       [ProviderDriverKind, CodeOutcome]
     >) {
       if (outcome === "unavailable") {
-        expect(["oh-my-pi", "openai-image", "gemini-native-image", "bfl-image"]).toContain(
-          providerKind,
-        );
+        expect([
+          "oh-my-pi",
+          "openai-image",
+          "gemini-native-image",
+          "bfl-image",
+          "ideogram-image",
+        ]).toContain(providerKind);
         continue;
       }
       const evidence = readProviderConformanceEvidence(providerKind);

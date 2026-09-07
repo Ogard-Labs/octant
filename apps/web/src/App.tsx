@@ -62,9 +62,13 @@ import {
   type SideChatSidecar,
   type WorkAttachmentId,
   type WorkThreadId,
+  decodeUtcTimestamp,
+  type WorkThread,
+  type WorkThreadCommand,
 } from "@octant/contracts";
 import { pastedImageName } from "./chat/composerImagePaste";
 import { markInteraction, markInteractionAfterPaint } from "./polling/interactionTrace";
+import { useMinuteTick } from "./polling/useMinuteTick";
 import { useMachineChangeFeed } from "./polling/useMachineChangeFeed";
 import type { CodeOperationId, ProviderInstance, VoiceSettings } from "@octant/contracts";
 import type {
@@ -208,6 +212,7 @@ import {
 import { useThreadUtilityPresentation } from "./shell/useThreadUtilityPresentation";
 import {
   codeThreadActivity,
+  threadRest,
   projectThreadsAccessForMode,
   sidebarThreadGroupsForMode,
   threadSearchArchivedListingForStatus,
@@ -742,6 +747,8 @@ function LaunchedShell(
   const [automationCenterOpen, setAutomationCenterOpen] = useState(false);
   const [agentsCenterOpen, setAgentsCenterOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
+  // Snoozed rows wake on the clock, so the sidebar keeps a minute-coarse one.
+  const minuteNow = useMinuteTick();
   const [artifactLibraryOpen, setArtifactLibraryOpen] = useState(false);
   const [imageLibraryOpen, setImageLibraryOpen] = useState(false);
   const [draftProviderInstanceId, setDraftProviderInstanceId] =
@@ -3041,9 +3048,24 @@ function LaunchedShell(
           ...(thread.lineageParentThreadId === undefined
             ? {}
             : { lineageParentThreadId: thread.lineageParentThreadId }),
+          ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
+          ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
+          ...threadRest(thread, {
+            now: minuteNow,
+            awaitingInput:
+              (codeProviderRequestsByThreadId[String(thread.threadId)]?.length ?? 0) > 0,
+          }),
         }))
       : [];
-  const workProjectThreads = workNavigation.navigation;
+  // Work rows rest the same way Code rows do; the host's runtime says when a
+  // thread waits on the person, which the builder already turned into
+  // "attention".
+  const workProjectThreads: ReadonlyArray<ChatThreadNavigationItem> = workNavigation.navigation.map(
+    (thread) => ({
+      ...thread,
+      ...threadRest(thread, { now: minuteNow, awaitingInput: thread.activity === "attention" }),
+    }),
+  );
   const sidebarThreadGroups = sidebarThreadGroupsForMode({
     activeMode,
     codeThreads: codeProjectThreads,
@@ -3089,7 +3111,13 @@ function LaunchedShell(
           all: sidebarThreadGroups.all.map(withProviderMark),
           unfiled: sidebarThreadGroups.unfiled.map(withProviderMark),
         };
-  const markedChatNavigation = chatController.navigation.map(withProviderMark);
+  // Chat's durable follow-up is the person's own mark as often as the agent's
+  // question, so it never wakes a snoozed row; only a running answer ending
+  // after a mid-turn snooze does.
+  const markedChatNavigation = chatController.navigation.map((thread) => ({
+    ...withProviderMark(thread),
+    ...threadRest(thread, { now: minuteNow, awaitingInput: false }),
+  }));
 
   // What a Code thread row offers on right-click. Each one carries the row's
   // navigation id, which for a Project-backed thread is its Code thread id;
@@ -3185,6 +3213,12 @@ function LaunchedShell(
     ...(exportCodeThread === undefined ? {} : { onExportThread: exportCodeThread }),
     ...(handOffCodeThread === undefined ? {} : { onHandOffThread: handOffCodeThread }),
     onArchiveThread: (threadId) => void codeController.archiveThread(decodeCodeThreadId(threadId)),
+    onCompleteThread: (threadId) =>
+      void codeController.completeThread(decodeCodeThreadId(threadId)),
+    onReopenThread: (threadId) => void codeController.reopenThread(decodeCodeThreadId(threadId)),
+    onSnoozeThread: (threadId, until) =>
+      void codeController.snoozeThread(decodeCodeThreadId(threadId), until),
+    onWakeThread: (threadId) => void codeController.wakeThread(decodeCodeThreadId(threadId)),
     onCompleteFollowUp: (threadId) =>
       void codeController.completeFollowUp(decodeCodeThreadId(threadId)),
     onMarkFollowUp: (threadId) => void codeController.markFollowUp(decodeCodeThreadId(threadId)),
@@ -3208,13 +3242,72 @@ function LaunchedShell(
   const chatThreadRowActions: ThreadRowActions = {
     ...(exportChatThread === undefined ? {} : { onExportThread: exportChatThread }),
     ...(handOffChatThread === undefined ? {} : { onHandOffThread: handOffChatThread }),
+    onCompleteThread: (threadId) =>
+      void chatController.completeThread(decodeChatThreadId(threadId)),
+    onReopenThread: (threadId) => void chatController.reopenThread(decodeChatThreadId(threadId)),
+    onSnoozeThread: (threadId, until) =>
+      void chatController.snoozeThread(decodeChatThreadId(threadId), until),
+    onWakeThread: (threadId) => void chatController.wakeThread(decodeChatThreadId(threadId)),
     onMarkThreadRead: (threadId) => chatController.markThreadRead(decodeChatThreadId(threadId)),
     onMarkThreadUnread: (threadId) => chatReadCursorStore.unmark(decodeChatThreadId(threadId)),
     onPinInPane: pinChatThreadInPane,
   };
+  // Work has no controller of its own for thread metadata: a rest command
+  // goes straight to the client with the version the sidebar last saw, and
+  // the host's answer is folded back into the navigation list.
+  const runWorkRestCommand = async (
+    threadId: string,
+    command: (expectedVersion: WorkThread["version"]) => WorkThreadCommand,
+  ): Promise<void> => {
+    const thread = workNavigation.bootstrap?.threads.find(
+      (candidate) => String(candidate.id) === threadId,
+    );
+    if (thread === undefined) return;
+    try {
+      const result = await workThreadClient.execute(command(thread.version));
+      if ("kind" in result && result.kind === "thread-updated") {
+        workNavigation.applyThread(result.thread);
+      }
+    } catch (error) {
+      // The host refused (a running turn, a wake time already gone) or the
+      // row was stale: say so where thread notices already appear, and read
+      // the list again so the row shows the thread as the host has it.
+      setThreadExportNotice(
+        error instanceof Error && error.message.trim() !== ""
+          ? error.message
+          : "The host could not change this thread.",
+      );
+      void workNavigation.refresh();
+    }
+  };
   const workThreadRowActions: ThreadRowActions = {
     ...(exportWorkThread === undefined ? {} : { onExportThread: exportWorkThread }),
     ...(handOffWorkThread === undefined ? {} : { onHandOffThread: handOffWorkThread }),
+    onCompleteThread: (threadId) =>
+      void runWorkRestCommand(threadId, (expectedVersion) => ({
+        kind: "complete-work-thread",
+        threadId: decodeWorkThreadId(threadId),
+        expectedVersion,
+      })),
+    onReopenThread: (threadId) =>
+      void runWorkRestCommand(threadId, (expectedVersion) => ({
+        kind: "reopen-work-thread",
+        threadId: decodeWorkThreadId(threadId),
+        expectedVersion,
+      })),
+    onSnoozeThread: (threadId, until) =>
+      void runWorkRestCommand(threadId, (expectedVersion) => ({
+        kind: "snooze-work-thread",
+        threadId: decodeWorkThreadId(threadId),
+        expectedVersion,
+        until: decodeUtcTimestamp(until),
+      })),
+    onWakeThread: (threadId) =>
+      void runWorkRestCommand(threadId, (expectedVersion) => ({
+        kind: "wake-work-thread",
+        threadId: decodeWorkThreadId(threadId),
+        expectedVersion,
+      })),
     onPinInPane: pinWorkThreadInPane,
   };
 
@@ -3225,6 +3318,11 @@ function LaunchedShell(
     if (chatController.status !== "ready") return;
     const thread = chatController.navigation.find((candidate) => candidate.threadId === threadId);
     if (thread === undefined) return;
+    // Opening a thread whose snooze ended is the acknowledgement; the host
+    // drops the stale snooze so the row stops saying "Woke".
+    if (markedChatNavigation.find((row) => row.threadId === threadId)?.woke === true) {
+      void chatController.wakeThread(decodeChatThreadId(threadId));
+    }
     // Picking a thread means "show me this thread": a Board or Inbox that was
     // open stays out of the way rather than keeping the pane while the row
     // highlights underneath it.
@@ -3243,6 +3341,11 @@ function LaunchedShell(
       (candidate) => String(candidate.threadId) === navigationId,
     );
     if (thread === undefined) return;
+    // Opening a thread whose snooze ended is the acknowledgement: the host
+    // drops the stale snooze so the row stops saying "Woke". A thread opened
+    // from inside the Snoozed shelf keeps its snooze; peeking is not waking.
+    const row = codeProjectThreads.find((candidate) => candidate.threadId === navigationId);
+    if (row?.woke === true) void codeController.wakeThread(decodeCodeThreadId(navigationId));
     closeWorkspaceReaders();
     markInteraction("renderer", "thread-open-requested");
     markInteractionAfterPaint("thread-open");
@@ -3259,6 +3362,13 @@ function LaunchedShell(
       (candidate) => String(candidate.threadId) === navigationId,
     );
     if (thread === undefined) return;
+    if (workProjectThreads.find((row) => row.threadId === navigationId)?.woke === true) {
+      void runWorkRestCommand(navigationId, (expectedVersion) => ({
+        kind: "wake-work-thread",
+        threadId: decodeWorkThreadId(navigationId),
+        expectedVersion,
+      }));
+    }
     closeWorkspaceReaders();
     markInteraction("renderer", "thread-open-requested");
     markInteractionAfterPaint("thread-open");

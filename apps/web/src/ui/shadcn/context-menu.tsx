@@ -1,7 +1,7 @@
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
-import { useState, type ComponentProps, type ReactNode } from "react";
+import { ChevronRight } from "lucide-react";
+import type { ComponentProps } from "react";
 import { cn } from "./utils";
-import type { ShadcnMenuItem } from "./dropdown-menu";
 
 export function ContextMenu(props: ComponentProps<typeof ContextMenuPrimitive.Root>) {
   return <ContextMenuPrimitive.Root {...props} />;
@@ -28,7 +28,7 @@ export function ContextMenuContent({
       <ContextMenuPrimitive.Positioner className="outline-none window-no-drag">
         <ContextMenuPrimitive.Popup
           className={cn(
-            "window-no-drag min-w-48 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none",
+            "window-no-drag min-w-48 rounded-xl bg-popover p-1 text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
             className,
           )}
           {...props}
@@ -54,6 +54,9 @@ export function ContextMenuLabel({
   );
 }
 
+const contextMenuItemClassName =
+  "window-no-drag relative flex cursor-default items-center rounded-md px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground";
+
 export function ContextMenuItem({
   className,
   closeOnClick = true,
@@ -61,13 +64,55 @@ export function ContextMenuItem({
 }: ComponentProps<typeof ContextMenuPrimitive.Item>) {
   return (
     <ContextMenuPrimitive.Item
-      className={cn(
-        "window-no-drag relative flex cursor-default items-center rounded-sm px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground",
-        className,
-      )}
+      className={cn(contextMenuItemClassName, className)}
       closeOnClick={closeOnClick}
       {...props}
     />
+  );
+}
+
+export function ContextMenuSub(props: ComponentProps<typeof ContextMenuPrimitive.SubmenuRoot>) {
+  return <ContextMenuPrimitive.SubmenuRoot data-slot="context-menu-sub" {...props} />;
+}
+
+export function ContextMenuSubTrigger({
+  className,
+  children,
+  ...props
+}: ComponentProps<typeof ContextMenuPrimitive.SubmenuTrigger>) {
+  return (
+    <ContextMenuPrimitive.SubmenuTrigger
+      className={cn(contextMenuItemClassName, className)}
+      data-slot="context-menu-sub-trigger"
+      {...props}
+    >
+      {children}
+      <ChevronRight aria-hidden="true" className="ml-auto" size={14} strokeWidth={1.8} />
+    </ContextMenuPrimitive.SubmenuTrigger>
+  );
+}
+
+export function ContextMenuSubContent({
+  className,
+  ...props
+}: ComponentProps<typeof ContextMenuPrimitive.Popup>) {
+  return (
+    <ContextMenuPrimitive.Portal>
+      <ContextMenuPrimitive.Positioner
+        align="start"
+        className="outline-none window-no-drag"
+        side="right"
+        sideOffset={0}
+      >
+        <ContextMenuPrimitive.Popup
+          className={cn(
+            "window-no-drag min-w-48 rounded-xl bg-popover p-1 text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
+            className,
+          )}
+          {...props}
+        />
+      </ContextMenuPrimitive.Positioner>
+    </ContextMenuPrimitive.Portal>
   );
 }
 
@@ -77,62 +122,5 @@ export function ContextMenuSeparator({
 }: ComponentProps<typeof ContextMenuPrimitive.Separator>) {
   return (
     <ContextMenuPrimitive.Separator className={cn("my-1 h-px bg-border", className)} {...props} />
-  );
-}
-
-export interface ShadcnContextMenuProps {
-  readonly items: ReadonlyArray<ShadcnMenuItem>;
-  readonly onValueChange: (value: string) => void;
-  readonly children: ReactNode;
-  readonly triggerClassName?: string;
-}
-
-/**
- * Owned context-menu recipe: the same items a dropdown action menu offers,
- * opened from the pointer's context-menu gesture rather than a trigger button.
- */
-export function ShadcnContextMenu(props: ShadcnContextMenuProps) {
-  // The recipe owns its own root, so it is the only place that can see this
-  // menu open and say so. Base UI does not set `aria-expanded` for a context
-  // menu, and the trigger the recipe renders reaches every caller of it.
-  const [open, setOpen] = useState(false);
-  return (
-    <ContextMenu onOpenChange={setOpen}>
-      <ContextMenuTrigger
-        aria-expanded={open}
-        className={cn(props.triggerClassName, "window-no-drag")}
-      >
-        {props.children}
-      </ContextMenuTrigger>
-      <ContextMenuContent>
-        {props.items.map((item) => (
-          <ContextMenuItem
-            className={cn(
-              "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag",
-            )}
-            closeOnClick
-            key={item.value}
-            label={item.label}
-            {...(item.disabled === true ? { disabled: true } : {})}
-            onClick={() => {
-              if (item.disabled === true) return;
-              props.onValueChange(item.value);
-            }}
-          >
-            {item.icon === undefined ? null : (
-              <span aria-hidden="true" className="flex size-4 items-center justify-center">
-                {item.icon}
-              </span>
-            )}
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate font-medium">{item.label}</span>
-              {item.description === undefined ? null : (
-                <span className="truncate text-xs text-muted-foreground">{item.description}</span>
-              )}
-            </span>
-          </ContextMenuItem>
-        ))}
-      </ContextMenuContent>
-    </ContextMenu>
   );
 }

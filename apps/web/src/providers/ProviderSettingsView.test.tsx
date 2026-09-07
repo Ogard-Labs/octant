@@ -1129,6 +1129,66 @@ describe("ProviderSettingsView", () => {
     expect(props.onRemove).toHaveBeenCalledWith(id);
   });
 
+  it("creates an Ideogram image profile with a write-only key and no base URL", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: geminiImageProvider() });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Ideogram Image");
+    const create = screen.getByRole("form", { name: "Add Ideogram image profile" });
+    expect(within(create).queryByLabelText("API base URL")).not.toBeInTheDocument();
+    expect(within(create).queryByLabelText("Quality")).not.toBeInTheDocument();
+    expect(within(create).queryByLabelText("Size")).not.toBeInTheDocument();
+    expect(within(create).queryByLabelText("Aspect ratio")).not.toBeInTheDocument();
+    await user.type(within(create).getByLabelText("Provider name"), "Ideogram");
+    await user.type(within(create).getByLabelText("Model allowlist"), "ideogram-v3, ideogram-v4");
+    await user.type(within(create).getByLabelText("Default model"), "ideogram-v3");
+    await user.type(within(create).getByLabelText("API key"), "ideogram-secret");
+    await user.click(screen.getByRole("button", { name: "Add Ideogram image profile" }));
+
+    expect(props.onCreateIdeogramImage).toHaveBeenCalledOnce();
+    const [name, configuration, credential] = vi.mocked(props.onCreateIdeogramImage).mock.calls[0]!;
+    expect(name).toBe("Ideogram");
+    expect(configuration).toMatchObject({
+      kind: "ideogram-image-http",
+      modelAllowlist: ["ideogram-v3", "ideogram-v4"],
+      defaultModel: "ideogram-v3",
+    });
+    expect("baseUrl" in configuration).toBe(false);
+    expect("quality" in configuration).toBe(false);
+    expect(credential.value).toBe("ideogram-secret");
+    credential.clear();
+    expect(document.body.textContent).not.toContain("ideogram-secret");
+  });
+
+  it("saves Ideogram image configuration and clears the stored key on remove", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: ideogramImageProvider() });
+    renderExpanded(<ProviderSettingsView {...props} />);
+    const card = screen.getByRole("article", { name: "Ideogram" });
+    await user.clear(within(card).getByLabelText("Model allowlist for Ideogram"));
+    await user.type(within(card).getByLabelText("Model allowlist for Ideogram"), "ideogram-v4");
+    await user.clear(within(card).getByLabelText("Default model for Ideogram"));
+    await user.type(within(card).getByLabelText("Default model for Ideogram"), "ideogram-v4");
+    await user.type(within(card).getByLabelText("API key for Ideogram"), "rotated-ideogram");
+    await user.click(
+      within(card).getByRole("button", { name: "Save Ideogram image settings for Ideogram" }),
+    );
+    expect(props.onChangeIdeogramImageConfiguration).toHaveBeenCalledOnce();
+    const [, configuration, credential] = vi.mocked(props.onChangeIdeogramImageConfiguration).mock
+      .calls[0]!;
+    expect(configuration).toMatchObject({
+      kind: "ideogram-image-http",
+      modelAllowlist: ["ideogram-v4"],
+      defaultModel: "ideogram-v4",
+    });
+    expect(credential.value).toBe("rotated-ideogram");
+    expect(document.body.textContent).not.toContain("rotated-ideogram");
+
+    await user.click(within(card).getByRole("button", { name: "Remove Ideogram" }));
+    expect(props.onRemove).toHaveBeenCalledWith(id);
+  });
+
   it("resets stale api-key auth back to bearer when switching from Anthropic to OpenAI-compatible", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: anthropicProvider() });
@@ -1818,6 +1878,7 @@ function ControllerBackedProviderSettings(props: {
       onChangeOpenAiImageConfiguration={controller.changeOpenAiImageConfiguration}
       onChangeGeminiImageConfiguration={controller.changeGeminiImageConfiguration}
       onChangeBflImageConfiguration={controller.changeBflImageConfiguration}
+      onChangeIdeogramImageConfiguration={controller.changeIdeogramImageConfiguration}
       onClearProviderCredential={controller.clearProviderCredential}
       onBeginProviderAuthentication={controller.beginProviderAuthentication}
       onCompleteProviderAuthentication={controller.completeProviderAuthentication}
@@ -1836,6 +1897,7 @@ function ControllerBackedProviderSettings(props: {
       onCreateOpenAiImage={controller.createOpenAiImage}
       onCreateGeminiImage={controller.createGeminiImage}
       onCreateBflImage={controller.createBflImage}
+      onCreateIdeogramImage={controller.createIdeogramImage}
       onPermissionPersistenceChange={controller.updatePermissionPersistence}
       onProbe={controller.probe}
       onProviderOrderChange={controller.updateProviderOrder}
@@ -1974,6 +2036,10 @@ function fixture(
       credential.clear();
       return true;
     }),
+    onCreateIdeogramImage: vi.fn(async (_name, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
     onRename: vi.fn(async () => true),
     onChangeBinary: vi.fn(async () => true),
     onChangeClaudeConfiguration: vi.fn(async (_id, _configuration, credential) => {
@@ -2038,6 +2104,10 @@ function fixture(
       return true;
     }),
     onChangeBflImageConfiguration: vi.fn(async (_id, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
+    onChangeIdeogramImageConfiguration: vi.fn(async (_id, _configuration, credential) => {
       credential.clear();
       return true;
     }),
@@ -2257,6 +2327,24 @@ function bflImageProvider(): ProviderInstance {
       kind: "bfl-image-http",
       modelAllowlist: ["flux-pro-1.1" as never],
       defaultModel: "flux-pro-1.1" as never,
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1 as never,
+    createdAt: "2026-08-28T10:00:00.000Z" as never,
+    updatedAt: "2026-08-28T10:00:00.000Z" as never,
+  };
+}
+
+function ideogramImageProvider(): ProviderInstance {
+  return {
+    id,
+    displayName: "Ideogram",
+    driverKind: "ideogram-image",
+    configuration: {
+      kind: "ideogram-image-http",
+      modelAllowlist: ["ideogram-v3" as never],
+      defaultModel: "ideogram-v3" as never,
     },
     enabled: true,
     environmentPolicy: "inherit-host",

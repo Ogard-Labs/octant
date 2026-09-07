@@ -35,6 +35,8 @@ import type {
   QwenProviderInstance,
   GooseProviderConfiguration,
   GooseProviderInstance,
+  IdeogramImageProviderConfiguration,
+  IdeogramImageProviderInstance,
   KimiCodeProviderInstance,
   KiloProviderConfiguration,
   KiloProviderInstance,
@@ -93,11 +95,12 @@ function reject(code: ProviderPolicyRejectionCode, message: string): never {
 
 export function isImageProfileDriverKind(
   driverKind: ProviderDriverKind,
-): driverKind is "openai-image" | "gemini-native-image" | "bfl-image" {
+): driverKind is "openai-image" | "gemini-native-image" | "bfl-image" | "ideogram-image" {
   return (
     driverKind === "openai-image" ||
     driverKind === "gemini-native-image" ||
-    driverKind === "bfl-image"
+    driverKind === "bfl-image" ||
+    driverKind === "ideogram-image"
   );
 }
 
@@ -1316,6 +1319,52 @@ function normalizeBflImageConfiguration(
   };
 }
 
+export interface IdeogramImageConfigurationInput {
+  readonly kind: IdeogramImageProviderConfiguration["kind"];
+  readonly modelAllowlist: ReadonlyArray<string>;
+  readonly defaultModel: string;
+}
+
+function normalizeIdeogramImageConfiguration(
+  configuration: IdeogramImageConfigurationInput,
+): IdeogramImageProviderConfiguration {
+  const { modelAllowlist, defaultModel } = normalizeImageModelSelection(
+    configuration.modelAllowlist,
+    configuration.defaultModel,
+  );
+  return {
+    kind: "ideogram-image-http",
+    modelAllowlist,
+    defaultModel,
+  };
+}
+
+interface CreateIdeogramImageProviderInput {
+  readonly id: ProviderInstanceId;
+  readonly displayName: string;
+  readonly configuration: IdeogramImageConfigurationInput;
+  readonly existingInstances: ReadonlyArray<ProviderInstance>;
+  readonly expectedVersion: AggregateVersion;
+  readonly createdAt: UtcTimestamp;
+  readonly enabled?: boolean;
+}
+
+export function createIdeogramImageProvider(
+  input: CreateIdeogramImageProviderInput,
+): IdeogramImageProviderInstance {
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    driverKind: "ideogram-image",
+    configuration: normalizeIdeogramImageConfiguration(input.configuration),
+    enabled: input.enabled ?? true,
+    environmentPolicy: "inherit-host",
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
 interface CreateBflImageProviderInput {
   readonly id: ProviderInstanceId;
   readonly displayName: string;
@@ -1560,6 +1609,19 @@ export function changeBflImageConfiguration(
   return {
     ...current,
     configuration: normalizeBflImageConfiguration(input),
+    version: nextVersion(current.version),
+    updatedAt,
+  };
+}
+
+export function changeIdeogramImageConfiguration(
+  current: IdeogramImageProviderInstance,
+  input: IdeogramImageConfigurationInput,
+  updatedAt: UtcTimestamp,
+): IdeogramImageProviderInstance {
+  return {
+    ...current,
+    configuration: normalizeIdeogramImageConfiguration(input),
     version: nextVersion(current.version),
     updatedAt,
   };

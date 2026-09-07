@@ -67,6 +67,7 @@ describe("provider registry contracts", () => {
     "openai-image",
     "gemini-native-image",
     "bfl-image",
+    "ideogram-image",
   ] as const)("decodes the %s driver kind", (driverKind) => {
     expect(Schema.decodeUnknownSync(ProviderDriverKind)(driverKind)).toBe(driverKind);
   });
@@ -400,6 +401,50 @@ describe("provider registry contracts", () => {
       decodeProviderInstance({
         ...instance,
         configuration: { ...instance.configuration, modelAllowlist: ["flux-dev", "flux-dev"] },
+      }),
+    ).toThrow();
+    expect(decodeProviderInstanceConfigurationChanged({ instance })).toEqual({ instance });
+    expect(() => decodeProviderInstanceBinaryChanged({ instance })).toThrow();
+  });
+
+  it("decodes an Ideogram image profile without a base URL or secret", () => {
+    const instance = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000434",
+      displayName: "Ideogram",
+      driverKind: "ideogram-image",
+      configuration: {
+        kind: "ideogram-image-http",
+        modelAllowlist: ["ideogram-v3", "ideogram-v4"],
+        defaultModel: "ideogram-v3",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-08-28T10:00:00.000Z",
+      updatedAt: "2026-08-28T10:00:00.000Z",
+    });
+
+    expect(instance.driverKind).toBe("ideogram-image");
+    expect(JSON.stringify(instance)).not.toMatch(/api.?key|credential|token|baseUrl/i);
+    expect(() =>
+      decodeProviderInstance({
+        ...instance,
+        configuration: { ...instance.configuration, baseUrl: "https://api.ideogram.ai" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...instance,
+        configuration: { ...instance.configuration, defaultModel: "ideogram-v2" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...instance,
+        configuration: {
+          ...instance.configuration,
+          modelAllowlist: ["ideogram-v4", "ideogram-v4"],
+        },
       }),
     ).toThrow();
     expect(decodeProviderInstanceConfigurationChanged({ instance })).toEqual({ instance });
@@ -1495,6 +1540,50 @@ describe("provider registry contracts", () => {
         expectedVersion: 0,
         displayName: "FLUX",
         configuration: { ...bflImageConfiguration, defaultModel: "flux-dev" },
+      }),
+    ).toThrow();
+
+    const ideogramImageConfiguration = {
+      kind: "ideogram-image-http",
+      modelAllowlist: ["ideogram-v3"],
+      defaultModel: "ideogram-v3",
+    } as const;
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "create-ideogram-image-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: "Ideogram",
+        configuration: ideogramImageConfiguration,
+      }),
+    ).toMatchObject({
+      kind: "create-ideogram-image-provider",
+      configuration: ideogramImageConfiguration,
+    });
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "change-ideogram-image-configuration",
+        instanceId: ids.instance,
+        expectedVersion: 1,
+        configuration: { ...ideogramImageConfiguration, defaultModel: "ideogram-v3" },
+      }),
+    ).toMatchObject({ kind: "change-ideogram-image-configuration" });
+    expect(() =>
+      decodeProviderRegistryCommand({
+        kind: "create-ideogram-image-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: "Ideogram",
+        configuration: { ...ideogramImageConfiguration, baseUrl: "https://api.ideogram.ai" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderRegistryCommand({
+        kind: "create-ideogram-image-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: "Ideogram",
+        configuration: { ...ideogramImageConfiguration, defaultModel: "ideogram-v4" },
       }),
     ).toThrow();
 

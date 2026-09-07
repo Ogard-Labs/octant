@@ -11,6 +11,7 @@ describe("provider Settings presentation", () => {
     expect(driverLabel("openai-image")).toBe("OpenAI Image");
     expect(driverLabel("gemini-native-image")).toBe("Gemini Image");
     expect(driverLabel("bfl-image")).toBe("Black Forest Labs Image");
+    expect(driverLabel("ideogram-image")).toBe("Ideogram Image");
   });
 
   it("turns technical readiness states into compact next-action labels", () => {
