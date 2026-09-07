@@ -125,6 +125,14 @@ and removes process-local registration when its owning client closes. Loopback
 renderer ports share the local-user trust class; the listener never reflects a
 non-loopback web origin into local authority.
 
+Managed runtime tool transport uses the provider SDK's existing tool-request
+and tool-answer contract. The adapter's in-process server exposes only the
+current app-authored catalogue; external provider tool-server configuration
+stays disabled. Code browser sessions can request an inline approval without
+raising thread access. The grant is bound to the exact browser context and
+owner, and browser-service policy is checked again before effects. See
+[decision 0093](decisions/0093-app-owned-tools-use-managed-runtime-transports.md).
+
 ## Modes: Chat, Work, and Code
 
 Modes are server-enforced domain policy, not renderer flags. Chat and Work can
