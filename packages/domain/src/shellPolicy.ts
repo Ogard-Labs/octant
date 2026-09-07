@@ -91,7 +91,7 @@ const DEFAULT_IDS = {
 const MODE_TITLES: Record<OctantMode, string> = {
   chat: "Welcome to Chat",
   work: "Welcome to Work",
-  code: "Welcome to Code",
+  code: "New task",
 };
 
 export function defaultContextKey(mode: OctantMode): WorkspaceContextKey {

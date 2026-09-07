@@ -19,6 +19,29 @@ const secondPaneId = decodePaneId("00000000-0000-4000-8000-000000000622");
 const splitNodeId = "00000000-0000-4000-8000-000000000610";
 
 describe("SplitWorkspace", () => {
+  it("labels a restored Code welcome pane as New task", () => {
+    const layout = decodeWorkspaceLayoutNode({
+      kind: "pane",
+      nodeId: "00000000-0000-4000-8000-000000000611",
+      paneId: String(firstPaneId),
+      surface: {
+        kind: "welcome",
+        id: "00000000-0000-4000-8000-000000000613",
+        mode: "code",
+        title: "Welcome to Code",
+      },
+    });
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        layout={layout}
+        renderSurface={() => <p>Composer</p>}
+      />,
+    );
+    expect(screen.getByRole("region", { name: "Workspace pane: New task" })).toBeVisible();
+    expect(screen.queryByText("Welcome to Code")).not.toBeInTheDocument();
+  });
+
   it("shows the resolved provider mark in a thread pane tab when enabled", () => {
     const handlers = splitCallbacks();
     const layout = decodeWorkspaceLayoutNode({

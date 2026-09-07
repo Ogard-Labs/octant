@@ -1079,7 +1079,7 @@ describe("ShellProjection", () => {
         kind: "welcome",
         id: unsupported.layouts.code.tabs[0]!.id,
         mode: "code",
-        title: "Welcome to Code",
+        title: "New task",
       },
     });
     connection.close();
@@ -1250,7 +1250,7 @@ describe("ShellProjection", () => {
       // title can never enter renderer state.
       expect(readWindowWorkspace(connection, ids.window)?.workspace.layouts.code).toMatchObject({
         kind: "pane",
-        surface: { kind: "welcome", title: "Welcome to Code" },
+        surface: { kind: "welcome", title: "New task" },
       });
       connection.close();
     },

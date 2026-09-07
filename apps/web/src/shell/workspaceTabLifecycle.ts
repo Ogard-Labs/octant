@@ -9,7 +9,16 @@ import type {
 } from "@octant/contracts/shell";
 
 export function activeSurfaceTitle(layout: WorkspaceLayoutNode, activePaneId: PaneId): string {
-  return findWorkspacePane(layout, activePaneId)?.surface.title ?? "Octant";
+  const surface = findWorkspacePane(layout, activePaneId)?.surface;
+  return surface === undefined ? "Octant" : workspaceSurfaceTitle(surface);
+}
+
+export function workspaceSurfaceTitle(surface: WorkspaceTab): string {
+  return surface.kind === "welcome" &&
+    surface.mode === "code" &&
+    surface.title === "Welcome to Code"
+    ? "New task"
+    : surface.title;
 }
 
 export function activeChatThreadTabId(

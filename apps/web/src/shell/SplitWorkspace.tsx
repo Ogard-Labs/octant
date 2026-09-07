@@ -21,6 +21,7 @@ import {
 import { WorkspaceDragStatus, WorkspaceDropOverlay } from "./WorkspaceDropOverlay";
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
+import { workspaceSurfaceTitle } from "./workspaceTabLifecycle";
 import { PullRequestChip, type PullRequestChipProps } from "../code/PullRequestChip";
 import type { ThreadProviderIdentity } from "./navigationModel";
 
@@ -298,6 +299,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
     "threadId" in surface ? props.paneFactsByThreadId?.get(String(surface.threadId)) : undefined;
   const path = "threadId" in surface ? (facts?.path ?? props.contextLabel) : undefined;
   const showHeader = props.layout.kind !== "pane" || props.showSinglePaneHeader !== false;
+  const title = workspaceSurfaceTitle(surface);
   const activateUnlessClosing = (target: EventTarget | null) => {
     // Activating can open another dock and resize the pane between pointer
     // down and click, moving its close button away from the pointer.
@@ -307,7 +309,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
   return (
     <section
       aria-current={active ? "true" : undefined}
-      aria-label={`Workspace pane: ${surface.title}`}
+      aria-label={`Workspace pane: ${title}`}
       className="workspace-pane"
       data-active={active ? "true" : "false"}
       data-focused={focused ? "true" : "false"}
@@ -333,7 +335,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                   dragKey,
                   paneId: pane.paneId,
                   surface,
-                  title: surface.title,
+                  title,
                 })
               }
               onPointerMove={props.drag.onPointerMove}
@@ -364,7 +366,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                     : { checks: facts.pullRequest.checks })}
                 />
               )}
-              <span className="workspace-pane__title">{surface.title}</span>
+              <span className="workspace-pane__title">{title}</span>
             </span>
             {path === undefined ? null : (
               <span aria-hidden="true" className="workspace-pane__path" title={path}>
@@ -380,7 +382,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
             {props.layout.kind === "pane" ? null : (
               <OctantIconButton
                 className="workspace-pane__close"
-                label={`Close ${surface.title}`}
+                label={`Close ${title}`}
                 onClick={() => props.onClosePane(pane.paneId)}
                 type="button"
               >
@@ -432,7 +434,7 @@ function PaneMenu(props: {
   return (
     <OctantContextMenuContent>
       <OctantContextMenuGroup>
-        <OctantContextMenuLabel>{props.surface.title}</OctantContextMenuLabel>
+        <OctantContextMenuLabel>{workspaceSurfaceTitle(props.surface)}</OctantContextMenuLabel>
       </OctantContextMenuGroup>
       <OctantContextMenuItem
         label={focusLabel}
