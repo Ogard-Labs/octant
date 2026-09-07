@@ -13,6 +13,7 @@ import {
   resolveEffectiveThemeMode,
   resolveTypographyFallback,
   resolveVibrancyOverlayAdjustment,
+  resolveAppBackground,
 } from "./themePolicy";
 
 const baseSettings: ThemeSettings = {
@@ -266,5 +267,84 @@ describe("resolveEffectiveSidebarBackground", () => {
     // 85 (already >= 80), then strong reduces by 30 -> 55, then re-clamped to >= 80 -> 80.
     // The increased-contrast floor always wins over vibrancy reduction.
     expect(resolved.overlayOpacity).toBe(80);
+  });
+});
+
+describe("application background policy", () => {
+  const resolvedDefaults = {
+    patternOpacity: 0.55,
+    patternSpeed: 1,
+    patternIntensity: 0.6,
+    photoOpacity: 0.42,
+    scope: "welcome",
+    coversSidebar: false,
+  };
+
+  it("animates the theme pattern until reduced motion or a zero speed asks it to hold still", () => {
+    expect(resolveAppBackground(baseSettings)).toEqual({
+      ...resolvedDefaults,
+      kind: "theme",
+      backgroundId: null,
+      animated: true,
+    });
+    expect(resolveAppBackground({ ...baseSettings, reducedMotion: true }).animated).toBe(false);
+    expect(resolveAppBackground(baseSettings, true).animated).toBe(false);
+    expect(
+      resolveAppBackground({
+        ...baseSettings,
+        appBackground: { ...baseSettings.appBackground, patternSpeed: 0 },
+      }).animated,
+    ).toBe(false);
+  });
+
+  it("keeps a photo under reduced motion and hands its image id and dials to the renderer", () => {
+    const settings: ThemeSettings = {
+      ...baseSettings,
+      reducedMotion: true,
+      appBackground: {
+        ...baseSettings.appBackground,
+        kind: "photo",
+        backgroundId: "00000000-0000-4000-8000-000000000b01" as never,
+        photoOpacity: 70,
+        patternSpeed: 100,
+      },
+    };
+    expect(resolveAppBackground(settings)).toEqual({
+      ...resolvedDefaults,
+      kind: "photo",
+      backgroundId: "00000000-0000-4000-8000-000000000b01",
+      animated: false,
+      photoOpacity: 0.7,
+      patternSpeed: 2,
+    });
+  });
+
+  it("runs under the sidebar only when the ground is everywhere and a person asked for it", () => {
+    const everywhere = resolveAppBackground({
+      ...baseSettings,
+      appBackground: { ...baseSettings.appBackground, scope: "everywhere", coversSidebar: true },
+    });
+    expect(everywhere.scope).toBe("everywhere");
+    expect(everywhere.coversSidebar).toBe(true);
+    const welcomeOnly = resolveAppBackground({
+      ...baseSettings,
+      appBackground: { ...baseSettings.appBackground, scope: "welcome", coversSidebar: true },
+    });
+    expect(welcomeOnly.coversSidebar).toBe(false);
+  });
+
+  it("turns the ground off under increased contrast and when a person chose none", () => {
+    expect(resolveAppBackground({ ...baseSettings, increasedContrast: true })).toEqual({
+      ...resolvedDefaults,
+      kind: "none",
+      backgroundId: null,
+      animated: false,
+    });
+    expect(
+      resolveAppBackground({
+        ...baseSettings,
+        appBackground: { ...baseSettings.appBackground, kind: "none" },
+      }).kind,
+    ).toBe("none");
   });
 });

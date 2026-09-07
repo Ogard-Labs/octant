@@ -34,6 +34,7 @@ import {
 } from "react";
 import { ComposerModelPicker } from "../../providers/ComposerModelPicker";
 import { ThreadComposer } from "../../composer/ThreadComposer";
+import { WelcomeHeading } from "../../composer/WelcomeHeading";
 import { ComposerVoiceButton } from "../../voice/ComposerVoiceButton";
 import { appendTranscript } from "../../voice/appendTranscript";
 import { HostSelector } from "../../shell/HostSelector";
@@ -73,6 +74,8 @@ export const CODE_DELIVERY_OUTCOME_LABELS: Record<CodeDeliveryOutcomeKind, strin
 };
 
 export interface CodeComposerAdapterProps {
+  /** The person's name from their profile, for the greeting on the hero. */
+  readonly greetingName?: string | undefined;
   readonly projectId?: ProjectId;
   /** False when the server says the selected Code Project is unavailable. */
   readonly projectAvailable?: boolean;
@@ -525,7 +528,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     <section aria-label="New Code thread" className="code-composer-adapter">
       <div className="welcome">
         <div className="welcome__heading">
-          <h1 className="oct-title oct-title--hero">What should we build?</h1>
+          <WelcomeHeading greetingName={props.greetingName} question="What should we build?" />
           {props.projectAvailable === false &&
           props.projectId !== undefined &&
           props.errorMessage === undefined ? (

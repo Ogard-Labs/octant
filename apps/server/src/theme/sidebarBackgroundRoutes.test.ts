@@ -3,7 +3,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_SIDEBAR_BACKGROUND, type SidebarBackground } from "@octant/contracts";
+import {
+  DEFAULT_SIDEBAR_BACKGROUND,
+  decodeAppBackground,
+  decodeSidebarBackgroundMetadata,
+  type SidebarBackground,
+} from "@octant/contracts";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { createSidebarBackgroundRouteHandler } from "./sidebarBackgroundRoutes";
 import { SidebarBackgroundStore } from "./backgroundStore";
@@ -87,6 +92,22 @@ describe("sidebar background routes", () => {
       }),
     );
     expect(res?.status).toBe(400);
+  });
+
+  it("replies to an upload with the contract metadata and nothing of the store's own", async () => {
+    const png = makePng(2, 2, 48);
+    const response = await handler(
+      authedRequest("POST", "/api/theme/sidebar-backgrounds", {
+        body: png,
+        headers: {
+          "content-type": "image/png",
+          "x-octant-sidebar-background-display-name": "wire.png",
+        },
+      }),
+    );
+    const body = await response!.json();
+    expect(() => decodeSidebarBackgroundMetadata(body)).not.toThrow();
+    expect(body).not.toHaveProperty("hash");
   });
 
   it("uploads a background and returns metadata", async () => {
@@ -213,6 +234,36 @@ describe("sidebar background routes", () => {
     );
     expect(delRes?.status).toBe(409);
     const listRes = await handler(authedRequest("GET", "/api/theme/sidebar-backgrounds"));
+    const list = await listRes!.json();
+    expect(list.backgrounds).toHaveLength(1);
+  });
+
+  it("rejects deletion of a photo the application background is showing", async () => {
+    const png = makePng(2, 2, 48);
+    const uploadRes = await handler(
+      authedRequest("POST", "/api/theme/sidebar-backgrounds", {
+        body: png,
+        headers: {
+          "content-type": "image/png",
+          "x-octant-sidebar-background-display-name": "welcome.png",
+        },
+      }),
+    );
+    const uploaded = await uploadRes!.json();
+    const guarded = createSidebarBackgroundRouteHandler({
+      store,
+      windowAuthorityStore,
+      currentSidebarBackground: () => DEFAULT_SIDEBAR_BACKGROUND,
+      currentAppBackground: () => decodeAppBackground({ kind: "photo", backgroundId: uploaded.id }),
+      now: () => 1_000,
+    });
+    const delRes = await guarded(
+      authedRequest("DELETE", `/api/theme/sidebar-backgrounds/${uploaded.id}`),
+    );
+    expect(delRes?.status).toBe(409);
+    const body = await delRes!.json();
+    expect(body.message).toContain("showing this photo");
+    const listRes = await guarded(authedRequest("GET", "/api/theme/sidebar-backgrounds"));
     const list = await listRes!.json();
     expect(list.backgrounds).toHaveLength(1);
   });

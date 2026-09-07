@@ -72,6 +72,7 @@ export type ImplementedSettingId =
   | "sidebar-material"
   | "workspace-material"
   | "sidebar-background"
+  | "app-background"
   | "mode-switcher"
   | "project-view-switcher"
   | "transcript-text-size"
@@ -285,6 +286,8 @@ const settingSearchText: Readonly<Record<ImplementedSettingId, string>> = {
     "appearance translucent workspace window translucency material vibrancy glass system opaque",
   "sidebar-background":
     "sidebar background image preset gradient custom upload overlay color opacity vibrancy",
+  "app-background":
+    "background ground welcome start screen everywhere sidebar theme pattern dither photo image upload opacity speed intensity none",
   "mode-switcher": "mode switcher compact buttons dropdown sidebar navigation",
   "project-view-switcher": "project view switcher icons dropdown sidebar code",
   "transcript-text-size": "transcript conversation text font size small medium large",

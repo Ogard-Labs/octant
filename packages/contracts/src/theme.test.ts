@@ -21,6 +21,8 @@ import {
   TypographyUi,
   DEFAULT_THEME_SETTINGS,
   decodeSidebarBackground,
+  decodeAppBackground,
+  DEFAULT_APP_BACKGROUND,
   decodeSidebarBackgroundListResult,
   decodeSidebarBackgroundMetadata,
   decodeThemeSettings,
@@ -453,5 +455,57 @@ describe("sidebar background contracts", () => {
         secret: "x",
       }),
     ).toThrow();
+  });
+});
+
+describe("application background contracts", () => {
+  const tuning = {
+    patternOpacity: 55,
+    patternSpeed: 50,
+    patternIntensity: 60,
+    photoOpacity: 42,
+    scope: "welcome",
+    coversSidebar: false,
+  };
+
+  it("decodes the theme pattern, a photo, and none, and rejects a photo without an image", () => {
+    expect(decodeAppBackground({ kind: "theme" })).toEqual({ kind: "theme", ...tuning });
+    expect(decodeAppBackground({ kind: "none" })).toEqual({ kind: "none", ...tuning });
+    expect(
+      decodeAppBackground({
+        kind: "photo",
+        backgroundId: "00000000-0000-4000-8000-000000000b01",
+        scope: "everywhere",
+        coversSidebar: true,
+        patternOpacity: 30,
+      }),
+    ).toEqual({
+      kind: "photo",
+      backgroundId: "00000000-0000-4000-8000-000000000b01",
+      ...tuning,
+      scope: "everywhere",
+      coversSidebar: true,
+      patternOpacity: 30,
+    });
+    expect(() => decodeAppBackground({ kind: "photo" })).toThrow();
+    expect(() => decodeAppBackground({ kind: "theme", backgroundId: "x" })).toThrow();
+    expect(() => decodeAppBackground({ kind: "pattern" })).toThrow();
+    expect(() => decodeAppBackground({ kind: "theme", patternSpeed: 140 })).toThrow();
+    expect(() => decodeAppBackground({ kind: "theme", scope: "sidebar" })).toThrow();
+  });
+
+  it("replays settings written before the application background existed as the theme pattern", () => {
+    expect(decodeThemeSettings(validSettings).appBackground).toEqual(DEFAULT_APP_BACKGROUND);
+    const event = decodeThemeSettingsUpdated({
+      settings: { ...validSettings, sidebarBackground: DEFAULT_THEME_SETTINGS.sidebarBackground },
+      version: 3,
+      updatedAt: "2026-09-06T10:00:00.000Z",
+    });
+    expect(event.settings.appBackground).toEqual({ kind: "theme", ...tuning });
+    const photo = decodeThemeSettings({
+      ...validSettings,
+      appBackground: { kind: "photo", backgroundId: "00000000-0000-4000-8000-000000000b01" },
+    });
+    expect(photo.appBackground.kind).toBe("photo");
   });
 });

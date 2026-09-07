@@ -325,7 +325,7 @@ export function CodeHome(props: CodeHomeProps) {
       {next.kind === "ready" && next.cards.length > 0 ? (
         <section aria-label="Continue" className="code-home__section">
           <SectionHead note="Your latest threads and where each one stands." title="Continue" />
-          <ul className="code-home__grid">
+          <ul className="code-home__grid code-home__grid--rows">
             {next.cards.map((card) => {
               const badge = cardBadge(card);
               return (
@@ -333,6 +333,7 @@ export function CodeHome(props: CodeHomeProps) {
                   <HomeCard
                     badge={badge.label}
                     disabled={props.onOpenThread === undefined}
+                    layout="row"
                     facts={
                       <ContinueFacts
                         card={card}
@@ -397,13 +398,19 @@ function HomeCard(props: {
   readonly meta?: string;
   /** A structured line of facts (icons and chips) instead of `meta`. */
   readonly facts?: ReactNode;
+  /**
+   * A card is something to start; a row is something that already exists.
+   * Continue lists threads, so it takes rows over hairlines, not a second
+   * wall of cards under the suggestions.
+   */
+  readonly layout?: "card" | "row";
   readonly disabled?: boolean;
   readonly onClick: () => void;
 }) {
   const Icon = props.icon;
   return (
     <OctantButton
-      className="code-home__card"
+      className={props.layout === "row" ? "code-home__row" : "code-home__card"}
       disabled={props.disabled === true}
       onClick={props.onClick}
       type="button"
