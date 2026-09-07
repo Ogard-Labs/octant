@@ -1409,7 +1409,7 @@ describe("ChatTurnRunner", () => {
         await new Promise<{
           readonly result: { readonly status: string; readonly attached: boolean };
         }>((resolve) =>
-          setTimeout(() => resolve({ result: { status: "ok", attached: true } }), 50),
+          setTimeout(() => resolve({ result: { status: "ok", attached: true } }), 1_200),
         ),
     );
     const sent: Array<{ readonly tools: ReadonlyArray<{ readonly name: string }> }> = [];
@@ -1444,7 +1444,7 @@ describe("ChatTurnRunner", () => {
       researchRouter: new ResearchRouter({
         searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
-      timeoutMs: 10,
+      timeoutMs: 1_000,
     });
 
     await Effect.runPromise(

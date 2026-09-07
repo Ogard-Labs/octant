@@ -12,7 +12,7 @@ import {
 } from "@octant/contracts";
 import { Effect, Queue, Schema, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import { WorkTurnRuntime } from "./workTurnRuntime";
 
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
@@ -112,13 +112,14 @@ describe("WorkTurnRuntime", () => {
   it("keeps the idle window open while an app-managed action is executing", async () => {
     const answerTool = vi.fn(() => Effect.void);
     const execute = vi.fn(async () => {
-      await new Promise<void>((resolve) => setTimeout(resolve, 75));
+      await new Promise<void>((resolve) => setTimeout(resolve, 1_200));
       return { result: { status: "ok" }, isError: false } as const;
     });
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
-    const connection = {
+    const connection: ProviderConnection = {
       subscribe: Effect.succeed(Stream.fromQueue(queue)),
-      start: () => Effect.void,
+      start: (input) => Effect.succeed({ sessionId: input.sessionId }),
+      resume: () => Effect.die("unused"),
       send: () =>
         Effect.gen(function* () {
           yield* Queue.offer(queue, {
@@ -131,7 +132,7 @@ describe("WorkTurnRuntime", () => {
             requestId: "work-tool-1",
             toolName: "work_tool",
             inputJson: "{}",
-          } as never);
+          });
           yield* Queue.offer(queue, {
             instanceId: ids.provider,
             sequence: 2,
@@ -139,20 +140,20 @@ describe("WorkTurnRuntime", () => {
             occurredAt: decodeTimestamp("2026-08-11T12:00:01.000Z"),
             kind: "completed",
             sessionId: ids.session as never,
-          } as never);
+          });
         }),
       interrupt: () => Effect.void,
       stop: () => Effect.void,
       answerApproval: () => Effect.void,
       answerUserInput: () => Effect.void,
       answerTool,
-    } as never;
+    };
     const driver: ProviderDriver = {
       kind: "openai-compatible",
       probe: () => Effect.die("unused"),
       acquire: () => Effect.succeed(connection),
     };
-    const outcome = await new WorkTurnRuntime({ timeoutMs: 10 }).run({
+    const outcome = await new WorkTurnRuntime({ timeoutMs: 1_000 }).run({
       command: decodeStartWorkThreadTurnCommand({
         kind: "start-work-thread-turn",
         requestId: ids.request,
