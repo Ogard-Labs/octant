@@ -138,10 +138,14 @@ describe("built-in theme preset catalog", () => {
     const system = getThemePreset("system")!;
     const grey = parseHexColor(system.tokens.dark!.accent!);
     expect(Math.max(grey.r, grey.g, grey.b) - Math.min(grey.r, grey.g, grey.b)).toBeLessThan(8);
-    // Ink is the true-black one: its page is darker than every other dark page.
-    expect(parseHexColor(getThemePreset("ink")!.tokens.dark!["app-background"]!).r).toBeLessThan(
-      parseHexColor(getThemePreset("moss")!.tokens.dark!["app-background"]!).r,
-    );
+    // The OLED presets' page is exactly black: those pixels switch off.
+    for (const id of ["ink", "obsidian", "onyx"]) {
+      const dark = getThemePreset(id)!.tokens.dark!;
+      expect(dark["app-background"]).toBe("#000000");
+      expect(dark.chrome).toBe("#000000");
+      expect(dark.sidebar).toBe("#000000");
+    }
+    expect(getThemePreset("moss")!.tokens.dark!["app-background"]).not.toBe("#000000");
   });
 
   it("returns undefined for an unknown id without throwing", () => {

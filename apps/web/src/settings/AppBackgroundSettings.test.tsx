@@ -110,6 +110,39 @@ describe("AppBackgroundSettings", () => {
     expect(photos.upload).toHaveBeenCalledWith(file);
   });
 
+  it("keeps a photo uploaded while the library list was still in flight", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    let settleList: (photos: ReadonlyArray<SidebarBackgroundMetadata>) => void = () => undefined;
+    const photos = library({
+      list: vi.fn(
+        () =>
+          new Promise<ReadonlyArray<SidebarBackgroundMetadata>>((resolve) => {
+            settleList = resolve;
+          }),
+      ),
+    });
+    render(
+      <AppBackgroundSettings
+        background={{ ...DEFAULT_APP_BACKGROUND, kind: "photo", backgroundId: PHOTO_ID as never }}
+        library={photos}
+        onChange={onChange}
+      />,
+    );
+
+    await user.upload(
+      screen.getByLabelText("Choose a photo to upload"),
+      new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "sunrise.png", { type: "image/png" }),
+    );
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    // The list answers late and knows nothing of the upload.
+    settleList([photo(PHOTO_ID, "harbour.png")]);
+
+    await user.click(await screen.findByRole("button", { name: "Choose an uploaded photo" }));
+    expect(await screen.findByRole("radio", { name: "sunrise.png" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "harbour.png" })).toBeInTheDocument();
+  });
+
   it("reports a refused upload in the row instead of pretending it worked", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();

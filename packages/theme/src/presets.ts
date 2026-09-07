@@ -176,11 +176,14 @@ function tintedTokens(mode: ThemePresetMode, spec: TintedPresetSpec): Record<str
           divider: 0.58,
           selection: 0.3,
         };
+  // An OLED preset's page really is black: the pixels switch off. The
+  // reading surface and controls keep a little lightness so edges still show.
+  const ground = spec.ink === true ? "#000000" : undefined;
   return {
     ...DEFAULT_DARK_TOKENS,
-    "app-background": color(l.app, tint),
-    chrome: color(l.chrome, tint),
-    sidebar: color(l.sidebar, tint),
+    "app-background": ground ?? color(l.app, tint),
+    chrome: ground ?? color(l.chrome, tint),
+    sidebar: ground ?? color(l.sidebar, tint),
     workspace: color(l.workspace, tint),
     floating: color(l.floating, tint),
     control: color(l.control, tint + 0.004),

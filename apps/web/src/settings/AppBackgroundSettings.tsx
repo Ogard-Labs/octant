@@ -71,7 +71,14 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
     library
       .list()
       .then((list) => {
-        if (!cancelled) setPhotos(list);
+        if (cancelled) return;
+        // An upload that finished while this list was in flight is not in it
+        // yet; keep what the row already knows rather than let a stale list
+        // take a fresh photo away.
+        setPhotos((current) => {
+          const listed = new Set(list.map((photo) => String(photo.id)));
+          return [...current.filter((photo) => !listed.has(String(photo.id))), ...list];
+        });
       })
       .catch(() => {
         if (!cancelled) setStatus("Octant could not list the photos on this host.");
