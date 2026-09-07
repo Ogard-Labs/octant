@@ -133,6 +133,21 @@ describe("SplitWorkspace", () => {
     expect(header).toHaveAttribute("aria-expanded", "true");
   });
 
+  it("closes an inactive pane without first activating and moving its header", async () => {
+    const user = userEvent.setup();
+    const handlers = splitCallbacks();
+    render(
+      <SplitWorkspace
+        {...handlers}
+        layout={splitLayout()}
+        renderSurface={(surface) => surface.title}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Close Second" }));
+    expect(handlers.onClosePane).toHaveBeenCalledWith(secondPaneId);
+    expect(handlers.onActivatePane).not.toHaveBeenCalled();
+  });
+
   it("offers focus, split, and close from a right-click over the pane's header", async () => {
     const user = userEvent.setup();
     const handlers = splitCallbacks();

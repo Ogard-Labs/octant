@@ -90,6 +90,16 @@ html[data-octant-native-host="true"] .shell--wide-context-open .shell-frame__nat
   app-region: no-drag;
 }
 
+/* Pane headers already own their empty draggable space. A sibling native
+   drag overlay crossed their close controls when the workspace material
+   established a stacking context: accessibility activation worked, but
+   pointer clicks dragged the window. Keep that overlay on the sidebar. */
+html[data-octant-native-host="true"]
+  .shell-frame:has(.workspace-pane__header)
+  .shell-frame__native-drag-strip {
+  right: calc(100% - var(--octant-rendered-sidebar-width));
+}
+
 .shell-frame > .window-chrome {
   position: relative;
   top: 0;

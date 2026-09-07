@@ -298,6 +298,12 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
     "threadId" in surface ? props.paneFactsByThreadId?.get(String(surface.threadId)) : undefined;
   const path = "threadId" in surface ? (facts?.path ?? props.contextLabel) : undefined;
   const showHeader = props.layout.kind !== "pane" || props.showSinglePaneHeader !== false;
+  const activateUnlessClosing = (target: EventTarget | null) => {
+    // Activating can open another dock and resize the pane between pointer
+    // down and click, moving its close button away from the pointer.
+    if (target instanceof Element && target.closest(".workspace-pane__close") !== null) return;
+    props.onActivatePane(pane.paneId);
+  };
   return (
     <section
       aria-current={active ? "true" : undefined}
@@ -309,8 +315,8 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
       data-workspace-can-split={canSplit ? "true" : "false"}
       data-workspace-pane-id={pane.paneId}
       onBeforeInputCapture={() => props.onActivatePane(pane.paneId)}
-      onKeyDownCapture={() => props.onActivatePane(pane.paneId)}
-      onPointerDownCapture={() => props.onActivatePane(pane.paneId)}
+      onKeyDownCapture={(event) => activateUnlessClosing(event.target)}
+      onPointerDownCapture={(event) => activateUnlessClosing(event.target)}
     >
       {showHeader ? (
         <OctantContextMenuRoot onOpenChange={setMenuOpen}>
