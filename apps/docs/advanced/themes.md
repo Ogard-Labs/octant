@@ -23,8 +23,14 @@ edit it.
 ### Theme mode and presets
 
 Theme mode is **System**, **Light**, or **Dark**. Built-in presets are
-**System** (follows the current system appearance), **Light**, **Dark**, and
-**Octant** (the product's original graphite palette).
+**System** (follows the current system appearance), **Light**, **Dark**,
+**Octant** (the original charcoal-and-brass palette), and eighteen tinted
+palettes that lean the whole page toward one hue and colour the accent, in
+light and dark: **Moss**, **Lagoon**, **Harbor**, **Iris**, **Rose**,
+**Ember**, **Coral**, **Clay**, **Sand**, **Olive**, **Mint**, **Sky**,
+**Slate**, **Plum**, **Ash**, and the true-black **Ink**, **Obsidian**, and
+**Onyx** for OLED screens. Every preset clears the same text and control
+contrast bars.
 Semantic token roles cover foundation, surface, control, border, text,
 focus, accent, status, and diff colors with contrast validation and safe
 fallback. Theme density is **comfortable** or **compact**.
@@ -60,6 +66,25 @@ Custom uploads accept PNG, JPEG, and WebP only (magic-byte validated), up to
 and vibrancy entirely; **Increased Contrast** clamps overlay opacity to at
 least 80%. Vibrancy is native to the Electron app; web hides the control and
 forces it off.
+
+### Background
+
+The app sits on a ground of its own. **Theme pattern** (the default) is an
+ordered-dither cloud drawn in the theme's accent, so switching presets or
+overriding the accent recolours it at once. **Photo** prints a picture of
+yours through the same dither, with the cloud over it; upload a PNG, JPEG, or
+WebP up to 8 MiB and 4096×4096 pixels, or pick one already on this host. The
+sidebar and the ground share one photo library, and a photo in use cannot be
+deleted. **None** keeps the plain page.
+
+**Show behind** puts the ground behind the start screens only, where it is
+masked away behind the composer and fades out below it, or behind everything,
+where the workspace and its pages turn translucent over it; **Cover the
+sidebar** extends an everything ground under the sidebar. **Pattern opacity**,
+**Pattern speed**, and **Pattern intensity** dial the cloud (speed zero holds it
+still), and **Photo opacity** dims a photo. Reduced motion holds the cloud
+still; Increased contrast turns the ground off; a browser without WebGL2 shows
+a photo but no cloud.
 
 ### Zen backgrounds
 

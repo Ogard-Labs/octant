@@ -3,6 +3,7 @@ import {
   SIDEBAR_BACKGROUND_MEDIA_TYPES,
   decodeSidebarBackgroundId,
   type SidebarBackground,
+  type AppBackground,
 } from "@octant/contracts";
 import { isLoopbackHostname, isAllowedRendererOrigin } from "../shellRoutes";
 import {
@@ -23,6 +24,11 @@ export interface SidebarBackgroundRouteDependencies {
   readonly store: SidebarBackgroundStore;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly currentSidebarBackground: () => SidebarBackground | null;
+  /**
+   * The application ground draws from the same image store, so a photo it
+   * shows is in use even when no sidebar background points at it.
+   */
+  readonly currentAppBackground?: () => AppBackground | null;
   readonly maxBodySize?: number;
   readonly now?: () => number;
 }
@@ -98,6 +104,7 @@ export function createSidebarBackgroundRouteHandler(
           id,
           origin,
           dependencies.currentSidebarBackground,
+          dependencies.currentAppBackground ?? (() => null),
         );
       }
       return failure("unsupported", "HTTP method is not supported for this route.", 400, origin);
@@ -186,12 +193,22 @@ async function handleDelete(
   id: ReturnType<typeof decodeSidebarBackgroundId>,
   origin: string | null,
   currentSidebarBackground: () => SidebarBackground | null,
+  currentAppBackground: () => AppBackground | null,
 ): Promise<Response> {
   const active = currentSidebarBackground();
   if (active !== null && active.kind === "custom" && active.backgroundId === id) {
     return failure(
       "conflict",
       "Sidebar background is currently in use and cannot be deleted.",
+      409,
+      origin,
+    );
+  }
+  const ground = currentAppBackground();
+  if (ground !== null && ground.kind === "photo" && ground.backgroundId === id) {
+    return failure(
+      "conflict",
+      "The background is showing this photo, so it cannot be deleted.",
       409,
       origin,
     );

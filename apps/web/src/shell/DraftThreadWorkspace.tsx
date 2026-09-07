@@ -87,6 +87,8 @@ export type DraftRecentThread = RecentThreadListItem;
 
 export interface DraftThreadWorkspaceProps {
   readonly mode: OctantMode;
+  /** The person's name from their profile, for the greeting on the hero. */
+  readonly greetingName?: string | undefined;
   /**
    * What this mode already has open, shown under the composer. A start screen
    * with nothing below the prompt left most of the pane empty and gave the
@@ -560,6 +562,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     return (
       <>
         <CodeComposerAdapter
+          greetingName={props.greetingName}
           suggestions={CODE_SUGGESTIONS}
           {...(beneath === undefined ? {} : { beneath })}
           {...(promptRequest === undefined ? {} : { promptRequest })}
@@ -638,6 +641,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     return (
       <>
         <WorkComposerAdapter
+          greetingName={props.greetingName}
           {...hostSelectorBinding}
           {...(selectedProjectId === undefined ? {} : { projectId: selectedProjectId })}
           {...(selectedProjectName === undefined ? {} : { projectName: selectedProjectName })}

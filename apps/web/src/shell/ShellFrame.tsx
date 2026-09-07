@@ -26,6 +26,13 @@ export interface ShellFrameProps {
   readonly sidebarWidth: number;
   readonly standaloneSurface?: ReactNode;
   readonly workspaceMaterial?: ResolvedSidebarMaterial;
+  /**
+   * The application ground drawn under the whole shell when its scope is
+   * everywhere. The workspace and its panes go transparent over it; the
+   * sidebar does too only when `backdropCoversSidebar` says so.
+   */
+  readonly backdrop?: ReactNode;
+  readonly backdropCoversSidebar?: boolean;
   readonly typography?: ThemeTypography;
   readonly theme?: ThemeSettings;
   readonly availableFonts?: ReadonlyArray<string>;
@@ -89,6 +96,10 @@ export function ShellFrame(props: ShellFrameProps) {
               : ""
           }${props.wideContextOpen ? " shell--wide-context-open" : ""}${
             props.sidebarCollapsed ? " shell--sidebar-collapsed" : ""
+          }${props.backdrop === undefined ? "" : " shell--app-backdrop"}${
+            props.backdrop !== undefined && props.backdropCoversSidebar === true
+              ? " shell--app-backdrop-sidebar"
+              : ""
           }`}
           data-octant-sidebar-vibrancy={props.sidebarVibrancyMode ?? "off"}
           data-thread-provider-icons={props.showThreadProviderIcons === false ? "false" : "true"}
@@ -106,6 +117,7 @@ export function ShellFrame(props: ShellFrameProps) {
             } as CSSProperties
           }
         >
+          {props.backdrop}
           {props.chrome}
           {props.sidebarCollapsed ? null : props.sidebar}
           {props.sidebarResizable && !props.sidebarCollapsed ? (

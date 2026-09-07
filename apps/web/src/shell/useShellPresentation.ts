@@ -1,5 +1,10 @@
 import type { AppReleaseRing } from "@octant/contracts/app-updates";
-import { useCallback, useEffect, useState } from "react";
+import {
+  decodeSidebarBackgroundListResult,
+  decodeSidebarBackgroundMetadata,
+} from "@octant/contracts/theme";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { BackgroundImageLibrary } from "../settings/AppBackgroundSettings";
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
 
 export function useResolvedMaterial(
@@ -153,9 +158,12 @@ export function useSidebarBackgroundFetcher(
       if (windowCapability !== undefined) {
         headers["x-octant-window-capability"] = windowCapability;
       }
-      const response = await fetch(`${serverUrl}/api/theme/sidebar-backgrounds/${backgroundId}`, {
-        headers,
-      });
+      // `new URL` absorbs a trailing slash on the server URL; string joining
+      // produced `//api/...`, which no route claims.
+      const response = await fetch(
+        new URL(`/api/theme/sidebar-backgrounds/${backgroundId}`, serverUrl),
+        { headers },
+      );
       if (!response.ok) {
         throw new Error(`Sidebar background fetch failed: ${response.status}`);
       }
@@ -275,4 +283,66 @@ export function writeBottomPanelPresentation(
 function clampBottomPanelHeight(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_BOTTOM_PANEL_HEIGHT;
   return Math.min(MAX_BOTTOM_PANEL_HEIGHT, Math.max(MIN_BOTTOM_PANEL_HEIGHT, Math.round(value)));
+}
+
+/** Whether the OS asked for reduced motion; the welcome ground holds still when it did. */
+export function usePrefersReducedMotion(): boolean {
+  const query = "(prefers-reduced-motion: reduce)";
+  const [matches, setMatches] = useState(() =>
+    typeof window.matchMedia === "function" ? window.matchMedia(query).matches : false,
+  );
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia(query);
+    const update = () => setMatches(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  return matches;
+}
+
+/**
+ * The host's background image library behind the window's authority. The
+ * sidebar and the welcome screen share it: one upload can serve either.
+ */
+export function useBackgroundImageLibrary(
+  serverUrl: string,
+  windowCapability: string | undefined,
+  fetcher: (backgroundId: string) => Promise<Blob>,
+): BackgroundImageLibrary {
+  return useMemo(() => {
+    const headers = (extra: Record<string, string> = {}): Record<string, string> =>
+      windowCapability === undefined
+        ? extra
+        : { ...extra, "x-octant-window-capability": windowCapability };
+    const collection = new URL("/api/theme/sidebar-backgrounds", serverUrl);
+    return {
+      fetch: fetcher,
+      list: async () => {
+        const response = await fetch(collection, { headers: headers() });
+        if (!response.ok) throw new Error(`Background list failed: ${response.status}`);
+        return decodeSidebarBackgroundListResult(await response.json()).backgrounds;
+      },
+      upload: async (file: File) => {
+        const response = await fetch(collection, {
+          method: "POST",
+          headers: headers({
+            "content-type": file.type,
+            "x-octant-sidebar-background-display-name": encodeURIComponent(file.name),
+          }),
+          body: file,
+        });
+        if (!response.ok) {
+          const body: unknown = await response.json().catch(() => undefined);
+          const message =
+            typeof body === "object" && body !== null && "message" in body
+              ? String((body as { message: unknown }).message)
+              : `The photo could not be uploaded (${response.status}).`;
+          throw new Error(message);
+        }
+        return decodeSidebarBackgroundMetadata(await response.json());
+      },
+    };
+  }, [fetcher, serverUrl, windowCapability]);
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { parseHexColor } from "./color";
 import { DEFAULT_DARK_TOKENS, DEFAULT_LIGHT_TOKENS, THEME_TOKEN_ROLE_IDS } from "./tokens";
 import {
   BUILT_IN_THEME_PRESET_IDS,
@@ -10,14 +11,55 @@ import {
 } from "./presets";
 
 describe("built-in theme preset catalog", () => {
-  it("publishes the bounded System, Light, Dark, and Octant presets", () => {
-    expect(BUILT_IN_THEME_PRESET_IDS).toEqual(["system", "light", "dark", "octant"]);
+  it("publishes System, Light, Dark, Octant, and the tinted presets", () => {
+    expect(BUILT_IN_THEME_PRESET_IDS).toEqual([
+      "system",
+      "light",
+      "dark",
+      "octant",
+      "moss",
+      "lagoon",
+      "harbor",
+      "iris",
+      "rose",
+      "ember",
+      "ink",
+      "coral",
+      "clay",
+      "sand",
+      "olive",
+      "mint",
+      "sky",
+      "slate",
+      "plum",
+      "ash",
+      "obsidian",
+      "onyx",
+    ]);
     expect(THEME_PRESETS.map((preset) => preset.id)).toEqual(BUILT_IN_THEME_PRESET_IDS);
     expect(THEME_PRESETS.map((preset) => preset.displayName)).toEqual([
       "System",
       "Light",
       "Dark",
       "Octant",
+      "Moss",
+      "Lagoon",
+      "Harbor",
+      "Iris",
+      "Rose",
+      "Ember",
+      "Ink",
+      "Coral",
+      "Clay",
+      "Sand",
+      "Olive",
+      "Mint",
+      "Sky",
+      "Slate",
+      "Plum",
+      "Ash",
+      "Obsidian",
+      "Onyx",
     ]);
   });
 
@@ -74,6 +116,36 @@ describe("built-in theme preset catalog", () => {
     expect(
       JSON.parse(serializeThemePresetCatalog()).map((preset: { id: string }) => preset.id),
     ).toEqual(BUILT_IN_THEME_PRESET_IDS);
+  });
+
+  it("colours every tinted preset's accent while the default stays monochrome", () => {
+    const tinted = THEME_PRESETS.filter(
+      (preset) => !["system", "light", "dark", "octant"].includes(preset.id),
+    );
+    expect(tinted).toHaveLength(18);
+    for (const preset of tinted) {
+      for (const mode of ["light", "dark"] as const) {
+        const tokens = preset.tokens[mode]!;
+        const accent = parseHexColor(tokens.accent!);
+        const spread =
+          Math.max(accent.r, accent.g, accent.b) - Math.min(accent.r, accent.g, accent.b);
+        // A tinted accent has hue; a grey has none. Ash and Slate are the
+        // quiet ones and carry only a little.
+        expect(spread).toBeGreaterThan(["ash", "slate"].includes(preset.id) ? 8 : 40);
+        expect(validateThemePreset(preset).valid).toBe(true);
+      }
+    }
+    const system = getThemePreset("system")!;
+    const grey = parseHexColor(system.tokens.dark!.accent!);
+    expect(Math.max(grey.r, grey.g, grey.b) - Math.min(grey.r, grey.g, grey.b)).toBeLessThan(8);
+    // The OLED presets' page is exactly black: those pixels switch off.
+    for (const id of ["ink", "obsidian", "onyx"]) {
+      const dark = getThemePreset(id)!.tokens.dark!;
+      expect(dark["app-background"]).toBe("#000000");
+      expect(dark.chrome).toBe("#000000");
+      expect(dark.sidebar).toBe("#000000");
+    }
+    expect(getThemePreset("moss")!.tokens.dark!["app-background"]).not.toBe("#000000");
   });
 
   it("returns undefined for an unknown id without throwing", () => {
