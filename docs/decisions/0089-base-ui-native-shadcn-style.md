@@ -36,8 +36,9 @@ that is no longer where the work happens.
   the visual language, or a guarding test already owns them:
   - Recipes paint no focus ring. The global `:focus-visible` rule is the only
     keyboard focus treatment, as the visual language requires.
-  - The badge is an outline-only status label, not a filled pill.
-  - The card is borderless and carries elevation, per 0070.
+  - The badge and the card follow the style. 0090 settles their shape and
+    elevation, and supersedes the radius and elevation rules that made an
+    outline-only badge and a shadowed card the local answer.
 - `--octant-*` roles remain the theme source and `shadcn-theme.css` remains the
   projection into shadcn variables. A style's own `:root` palette is never
   adopted; it would land literal colours and take ownership of `--background`
