@@ -75,7 +75,8 @@ export function driverLabel(
   | "Azure AI Foundry"
   | "OpenAI Image"
   | "Gemini Image"
-  | "Black Forest Labs Image" {
+  | "Black Forest Labs Image"
+  | "Ideogram Image" {
   if (driverKind === "opencode") return "OpenCode";
   if (driverKind === "codex") return "Codex";
   if (driverKind === "claude") return "Claude";
@@ -98,6 +99,7 @@ export function driverLabel(
   if (driverKind === "openai-image") return "OpenAI Image";
   if (driverKind === "gemini-native-image") return "Gemini Image";
   if (driverKind === "bfl-image") return "Black Forest Labs Image";
+  if (driverKind === "ideogram-image") return "Ideogram Image";
   return "OpenAI-compatible";
 }
 

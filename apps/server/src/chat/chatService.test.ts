@@ -66,6 +66,7 @@ import {
   readPendingChatPurges,
   searchChatThreads,
   searchChatTranscript,
+  readChatNavigation,
 } from "../persistence/chatProjection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
@@ -6857,5 +6858,108 @@ describe("ChatService provider session recovery", () => {
     expect(conflicts).toBe(2);
     expect(service.read(conflicting.thread.id).turns[0]?.attempts[0]?.outcome).toBe("streaming");
     expect(service.read(recovering.thread.id).turns[0]?.attempts[0]?.outcome).toBe("interrupted");
+  });
+});
+
+describe("completing and snoozing a Chat thread", () => {
+  const later = "2099-01-02T09:00:00.000Z";
+
+  async function createThread(service: ChatService) {
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Resting thread",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    return created.thread;
+  }
+
+  it("puts a finished thread away, brings it back with Reopen, and shows the rest on navigation", async () => {
+    const { service, persistence } = openFixture();
+    const thread = await createThread(service);
+    const completed = await service.execute({
+      kind: "complete-chat-thread",
+      threadId: thread.id,
+      expectedVersion: thread.version,
+    });
+    expect(completed).toMatchObject({ kind: "thread-updated", thread: { completedAt: now } });
+    expect(
+      readChatNavigation(persistence.connection).find((row) => row.id === thread.id)?.completedAt,
+    ).toBe(now);
+
+    const reopened = await service.execute({
+      kind: "reopen-chat-thread",
+      threadId: thread.id,
+      expectedVersion: service.read(thread.id).thread.version,
+    });
+    expect(reopened.kind).toBe("thread-updated");
+    expect(service.read(thread.id).thread).not.toHaveProperty("completedAt");
+  });
+
+  it("snoozes a thread until a time ahead, wakes it by hand, and refuses a wake time already gone", async () => {
+    const { service, persistence } = openFixture();
+    const thread = await createThread(service);
+    const snoozed = await service.execute({
+      kind: "snooze-chat-thread",
+      threadId: thread.id,
+      expectedVersion: thread.version,
+      until: later,
+    });
+    expect(snoozed).toMatchObject({
+      kind: "thread-updated",
+      thread: { snooze: { until: later, at: now } },
+    });
+    expect(
+      readChatNavigation(persistence.connection).find((row) => row.id === thread.id)?.snooze,
+    ).toEqual({ until: later, at: now });
+    await service.execute({
+      kind: "wake-chat-thread",
+      threadId: thread.id,
+      expectedVersion: service.read(thread.id).thread.version,
+    });
+    expect(service.read(thread.id).thread).not.toHaveProperty("snooze");
+    await expect(
+      service.execute({
+        kind: "snooze-chat-thread",
+        threadId: thread.id,
+        expectedVersion: service.read(thread.id).thread.version,
+        until: "2020-01-01T00:00:00.000Z",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid", message: /still ahead/ } });
+  });
+
+  it("brings a completed thread back when a person sends it a message", async () => {
+    const { service } = openFixture();
+    const thread = await createThread(service);
+    await service.execute({
+      kind: "complete-chat-thread",
+      threadId: thread.id,
+      expectedVersion: thread.version,
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: thread.id,
+      expectedVersion: service.read(thread.id).thread.version,
+      prompt: "Back to this one.",
+    });
+    expect(service.read(thread.id).thread).not.toHaveProperty("completedAt");
+  });
+
+  it("archives a completed thread on the host's timer only once its completion is old enough", async () => {
+    const { service } = openFixture();
+    const thread = await createThread(service);
+    await service.execute({
+      kind: "complete-chat-thread",
+      threadId: thread.id,
+      expectedVersion: thread.version,
+    });
+    expect(service.archiveCompletedThread(thread.id, { afterDays: 7, now })).toEqual({
+      status: "skipped",
+      reason: "not-due",
+    });
+    expect(
+      service.archiveCompletedThread(thread.id, { afterDays: 7, now: "2030-01-01T00:00:00.000Z" }),
+    ).toEqual({ status: "archived" });
+    expect(service.read(thread.id).thread.lifecycle).toBe("archived");
   });
 });

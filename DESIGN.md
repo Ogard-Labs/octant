@@ -354,15 +354,24 @@ marks, and status dots. Leftover `.btn*` recipes are gone; adapters own
 button paint. Phone-only
 surfaces use the larger 22/26/30px mobile radii.
 
-Controls are 44px by default and 34px compact. Dense operating rails use a
-28px navigation row; the title band, the right dock head, and the bottom panel
-toolbar share one 34px rail so their tabs and hairlines sit on one level. Icon sizes are 16/19/22px for small/medium/large actions; touch
+Controls are 44px by default and 34px compact. The shell frame runs on one
+grid, named by the `--oct-title-rail-h`, `--oct-rail-tab-h`,
+`--oct-rail-button-h`, `--oct-nav-head-h`, `--oct-nav-row-h`, and
+`--oct-nav-inset` tokens in `octant.css`: the title band, the window
+controls, the right dock head, and the bottom panel toolbar share one 38px
+rail, on which a 30px tab and a 28px icon control sit on one centreline and
+the band's hairline meets the dock's; the sidebar runs 30px navigation,
+Project, and thread rows between a 40px header row and a 40px account row,
+with every leading icon on a 12px inset and its section labels at 12px in the
+meta ink with a 12px gap above. Hover-only actions (add, more, pin, archive,
+and a tab's pin and close) take no width until their row is hovered or
+focused. Icon sizes are 16/19/22px for small/medium/large actions; touch
 surfaces keep 44px targets. The workspace sidebar defaults to 232px, supports
 resizing, and may collapse completely while leaving Show sidebar and New thread
 in the native title rail. Settings uses a separate compact 248px navigation
 rail. The right dock defaults to 320px when open. A fresh window starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The
-pane/title control rail is 34px in the native host and the status bar is 26px.
+pane/title control rail is 38px in the native host and the status bar is 26px.
 While a route or tool is still loading, its state is one quiet line (spinner,
 then the title) on the page ground, never a raised card: a card with a title
 and a sentence reads as a finished empty state.
@@ -446,7 +455,10 @@ row with its threads nested beneath it, pinned Projects leading in their own
 labelled band that is absent when nothing is pinned), then Chats (threads filed
 in no Project; Work and Code call the group Recents). Rows are hairline rails, never
 cards; provider marks are fixed-size inline and can be hidden without changing
-row height or indentation. A thread with unread activity ends its row with a
+row height or indentation. A hovered row takes the soft ink wash and the row
+the workspace is showing takes the selection fill with a hairline edge, the
+same two states the thread tab strip draws, so pointing never looks like
+being there. A thread with unread activity ends its row with a
 small filled dot labelled "New activity", driven by the read cursors the
 window already keeps, never by a poll; working and attention states keep the
 leading status dot. A list longer than eight rows folds behind one quiet "Show
@@ -547,7 +559,10 @@ is neutral explanatory text rather than a warning callout.
 The Board is an operational reading surface with four fixed,
 server-authoritative statuses: Ready, In Progress, Waiting, and Done. All
 four lanes show by default, each named once by mark, label, and count with no
-rule under the head; a Board/List toggle leads the toolbar. A card is a flat
+rule under the head, as a 12px meta label with the count at the lane's
+trailing edge; a Board/List toggle leads the toolbar, and every control on it
+(the segmented choices, search, Filters, Refresh, View) is one 28px rail
+control. A card is a flat
 hairline-edged object on the card fill: the Project as an eyebrow, the title,
 and one line of what the thread waits on or is doing, active runs and failing
 checks, who runs it, and when it last moved. Checkout, branch, plan, and

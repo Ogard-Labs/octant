@@ -5,6 +5,9 @@ import {
   ContextMenuItem,
   ContextMenuLabel,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
   ShadcnContextMenu,
   type ShadcnContextMenuProps,
@@ -22,3 +25,6 @@ export const OctantContextMenuGroup = ContextMenuGroup;
 export const OctantContextMenuLabel = ContextMenuLabel;
 export const OctantContextMenuItem = ContextMenuItem;
 export const OctantContextMenuSeparator = ContextMenuSeparator;
+export const OctantContextMenuSub = ContextMenuSub;
+export const OctantContextMenuSubTrigger = ContextMenuSubTrigger;
+export const OctantContextMenuSubContent = ContextMenuSubContent;

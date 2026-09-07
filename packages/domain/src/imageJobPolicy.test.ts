@@ -46,6 +46,24 @@ function bflImageProfile(enabled = true): ProviderInstance {
   };
 }
 
+function ideogramImageProfile(enabled = true): ProviderInstance {
+  return {
+    id: "a1000000-0000-4000-8000-000000000006" as ProviderInstance["id"],
+    displayName: "Ideogram",
+    enabled,
+    environmentPolicy: "inherit-host",
+    version: 1 as ProviderInstance["version"],
+    createdAt: timestamp as ProviderInstance["createdAt"],
+    updatedAt: timestamp as ProviderInstance["updatedAt"],
+    driverKind: "ideogram-image",
+    configuration: {
+      kind: "ideogram-image-http",
+      modelAllowlist: ["ideogram-v3" as never],
+      defaultModel: "ideogram-v3" as never,
+    },
+  };
+}
+
 describe("image job transitions", () => {
   it("allows the AgentRun lifecycle subset queued → running → completed", () => {
     assertImageJobTransitionAllowed("queued", "running");
@@ -94,6 +112,16 @@ describe("image job profile eligibility", () => {
   it("refuses a model outside the BFL profile allowlist", () => {
     expect(() =>
       assertImageJobProfileEligible(bflImageProfile(), "flux-dev" as ImageJob["modelId"]),
+    ).toThrow(ImageJobPolicyRejected);
+  });
+
+  it("accepts an enabled Ideogram image profile whose allowlist contains the model", () => {
+    assertImageJobProfileEligible(ideogramImageProfile(), "ideogram-v3" as ImageJob["modelId"]);
+  });
+
+  it("refuses a model outside the Ideogram profile allowlist", () => {
+    expect(() =>
+      assertImageJobProfileEligible(ideogramImageProfile(), "ideogram-v4" as ImageJob["modelId"]),
     ).toThrow(ImageJobPolicyRejected);
   });
 

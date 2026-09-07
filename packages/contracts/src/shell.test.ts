@@ -68,6 +68,7 @@ const settings = {
   firstRunOnboarding: "pending",
   automaticUpdateChecks: true,
   marketplaceFetchesEnabled: true,
+  completedThreadArchiveAfterDays: 7,
   navigatorAssistant: {},
   voice: {},
   imageGeneration: { customSources: [] },
