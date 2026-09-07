@@ -2327,8 +2327,12 @@ function LaunchedShell(
     draftProviderInstanceId !== undefined && draftModelId !== undefined
       ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
       : undefined;
+  const preferredChatSelection =
+    activeMode === "chat" && rawDraftSelection === undefined
+      ? firstRunChatDefault
+      : rawDraftSelection;
   const visibleDraftSelection =
-    resolveDraftProviderSelection(draftProviderGroups, rawDraftSelection) ??
+    resolveDraftProviderSelection(draftProviderGroups, preferredChatSelection) ??
     firstSelectableProviderSelection(draftProviderGroups);
   const effectiveDraftProviderInstanceId =
     activeMode === "work"
@@ -3821,7 +3825,7 @@ function LaunchedShell(
     );
     if (project === undefined) return false;
     const selection =
-      resolveDraftProviderSelection(chatProviderGroups, rawDraftSelection) ??
+      resolveDraftProviderSelection(chatProviderGroups, preferredChatSelection) ??
       firstSelectableProviderSelection(chatProviderGroups);
     if (selection === undefined && chatProviderGroups.length > 0) {
       setDraftError("No visible Chat model is available. Re-enable a model in Settings first.");
@@ -4050,7 +4054,7 @@ function LaunchedShell(
     try {
       if (mode === "chat") {
         const draftSelection =
-          resolveDraftProviderSelection(chatProviderGroups, rawDraftSelection) ??
+          resolveDraftProviderSelection(chatProviderGroups, preferredChatSelection) ??
           firstSelectableProviderSelection(chatProviderGroups);
         if (draftSelection === undefined && chatProviderGroups.length > 0) {
           setDraftError("No visible Chat model is available. Re-enable a model in Settings first.");

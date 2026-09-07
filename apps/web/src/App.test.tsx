@@ -919,6 +919,90 @@ describe("App", () => {
     ).toBe(true);
   });
 
+  it("keeps a visible saved Chat default ahead of the first catalog model", async () => {
+    const user = userEvent.setup();
+    const chatApi = chats();
+    const baseBootstrap = vi.mocked(chatApi.bootstrap).getMockImplementation()!;
+    const baseExecute = vi.mocked(chatApi.execute).getMockImplementation()!;
+    const execute = vi.mocked(chatApi.execute);
+    const providerApi = providersWithToolModel();
+    const providerBootstrap = await providerApi.bootstrap();
+    const instance = providerBootstrap.instances[0];
+    const observed = providerBootstrap.observedStates[0];
+    if (instance === undefined || observed === undefined)
+      throw new Error("Expected provider fixture");
+    const preferredModel = providerModel({
+      id: "preferred-model",
+      displayName: "Preferred model",
+      toolCalling: "supported",
+      evidence: "supported",
+    });
+    const firstModel = providerModel({
+      id: "first-model",
+      displayName: "First model",
+      toolCalling: "supported",
+      evidence: "supported",
+    });
+    vi.mocked(chatApi.bootstrap).mockImplementation(async () => {
+      const current = await baseBootstrap();
+      return {
+        ...current,
+        settings: {
+          ...current.settings,
+          defaultProviderInstanceId: instance.id,
+          defaultModelId: preferredModel.id,
+        },
+      };
+    });
+    execute.mockImplementation(async (command) => {
+      if (command.kind === "change-chat-provider") {
+        const created = await baseExecute({ kind: "create-chat-thread", title: "ignored" });
+        if (created?.kind !== "thread-created") throw new Error("Expected created Chat thread");
+        return decodeChatCommandResult({
+          kind: "thread-updated",
+          thread: {
+            ...created.thread,
+            providerInstanceId: command.providerInstanceId,
+            modelId: command.modelId,
+            version: 2,
+          },
+        });
+      }
+      return baseExecute(command);
+    });
+    const preferredProviderApi = {
+      ...providerApi,
+      bootstrap: vi.fn(async () => ({
+        ...providerBootstrap,
+        observedStates: [{ ...observed, models: [firstModel, preferredModel] }],
+      })),
+    };
+
+    render(
+      <App
+        chatClient={chatApi}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={preferredProviderApi}
+        shellClient={client(chatShellBootstrap())}
+      />,
+    );
+
+    const welcome = await screen.findByRole("region", { name: "Chat welcome" });
+    await user.type(within(welcome).getByRole("textbox", { name: "First message" }), "Preferred");
+    await user.click(within(welcome).getByRole("button", { name: "Start chat" }));
+
+    await waitFor(() =>
+      expect(
+        execute.mock.calls.some(
+          ([command]) =>
+            command.kind === "change-chat-provider" && command.modelId === "preferred-model",
+        ),
+      ).toBe(true),
+    );
+  });
+
   it("refuses a new Chat task when every provider model is hidden", async () => {
     const user = userEvent.setup();
     const chatApi = chats();
