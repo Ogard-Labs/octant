@@ -3,7 +3,7 @@ import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
 import { decodeCodeRelativePath } from "@octant/contracts/code";
 import { useEffect, useState } from "react";
 import { useCodeFileChangeWatch, noticeTouches } from "../code/useCodeFileChangeWatch";
-import { MarkdownLite } from "../preview/previewViewers";
+import { Markdown } from "../markdown/Markdown";
 import { ShellState } from "./ShellState";
 
 export interface DockDocumentToolProps {
@@ -121,7 +121,7 @@ export function DockDocumentTool(props: DockDocumentToolProps) {
           {load.text === "" ? (
             <p role="status">The document is empty.</p>
           ) : (
-            <MarkdownLite text={load.text} />
+            <Markdown body={load.text} />
           )}
         </div>
       ) : (

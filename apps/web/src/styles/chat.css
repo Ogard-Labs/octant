@@ -1135,3 +1135,43 @@
     animation: none;
   }
 }
+
+/* Syntax the one renderer added that the two hand-written parsers it replaced
+   could not produce: a table, a nested list, and struck text. Without these a
+   table arrived with browser default borders, which read as a foreign object
+   on a dark ground. */
+.chat-rich-text table {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: var(--oct-text-sm);
+}
+.chat-rich-text th,
+.chat-rich-text td {
+  padding: 6px 10px;
+  border: 1px solid var(--oct-border);
+  text-align: start;
+  vertical-align: top;
+}
+.chat-rich-text th {
+  background: var(--oct-surface);
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
+}
+.chat-rich-text li > ul,
+.chat-rich-text li > ol {
+  margin-top: 4px;
+}
+.chat-rich-text del {
+  color: var(--oct-muted);
+}
+/* A task list carries its own marker, so the bullet would be a second one. */
+.chat-rich-text li:has(> input[type="checkbox"]) {
+  list-style: none;
+  margin-left: -20px;
+}
+.chat-rich-text li > input[type="checkbox"] {
+  margin-inline-end: 6px;
+}
