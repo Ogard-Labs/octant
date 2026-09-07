@@ -1,5 +1,5 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
-import type { ComponentProps, ReactNode, RefObject } from "react";
+import type { ComponentProps } from "react";
 import { cn } from "./utils";
 
 /*
@@ -48,47 +48,5 @@ export function DialogTitle({ className, ...props }: ComponentProps<typeof Dialo
       className={cn("text-sm font-semibold text-foreground", className)}
       {...props}
     />
-  );
-}
-
-export interface ShadcnDialogShellProps {
-  readonly children: ReactNode;
-  readonly initialFocus?: RefObject<HTMLElement | null>;
-  readonly label: string;
-  readonly onClose: () => void;
-  readonly open: boolean;
-  readonly popupId?: string;
-  readonly restoreFocus?: RefObject<HTMLElement | null>;
-  readonly className?: string;
-}
-
-/** Product-facing dialog shell used by OctantDialog. */
-export function ShadcnDialogShell(props: ShadcnDialogShellProps) {
-  return (
-    <Dialog
-      modal
-      onOpenChange={(open) => {
-        if (!open) props.onClose();
-      }}
-      open={props.open}
-    >
-      <DialogPortal>
-        <DialogBackdrop
-          className="octant-dialog__backdrop window-no-drag"
-          data-testid="octant-dialog-backdrop"
-        />
-        <DialogViewport className="octant-dialog__viewport window-no-drag">
-          <DialogPopup
-            className={cn("octant-dialog__popup window-no-drag", props.className)}
-            finalFocus={props.restoreFocus}
-            id={props.popupId}
-            initialFocus={props.initialFocus}
-          >
-            <DialogTitle className="sr-only">{props.label}</DialogTitle>
-            {props.children}
-          </DialogPopup>
-        </DialogViewport>
-      </DialogPortal>
-    </Dialog>
   );
 }

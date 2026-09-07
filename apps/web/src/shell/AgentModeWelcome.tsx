@@ -57,7 +57,7 @@ export function AgentModeWelcome(props: AgentModeWelcomeProps) {
         onClick={props.onOpenDraft}
         role="listitem"
         type="button"
-        variant="outline"
+        variant="ghost"
       >
         <span className="draft-thread__intent-label">
           <Sparkles aria-hidden="true" size={14} strokeWidth={1.8} />
@@ -84,7 +84,7 @@ export function AgentModeWelcome(props: AgentModeWelcomeProps) {
             strokeWidth={1.4}
           />
           <p className="draft-thread__eyebrow">Octant {presentation.eyebrow}</p>
-          <h1 className="draft-thread__heading">{presentation.heading}</h1>
+          <h1 className="oct-title oct-title--hero">{presentation.heading}</h1>
           <p className="draft-thread__description">{presentation.description}</p>
         </div>
 
@@ -95,7 +95,7 @@ export function AgentModeWelcome(props: AgentModeWelcomeProps) {
             onClick={props.onAddFolder}
             role="listitem"
             type="button"
-            variant="outline"
+            variant="ghost"
           >
             <span className="draft-thread__intent-label">
               <FolderPlus aria-hidden="true" size={14} strokeWidth={1.8} />

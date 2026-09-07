@@ -116,6 +116,24 @@ function bflImageInstance(id: string, displayName: string): ProviderInstance {
   });
 }
 
+function ideogramImageInstance(id: string, displayName: string): ProviderInstance {
+  return decodeProviderInstance({
+    id,
+    displayName,
+    driverKind: "ideogram-image",
+    configuration: {
+      kind: "ideogram-image-http",
+      modelAllowlist: ["ideogram-v3"],
+      defaultModel: "ideogram-v3",
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
 function foundryInstance(id: string, displayName: string): ProviderInstance {
   return decodeProviderInstance({
     id,
@@ -220,6 +238,7 @@ describe("model picker policy", () => {
       expect(driverLabel("openai-image")).toBe("OpenAI Image");
       expect(driverLabel("gemini-native-image")).toBe("Gemini Image");
       expect(driverLabel("bfl-image")).toBe("Black Forest Labs Image");
+      expect(driverLabel("ideogram-image")).toBe("Ideogram Image");
       expect(driverLabel("ollama")).toBe("Ollama");
       expect(driverLabel("opencode")).toBe("OpenCode CLI");
       expect(driverLabel("kimi-code")).toBe("Kimi Code ACP");
@@ -342,20 +361,26 @@ describe("model picker policy", () => {
         "Gemini Image",
       );
       const bflImage = bflImageInstance("00000000-0000-4000-8000-000000000204", "FLUX");
+      const ideogramImage = ideogramImageInstance(
+        "00000000-0000-4000-8000-000000000205",
+        "Ideogram",
+      );
       const imageModel = model({ id: "gpt-image-2", displayName: "GPT Image 2" });
       const geminiModel = model({
         id: "gemini-3.1-flash-image",
         displayName: "Gemini 3.1 Flash Image",
       });
       const bflModel = model({ id: "flux-pro-1.1", displayName: "FLUX Pro 1.1" });
+      const ideogramModel = model({ id: "ideogram-v3", displayName: "Ideogram v3" });
       const observedByInstance = new Map([
         [chat.id, observed(chat.id, [model({ id: "chat-1", displayName: "Chat 1" })])],
         [openAiImage.id, observed(openAiImage.id, [imageModel])],
         [geminiImage.id, observed(geminiImage.id, [geminiModel])],
         [bflImage.id, observed(bflImage.id, [bflModel])],
+        [ideogramImage.id, observed(ideogramImage.id, [ideogramModel])],
       ]);
       const pickerInput = {
-        instances: [chat, openAiImage, geminiImage, bflImage],
+        instances: [chat, openAiImage, geminiImage, bflImage, ideogramImage],
         observedByInstance,
       };
 
@@ -367,6 +392,7 @@ describe("model picker policy", () => {
           false,
         );
         expect(groups.some((group) => group.instance.driverKind === "bfl-image")).toBe(false);
+        expect(groups.some((group) => group.instance.driverKind === "ideogram-image")).toBe(false);
       }
     });
 

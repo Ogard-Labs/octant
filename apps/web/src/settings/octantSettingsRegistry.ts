@@ -21,7 +21,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "General",
       scope: "app",
       keywords:
-        "general enabled modes startup default chat work profile name email avatar updates version release",
+        "general enabled modes startup default chat work profile name email avatar updates version release threads completed archive snooze",
       settings: [
         {
           id: settingId("user-profile"),
@@ -47,6 +47,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "app",
           keywords:
             "update updates upgrade version release automatic check download install relaunch privacy signed notarized",
+        },
+        {
+          id: settingId("completed-thread-archive"),
+          label: "Archive completed threads",
+          scope: "host",
+          keywords:
+            "complete completed threads archive automatically days never snooze snoozed shelf sidebar",
         },
         {
           id: settingId("marketplace-fetches"),

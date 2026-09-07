@@ -29,6 +29,7 @@ import {
   QwenConfigurationForm,
   GooseConfigurationForm,
   HttpConfigurationForm,
+  IdeogramImageConfigurationForm,
   OpenAiImageConfigurationForm,
   KiloConfigurationForm,
   OhMyPiConfigurationForm,
@@ -79,6 +80,7 @@ export type ProviderSettingsListProps = Pick<
   | "onChangeOpenAiImageConfiguration"
   | "onChangeGeminiImageConfiguration"
   | "onChangeBflImageConfiguration"
+  | "onChangeIdeogramImageConfiguration"
   | "onProviderCredentialStatus"
   | "onClearProviderCredential"
   | "onBeginProviderAuthentication"
@@ -210,6 +212,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
                 onChangeOpenAiImageConfiguration={props.onChangeOpenAiImageConfiguration}
                 onChangeGeminiImageConfiguration={props.onChangeGeminiImageConfiguration}
                 onChangeBflImageConfiguration={props.onChangeBflImageConfiguration}
+                onChangeIdeogramImageConfiguration={props.onChangeIdeogramImageConfiguration}
                 onClearProviderCredential={props.onClearProviderCredential}
                 onBeginProviderAuthentication={props.onBeginProviderAuthentication}
                 onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}
@@ -428,6 +431,7 @@ interface ProviderRowProps {
   readonly onChangeOpenAiImageConfiguration: ProviderSettingsViewProps["onChangeOpenAiImageConfiguration"];
   readonly onChangeGeminiImageConfiguration: ProviderSettingsViewProps["onChangeGeminiImageConfiguration"];
   readonly onChangeBflImageConfiguration: ProviderSettingsViewProps["onChangeBflImageConfiguration"];
+  readonly onChangeIdeogramImageConfiguration: ProviderSettingsViewProps["onChangeIdeogramImageConfiguration"];
   readonly onProviderCredentialStatus: ProviderSettingsViewProps["onProviderCredentialStatus"];
   readonly onClearProviderCredential: ProviderSettingsViewProps["onClearProviderCredential"];
   readonly onBeginProviderAuthentication: ProviderSettingsViewProps["onBeginProviderAuthentication"];
@@ -471,7 +475,8 @@ function ProviderRow(props: ProviderRowProps) {
   const isOpenAiImage = props.instance.driverKind === "openai-image";
   const isGeminiImage = props.instance.driverKind === "gemini-native-image";
   const isBflImage = props.instance.driverKind === "bfl-image";
-  const isImageProfile = isOpenAiImage || isGeminiImage || isBflImage;
+  const isIdeogramImage = props.instance.driverKind === "ideogram-image";
+  const isImageProfile = isOpenAiImage || isGeminiImage || isBflImage || isIdeogramImage;
   const usesCredential =
     isHttp ||
     isAnthropicHttp ||
@@ -840,6 +845,15 @@ function ProviderRow(props: ProviderRowProps) {
               </span>
             </div>
           )}
+          {!isIdeogramImage ? null : (
+            <div className="provider-card__facts provider-card__facts--image">
+              <span>Default model: {props.instance.configuration.defaultModel}</span>
+              <span>Allowlist: {props.instance.configuration.modelAllowlist.join(", ")}</span>
+              <span>
+                Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
+              </span>
+            </div>
+          )}
           {autoRegisteredDisabled ? (
             <p className="provider-card__guidance">Detected on this host — enable to use</p>
           ) : null}
@@ -1137,6 +1151,16 @@ function ProviderRow(props: ProviderRowProps) {
                   instance={props.instance}
                   key={`bfl-image:${props.instance.version}`}
                   onChange={props.onChangeBflImageConfiguration}
+                  onClearCredential={props.onClearProviderCredential}
+                />
+              ) : isIdeogramImage ? (
+                <IdeogramImageConfigurationForm
+                  credential={credential}
+                  credentialManagementAvailable={props.credentialManagementAvailable}
+                  disabled={disabled}
+                  instance={props.instance}
+                  key={`ideogram-image:${props.instance.version}`}
+                  onChange={props.onChangeIdeogramImageConfiguration}
                   onClearCredential={props.onClearProviderCredential}
                 />
               ) : isHttp ? (

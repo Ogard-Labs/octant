@@ -286,11 +286,14 @@ describe("ShellFrame", () => {
     expect(shellStyles).toMatch(
       /@media \(max-width: 680px\)[\s\S]*\.shell\.shell-frame\s*\{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\);/,
     );
+    // The chrome row is the title rail (38px, `--oct-title-rail-h`), the
+    // same height the thread tab band takes, so the narrow drawer starts
+    // where the rail ends instead of four pixels above it.
     expect(shellStyles).toMatch(
-      /@media \(max-width: 680px\)[\s\S]*\.shell\.shell-frame\s*\{[\s\S]*grid-template-rows:\s*34px minmax\(0, 1fr\);/,
+      /@media \(max-width: 680px\)[\s\S]*\.shell\.shell-frame\s*\{[\s\S]*grid-template-rows:\s*var\(--oct-title-rail-h\) minmax\(0, 1fr\);/,
     );
     expect(shellStyles).toMatch(
-      /@media \(max-width: 680px\)[\s\S]*\.shell-frame > \.sidebar\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*34px auto 0 0;[^}]*box-shadow:\s*var\(--octant-shadow-overlay\);/,
+      /@media \(max-width: 680px\)[\s\S]*\.shell-frame > \.sidebar\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*var\(--oct-title-rail-h\) auto 0 0;[^}]*box-shadow:\s*var\(--octant-shadow-overlay\);/,
     );
     expect(shellStyles).toMatch(
       /@media \(max-width: 680px\)[\s\S]*\.shell-frame > \.workspace-layer\s*\{[\s\S]*grid-column:\s*1;/,

@@ -566,6 +566,8 @@ export function readChatNavigation(
       lastSequence: row.last_sequence,
       followUpOpen: row.follow_up_open === 1,
       executing: row.executing === 1,
+      ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
+      ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
     });
   });
 }

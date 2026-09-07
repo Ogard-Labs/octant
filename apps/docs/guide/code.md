@@ -170,6 +170,36 @@ server-owned session.
 The sidebar follows the pane that last received pointer or keyboard input.
 Each thread remembers its open tools and selected tool.
 
+## Complete and snooze threads
+
+The same actions exist for Chat and Work threads; this section describes
+them once, for Code.
+
+A thread you are done with can be put away without archiving it. Choose
+**Complete** from the row's menu (right-click, or the ⋯ control on hover) and
+the thread leaves its Project group for the collapsed **Completed** shelf at
+the foot of the sidebar. Everything about it stays: the transcript, the
+checkout, its pull request link, and search. **Reopen** brings it back to the
+top of its group, and so does sending it a new message.
+
+Octant refuses to complete a thread while its turn is still running or while
+the agent is waiting on an approval or an answer from you, so a thread never
+disappears with work in flight. Completing a thread also clears its pin.
+
+**Snooze** hides a thread until a time you pick — in an hour, in three hours,
+this evening, tomorrow morning, or next Monday morning. Snoozed threads sit in
+their own collapsed shelf with the time until they return. A snoozed thread is
+otherwise untouched: a running turn keeps running. It comes back early if the
+agent needs you, or if the turn that was running when you snoozed it finishes.
+When a snooze ends the row reappears where it was, marked **Woke** until you
+open it. **Wake** in the row menu ends a snooze by hand, and so does sending
+the thread a message. A thread that is waiting on you cannot be snoozed.
+
+Completed threads move to the archive on their own after a week. Change that
+window, or turn it off, under **Settings › General › Archive completed
+threads**. Archiving keeps every thread and its history; only a confirmed purge
+in **Settings › Host** deletes anything.
+
 ## Next steps
 
 - [Promotions](/guide/promotions) for creating Code threads from Work work

@@ -1,4 +1,5 @@
 import {
+  DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS,
   DEFAULT_OPEN_IN_APPLICATIONS,
   DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE,
   LOCAL_HOST_ID,
@@ -154,6 +155,7 @@ export function defaultShellSettings(): ShellSettings {
     firstRunOnboarding: "pending",
     automaticUpdateChecks: true,
     marketplaceFetchesEnabled: true,
+    completedThreadArchiveAfterDays: DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS,
     openInApplications: [...DEFAULT_OPEN_IN_APPLICATIONS],
     transcriptTextSize: "medium",
     transcriptWidth: "narrow",

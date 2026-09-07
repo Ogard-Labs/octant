@@ -73,10 +73,18 @@ export function OctantPopover(props: OctantPopoverProps) {
           size: props.triggerVariant === "ghost-icon" ? "icon" : undefined,
         });
 
+  // A trigger painted from `buttonVariants` says which variant it wears, the
+  // same way the button recipe does. Without it a ghost trigger is only
+  // identifiable by the class string it happened to be given.
   const triggerButton = (
     <PopoverTrigger
       aria-label={props.triggerLabel}
       className={cn("window-no-drag", variantClassName, props.triggerClassName)}
+      {...(props.triggerVariant === undefined
+        ? {}
+        : {
+            "data-variant": props.triggerVariant === "ghost-icon" ? "ghost" : props.triggerVariant,
+          })}
       title={props.triggerTooltip === undefined ? props.triggerLabel : undefined}
       {...props.triggerDataAttributes}
       {...(props.triggerAriaPressed === undefined

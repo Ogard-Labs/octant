@@ -8,14 +8,14 @@ import {
 } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
-  OctantEmptyStateActions,
-  OctantEmptyStateCopy,
-  OctantEmptyStateDescription,
-  OctantEmptyStateEyebrow,
-  OctantEmptyStateMedia,
-  OctantEmptyStateRoot,
-  OctantEmptyStateTitle,
-} from "../ui/base/OctantEmptyState";
+  OctantEmptyContent,
+  OctantEmptyHeader,
+  OctantEmptyDescription,
+  OctantEmptyEyebrow,
+  OctantEmptyMedia,
+  OctantEmptyRoot,
+  OctantEmptyTitle,
+} from "../ui/base/OctantEmpty";
 
 type ShellStateKind = "disconnected" | "loading" | "neutral" | "warning";
 
@@ -45,34 +45,34 @@ export interface ShellStateProps {
 export function ShellState(props: ShellStateProps) {
   const StateIcon = stateIcons[props.state];
   return (
-    <OctantEmptyStateRoot
+    <OctantEmptyRoot
       className="shell-state"
       data-state={props.state}
       role={props.role ?? (props.state === "loading" ? "status" : undefined)}
     >
-      <OctantEmptyStateMedia tone={stateTones[props.state]}>
+      <OctantEmptyMedia tone={stateTones[props.state]}>
         <StateIcon
           aria-hidden="true"
           className={props.state === "loading" ? "shell-state__spinner" : undefined}
           size={16}
           strokeWidth={1.7}
         />
-      </OctantEmptyStateMedia>
-      <OctantEmptyStateCopy>
+      </OctantEmptyMedia>
+      <OctantEmptyHeader>
         {props.eyebrow === undefined ? null : (
-          <OctantEmptyStateEyebrow>{props.eyebrow}</OctantEmptyStateEyebrow>
+          <OctantEmptyEyebrow>{props.eyebrow}</OctantEmptyEyebrow>
         )}
-        <OctantEmptyStateTitle>{props.title}</OctantEmptyStateTitle>
-        <OctantEmptyStateDescription>{props.message}</OctantEmptyStateDescription>
-      </OctantEmptyStateCopy>
+        <OctantEmptyTitle>{props.title}</OctantEmptyTitle>
+        <OctantEmptyDescription>{props.message}</OctantEmptyDescription>
+      </OctantEmptyHeader>
       {props.action === undefined ? null : (
-        <OctantEmptyStateActions>
+        <OctantEmptyContent>
           <OctantButton onClick={props.action.onClick} type="button" variant="secondary">
             <RefreshCcw aria-hidden="true" size={14} strokeWidth={1.9} />
             <span>{props.action.label}</span>
           </OctantButton>
-        </OctantEmptyStateActions>
+        </OctantEmptyContent>
       )}
-    </OctantEmptyStateRoot>
+    </OctantEmptyRoot>
   );
 }

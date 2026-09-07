@@ -2,6 +2,13 @@ import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import type { ComponentProps } from "react";
 import { cn } from "./utils";
 
+/*
+ * The popup is a floating overlay, so it keeps a shadow — 0086 reserves those
+ * for things that genuinely float. `--octant-shadow-overlay` already carries a
+ * 1px hairline inside the token, so it needs no separate border or ring; the
+ * style adds one because its own shadow does not.
+ */
+
 export function Popover(props: ComponentProps<typeof PopoverPrimitive.Root>) {
   return <PopoverPrimitive.Root data-slot="popover" {...props} />;
 }
@@ -13,7 +20,7 @@ export function PopoverTrigger({
   return (
     <PopoverPrimitive.Trigger
       className={cn(
-        "inline-flex cursor-pointer items-center justify-center rounded-md outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
+        "inline-flex cursor-pointer items-center justify-center rounded-lg outline-none",
         className,
       )}
       data-slot="popover-trigger"
@@ -37,7 +44,7 @@ export function PopoverPopup({
   return (
     <PopoverPrimitive.Popup
       className={cn(
-        "z-50 rounded-md border border-border bg-popover p-4 text-popover-foreground shadow-md outline-none",
+        "z-50 rounded-xl bg-popover p-2.5 text-sm text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none",
         className,
       )}
       data-slot="popover-content"

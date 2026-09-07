@@ -882,6 +882,64 @@ describe("ProviderService", () => {
     ).resolves.toMatchObject({ kind: "provider-removed", instanceId, version: 3 });
   });
 
+  it("creates and updates an Ideogram image profile through the journal", async () => {
+    const fixture = serviceFixture();
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "create-ideogram-image-provider",
+        instanceId,
+        expectedVersion: 0,
+        displayName: "Ideogram",
+        configuration: {
+          kind: "ideogram-image-http",
+          modelAllowlist: ["ideogram-v3", "ideogram-v4"],
+          defaultModel: "ideogram-v3",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-created",
+      instance: {
+        displayName: "Ideogram",
+        driverKind: "ideogram-image",
+        configuration: {
+          kind: "ideogram-image-http",
+          modelAllowlist: ["ideogram-v3", "ideogram-v4"],
+          defaultModel: "ideogram-v3",
+        },
+        version: 1,
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-ideogram-image-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "ideogram-image-http",
+          modelAllowlist: ["ideogram-v4"],
+          defaultModel: "ideogram-v4",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: {
+        driverKind: "ideogram-image",
+        configuration: {
+          modelAllowlist: ["ideogram-v4"],
+          defaultModel: "ideogram-v4",
+        },
+        version: 2,
+      },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "remove-provider",
+        instanceId,
+        expectedVersion: 2,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-removed", instanceId, version: 3 });
+  });
+
   it("creates and returns the authoritative strict Codex provider instance", async () => {
     const fixture = serviceFixture();
     const expected = decodeProviderInstance({

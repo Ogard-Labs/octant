@@ -69,8 +69,9 @@ describe("OctantButton", () => {
     expect(baseLayer).not.toContain("button:focus-visible");
 
     expect(remainder).not.toMatch(/(?:^|\n)button\s*\{/);
-    // The neutral :focus-visible ring in octant.css is the only keyboard
-    // focus treatment; a second accent outline here doubled it on buttons.
+    // Keyboard focus is painted once, by the shared rule in octant.css (0090).
+    // The stylesheet does not add a treatment of its own here; a second accent
+    // outline doubled it.
     expect(remainder).not.toMatch(/(?:^|\n)button:focus-visible\s*\{/);
     expect(styles).not.toContain("outline: 2px solid var(--octant-focus-ring);");
     expect(styles).not.toContain(".project-button--primary");
