@@ -37,6 +37,8 @@ const driverLabels: Readonly<Record<ProviderDriverKind, string>> = {
   "azure-foundry": "Azure AI Foundry",
   "openai-image": "OpenAI Image",
   "gemini-native-image": "Gemini Image",
+  "bfl-image": "Black Forest Labs Image",
+  "ideogram-image": "Ideogram Image",
 };
 
 export function driverLabel(driverKind: ProviderDriverKind): string {

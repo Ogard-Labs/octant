@@ -35,14 +35,14 @@ Users work across repositories and document projects with long-running threads, 
 
 ## Brand Commitments
 
-The product name is Octant. The interface should remain an original quiet graphite workbench. The supplied Codex screenshots are binding references for compact structure, information density, dark-surface discipline, restrained borders, and low-noise controls. They are not a source for copied assets, terminology, or distinctive product structure. Octant must avoid too much chrome, low contrast, and sparse screens that hide useful project or orchestration state.
+The product name is Octant. The interface should remain an original quiet graphite workbench. Compact structure, information density, dark-surface discipline, restrained borders, and low-noise controls are binding requirements. No external product's assets, branding, or distinctive structure is copied into the interface; provider and service names appear only where they identify an integration. Octant must avoid too much chrome, low contrast, and sparse screens that hide useful project or orchestration state.
 
 ## Evidence on Hand
 
 - Product and architecture contract: `AGENTS.md`, `docs/architecture.md`, and `docs/decisions/`.
 - Current visual contract: `DESIGN.md`.
 - Approved workspace and dogfood plan: `docs/plans/ade-spine-and-first-run-review.md`.
-- User-supplied Codex reference screenshots for sidebar, terminal, Environment, and overall workspace density.
+- Maintainer-supplied reference screenshots for sidebar, terminal, Environment, and overall workspace density.
 - No external customer claims, benchmarks, testimonials, or telemetry are available and none should be fabricated.
 
 ## Product Principles

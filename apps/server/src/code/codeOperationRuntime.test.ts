@@ -17,6 +17,7 @@ import {
   type CodeOperationEventFrame as OperationFrame,
   type CodeRuntimeWork,
   type CodeThread,
+  type CodeThreadId,
   type ProviderRuntimeEvent,
   type WindowId,
 } from "@octant/contracts";
@@ -268,6 +269,60 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("tells the host once that a person asked the thread for a turn, and not again on replay", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const onProviderTurnRequested = vi.fn();
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+      onProviderTurnRequested,
+    });
+    const startOperation = operationId(11);
+    const command = {
+      kind: "start-provider-turn",
+      operationId: startOperation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    } as const;
+
+    await fixture.runtime.execute(windowId, command);
+    expect(onProviderTurnRequested).toHaveBeenCalledTimes(1);
+    expect(onProviderTurnRequested).toHaveBeenCalledWith(threadId);
+
+    await fixture.runtime.execute(windowId, command);
+    expect(onProviderTurnRequested).toHaveBeenCalledTimes(1);
+    fixture.close();
+  });
+
+  it("refuses to start a turn when the thread cannot be brought back, and records no work for it", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+      onProviderTurnRequested: () => {
+        throw new Error("journal is unavailable");
+      },
+    });
+
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(12),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).rejects.toThrow("journal is unavailable");
+    expect(connection.send).not.toHaveBeenCalled();
+    expect(fixture.runtimeWorks()).toEqual([]);
+    fixture.close();
+  });
+
   it("runs a provider turn asynchronously and owns exact input, approval, and cancellation", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -486,6 +541,47 @@ describe("CodeOperationRuntime", () => {
         interrupted: false,
       }),
     );
+    fixture.close();
+  });
+
+  it("journals how a tool ended so the row it started does not stay open forever", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(21);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: startOperation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({ kind: "tool-start", toolCallId: "call-1", toolName: "Read" }),
+      ),
+    );
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({ kind: "tool-success", toolCallId: "call-1", summary: "Tool completed." }),
+      ),
+    );
+
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
+      const states = frames.flatMap((frame) =>
+        frame.event.kind === "tool-activity" ? [frame.event.state] : [],
+      );
+      expect(states).toEqual(["started", "completed"]);
+      const closed = frames.find(
+        (frame) => frame.event.kind === "tool-activity" && frame.event.state === "completed",
+      );
+      expect(closed?.event).toMatchObject({ toolName: "Read", summary: "Tool completed." });
+    });
     fixture.close();
   });
 
@@ -1216,6 +1312,7 @@ function runtimeFixture(options: {
   approvalValidator?: boolean | (() => boolean);
   failRuntimeWorkJournal?: boolean;
   throwRuntimeWorkReporter?: boolean;
+  onProviderTurnRequested?: (threadId: CodeThreadId) => void;
   evidencePut?: (
     content: string,
     metadata?: { readonly truncated?: boolean },
@@ -1319,6 +1416,9 @@ function runtimeFixture(options: {
     actor,
     clock: () => now,
     uuid: () => `90000000-0000-4000-8000-${(++uuidCounter).toString().padStart(12, "0")}`,
+    ...(options.onProviderTurnRequested === undefined
+      ? {}
+      : { onProviderTurnRequested: options.onProviderTurnRequested }),
     reportRuntimeWorkFailure: (failure) => {
       runtimeWorkFailures.push(failure.kind);
       if (options.throwRuntimeWorkReporter === true) throw new Error("diagnostic reporter failed");

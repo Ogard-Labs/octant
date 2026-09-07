@@ -154,6 +154,28 @@ const GLYPHS: Readonly<Record<string, GlyphSpec>> = {
       </g>
     ),
   },
+  // A refracting prism: distinct from the photo-frame (OpenAI Image) and
+  // sparkle (Gemini Image) marks, abstract rather than a vendor logo.
+  "bfl-image": {
+    mark: (
+      <g fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.5">
+        <rect height="9.5" rx="1.4" width="11.5" x="2.25" y="3.25" />
+        <path d="M8 5.4l2.7 4.7H5.3z" />
+        <path d="M8 5.4v4.7" strokeWidth="1" />
+      </g>
+    ),
+  },
+  // A cut facet: a four-point diamond with a center seam, distinct in point
+  // count and silhouette from the triangular prism (BFL) mark beside it.
+  "ideogram-image": {
+    mark: (
+      <g fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.5">
+        <rect height="9.5" rx="1.4" width="11.5" x="2.25" y="3.25" />
+        <path d="M8 5.4l2.3 2.6L8 10.6l-2.3-2.6z" />
+        <path d="M8 5.4v5.2" strokeWidth="1" />
+      </g>
+    ),
+  },
 };
 
 export function providerGlyphColor(driverKind: string): string {
