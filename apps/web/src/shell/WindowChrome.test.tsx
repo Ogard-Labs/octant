@@ -389,12 +389,10 @@ describe("WindowChrome", () => {
     // so the dock and dialog stay workspace-opaque under every theme.
     expect(cssRule(".right-utility-dock")).toContain("background: var(--oct-bg);");
     expect(cssRule(".octant-dialog__popup")).toContain("background: var(--oct-bg);");
-    expect(cssRule(".environment-git-group dl")).toContain("background: var(--octant-control);");
-    expect(cssRule(".environment-git-group dl")).toContain(
-      "border: 1px solid var(--octant-border);",
-    );
-    expect(cssRule(".environment-git-group dl")).toContain("border-radius: var(--oct-radius-sm);");
-    expect(cssRule(".environment-git-group__row")).toContain("min-height: 30px;");
+    expect(cssRule(".environment-git-group dl")).toContain("background: transparent;");
+    expect(cssRule(".environment-git-group dl")).toContain("border: 0;");
+    expect(cssRule(".environment-git-group dl")).toContain("border-radius: 0;");
+    expect(cssRule(".environment-git-group__row")).toContain("min-height: 32px;");
     expect(cssRule(".environment-git-group__row + .environment-git-group__row")).toContain(
       "border-top: 1px solid var(--octant-border);",
     );
@@ -454,7 +452,10 @@ describe("WindowChrome", () => {
     expect(cssRule(".environment-git-group__error")).toContain("color: var(--oct-muted);");
     expect(cssRule(".environment-git-group__error")).toContain("background: transparent;");
     expect(cssRule(".environment-git-group__error")).not.toMatch(/warn|yellow/i);
+    expect(cssRule(".environment-git-group dl")).toContain("background: transparent;");
+    expect(cssRule(".environment-git-group dl")).toContain("border: 0;");
     expect(cssRule(".thread-environment-dock__header span")).toContain("color: var(--oct-muted);");
+    expect(cssRule(".thread-environment-dock__body")).toContain("gap: 0;");
     expect(styles).not.toContain(".thread-environment-summary");
     expect(cssRule(".thread-environment-disclosure .environment-group__summary")).toContain(
       "font-family: var(--oct-font-display);",

@@ -285,7 +285,7 @@ function ProjectGroup(props: {
       aria-label={`Project ${props.project.projectName}`}
       className="surface-section code-project-pull-requests__project"
     >
-      <div className="code-project-pull-requests__project-header">
+      <div className="surface-section__head code-project-pull-requests__project-header">
         <div className="surface-row__copy">
           <h2 className="oct-section-label">{props.project.projectName}</h2>
           {props.project.kind === "connected" ? (
