@@ -216,6 +216,9 @@ describe("CodeOperationService", () => {
       kind: "operation-failed",
       failure: { category: "unauthorized" },
     });
+    // Typing reaches a shell that is already open; the root was resolved once
+    // when it opened, and re-resolving per key is what made typing crawl.
+    expect(authority.resolveCheckoutRoot).toHaveBeenCalledTimes(1);
     activeThread = decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" });
     expect(terminals.write).not.toHaveBeenCalled();
     approved = true;

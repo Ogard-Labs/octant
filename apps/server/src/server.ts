@@ -6777,7 +6777,7 @@ export function startOctantServer(
     // routes, so the web Settings host card and `octant server status`
     // can never disagree about the same host.
     const composeHostDiagnostics = (): HostRuntimeDiagnostics => {
-      const status = persistence.status();
+      const status = persistence.status({ fresh: true });
       const capabilities = [
         "local-loopback",
         ...persistence
