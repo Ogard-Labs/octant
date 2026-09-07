@@ -10,7 +10,9 @@ import type {
 } from "@octant/contracts/chat";
 import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import { activeChatTurns } from "@octant/domain/chat-policy";
-import { Ban, Check, Circle, CircleAlert, CircleX, Clock3, LoaderCircle } from "lucide-react";
+import type { PickerGroup } from "@octant/domain";
+import { providerModelLabel } from "../providers/providerModelLabel";
+import { TurnHeader, TurnTime, turnWorkedFor } from "../transcript/TurnHeader";
 import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
@@ -57,6 +59,8 @@ export interface ChatTranscriptProps {
    * end of the transcript with every other sent message, not in the composer.
    */
   readonly pendingUserMessage?: string;
+  /** The picker's provider and model names, so a reply can say who answered. */
+  readonly providerGroups?: ReadonlyArray<PickerGroup>;
 }
 
 export interface ChatTranscriptCheckpoints {
@@ -119,10 +123,13 @@ export function ChatTranscript(props: ChatTranscriptProps) {
     (decision) => !turnIds.has(String(decision.turnId)),
   );
 
+  // The scroll frame spans the pane so its scrollbar sits at the pane's edge,
+  // as it does in Work and Code; each piece of content takes the thread
+  // column itself.
   const lead = (
     <>
       {props.connectionStatus === "disconnected" ? (
-        <p aria-live="polite" className="chat-transcript__connection" role="status">
+        <p aria-live="polite" className="chat-transcript__connection thread-column" role="status">
           Disconnected — reconnecting to the authoritative transcript.
         </p>
       ) : null}
@@ -130,24 +137,24 @@ export function ChatTranscript(props: ChatTranscriptProps) {
         <p
           aria-label="Historical attachment warning"
           aria-live="polite"
-          className="chat-transcript__handoff-warning"
+          className="chat-transcript__handoff-warning thread-column"
           role="status"
         >
           {handoffWarningText(props.view.thread.handoffWarning)}
         </p>
       )}
       {props.view.thread.branchedFrom === undefined ? null : (
-        <p className="chat-transcript__provenance" role="status">
+        <p className="chat-transcript__provenance thread-column" role="status">
           {branchOriginText(props.view.thread.branchedFrom)}
         </p>
       )}
       {props.checkpoints?.message === undefined ? null : (
-        <p className="chat-transcript__provenance" role="status">
+        <p className="chat-transcript__provenance thread-column" role="status">
           {props.checkpoints.message}
         </p>
       )}
       {revisedTurnCount === 0 ? null : (
-        <p className="chat-transcript__provenance" role="status">
+        <p className="chat-transcript__provenance thread-column" role="status">
           {revisedTurnCount === 1
             ? "1 earlier message was revised. This is the conversation as it now stands; the earlier version stays in this thread's history."
             : `${revisedTurnCount} earlier messages were revised. This is the conversation as it now stands; the earlier versions stay in this thread's history.`}
@@ -167,18 +174,24 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       </div>
     );
 
+  const trail = (
+    <div className="thread-column">
+      {orphanedRouteDecisions.map((decision) => (
+        <RouteReceipt decision={decision} key={String(decision.turnId)} />
+      ))}
+      {pendingMessage}
+    </div>
+  );
+
   if (turns.length === 0) {
     return (
-      <section aria-label="Conversation" className="chat-transcript thread-column">
+      <section aria-label="Conversation" className="chat-transcript transcript-scroll">
         {lead}
         <div className="chat-transcript__empty" role="status">
           <h2>Start the conversation</h2>
           <p>Ask a question, draft something, or explore an idea.</p>
         </div>
-        {orphanedRouteDecisions.map((decision) => (
-          <RouteReceipt decision={decision} key={String(decision.turnId)} />
-        ))}
-        {pendingMessage}
+        {trail}
       </section>
     );
   }
@@ -186,15 +199,15 @@ export function ChatTranscript(props: ChatTranscriptProps) {
   return (
     <TranscriptWindow
       ariaLabel="Conversation"
-      className="chat-transcript thread-column"
+      className="chat-transcript transcript-scroll"
       estimateSize={160}
-      gap={36}
+      gap={20}
       itemKey={(turn) => String(turn.id)}
       items={turns}
       itemTag="li"
       key={String(props.view.thread.id)}
       lead={lead}
-      listClassName="chat-transcript__turns"
+      listClassName="chat-transcript__turns thread-column"
       listLabel="Chat transcript"
       listTag="ol"
       {...(editingTurnId === undefined ? {} : { pinnedKeys: [editingTurnId] })}
@@ -287,10 +300,16 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                     {attachmentList}
                   </>
                 ) : (
-                  <div className="bubble">
-                    <MessageBody content={userContent} missing="Message content is unavailable." />
-                    {attachmentList}
-                  </div>
+                  <>
+                    <div className="bubble">
+                      <MessageBody
+                        content={userContent}
+                        missing="Message content is unavailable."
+                      />
+                      {attachmentList}
+                    </div>
+                    <TurnTime at={turn.createdAt} />
+                  </>
                 )}
                 {editing || checkpoints === undefined ? null : (
                   <ThreadCheckpointControls
@@ -321,6 +340,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   onQuoteSelection={props.onQuoteSelection}
                   onRetryAttempt={props.onRetryAttempt}
                   previousAttempt={turn.attempts[index - 1]}
+                  providerGroups={props.providerGroups}
                   citations={citationsByAttempt.get(String(attempt.id)) ?? []}
                 />
               ))}
@@ -331,14 +351,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       restoreKey={String(props.view.thread.id)}
       {...(props.revealTurnId === undefined ? {} : { revealKey: String(props.revealTurnId) })}
       role="region"
-      trail={
-        <>
-          {orphanedRouteDecisions.map((decision) => (
-            <RouteReceipt decision={decision} key={String(decision.turnId)} />
-          ))}
-          {pendingMessage}
-        </>
-      }
+      trail={trail}
     />
   );
 }
@@ -454,6 +467,7 @@ function AttemptBlock(props: {
   readonly onQuoteSelection: ChatTranscriptProps["onQuoteSelection"];
   readonly onRetryAttempt: ChatTranscriptProps["onRetryAttempt"];
   readonly previousAttempt: ChatAttempt | undefined;
+  readonly providerGroups: ChatTranscriptProps["providerGroups"];
 }) {
   const handoff = handoffLabel(props.previousAttempt, props.attempt);
   const responseContents = props.attempt.responseRefs.map((reference) =>
@@ -479,6 +493,21 @@ function AttemptBlock(props: {
         aria-label={`Assistant response · ${attemptLabels[props.attempt.outcome]}`}
         className="turn-agent"
       >
+        <TurnHeader
+          at={props.attempt.updatedAt}
+          outcome={props.attempt.outcome}
+          {...(props.providerGroups === undefined
+            ? {}
+            : { provider: providerModelLabel(props.providerGroups, props.attempt) })}
+          {...(() => {
+            const workedFor = turnWorkedFor(
+              props.attempt.outcome,
+              props.attempt.createdAt,
+              props.attempt.updatedAt,
+            );
+            return workedFor === undefined ? {} : { workedFor };
+          })()}
+        />
         {props.attempt.responseRefs.length === 0 ? null : responseBody === undefined ? (
           <p role="alert">Response content is unavailable.</p>
         ) : canQuote ? (
@@ -490,13 +519,6 @@ function AttemptBlock(props: {
         ) : (
           <ChatRichText body={responseBody} />
         )}
-        <AttemptStatus
-          outcome={props.attempt.outcome}
-          {...(() => {
-            const workedFor = attemptWorkedFor(props.attempt);
-            return workedFor === undefined ? {} : { workedFor };
-          })()}
-        />
         {props.attempt.outcome === "failed" ? (
           <SupportCorrelationControl correlationId={String(props.attempt.id)} />
         ) : null}
@@ -614,47 +636,6 @@ function MessageBody(props: {
   return <TrackerReferenceText asParagraph text={props.content.body} />;
 }
 
-/**
- * How long a finished attempt took, from when it was created to its last
- * change. Only a completed attempt reports it: for any other outcome the last
- * change is whatever ended it, which is not the same as time spent working.
- */
-function attemptWorkedFor(attempt: {
-  readonly outcome: ChatAttemptOutcome;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-}): string | undefined {
-  if (attempt.outcome !== "completed") return undefined;
-  const started = Date.parse(attempt.createdAt);
-  const ended = Date.parse(attempt.updatedAt);
-  if (Number.isNaN(started) || Number.isNaN(ended)) return undefined;
-  const seconds = Math.floor((ended - started) / 1000);
-  if (seconds < 1) return undefined;
-  if (seconds < 60) return `Worked for ${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  return `Worked for ${minutes}m ${seconds % 60}s`;
-}
-
-function AttemptStatus(props: {
-  readonly outcome: ChatAttemptOutcome;
-  readonly workedFor?: string;
-}) {
-  const StatusIcon = attemptStatusIcon(props.outcome);
-  return (
-    <p
-      aria-live={props.outcome === "streaming" ? "polite" : undefined}
-      className={`runstatus chat-transcript__attempt-status--${props.outcome}`}
-    >
-      <StatusIcon aria-hidden="true" size={12} strokeWidth={1.8} />
-      <span>{attemptLabels[props.outcome]}</span>
-      <span className="sr-only"> attempt state</span>
-      {props.workedFor === undefined ? null : (
-        <span className="chat-transcript__worked-for">{props.workedFor}</span>
-      )}
-    </p>
-  );
-}
-
 function CitationList(props: { readonly citations: ChatThreadView["citations"] }) {
   return (
     <ul aria-label="Sources" className="chat-transcript__citations">
@@ -707,25 +688,6 @@ function handoffWarningText(
 ): string {
   const names = warning.omittedAttachments.map((attachment) => attachment.displayName).join(", ");
   return `${names} ${warning.omittedAttachments.length === 1 ? "remains" : "remain"} available locally and ${warning.omittedAttachments.length === 1 ? "was" : "were"} not sent to ${warning.targetModelId}.`;
-}
-
-function attemptStatusIcon(outcome: ChatAttemptOutcome) {
-  switch (outcome) {
-    case "queued":
-      return Circle;
-    case "streaming":
-      return LoaderCircle;
-    case "waiting":
-      return Clock3;
-    case "interrupted":
-      return CircleAlert;
-    case "failed":
-      return CircleX;
-    case "cancelled":
-      return Ban;
-    case "completed":
-      return Check;
-  }
 }
 
 function safeCitationUrl(value: string): string | undefined {

@@ -146,6 +146,15 @@ export interface CodeOperationRuntimeOptions {
   readonly uuid: () => string;
   /** Reports a board-record failure without exposing journal or provider details. */
   readonly reportRuntimeWorkFailure?: (failure: CodeRuntimeWorkRecordFailure) => void;
+  /**
+   * A person asked the thread for a turn. Fires once per new turn, after the
+   * scope check and before any runtime work is recorded, so a completed or
+   * snoozed thread comes back the moment it is spoken to. A throw refuses the
+   * turn: a thread that stayed completed or snoozed while its turn ran would
+   * be a half-applied state, so the host starts nothing on a record it could
+   * not bring back.
+   */
+  readonly onProviderTurnRequested?: (threadId: CodeThreadId) => void;
   readonly ghExecutable?: string;
   readonly pullRequestPort?: CodeOperationPullRequestPort;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
@@ -491,6 +500,11 @@ export function createCodeOperationRuntime(
       // replay lookup, but before approval or the operation side effect. That
       // keeps inaccessible commands out of the durable runtime-work journal
       // while still recording work that waits on approval.
+      // Bringing the thread back comes before any runtime-work record: a
+      // reset that fails must leave no "running" record behind for a turn
+      // that never starts.
+      if (command.kind === "start-provider-turn")
+        options.onProviderTurnRequested?.(command.threadId);
       const started = codeRuntimeWorkStarted(command);
       if (started !== undefined)
         observeRuntimeWorkOutcome(
@@ -1408,7 +1422,22 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               }
             : {}),
           persistEvent: (event) => Effect.sync(() => this.#persistNormalized(active, event)),
-          persistOutcome: (outcome) => Effect.sync(() => this.#persistOutcome(active, outcome)),
+          persistOutcome: (outcome, failure) =>
+            Effect.sync(() => {
+              // A typed failure's message is provider-authored text like any
+              // event's, so it takes the same redaction before it is journaled.
+              const message =
+                failure === undefined || outcome !== "failed"
+                  ? undefined
+                  : boundProviderFailureMessage(
+                      sanitizeProviderText(failure.message, active.checkoutRoot, active.secrets),
+                    );
+              this.#persistOutcome(
+                active,
+                outcome,
+                message === undefined ? undefined : { category: "failed", message },
+              );
+            }),
         }),
       ),
     )
@@ -1578,6 +1607,22 @@ function normalizedOperationEvent(
       reconciled: event.reconciliation?.status === "confirmed",
     };
   }
+  // The provider's word on how a tool ended is an observation, never proof,
+  // but it is still the only thing that closes the tool row the start opened.
+  if (
+    event.category === "observation" &&
+    (event.providerKind === "tool-success" || event.providerKind === "tool-failure") &&
+    event.toolCallId !== undefined &&
+    event.toolName !== undefined
+  ) {
+    return {
+      kind: "tool-activity",
+      toolCallId: event.toolCallId,
+      toolName: event.toolName,
+      state: event.providerKind === "tool-success" ? "completed" : "failed",
+      ...(event.text === undefined ? {} : { summary: event.text }),
+    };
+  }
   if (event.category === "usage")
     return {
       kind: "usage",
@@ -1666,17 +1711,24 @@ function boundProviderFailureMessage(text: string): string | undefined {
   return head === "" ? undefined : `${head}${FAILURE_MESSAGE_SUFFIX}`;
 }
 
+/**
+ * The one treatment every provider-authored string gets before it is journaled:
+ * the checkout root and the turn's secrets are replaced. Event text and a
+ * typed failure's message share it, so neither has a path the other lacks.
+ */
+function sanitizeProviderText(value: string, checkoutRoot: string, secrets: readonly string[]) {
+  let sanitized = value.replaceAll(checkoutRoot, "[CHECKOUT]");
+  for (const secret of secrets) sanitized = sanitized.replaceAll(secret, "[REDACTED]");
+  return sanitized;
+}
+
 function sanitizeProviderEvent(
   event: ProviderRuntimeEvent,
   checkoutRoot: string,
   secrets: readonly string[],
 ): ProviderRuntimeEvent {
   const sanitize = (value: unknown): unknown => {
-    if (typeof value === "string") {
-      let sanitized = value.replaceAll(checkoutRoot, "[CHECKOUT]");
-      for (const secret of secrets) sanitized = sanitized.replaceAll(secret, "[REDACTED]");
-      return sanitized;
-    }
+    if (typeof value === "string") return sanitizeProviderText(value, checkoutRoot, secrets);
     if (Array.isArray(value)) return value.map(sanitize);
     if (typeof value !== "object" || value === null) return value;
     return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, sanitize(child)]));

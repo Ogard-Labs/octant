@@ -5,6 +5,9 @@ import type { ThreadBoardPullRequestSummaries } from "@octant/contracts";
 import {
   Archive,
   Cpu,
+  BellRing,
+  Check,
+  Clock,
   ExternalLink,
   FolderGit2,
   GitBranch,
@@ -13,8 +16,10 @@ import {
   MoreHorizontal,
   Pin,
   PinOff,
+  RotateCcw,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { resolveSnoozePresets } from "@octant/domain";
 import type { ChatThreadNavigationItem, ThreadRowActivity } from "../shell/navigationModel";
 import { describePullRequestSummary } from "../threadBoard/ThreadBoardPullRequestSummaries";
 import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
@@ -127,6 +132,9 @@ function threadRowStates(thread: ChatThreadNavigationItem): ReadonlyArray<string
   if (thread.followUp === true) states.push("Follow-up");
   if (thread.unread === true) states.push("Unread");
   if (thread.pinned === true) states.push("Pinned");
+  if (thread.woke === true) states.push("Woke");
+  else if (thread.shelf === "snoozed") states.push("Snoozed");
+  if (thread.shelf === "completed") states.push("Completed");
   return states;
 }
 
@@ -135,6 +143,24 @@ function threadRowStates(thread: ChatThreadNavigationItem): ReadonlyArray<string
  * header carries recency without the reader parsing a date. Falls back to the
  * absolute date past a year, where "14mo ago" stops being useful.
  */
+/**
+ * The row's own age: the shortest true reading, because the row has one word
+ * of room at its edge and the card beside it spells the rest out.
+ */
+function threadRowShortAge(updatedAt: string | undefined): string | undefined {
+  if (updatedAt === undefined) return undefined;
+  const date = new Date(updatedAt);
+  if (Number.isNaN(date.getTime())) return undefined;
+  const minutes = Math.round((Date.now() - date.getTime()) / 60000);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.round(hours / 24);
+  if (days < 365) return `${days}d`;
+  return date.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+}
+
 function threadRowAge(updatedAt: string | undefined): string | undefined {
   if (updatedAt === undefined) return undefined;
   const date = new Date(updatedAt);
@@ -376,6 +402,12 @@ function ThreadRowActionsGutter(props: {
   const pinned = props.thread.pinned === true;
   const pinLabel = pinned ? "Unpin thread" : "Pin thread";
   const pullRequestDestinations = threadRowPullRequestDestinations(props.thread, props.actions);
+  // The overflow menu is flat, so each wake time is its own row here; the
+  // right-click menu folds the same times under one Snooze item.
+  const snoozePresets =
+    props.actions.onSnoozeThread === undefined || props.thread.snooze !== undefined
+      ? []
+      : resolveSnoozePresets(new Date());
   const overflowItems: ReadonlyArray<OctantMenuItem> = [
     ...(props.actions.onPinThread === undefined
       ? []
@@ -399,6 +431,43 @@ function ThreadRowActionsGutter(props: {
             value: "archive",
           } as const,
         ]),
+    ...(props.thread.completedAt !== undefined
+      ? props.actions.onReopenThread === undefined
+        ? []
+        : [
+            {
+              icon: <RotateCcw aria-hidden="true" size={14} strokeWidth={1.8} />,
+              label: "Reopen thread",
+              value: "reopen",
+            } as const,
+          ]
+      : props.actions.onCompleteThread === undefined
+        ? []
+        : [
+            {
+              icon: <Check aria-hidden="true" size={14} strokeWidth={1.8} />,
+              label: "Complete thread",
+              value: "complete",
+            } as const,
+          ]),
+    ...(props.thread.snooze !== undefined
+      ? props.actions.onWakeThread === undefined
+        ? []
+        : [
+            {
+              icon: <BellRing aria-hidden="true" size={14} strokeWidth={1.8} />,
+              label: "Wake thread",
+              value: "wake",
+            } as const,
+          ]
+      : props.actions.onSnoozeThread === undefined
+        ? []
+        : snoozePresets.map((preset) => ({
+            description: preset.whenLabel,
+            icon: <Clock aria-hidden="true" size={14} strokeWidth={1.8} />,
+            label: `Snooze · ${preset.label}`,
+            value: `snooze:${preset.id}`,
+          }))),
     ...pullRequestDestinations.map((destination) => ({
       icon: <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.8} />,
       label: destination.label,
@@ -439,6 +508,11 @@ function ThreadRowActionsGutter(props: {
           onValueChange={(value) => {
             if (value === "pin") props.actions.onPinThread?.(threadId, !pinned);
             if (value === "archive") props.actions.onArchiveThread?.(threadId);
+            if (value === "complete") props.actions.onCompleteThread?.(threadId);
+            if (value === "reopen") props.actions.onReopenThread?.(threadId);
+            if (value === "wake") props.actions.onWakeThread?.(threadId);
+            const preset = snoozePresets.find((candidate) => `snooze:${candidate.id}` === value);
+            if (preset !== undefined) props.actions.onSnoozeThread?.(threadId, preset.until);
             pullRequestDestinations.find((destination) => destination.key === value)?.run();
           }}
           selectionMode="action"
@@ -661,6 +735,8 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
       />
     );
   }
+  const rowPullRequest = props.thread.pullRequests?.items[0];
+  const rowAge = threadRowShortAge(props.thread.updatedAt);
   const row = (
     <OctantButton
       aria-current={props.activeThreadId === rowId ? "page" : undefined}
@@ -676,6 +752,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
         props.thread.followUp === undefined ? undefined : props.thread.followUp ? "true" : "false"
       }
       data-pinned={props.thread.pinned === true ? "true" : undefined}
+      data-shelf={props.thread.shelf}
       data-thread-id={props.thread.threadId}
       data-unread={
         props.thread.unread === undefined ? undefined : props.thread.unread ? "true" : "false"
@@ -711,7 +788,14 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
         </span>
       )}
       <span className="sidebar-navigation__thread-copy">
-        <span className="sidebar-navigation__thread-title">{props.thread.title}</span>
+        <span className="sidebar-navigation__thread-headline">
+          <span className="sidebar-navigation__thread-title">{props.thread.title}</span>
+          {rowPullRequest === undefined ? null : (
+            <span className="sidebar-navigation__thread-pr">
+              #{String(rowPullRequest.identity.number)}
+            </span>
+          )}
+        </span>
         {props.thread.checkoutChip === undefined ? null : (
           <span
             className="sidebar-navigation__thread-checkout"
@@ -724,6 +808,40 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
           </span>
         )}
       </span>
+      {rowPullRequest === undefined ? null : (
+        <span
+          aria-label={`Pull request #${String(rowPullRequest.identity.number)} · ${rowPullRequest.state}`}
+          className="sidebar-navigation__thread-pr-mark"
+          data-state={rowPullRequest.state}
+          role="img"
+          title={`Pull request #${String(rowPullRequest.identity.number)} · ${rowPullRequest.state}`}
+        >
+          <GitPullRequest aria-hidden="true" size={12} strokeWidth={1.8} />
+        </span>
+      )}
+      {/* A snoozed row says when it comes back, not when it was last touched;
+          a row whose snooze ended says so until it is opened, because it
+          reappears where it was rather than at the top. */}
+      {props.thread.wakeLabel !== undefined ? (
+        <span
+          className="sidebar-navigation__thread-age"
+          title={`Wakes ${new Date(props.thread.snooze?.until ?? "").toLocaleString()}`}
+        >
+          {props.thread.wakeLabel}
+        </span>
+      ) : rowAge === undefined ? null : (
+        <span
+          className="sidebar-navigation__thread-age"
+          title={threadRowAge(props.thread.updatedAt)}
+        >
+          {rowAge}
+        </span>
+      )}
+      {props.thread.woke === true ? (
+        <span className="sidebar-navigation__thread-woke" title="Snooze ended">
+          Woke
+        </span>
+      ) : null}
       {unread ? (
         <span
           aria-label={ACTIVITY_LABELS.unread}

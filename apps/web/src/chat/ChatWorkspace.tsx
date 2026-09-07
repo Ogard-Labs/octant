@@ -23,6 +23,7 @@ import type { ProviderObservedState, ProviderRegistrySnapshot } from "@octant/co
 import { decodeProviderModelId } from "@octant/contracts/providers";
 import type { PickerGroup } from "@octant/domain";
 import { buildComposerPoolModel } from "@octant/domain/composer-pool-policy";
+import { CirclePause } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useSteeredSend } from "../composer/useSteeredSend";
 import type { TurnSettlement } from "../composer/steeredSend";
@@ -995,6 +996,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           connectionStatus={
             props.controller.status === "disconnected" ? "disconnected" : "connected"
           }
+          {...(props.providerGroups === undefined ? {} : { providerGroups: props.providerGroups })}
           onQuoteSelection={({ turnId, text }) => {
             setPendingQuotes((current) => [
               ...current,
@@ -1071,17 +1073,15 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       {pendingToolApproval === undefined ? null : (
         <section
           aria-label="Extension tool approval"
-          className="chat-workspace__tool-approval"
+          className="approval-row chat-workspace__tool-approval thread-column"
           role="group"
         >
-          <div>
-            <strong>Allow {pendingToolApproval.mcpToolName}?</strong>
-            <span>One-time extension tool request</span>
-          </div>
-          <code>
-            {pendingToolApproval.inputJson === "" ? "(empty input)" : pendingToolApproval.inputJson}
-          </code>
-          <div>
+          <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
+          <span className="approval-row__text">
+            Allow {pendingToolApproval.mcpToolName}?
+            <span className="approval-row__detail">One-time extension tool request</span>
+          </span>
+          <div className="approval-row__actions">
             <OctantButton
               disabled={toolApprovalBusy}
               onClick={() => void decideToolApproval("approved")}
@@ -1095,11 +1095,14 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               onClick={() => void decideToolApproval("denied")}
               size="sm"
               type="button"
-              variant="secondary"
+              variant="ghost"
             >
               Deny
             </OctantButton>
           </div>
+          <code className="approval-row__code">
+            {pendingToolApproval.inputJson === "" ? "(empty input)" : pendingToolApproval.inputJson}
+          </code>
         </section>
       )}
       <ChatComposer

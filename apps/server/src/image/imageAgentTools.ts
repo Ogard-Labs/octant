@@ -4,6 +4,7 @@ import {
   decodeProviderModelId,
   MAX_IMAGE_PROMPT_CHARACTERS,
   MAX_IMAGE_VARIANTS,
+  type ImageGenerationCustomSource,
   type ImageGenerationScopeId,
   type ImageJob,
   type ImageJobThreadKind,
@@ -44,6 +45,7 @@ const FORBIDDEN_INPUT_KEYS = [
 
 export interface ImageAgentToolPort {
   readonly listInstances: () => ReadonlyArray<ProviderInstance>;
+  readonly readImageGenerationCustomSources: () => ReadonlyArray<ImageGenerationCustomSource>;
   readonly enqueue: (input: EnqueueImageJobInput) => Promise<ImageJob>;
   readonly listJobs: ImageJobService["listByScope"];
 }
@@ -69,7 +71,8 @@ export function createImageAgentTools(options: {
   readonly port: ImageAgentToolPort;
 }): AppManagedToolSet | undefined {
   const instances = options.port.listInstances();
-  if (!hasEligibleImageProfile(instances)) return undefined;
+  const customSources = options.port.readImageGenerationCustomSources();
+  if (!hasEligibleImageProfile(instances, customSources)) return undefined;
   return {
     definitions: [
       {
@@ -86,7 +89,10 @@ export function createImageAgentTools(options: {
       const parsed = parseInput(inputJson);
       if ("error" in parsed) return { result: { error: parsed.error }, isError: true };
 
-      const profiles = listEligibleImageProfiles(options.port.listInstances());
+      const profiles = listEligibleImageProfiles(
+        options.port.listInstances(),
+        options.port.readImageGenerationCustomSources(),
+      );
       if (profiles.length === 0) {
         return { result: { error: "No enabled image profile is configured." }, isError: true };
       }

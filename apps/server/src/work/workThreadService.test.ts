@@ -824,6 +824,7 @@ function serviceFixture(
     readonly events?: ReadonlyArray<EventEnvelope>;
     readonly issueContext?: WorkThreadServiceDependencies["issueContext"];
     readonly linearIssueContext?: WorkThreadServiceDependencies["linearIssueContext"];
+    readonly observeRuntime?: WorkThreadServiceDependencies["observeRuntime"];
   } = {},
 ) {
   const projection = new WorkThreadProjection();
@@ -901,6 +902,7 @@ function serviceFixture(
     ...(options.linearIssueContext === undefined
       ? {}
       : { linearIssueContext: options.linearIssueContext }),
+    ...(options.observeRuntime === undefined ? {} : { observeRuntime: options.observeRuntime }),
   });
   return {
     service,
@@ -955,3 +957,133 @@ function thread(overrides: Partial<ReturnType<typeof decodeWorkThread>> = {}) {
     ...overrides,
   });
 }
+
+describe("completing and snoozing a Work thread", () => {
+  const later = new Date(Date.parse(now) + 24 * 60 * 60 * 1_000).toISOString();
+
+  it("puts a finished thread away and brings it back with Reopen", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "complete-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).resolves.toMatchObject({ kind: "thread-updated", thread: { completedAt: now, version: 2 } });
+    expect(fixture.projection.read(ids.thread)?.completedAt).toBe(now);
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "reopen-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 2,
+      }),
+    ).resolves.toMatchObject({ kind: "thread-updated", thread: { version: 3 } });
+    expect(fixture.projection.read(ids.thread)).not.toHaveProperty("completedAt");
+  });
+
+  it("refuses to complete a thread while its turn runs or waits on the person", async () => {
+    const running = serviceFixture({
+      threads: [thread()],
+      observeRuntime: () => ({ executing: true, awaitingInput: false }),
+    });
+    await expect(
+      running.service.execute(ids.window, {
+        kind: "complete-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid", message: /running turn/ } });
+
+    const waiting = serviceFixture({
+      threads: [thread()],
+      observeRuntime: () => ({ executing: false, awaitingInput: true }),
+    });
+    await expect(
+      waiting.service.execute(ids.window, {
+        kind: "snooze-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        until: later,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid", message: /waiting on you/ } });
+    expect(running.persistence.journal.append).not.toHaveBeenCalled();
+    expect(waiting.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("snoozes a running thread, remembers the turn under way, and wakes it again", async () => {
+    const fixture = serviceFixture({
+      threads: [thread()],
+      observeRuntime: () => ({ executing: true, awaitingInput: false }),
+    });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "snooze-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        until: later,
+      }),
+    ).resolves.toMatchObject({
+      kind: "thread-updated",
+      thread: { snooze: { until: later, at: now, duringTurn: true }, version: 2 },
+    });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "wake-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 2,
+      }),
+    ).resolves.toMatchObject({ kind: "thread-updated", thread: { version: 3 } });
+    expect(fixture.projection.read(ids.thread)).not.toHaveProperty("snooze");
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "snooze-work-thread",
+        threadId: ids.thread,
+        expectedVersion: 3,
+        until: new Date(Date.parse(now) - 60 * 60 * 1_000).toISOString(),
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid", message: /still ahead/ } });
+  });
+
+  it("brings a resting thread back when a person asks it for a turn, and journals nothing otherwise", () => {
+    const resting = serviceFixture({
+      threads: [thread({ completedAt: now as never, snooze: { until: later, at: now } as never })],
+    });
+    resting.service.noteTurnRequested(ids.thread);
+    expect(resting.persistence.journal.append).toHaveBeenCalledTimes(1);
+    const back = resting.projection.read(ids.thread);
+    expect(back?.version).toBe(2);
+    expect(back).not.toHaveProperty("completedAt");
+    expect(back).not.toHaveProperty("snooze");
+
+    const inPlay = serviceFixture({ threads: [thread()] });
+    inPlay.service.noteTurnRequested(ids.thread);
+    expect(inPlay.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("archives a completed thread on the host's timer as the system, only once it is old enough", () => {
+    const completedAt = new Date(Date.parse(now) - 7 * 24 * 60 * 60 * 1_000).toISOString();
+    const fixture = serviceFixture({ threads: [thread({ completedAt: completedAt as never })] });
+    expect(
+      fixture.service.archiveCompletedThread(ids.thread, {
+        afterDays: 7,
+        now: new Date(Date.parse(now) - 60 * 60 * 1_000).toISOString(),
+      }),
+    ).toEqual({ status: "skipped", reason: "not-due" });
+    expect(fixture.service.archiveCompletedThread(ids.thread, { afterDays: 7, now })).toEqual({
+      status: "archived",
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        expectedVersion: 1,
+        events: [
+          expect.objectContaining({
+            eventName: "work.thread-updated@1",
+            actor: expect.objectContaining({ kind: "system" }),
+          }),
+        ],
+      }),
+    );
+    expect(fixture.projection.read(ids.thread)?.lifecycle).toBe("archived");
+  });
+});

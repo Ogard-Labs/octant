@@ -118,7 +118,16 @@ export interface CodeTurnRunnerInput {
     input: CodeObservationInput,
   ) => Effect.Effect<CodeObservationReconciliation, CodeTurnFailure>;
   readonly persistEvent: (event: CodeTurnEvent) => Effect.Effect<void, CodeTurnFailure>;
-  readonly persistOutcome: (outcome: CodeTurnOutcome) => Effect.Effect<void, CodeTurnFailure>;
+  /**
+   * A failed outcome travels with the reason that produced it. Observed: a
+   * turn that failed before the provider said anything was journaled as
+   * `failed` alone, and the transcript could only say "The provider turn
+   * failed" for it.
+   */
+  readonly persistOutcome: (
+    outcome: CodeTurnOutcome,
+    failure?: CodeTurnFailure,
+  ) => Effect.Effect<void, CodeTurnFailure>;
   readonly signal?: AbortSignal;
   /** Observes a completed reply with its full text and the tool calls it made. */
   readonly onTurnCompleted?: (input: {
@@ -151,21 +160,23 @@ export class CodeTurnRunner {
       let outcome: CodeTurnOutcome | undefined;
       let handledEvents = 0;
       let unresolvedReconciliation = false;
+      const toolNames = new Map<string, string>();
       let providerCompleted = false;
       let responseText = "";
       const answeredToolRequestIds = new Set<string>();
 
-      const persistOutcome = (next: CodeTurnOutcome) =>
+      const persistOutcome = (next: CodeTurnOutcome, failure?: CodeTurnFailure) =>
         Effect.gen(function* () {
           if (outcome === next) return;
           outcome = next;
-          yield* input.persistOutcome(next);
+          yield* input.persistOutcome(next, failure);
         });
 
       const fail = (next: Exclude<CodeTurnOutcome, "completed">, message: string) =>
         Effect.gen(function* () {
-          yield* persistOutcome(next);
-          return yield* Effect.fail(codeTurnFailure(next, message));
+          const failure = codeTurnFailure(next, message);
+          yield* persistOutcome(next, failure);
+          return yield* Effect.fail(failure);
         });
 
       if (input.signal?.aborted) {
@@ -246,11 +257,20 @@ export class CodeTurnRunner {
                 if (!isSanitizedEventValid(boundedEvent, sanitizedEvent, input.checkoutRoot)) {
                   return yield* fail("failed", "Provider event sanitization failed closed.");
                 }
-                const normalized = yield* normalizeProviderEvent(input, sanitizedEvent);
+                const normalized = withToolName(
+                  toolNames,
+                  yield* normalizeProviderEvent(input, sanitizedEvent),
+                );
                 if (serializedBytes(normalized) > MAX_CODE_TURN_EVENT_BYTES) {
                   return yield* fail("failed", "Normalized Code event exceeded its byte budget.");
                 }
+                // Only a claimed mutation has something the checkout can confirm.
+                // A read or a shell claim is observational by nature, and its
+                // "not-confirmed" status used to hold every tool-using turn in
+                // "waiting" after the provider had completed, which also dropped
+                // the resume cursor so the next turn started with no memory.
                 if (
+                  claimsMutation(sanitizedEvent) &&
                   normalized.reconciliation !== undefined &&
                   normalized.reconciliation.status !== "confirmed"
                 ) {
@@ -393,6 +413,36 @@ export class CodeTurnRunner {
   }
 }
 
+/**
+ * Whether a description already says which tool it is about: the action as a
+ * whole word, in any case, so "edit" counts for Edit and "Writer" does not
+ * count for Write.
+ */
+function namesAction(description: string, action: string): boolean {
+  const escaped = action.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, "iu").test(description);
+}
+
+function claimsMutation(event: ProviderRuntimeEvent): boolean {
+  return event.kind === "file-change" || event.kind === "diff";
+}
+
+/**
+ * A tool's outcome arrives without its name, so the name is remembered from
+ * the start of the same call and carried on the outcome; the journal then
+ * closes the tool row it opened instead of leaving it forever "started".
+ */
+function withToolName(toolNames: Map<string, string>, event: CodeTurnEvent): CodeTurnEvent {
+  if (event.toolCallId === undefined) return event;
+  if (event.category === "tool" && event.status === "started" && event.toolName !== undefined) {
+    toolNames.set(event.toolCallId, event.toolName);
+    return event;
+  }
+  if (event.category !== "observation" || event.toolName !== undefined) return event;
+  const toolName = toolNames.get(event.toolCallId);
+  return toolName === undefined ? event : { ...event, toolName };
+}
+
 function normalizeProviderEvent(
   input: CodeTurnRunnerInput,
   event: ProviderRuntimeEvent,
@@ -496,7 +546,14 @@ function normalizeProviderEvent(
         ...base,
         category: "approval",
         requestId: text(event.requestId),
-        text: text(`${event.action}: ${event.description}`),
+        // A description that already names the tool is not prefixed with it
+        // again; "Edit: Claude requests permission to use Edit." said the same
+        // word twice on every prompt.
+        text: text(
+          namesAction(event.description, event.action)
+            ? event.description
+            : `${event.action}: ${event.description}`,
+        ),
         executionPolicy: input.thread.executionPolicy,
         permissionPersistence: input.thread.permissionPersistence,
       });

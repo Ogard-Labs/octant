@@ -6,6 +6,9 @@ import {
   ContextMenuItem,
   ContextMenuLabel,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "../shadcn/context-menu";
 import { cn } from "../shadcn/utils";
@@ -73,3 +76,6 @@ export const OctantContextMenuGroup = ContextMenuGroup;
 export const OctantContextMenuLabel = ContextMenuLabel;
 export const OctantContextMenuItem = ContextMenuItem;
 export const OctantContextMenuSeparator = ContextMenuSeparator;
+export const OctantContextMenuSub = ContextMenuSub;
+export const OctantContextMenuSubTrigger = ContextMenuSubTrigger;
+export const OctantContextMenuSubContent = ContextMenuSubContent;

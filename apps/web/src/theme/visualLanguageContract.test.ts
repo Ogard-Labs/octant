@@ -132,6 +132,51 @@ describe("the public-block visual language", () => {
     );
   });
 
+  it("keeps one transcript rhythm across Chat, Work, and Code", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const chat = readFileSync(join(webRoot, "styles/chat.css"), "utf8");
+    const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
+    const transcripts = [
+      "chat/ChatTranscript.tsx",
+      "work/WorkThreadWorkspace.tsx",
+      "code/CodeThreadWorkspace.tsx",
+    ].map((path) => readFileSync(join(webRoot, path), "utf8"));
+    const composers = [
+      "chat/ChatComposer.tsx",
+      "work/WorkThreadWorkspace.tsx",
+      "code/CodeThreadWorkspace.tsx",
+    ].map((path) => readFileSync(join(webRoot, path), "utf8"));
+
+    // The bubble, its time, the reply, the composer frame, its controls, and
+    // its status line are painted once, in the system. Before this Work's
+    // message was a full-width sticky slab, Chat's bubble carried a hairline
+    // shadow over its border, Code drew message and status classes of its
+    // own, and each mode's composer row sized its controls differently.
+    expect(system).toMatch(/\.turn-user \.bubble \{[^}]*box-shadow:\s*none/);
+    expect(system).toMatch(/\.turn-user \{[^}]*justify-items:\s*end/);
+    expect(system).not.toMatch(/\.turn-user \{[^}]*position:\s*sticky/);
+    expect(system).toMatch(
+      /\.composer-row button,\n\.composer-row \[role="button"\],\n\.composer-row \[role="combobox"\] \{\n  min-height: 30px;\n  height: 30px;/,
+    );
+    expect(chat).not.toMatch(/\.chat-transcript \.turn-user/);
+    expect(chat).not.toMatch(/\.chat-composer__status \{/);
+    expect(styles).not.toMatch(/\.code-thread-workspace__message--user/);
+    expect(styles).not.toMatch(/\.code-thread-workspace__composer \.composer-(?:input|row)\b/);
+    expect(styles).not.toMatch(/\.code-thread-workspace__status \{/);
+    for (const source of transcripts) {
+      expect(source).toContain("transcript-scroll");
+      expect(source).toContain("turn-user");
+      expect(source).toContain("turn-agent");
+      expect(source).toContain("<TurnTime");
+      expect(source).toContain("<ChatRichText");
+    }
+    for (const source of composers) {
+      expect(source).toContain("thread-composer");
+      // Chat composes its status class with its live/quiet modifiers.
+      expect(source).toMatch(/className=\{?[`"]composer-status\b/);
+    }
+  });
+
   it("keeps the keyboard focus ring on the switch its own reset would swallow", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const track = system.match(/\.octant-switch\[data-slot="switch"\]\s*\{[^}]+\}/)?.[0] ?? "";
@@ -294,17 +339,26 @@ describe("the public-block visual language", () => {
     const settings = readFileSync(join(webRoot, "styles/settings.css"), "utf8");
     const navigation =
       settings.match(/(?:^|\n)\.settings-navigation \.setnav-section\s*\{[^}]+\}/)?.[0] ?? "";
-    const hiddenDesktopGroups =
-      settings.match(
-        /\.settings-view__sidebar \.settings-navigation \.setnav-section\s*\{[^}]+\}/,
-      )?.[0] ?? "";
     const hint = settings.match(/\.setrow-hint\s*\{[^}]+\}/)?.[0] ?? "";
 
     expect(navigation).toMatch(/font-size:\s*calc\(12 \* var\(--oct-text-step\)\)/);
+    expect(navigation).toMatch(/font-weight:\s*var\(--oct-weight-regular\)/);
     expect(navigation).toMatch(/text-transform:\s*none/);
     expect(navigation).toMatch(/letter-spacing:\s*normal/);
-    expect(hiddenDesktopGroups).toMatch(/width:\s*1px/);
-    expect(hiddenDesktopGroups).toMatch(/clip-path:\s*inset\(50%\)/);
+    // The desktop rail shows its group labels; a quiet label is what separates
+    // one group of pages from the next, not a hairline and not a hidden name.
+    // Any way of hiding them counts: the sr-only recipe, display, visibility.
+    const sidebarLabelRules = settings.match(
+      /\.settings-view__sidebar[^{]*\.setnav-section[^{]*\{[^}]*\}/g,
+    );
+    for (const rule of sidebarLabelRules ?? []) {
+      expect(rule).not.toMatch(
+        /clip-path|display:\s*none|visibility:\s*hidden|width:\s*1px|font-size:\s*0/,
+      );
+    }
+    expect(settings).not.toMatch(
+      /\.settings-navigation__group \+ \.settings-navigation__group\s*\{[^}]*border-top/,
+    );
     expect(hint).toMatch(/font-size:\s*calc\(12 \* var\(--oct-text-step\)\)/);
   });
 

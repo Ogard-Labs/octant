@@ -430,10 +430,10 @@ export function WorkspaceView(props: WorkspaceViewProps) {
         const cleaned =
           stopped?.kind === "terminal-state" ||
           (stopped?.kind === "operation-failed" && stopped.failure.category === "unavailable");
-        if (!cleaned) return;
+        if (!cleaned) return false;
       }
       const closed = await props.onClosePane(paneId);
-      if (closed === false) return;
+      if (closed === false) return false;
       if (
         surface?.kind === "browser" &&
         surface.threadId !== undefined &&
@@ -450,6 +450,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
             : props.browserAutomationClient.stop({ contextId, threadId })
         ).catch(() => undefined);
       }
+      return true;
     },
     [props.browserAutomationClient, props.codeController, props.onClosePane, props.workspace],
   );
@@ -466,6 +467,23 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           (thread) => String(thread.id) === String(activeSurface.threadId),
         )?.title
       : undefined;
+  // The tab wears the thread's pull request the way the sidebar row and the
+  // board card do: the first linked request, from the cached snapshot.
+  const activeCodePullRequest = useMemo(() => {
+    if (
+      activeSurface === undefined ||
+      !("threadId" in activeSurface) ||
+      activeSurface.mode !== "code"
+    ) {
+      return undefined;
+    }
+    const summary = props.codeController.navigation?.find(
+      (item) => String(item.threadId) === String(activeSurface.threadId),
+    )?.pullRequestSummaries?.items[0];
+    return summary === undefined
+      ? undefined
+      : { number: summary.identity.number, state: summary.state };
+  }, [activeSurface, props.codeController.navigation]);
   const activeThreadTab = useMemo(
     () =>
       activeSurface === undefined
@@ -475,8 +493,15 @@ export function WorkspaceView(props: WorkspaceViewProps) {
             contextProjectId,
             activeCodeThreadTitle,
             contextProject?.name,
+            activeCodePullRequest,
           ),
-    [activeCodeThreadTitle, activeSurface, contextProjectId, contextProject?.name],
+    [
+      activeCodePullRequest,
+      activeCodeThreadTitle,
+      activeSurface,
+      contextProjectId,
+      contextProject?.name,
+    ],
   );
 
   function activateThreadTab(tab: WorkspaceThreadTab) {
@@ -506,6 +531,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           fallbackTitle={activeSurface?.title ?? "Workspace"}
           mode={props.mode}
           onActivate={activateThreadTab}
+          onCloseActive={() => closePane(activePaneId)}
         />
         {props.crossContextOffer === undefined ? null : (
           <CrossContextBanner
@@ -1589,6 +1615,9 @@ function renderNonCodeTab(
   }
   return (
     <AgentModeWelcome
+      hasProjects={props.projects.some(
+        (project) => project.type === tab.mode && project.lifecycle === "active",
+      )}
       mode={tab.mode === "code" ? "code" : "work"}
       onAddFolder={props.onAttachFolder ?? (() => {})}
       {...(props.onOpenDraftThread === undefined

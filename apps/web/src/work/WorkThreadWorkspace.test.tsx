@@ -354,6 +354,38 @@ describe("WorkThreadWorkspace", () => {
     );
   });
 
+  it("says why a turn failed instead of leaving the transcript silent", async () => {
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({
+        threadId,
+        turns: [
+          workTurn({
+            status: "failed",
+            transcript: [{ role: "user", text: "Summarize the brief" }],
+            failure: { category: "failed", message: "Claude message stream failed." },
+          }),
+        ],
+      })),
+    };
+    const requestClient = { list: vi.fn(async () => ({ requests: [] })) };
+
+    render(
+      <WorkThreadWorkspace
+        requestClient={requestClient as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    expect(await screen.findByText("Claude message stream failed.")).toBeVisible();
+  });
+
   it("windows long Work transcripts instead of mounting every message", async () => {
     const turns = Array.from({ length: 200 }, (_, index) =>
       workTurn({

@@ -123,6 +123,15 @@ import {
   unsupportedModelOptionValues,
 } from "@octant/domain/chat-policy";
 import {
+  completedThreadArchiveDue,
+  decideCompleteThread,
+  decideSnoozeThread,
+} from "@octant/domain/thread-completion-policy";
+import type {
+  CompletedThreadArchiveInput,
+  CompletedThreadArchiveOutcome,
+} from "../completedThreadArchiveSweep";
+import {
   chatProviderServesTurn,
   selectChatProviderFallback,
   type ChatProviderCapabilityName,
@@ -611,6 +620,38 @@ export class ChatServiceError extends Error {
   }
 }
 
+const CHAT_COMPLETE_REFUSALS = {
+  archived: "An archived thread cannot be completed.",
+  executing: "Wait for the running answer to finish before completing this thread.",
+  "awaiting-input": "This thread is waiting on you; answer it before completing it.",
+} as const;
+
+const CHAT_SNOOZE_REFUSALS = {
+  archived: "An archived thread cannot be snoozed.",
+  "awaiting-input": "This thread is waiting on you; answer it before snoozing it.",
+  "wake-time-not-in-future": "Pick a wake time that is still ahead.",
+} as const;
+
+/**
+ * A thread back in play carries neither rest: completion and snooze are
+ * dropped rather than stored as "not any more", so a thread that was never
+ * put away and one that came back are the same record.
+ */
+function withoutThreadRest<T extends Pick<ChatThread, "completedAt" | "snooze">>(
+  thread: T,
+): Omit<T, "completedAt" | "snooze"> {
+  const { completedAt: _completedAt, snooze: _snooze, ...rest } = thread;
+  return rest;
+}
+
+function hasAttemptInFlight(view: ChatThreadView | undefined): boolean {
+  return (
+    view?.turns
+      .flatMap((turn) => turn.attempts)
+      .some((attempt) => attempt.outcome === "queued" || attempt.outcome === "streaming") === true
+  );
+}
+
 export class ChatService {
   readonly #persistence: PersistenceService;
   readonly #uuid: () => string;
@@ -996,6 +1037,10 @@ export class ChatService {
         case "rename-chat-thread":
         case "move-chat-thread":
         case "change-chat-thread-lifecycle":
+        case "complete-chat-thread":
+        case "reopen-chat-thread":
+        case "snooze-chat-thread":
+        case "wake-chat-thread":
         case "change-chat-provider":
         case "select-chat-multi-model-pool":
         case "change-chat-research":
@@ -1669,6 +1714,59 @@ export class ChatService {
               version: (command.expectedVersion + 1) as AggregateVersion,
               updatedAt: timestamp,
             };
+    } else if (command.kind === "complete-chat-thread") {
+      // Completing hides the row, so a running answer must finish first.
+      // Chat's durable follow-up is the person's own mark as often as the
+      // agent's question, so it never blocks putting a thread away.
+      const decision = decideCompleteThread({
+        lifecycle: current.lifecycle,
+        executing: this.#isTurnActive(current.id),
+        awaitingInput: false,
+      });
+      if (decision.status === "refused") {
+        throw new ChatServiceError({
+          category: "invalid",
+          message: CHAT_COMPLETE_REFUSALS[decision.reason],
+        });
+      }
+      next = {
+        ...withoutThreadRest(current),
+        completedAt: timestamp,
+        version: (command.expectedVersion + 1) as AggregateVersion,
+        updatedAt: timestamp,
+      };
+    } else if (command.kind === "reopen-chat-thread" || command.kind === "wake-chat-thread") {
+      next = {
+        ...withoutThreadRest(current),
+        version: (command.expectedVersion + 1) as AggregateVersion,
+        updatedAt: timestamp,
+      };
+    } else if (command.kind === "snooze-chat-thread") {
+      const executing = this.#isTurnActive(current.id);
+      const decision = decideSnoozeThread({
+        lifecycle: current.lifecycle,
+        awaitingInput: false,
+        until: command.until,
+        now: timestamp,
+      });
+      if (decision.status === "refused") {
+        throw new ChatServiceError({
+          category: "invalid",
+          message: CHAT_SNOOZE_REFUSALS[decision.reason],
+        });
+      }
+      next = {
+        ...withoutThreadRest(current),
+        snooze: {
+          until: command.until,
+          at: timestamp,
+          // An answer running now is what "something happened" means later:
+          // its end wakes the thread early.
+          ...(executing ? { duringTurn: true } : {}),
+        },
+        version: (command.expectedVersion + 1) as AggregateVersion,
+        updatedAt: timestamp,
+      };
     } else if (command.kind === "change-chat-provider") {
       const providerInstanceId = decodeProviderInstanceId(command.providerInstanceId);
       const targetProbe = await this.#probeProvider(
@@ -1913,8 +2011,11 @@ export class ChatService {
         expectedVersion: command.expectedVersion,
         createdAt: timestamp,
       });
+      // A person sending the thread a message is re-engaging with it: a
+      // completed thread comes back and a snoozed one wakes, in the same
+      // thread update the turn already journals.
       const updatedThread = {
-        ...thread,
+        ...withoutThreadRest(thread),
         version: (command.expectedVersion + 1) as AggregateVersion,
         updatedAt: timestamp,
       };
@@ -2051,8 +2152,11 @@ export class ChatService {
         expectedVersion: command.expectedVersion,
         createdAt: timestamp,
       });
+      // A person sending the thread a message is re-engaging with it: a
+      // completed thread comes back and a snoozed one wakes, in the same
+      // thread update the turn already journals.
       const updatedThread = {
-        ...thread,
+        ...withoutThreadRest(thread),
         version: (command.expectedVersion + 1) as AggregateVersion,
         updatedAt: timestamp,
       };
@@ -2325,8 +2429,11 @@ export class ChatService {
         createdAt: timestamp,
       });
       const updatedTurn: ChatTurn = { ...turn, attempts: [...turn.attempts, nextAttempt] };
+      // A person sending the thread a message is re-engaging with it: a
+      // completed thread comes back and a snoozed one wakes, in the same
+      // thread update the turn already journals.
       const updatedThread = {
-        ...thread,
+        ...withoutThreadRest(thread),
         version: (command.expectedVersion + 1) as AggregateVersion,
         updatedAt: timestamp,
       };
@@ -2439,8 +2546,11 @@ export class ChatService {
         createdAt: timestamp,
       });
       const updatedTurn: ChatTurn = { ...turn, attempts: [...turn.attempts, nextAttempt] };
+      // A person sending the thread a message is re-engaging with it: a
+      // completed thread comes back and a snoozed one wakes, in the same
+      // thread update the turn already journals.
       const updatedThread = {
-        ...thread,
+        ...withoutThreadRest(thread),
         version: (command.expectedVersion + 1) as AggregateVersion,
         updatedAt: timestamp,
       };
@@ -4378,11 +4488,57 @@ export class ChatService {
     return { ...thread, version: aggregateVersion };
   }
 
+  /** A queued or streaming attempt, or an execution this process still owns. */
+  #isTurnActive(threadId: ChatThreadId): boolean {
+    const view = this.#persistence.readChatThreadView(threadId);
+    return hasAttemptInFlight(view) || this.#activeThreadExecutions.has(String(threadId));
+  }
+
+  /**
+   * Archive one completed thread on the host's own timer. Re-reads the thread
+   * and re-decides from the authoritative record, so a thread reopened between
+   * the sweep's read and this call is left alone rather than archived on stale
+   * evidence. Archiving keeps everything; it only leaves the shelves.
+   */
+  archiveCompletedThread(
+    threadId: ChatThreadId,
+    input: CompletedThreadArchiveInput,
+  ): CompletedThreadArchiveOutcome {
+    const thread = this.#persistence.readChatThread(threadId);
+    if (thread === undefined || thread.lifecycle === "deleted") {
+      return { status: "skipped", reason: "not-found" };
+    }
+    if (
+      !completedThreadArchiveDue({
+        lifecycle: thread.lifecycle,
+        completedAt: thread.completedAt,
+        afterDays: input.afterDays,
+        now: input.now,
+      })
+    ) {
+      return { status: "skipped", reason: "not-due" };
+    }
+    const current = this.#withAggregateHeadVersion(thread);
+    const next = archiveChatThread(current, {
+      expectedVersion: current.version,
+      updatedAt: decodeTimestamp(this.#clock()),
+    });
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: threadId },
+      expectedVersion: current.version,
+      events: [
+        this.#pending(
+          "chat.thread-updated@1",
+          { kind: "thread-updated", thread: next },
+          { actorKind: "system" },
+        ),
+      ],
+    });
+    return { status: "archived" };
+  }
+
   #assertNoActiveTurn(view: ChatThreadView | undefined, threadId: ChatThreadId): void {
-    const active = view?.turns
-      .flatMap((turn) => turn.attempts)
-      .find((attempt) => attempt.outcome === "queued" || attempt.outcome === "streaming");
-    if (active !== undefined || this.#activeThreadExecutions.has(String(threadId))) {
+    if (hasAttemptInFlight(view) || this.#activeThreadExecutions.has(String(threadId))) {
       throw new ChatServiceError({
         category: "waiting",
         message: "A Chat response is already running for this thread.",
@@ -4497,7 +4653,12 @@ export class ChatService {
   #pending(
     eventName: string,
     payload: unknown,
-    options?: { readonly correlationId?: CorrelationId },
+    options?: {
+      readonly correlationId?: CorrelationId;
+      // Everything a person asks for is theirs; only the host's own timer
+      // writes as the system, so a journal reader can tell the two apart.
+      readonly actorKind?: "local-user" | "system";
+    },
   ) {
     return {
       eventId: decodeEventId(this.#uuid()),
@@ -4505,7 +4666,10 @@ export class ChatService {
       eventVersion: 1,
       hostId: LOCAL_HOST_ID,
       correlationId: options?.correlationId ?? decodeCorrelationId(this.#uuid()),
-      actor: { kind: "local-user" as const, actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+      actor: {
+        kind: options?.actorKind ?? ("local-user" as const),
+        actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID),
+      },
       occurredAt: decodeTimestamp(this.#clock()),
       payload,
     };

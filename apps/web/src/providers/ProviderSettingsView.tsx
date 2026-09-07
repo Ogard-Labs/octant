@@ -2,6 +2,7 @@ import type {
   AgentEligibleModelRef,
   AnthropicCompatibleProviderConfiguration,
   AzureFoundryProviderConfiguration,
+  BflImageProviderConfiguration,
   ClaudeProviderConfiguration,
   DevinProviderConfiguration,
   DiscoverySnapshot,
@@ -12,6 +13,7 @@ import type {
   ClineProviderConfiguration,
   QwenProviderConfiguration,
   GooseProviderConfiguration,
+  IdeogramImageProviderConfiguration,
   KiloProviderConfiguration,
   MistralVibeProviderConfiguration,
   GeminiImageProviderConfiguration,
@@ -86,6 +88,16 @@ export interface ProviderSettingsViewProps {
     configuration: GeminiImageProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
+  readonly onCreateBflImage: (
+    displayName: string,
+    configuration: BflImageProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onCreateIdeogramImage: (
+    displayName: string,
+    configuration: IdeogramImageProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
   readonly onCreateClaude: (
     displayName: string,
     configuration: ClaudeProviderConfiguration,
@@ -150,6 +162,16 @@ export interface ProviderSettingsViewProps {
   readonly onChangeGeminiImageConfiguration: (
     instanceId: ProviderInstanceId,
     configuration: GeminiImageProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onChangeBflImageConfiguration: (
+    instanceId: ProviderInstanceId,
+    configuration: BflImageProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onChangeIdeogramImageConfiguration: (
+    instanceId: ProviderInstanceId,
+    configuration: IdeogramImageProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
   readonly onChangeClaudeConfiguration: (
@@ -286,6 +308,8 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
             onCreateOpenAiCompatible={props.onCreateOpenAiCompatible}
             onCreateOpenAiImage={props.onCreateOpenAiImage}
             onCreateGeminiImage={props.onCreateGeminiImage}
+            onCreateBflImage={props.onCreateBflImage}
+            onCreateIdeogramImage={props.onCreateIdeogramImage}
           />
         }
         credentialManagementAvailable={props.credentialManagementAvailable}
@@ -316,6 +340,8 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangeOpenAiCompatibleConfiguration={props.onChangeOpenAiCompatibleConfiguration}
         onChangeOpenAiImageConfiguration={props.onChangeOpenAiImageConfiguration}
         onChangeGeminiImageConfiguration={props.onChangeGeminiImageConfiguration}
+        onChangeBflImageConfiguration={props.onChangeBflImageConfiguration}
+        onChangeIdeogramImageConfiguration={props.onChangeIdeogramImageConfiguration}
         onChangePiConfiguration={props.onChangePiConfiguration}
         onClearProviderCredential={props.onClearProviderCredential}
         onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}

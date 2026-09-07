@@ -25,7 +25,7 @@ import {
   type WorkTurnClient,
 } from "@octant/client-runtime/work-turn-client";
 import type { FileMentionClient, ThreadMentionClient } from "@octant/client-runtime";
-import { Check, FileText, Globe2, Paperclip } from "lucide-react";
+import { Check, CirclePause, FileText, Globe2, Paperclip } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -72,12 +72,20 @@ import { useWorkFileMentions } from "./useWorkFileMentions";
 import { samePollingData } from "../polling/samePollingData";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
+import { ChatRichText } from "../chat/ChatRichText";
 import {
   documentIsVisible,
   scheduleVisibleInterval,
   waitUntilDocumentVisible,
 } from "../polling/documentVisibility";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
+import {
+  TurnHeader,
+  TurnTime,
+  turnWorkedFor,
+  type TurnHeaderOutcome,
+} from "../transcript/TurnHeader";
+import { providerModelLabel } from "../providers/providerModelLabel";
 
 /**
  * A message the user sent while a turn was still running.
@@ -104,6 +112,10 @@ type WorkTranscriptRow =
       readonly kind: "message";
       readonly key: string;
       readonly entry: WorkTurnState["transcript"][number];
+      /** When the person's message was accepted; assistant entries carry the time on their header. */
+      readonly at?: string;
+      /** The turn header, when this is the turn's first reply and so opens with it. */
+      readonly head?: WorkTurnState;
     }
   | { readonly kind: "steered"; readonly key: string; readonly prompt: string }
   | { readonly kind: "request"; readonly key: string; readonly request: WorkRequest }
@@ -112,9 +124,58 @@ type WorkTranscriptRow =
       readonly key: string;
       readonly wrote: NonNullable<WorkTurnState["wroteFiles"]>;
     }
-  | { readonly kind: "status"; readonly key: "status"; readonly text: string };
+  | { readonly kind: "status"; readonly key: "status"; readonly text: string }
+  | {
+      readonly kind: "head";
+      readonly key: string;
+      readonly turn: WorkTurnState;
+    };
 
 const WORK_TRANSCRIPT_RECONNECTING_MESSAGE = "Work transcript is reconnecting.";
+
+/**
+ * The turn header: it opens the turn's first reply, or stands alone when the
+ * turn ended without one.
+ */
+function WorkTurnHeader(props: {
+  readonly turn: WorkTurnState;
+  readonly providerGroups: ReadonlyArray<PickerGroup>;
+}) {
+  const outcome = turnHeaderOutcome(props.turn);
+  const workedFor = turnWorkedFor(outcome, props.turn.acceptedAt, props.turn.updatedAt);
+  return (
+    <TurnHeader
+      at={props.turn.updatedAt}
+      outcome={outcome}
+      provider={providerModelLabel(props.providerGroups, props.turn.authority)}
+      {...(workedFor === undefined ? {} : { workedFor })}
+      {...(props.turn.failure === undefined ? {} : { reason: props.turn.failure.message })}
+    />
+  );
+}
+
+/**
+ * Where a turn's header sits: before its first assistant entry, or after the
+ * whole turn when no reply exists yet. A turn that ended without a reply used
+ * to leave the transcript silent — the journal recorded the failure while the
+ * surface showed only the user's own message — so the header is emitted for
+ * every turn, reply or not.
+ */
+function turnHeaderOutcome(turn: WorkTurnState): TurnHeaderOutcome {
+  switch (turn.status) {
+    case "accepted":
+    case "running":
+      return "running";
+    case "waiting":
+      return "waiting";
+    case "cancelled":
+      return "cancelled";
+    case "failed":
+      return "failed";
+    case "completed":
+      return "completed";
+  }
+}
 
 export interface WorkThreadWorkspaceProps {
   readonly title: string;
@@ -323,13 +384,27 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     const rows: WorkTranscriptRow[] = [];
     if (turns.length === 0) rows.push({ kind: "empty", key: "empty" });
     for (const [turnIndex, turn] of turns.entries()) {
+      const head: WorkTranscriptRow = {
+        kind: "head",
+        key: `${String(turn.requestId)}-${String(turnIndex)}-head`,
+        turn,
+      };
+      let headPlaced = false;
       for (const [index, entry] of turn.transcript.entries()) {
+        // The header opens the turn's first reply in the same row, as it does
+        // in Chat and Code; a separate header row put a full row gap between
+        // the header and the prose it introduces.
+        const opensTurn = entry.role === "assistant" && !headPlaced;
+        if (opensTurn) headPlaced = true;
         rows.push({
           kind: "message",
           key: `${String(turn.requestId)}-${String(turnIndex)}-${entry.role}-${String(index)}`,
           entry,
+          ...(entry.role === "user" ? { at: turn.acceptedAt } : {}),
+          ...(opensTurn ? { head: turn } : {}),
         });
       }
+      if (!headPlaced) rows.push(head);
       // The files land after the turn that produced them, so the transcript
       // reads as what was said and then what came out of it.
       if (turn.wroteFiles !== undefined) {
@@ -932,12 +1007,12 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
 
       <TranscriptWindow
         ariaLabel="Work transcript"
-        className="work-thread-workspace__conversation"
+        className="work-thread-workspace__conversation transcript-scroll"
         estimateSize={92}
-        gap={18}
+        gap={20}
         itemKey={(row) => row.key}
         items={transcriptRows}
-        listClassName="work-thread-workspace__transcript"
+        listClassName="thread-column"
         renderItem={(row) => {
           if (row.kind === "empty") {
             return (
@@ -953,24 +1028,26 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   <div className="bubble">
                     <TrackerReferenceText asParagraph text={row.entry.text} />
                   </div>
+                  {row.at === undefined ? null : <TurnTime at={row.at} />}
                 </article>
               );
             }
+            // A reply is markdown, as it is in Chat and Code: the same headings,
+            // lists, and code blocks render the same way here.
             return (
               <article aria-label="Assistant message" className="turn-agent">
-                {row.entry.text === "" ? (
-                  <p className="runstatus" role="status">
-                    Working…
-                  </p>
-                ) : (
-                  <TrackerReferenceText asParagraph text={row.entry.text} />
+                {row.head === undefined ? null : (
+                  <WorkTurnHeader providerGroups={props.providerGroups ?? []} turn={row.head} />
                 )}
-                {row.entry.status === undefined ? null : (
-                  <p className="runstatus" role="status">
-                    {row.entry.status}
-                  </p>
-                )}
+                {row.entry.text === "" ? null : <ChatRichText body={row.entry.text} />}
               </article>
+            );
+          }
+          if (row.kind === "head") {
+            return (
+              <div className="turn-agent">
+                <WorkTurnHeader providerGroups={props.providerGroups ?? []} turn={row.turn} />
+              </div>
             );
           }
           if (row.kind === "steered") {
@@ -1021,15 +1098,18 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           }
           if (row.kind === "request") {
             return (
-              <p className="runstatus" role="status">
-                {row.request.detail.kind === "approval"
-                  ? `Approval required — ${row.request.detail.action}: ${row.request.detail.description}`
-                  : `Input required — ${row.request.detail.prompt}`}
-              </p>
+              <div className="approval-row" role="status">
+                <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
+                <span className="approval-row__text">
+                  {row.request.detail.kind === "approval"
+                    ? `Approval required — ${row.request.detail.action}: ${row.request.detail.description}`
+                    : `Input required — ${row.request.detail.prompt}`}
+                </span>
+              </div>
             );
           }
           return (
-            <p className="runstatus" role="status">
+            <p className="oct-row-detail" role="status">
               {row.text}
             </p>
           );
@@ -1068,198 +1148,192 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         }
       />
 
-      <div className="work-thread-workspace__composer">
-        <div className="work-thread-workspace__composer-shell">
-          <ThreadComposer
-            chips={
-              <>
-                <ThreadMentionChips
-                  chips={threadMentions.chips}
-                  onRemove={(mentionedThreadId) =>
-                    threadMentions.composer?.onRemoveChip(mentionedThreadId)
-                  }
-                />
-                <TrackerReferenceComposerHints draft={prompt} />
-                <WorkImageAttachmentChips images={images} />
-                {composerDraft.persistError === undefined ? null : (
-                  <p className="work-thread-workspace__hint" role="status">
-                    {composerDraft.persistError}
-                  </p>
-                )}
-              </>
+      <ThreadComposer
+        className="thread-composer thread-column"
+        chips={
+          <>
+            <ThreadMentionChips
+              chips={threadMentions.chips}
+              onRemove={(mentionedThreadId) =>
+                threadMentions.composer?.onRemoveChip(mentionedThreadId)
+              }
+            />
+            <TrackerReferenceComposerHints draft={prompt} />
+            <WorkImageAttachmentChips images={images} />
+            {composerDraft.persistError === undefined ? null : (
+              <p className="work-thread-workspace__hint" role="status">
+                {composerDraft.persistError}
+              </p>
+            )}
+          </>
+        }
+        input={
+          <OctantTextarea
+            aria-label="Work prompt"
+            autoFocus
+            className="composer-input"
+            disabled={
+              creating ||
+              completionLocked ||
+              (props.mutationClient === undefined && props.turnClient === undefined)
             }
-            input={
-              <OctantTextarea
-                aria-label="Work prompt"
-                autoFocus
-                className="composer-input"
-                disabled={
-                  creating ||
-                  completionLocked ||
-                  (props.mutationClient === undefined && props.turnClient === undefined)
-                }
-                onChange={(event) => {
-                  rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
-                  syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
-                }}
-                onClick={(event) => {
-                  rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
-                  syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
-                }}
-                onKeyDown={handleKeyDown}
-                onKeyUp={(event) => {
-                  rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
-                  syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
-                }}
-                onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
-                  if (creating || completionLocked) return;
-                  if (attachFromTransfer(event.clipboardData)) event.preventDefault();
-                }}
-                placeholder={
-                  turnRunning
-                    ? "Send the next message…"
-                    : "Describe the deliverable or paste a draft…"
-                }
-                ref={textareaRef}
-                rows={4}
-                value={prompt}
-              />
-            }
-            typeahead={
-              <>
-                {mention.open ? (
-                  <ThreadMentionTypeahead
-                    activeIndex={mention.activeIndex}
-                    {...(threadMentions.composer?.busy === undefined
-                      ? {}
-                      : { busy: threadMentions.composer.busy })}
-                    candidates={threadMentions.composer?.candidates ?? []}
-                    listId={mentionListId}
-                    onChoose={mention.choose}
-                    onHover={mention.setActiveIndex}
-                  />
-                ) : null}
-                {fileMentionOpen ? (
-                  <PathMentionTypeahead
-                    activeIndex={fileMentions.activeIndex}
-                    busy={fileMentions.busy}
-                    candidates={fileMentions.candidates}
-                    listId={fileMentionListId}
-                    onChoose={fileMentions.choose}
-                    onHover={fileMentions.setActiveIndex}
-                  />
-                ) : null}
-              </>
-            }
-            row={{
-              leading: (
-                <>
-                  {/* Model sits beside send, not on a strip above the composer:
-                      the bar holds how the task runs (0073). */}
-                  {thread === undefined ? null : (
-                    <span
-                      aria-label="Bound provider and model"
-                      className="work-thread-workspace__bound-model"
-                    >
-                      <ComposerModelPicker
-                        ariaLabel="Provider and model"
-                        disabled={providerChanging || creating || completionLocked}
-                        groups={props.providerGroups ?? []}
-                        onSelect={(selection) => void changeProvider(selection)}
-                        {...(props.onOpenSettings === undefined
-                          ? {}
-                          : { onOpenSettings: props.onOpenSettings })}
-                        selectedModelId={thread.modelId}
-                        selectedProviderInstanceId={thread.providerInstanceId}
-                      />
-                    </span>
-                  )}
-                  {props.turnClient === undefined ? null : (
-                    <>
-                      <label>
-                        <span className="work-composer-adapter__visually-hidden">
-                          Add attachment
-                        </span>
-                        {/* ui-boundary-exception: native-file-input */}
-                        <input
-                          aria-label="Choose attachment file"
-                          accept="image/png,image/jpeg,image/webp,image/gif"
-                          className="work-composer-adapter__file-input"
-                          disabled={creating || completionLocked || imageSupport === false}
-                          onChange={(event) => {
-                            const file = event.currentTarget.files?.item(0);
-                            if (file !== null && file !== undefined) {
-                              if (imageSupport === false) {
-                                images.refuse(
-                                  "The selected model does not accept images. Choose an image-capable model.",
-                                );
-                              } else {
-                                images.attach([file]);
-                              }
-                            }
-                            event.currentTarget.value = "";
-                          }}
-                          type="file"
-                        />
-                      </label>
-                      <OctantButton
-                        aria-label="Add attachment"
-                        disabled={creating || completionLocked || imageSupport === false}
-                        onClick={(event) => {
-                          event.currentTarget.parentElement
-                            ?.querySelector<HTMLInputElement>('input[type="file"]')
-                            ?.click();
-                        }}
-                        size="icon"
-                        type="button"
-                        variant="ghost"
-                      >
-                        <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
-                      </OctantButton>
-                    </>
-                  )}
-                  <ComposerVoiceButton
-                    disabled={creating || completionLocked}
-                    onTranscript={(transcript) =>
-                      rememberDraft(appendTranscript(prompt, transcript), null)
-                    }
-                  />
-                </>
-              ),
-              actions: {
-                kind: "send",
-                send: {
-                  ariaLabel:
-                    props.turnClient === undefined && !turnRunning
-                      ? "Create artifact"
-                      : "Send follow-up",
-                  disabled: !canSubmit,
-                  onSend: () => void submit(),
-                },
-              },
+            onChange={(event) => {
+              rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
+              syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
             }}
+            onClick={(event) => {
+              rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
+              syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
+            }}
+            onKeyDown={handleKeyDown}
+            onKeyUp={(event) => {
+              rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
+              syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
+            }}
+            onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+              if (creating || completionLocked) return;
+              if (attachFromTransfer(event.clipboardData)) event.preventDefault();
+            }}
+            placeholder={
+              turnRunning ? "Send the next message…" : "Describe the deliverable or paste a draft…"
+            }
+            ref={textareaRef}
+            rows={4}
+            value={prompt}
           />
-          {errorMessage === undefined ? null : (
-            <p className="draft-thread__error" role="alert">
-              {errorMessage}
-            </p>
-          )}
-          {steered.pending === undefined ? null : (
-            <p className="draft-thread__hint" role="status">
-              Sent. It runs when the turn in progress finishes.
-            </p>
-          )}
-          <p className="draft-thread__hint">
-            {completionLocked
-              ? "Reactivate this task before creating another file or changing its provider."
-              : turnRunning
-                ? "Press Enter to send · it runs when this response finishes · Shift+Enter for a new line"
-                : props.turnClient === undefined
-                  ? "Press Enter to save a markdown artifact · Shift+Enter for a new line"
-                  : "Press Enter to send · Shift+Enter for a new line · Type # to mention a thread, @ to mention a file"}
-          </p>
-        </div>
-      </div>
+        }
+        typeahead={
+          <>
+            {mention.open ? (
+              <ThreadMentionTypeahead
+                activeIndex={mention.activeIndex}
+                {...(threadMentions.composer?.busy === undefined
+                  ? {}
+                  : { busy: threadMentions.composer.busy })}
+                candidates={threadMentions.composer?.candidates ?? []}
+                listId={mentionListId}
+                onChoose={mention.choose}
+                onHover={mention.setActiveIndex}
+              />
+            ) : null}
+            {fileMentionOpen ? (
+              <PathMentionTypeahead
+                activeIndex={fileMentions.activeIndex}
+                busy={fileMentions.busy}
+                candidates={fileMentions.candidates}
+                listId={fileMentionListId}
+                onChoose={fileMentions.choose}
+                onHover={fileMentions.setActiveIndex}
+              />
+            ) : null}
+          </>
+        }
+        row={{
+          leading: (
+            <>
+              {/* Model sits beside send, not on a strip above the composer:
+                      the bar holds how the task runs (0073). */}
+              {thread === undefined ? null : (
+                <span
+                  aria-label="Bound provider and model"
+                  className="work-thread-workspace__bound-model"
+                >
+                  <ComposerModelPicker
+                    ariaLabel="Provider and model"
+                    disabled={providerChanging || creating || completionLocked}
+                    groups={props.providerGroups ?? []}
+                    onSelect={(selection) => void changeProvider(selection)}
+                    {...(props.onOpenSettings === undefined
+                      ? {}
+                      : { onOpenSettings: props.onOpenSettings })}
+                    selectedModelId={thread.modelId}
+                    selectedProviderInstanceId={thread.providerInstanceId}
+                  />
+                </span>
+              )}
+              {props.turnClient === undefined ? null : (
+                <>
+                  <label>
+                    <span className="work-composer-adapter__visually-hidden">Add attachment</span>
+                    {/* ui-boundary-exception: native-file-input */}
+                    <input
+                      aria-label="Choose attachment file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      className="work-composer-adapter__file-input"
+                      disabled={creating || completionLocked || imageSupport === false}
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.item(0);
+                        if (file !== null && file !== undefined) {
+                          if (imageSupport === false) {
+                            images.refuse(
+                              "The selected model does not accept images. Choose an image-capable model.",
+                            );
+                          } else {
+                            images.attach([file]);
+                          }
+                        }
+                        event.currentTarget.value = "";
+                      }}
+                      type="file"
+                    />
+                  </label>
+                  <OctantButton
+                    aria-label="Add attachment"
+                    disabled={creating || completionLocked || imageSupport === false}
+                    onClick={(event) => {
+                      event.currentTarget.parentElement
+                        ?.querySelector<HTMLInputElement>('input[type="file"]')
+                        ?.click();
+                    }}
+                    size="icon"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
+                  </OctantButton>
+                </>
+              )}
+              <ComposerVoiceButton
+                disabled={creating || completionLocked}
+                onTranscript={(transcript) =>
+                  rememberDraft(appendTranscript(prompt, transcript), null)
+                }
+              />
+            </>
+          ),
+          actions: {
+            kind: "send",
+            send: {
+              ariaLabel:
+                props.turnClient === undefined && !turnRunning
+                  ? "Create artifact"
+                  : "Send follow-up",
+              disabled: !canSubmit,
+              onSend: () => void submit(),
+            },
+          },
+        }}
+        footer={
+          <div aria-live="polite" className="composer-status">
+            {errorMessage === undefined ? null : (
+              <span className="composer-status__notice" role="alert">
+                {errorMessage}
+              </span>
+            )}
+            <span className="composer-status__hint" role="status">
+              {steered.pending !== undefined
+                ? "Sent. It runs when the turn in progress finishes."
+                : completionLocked
+                  ? "Reactivate this task before creating another file or changing its provider."
+                  : turnRunning
+                    ? "Enter sends when this response finishes"
+                    : props.turnClient === undefined
+                      ? "Enter saves a Markdown artifact · Shift+Enter for a new line"
+                      : "Enter to send · Shift+Enter for a new line · # mentions a thread · @ mentions a file"}
+            </span>
+          </div>
+        }
+      />
     </section>
   );
 }

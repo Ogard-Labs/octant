@@ -203,7 +203,9 @@ describe("ChatTranscript", () => {
 
     const content = screen.getByRole("list", { name: "Chat transcript" });
     expect(content.textContent).toMatch(
-      /Please summarize this\.\s*diagram\.png[\s\S]*Interrupted[\s\S]*Provider handoff · model-b[\s\S]*Here is the summary\.[\s\S]*Completed/,
+      // The outcome heads the reply, so a finished turn reads "Completed" and
+      // then what it said.
+      /Please summarize this\.\s*diagram\.png[\s\S]*Interrupted[\s\S]*Provider handoff · model-b[\s\S]*Completed[\s\S]*Here is the summary\./,
     );
   });
 
@@ -407,7 +409,7 @@ describe("ChatTranscript", () => {
     const { rerender } = render(<ChatTranscript view={view} />);
     const workedFor = screen.getByText("Worked for 1m 5s");
     expect(workedFor).toBeVisible();
-    expect(getComputedStyle(workedFor.closest("p")!).position).not.toBe("absolute");
+    expect(getComputedStyle(workedFor.closest("header")!).position).not.toBe("absolute");
 
     rerender(
       <ChatTranscript view={viewFixture({ attemptUpdatedAt: "2026-07-20T08:00:00.999Z" })} />,
