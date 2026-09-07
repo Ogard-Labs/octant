@@ -2327,13 +2327,12 @@ function LaunchedShell(
     draftProviderInstanceId !== undefined && draftModelId !== undefined
       ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
       : undefined;
-  const preferredChatSelection =
-    activeMode === "chat" && rawDraftSelection === undefined
-      ? firstRunChatDefault
-      : rawDraftSelection;
+  const preferredChatSelection = rawDraftSelection ?? firstRunChatDefault;
   const visibleDraftSelection =
-    resolveDraftProviderSelection(draftProviderGroups, preferredChatSelection) ??
-    firstSelectableProviderSelection(draftProviderGroups);
+    resolveDraftProviderSelection(
+      draftProviderGroups,
+      activeMode === "chat" ? preferredChatSelection : rawDraftSelection,
+    ) ?? firstSelectableProviderSelection(draftProviderGroups);
   const effectiveDraftProviderInstanceId =
     activeMode === "work"
       ? workProviderChoice?.instanceId
