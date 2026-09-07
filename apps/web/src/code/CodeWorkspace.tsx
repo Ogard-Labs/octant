@@ -929,6 +929,12 @@ function TerminalWorkspaceSurface(
     setReattaching(true);
     const reattach = async (initial: boolean) => {
       if (startInFlight.current) {
+        // The start already under way owns the wait: it shows its own
+        // connecting state and installs the terminal it gets. This attach
+        // used to leave "reattaching" raised while stepping aside, and no
+        // later poll lowered it, so the terminal that start delivered stayed
+        // hidden behind a connecting screen for the rest of the session.
+        if (initial) setReattaching(false);
         refreshTimer = setTimeout(() => void reattach(false), terminalRefreshIntervalMs);
         return;
       }

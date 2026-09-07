@@ -307,7 +307,9 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
           output={output}
         />
       ) : (
-        <p role="status">Loading terminal replay…</p>
+        <p className="code-terminal-pane__loading" role="status">
+          Loading terminal replay…
+        </p>
       )}
     </section>
   );

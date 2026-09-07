@@ -27,6 +27,15 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   background: transparent;
 }
 
+/* The native window is transparent only so the sidebar's glass can frost the
+   desktop. With the ground drawn under the whole shell (0091) the workspace
+   layer over it is translucent too, and through that the transparent window
+   showed whatever sat behind Octant, sharp, under every transcript. The ground
+   needs an opaque page beneath it, glass or not. */
+html[data-octant-native-host="true"] .shell.shell-frame.shell--app-backdrop {
+  background: var(--octant-app-background);
+}
+
 .shell.shell-frame.shell--wide-context-open {
   --octant-rendered-sidebar-width: min(
     var(--octant-sidebar-width, 232px),
@@ -477,12 +486,11 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   background: var(--octant-workspace-translucent-strong);
 }
 
-/* The workspace, its panes, and the thread tab band each paint the opaque
-   workspace colour. With the layer beneath them translucent, that fill hid
+/* The workspace and its panes each paint the opaque workspace colour. With
+   the layer beneath them translucent, that fill hid
    the glass entirely, so the setting appeared to do nothing. */
 .shell--workspace-material-translucent.shell-frame .workspace,
-.shell--workspace-material-translucent.shell-frame .workspace-pane,
-.shell--workspace-material-translucent.shell-frame .workspace-thread-tabs {
+.shell--workspace-material-translucent.shell-frame .workspace-pane {
   background: transparent;
 }
 

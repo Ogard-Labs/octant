@@ -83,7 +83,19 @@
   flex: 1;
   padding: var(--oct-space-2) var(--oct-space-4) var(--oct-space-3);
   overflow: hidden;
-  background: var(--oct-surface-inset);
+  /* The engine themes its cells on the workspace ground; the padding around
+     them paints the same colour so a session never sits in a lighter frame. */
+  background: var(--octant-workspace);
+}
+
+/* The wait for a replay reads like the first line of the session it becomes,
+   not like a paragraph dropped into the pane. */
+.code-terminal-pane__loading {
+  margin: 0;
+  padding: var(--oct-space-3) var(--oct-space-4);
+  color: var(--oct-muted);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
 }
 
 .code-terminal-pane {

@@ -15,6 +15,7 @@ export const mount: XtermAdapterRuntime["mount"] = (element, options) => {
   const theme = resolvedTerminalTheme();
   const terminal = new Terminal({
     convertEol: true,
+    cursorBlink: true,
     disableStdin: !interactive,
     fontFamily: typography.fontFamily,
     fontSize: typography.fontSize,

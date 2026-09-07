@@ -5,8 +5,9 @@ import type {
   WorkspacePane,
   WorkspaceTab,
 } from "@octant/contracts/shell";
-import { GripVertical } from "lucide-react";
+import { GripVertical, X } from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { OctantIconButton } from "../ui/base/OctantButton";
 import { OctantSlider } from "../ui/base/OctantSlider";
 import {
   OctantContextMenuContent,
@@ -58,7 +59,13 @@ export interface SplitWorkspaceProps {
   readonly providerByThreadId?: ReadonlyMap<string, ThreadProviderIdentity>;
   /** The same preference controls provider marks in navigation and pane tabs. */
   readonly showProviderIcons?: boolean;
-  /** The window-level thread strip owns the title band for an unsplit workspace. */
+  /**
+   * The Project the window's panes live in, worn as a chip beside each
+   * thread's title. Every pane shares it: placement across Projects is
+   * server-refused, so one label is true of them all.
+   */
+  readonly contextLabel?: string;
+  /** Start screens alone in the window keep the title band clear. */
   readonly showSinglePaneHeader?: boolean;
   readonly totalWorkspacePaneCount: number;
 }
@@ -328,10 +335,23 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
               )}
               <span className="workspace-pane__title">{surface.title}</span>
             </span>
+            {props.contextLabel === undefined || !("threadId" in surface) ? null : (
+              <span aria-hidden="true" className="workspace-pane__project">
+                {props.contextLabel}
+              </span>
+            )}
             <span
               aria-hidden="true"
               className="workspace-pane__window-drag-space window-drag-region"
             />
+            <OctantIconButton
+              className="workspace-pane__close"
+              label={`Close ${surface.title}`}
+              onClick={() => props.onClosePane(pane.paneId)}
+              type="button"
+            >
+              <X aria-hidden="true" size={14} strokeWidth={1.8} />
+            </OctantIconButton>
           </OctantContextMenuTrigger>
           <PaneMenu
             canSplit={canSplit}

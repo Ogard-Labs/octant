@@ -259,6 +259,18 @@ html[data-octant-theme-mode="light"] {
 html[data-octant-native-host="true"],
 html[data-octant-native-host="true"] body {
   background: transparent;
+  /* Every scroller Octant has is its own, so a trackpad scroll that reaches
+     the document only bounces it. On a transparent window that bounce shows
+     the desktop for its whole length, which reads as the app shrinking or
+     vanishing under the pointer. */
+  overscroll-behavior: none;
+}
+
+/* Nothing frosts the transparent window until the host says its glass is on,
+   so until then the page is the last opaque thing between the desktop and
+   every surface that scrolls, bounces, or goes translucent. */
+html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) body {
+  background: var(--octant-app-background);
 }
 
 .thread-activity-frame {
@@ -1244,7 +1256,11 @@ strong {
   text-align: left;
 }
 
-.project-row__select:hover {
+/* The name button is what opens and closes the Project, so the recipe marks
+   it expanded and would fill it; that turned every open Project into a
+   highlighted row, which is the header's mistake all over again. */
+.project-row__select:hover,
+.project-row__select[aria-expanded] {
   background: transparent;
 }
 
@@ -1489,223 +1505,12 @@ strong {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  /* One row: the split tree fills the workspace. The band above it used to be
+     the thread strip's; without that row the tree landed in an auto track and
+     sat content-high, with the composer floating mid-pane. */
+  grid-template-rows: minmax(0, 1fr);
   place-items: stretch;
   background: var(--octant-workspace);
-}
-
-/* The title band is the title rail the dock head and the window controls
-   share: 30px tabs 4px down, and the hairline closing the band at exactly the
-   rail height so it meets the dock's rule. The hairline runs to the window's
-   edge: the space reserved for the native window controls is padding inside
-   the band, not a margin outside it, which stopped the rule short and left a
-   gap before the dock's own rule. */
-.workspace-thread-tabs {
-  position: relative;
-  z-index: 5;
-  display: flex;
-  min-width: 0;
-  min-height: var(--oct-title-rail-h);
-  align-items: center;
-  gap: 6px;
-  padding: 4px var(--octant-window-chrome-reserved-width, 148px) 3px var(--oct-space-3);
-  border-bottom: 1px solid var(--octant-border);
-  background: color-mix(in srgb, var(--octant-workspace) 96%, var(--octant-control));
-}
-
-.shell--sidebar-collapsed .workspace-thread-tabs {
-  padding-left: var(--octant-window-chrome-leading-width, 148px);
-}
-
-.workspace-thread-tabs__context,
-.workspace-thread-tabs__surface {
-  display: inline-flex;
-  min-width: 0;
-  flex: 0 1 auto;
-  align-items: center;
-  gap: 5px;
-  overflow: hidden;
-  color: var(--octant-text-muted);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  white-space: nowrap;
-}
-
-.workspace-thread-tabs__context > span:first-of-type,
-.workspace-thread-tabs__surface {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.workspace-thread-tabs__context > svg {
-  flex: 0 0 auto;
-  opacity: 0.72;
-}
-
-.workspace-thread-tabs__separator {
-  color: var(--octant-border-strong);
-}
-
-.workspace-thread-tabs__list {
-  display: flex;
-  min-width: 0;
-  max-width: min(1040px, 80%);
-  flex: 0 1 auto;
-  align-items: center;
-  gap: 2px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.workspace-thread-tabs__list::-webkit-scrollbar {
-  display: none;
-}
-
-/* Thread tabs follow the dock's tab grammar: quiet labels, the active one
-   on the selection fill, no border or shadow. The bordered, shadowed pill
-   read as a button dropped into the breadcrumb. */
-.workspace-thread-tabs__item {
-  display: inline-flex;
-  min-width: 0;
-  flex: 0 1 auto;
-  align-items: center;
-  padding-inline-end: 2px;
-  border: 0;
-  border-radius: var(--oct-radius-sm);
-  color: var(--octant-text-muted);
-  background: transparent;
-}
-
-.workspace-thread-tabs__item:hover {
-  color: var(--octant-text-primary);
-  background: var(--oct-fg-soft);
-}
-
-/* The tab in front is a different thing from the tab under the pointer: it
-   takes the selection fill and a hairline edge, the same treatment the dock's
-   tool tabs use, so the two strips read as one grammar. */
-.workspace-thread-tabs__item[data-active="true"] {
-  color: var(--octant-text-primary);
-  background: var(--octant-selection);
-  box-shadow: inset 0 0 0 1px var(--octant-border);
-}
-
-/* The title is what the tab is for, so it gets the width: it grows into the
-   tab and yields to the chips only when the tab itself has run out of room.
-   Measured before this rule a 30ch tab cut "Add a one-line JSDoc comment" to
-   "Add a one-li…" while the Project chip beside it kept every letter. */
-.workspace-thread-tabs__select {
-  min-width: 0;
-  max-width: 440px;
-  height: var(--oct-rail-tab-h);
-  flex: 1 1 auto;
-  gap: 6px;
-  padding: 0 10px;
-  color: inherit;
-  font-size: var(--oct-text-sm);
-}
-
-.workspace-thread-tabs__where {
-  width: var(--oct-icon-sm);
-  height: var(--oct-icon-sm);
-  flex: 0 0 auto;
-  opacity: 0.7;
-}
-
-.workspace-thread-tabs__item[data-active="true"] .workspace-thread-tabs__where {
-  opacity: 1;
-}
-
-/* "PR #917" on the tab of a thread that delivers to a pull request: a tinted
-   chip in the request's state colour, ahead of the title, so the tab says
-   where the work is going before it says what the work is. */
-.workspace-thread-tabs__pr {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  height: 18px;
-  padding: 0 6px;
-  border-radius: var(--oct-radius-sm);
-  color: var(--oct-meta);
-  background: color-mix(in srgb, currentcolor 12%, transparent);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-display);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.workspace-thread-tabs__pr[data-state="open"] {
-  color: var(--octant-success-text);
-}
-
-.workspace-thread-tabs__pr[data-state="merged"] {
-  color: var(--octant-palette-purple);
-}
-
-.workspace-thread-tabs__pr[data-state="closed"] {
-  color: var(--octant-danger-text);
-}
-
-.workspace-thread-tabs__title {
-  flex: 1 1 auto;
-  min-width: 6ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The Project rides on the tab rather than heading the whole strip, so a
-   strip holding threads from two Projects names each one. It stays quiet:
-   the thread is what the person is looking for, the Project is the answer to
-   "which one is this". */
-.workspace-thread-tabs__project {
-  flex: 0 0 auto;
-  max-width: 16ch;
-  overflow: hidden;
-  padding: 1px 6px 2px;
-  border-radius: var(--oct-radius-xs, 3px);
-  color: var(--octant-text-muted);
-  background: var(--oct-fg-soft);
-  font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The controls take no room until they are wanted: an invisible 44px at the
-   end of every tab read as dead space and pushed the next tab along. The
-   tab in front always shows its close, the way a tab bar is expected to;
-   the others reveal theirs on hover or focus, and a pinned tab keeps its pin. */
-.workspace-thread-tabs__pin,
-.workspace-thread-tabs__close {
-  width: 0;
-  min-width: 0;
-  height: 22px;
-  min-height: 22px;
-  padding: 0;
-  overflow: hidden;
-  color: var(--octant-text-muted);
-  opacity: 0;
-}
-
-.workspace-thread-tabs__item:hover .workspace-thread-tabs__pin,
-.workspace-thread-tabs__item:hover .workspace-thread-tabs__close,
-.workspace-thread-tabs__item:focus-within .workspace-thread-tabs__pin,
-.workspace-thread-tabs__item:focus-within .workspace-thread-tabs__close,
-.workspace-thread-tabs__item[data-active="true"] .workspace-thread-tabs__close,
-.workspace-thread-tabs__item[data-pinned="true"] .workspace-thread-tabs__pin {
-  width: 22px;
-  min-width: 22px;
-  opacity: 1;
-}
-
-.workspace-thread-tabs__item[data-pinned="true"] .workspace-thread-tabs__pin {
-  color: var(--octant-text-primary);
-}
-
-.workspace-thread-tabs__drag-space {
-  min-width: 12px;
-  align-self: stretch;
-  flex: 1 1 auto;
 }
 
 .workspace-cross-context-banner {
@@ -1875,6 +1680,35 @@ strong {
   gap: 4px;
   margin-right: var(--octant-window-chrome-reserved-width, 148px);
   padding: 2px 0 2px 4px;
+}
+
+/* The Project chip and the close sit in the band with the title: the chip
+   in the same quiet ink as the sidebar's, the close visible at rest because
+   it is the pane's one inline action and a hidden close read as no close. */
+.workspace-pane__project {
+  flex: 0 0 auto;
+  max-width: 16ch;
+  overflow: hidden;
+  padding: 1px 6px 2px;
+  border-radius: var(--oct-radius-xs, 3px);
+  color: var(--octant-text-muted);
+  background: var(--oct-fg-soft);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-pane__close {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  margin-right: var(--oct-space-1);
+  color: var(--octant-text-muted);
+}
+
+.workspace-pane__close:hover {
+  color: var(--oct-fg);
 }
 
 /* The tab sits in the corner the sidebar and the title band make, so it takes

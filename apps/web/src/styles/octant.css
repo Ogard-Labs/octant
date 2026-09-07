@@ -1957,22 +1957,6 @@ input.switch:checked::after {
   z-index: var(--oct-z-toast);
 }
 
-/* One focus treatment for every owned button.
-   The recipe drew a 3px ring, which is a filled glow rather than an edge: on a
-   tab it read as a highlighter circle drawn around the label, and inside the
-   composer's own frame it read as a second field. Keyboard focus is one
-   outline, at one width, drawn outside the control — the same mark the rest of
-   the system uses. */
-[data-slot="button"]:focus-visible {
-  outline: 2px solid var(--oct-accent-fg);
-  outline-offset: 1px;
-  /* One mark, not two. The shared rule above paints a halo on anything
-     focusable, so without this a button carried both an outline and a ring —
-     only the icon buttons escaped it, because the shell zeroes their shadow
-     for other reasons. */
-  box-shadow: none;
-}
-
 .octant-tooltip {
   max-width: min(280px, calc(100vw - 24px));
   padding: 7px 10px;

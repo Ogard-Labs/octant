@@ -5365,28 +5365,6 @@ function LaunchedShell(
                       }
                       void controller.openChatThread(threadId, title, projectId);
                     }}
-                    onActivateThreadTab={(tab) => {
-                      closeWorkspaceReaders();
-                      if (tab.mode === "chat") {
-                        void controller.openChatThread(tab.threadId, tab.title, tab.projectId);
-                        return;
-                      }
-                      if (tab.mode === "work") {
-                        void controller.openWorkThread(
-                          tab.threadId,
-                          tab.title,
-                          tab.hostId,
-                          tab.projectId,
-                        );
-                        return;
-                      }
-                      void controller.openCodeThread(
-                        tab.threadId,
-                        tab.title,
-                        tab.hostId,
-                        tab.projectId,
-                      );
-                    }}
                     onViewAllChatProjectThreads={viewAllChatProjectThreads}
                     onOpenSideChat={(sidecar) => void controller.openSideChat(sidecar)}
                     {...(activeMode === "chat" && draftCreating

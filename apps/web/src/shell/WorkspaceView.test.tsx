@@ -101,14 +101,12 @@ describe("WorkspaceView welcome", () => {
 });
 
 describe("WorkspaceView Code tab registration", () => {
-  it("uses the window thread strip instead of duplicating an unsplit pane header", async () => {
+  it("gives an unsplit conversation one title row of its own instead of a window strip", async () => {
     render(<WorkspaceView {...propsFor(codeTab("code-overview", "Planning"))} />);
 
-    expect(await screen.findByRole("tab", { name: "Planning" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(screen.queryByTitle("Drag to move or split")).not.toBeInTheDocument();
+    expect(await screen.findByTitle("Drag to move or split")).toHaveTextContent("Planning");
+    expect(screen.getByRole("button", { name: "Close Planning" })).toBeVisible();
+    expect(screen.queryByRole("tablist", { name: "Open threads" })).not.toBeInTheDocument();
   });
 
   it.each(codeTabs)(

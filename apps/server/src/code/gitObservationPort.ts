@@ -617,7 +617,10 @@ function parseStatus(output: string): GitStatusEntry[] | undefined {
     const field = fields[index]!;
     if (field.length < 4 || field[2] !== " ") return undefined;
     const entry: GitStatusEntry = {
-      path: field.slice(3),
+      // Git collapses an untracked directory to one `dir/` line. The slash is
+      // its way of saying "directory", not part of the path: a relative path
+      // never ends in one, and left in place it refused the whole observation.
+      path: field.slice(3).replace(/\/$/, ""),
       index: field[0]!,
       worktree: field[1]!,
     };

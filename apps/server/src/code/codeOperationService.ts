@@ -904,6 +904,11 @@ export class CodeOperationService {
             } catch (error) {
               const category =
                 error instanceof ReviewFindingServiceError ? error.failure : ("failed" as const);
+              // The renderer sees only the category. Without the reason in the
+              // host log, a refused result and a thrown one read the same.
+              console.warn(
+                `Octant code operation ${command.kind} failed unexpectedly: ${(error instanceof Error ? error.message : String(error)).slice(0, 400)}`,
+              );
               result = this.#failed(command.operationId, category, "Code operation failed.");
             }
           }

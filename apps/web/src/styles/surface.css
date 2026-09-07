@@ -509,15 +509,64 @@
 
 .shell--app-backdrop.shell-frame .workspace,
 .shell--app-backdrop.shell-frame .workspace-pane,
-.shell--app-backdrop.shell-frame .workspace-thread-tabs,
 .shell--app-backdrop.shell-frame .draft-thread,
 .shell--app-backdrop.shell-frame .chat-welcome,
 .shell--app-backdrop.shell-frame .chat-workspace,
 .shell--app-backdrop.shell-frame .work-composer-adapter,
-.shell--app-backdrop.shell-frame .work-thread-workspace {
+.shell--app-backdrop.shell-frame .work-thread-workspace,
+.shell--app-backdrop.shell-frame .code-composer-adapter,
+.shell--app-backdrop.shell-frame .code-thread-workspace,
+.shell--app-backdrop.shell-frame .code-delivery-pane,
+.shell--app-backdrop.shell-frame .code-diff-pane {
   background: transparent;
+}
+
+/* A terminal is a plate of its own: the engine paints the workspace ground
+   behind its cells, so a cloud showing through the padding around them framed
+   every session in a different colour than the one its text sat on. */
+.shell--app-backdrop.shell-frame .code-terminal-pane {
+  background: var(--octant-workspace);
 }
 
 .shell--app-backdrop-sidebar.shell-frame .sidebar {
   background: var(--octant-sidebar-translucent-subtle);
+}
+
+/* Where the conversation reads, the ground steps back. Each transcript
+   column carries a plate a gutter wider than its measure and feathered at
+   every edge, so the cloud stays in the margins and never under a line. */
+.shell--app-backdrop.shell-frame .code-thread-workspace__transcript,
+.shell--app-backdrop.shell-frame .work-thread-workspace__transcript,
+.shell--app-backdrop.shell-frame .chat-transcript__turns {
+  position: relative;
+  isolation: isolate;
+}
+
+.shell--app-backdrop.shell-frame .code-thread-workspace__transcript::before,
+.shell--app-backdrop.shell-frame .work-thread-workspace__transcript::before,
+.shell--app-backdrop.shell-frame .chat-transcript__turns::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: -16px -32px;
+  border-radius: var(--oct-radius-lg);
+  background: var(--octant-workspace-translucent);
+  pointer-events: none;
+  mask-image:
+    linear-gradient(
+      to right,
+      transparent,
+      currentColor 32px,
+      currentColor calc(100% - 32px),
+      transparent
+    ),
+    linear-gradient(
+      to bottom,
+      transparent,
+      currentColor 16px,
+      currentColor calc(100% - 16px),
+      transparent
+    );
+  mask-composite: intersect;
+  -webkit-mask-composite: source-in;
 }

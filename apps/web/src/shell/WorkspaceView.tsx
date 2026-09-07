@@ -94,11 +94,6 @@ import { WorkThreadEnvironment } from "../environment/WorkThreadEnvironment";
 import { ChatThreadEnvironment } from "../environment/ChatThreadEnvironment";
 import { ThreadActivityPictureInPicture } from "../threadActivity/ThreadActivityPictureInPicture";
 import type { ThreadProviderIdentity } from "./navigationModel";
-import {
-  WorkspaceThreadTabs,
-  workspaceThreadTabFromSurface,
-  type WorkspaceThreadTab,
-} from "./WorkspaceThreadTabs";
 
 const CodeWorkspaceTab = lazy(() => import("../code/CodeWorkspaceTab"));
 const CanvasWorkspaceTab = lazy(() =>
@@ -203,8 +198,6 @@ export interface WorkspaceViewProps {
   readonly onCommitResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
   readonly onFocus: (paneId: PaneId) => void;
   readonly onOpenCodeThread: (threadId: CodeThreadId, title: string, projectId?: ProjectId) => void;
-  /** Reopens a window-local thread tab through the ordinary authoritative shell command. */
-  readonly onActivateThreadTab?: (tab: WorkspaceThreadTab) => void;
   readonly onOpenWorkThread?: (threadId: WorkThreadId, projectId: ProjectId) => void;
   /** Opens one repository file as a Code file tab, from the file explorer. */
   readonly onOpenCodeFile?: (input: {
@@ -465,78 +458,12 @@ export function WorkspaceView(props: WorkspaceViewProps) {
   const contextProject = props.projects.find(
     (project) => String(project.id) === String(contextProjectId),
   );
-  const activeCodeThreadTitle =
-    activeSurface !== undefined && "threadId" in activeSurface && activeSurface.mode === "code"
-      ? props.codeController.bootstrap?.threads.find(
-          (thread) => String(thread.id) === String(activeSurface.threadId),
-        )?.title
-      : undefined;
-  // The tab wears the thread's pull request the way the sidebar row and the
-  // board card do: the first linked request, from the cached snapshot.
-  const activeCodePullRequest = useMemo(() => {
-    if (
-      activeSurface === undefined ||
-      !("threadId" in activeSurface) ||
-      activeSurface.mode !== "code"
-    ) {
-      return undefined;
-    }
-    const summary = props.codeController.navigation?.find(
-      (item) => String(item.threadId) === String(activeSurface.threadId),
-    )?.pullRequestSummaries?.items[0];
-    return summary === undefined
-      ? undefined
-      : { number: summary.identity.number, state: summary.state };
-  }, [activeSurface, props.codeController.navigation]);
-  const activeThreadTab = useMemo(
-    () =>
-      activeSurface === undefined
-        ? undefined
-        : workspaceThreadTabFromSurface(
-            activeSurface,
-            contextProjectId,
-            activeCodeThreadTitle,
-            contextProject?.name,
-            activeCodePullRequest,
-          ),
-    [
-      activeCodePullRequest,
-      activeCodeThreadTitle,
-      activeSurface,
-      contextProjectId,
-      contextProject?.name,
-    ],
-  );
-
-  function activateThreadTab(tab: WorkspaceThreadTab) {
-    if (props.onActivateThreadTab !== undefined) {
-      props.onActivateThreadTab(tab);
-      return;
-    }
-    if (tab.mode === "chat") {
-      props.onOpenChatThread?.(tab.threadId, tab.title, tab.projectId);
-      return;
-    }
-    if (tab.mode === "work") {
-      if (tab.projectId !== undefined) props.onOpenWorkThread?.(tab.threadId, tab.projectId);
-      return;
-    }
-    props.onOpenCodeThread(tab.threadId, tab.title, tab.projectId);
-  }
 
   return (
     <TabActivationProvider
       {...(props.tabActivation === undefined ? {} : { registry: props.tabActivation })}
     >
       <main className="workspace" hidden={props.hidden}>
-        <WorkspaceThreadTabs
-          {...(activeThreadTab === undefined ? {} : { activeTab: activeThreadTab })}
-          {...(contextProject === undefined ? {} : { contextLabel: contextProject.name })}
-          fallbackTitle={activeSurface?.title ?? "Workspace"}
-          mode={props.mode}
-          onActivate={activateThreadTab}
-          onCloseActive={() => closePane(activePaneId)}
-        />
         {props.crossContextOffer === undefined ? null : (
           <CrossContextBanner
             message={props.crossContextOffer.message}
@@ -550,6 +477,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           />
         )}
         <SplitWorkspace
+          {...(contextProject === undefined ? {} : { contextLabel: contextProject.name })}
           drag={props.drag}
           layout={props.layout}
           mode={props.mode}
@@ -1935,6 +1863,11 @@ function findPaneInLayout(layout: WorkspaceLayoutNode, paneId: PaneId): Workspac
   return findPaneInLayout(layout.first, paneId) ?? findPaneInLayout(layout.second, paneId);
 }
 
+/**
+ * A pane's header is the one title row a surface gets: its name, its Project,
+ * and the way to close it. Start screens and readers carry their own heading
+ * or need none, so alone in the window they keep the band clear.
+ */
 function singlePaneSurfaceNeedsHeader(surface: WorkspaceTab | undefined): boolean {
   if (surface === undefined) return false;
   switch (surface.kind) {
@@ -1942,9 +1875,6 @@ function singlePaneSurfaceNeedsHeader(surface: WorkspaceTab | undefined): boolea
     case "draft-thread":
     case "settings":
     case "project":
-    case "chat-thread":
-    case "work-thread":
-    case "code-overview":
       return false;
     default:
       return true;

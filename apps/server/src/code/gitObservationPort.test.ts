@@ -76,6 +76,30 @@ describe("GitObservationPort", () => {
     expect(gitOutput(repository, "status", "--porcelain=v1")).toContain("tracked.txt");
   });
 
+  it("names an untracked directory without the slash git prints after it", async () => {
+    const root = temporaryDirectory();
+    const repository = join(root, "repository");
+    mkdirSync(repository);
+    git(repository, "init", "--initial-branch=main");
+    git(repository, "config", "user.name", "Octant Test");
+    git(repository, "config", "user.email", "test@octant.local");
+    writeFileSync(join(repository, "tracked.txt"), "before\n");
+    git(repository, "add", "--", "tracked.txt");
+    git(repository, "commit", "-m", "initial");
+    mkdirSync(join(repository, "notes"));
+    writeFileSync(join(repository, "notes", "draft.md"), "untracked\n");
+
+    const result = await new GitObservationPort(confinedOptions()).observe(repository);
+
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    // A relative path in the contract never ends in a slash; with git's
+    // `notes/` passed through, the whole observation was refused and the
+    // Review tool showed only "Code operation failed".
+    expect(result.statusEntries).toEqual([{ path: "notes", index: "?", worktree: "?" }]);
+    expect(result.changedPaths).toEqual(["notes"]);
+  });
+
   it("reports detached HEAD exactly and redacts credentials embedded in remote URLs", async () => {
     const repository = createRepository();
     git(repository, "checkout", "--detach", "HEAD");
