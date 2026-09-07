@@ -218,7 +218,11 @@ export function ComposerPoolControl(props: ComposerPoolControlProps) {
                       />
                       <span>
                         {view.providerName} — {view.modelName}
-                        {view.isCurrent ? " (current)" : ""}
+                        {view.isCurrent
+                          ? view.hiddenCurrent
+                            ? " (current · hidden in Settings)"
+                            : " (current)"
+                          : ""}
                       </span>
                     </label>
                     {view.unavailableReason === undefined ? null : (

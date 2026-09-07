@@ -1712,6 +1712,34 @@ describe("ProviderSettingsView", () => {
     expect(screen.getByText(/No configured, ready models are available/i)).toBeVisible();
   });
 
+  it("hides an observed model from new pickers while keeping its Settings toggle reversible", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ observed: observation() });
+    const rendered = renderExpanded(<ProviderSettingsView {...props} />);
+
+    const hide = screen.getByRole("checkbox", { name: "Hide Model One in model pickers" });
+    expect(hide).toBeChecked();
+    await user.click(hide);
+    expect(props.onHiddenModelsChange).toHaveBeenCalledWith([
+      { providerInstanceId: id, modelId: "model-1" },
+    ]);
+
+    const hiddenProps = fixture({ observed: observation() });
+    rendered.rerender(
+      <ProviderSettingsView
+        {...hiddenProps}
+        defaults={{
+          ...hiddenProps.defaults,
+          hiddenModels: [{ providerInstanceId: id, modelId: "model-1" as never }],
+        }}
+      />,
+    );
+    const show = screen.getByRole("checkbox", { name: "Show Model One in model pickers" });
+    expect(show).not.toBeChecked();
+    await user.click(show);
+    expect(hiddenProps.onHiddenModelsChange).toHaveBeenCalledWith([]);
+  });
+
   it("labels disabled auto-registered providers with detected-host enable copy", () => {
     renderExpanded(
       <ProviderSettingsView
@@ -1857,6 +1885,7 @@ function ControllerBackedProviderSettings(props: {
       {...(controller.message === undefined ? {} : { message: controller.message })}
       observedByInstance={controller.observedByInstance}
       onAgentEligibleModelsChange={controller.updateAgentEligibleModels}
+      onHiddenModelsChange={controller.updateHiddenModels}
       onChangeBinary={controller.changeBinary}
       onChangeClaudeConfiguration={controller.changeClaudeConfiguration}
       onChangeDevinConfiguration={controller.changeDevinConfiguration}
@@ -2120,6 +2149,7 @@ function fixture(
     onPermissionPersistenceChange: vi.fn(async () => true),
     onProviderOrderChange: vi.fn(async () => true),
     onAgentEligibleModelsChange: vi.fn(async () => true),
+    onHiddenModelsChange: vi.fn(async () => true),
     onRetry: vi.fn(async () => true),
   };
 }

@@ -1,6 +1,6 @@
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProviderDriverKind } from "@octant/contracts/providers";
-import type { ProviderInstance } from "@octant/contracts/providers";
+import type { HiddenProviderModelRef, ProviderInstance } from "@octant/contracts/providers";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import type { ProviderModel } from "@octant/contracts/providers";
 import type { ProviderObservedState } from "@octant/contracts/providers";
@@ -210,6 +210,11 @@ export interface PickerGroup {
   readonly executionHost: string;
   readonly sections: ReadonlyArray<PickerSection>;
   readonly unavailableCurrent?: PickerModel;
+  /**
+   * A model hidden in Settings but still bound to an existing draft/thread.
+   * It remains valid for that binding while staying out of the selectable rows.
+   */
+  readonly hiddenCurrent?: PickerModel;
 }
 
 export interface ModelPickerSelection {
@@ -228,6 +233,7 @@ export function findPickerModel(
     const model = section.models.find((candidate) => candidate.model.id === selection.modelId);
     if (model !== undefined) return model;
   }
+  if (group.hiddenCurrent?.model.id === selection.modelId) return group.hiddenCurrent;
   return undefined;
 }
 
@@ -257,6 +263,7 @@ export interface ModelPickerInput {
   readonly providerOrder?: ReadonlyArray<ProviderInstanceId> | undefined;
   readonly mode: OctantMode;
   readonly currentSelection?: ModelPickerSelection | undefined;
+  readonly hiddenModels?: ReadonlyArray<HiddenProviderModelRef> | undefined;
   readonly hostId?: string | undefined;
 }
 
@@ -296,6 +303,9 @@ export function providerCanServeAnyModel(
 
 export function buildModelPickerGroups(input: ModelPickerInput): ReadonlyArray<PickerGroup> {
   const ordered = orderProviderInstances(input.instances, input.providerOrder ?? []);
+  const hiddenKeys = new Set(
+    (input.hiddenModels ?? []).map((ref) => `${ref.providerInstanceId}:${ref.modelId}`),
+  );
   const groups: PickerGroup[] = [];
   for (const instance of ordered) {
     if (isImageProfileDriverKind(instance.driverKind)) continue;
@@ -309,16 +319,37 @@ export function buildModelPickerGroups(input: ModelPickerInput): ReadonlyArray<P
       continue;
     }
     const orderedModels = orderProviderModels(observed.models, manualModelOrderOf(instance));
+    const visibleModels = orderedModels.filter(
+      (model) => !hiddenKeys.has(`${instance.id}:${model.id}`),
+    );
     const sections = sectionModels(
-      orderedModels,
+      visibleModels,
       input.mode,
       instance.driverKind,
       observed.verifiedToolModelIds ?? [],
     );
     const currentSelection = input.currentSelection;
+    const hiddenCurrentModel =
+      currentSelection !== undefined &&
+      currentSelection.providerInstanceId === instance.id &&
+      hiddenKeys.has(`${instance.id}:${currentSelection.modelId}`)
+        ? orderedModels.find((model) => model.id === currentSelection.modelId)
+        : undefined;
+    const hiddenCurrent =
+      hiddenCurrentModel === undefined
+        ? undefined
+        : sectionModels(
+            [hiddenCurrentModel],
+            input.mode,
+            instance.driverKind,
+            observed.verifiedToolModelIds ?? [],
+          )
+            .flatMap((section) => section.models)
+            .at(0);
     const unavailableCurrent =
       currentSelection !== undefined &&
       currentSelection.providerInstanceId === instance.id &&
+      hiddenCurrent === undefined &&
       !orderedModels.some((m) => m.id === currentSelection.modelId)
         ? unavailableCurrentModel(
             currentSelection.modelId,
@@ -336,6 +367,7 @@ export function buildModelPickerGroups(input: ModelPickerInput): ReadonlyArray<P
       executionHost: input.hostId ?? localExecutionHost,
       sections,
       ...(unavailableCurrent === undefined ? {} : { unavailableCurrent }),
+      ...(hiddenCurrent === undefined ? {} : { hiddenCurrent }),
     });
   }
   return groups;
@@ -359,13 +391,8 @@ function sectionModels(
   verifiedToolModelIds: ReadonlyArray<ProviderModelId>,
 ): ReadonlyArray<PickerSection> {
   if (mode === "chat") {
-    return [
-      {
-        id: "all-models",
-        label: "Models",
-        models: models.map((model) => toPickerModel(model, driverKind, verifiedToolModelIds)),
-      },
-    ];
+    const allModels = models.map((model) => toPickerModel(model, driverKind, verifiedToolModelIds));
+    return allModels.length === 0 ? [] : [{ id: "all-models", label: "Models", models: allModels }];
   }
   const toolCapable: PickerModel[] = [];
   const chatOnly: PickerModel[] = [];
@@ -528,7 +555,7 @@ export function filterModelPickerGroups(
     } else if (
       providerMatch &&
       group.sections.length === 0 &&
-      group.unavailableCurrent !== undefined
+      (group.unavailableCurrent !== undefined || group.hiddenCurrent !== undefined)
     ) {
       filtered.push(group);
     }

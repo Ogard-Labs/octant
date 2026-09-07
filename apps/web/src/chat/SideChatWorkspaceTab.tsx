@@ -129,6 +129,7 @@ function SideChatSidecarSurface(props: {
             instances: providerController.instances,
             observedByInstance: providerController.observedByInstance,
             providerOrder: providerController.defaults?.providerOrder ?? [],
+            hiddenModels: providerController.defaults?.hiddenModels ?? [],
             mode: "chat",
           }),
     [providerController],

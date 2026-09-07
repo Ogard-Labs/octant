@@ -2015,6 +2015,45 @@ describe("ProviderService", () => {
     });
   });
 
+  it("persists, preserves, and clears hidden model defaults", async () => {
+    const fixture = serviceFixture();
+    const hiddenModels = [
+      { providerInstanceId: instanceId, modelId: decodeProviderModelId("gpt-5.2") },
+    ];
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "update-provider-defaults",
+        expectedVersion: 0,
+        permissionPersistence: "current-session",
+        hiddenModels,
+      }),
+    ).resolves.toEqual({
+      kind: "provider-defaults-updated",
+      defaults: { permissionPersistence: "current-session", hiddenModels, version: 1 },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "update-provider-defaults",
+        expectedVersion: 1,
+        permissionPersistence: "project-default",
+      }),
+    ).resolves.toEqual({
+      kind: "provider-defaults-updated",
+      defaults: { permissionPersistence: "project-default", hiddenModels, version: 2 },
+    });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "update-provider-defaults",
+        expectedVersion: 2,
+        permissionPersistence: "project-default",
+        hiddenModels: [],
+      }),
+    ).resolves.toEqual({
+      kind: "provider-defaults-updated",
+      defaults: { permissionPersistence: "project-default", version: 3 },
+    });
+  });
+
   it("blocks probes for disabled providers and removal with active sessions", async () => {
     const disabled = serviceFixture({ instances: [provider({ enabled: false })] });
     await expect(disabled.service.probe(windowId, instanceId)).rejects.toMatchObject({

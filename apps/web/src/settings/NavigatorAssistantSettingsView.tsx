@@ -40,6 +40,7 @@ export function NavigatorAssistantSettingsView(props: NavigatorAssistantSettings
           ),
         ),
         providerOrder: props.providerSnapshot?.defaults.providerOrder,
+        hiddenModels: props.providerSnapshot?.defaults.hiddenModels,
         mode: "chat",
       }),
     [props.providerSnapshot],

@@ -1,6 +1,7 @@
 import {
   decodeProviderInstanceId,
   type AgentEligibleModelRef,
+  type HiddenProviderModelRef,
   type AnthropicCompatibleProviderConfiguration,
   type AzureFoundryProviderConfiguration,
   type BflImageProviderConfiguration,
@@ -2555,6 +2556,16 @@ export function useProviderController(options: ProviderControllerOptions) {
       })),
     [execute],
   );
+  const updateHiddenModels = useCallback(
+    (hiddenModels: ReadonlyArray<HiddenProviderModelRef>) =>
+      execute((current) => ({
+        kind: "update-provider-defaults",
+        expectedVersion: current.defaults.version,
+        permissionPersistence: current.defaults.permissionPersistence,
+        hiddenModels,
+      })),
+    [execute],
+  );
   const probe = useCallback(
     async (instanceId: ProviderInstanceId) => {
       if (client === undefined) return false;
@@ -2728,6 +2739,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     updatePermissionPersistence,
     updateProviderOrder,
     updateAgentEligibleModels,
+    updateHiddenModels,
   };
 }
 

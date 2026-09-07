@@ -1,5 +1,6 @@
 import type {
   AgentEligibleModelRef,
+  HiddenProviderModelRef,
   AnthropicCompatibleProviderConfiguration,
   AzureFoundryProviderConfiguration,
   BflImageProviderConfiguration,
@@ -262,6 +263,9 @@ export interface ProviderSettingsViewProps {
   readonly onAgentEligibleModelsChange: (
     agentEligibleModels: ReadonlyArray<AgentEligibleModelRef>,
   ) => Promise<boolean>;
+  readonly onHiddenModelsChange: (
+    hiddenModels: ReadonlyArray<HiddenProviderModelRef>,
+  ) => Promise<boolean>;
   readonly onRetry: () => Promise<boolean>;
 }
 
@@ -320,6 +324,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         probingIds={props.probingIds}
         status={props.status}
         onAgentEligibleModelsChange={props.onAgentEligibleModelsChange}
+        onHiddenModelsChange={props.onHiddenModelsChange}
         onBeginProviderAuthentication={props.onBeginProviderAuthentication}
         onChangeAnthropicCompatibleConfiguration={props.onChangeAnthropicCompatibleConfiguration}
         onChangeAzureFoundryConfiguration={props.onChangeAzureFoundryConfiguration}

@@ -41,6 +41,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
           ),
         ),
         providerOrder: props.providerSnapshot?.defaults.providerOrder,
+        hiddenModels: props.providerSnapshot?.defaults.hiddenModels,
         mode: "chat",
         currentSelection:
           draft.defaultProviderInstanceId === "" || draft.defaultModelId === ""

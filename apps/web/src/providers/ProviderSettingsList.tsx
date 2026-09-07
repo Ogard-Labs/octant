@@ -1,6 +1,7 @@
 import type {
   AgentEligibleModelRef,
   DiscoverySnapshot,
+  HiddenProviderModelRef,
   ProviderInstance,
   ProviderInstanceId,
   ProviderModelId,
@@ -91,6 +92,7 @@ export type ProviderSettingsListProps = Pick<
   | "onVerifyFoundryTools"
   | "onProviderOrderChange"
   | "onAgentEligibleModelsChange"
+  | "onHiddenModelsChange"
 > & {
   readonly discoverySnapshot: DiscoverySnapshot | undefined;
   readonly createForm?: ReactNode;
@@ -219,6 +221,8 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
                 onMove={move}
                 onProbe={props.onProbe}
                 onVerifyFoundryTools={props.onVerifyFoundryTools}
+                hiddenModels={props.defaults.hiddenModels ?? []}
+                onHiddenModelsChange={props.onHiddenModelsChange}
                 onProviderCredentialStatus={props.onProviderCredentialStatus}
                 onRemove={props.onRemove}
                 onRename={props.onRename}
@@ -440,6 +444,8 @@ interface ProviderRowProps {
   readonly onRemove: ProviderSettingsViewProps["onRemove"];
   readonly onProbe: ProviderSettingsViewProps["onProbe"];
   readonly onVerifyFoundryTools: ProviderSettingsViewProps["onVerifyFoundryTools"];
+  readonly hiddenModels: ReadonlyArray<HiddenProviderModelRef>;
+  readonly onHiddenModelsChange: ProviderSettingsViewProps["onHiddenModelsChange"];
 }
 
 function ProviderRow(props: ProviderRowProps) {
@@ -1182,13 +1188,47 @@ function ProviderRow(props: ProviderRowProps) {
                       <p>No models reported.</p>
                     ) : (
                       <ul>
-                        {props.observed.models.map((model) => (
-                          <li key={model.id}>
-                            {!isHttp && !isAnthropicHttp && !isFoundry
+                        {props.observed.models.map((model) => {
+                          const hidden = props.hiddenModels.some(
+                            (ref) =>
+                              ref.providerInstanceId === props.instance.id &&
+                              ref.modelId === model.id,
+                          );
+                          const modelLabel =
+                            !isHttp && !isAnthropicHttp && !isFoundry
                               ? model.displayName
-                              : `${model.displayName} · ${titleCase(model.source)} · ${titleCase(model.verification)}`}
-                          </li>
-                        ))}
+                              : `${model.displayName} · ${titleCase(model.source)} · ${titleCase(model.verification)}`;
+                          return (
+                            <li key={model.id}>
+                              <span>{modelLabel}</span>
+                              <label>
+                                <OctantCheckbox
+                                  aria-label={`${hidden ? "Show" : "Hide"} ${model.displayName} in model pickers`}
+                                  checked={!hidden}
+                                  className="window-no-drag"
+                                  disabled={disabled}
+                                  onChange={(event) => {
+                                    const next = props.hiddenModels.filter(
+                                      (ref) =>
+                                        !(
+                                          ref.providerInstanceId === props.instance.id &&
+                                          ref.modelId === model.id
+                                        ),
+                                    );
+                                    if (!event.currentTarget.checked) {
+                                      next.push({
+                                        providerInstanceId: props.instance.id,
+                                        modelId: model.id,
+                                      });
+                                    }
+                                    void props.onHiddenModelsChange(next);
+                                  }}
+                                />
+                                <span>{hidden ? "Hidden" : "Shown"}</span>
+                              </label>
+                            </li>
+                          );
+                        })}
                       </ul>
                     )}
                   </section>

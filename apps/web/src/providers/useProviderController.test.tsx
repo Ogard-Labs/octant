@@ -1897,6 +1897,34 @@ describe("useProviderController", () => {
     );
     expect(result.current.defaults.agentEligibleModels).toEqual(agentEligibleModels);
   });
+
+  it("updates hidden model defaults while preserving permission persistence", async () => {
+    const hiddenModels = [{ providerInstanceId: id, modelId: decodeProviderModelId("gpt-5.2") }];
+    const api = client(snapshot([provider()]));
+    vi.mocked(api.execute).mockResolvedValueOnce({
+      kind: "provider-defaults-updated",
+      defaults: {
+        permissionPersistence: "current-session",
+        hiddenModels,
+        version: 1 as never,
+      },
+    });
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(result.current.updateHiddenModels(hiddenModels)).resolves.toBe(true);
+    });
+
+    expect(api.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "update-provider-defaults",
+        permissionPersistence: "current-session",
+        hiddenModels,
+      }),
+    );
+    expect(result.current.defaults.hiddenModels).toEqual(hiddenModels);
+  });
 });
 
 function client(initial = snapshot()): ProviderClient {

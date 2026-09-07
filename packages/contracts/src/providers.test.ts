@@ -1661,6 +1661,37 @@ describe("provider registry contracts", () => {
     ).toBeUndefined();
   });
 
+  it("decodes hidden model defaults and preserves an absent override", () => {
+    const defaults = {
+      permissionPersistence: "current-session",
+      hiddenModels: [{ providerInstanceId: ids.instance, modelId: "gpt-5.2" }],
+      version: 3,
+    } as const;
+    expect(decodeProviderDefaults(defaults)).toEqual(defaults);
+    expect(
+      decodeProviderDefaults({ permissionPersistence: "current-session", version: 0 }).hiddenModels,
+    ).toBeUndefined();
+  });
+
+  it("rejects duplicate hidden model defaults and accepts them on updates", () => {
+    const entry = { providerInstanceId: ids.instance, modelId: "gpt-5.2" } as const;
+    expect(() =>
+      decodeProviderDefaults({
+        permissionPersistence: "current-session",
+        hiddenModels: [entry, entry],
+        version: 1,
+      }),
+    ).toThrow();
+    const command = decodeProviderRegistryCommand({
+      kind: "update-provider-defaults",
+      expectedVersion: 2,
+      permissionPersistence: "project-default",
+      hiddenModels: [entry],
+    });
+    expect(command.kind).toBe("update-provider-defaults");
+    if (command.kind === "update-provider-defaults") expect(command.hiddenModels).toEqual([entry]);
+  });
+
   it("rejects duplicate or oversized agent-eligible model defaults", () => {
     const entry = { providerInstanceId: ids.instance, modelId: "gpt-5.2" } as const;
     expect(() =>

@@ -2185,12 +2185,14 @@ function LaunchedShell(
         instances: providerController.instances,
         observedByInstance: providerController.observedByInstance,
         providerOrder: providerController.defaults.providerOrder,
+        hiddenModels: providerController.defaults.hiddenModels,
         mode: "code",
       }),
     [
       providerController.instances,
       providerController.observedByInstance,
       providerController.defaults.providerOrder,
+      providerController.defaults.hiddenModels,
     ],
   );
   const workProviderGroups = useMemo(
@@ -2199,12 +2201,14 @@ function LaunchedShell(
         instances: providerController.instances,
         observedByInstance: providerController.observedByInstance,
         providerOrder: providerController.defaults.providerOrder,
+        hiddenModels: providerController.defaults.hiddenModels,
         mode: "work",
       }),
     [
       providerController.instances,
       providerController.observedByInstance,
       providerController.defaults.providerOrder,
+      providerController.defaults.hiddenModels,
     ],
   );
   const chatProviderGroups = useMemo(
@@ -2213,12 +2217,14 @@ function LaunchedShell(
         instances: providerController.instances,
         observedByInstance: providerController.observedByInstance,
         providerOrder: providerController.defaults.providerOrder,
+        hiddenModels: providerController.defaults.hiddenModels,
         mode: "chat",
       }),
     [
       providerController.instances,
       providerController.observedByInstance,
       providerController.defaults.providerOrder,
+      providerController.defaults.hiddenModels,
     ],
   );
   useEffect(() => {

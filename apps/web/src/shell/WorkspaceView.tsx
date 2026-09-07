@@ -1868,12 +1868,14 @@ function ChatThreadWorkspace(props: {
         instances: props.providerController.instances ?? [],
         observedByInstance: props.providerController.observedByInstance ?? new Map(),
         providerOrder,
+        hiddenModels: props.providerController.defaults?.hiddenModels ?? [],
         mode: "chat",
       }),
     [
       props.providerController.instances,
       props.providerController.observedByInstance,
       providerOrder,
+      props.providerController.defaults?.hiddenModels,
     ],
   );
   return (

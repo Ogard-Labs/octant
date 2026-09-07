@@ -749,6 +749,17 @@ const UniqueAgentEligibleModels = Schema.Array(AgentEligibleModelRef).pipe(
   ),
 );
 
+/**
+ * One Settings-defined model visibility override. Hidden models stay valid
+ * for existing thread bindings; this list only controls new picker options.
+ */
+export const HiddenProviderModelRef = AgentEligibleModelRef;
+export type HiddenProviderModelRef = AgentEligibleModelRef;
+
+const UniqueHiddenProviderModels = Schema.Array(HiddenProviderModelRef).pipe(
+  Schema.filter((refs) => new Set(refs.map(agentEligibleModelKey)).size === refs.length),
+);
+
 export const ProviderDefaults = Schema.Struct({
   permissionPersistence: PermissionPersistence,
   providerOrder: Schema.optional(
@@ -760,6 +771,7 @@ export const ProviderDefaults = Schema.Struct({
    * multi-model pool until Settings defines one.
    */
   agentEligibleModels: Schema.optional(UniqueAgentEligibleModels),
+  hiddenModels: Schema.optional(UniqueHiddenProviderModels),
   version: AggregateVersion,
 }).annotations(strict);
 export type ProviderDefaults = typeof ProviderDefaults.Type;
@@ -1389,6 +1401,7 @@ export const ProviderRegistryCommand = Schema.Union(
       ),
     ),
     agentEligibleModels: Schema.optional(UniqueAgentEligibleModels),
+    hiddenModels: Schema.optional(UniqueHiddenProviderModels),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("probe-provider"),

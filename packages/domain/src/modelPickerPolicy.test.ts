@@ -545,6 +545,53 @@ describe("model picker policy", () => {
       expect(groups[0]!.unavailableCurrent?.unavailableReason).toBeDefined();
     });
 
+    it("hides configured models while keeping a hidden current selection bound", () => {
+      const instance = openAiInstance({
+        id: "00000000-0000-4000-8000-000000000101",
+        displayName: "G",
+      });
+      const visible = model({ id: "visible", displayName: "Visible" });
+      const hidden = model({ id: "hidden", displayName: "Hidden" });
+      const observedByInstance = new Map([[instance.id, observed(instance.id, [visible, hidden])]]);
+      const hiddenSelection = {
+        providerInstanceId: instance.id,
+        modelId: decodeProviderModelId("hidden"),
+      };
+      const groups = buildModelPickerGroups(
+        input({
+          instances: [instance],
+          observedByInstance,
+          hiddenModels: [hiddenSelection],
+          currentSelection: hiddenSelection,
+        }),
+      );
+      expect(groups[0]!.sections.flatMap((section) => section.models)).toEqual([
+        expect.objectContaining({ model: visible }),
+      ]);
+      expect(groups[0]!.hiddenCurrent).toEqual(expect.objectContaining({ model: hidden }));
+      expect(isDraftSelectionSelectable(groups, hiddenSelection)).toBe(true);
+      expect(resolveDraftProviderSelection(groups, hiddenSelection)).toEqual(hiddenSelection);
+    });
+
+    it("leaves a provider group with no selectable models when all are hidden", () => {
+      const instance = openAiInstance({
+        id: "00000000-0000-4000-8000-000000000101",
+        displayName: "G",
+      });
+      const hidden = model({ id: "hidden", displayName: "Hidden" });
+      const observedByInstance = new Map([[instance.id, observed(instance.id, [hidden])]]);
+      const groups = buildModelPickerGroups(
+        input({
+          instances: [instance],
+          observedByInstance,
+          hiddenModels: [{ providerInstanceId: instance.id, modelId: hidden.id }],
+        }),
+      );
+      expect(groups).toHaveLength(1);
+      expect(groups[0]!.sections).toEqual([]);
+      expect(groups[0]!.hiddenCurrent).toBeUndefined();
+    });
+
     it("retains the current selection when its provider is disabled", () => {
       const disabled = openAiInstance({
         id: "00000000-0000-4000-8000-000000000101",

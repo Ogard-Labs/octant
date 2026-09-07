@@ -481,6 +481,7 @@ export class ProviderService implements ProviderServiceApi {
           command.permissionPersistence,
           command.providerOrder,
           command.agentEligibleModels,
+          command.hiddenModels,
         );
         this.#persistence.journal.append({
           aggregate: {

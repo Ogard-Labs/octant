@@ -64,6 +64,29 @@ describe("autoConfigureChatDefaults", () => {
     expect(autoConfigureChatDefaults(configured, [])).toBeUndefined();
   });
 
+  it("does not auto-select a hidden model when no visible model remains", () => {
+    const settings = decodeChatBootstrap({
+      settings: {
+        defaultResearchEnabled: false,
+        defaultResearchRouting: "automatic",
+        defaultPersonalityInstructions: "Be calm.",
+        version: 0,
+        updatedAt: now,
+      },
+      threads: [],
+    }).settings;
+
+    expect(
+      autoConfigureChatDefaults(settings, [
+        {
+          instance: { id: "10000000-0000-4000-8000-000000000001", displayName: "Gateway" },
+          readiness: "ready",
+          sections: [],
+        } as never,
+      ]),
+    ).toBeUndefined();
+  });
+
   it("carries an existing fallback through a default-model replace so a model choice cannot clear it", () => {
     const fallback = {
       providerInstanceId: "10000000-0000-4000-8000-000000000003",

@@ -757,6 +757,7 @@ function ProvidersSection(props: {
         onProbe={props.providerController.probe}
         onProviderOrderChange={props.providerController.updateProviderOrder}
         onAgentEligibleModelsChange={props.providerController.updateAgentEligibleModels}
+        onHiddenModelsChange={props.providerController.updateHiddenModels}
         onVerifyFoundryTools={props.providerController.verifyFoundryTools}
         onProviderCredentialStatus={props.providerController.providerCredentialStatus}
         onRemove={props.providerController.remove}
