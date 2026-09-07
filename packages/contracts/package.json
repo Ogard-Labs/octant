@@ -93,6 +93,7 @@
     "./thread-checkpoints": "./src/threadCheckpoints.ts",
     "./thread-creation": "./src/threadCreation.ts",
     "./thread-retention": "./src/threadRetention.ts",
+    "./thread-rest": "./src/threadRest.ts",
     "./thread-export": "./src/threadExport.ts",
     "./thread-hand-off": "./src/threadHandOff.ts",
     "./zen": "./src/zen.ts",

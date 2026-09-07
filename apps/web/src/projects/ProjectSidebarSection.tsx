@@ -272,8 +272,16 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   );
   const searchQuery = props.searchQuery ?? "";
   const searching = searchQuery.trim() !== "";
-  const listedThreads = props.threadGroups?.all ?? props.threads;
+  // Snoozed and completed threads leave the Project groups for their own
+  // shelves at the foot of the list; search and view filters never reach
+  // them, so a rested thread is exactly where the person put it.
+  const everyListedThread = props.threadGroups?.all ?? props.threads;
+  const listedThreads = everyListedThread?.filter((thread) => thread.shelf === undefined);
+  const snoozedThreads = everyListedThread?.filter((thread) => thread.shelf === "snoozed") ?? [];
+  const completedThreads =
+    everyListedThread?.filter((thread) => thread.shelf === "completed") ?? [];
   const unfiledLabel = props.unfiledLabel ?? "Unfiled";
+  const onSelectThread = props.onSelectThread;
   const projectNames = useMemo(
     () => new Map(props.projects.map((project) => [String(project.id), project.name])),
     [props.projects],
@@ -608,6 +616,52 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           ) : null}
         </>
       )}
+      {onSelectThread === undefined
+        ? null
+        : (
+            [
+              { label: "Snoozed", threads: snoozedThreads },
+              { label: "Completed", threads: completedThreads },
+            ] as const
+          ).map((shelf) =>
+            shelf.threads.length === 0 ? null : (
+              <details
+                className="project-archive project-shelf"
+                data-shelf={shelf.label.toLowerCase()}
+                key={shelf.label}
+                open={
+                  props.activeThreadId !== undefined &&
+                  shelf.threads.some(
+                    (thread) => (thread.navigationId ?? thread.threadId) === props.activeThreadId,
+                  )
+                    ? true
+                    : undefined
+                }
+              >
+                <summary>
+                  {shelf.label} <span>{shelf.threads.length}</span>
+                </summary>
+                <div className="project-threads">
+                  <ProjectThreadRows
+                    {...(props.threadActions === undefined ? {} : { actions: props.threadActions })}
+                    {...(props.activeThreadId === undefined
+                      ? {}
+                      : { activeThreadId: props.activeThreadId })}
+                    {...(props.openThreadIds === undefined
+                      ? {}
+                      : { openThreadIds: props.openThreadIds })}
+                    {...(props.onRenameThread === undefined
+                      ? {}
+                      : { onRenameThread: props.onRenameThread })}
+                    collapsedLimit={SIDEBAR_THREAD_LIMIT}
+                    onSelectThread={onSelectThread}
+                    projectNameForThread={projectNameForThread}
+                    threads={shelf.threads}
+                  />
+                </div>
+              </details>
+            ),
+          )}
       {(currentFilters === undefined || currentFilters.lifecycle === "active") &&
       props.archivedProjects.length > 0 ? (
         <details className="project-archive">

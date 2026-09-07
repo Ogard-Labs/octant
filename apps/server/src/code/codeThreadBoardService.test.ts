@@ -43,6 +43,7 @@ const ids = {
   executing: decodeCodeThreadId("00000000-0000-4000-8000-000000003003"),
   ready: decodeCodeThreadId("00000000-0000-4000-8000-000000003004"),
   archived: decodeCodeThreadId("00000000-0000-4000-8000-000000003005"),
+  completed: decodeCodeThreadId("00000000-0000-4000-8000-000000003006"),
   projectA: decodeProjectId("00000000-0000-4000-8000-0000000030a1"),
   projectB: decodeProjectId("00000000-0000-4000-8000-0000000030a2"),
   binding: decodeBindingRevisionId("00000000-0000-4000-8000-000000003009"),
@@ -58,6 +59,7 @@ function thread(overrides: {
   readonly lifecycle?: CodeThread["lifecycle"];
   readonly providerInstanceId?: string;
   readonly title?: string;
+  readonly completedAt?: string;
 }): CodeThread {
   return decodeCodeThread({
     id: overrides.id,
@@ -67,6 +69,7 @@ function thread(overrides: {
     checkoutId: ids.checkout,
     title: overrides.title ?? "Board thread",
     lifecycle: overrides.lifecycle ?? "active",
+    ...(overrides.completedAt === undefined ? {} : { completedAt: overrides.completedAt }),
     providerInstanceId: overrides.providerInstanceId ?? ids.providerA,
     modelId: "model-a",
     executionPolicy: "approval-gated",
@@ -294,6 +297,7 @@ describe("CodeThreadBoardService derivation", () => {
         list: () => [
           ...allThreads,
           boardThread({ thread: thread({ id: ids.archived, lifecycle: "archived" }) }),
+          boardThread({ thread: thread({ id: ids.completed, completedAt: now }) }),
         ],
       },
       metadata: metadataService(),
@@ -309,17 +313,20 @@ describe("CodeThreadBoardService derivation", () => {
 
     await board.query(decodeCodeBoardQuery({ version: 1 }));
 
-    // An archived thread has no card, so a Project with a long archive would
-    // otherwise spend the whole read pool on threads about to be dropped.
+    // An archived or completed thread has no card, so a Project with a long
+    // archive would otherwise spend the whole read pool on threads about to be
+    // dropped.
     expect(observed.map(String)).not.toContain(String(ids.archived));
+    expect(observed.map(String)).not.toContain(String(ids.completed));
     expect(observed).toHaveLength(allThreads.length);
   });
 
-  it("resolves one card per non-archived thread with a runtime-derived status", async () => {
+  it("resolves one card per thread in play with a runtime-derived status", async () => {
     const board = service({
       threads: [
         ...allThreads,
         boardThread({ thread: thread({ id: ids.archived, lifecycle: "archived" }) }),
+        boardThread({ thread: thread({ id: ids.completed, completedAt: now }) }),
       ],
       runtime: (threadId) =>
         threadId === ids.executing
@@ -329,7 +336,8 @@ describe("CodeThreadBoardService derivation", () => {
 
     const view = await board.query(decodeCodeBoardQuery({ version: 1 }));
 
-    // Archived threads are excluded; every other thread appears exactly once.
+    // Archived threads and threads the person completed are excluded; every
+    // other thread appears exactly once.
     expect(view.cards.map((card) => card.threadId).sort()).toEqual(
       [ids.done, ids.waiting, ids.executing, ids.ready].sort(),
     );

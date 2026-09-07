@@ -1562,3 +1562,89 @@ describe("ProjectSidebarSection context health", () => {
     expect(screen.getByRole("button", { name: "Collapse Test" })).toBeVisible();
   });
 });
+
+describe("snoozed and completed shelves", () => {
+  it("files snoozed and completed threads in collapsed shelves below the Projects", async () => {
+    const user = userEvent.setup();
+    const onSelectThread = vi.fn();
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={onSelectThread}
+        projects={[chatProjectA]}
+        threads={[
+          { projectId: String(chatProjectA.id), threadId: "thread-a", title: "Planning" },
+          {
+            projectId: String(chatProjectA.id),
+            threadId: "thread-b",
+            title: "Parked until Monday",
+            shelf: "snoozed",
+            snooze: { until: "2026-09-14T09:00:00.000Z", at: "2026-09-07T10:00:00.000Z" },
+            wakeLabel: "7d",
+          },
+          {
+            projectId: String(chatProjectA.id),
+            threadId: "thread-c",
+            title: "Shipped the fix",
+            shelf: "completed",
+            completedAt: "2026-09-06T10:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    const projects = screen.getByRole("region", { name: "Projects" });
+    expect(within(projects).getByRole("button", { name: /Planning/ })).toBeVisible();
+    expect(within(projects).queryByRole("button", { name: /Parked until Monday/ })).toBeNull();
+    expect(within(projects).queryByRole("button", { name: /Shipped the fix/ })).toBeNull();
+
+    const snoozed = screen.getByText("Snoozed").closest("details");
+    const completed = screen.getByText("Completed").closest("details");
+    expect(snoozed).toHaveAttribute("data-shelf", "snoozed");
+    expect(completed).toHaveAttribute("data-shelf", "completed");
+    expect(snoozed).not.toHaveAttribute("open");
+    expect(within(snoozed!).getByText("1")).toBeInTheDocument();
+    expect(within(completed!).getByText("1")).toBeInTheDocument();
+
+    await user.click(within(completed!).getByText("Completed"));
+    await user.click(within(completed!).getByRole("button", { name: /Shipped the fix/ }));
+    expect(onSelectThread).toHaveBeenCalledWith("thread-c");
+  });
+
+  it("opens the shelf that holds the thread on screen so the row never hides its own selection", () => {
+    render(
+      <ProjectSidebarSection
+        activeThreadId="thread-c"
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={vi.fn()}
+        projects={[chatProjectA]}
+        threads={[
+          {
+            projectId: String(chatProjectA.id),
+            threadId: "thread-c",
+            title: "Shipped the fix",
+            shelf: "completed",
+            completedAt: "2026-09-06T10:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText("Completed").closest("details")).toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: /Shipped the fix/ })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
+});

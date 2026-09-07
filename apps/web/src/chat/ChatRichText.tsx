@@ -2,6 +2,7 @@ import { Fragment, type ReactNode } from "react";
 import type { TrackerReferenceResolution } from "@octant/contracts";
 import { useTrackerReferenceResolutions } from "../tracker/TrackerReferenceContext";
 import { splitPlainTextWithTrackerReferences } from "../tracker/TrackerReferenceText";
+import { CodeBlock } from "../transcript/CodeBlock";
 
 export interface ChatRichTextProps {
   readonly body: string;
@@ -32,14 +33,7 @@ function RichBlockView(props: {
   const block = props.block;
   switch (block.kind) {
     case "code":
-      return (
-        <div className="chat-rich-text__code">
-          {block.language === undefined ? null : <span>{block.language}</span>}
-          <pre>
-            <code>{block.text}</code>
-          </pre>
-        </div>
-      );
+      return <CodeBlock code={block.text} language={block.language} />;
     case "heading": {
       const Heading = `h${block.level}` as "h2" | "h3" | "h4";
       return <Heading>{inlineContent(block.text, props.byIdentity)}</Heading>;

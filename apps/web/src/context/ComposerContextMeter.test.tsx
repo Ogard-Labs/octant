@@ -267,7 +267,7 @@ describe("ComposerContextMeter", () => {
     expect(popover).toHaveTextContent(/not a context-window maximum/);
     expect(popover).not.toHaveTextContent("Context maximum");
     expect(popover).toHaveTextContent("Provider account limits");
-    expect(popover).toHaveTextContent(/five hourLow · 91% used · resets/i);
+    expect(popover).toHaveTextContent(/5-hour limitLow · 91% used · resets/i);
   });
 
   it("moves the ring to its new share instead of snapping between renders", () => {

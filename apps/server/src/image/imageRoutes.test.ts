@@ -81,6 +81,7 @@ function setup(
       }),
     } as unknown as ImageJobService,
     listInstances: () => options.instances ?? [imageProfile()],
+    readImageGenerationSettings: () => ({ customSources: [] }),
     authorizeScope: async () => options.authorized !== false,
     saveToProject,
     windowAuthorityStore,

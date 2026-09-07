@@ -26,6 +26,7 @@ import {
   MAX_CHAT_TRANSCRIPT_SEARCH_HITS,
   MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH,
   MAX_CHAT_TRANSCRIPT_SEARCH_SNIPPET_LENGTH,
+  decodeChatThreadId,
 } from "./chat";
 import { MAX_THREAD_MENTIONS_PER_TURN } from "./threadMention";
 
@@ -1005,5 +1006,34 @@ describe("chat contracts", () => {
         }),
       ).toThrow();
     });
+  });
+});
+
+describe("Chat thread rest commands", () => {
+  const threadId = decodeChatThreadId("00000000-0000-4000-8000-0000000000aa");
+
+  it("decodes complete, reopen, snooze, and wake, and refuses a snooze with no wake time", () => {
+    for (const kind of [
+      "complete-chat-thread",
+      "reopen-chat-thread",
+      "wake-chat-thread",
+    ] as const) {
+      expect(decodeChatCommand({ kind, threadId, expectedVersion: 1 })).toEqual({
+        kind,
+        threadId,
+        expectedVersion: 1,
+      });
+    }
+    expect(
+      decodeChatCommand({
+        kind: "snooze-chat-thread",
+        threadId,
+        expectedVersion: 1,
+        until: "2026-01-02T09:00:00.000Z",
+      }),
+    ).toMatchObject({ kind: "snooze-chat-thread", until: "2026-01-02T09:00:00.000Z" });
+    expect(() =>
+      decodeChatCommand({ kind: "snooze-chat-thread", threadId, expectedVersion: 1 }),
+    ).toThrow();
   });
 });
