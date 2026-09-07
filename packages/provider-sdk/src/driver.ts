@@ -115,6 +115,11 @@ export interface ProviderToolVerificationResult {
 }
 
 export interface ProviderConnection {
+  /** A transport may cancel one app tool while its session remains alive. */
+  readonly toolRequestSignal?: (input: {
+    readonly sessionId: ProviderSessionId;
+    readonly requestId: string;
+  }) => AbortSignal;
   /**
    * Establishes a subscription to this connection's runtime events and returns
    * the stream reading from it. Each subscriber gets its own, and it lasts as
