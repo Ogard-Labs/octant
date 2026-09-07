@@ -75,3 +75,48 @@ export function resolveEffectiveSidebarBackground(
     : adjustedOpacity;
   return { ...base, overlayOpacity: finalOpacity };
 }
+
+export interface ResolvedAppBackground {
+  readonly kind: "theme" | "photo" | "none";
+  readonly backgroundId: string | null;
+  /** The pattern drifts only while nothing has asked Octant to hold still. */
+  readonly animated: boolean;
+  /** 0..1, ready for the renderer. */
+  readonly patternOpacity: number;
+  /** A multiplier on the pattern's base drift: 0 still, 1 default, 2 twice as fast. */
+  readonly patternSpeed: number;
+  /** 0..1: how much of the field the pattern fills at its densest. */
+  readonly patternIntensity: number;
+  /** 0..1, ready for the renderer. */
+  readonly photoOpacity: number;
+  readonly scope: "welcome" | "everywhere";
+  readonly coversSidebar: boolean;
+}
+
+// Increased contrast turns the ground off: a dithered field behind the page
+// is exactly the low-contrast texture that setting exists to remove.
+// Reduced motion keeps the ground but freezes the pattern; a still frame
+// carries the same picture as a drifting one, so nothing is lost.
+export function resolveAppBackground(
+  settings: ThemeSettings,
+  systemPrefersReducedMotion = false,
+): ResolvedAppBackground {
+  const background = settings.appBackground;
+  const tuning = {
+    patternOpacity: background.patternOpacity / 100,
+    patternSpeed: background.patternSpeed / 50,
+    patternIntensity: background.patternIntensity / 100,
+    photoOpacity: background.photoOpacity / 100,
+    scope: background.scope,
+    coversSidebar: background.scope === "everywhere" && background.coversSidebar,
+  };
+  if (settings.increasedContrast || background.kind === "none") {
+    return { ...tuning, kind: "none", backgroundId: null, animated: false };
+  }
+  const animated =
+    !settings.reducedMotion && !systemPrefersReducedMotion && background.patternSpeed > 0;
+  if (background.kind === "photo") {
+    return { ...tuning, kind: "photo", backgroundId: background.backgroundId, animated };
+  }
+  return { ...tuning, kind: "theme", backgroundId: null, animated };
+}

@@ -14,6 +14,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { WelcomeHeading } from "../composer/WelcomeHeading";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { DraftRecentThread } from "../shell/DraftThreadWorkspace";
@@ -22,6 +23,8 @@ import { RecentThreadList } from "../shell/RecentThreadList";
 export interface ChatWelcomeProps {
   /** The threads this mode already has, shown under the starter ideas. */
   readonly recentThreads?: ReadonlyArray<DraftRecentThread>;
+  /** The person's name from their profile, for the greeting on the hero. */
+  readonly greetingName?: string | undefined;
   readonly creating?: boolean;
   readonly errorMessage?: string;
   readonly hosts?: ReadonlyArray<HostIdentity>;
@@ -96,7 +99,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
     <section aria-label="Chat welcome" className="draft-thread chat-welcome">
       <div className="welcome">
         <div className="welcome__heading">
-          <h1 className="oct-title oct-title--hero">{presentation.heading}</h1>
+          <WelcomeHeading greetingName={props.greetingName} question={presentation.heading} />
         </div>
 
         <div className="composer-stack">

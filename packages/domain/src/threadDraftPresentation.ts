@@ -102,3 +102,19 @@ export function draftThreadModePresentation(
       };
   }
 }
+
+/**
+ * The welcome's greeting for the hour, with the person's name when one is
+ * known. Morning runs to noon, afternoon to six, and evening is the rest,
+ * night included: "Good night" reads as a farewell, not a hello.
+ */
+export function welcomeGreeting(input: {
+  readonly hour: number;
+  readonly name?: string | undefined;
+}): string {
+  const hour = ((Math.trunc(input.hour) % 24) + 24) % 24;
+  const time =
+    hour >= 5 && hour < 12 ? "morning" : hour >= 12 && hour < 18 ? "afternoon" : "evening";
+  const name = input.name?.trim();
+  return name === undefined || name.length === 0 ? `Good ${time}` : `Good ${time}, ${name}`;
+}

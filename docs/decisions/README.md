@@ -98,6 +98,7 @@ distilled successor of the earlier long-form design specifications.
 | [0088](0088-completed-and-snoozed-threads.md)                                | Completed and snoozed threads rest in shelves; completion archives on a timer               | Accepted           |
 | [0089](0089-base-ui-native-shadcn-style.md)                                  | Product controls follow the Base UI-native shadcn style                                     | Accepted           |
 | [0090](0090-recipes-own-their-own-shape-and-focus.md)                        | Recipes own their shape; the app owns its focus ring                                        | Accepted           |
+| [0091](0091-the-application-ground-is-the-theme-pattern-or-a-photo.md)       | The application ground is the theme's pattern or a person's photo                           | Accepted           |
 
 ## Adding an ADR
 
