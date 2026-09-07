@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from "react";
 import { ComposerModelPicker } from "../../providers/ComposerModelPicker";
+import { composerPlaceholder, THREAD_HINT } from "../../composer/composerPlaceholder";
 import { HostSelector } from "../../shell/HostSelector";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
@@ -225,7 +226,9 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 }}
                 onKeyDown={handleKeyDown}
                 onPaste={onDraftPaste}
-                placeholder="Describe the work…"
+                placeholder={composerPlaceholder("Describe the work", [
+                  threadMentions.composer === undefined ? undefined : THREAD_HINT,
+                ])}
                 rows={3}
                 value={prompt}
               />

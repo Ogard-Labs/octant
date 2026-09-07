@@ -19,6 +19,7 @@ import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { CirclePause, UserRoundCog } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { composerPlaceholder, FILE_HINT, THREAD_HINT } from "../composer/composerPlaceholder";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
@@ -1316,7 +1317,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             onPaste={(event) => {
               if (attachFromTransfer(event.clipboardData)) event.preventDefault();
             }}
-            placeholder={busy ? "Send the next message…" : "Ask for follow-up changes…"}
+            placeholder={
+              busy
+                ? "Send the next message…"
+                : composerPlaceholder("Ask for follow-up changes", [
+                    FILE_HINT,
+                    threadMentions.composer === undefined ? undefined : THREAD_HINT,
+                  ])
+            }
             ref={textareaRef}
             rows={2}
             value={draft}

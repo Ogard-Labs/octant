@@ -3058,7 +3058,7 @@ describe("App", () => {
     ).toBeVisible();
     expect(await screen.findByRole("button", { name: "New task" })).toBeVisible();
     expect(
-      await screen.findByPlaceholderText("Ask for follow-up changes…", {}, { timeout: 5_000 }),
+      await screen.findByPlaceholderText(/^Ask for follow-up changes/, {}, { timeout: 5_000 }),
     ).toBeVisible();
 
     await openSidebarProject(user, "Octant");
@@ -3916,7 +3916,7 @@ describe("App", () => {
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
     const composer = await screen.findByPlaceholderText(
-      "Ask for follow-up changes…",
+      /^Ask for follow-up changes/,
       {},
       { timeout: 5_000 },
     );
@@ -4033,7 +4033,7 @@ describe("App", () => {
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
     const composer = await screen.findByPlaceholderText(
-      "Ask for follow-up changes…",
+      /^Ask for follow-up changes/,
       {},
       { timeout: 5_000 },
     );

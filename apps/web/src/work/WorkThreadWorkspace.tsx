@@ -17,6 +17,7 @@ import {
 import type { ProjectId } from "@octant/contracts/projects";
 import type { PickerGroup } from "@octant/domain";
 import type { ChatComposerThreadMentionChip } from "../chat/ChatComposer";
+import { composerPlaceholder, FILE_HINT, THREAD_HINT } from "../composer/composerPlaceholder";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
@@ -1195,7 +1196,12 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               if (attachFromTransfer(event.clipboardData)) event.preventDefault();
             }}
             placeholder={
-              turnRunning ? "Send the next message…" : "Describe the deliverable or paste a draft…"
+              turnRunning
+                ? "Send the next message…"
+                : composerPlaceholder("Describe the deliverable or paste a draft", [
+                    props.fileMentionClient === undefined ? undefined : FILE_HINT,
+                    threadMentions.composer === undefined ? undefined : THREAD_HINT,
+                  ])
             }
             ref={textareaRef}
             rows={4}

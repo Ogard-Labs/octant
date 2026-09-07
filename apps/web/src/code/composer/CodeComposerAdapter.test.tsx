@@ -28,10 +28,9 @@ describe("CodeComposerAdapter", () => {
 
   it("keeps the welcome prompt on the shared composer frame", () => {
     render(<CodeComposerAdapter {...defaultProps} />);
-    expect(screen.getByRole("textbox", { name: "First message" })).toHaveAttribute(
-      "placeholder",
-      "Describe what to build, ask a follow-up, or attach an image…",
-    );
+    expect(
+      screen.getByRole("textbox", { name: "First message" }).getAttribute("placeholder"),
+    ).toMatch(/^Describe what to build/);
   });
 
   it("puts Project, branch, and Environment on the composer's lower band after the prompt", () => {

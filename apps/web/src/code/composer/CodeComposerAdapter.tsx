@@ -33,6 +33,7 @@ import {
   type ReactNode,
 } from "react";
 import { ComposerModelPicker } from "../../providers/ComposerModelPicker";
+import { composerPlaceholder, THREAD_HINT } from "../../composer/composerPlaceholder";
 import { ThreadComposer } from "../../composer/ThreadComposer";
 import { WelcomeHeading } from "../../composer/WelcomeHeading";
 import { ComposerVoiceButton } from "../../voice/ComposerVoiceButton";
@@ -563,7 +564,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   if (props.creating === true) return;
                   if (attachFromTransfer(event.clipboardData)) event.preventDefault();
                 }}
-                placeholder="Describe what to build, ask a follow-up, or attach an image…"
+                placeholder={composerPlaceholder("Describe what to build", [
+                  threadMentions.composer === undefined ? undefined : THREAD_HINT,
+                ])}
                 ref={textareaRef}
                 rows={3}
                 value={prompt}

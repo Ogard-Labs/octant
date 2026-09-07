@@ -18,6 +18,7 @@ import {
   type ThreadMentions,
 } from "./ThreadMentionPicker";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
+import { COMMAND_HINT, composerPlaceholder, THREAD_HINT } from "../composer/composerPlaceholder";
 import type {
   CanvasContextSelection,
   CanvasContextSelectionId,
@@ -587,7 +588,14 @@ export function ChatComposer(props: ChatComposerProps) {
       onKeyDown={onDraftKeyDown}
       onKeyUp={onDraftKeyUp}
       onPaste={onDraftPaste}
-      placeholder={props.isSending ? "Send the next message…" : "Message Octant"}
+      placeholder={
+        props.isSending
+          ? "Send the next message…"
+          : composerPlaceholder("Message Octant", [
+              offeredCommands.length > 0 ? COMMAND_HINT : undefined,
+              props.threadMentions === undefined ? undefined : THREAD_HINT,
+            ])
+      }
       ref={messageRef}
       rows={1}
       value={props.draft}
