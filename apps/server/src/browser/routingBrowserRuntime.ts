@@ -48,6 +48,13 @@ export class RoutingBrowserRuntime implements BrowserRuntimePort {
     return this.#owned(args[0]).act(...args);
   }
 
+  /** A peek goes to whichever backend holds the page; one without a peek offers none. */
+  async peek(...args: Parameters<NonNullable<BrowserRuntimePort["peek"]>>) {
+    const peek = this.#owned(args[0]).peek;
+    if (peek === undefined) throw new Error("This Browser runtime cannot picture its page.");
+    return peek(...args);
+  }
+
   async closeContext(contextId: BrowserContextId): Promise<void> {
     const runtime = this.#backend.get(contextId);
     this.#backend.delete(contextId);
