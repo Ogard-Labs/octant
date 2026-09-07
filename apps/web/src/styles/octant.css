@@ -4270,8 +4270,8 @@ input.switch:checked::after {
 .composer-row button,
 .composer-row [role="button"],
 .composer-row [role="combobox"] {
-  min-height: 30px;
-  height: 30px;
+  min-height: 28px;
+  height: 28px;
   border-radius: var(--oct-radius-sm);
 }
 /* The composer is one raised object, so nothing riding its row draws a second
@@ -4287,18 +4287,21 @@ input.switch:checked::after {
   border-color: transparent;
   box-shadow: none;
 }
-/* Buttons take the system's focus outline wherever they are; these are the
-   row's controls that are not the button recipe and would otherwise be left
-   with no focus mark at all once the ring above is suppressed. */
+/* The reset above outranks the global ring (0,1,1 over 0,1,0), so the row
+   names the same ring back once for every control it silenced. The accent
+   outline that stood here read as a selection, and it left the button-recipe
+   controls with no mark at all. No outline is declared so the meter's own
+   prefers-contrast outline keeps winning. */
+.composer-row button:focus-visible,
+.composer-row [role="button"]:focus-visible,
 .composer-row [role="combobox"]:focus-visible,
 .composer-row input:focus-visible {
-  outline: 2px solid var(--oct-accent-fg);
-  outline-offset: 1px;
+  box-shadow: var(--oct-focus-ring);
 }
 /* The send control is the row's one filled affordance, so it stays a circle. */
 .composer-row button[data-size="icon"] {
-  width: 30px;
-  min-width: 30px;
+  width: 28px;
+  min-width: 28px;
   padding: 0;
   border-radius: var(--oct-radius-pill);
 }
@@ -4309,13 +4312,23 @@ input.switch:checked::after {
 .composer-row [role="combobox"] {
   width: auto;
   max-width: 190px;
-  min-height: 30px;
+  min-height: 28px;
   padding-inline: 8px 22px;
   border-color: transparent;
   border-radius: var(--oct-radius-sm);
-  color: var(--oct-muted);
+  color: var(--oct-meta);
   background: transparent;
   font-size: var(--oct-text-xs);
+  font-weight: 500;
+}
+/* The select trigger wears the pane title's own recipe — meta ink at rest,
+   fg ink over the soft fill when pointed at — so the frame's controls and the
+   title band above them read as one system. The model picker is a button
+   recipe and keeps the recipe's own hover; a product class may not repaint
+   it (ui:check counts that as a repaint). */
+.composer-row [role="combobox"]:hover {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 /* A bordered box inside the composer's own box read as a form field nested in
    a form field. The trigger is a quiet pill that only gains a ground when
@@ -4323,13 +4336,14 @@ input.switch:checked::after {
 .composer-row .composer-model-picker__trigger {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  min-height: 30px;
+  gap: 5px;
+  min-height: 28px;
   padding-block: 0;
   padding-inline: 8px 6px;
-  color: var(--oct-muted);
+  color: var(--oct-meta);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
+  font-weight: 500;
   text-align: left;
 }
 
@@ -4337,7 +4351,7 @@ input.switch:checked::after {
    field inside the raised prompt. The disabled trigger keeps the truthful
    state and settings route while the row keeps one continuous surface. */
 .composer-row .composer-model-picker--empty {
-  min-height: 30px;
+  min-height: 28px;
   padding: 0;
   border: 0;
   background: transparent;

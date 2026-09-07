@@ -374,10 +374,10 @@
   gap: 5px;
   min-height: 24px;
   padding: 0 7px;
-  color: var(--octant-text-secondary);
+  color: var(--oct-meta);
   border-radius: var(--oct-radius-sm);
-  font-size: var(--oct-text-detail);
-  font-weight: var(--oct-weight-display);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
   white-space: nowrap;
 }
 

@@ -187,7 +187,7 @@ describe("the public-block visual language", () => {
     expect(system).toMatch(/\.turn-user \{[^}]*justify-items:\s*end/);
     expect(system).not.toMatch(/\.turn-user \{[^}]*position:\s*sticky/);
     expect(system).toMatch(
-      /\.composer-row button,\n\.composer-row \[role="button"\],\n\.composer-row \[role="combobox"\] \{\n  min-height: 30px;\n  height: 30px;/,
+      /\.composer-row button,\n\.composer-row \[role="button"\],\n\.composer-row \[role="combobox"\] \{\n  min-height: 28px;\n  height: 28px;/,
     );
     expect(chat).not.toMatch(/\.chat-transcript \.turn-user/);
     expect(chat).not.toMatch(/\.chat-composer__status \{/);
