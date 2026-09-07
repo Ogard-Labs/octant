@@ -2651,12 +2651,10 @@ export function startOctantServer(
     };
     const projectPullRequestService = new CodeProjectPullRequestService({
       projects: projectService,
-      remotes: {
-        remotes: async (root) => {
-          const observed = await gitObservationPort.observe(root);
-          return observed.status === "ready" ? observed.remotes : undefined;
-        },
-      },
+      // Only the remotes: the full observation also diffs the working tree
+      // and hashes every changed file, which cost the two-second navigation
+      // tick one to five seconds per memo miss on a large checkout.
+      remotes: { remotes: (root) => gitObservationPort.observeRemotes(root) },
       list: projectPullRequestPorts.list,
       detail: projectPullRequestPorts.detail,
       cacheStats,
