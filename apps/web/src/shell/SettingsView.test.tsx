@@ -642,6 +642,9 @@ describe("SettingsView", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 
     expect(styles).toMatch(/\.settings-view\s*\{[\s\S]*font-family:\s*var\(--oct-font-display\);/);
+    expect(styles).toMatch(
+      /\.settings-view\s*\{[\s\S]*grid-template-columns:\s*var\(--octant-sidebar-width, 248px\) minmax\(0, 1fr\);/,
+    );
     // The readable column stays bounded, but its left edge follows the
     // navigator instead of floating in the middle of wide windows.
     expect(styles).toMatch(/--oct-settings-reading-width:\s*680px;/);

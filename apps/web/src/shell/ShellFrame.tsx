@@ -76,6 +76,7 @@ export function ShellFrame(props: ShellFrameProps) {
         <div
           className={`shell shell-frame--standalone shell--material-${props.material}`}
           data-octant-sidebar-vibrancy={props.sidebarVibrancyMode ?? "off"}
+          style={{ "--octant-sidebar-width": `${props.sidebarWidth}px` } as CSSProperties}
         >
           {props.standaloneSurface}
         </div>
