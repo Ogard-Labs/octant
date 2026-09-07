@@ -279,7 +279,15 @@ function boundedCleanup<E, R>(
   effect: Effect.Effect<void, E, R>,
   timeoutMs: number,
 ): Effect.Effect<void, never, R> {
-  return Effect.raceFirst(effect.pipe(Effect.catchAll(() => Effect.void)), Effect.sleep(timeoutMs));
+  // Finalizers are uninterruptible. Keep the raced children interruptible so
+  // a completed cleanup cancels its timer instead of waiting out the budget.
+  return Effect.raceFirst(
+    effect.pipe(
+      Effect.catchAll(() => Effect.void),
+      Effect.interruptible,
+    ),
+    Effect.sleep(timeoutMs).pipe(Effect.interruptible),
+  );
 }
 
 function isTerminalEvent(event: ProviderRuntimeEvent): boolean {
