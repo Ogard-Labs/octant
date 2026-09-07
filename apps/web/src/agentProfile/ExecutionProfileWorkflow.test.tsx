@@ -85,8 +85,10 @@ describe("ExecutionProfileWorkflow", () => {
 
     const trigger = screen.getByRole("button", { name: "Execution profile: Code reviewer" });
     expect(trigger).toBeVisible();
-    expect(trigger).toHaveClass("shadow-none");
-    expect(trigger).not.toHaveClass("border");
+    // Quiet chrome in the composer: the trigger is a ghost button, so it
+    // carries no fill and no visible edge of its own until it is hovered or
+    // its menu is open.
+    expect(trigger).toHaveAttribute("data-variant", "ghost");
     await user.click(trigger);
     expect(screen.getAllByText("OpenAI").length).toBeGreaterThan(0);
     expect(screen.getAllByText("GPT-5").length).toBeGreaterThan(0);

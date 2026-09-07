@@ -15,9 +15,9 @@ describe("ShellState", () => {
     );
 
     expect(screen.getByRole("status")).toHaveAttribute("data-state", "loading");
-    expect(
-      screen.getByRole("status").querySelector('[data-slot="empty-state-title"]'),
-    ).toHaveTextContent("Loading Octant");
+    expect(screen.getByRole("status").querySelector('[data-slot="empty-title"]')).toHaveTextContent(
+      "Loading Octant",
+    );
     expect(container.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
   });
 

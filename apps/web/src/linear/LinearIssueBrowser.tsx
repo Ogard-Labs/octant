@@ -16,11 +16,11 @@ import { ShellState } from "../shell/ShellState";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
-  OctantEmptyStateActions,
-  OctantEmptyStateCopy,
-  OctantEmptyStateRoot,
-  OctantEmptyStateTitle,
-} from "../ui/base/OctantEmptyState";
+  OctantEmptyContent,
+  OctantEmptyHeader,
+  OctantEmptyRoot,
+  OctantEmptyTitle,
+} from "../ui/base/OctantEmpty";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 
@@ -279,16 +279,16 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
         <div className="linear-issues__panes">
           <div className="linear-issues__list-pane">
             {page.rows.length === 0 ? (
-              <OctantEmptyStateRoot role="status">
-                <OctantEmptyStateCopy className="col-span-2">
-                  <OctantEmptyStateTitle>
+              <OctantEmptyRoot role="status">
+                <OctantEmptyHeader className="col-span-2">
+                  <OctantEmptyTitle>
                     {debouncedSearch.trim() === "" && isEmptyFilter(query.filter)
                       ? "No issues in this workspace."
                       : "No issues match this search."}
-                  </OctantEmptyStateTitle>
-                </OctantEmptyStateCopy>
+                  </OctantEmptyTitle>
+                </OctantEmptyHeader>
                 {debouncedSearch.trim() === "" && isEmptyFilter(query.filter) ? null : (
-                  <OctantEmptyStateActions className="col-span-2 col-start-1">
+                  <OctantEmptyContent className="col-span-2 col-start-1">
                     <OctantButton
                       onClick={() => {
                         setSearch("");
@@ -303,9 +303,9 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
                     >
                       Clear filters
                     </OctantButton>
-                  </OctantEmptyStateActions>
+                  </OctantEmptyContent>
                 )}
-              </OctantEmptyStateRoot>
+              </OctantEmptyRoot>
             ) : (
               <ul className="linear-issues__list">
                 {page.rows.map((row) => (
