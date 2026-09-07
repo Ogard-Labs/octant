@@ -2773,7 +2773,7 @@ input.switch:checked::after {
   background: currentColor;
 }
 .st-waiting {
-  color: var(--oct-warn-fg);
+  color: var(--oct-muted);
 }
 .st-done {
   color: var(--oct-success-fg);

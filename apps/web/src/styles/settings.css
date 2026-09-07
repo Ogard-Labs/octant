@@ -1564,8 +1564,9 @@ textarea.settings-view__text-input {
 }
 
 .octant-number-stepper:focus-within {
-  border-color: var(--ring);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 35%, transparent);
+  /* Keyboard focus stays visible through the quiet border cue. The previous
+     three-pixel halo read as a second card around the control. */
+  border-color: var(--octant-border-strong);
 }
 
 .octant-number-stepper__button {

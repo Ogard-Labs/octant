@@ -390,10 +390,11 @@ with every leading icon on a 12px inset and its section labels at 12px in the
 meta ink with a 12px gap above. Hover-only actions (add, more, pin, archive,
 and a tab's pin and close) take no width until their row is hovered or
 focused. Icon sizes are 16/19/22px for small/medium/large actions; touch
-surfaces keep 44px targets. The workspace sidebar defaults to 232px, supports
-resizing, and may collapse completely while leaving Show sidebar and New thread
-in the native title rail. Settings uses a separate compact 248px navigation
-rail. The right dock defaults to 320px when open. A fresh window starts with it
+surfaces keep 44px targets. The workspace and Settings share the saved sidebar
+width, defaulting to 232px; narrow Settings layouts retain their responsive
+rail clamp or drawer. The workspace sidebar supports resizing and may collapse
+completely while leaving Show sidebar and New thread in the native title rail.
+The right dock defaults to 320px when open. A fresh window starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The
 pane/title control rail is 38px in the native host and the status bar is 26px.
 While a route or tool is still loading, its state is one quiet line (spinner,
@@ -452,9 +453,12 @@ its own surface. Attaching an image is a composer affordance and is available he
 The prompt itself is frameless:
 `OctantTextarea` drops the shadcn field recipe when it wears `.composer-input`.
 Composer-row selects drop the same field chrome. Feature CSS must not
-repaint those controls a third time. Opaque shadcn
-popovers, menus, dialogs, Environment, and forms use the floating surface and
-overlay shadow. Frosted material is limited to native/optional sidebar
+repaint those controls a third time. Select lists open beside their trigger
+without covering it with the selected item. The model picker anchors to the
+trigger's trailing edge, keeps its dimensions stable while filtering, and
+scrolls its model list internally. Popovers, menus, and dialogs use the floating
+surface and overlay shadow. Environment and inline Settings sections remain
+flat on their owning surface. Frosted material is limited to native/optional sidebar
 translucency and the floating activity picture-in-picture; reduced
 transparency and unsupported `backdrop-filter` resolve to opaque surfaces.
 

@@ -20,6 +20,18 @@ capabilities.
   configuration and historical thread references.
 - **Removing** is rejected while active sessions depend on the instance.
 
+### Model visibility
+
+Expand a provider and use **Shown / Hidden** beside each reported model to
+choose which models appear in model pickers. This preference applies across
+the app and survives connection checks and discovery refreshes. Hiding a
+model keeps the provider configured and preserves tasks already using that
+model. Show it again in the same list to make it selectable for new tasks.
+
+New-task defaults use visible models. If every model is hidden, show a model
+in Provider Settings before starting a new task. Visibility is a selection
+preference; it does not grant or change provider permissions.
+
 ### Discovery and auto-registration
 
 Octant scans a sanitized `PATH` plus approved install locations to find

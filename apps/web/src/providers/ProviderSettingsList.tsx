@@ -451,6 +451,12 @@ interface ProviderRowProps {
 function ProviderRow(props: ProviderRowProps) {
   const [configurationOpen, setConfigurationOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [modelQuery, setModelQuery] = useState("");
+  const modelSearch = modelQuery.trim().toLowerCase();
+  const visibleModelRows =
+    props.observed?.models.filter((model) =>
+      `${model.displayName} ${model.id}`.toLowerCase().includes(modelSearch),
+    ) ?? [];
   const disabled = props.busy || props.probing;
   const readiness = props.probing ? "checking" : props.observed?.readiness;
   const autoRegisteredDisabled = isDisabledDiscoveryInstance(
@@ -1182,13 +1188,23 @@ function ProviderRow(props: ProviderRowProps) {
               ) : null}
               {props.observed === undefined ? null : (
                 <div className="provider-card__discovery">
-                  <section aria-labelledby={`models-${props.instance.id}`}>
+                  <section
+                    className="provider-model-visibility"
+                    aria-labelledby={`models-${props.instance.id}`}
+                  >
                     <h4 id={`models-${props.instance.id}`}>Models</h4>
+                    <p className="oct-row-detail">Choose which models appear in new selections.</p>
+                    <OctantInput
+                      aria-label={`Filter ${props.instance.displayName} models`}
+                      onChange={(event) => setModelQuery(event.currentTarget.value)}
+                      placeholder="Filter models"
+                      value={modelQuery}
+                    />
                     {props.observed.models.length === 0 ? (
                       <p>No models reported.</p>
                     ) : (
                       <ul>
-                        {props.observed.models.map((model) => {
+                        {visibleModelRows.map((model) => {
                           const hidden = props.hiddenModels.some(
                             (ref) =>
                               ref.providerInstanceId === props.instance.id &&
@@ -1231,6 +1247,9 @@ function ProviderRow(props: ProviderRowProps) {
                         })}
                       </ul>
                     )}
+                    {props.observed.models.length > 0 && visibleModelRows.length === 0 ? (
+                      <p className="oct-row-detail">No models match this filter.</p>
+                    ) : null}
                   </section>
                   <section aria-labelledby={`capabilities-${props.instance.id}`}>
                     <h4 id={`capabilities-${props.instance.id}`}>Capabilities</h4>

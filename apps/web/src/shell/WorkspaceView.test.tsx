@@ -95,7 +95,7 @@ describe("WorkspaceView welcome", () => {
     render(
       <WorkspaceView
         {...propsFor(welcome)}
-        draftProjectSelection={{ code: ids.project }}
+        draftProjectSelection={{ code: codeProject("active").id }}
         projects={[codeProject("active")]}
       />,
     );

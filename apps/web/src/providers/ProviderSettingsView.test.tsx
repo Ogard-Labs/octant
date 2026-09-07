@@ -1717,6 +1717,11 @@ describe("ProviderSettingsView", () => {
     const props = fixture({ observed: observation() });
     const rendered = renderExpanded(<ProviderSettingsView {...props} />);
 
+    const filter = screen.getByRole("textbox", { name: /Filter .* models/ });
+    await user.type(filter, "missing model");
+    expect(screen.queryByRole("checkbox", { name: "Hide Model One in model pickers" })).toBeNull();
+    expect(screen.getByText("No models match this filter.")).toBeVisible();
+    await user.clear(filter);
     const hide = screen.getByRole("checkbox", { name: "Hide Model One in model pickers" });
     expect(hide).toBeChecked();
     await user.click(hide);

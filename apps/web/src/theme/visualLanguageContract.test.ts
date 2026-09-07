@@ -140,6 +140,16 @@ describe("the public-block visual language", () => {
     expect(system).not.toMatch(/\[data-slot="button"\]:focus-visible\s*\{[^}]*outline:/);
   });
 
+  it("keeps number steppers free of a focus halo", () => {
+    const settings = readFileSync(join(webRoot, "styles/settings.css"), "utf8");
+    const focus =
+      settings.match(/\.octant-number-stepper:focus-within\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+
+    expect(focus).not.toBe("");
+    expect(focus).toMatch(/border-color:\s*var\(--octant-border-strong\)/);
+    expect(focus).not.toMatch(/box-shadow:\s*(?!none\s*;)[^;]+;/);
+  });
+
   it("keeps keyboard focus semantics without painting a global ring", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const withoutComments = system.replace(/\/\*[\s\S]*?\*\//g, "");

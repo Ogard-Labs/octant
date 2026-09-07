@@ -23,6 +23,26 @@ describe("ComposerModelPicker", () => {
     localStorage.clear();
   });
 
+  it("names a hidden bound model without offering it as a new selection", async () => {
+    const source = groups();
+    const first = source[0];
+    const current = first?.sections[0]?.models[0];
+    if (first === undefined || current === undefined) throw new Error("Expected model fixture");
+    const hidden = [{ ...first, sections: [], hiddenCurrent: current }, ...source.slice(1)];
+    render(
+      <ComposerModelPicker
+        groups={hidden}
+        onSelect={vi.fn()}
+        selectedModelId={modelOne}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "Provider and model" });
+    expect(trigger).toHaveTextContent("Model One");
+    await userEvent.click(trigger);
+    expect(screen.queryByRole("option", { name: "Model One" })).not.toBeInTheDocument();
+  });
+
   it("opens a nested provider → model menu from the compact trigger", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();

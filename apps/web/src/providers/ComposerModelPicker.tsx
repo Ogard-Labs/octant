@@ -337,6 +337,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
   return (
     <div className="composer-model-picker">
       <OctantPopover
+        align="end"
         className="composer-model-picker__menu"
         collisionAvoidance={{ side: "flip", align: "shift", fallbackAxisSide: "none" }}
         onOpenChange={(next) => {
@@ -546,7 +547,7 @@ function selectedModelLabel(
     const match = section.models.find((picker) => picker.model.id === modelId);
     if (match !== undefined) return match.model.displayName;
   }
-  return group.unavailableCurrent?.model.displayName;
+  return group.hiddenCurrent?.model.displayName ?? group.unavailableCurrent?.model.displayName;
 }
 
 function readinessStatus(readiness: PickerGroup["readiness"]): string | undefined {

@@ -2031,6 +2031,7 @@ export function useCodeController(options: CodeControllerOptions) {
           message: string,
         ) => {
           setTurnStatus(status === "waiting" ? "waiting" : "failed");
+          if (status !== "waiting") setProviderRequests([]);
           // The same sentence lands on this turn's assistant row below.
           setTurnError(message, { inTranscript: true });
           restoreFailedPrompt();

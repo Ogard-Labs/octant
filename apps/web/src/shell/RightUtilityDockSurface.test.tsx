@@ -161,7 +161,7 @@ describe("the right sidebar surface", () => {
   it("uses a generic detail for an unknown launchable tool", () => {
     render(
       <RightUtilityDockSurface
-        launchableSurfaces={[{ id: "unknown-tool" as never, label: "Custom tool" }]}
+        launchableSurfaces={[{ ...browser, id: "unknown-tool" as never, label: "Custom tool" }]}
         onCloseTab={vi.fn()}
         onOpenTab={vi.fn()}
         onSelectSurface={vi.fn()}
