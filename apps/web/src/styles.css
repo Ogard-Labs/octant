@@ -3724,14 +3724,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   min-width: 0;
   align-items: baseline;
   gap: var(--oct-space-2);
-  padding: var(--oct-space-2) 0 var(--oct-space-2);
+  padding: var(--oct-space-2) var(--oct-space-4);
   border-bottom: 1px solid var(--oct-hairline);
-}
-/* The dock body already owns its horizontal gutter. Keep the Environment
-   summary and its first fact on that same edge instead of adding a second
-   tool-header inset. */
-.right-utility-dock__tool .thread-environment-dock__header {
-  padding-inline: 0;
 }
 .thread-environment-dock__header h2 {
   margin: 0;
@@ -3751,7 +3745,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   display: grid;
   align-content: start;
   gap: 0;
-  padding: 0 0 var(--oct-space-4);
+  padding: 0 var(--oct-space-4) var(--oct-space-4);
 }
 .thread-environment-dock__body > * + * {
   border-top: 1px solid var(--oct-hairline);
@@ -3963,9 +3957,12 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   font-size: var(--oct-text-xs);
 }
 .thread-environment-dock .code-composer-choice__trigger {
+  display: inline-flex;
   width: 100%;
   max-width: none;
   min-height: 28px;
+  align-items: center;
+  gap: var(--oct-space-2);
   padding: 0;
   color: var(--oct-fg-2);
   font-size: var(--oct-text-sm);
