@@ -144,17 +144,11 @@ describe("useWorkThreadNavigation", () => {
   });
 
   it("drops a navigation response that began before the document became hidden", async () => {
-    let resolveNavigation:
-      | ((value: { threads: ReadonlyArray<ReturnType<typeof workThread>>; runtime: [] }) => void)
-      | undefined;
-    const navigation = vi.fn(
-      () =>
-        new Promise<{ threads: ReadonlyArray<ReturnType<typeof workThread>>; runtime: [] }>(
-          (resolve) => {
-            resolveNavigation = resolve;
-          },
-        ),
-    );
+    const hiddenRead = deferred<{
+      readonly threads: ReadonlyArray<ReturnType<typeof workThread>>;
+      readonly runtime: [];
+    }>();
+    const navigation = vi.fn(() => hiddenRead.promise);
     const { result, unmount } = renderHook(() =>
       useWorkThreadNavigation(
         {
@@ -169,12 +163,15 @@ describe("useWorkThreadNavigation", () => {
     await waitFor(() => expect(navigation).toHaveBeenCalledTimes(1));
     Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
     document.dispatchEvent(new Event("visibilitychange"));
-    resolveNavigation?.({
+    hiddenRead.resolve({
       threads: [decodeWorkThread({ ...workThread(), title: "Stale title" })],
       runtime: [],
     });
+    // Awaiting the read the hook itself awaited settles this on delivery order
+    // rather than on a guessed number of microtasks: the hook registered its
+    // continuation first, so it has already run once this resolves.
     await act(async () => {
-      await Promise.resolve();
+      await hiddenRead.promise;
     });
 
     expect(result.current.navigation[0]?.title).toBe("Research brief");
@@ -194,7 +191,12 @@ describe("useWorkThreadNavigation", () => {
     const navigation = vi
       .fn()
       .mockImplementationOnce(() => timerRead.promise)
-      .mockImplementationOnce(() => revisionRead.promise);
+      .mockImplementationOnce(() => revisionRead.promise)
+      // The refresh timer keeps polling once the two scripted reads settle, and
+      // a loaded runner gives it the time to. Those polls must stay pending: a
+      // bare vi.fn() resolves to undefined, which the hook stores as an empty
+      // list and wipes the revision result asserted on below.
+      .mockImplementation(() => new Promise<never>(() => {}));
     const { result, rerender, unmount } = renderHook(
       ({ changeRevision }) =>
         useWorkThreadNavigation(
@@ -231,7 +233,9 @@ describe("useWorkThreadNavigation", () => {
       ],
       runtime: [],
     });
-    await act(async () => Promise.resolve());
+    await act(async () => {
+      await timerRead.promise;
+    });
 
     expect(result.current.navigation[0]?.title).toBe("Newest title");
     unmount();
