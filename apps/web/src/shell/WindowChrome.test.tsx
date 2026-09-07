@@ -202,7 +202,10 @@ describe("WindowChrome", () => {
   });
 
   it("keeps compact native chrome geometry and neutral tool controls", () => {
-    expect(cssRule(".shell-frame > .window-chrome")).toContain("height: 34px;");
+    // The chrome is the title rail: the same height as the thread tab band
+    // beside it, so its 28px controls and the band's 30px tabs share one
+    // centreline. The earlier 34px row sat its buttons two pixels above them.
+    expect(cssRule(".shell-frame > .window-chrome")).toContain("height: var(--oct-title-rail-h);");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("top: 0;");
     expect(
       cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome'),
@@ -212,8 +215,8 @@ describe("WindowChrome", () => {
     );
     expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("border-bottom: 0;");
-    expect(cssRule(".window-chrome__button")).toContain("width: 26px;");
-    expect(cssRule(".window-chrome__button")).toContain("height: 26px;");
+    expect(cssRule(".window-chrome__button")).toContain("width: var(--oct-rail-button-h);");
+    expect(cssRule(".window-chrome__button")).toContain("height: var(--oct-rail-button-h);");
     expect(cssRule(".window-chrome__button")).toContain("background: transparent;");
     // The hover fill is the design system's neutral soft ink (--oct-fg-soft),
     // the same feedback .shell-icon-button gives, still no accent.
@@ -240,7 +243,11 @@ describe("WindowChrome", () => {
     // where .mode[aria-current="page"] uses the shadcn-projected neutral fill.
     const systemStyles = readFileSync(resolve(process.cwd(), "src/styles/octant.css"), "utf8");
     const activeMode = systemStyles.match(/\.mode\[aria-current="page"\]\s*{[^}]*}/)?.[0] ?? "";
-    expect(activeMode).toContain("var(--sidebar-accent)");
+    // The current mode wears the selection fill and a hairline edge, the same
+    // two marks the thread tab strip gives the tab in front; the hover state
+    // is the softer ink wash, so pointing never looks like being there.
+    expect(activeMode).toContain("var(--oct-selection)");
+    expect(activeMode).toContain("box-shadow: inset 0 0 0 1px var(--oct-border);");
     expect(activeMode).not.toMatch(/--octant-accent|purple/i);
     // The Project header is a quiet section label, so its active state is
     // carried by ink alone rather than a filled pill.
@@ -263,7 +270,9 @@ describe("WindowChrome", () => {
   it("keeps the Project tree readable and reserves status ink for active work", () => {
     const projectName = cssRule(".project-row__copy > span");
     expect(projectName).toContain("font-family: var(--oct-font-display);");
-    expect(projectName).toContain("font-weight: 400;");
+    // A Project name is the 13px row label (DESIGN.md "Scale"), one step
+    // heavier than the 400 thread titles filed under it.
+    expect(projectName).toContain("font-weight: 500;");
     expect(projectName).not.toMatch(/text-transform|letter-spacing|mono/);
     expect(cssRule('.sidebar-navigation__thread-status[data-activity="idle"]')).toContain(
       "opacity: 0;",
@@ -627,8 +636,10 @@ describe("WindowChrome", () => {
 
     expect(leading).toHaveClass("window-no-drag", "window-chrome__leading--browser");
     expect(leading).toContainElement(opener);
-    expect(cssRule(".window-chrome__leading--browser .window-chrome__button")).toContain(
-      "width: 28px;",
+    // Native and browser openers are the same 28px rail control now that the
+    // chrome is the full title rail; the browser no longer needs its own size.
+    expect(cssRule(".window-chrome__leading .window-chrome__button")).toContain(
+      "width: var(--oct-rail-button-h);",
     );
     expect(leading?.querySelector(".window-chrome__traffic-light-space")).not.toBeInTheDocument();
     await user.click(opener);

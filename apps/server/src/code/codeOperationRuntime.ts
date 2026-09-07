@@ -146,6 +146,15 @@ export interface CodeOperationRuntimeOptions {
   readonly uuid: () => string;
   /** Reports a board-record failure without exposing journal or provider details. */
   readonly reportRuntimeWorkFailure?: (failure: CodeRuntimeWorkRecordFailure) => void;
+  /**
+   * A person asked the thread for a turn. Fires once per new turn, after the
+   * scope check and before any runtime work is recorded, so a completed or
+   * snoozed thread comes back the moment it is spoken to. A throw refuses the
+   * turn: a thread that stayed completed or snoozed while its turn ran would
+   * be a half-applied state, so the host starts nothing on a record it could
+   * not bring back.
+   */
+  readonly onProviderTurnRequested?: (threadId: CodeThreadId) => void;
   readonly ghExecutable?: string;
   readonly pullRequestPort?: CodeOperationPullRequestPort;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
@@ -491,6 +500,11 @@ export function createCodeOperationRuntime(
       // replay lookup, but before approval or the operation side effect. That
       // keeps inaccessible commands out of the durable runtime-work journal
       // while still recording work that waits on approval.
+      // Bringing the thread back comes before any runtime-work record: a
+      // reset that fails must leave no "running" record behind for a turn
+      // that never starts.
+      if (command.kind === "start-provider-turn")
+        options.onProviderTurnRequested?.(command.threadId);
       const started = codeRuntimeWorkStarted(command);
       if (started !== undefined)
         observeRuntimeWorkOutcome(
@@ -1591,6 +1605,22 @@ function normalizedOperationEvent(
       kind: "diff",
       content: evidence.put(event.text ?? " "),
       reconciled: event.reconciliation?.status === "confirmed",
+    };
+  }
+  // The provider's word on how a tool ended is an observation, never proof,
+  // but it is still the only thing that closes the tool row the start opened.
+  if (
+    event.category === "observation" &&
+    (event.providerKind === "tool-success" || event.providerKind === "tool-failure") &&
+    event.toolCallId !== undefined &&
+    event.toolName !== undefined
+  ) {
+    return {
+      kind: "tool-activity",
+      toolCallId: event.toolCallId,
+      toolName: event.toolName,
+      state: event.providerKind === "tool-success" ? "completed" : "failed",
+      ...(event.text === undefined ? {} : { summary: event.text }),
     };
   }
   if (event.category === "usage")

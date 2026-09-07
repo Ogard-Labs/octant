@@ -2,7 +2,7 @@ import type { ComponentProps } from "react";
 import { cn } from "./utils";
 
 /*
- * A card is bounded by a hairline ring rather than lifted by a shadow (0086):
+ * A card is bounded by a hairline ring rather than lifted by a shadow (0090):
  * it sits in the page, and shadow now means something that floats above it.
  * Semantic elements stay — a card is a section with a heading, not a stack of
  * divs.

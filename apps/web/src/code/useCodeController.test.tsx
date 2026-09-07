@@ -2778,6 +2778,46 @@ describe("useCodeController", () => {
     await waitFor(() => expect(result.current.navigation[0]?.unread).toBe(false));
   });
 
+  it("completes, reopens, snoozes, and wakes a thread with the version it last saw", async () => {
+    const execute = vi.fn(async (command: { kind: string }) => {
+      const current = bootstrap().threads[0]!;
+      return { kind: "thread-updated", thread: { ...current, version: 2 } } as never;
+    });
+    const client = fakeClient({ execute });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await result.current.completeThread(ids.thread);
+    });
+    expect(execute).toHaveBeenLastCalledWith({
+      kind: "complete-code-thread",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+
+    await act(async () => {
+      await result.current.snoozeThread(ids.thread, "2026-09-08T09:00:00.000Z");
+    });
+    expect(execute).toHaveBeenLastCalledWith({
+      kind: "snooze-code-thread",
+      threadId: ids.thread,
+      expectedVersion: 2,
+      until: "2026-09-08T09:00:00.000Z",
+    });
+
+    await act(async () => {
+      await result.current.wakeThread(ids.thread);
+      await result.current.reopenThread(ids.thread);
+    });
+    expect(execute.mock.calls.map(([command]) => command.kind)).toEqual([
+      "complete-code-thread",
+      "snooze-code-thread",
+      "wake-code-thread",
+      "reopen-code-thread",
+    ]);
+  });
+
   it("marks a manual follow-up with a strictly newer trigger sequence", async () => {
     const executeFollowUp = vi.fn(async () => ({ kind: "follow-up-updated" }) as never);
     const client = fakeClient({

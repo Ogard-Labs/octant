@@ -1,4 +1,4 @@
-# 0086. Recipes own their shape; the app owns its focus ring
+# 0090. Recipes own their shape; the app owns its focus ring
 
 **Status:** Accepted
 
@@ -11,7 +11,7 @@ of three named shadows, and — with DESIGN.md — keyboard focus painted exactl
 once by a global `:focus-visible` rule that every recipe was forbidden to add
 to.
 
-0085 moved product controls onto the Base UI-native shadcn style. That style
+0089 moved product controls onto the Base UI-native shadcn style. That style
 carries its own answers to the same three questions, and they are not
 compatible with 0070's:
 
@@ -88,6 +88,6 @@ own radius, so that line bought nothing and cost the control its shape.
 - 0070 is superseded on radius and elevation. Its single-owner focus ring is
   kept, minus the radius it imposed. Its
   stack, token, shell, and dual-paint rules are carried forward here.
-- 0085 settles which style the recipes follow.
+- 0089 settles which style the recipes follow.
 - 0073 owns the type hierarchy a recipe's sizes land on.
 - 0016 owns the primitive stack and token authority.
