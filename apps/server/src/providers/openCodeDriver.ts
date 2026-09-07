@@ -1,3 +1,4 @@
+import { OpenCodeMessageParts } from "./openCodeMessageParts";
 import { isAbsolute, resolve } from "node:path";
 import {
   type CorrelationId,
@@ -75,6 +76,7 @@ interface SessionState {
   terminal: boolean;
   active: boolean;
   readonly taskIds: Map<string, string>;
+  readonly messageParts: OpenCodeMessageParts;
   readonly modelId: string;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly approvals: Set<string>;
@@ -623,6 +625,7 @@ function newSessionState(
     terminal: false,
     active: false,
     taskIds: new Map(),
+    messageParts: new OpenCodeMessageParts(),
     modelId,
     executionPolicy,
     approvals: new Set(),
@@ -659,6 +662,7 @@ function mapAndOffer(
       instanceId,
       sessionId: state.sessionId,
       sequenceStart: state.nextSequence,
+      messageParts: state.messageParts,
       correlationId: state.correlationId,
       occurredAt: clock() as UtcTimestamp,
     },
@@ -783,9 +787,16 @@ export function providerFailure(error: unknown): ProviderFailure {
 
 export function sourceSessionId(event: Event): string | undefined {
   const properties = event.properties as { readonly sessionID?: unknown };
-  return typeof properties.sessionID === "string" && properties.sessionID.length > 0
-    ? properties.sessionID
-    : undefined;
+  if (typeof properties.sessionID === "string" && properties.sessionID.length > 0)
+    return properties.sessionID;
+  // Earlier runtimes put the session identity inside the message or part.
+  const nested =
+    event.type === "message.part.updated"
+      ? event.properties.part?.sessionID
+      : event.type === "message.updated"
+        ? event.properties.info?.sessionID
+        : undefined;
+  return typeof nested === "string" && nested.length > 0 ? nested : undefined;
 }
 
 export function isTerminalEvent(event: ProviderRuntimeEvent): boolean {

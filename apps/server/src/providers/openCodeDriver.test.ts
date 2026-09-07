@@ -361,6 +361,107 @@ describe("OpenCode driver", () => {
     expect(String(exit)).toContain("invalid-configuration");
   });
 
+  it("delivers assistant message parts once and never echoes user parts", async () => {
+    const events: Event[] = [
+      {
+        id: "role-user",
+        type: "message.updated",
+        properties: {
+          sessionID: "provider-session",
+          info: { id: "user-message", sessionID: "provider-session", role: "user" },
+        },
+      } as Event,
+      {
+        id: "user-part",
+        type: "message.part.updated",
+        properties: {
+          sessionID: "provider-session",
+          time: 1,
+          part: {
+            id: "user-part",
+            sessionID: "provider-session",
+            messageID: "user-message",
+            type: "text",
+            text: "User prompt",
+          },
+        },
+      },
+      {
+        id: "role-assistant",
+        type: "message.updated",
+        properties: {
+          sessionID: "provider-session",
+          info: { id: "answer", sessionID: "provider-session", role: "assistant" },
+        },
+      } as Event,
+      {
+        id: "part-start",
+        type: "message.part.updated",
+        properties: {
+          sessionID: "provider-session",
+          time: 2,
+          part: {
+            id: "text",
+            sessionID: "provider-session",
+            messageID: "answer",
+            type: "text",
+            text: "Hello",
+          },
+        },
+      },
+      {
+        id: "part-delta",
+        type: "message.part.delta",
+        properties: {
+          sessionID: "provider-session",
+          messageID: "answer",
+          partID: "text",
+          field: "text",
+          delta: " there",
+        },
+      },
+      {
+        id: "part-end",
+        type: "message.part.updated",
+        properties: {
+          sessionID: "provider-session",
+          time: 3,
+          part: {
+            id: "text",
+            sessionID: "provider-session",
+            messageID: "answer",
+            type: "text",
+            text: "Hello there",
+          },
+        },
+      },
+      idleEvent("provider-session"),
+    ];
+    const fixture = driverFixture({ events });
+    const output = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver
+          .acquire({ instanceId, projectRoot: "/tmp/project" })
+          .pipe(
+            Effect.flatMap((connection) =>
+              connection
+                .start({ sessionId, modelId, executionPolicy: "approval-gated" })
+                .pipe(
+                  Effect.flatMap(() =>
+                    Stream.runCollect(Stream.unwrapScoped(connection.subscribe)),
+                  ),
+                ),
+            ),
+          ),
+      ),
+    );
+    expect(
+      Array.from(output)
+        .flatMap((event) => (event.kind === "text-delta" ? [event.text] : []))
+        .join(""),
+    ).toBe("Hello there");
+  });
+
   it("routes only matching source sessions, suppresses duplicate terminals, and keeps todo IDs stable", async () => {
     const events = [
       textEvent("other", "ignored"),
