@@ -15,11 +15,6 @@ export interface OpenCodeBinaryProbe {
 
 export type OpenCodeRuntime = "legacy" | "beta";
 
-export interface OpenCodeApiRoutes {
-  readonly apiPrefix: "" | "/api";
-  readonly healthPath: "/global/health" | "/api/health";
-}
-
 export interface OpenCodeServerConnection {
   readonly authorization: string;
   readonly pid: number;
@@ -27,8 +22,6 @@ export interface OpenCodeServerConnection {
   readonly runtime?: OpenCodeRuntime;
   /** Version emitted by the same probe that selected the runtime protocol. */
   readonly version?: string;
-  /** Routes selected from the same runtime attestation; no path rewriting for v1. */
-  readonly routes?: OpenCodeApiRoutes;
   readonly url: URL;
 }
 
@@ -383,10 +376,6 @@ function acquireOpenCodeServer(
               connection: {
                 authorization,
                 pid: child.pid!,
-                routes:
-                  runtime === "beta"
-                    ? { apiPrefix: "/api", healthPath: "/api/health" }
-                    : { apiPrefix: "", healthPath: "/global/health" },
                 runtime,
                 version,
                 url,

@@ -185,6 +185,15 @@ export interface CodeAppManagedToolsOptions {
   readonly thread: CodeThread;
   readonly readThread: (windowId: WindowId, threadId: CodeThread["id"]) => CodeThread | undefined;
   readonly uuid: () => string;
+  readonly browserApproval?: {
+    readonly isApproved: (contextId: string) => boolean;
+    readonly request: (
+      origin: string,
+      signal?: AbortSignal,
+    ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
+    readonly remember: (contextId: string) => void;
+    readonly forget: (contextId: string) => void;
+  };
   readonly executeOperation: (
     windowId: WindowId,
     command: CodeOperationCommand,
@@ -330,13 +339,13 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       if (name === CODE_PROPOSE_THREAD_TOOL_NAME && options.planner !== undefined) {
         return plannerProposeTool(options, parseProposeThreadInput(inputJson));
       }
+      if (name === CODE_BROWSER_TOOL_NAME && options.browser !== undefined) {
+        return browserTool(options, parseBrowserInput(inputJson), signal);
+      }
       const postureFailure = currentAuthorityFailure(options);
       if (postureFailure !== undefined) return failure(postureFailure);
       if (name === CODE_TERMINAL_TOOL_NAME) {
         return terminalTool(options, parseTerminalInput(inputJson), signal);
-      }
-      if (name === CODE_BROWSER_TOOL_NAME && options.browser !== undefined) {
-        return browserTool(options, parseBrowserInput(inputJson), signal);
       }
       if (name === CODE_APPLE_TOOL_NAME && options.apple !== undefined) {
         return appleTool(options, parseAppleInput(inputJson), signal);
@@ -592,16 +601,45 @@ async function browserTool(
   const authority = options.browser.resolveAuthority(threadId, "code");
   if (authority === undefined) return failure("browser-authority-unavailable");
   if (input.operation === "stop") {
+    const context = options.browser.inspectThread(options.windowId, threadId).context;
+    if (context !== undefined) options.browserApproval?.forget(String(context.contextId));
     const released = await options.browser.releaseThread(options.windowId, threadId);
     return browserResult(released);
   }
+  const postureFailure = browserAuthorityFailure(options);
+  if (postureFailure !== undefined) return failure(postureFailure);
   let snapshot = options.browser.inspectThread(options.windowId, threadId);
-  if (snapshot.context === undefined) {
-    if (input.operation !== "navigate" || input.url === undefined) {
-      return failure("browser-navigation-required");
-    }
-    const origin = allowedOrigin(input.url);
-    if (origin === undefined) return failure("invalid-browser-url");
+  const existing = snapshot.context?.state === "active" ? snapshot.context : undefined;
+  if (existing === undefined && snapshot.context !== undefined) {
+    options.browserApproval?.forget(String(snapshot.context.contextId));
+  }
+  const origin =
+    existing === undefined
+      ? input.operation === "navigate" && input.url !== undefined
+        ? allowedOrigin(input.url)
+        : undefined
+      : existing.policy.allowedOrigins.join(", ");
+  if (origin === undefined)
+    return failure(
+      input.operation === "navigate" && input.url !== undefined
+        ? "invalid-browser-url"
+        : "browser-navigation-required",
+    );
+  const requiresApproval = currentAuthorityFailure(options) !== undefined;
+  if (
+    requiresApproval &&
+    (existing === undefined ||
+      options.browserApproval?.isApproved(String(existing.contextId)) !== true)
+  ) {
+    if (options.browserApproval === undefined) return failure("browser-approval-required");
+    const outcome = await options.browserApproval.request(origin, signal);
+    if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
+    const changed = browserAuthorityFailure(options);
+    if (changed !== undefined || signal?.aborted === true)
+      return failure(changed ?? "tool-interrupted");
+    if (existing !== undefined) options.browserApproval.remember(String(existing.contextId));
+  }
+  if (existing === undefined) {
     const action = actionRequest(options, authority);
     const created = await guardedBrowserEffect(options, threadId, signal, () =>
       options.browser!.create({
@@ -619,6 +657,9 @@ async function browserTool(
     );
     if (created.kind === "failure") return failure(created.reason);
     snapshot = created.snapshot;
+    if (requiresApproval && snapshot.context?.state === "active") {
+      options.browserApproval?.remember(String(snapshot.context.contextId));
+    }
   }
   const context = snapshot.context;
   if (context === undefined || context.state !== "active") return browserResult(snapshot);
@@ -864,7 +905,7 @@ async function guardedBrowserEffect(
     while (!settled) {
       await defaultWait(25);
       if (settled) break;
-      const reason = currentAuthorityFailure(options);
+      const reason = browserAuthorityFailure(options);
       if (reason !== undefined) return reason;
     }
     return new Promise<string>(() => undefined);
@@ -878,7 +919,7 @@ async function guardedBrowserEffect(
     ]);
     settled = true;
     if (outcome.kind === "snapshot") {
-      const reason = currentAuthorityFailure(options);
+      const reason = browserAuthorityFailure(options);
       if (reason === undefined && signal?.aborted !== true) return outcome;
       await options.browser?.releaseThread(options.windowId, threadId);
       return { kind: "failure", reason: signal?.aborted === true ? "tool-interrupted" : reason! };
@@ -1194,6 +1235,17 @@ function profileToolConstraintFailure(thread: CodeThread, toolName: string): str
     profileDisplayName: thread.profileDisplayName ?? "the bound profile",
   });
   return decision.status === "refused" ? decision.reason : undefined;
+}
+
+function browserAuthorityFailure(options: CodeAppManagedToolsOptions): string | undefined {
+  const stale = currentThreadIdentityFailure(options);
+  if (stale !== undefined) return stale;
+  const current = options.readThread(options.windowId, options.thread.id);
+  const posture = clampTurnAccessPosture({
+    requested: options.thread.executionPolicy,
+    thread: current?.executionPolicy ?? options.thread.executionPolicy,
+  });
+  return posture === "plan" ? "plan-mode-read-only" : undefined;
 }
 
 function currentAuthorityFailure(options: CodeAppManagedToolsOptions): string | undefined {

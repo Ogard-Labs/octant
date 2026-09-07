@@ -681,7 +681,11 @@ function decodeInitializedMessage(
     !modelAccepted ||
     message.permissionMode !== expectedPermissionMode ||
     (input.resumeSessionId !== undefined && message.session_id !== input.resumeSessionId) ||
-    mcpServers.length > 0 ||
+    mcpServers.some((server) => {
+      if (!input.managedToolServer || typeof server !== "object" || server === null) return true;
+      const record = server as Record<string, unknown>;
+      return record.name !== "octant" || record.status !== "connected";
+    }) ||
     !withinRequestedTools(tools, input.tools)
   ) {
     throw protocol("Claude initialized an unexpected runtime surface.");
@@ -920,13 +924,23 @@ export function decodeMessage(
   if (message.type === "result") return decodeResult(message, input.tools);
   if (message.type === "tool_progress") {
     const elapsedSeconds = nonNegativeNumber(message.elapsed_time_seconds);
+    // App-owned MCP calls report parent-correlated heartbeats while awaiting
+    // approval. This is progress metadata, not authority to spawn an agent.
+    const managedHeartbeat =
+      input.managedToolServer === true &&
+      message.heartbeat === true &&
+      typeof message.tool_name === "string" &&
+      message.tool_name.startsWith("mcp__octant__") &&
+      typeof message.parent_tool_use_id === "string" &&
+      message.parent_tool_use_id.length > 0 &&
+      message.parent_tool_use_id.length <= 256;
     if (
       typeof message.session_id !== "string" ||
       typeof message.tool_use_id !== "string" ||
       typeof message.tool_name !== "string" ||
       !input.tools.includes(message.tool_name) ||
       elapsedSeconds === undefined ||
-      message.parent_tool_use_id !== null ||
+      (message.parent_tool_use_id !== null && !managedHeartbeat) ||
       (message.task_id !== undefined && typeof message.task_id !== "string")
     )
       throw protocol("Claude returned an unsupported runtime message.");
@@ -936,6 +950,9 @@ export function decodeMessage(
       toolUseId: message.tool_use_id,
       toolName: message.tool_name,
       elapsedSeconds,
+      ...(managedHeartbeat && typeof message.parent_tool_use_id === "string"
+        ? { parentToolUseId: message.parent_tool_use_id }
+        : {}),
       ...(typeof message.task_id === "string" ? { taskId: message.task_id } : {}),
     };
   }

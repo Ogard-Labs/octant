@@ -1024,6 +1024,11 @@ interface ActiveTurn {
   readonly secrets: readonly string[];
   readonly abort: AbortController;
   readonly approvals: Map<string, string>;
+  readonly browserApprovals: Map<
+    string,
+    (outcome: "approved" | "denied" | "cancelled" | "expired") => void
+  >;
+  readonly browserGrantKeys: Set<string>;
   readonly questions: Set<string>;
   /** Questions the native harness asked on this turn; answered by the host, not the provider. */
   readonly harnessQuestions: Set<string>;
@@ -1051,6 +1056,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     Extract<CodeOperationCommand, { kind: "start-provider-turn" }>
   >();
   readonly #active = new Map<string, ActiveTurn>();
+  readonly #approvedBrowserContexts = new Set<string>();
 
   constructor(input: {
     options: CodeOperationRuntimeOptions;
@@ -1127,6 +1133,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       secrets,
       abort: new AbortController(),
       approvals: new Map(),
+      browserApprovals: new Map(),
+      browserGrantKeys: new Set(),
       questions: new Set(),
       harnessQuestions: new Set(),
       cursor: 0,
@@ -1208,6 +1216,57 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return true;
   }
 
+  #browserApprovalKey(active: ActiveTurn, contextId: string): string {
+    return JSON.stringify([
+      active.windowId,
+      active.thread.id,
+      active.thread.checkoutId,
+      active.thread.providerInstanceId,
+      active.thread.modelId,
+      contextId,
+    ]);
+  }
+
+  #askBrowserApproval(
+    active: ActiveTurn,
+    origin: string,
+    signal?: AbortSignal,
+  ): Promise<"approved" | "denied" | "cancelled" | "expired"> {
+    if (signal?.aborted || active.abort.signal.aborted || active.browserApprovals.size >= 4)
+      return Promise.resolve("cancelled");
+    const approvalId = CodeApprovalId.make(this.#options.uuid());
+    return new Promise((resolve) => {
+      const finish = (outcome: "approved" | "denied" | "cancelled" | "expired") => {
+        if (!active.browserApprovals.delete(String(approvalId))) return;
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", abort);
+        active.abort.signal.removeEventListener("abort", abort);
+        resolve(outcome);
+      };
+      const abort = () => finish("cancelled");
+      const timer = setTimeout(() => finish("expired"), 10 * 60_000);
+      active.browserApprovals.set(String(approvalId), finish);
+      signal?.addEventListener("abort", abort, { once: true });
+      active.abort.signal.addEventListener("abort", abort, { once: true });
+      try {
+        const frame = this.#events.append({
+          threadId: active.thread.id,
+          operationId: active.operationId,
+          expectedCursor: active.cursor,
+          event: {
+            kind: "approval-requested",
+            approvalId,
+            action: "provider-tool",
+            summary: `Allow this thread to use an isolated browser session at ${origin.slice(0, 512)}? Shell and file access stay unchanged.`,
+          },
+        });
+        active.cursor = frame.cursor;
+      } catch {
+        finish("cancelled");
+      }
+    });
+  }
+
   async answerApproval(input: Parameters<CodeOperationTurnPort["answerApproval"]>[0]) {
     const active = this.#owned(input.thread, input.checkoutRoot);
     const providerRequestId = active?.approvals.get(input.approvalId);
@@ -1218,6 +1277,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             requested: active.thread.executionPolicy,
             thread: input.thread.executionPolicy,
           });
+    const browserApproval = active?.browserApprovals.get(input.approvalId);
+    if (active !== undefined && browserApproval !== undefined) {
+      if (
+        turnPosture === "plan" ||
+        active.thread.permissionPersistence !== input.thread.permissionPersistence
+      )
+        return turnState("failed");
+      browserApproval(input.decision === "approved" ? "approved" : "denied");
+      return turnState(active.state);
+    }
     if (
       active === undefined ||
       active.connection === undefined ||
@@ -1241,6 +1310,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const active = this.#owned(input.thread, input.checkoutRoot);
     if (active === undefined) return turnState("failed");
     active.state = "interrupted";
+    this.#revokeBrowserGrants(active);
     this.#persistRuntimeWork(active, "interrupted");
     active.abort.abort();
     if (active.connection !== undefined) {
@@ -1383,6 +1453,28 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                     thread: active.thread,
                     readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
                     uuid: this.#options.uuid,
+                    browserApproval: {
+                      isApproved: (contextId) => {
+                        const key = this.#browserApprovalKey(active, contextId);
+                        const approved = this.#approvedBrowserContexts.has(key);
+                        if (approved) active.browserGrantKeys.add(key);
+                        return approved;
+                      },
+                      request: (origin, signal) => this.#askBrowserApproval(active, origin, signal),
+                      remember: (contextId) => {
+                        if (this.#approvedBrowserContexts.size >= 256) {
+                          const oldest = this.#approvedBrowserContexts.values().next().value;
+                          if (oldest !== undefined) this.#approvedBrowserContexts.delete(oldest);
+                        }
+                        const key = this.#browserApprovalKey(active, contextId);
+                        this.#approvedBrowserContexts.add(key);
+                        active.browserGrantKeys.add(key);
+                      },
+                      forget: (contextId) =>
+                        this.#approvedBrowserContexts.delete(
+                          this.#browserApprovalKey(active, contextId),
+                        ),
+                    },
                     ...(this.#options.recordExternalContentIngestion === undefined
                       ? {}
                       : {
@@ -1500,6 +1592,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     failure?: CodeOperationFailure,
   ): void {
     active.state = outcome;
+    if (outcome === "failed" || outcome === "interrupted") this.#revokeBrowserGrants(active);
     if (active.lastPersistedState === outcome && failure === undefined) return;
     active.lastPersistedState = outcome;
     const frame = this.#events.append({
@@ -1514,6 +1607,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     });
     active.cursor = frame.cursor;
     this.#persistRuntimeWork(active, outcome);
+  }
+
+  #revokeBrowserGrants(active: ActiveTurn): void {
+    for (const key of active.browserGrantKeys) this.#approvedBrowserContexts.delete(key);
+    active.browserGrantKeys.clear();
   }
 
   /**
@@ -1660,7 +1758,9 @@ function normalizedOperationEvent(
       toolCallId: event.toolCallId ?? event.requestId ?? "provider-tool",
       toolName: event.toolName ?? "provider-tool",
       state:
-        event.status === "provider-claimed-failure"
+        event.status === "provider-claimed-failure" ||
+        event.status === "failed" ||
+        event.status === "interrupted"
           ? "failed"
           : event.status === "completed"
             ? "completed"

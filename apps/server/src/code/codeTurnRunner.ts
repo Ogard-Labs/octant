@@ -215,6 +215,7 @@ export class CodeTurnRunner {
           sessionId: input.sessionId,
           modelId: input.thread.modelId,
           executionPolicy: input.thread.executionPolicy,
+          tools: input.appManagedTools?.definitions ?? [],
         })
         .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
 
@@ -315,20 +316,48 @@ export class CodeTurnRunner {
                       });
                       return;
                     }
-                    const execution = yield* Effect.promise(async () => {
-                      try {
-                        return await toolSet.execute({
-                          name: sanitizedEvent.toolName,
-                          inputJson: sanitizedEvent.inputJson,
-                          ...(input.signal === undefined ? {} : { signal: input.signal }),
-                        });
-                      } catch {
-                        return {
-                          result: { error: "tool-execution-failed" },
-                          isError: true,
-                        } as const;
-                      }
+                    const requestSignal = connection.toolRequestSignal?.({
+                      sessionId: input.sessionId,
+                      requestId: sanitizedEvent.requestId,
                     });
+                    const executionSignal =
+                      requestSignal === undefined
+                        ? input.signal
+                        : input.signal === undefined
+                          ? requestSignal
+                          : AbortSignal.any([input.signal, requestSignal]);
+                    if (executionSignal?.aborted) {
+                      yield* input.persistEvent({
+                        ...normalized,
+                        status: "interrupted",
+                        text: "App-managed action was cancelled.",
+                      });
+                      return;
+                    }
+                    const execution = yield* idle.during(
+                      Effect.promise(async () => {
+                        try {
+                          return await toolSet.execute({
+                            name: sanitizedEvent.toolName,
+                            inputJson: sanitizedEvent.inputJson,
+                            ...(executionSignal === undefined ? {} : { signal: executionSignal }),
+                          });
+                        } catch {
+                          return {
+                            result: { error: "tool-execution-failed" },
+                            isError: true,
+                          } as const;
+                        }
+                      }),
+                    );
+                    if (executionSignal?.aborted) {
+                      yield* input.persistEvent({
+                        ...normalized,
+                        status: "interrupted",
+                        text: "App-managed action was cancelled.",
+                      });
+                      return;
+                    }
                     const answer = boundedToolAnswer(execution.result, execution.isError === true);
                     yield* connection.answerTool({
                       sessionId: input.sessionId,

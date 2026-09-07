@@ -270,6 +270,41 @@ describe("mapClaudeMessage", () => {
     expect(JSON.stringify(results)).not.toContain("private-tool-output");
   });
 
+  it("correlates a managed heartbeat with its active parent tool", () => {
+    const ctx = context();
+    const toolName = "mcp__octant__octant_browser";
+    mapped(ctx, {
+      kind: "stream-event",
+      sessionId: claudeSessionId,
+      event: {
+        kind: "content-start",
+        index: 0,
+        content: { kind: "tool-use", toolUseId: "parent-tool", toolName, input: {} },
+      },
+    });
+    const progress = mapped(ctx, {
+      kind: "tool-progress",
+      sessionId: claudeSessionId,
+      toolUseId: "heartbeat",
+      parentToolUseId: "parent-tool",
+      toolName,
+      elapsedSeconds: 30,
+    });
+    expect(progress.some((item) => item.kind === "failure")).toBe(false);
+    expect(eventValues(progress)).toContainEqual(
+      expect.objectContaining({ kind: "tool-progress" }),
+    );
+    const unknown = mapped(ctx, {
+      kind: "tool-progress",
+      sessionId: claudeSessionId,
+      toolUseId: "heartbeat",
+      parentToolUseId: "unknown",
+      toolName,
+      elapsedSeconds: 30,
+    });
+    expect(unknown.some((item) => item.kind === "failure")).toBe(true);
+  });
+
   it("protocol-fails unknown tool progress without synthesizing tool state or start", () => {
     const ctx = context();
 

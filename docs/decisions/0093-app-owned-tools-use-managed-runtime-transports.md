@@ -13,8 +13,9 @@ browser operation, even when a narrower isolated session was sufficient.
 ## Decision
 
 - A managed provider adapter may expose the exact app-authored catalogue
-  through an in-process tool server owned by that provider connection. This
-  is a narrow exception to 0006's disabled provider-native tool-server rule.
+  through its runtime's structured tool-call protocol or an in-process tool
+  server owned by that provider connection. The latter is a narrow exception
+  to 0006's disabled provider-native tool-server rule.
   User, Project, plugin, external-process, and remote tool-server configuration
   remain disabled. Installing or discovering a server never grants authority.
 - Calls and results cross the existing provider SDK tool-request/answer

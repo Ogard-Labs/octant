@@ -169,7 +169,7 @@ export function makeOfficialOpenCodeClient(
   server: OpenCodeServerConnection,
   projectRoot: string,
 ): OpenCodeClientPort {
-  const beta = server.runtime === "beta" || server.routes?.apiPrefix === "/api";
+  const beta = server.runtime === "beta";
   const client = createOpencodeClient({
     baseUrl: server.url.toString(),
     directory: projectRoot,

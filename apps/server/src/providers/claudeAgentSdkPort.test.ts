@@ -42,6 +42,7 @@ class FakeQuery implements ClaudeAgentSdkQueryLike {
   readonly supportedModels = vi.fn(async () => initialization.models);
   readonly accountInfo = vi.fn(async () => initialization.account);
   readonly close = vi.fn(() => undefined);
+  readonly setMcpServers = vi.fn(async () => ({ added: ["octant"], removed: [], errors: {} }));
 
   constructor(private readonly output: readonly unknown[]) {}
 
@@ -148,6 +149,34 @@ async function collectMessages(output: readonly unknown[]) {
 }
 
 describe("Claude Agent SDK port", () => {
+  test("connects only the app-owned tool server before delivering a tool-enabled prompt", async () => {
+    const name = "mcp__octant__octant_browser";
+    const harness = makeHarness([
+      {
+        ...safeRuntimeInitialization,
+        tools: [...safeRuntimeInitialization.tools, name],
+        mcp_servers: [{ name: "octant", status: "connected" }],
+      },
+    ]);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          yield* query.send({
+            text: "Inspect the browser",
+            appManagedTools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+            onAppToolCall: async () => ({ resultJson: "{}", isError: false }),
+          });
+          expect(harness.query.setMcpServers).toHaveBeenCalledWith({
+            octant: expect.objectContaining({ type: "sdk", name: "octant" }),
+          });
+          const messages = yield* Stream.runCollect(query.messages);
+          expect(Chunk.toReadonlyArray(messages)[0]).toMatchObject({ kind: "initialized" });
+        }),
+      ),
+    );
+  });
+
   test("constructs an isolated streaming query with exact root, executable, resume, policy, and tools", async () => {
     const harness = makeHarness();
 

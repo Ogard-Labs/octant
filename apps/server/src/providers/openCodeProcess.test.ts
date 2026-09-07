@@ -259,7 +259,6 @@ describe("OpenCodeProcessPort", () => {
     expect(observed.url.hostname).toBe("127.0.0.1");
     expect(observed.runtime).toBe("beta");
     expect(observed.version).toBe("opencode2 v0.0.0-beta-18721");
-    expect(observed.routes).toEqual({ apiPrefix: "/api", healthPath: "/api/health" });
     expect(observed.authorization).toMatch(/^Basic b3BlbmNvZGU6/);
   });
 

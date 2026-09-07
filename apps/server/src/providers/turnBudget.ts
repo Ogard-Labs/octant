@@ -20,6 +20,8 @@ export interface IdleTimeout {
   readonly touch: Effect.Effect<void>;
   /** Resolves once no activity has been recorded for the configured window. */
   readonly expired: Effect.Effect<void>;
+  /** App-owned work has its own deadline; it is not provider silence. */
+  readonly during: <A, E, R>(activity: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
 }
 
 /**
@@ -30,6 +32,7 @@ export interface IdleTimeout {
 export function makeIdleTimeout(idleMs: number): Effect.Effect<IdleTimeout> {
   return Effect.gen(function* () {
     let lastActivity = yield* Clock.currentTimeMillis;
+    let activeActions = 0;
     const touch = Effect.flatMap(Clock.currentTimeMillis, (now) =>
       Effect.sync(() => {
         lastActivity = now;
@@ -39,10 +42,25 @@ export function makeIdleTimeout(idleMs: number): Effect.Effect<IdleTimeout> {
       for (;;) {
         const now = yield* Clock.currentTimeMillis;
         const remaining = idleMs - (now - lastActivity);
-        if (remaining <= 0) return;
-        yield* Effect.sleep(remaining);
+        if (remaining <= 0 && activeActions === 0) return;
+        yield* Effect.sleep(activeActions > 0 ? idleMs : remaining);
       }
     });
-    return { touch, expired };
+    const during = <A, E, R>(activity: Effect.Effect<A, E, R>) =>
+      Effect.acquireUseRelease(
+        Effect.sync(() => {
+          activeActions += 1;
+        }),
+        () => activity,
+        () =>
+          touch.pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                activeActions -= 1;
+              }),
+            ),
+          ),
+      );
+    return { touch, expired, during };
   });
 }

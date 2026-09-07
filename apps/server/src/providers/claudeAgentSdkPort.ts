@@ -2,8 +2,15 @@ import {
   listSessions as listClaudeSessions,
   query as queryClaude,
   type Options as ClaudeSdkOptions,
+  type McpSdkServerConfigWithInstance,
+  type McpSetServersResult,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
+import type {
+  ProviderExecutionPolicy,
+  ProviderFailure,
+  ProviderToolDefinition,
+} from "@octant/contracts";
+import { createManagedMcpTools, type ManagedToolAnswer } from "./managedMcpTools";
 import { Effect, Stream, type Scope } from "effect";
 
 import {
@@ -94,6 +101,8 @@ export interface ClaudeOpenQueryInput {
    */
   readonly sessionId?: string;
   readonly tools: readonly string[];
+  /** Decoder attestation for the one in-process server owned by this adapter. */
+  readonly managedToolServer?: boolean;
   readonly sandbox?: ClaudeSandboxSettings;
   readonly canUseTool: (request: ClaudeToolRequest) => Promise<ClaudeToolDecision>;
   readonly preToolUse: (request: ClaudePreToolRequest) => Promise<ClaudePreToolDecision>;
@@ -255,6 +264,7 @@ export type ClaudeDecodedMessage =
     }
   | {
       readonly kind: "tool-progress";
+      readonly parentToolUseId?: string;
       readonly sessionId: string;
       readonly toolUseId: string;
       readonly toolName: string;
@@ -302,6 +312,12 @@ export type ClaudeDecodedMessage =
 
 export interface ClaudeUserMessage {
   readonly text: string;
+  readonly appManagedTools?: ReadonlyArray<ProviderToolDefinition>;
+  readonly onAppToolCall?: (
+    name: string,
+    inputJson: string,
+    signal: AbortSignal,
+  ) => Promise<ManagedToolAnswer>;
 }
 
 export interface ClaudeQueryPort {
@@ -421,6 +437,9 @@ export interface ClaudeAgentSdkQueryInvocation {
 }
 
 export interface ClaudeAgentSdkQueryLike extends AsyncIterable<unknown> {
+  readonly setMcpServers?: (
+    servers: Record<string, McpSdkServerConfigWithInstance>,
+  ) => Promise<McpSetServersResult>;
   readonly interrupt: () => Promise<unknown>;
   readonly setPermissionMode: (mode: ClaudePermissionMode) => Promise<void>;
   readonly initializationResult: () => Promise<unknown>;
@@ -585,9 +604,22 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
           const issuedMessageIds = new Set<string>();
           let query: ClaudeAgentSdkQueryLike | undefined;
           let initializedSessionId: string | undefined;
+          let managedServer:
+            | import("@modelcontextprotocol/sdk/server/mcp.js").McpServer
+            | undefined;
+          let managedToolNames: ReadonlyArray<string> = [];
+          const isManagedTool = (name: string) => managedToolNames.includes(name);
+          const decodingInput = (): ClaudeOpenQueryInput => ({
+            ...input,
+            tools: [...input.tools, ...managedToolNames],
+            managedToolServer: managedToolNames.length > 0,
+          });
           const closeCoordinator = makeClaudeCloseCoordinator(
             () => prompt.close(),
-            () => query?.close(),
+            () => {
+              query?.close();
+              void managedServer?.close().catch(() => undefined);
+            },
           );
           try {
             const canUseTool: ClaudeAgentSdkInvocationOptions["canUseTool"] = async (
@@ -607,6 +639,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   message: "Claude background tool use is unavailable.",
                 };
               }
+              // This only authorizes forwarding to the app. The in-process
+              // handler still waits for the server's tool policy and answer.
+              if (isManagedTool(toolName)) return { behavior: "allow", updatedInput: toolInput };
               if (!input.tools.includes(toolName)) {
                 return {
                   behavior: "deny",
@@ -670,6 +705,14 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                     },
                   };
                 }
+                if (isManagedTool(hookInput.tool_name)) {
+                  return {
+                    hookSpecificOutput: {
+                      hookEventName: "PreToolUse",
+                      permissionDecision: "allow",
+                    },
+                  };
+                }
                 if (!input.tools.includes(hookInput.tool_name)) {
                   return {
                     hookSpecificOutput: {
@@ -702,7 +745,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               };
             const invocationOptions: ClaudeAgentSdkInvocationOptions = {
               cwd: input.projectRoot,
-              env: { ...input.authEnvironment },
+              env: { ...input.authEnvironment, MCP_TOOL_TIMEOUT: "660000" },
               model: input.model,
               ...(input.effort === undefined ? {} : { effort: input.effort }),
               pathToClaudeCodeExecutable: input.binaryPath,
@@ -775,8 +818,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               sessionAnnounced.reject(failed);
             };
             const decodeNext = (message: unknown): ClaudeDecodedMessage | undefined => {
-              if (phase.kind !== "initializing") return decodeMessage(message, input, phase);
-              const decoded = decodeMessage(message, input, phase);
+              if (phase.kind !== "initializing")
+                return decodeMessage(message, decodingInput(), phase);
+              const decoded = decodeMessage(message, decodingInput(), phase);
               if (decoded.kind === "initialized") {
                 if (announcedSessionId !== undefined && announcedSessionId !== decoded.sessionId) {
                   throw protocol("Claude initialized an unexpected runtime surface.");
@@ -879,8 +923,43 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 catch: (error) => sanitizeFailure(error, "session discovery"),
               }),
               messages,
-              send: ({ text }) =>
-                request(() => {
+              send: ({ text, appManagedTools = [], onAppToolCall }) =>
+                request(async () => {
+                  if (appManagedTools.length > 0 || managedServer !== undefined) {
+                    if (
+                      query?.setMcpServers === undefined ||
+                      (appManagedTools.length > 0 && onAppToolCall === undefined)
+                    ) {
+                      throw protocol("App tool transport is unavailable.");
+                    }
+                    const prepared =
+                      appManagedTools.length === 0 || onAppToolCall === undefined
+                        ? undefined
+                        : createManagedMcpTools(appManagedTools, onAppToolCall);
+                    if (prepared?.kind === "invalid")
+                      throw protocol("App tool catalogue is invalid.");
+                    const next = prepared?.server;
+                    const previous = managedServer;
+                    const previousNames = managedToolNames;
+                    managedToolNames = appManagedTools.map((tool) => `mcp__octant__${tool.name}`);
+                    try {
+                      const result = await query.setMcpServers(
+                        next === undefined
+                          ? {}
+                          : {
+                              octant: { type: "sdk", name: "octant", instance: next },
+                            },
+                      );
+                      if (Object.keys(result.errors).length > 0)
+                        throw protocol("App tool transport could not connect.");
+                      managedServer = next;
+                      await previous?.close();
+                    } catch (error) {
+                      managedToolNames = previousNames;
+                      await next?.close();
+                      throw error;
+                    }
+                  }
                   const messageId = crypto.randomUUID();
                   issuedMessageIds.add(messageId);
                   return prompt.offer({

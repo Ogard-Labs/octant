@@ -14,6 +14,8 @@ import {
   decodeCodeThread,
   decodeCodeThreadId,
   decodeProviderSessionId,
+  decodeBrowserAutomationSnapshot,
+  decodeToolActionAuthority,
   type CodeOperationEventFrame as OperationFrame,
   type CodeRuntimeWork,
   type CodeThread,
@@ -322,6 +324,176 @@ describe("CodeOperationRuntime", () => {
     expect(fixture.runtimeWorks()).toEqual([]);
     fixture.close();
   });
+
+  it.each(["approved", "denied", "cancelled"] as const)(
+    "honors %s browser approval without changing thread access",
+    async (decision) => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const request = new AbortController();
+      const provider = { ...providerConnection(queue), toolRequestSignal: () => request.signal };
+      const authority = decodeToolActionAuthority({
+        hostId: "90000000-0000-4000-8000-000000000001",
+        mode: "code",
+        projectId: thread().projectId,
+        rootId: "90000000-0000-4000-8000-000000000009",
+        worktreeId: checkoutId,
+        providerInstanceId: thread().providerInstanceId,
+        extension: { kind: "core" },
+      });
+      const snapshot = decodeBrowserAutomationSnapshot({
+        status: "running",
+        threadId,
+        evidence: [],
+        context: {
+          contextId: "90000000-0000-4000-8000-000000000060",
+          threadId,
+          actionId: "90000000-0000-4000-8000-000000000061",
+          correlationId: "90000000-0000-4000-8000-000000000062",
+          authority,
+          policy: {
+            profileMode: "isolated",
+            allowedOrigins: ["https://example.com"],
+            credentialFieldProtection: true,
+            maxConcurrentTabs: 1,
+            sessionTimeoutMs: 600000,
+          },
+          state: "active",
+          createdAt: now,
+        },
+      });
+      let currentSnapshot = decodeBrowserAutomationSnapshot({
+        status: "ready",
+        threadId,
+        evidence: [],
+      });
+      const create = vi.fn(async () => {
+        currentSnapshot = snapshot;
+        return snapshot;
+      });
+      const act = vi.fn(async () => snapshot);
+      const fixture = runtimeFixture({
+        provider: providerDriver(provider),
+        browserAutomation: {
+          resolveAuthority: () => authority,
+          inspectThread: () => currentSnapshot,
+          create,
+          act,
+          releaseThread: vi.fn(async () => snapshot),
+        },
+      });
+      try {
+        const operation = operationId(70);
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operation,
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        });
+        await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+        await Effect.runPromise(
+          Queue.offer(
+            queue,
+            providerEvent({
+              kind: "tool-request",
+              requestId: "browser-request",
+              toolName: "octant_browser",
+              inputJson: '{"operation":"navigate","url":"https://example.com"}',
+            }),
+          ),
+        );
+        let approval: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
+        await vi.waitFor(async () => {
+          const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 30);
+          approval = frames
+            .map((frame) => frame.event)
+            .find((event) => event.kind === "approval-requested");
+          expect(approval).toBeDefined();
+        });
+        expect(create).not.toHaveBeenCalled();
+        if (approval === undefined) throw new Error("Expected browser approval");
+        if (decision === "cancelled") request.abort();
+        await fixture.runtime.execute(windowId, {
+          kind: "answer-provider-approval",
+          operationId: operationId(71),
+          threadId,
+          checkoutId,
+          approvalId: approval.approvalId,
+          decision: decision === "denied" ? "denied" : "approved",
+        });
+        if (decision === "cancelled") {
+          await vi.waitFor(async () => {
+            const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 30);
+            expect(
+              frames.some(
+                (frame) =>
+                  frame.event.kind === "tool-activity" &&
+                  frame.event.state === "failed" &&
+                  frame.event.summary === "App-managed action was cancelled.",
+              ),
+            ).toBe(true);
+          });
+          expect(provider.answerTool).not.toHaveBeenCalled();
+        } else {
+          await vi.waitFor(() =>
+            expect(provider.answerTool).toHaveBeenCalledWith(
+              expect.objectContaining({
+                requestId: "browser-request",
+                isError: decision === "denied",
+              }),
+            ),
+          );
+        }
+        expect(create).toHaveBeenCalledTimes(decision === "approved" ? 1 : 0);
+        expect(act).toHaveBeenCalledTimes(decision === "approved" ? 1 : 0);
+        if (decision === "approved") {
+          await fixture.runtime.execute(windowId, {
+            kind: "cancel-provider-turn",
+            operationId: operationId(72),
+            threadId,
+            checkoutId,
+          });
+          await vi.waitFor(() => expect(provider.stop).toHaveBeenCalled());
+          const nextOperation = operationId(73);
+          await fixture.runtime.execute(windowId, {
+            kind: "start-provider-turn",
+            operationId: nextOperation,
+            threadId,
+            checkoutId,
+            sessionId,
+            prompt: fixture.prompt,
+          });
+          await vi.waitFor(() => expect(provider.send).toHaveBeenCalledTimes(2));
+          await Effect.runPromise(
+            Queue.offer(
+              queue,
+              providerEvent({
+                kind: "tool-request",
+                requestId: "browser-again",
+                toolName: "octant_browser",
+                inputJson: '{"operation":"navigate","url":"https://example.com"}',
+              }),
+            ),
+          );
+          await vi.waitFor(async () => {
+            const frames = await fixture.runtime.subscribe(
+              windowId,
+              threadId,
+              nextOperation,
+              0,
+              30,
+            );
+            expect(frames.some((frame) => frame.event.kind === "approval-requested")).toBe(true);
+          });
+          expect(act).toHaveBeenCalledTimes(1);
+        }
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    },
+  );
 
   it("runs a provider turn asynchronously and owns exact input, approval, and cancellation", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
@@ -1297,6 +1469,7 @@ describe("CodeOperationRuntime", () => {
 
 function runtimeFixture(options: {
   provider?: ProviderDriver | undefined;
+  browserAutomation?: Parameters<typeof createCodeOperationRuntime>[0]["browserAutomation"];
   terminalExit?: { readonly exitCode: number };
   pullRequestPort?: Parameters<typeof createCodeOperationRuntime>[0]["pullRequestPort"];
   pullRequestTarget?: boolean;
@@ -1385,6 +1558,9 @@ function runtimeFixture(options: {
       environment: {},
     }),
     resolveProviderDriver: async () => options.provider,
+    ...(options.browserAutomation === undefined
+      ? {}
+      : { browserAutomation: options.browserAutomation, supportsAppManagedTools: () => true }),
     credentialResolver: { resolve: async () => options.credential },
     resolvePullRequestTarget: async () =>
       options.pullRequestTarget === true
