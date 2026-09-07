@@ -45,6 +45,11 @@
 .execution-profile-workflow--settings {
   display: grid;
   gap: var(--oct-space-6);
+  font-size: var(--oct-text-sm);
+}
+
+.execution-profile-workflow__context > summary {
+  padding-inline: 0;
 }
 
 .execution-profile-workflow--settings .execution-profile-workflow__profiles {
@@ -145,8 +150,8 @@
 }
 
 .execution-profile-workflow--settings .execution-context-picker__listbox {
-  max-height: none;
-  overflow: visible;
+  max-height: min(320px, 45vh);
+  overflow-y: auto;
 }
 
 /*

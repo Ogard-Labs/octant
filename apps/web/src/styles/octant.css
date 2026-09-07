@@ -21,11 +21,9 @@
    can never drift apart the way two duplicated palette blocks do. The
    light value comes first.
 
-   Light is NOT an inversion of dark. Brass reads 8.3:1 on ink but only
-   2.0:1 on cream, and every semantic hue fails on white, so text-bearing
-   colours have a separate light value. Fills keep the brand brass in both
-   themes; only text darkens. That is what --oct-accent (fill) versus
-   --oct-accent-fg (text) is for.
+   Text and semantic colours carry separate light and dark values for
+   contrast. The default action accent is monochrome; the runtime bridge
+   applies the selected preset and any explicit colour overrides.
 
    Theme resolution: follows the OS by default, and [data-theme] on <html>
    overrides it in either direction. --oct-* colours track color-scheme,
@@ -48,13 +46,10 @@
      translucent tint would shift as content passes beneath it */
   --oct-selection: light-dark(#d9d8d4, #353430);
 
-  /* ── brand ──
-     accent is the fill and stays brass in both themes so the brand does
-     not change colour. accent-fg is the same brand as *text*, darkened
-     for light where brass on cream is unreadable. */
-  --oct-accent: #d9a441;
-  --oct-accent-fg: light-dark(#8a6218, #d9a441);
-  --oct-accent-on: #14130f;
+  /* Monochrome actions. The runtime theme owns optional tinted accents. */
+  --oct-accent: light-dark(#1b1b1b, #f0f0f0);
+  --oct-accent-fg: light-dark(#1b1b1b, #f0f0f0);
+  --oct-accent-on: light-dark(#ffffff, #171717);
   --oct-accent-hover: light-dark(
     color-mix(in oklab, var(--oct-accent), black 10%),
     color-mix(in oklab, var(--oct-accent), white 12%)
@@ -242,9 +237,8 @@
   --oct-tree-indent: 14px;
 
   /* ── chart series ──────────────────────────────────────────────────
-     Six hues, each picked twice so it holds against both grounds. Series
-     one is the brass, so a single-series chart reads as part of the
-     product rather than as a foreign widget.
+     Six categorical hues, each picked twice so it holds against both
+     grounds. Data-series colours do not define the interface accent.
 
      Every one clears 3:1 against its own background, which is the bar
      for a graphical object under WCAG 1.4.11. That is enough for a mark

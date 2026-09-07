@@ -2677,8 +2677,8 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-home__row .code-home__badge[data-tone="waiting"]::before {
-  background: var(--octant-warning-text);
-  opacity: 1;
+  background: var(--oct-fg-2);
+  opacity: 0.65;
 }
 
 .code-home__row .code-home__badge[data-tone="done"]::before,
@@ -2744,7 +2744,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-home__badge[data-tone="waiting"] {
-  color: var(--octant-warning-text, var(--oct-fg-2));
+  color: var(--oct-fg-2);
 }
 
 .code-home__card-detail {

@@ -79,6 +79,14 @@ function controller(
 }
 
 describe("ExecutionProfileWorkflow", () => {
+  it("keeps saved profiles visible while advanced execution context is collapsed", async () => {
+    render(<ExecutionProfileWorkflow controller={controller()} variant="settings" />);
+    expect(screen.getByRole("button", { name: "Create profile" })).toBeVisible();
+    expect(screen.getByRole("listbox")).not.toBeVisible();
+    await userEvent.click(screen.getByText("Execution context"));
+    expect(screen.getByRole("listbox")).toBeVisible();
+  });
+
   it("shows provider, model, profile, host, permissions, and resolution receipt", async () => {
     const user = userEvent.setup();
     render(<ExecutionProfileWorkflow controller={controller()} variant="composer" />);
