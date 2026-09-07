@@ -600,16 +600,18 @@ export class ChatTurnRunner {
                       return;
                     }
                     selectedResearchBackend = route.backend;
-                    const results = yield* Effect.tryPromise({
-                      try: () =>
-                        route.execute({
-                          query: parsedQuery,
-                          limit: 5,
-                          ...(executionSignal === undefined ? {} : { signal: executionSignal }),
-                        }),
-                      catch: () =>
-                        decodeChatFailure({ category: "failed", message: "Research failed." }),
-                    });
+                    const results = yield* idle.during(
+                      Effect.tryPromise({
+                        try: () =>
+                          route.execute({
+                            query: parsedQuery,
+                            limit: 5,
+                            ...(executionSignal === undefined ? {} : { signal: executionSignal }),
+                          }),
+                        catch: () =>
+                          decodeChatFailure({ category: "failed", message: "Research failed." }),
+                      }),
+                    );
                     if (executionSignal?.aborted) return;
                     yield* connection.answerTool({
                       sessionId: input.attempt.providerSessionId,
@@ -633,19 +635,21 @@ export class ChatTurnRunner {
                     });
                     return;
                   }
-                  const execution = yield* Effect.tryPromise({
-                    try: () =>
-                      toolSet.execute({
-                        name: event.toolName,
-                        inputJson: event.inputJson,
-                        ...(executionSignal === undefined ? {} : { signal: executionSignal }),
-                      }),
-                    catch: () =>
-                      decodeChatFailure({
-                        category: "failed",
-                        message: "App-managed tool execution failed.",
-                      }),
-                  });
+                  const execution = yield* idle.during(
+                    Effect.tryPromise({
+                      try: () =>
+                        toolSet.execute({
+                          name: event.toolName,
+                          inputJson: event.inputJson,
+                          ...(executionSignal === undefined ? {} : { signal: executionSignal }),
+                        }),
+                      catch: () =>
+                        decodeChatFailure({
+                          category: "failed",
+                          message: "App-managed tool execution failed.",
+                        }),
+                    }),
+                  );
                   if (executionSignal?.aborted) return;
                   yield* connection.answerTool({
                     sessionId: input.attempt.providerSessionId,

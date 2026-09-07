@@ -203,17 +203,22 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                       ? input.signal
                       : AbortSignal.any([input.signal, requestSignal]);
                   if (executionSignal.aborted) return;
-                  const execution = yield* Effect.promise(async () => {
-                    try {
-                      return await toolSet.execute({
-                        name: event.toolName,
-                        inputJson: event.inputJson,
-                        signal: executionSignal,
-                      });
-                    } catch {
-                      return { result: { error: "tool-execution-failed" }, isError: true } as const;
-                    }
-                  });
+                  const execution = yield* idle.during(
+                    Effect.promise(async () => {
+                      try {
+                        return await toolSet.execute({
+                          name: event.toolName,
+                          inputJson: event.inputJson,
+                          signal: executionSignal,
+                        });
+                      } catch {
+                        return {
+                          result: { error: "tool-execution-failed" },
+                          isError: true,
+                        } as const;
+                      }
+                    }),
+                  );
                   if (executionSignal.aborted) return;
                   yield* connection
                     .answerTool({

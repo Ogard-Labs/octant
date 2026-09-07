@@ -1404,7 +1404,14 @@ describe("ChatTurnRunner", () => {
   it("executes bounded app-managed tools once and returns structured answers", async () => {
     const queue = Effect.runSync(Queue.unbounded<never>());
     const answerTool = vi.fn(() => Effect.void);
-    const execute = vi.fn(async () => ({ result: { status: "ok", attached: true } }));
+    const execute = vi.fn(
+      async () =>
+        await new Promise<{
+          readonly result: { readonly status: string; readonly attached: boolean };
+        }>((resolve) =>
+          setTimeout(() => resolve({ result: { status: "ok", attached: true } }), 50),
+        ),
+    );
     const sent: Array<{ readonly tools: ReadonlyArray<{ readonly name: string }> }> = [];
     const connection = {
       subscribe: Effect.succeed(Stream.fromQueue(queue)),
@@ -1437,6 +1444,7 @@ describe("ChatTurnRunner", () => {
       researchRouter: new ResearchRouter({
         searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
+      timeoutMs: 10,
     });
 
     await Effect.runPromise(
