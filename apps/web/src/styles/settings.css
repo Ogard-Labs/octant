@@ -556,6 +556,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 /* Compound editors (multi-field controls) stack under their label instead of
    hanging off the right edge as a one-line value. */
 .setrow[data-setting-id="sidebar-background"],
+.setrow[data-setting-id="app-background"],
 .setrow[data-setting-id="environment-presentation"],
 .setrow[data-setting-id="default-model"],
 .setrow[data-setting-id="vision-reviewer"],
@@ -572,6 +573,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 }
 
 .setrow[data-setting-id="sidebar-background"] > .setrow-control,
+.setrow[data-setting-id="app-background"] > .setrow-control,
 .setrow[data-setting-id="environment-presentation"] > .setrow-control,
 .setrow[data-setting-id="default-model"] > .setrow-control,
 .setrow[data-setting-id="vision-reviewer"] > .setrow-control,

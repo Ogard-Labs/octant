@@ -1402,15 +1402,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         }}
         footer={
           <div aria-live="polite" className="composer-status">
-            <span className="composer-status__hint code-thread-workspace__hint">
-              {providerChanging
-                ? "Checking the selected provider…"
-                : steered.pending !== undefined
-                  ? "Sent · runs when the response in progress finishes"
-                  : busy
-                    ? "Enter sends when this response finishes"
-                    : "Enter to send · Shift+Enter for a new line"}
-            </span>
+            {/* Idle, the line says nothing: Enter sends everywhere else too, and
+                a sentence under every composer read as clutter. */}
+            {providerChanging || steered.pending !== undefined || busy ? (
+              <span className="composer-status__hint code-thread-workspace__hint">
+                {providerChanging
+                  ? "Checking the selected provider…"
+                  : steered.pending !== undefined
+                    ? "Sent · runs when the response in progress finishes"
+                    : "Enter sends when this response finishes"}
+              </span>
+            ) : null}
             {accessMessage === undefined ? null : (
               <span className="code-thread-workspace__hint" role="status">
                 {accessMessage}
@@ -1444,16 +1446,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 {forkMessage}
               </span>
             )}
-            {/* Spend and limits sit at the far end of the same line. A provider
-                that has reported nothing shows nothing here rather than a
-                sentence saying so, and a limit appears only once it is worth
-                acting on; the context meter's panel keeps the full account. */}
+            {/* Limits sit at the far end of the same line, and only once one is
+                worth acting on; the context meter's panel keeps the account of
+                what a turn spent. */}
             <span className="composer-status__trailing">
-              {threadUsageLabel(props.controller.threadUsage) === undefined ? null : (
-                <span className="code-thread-workspace__hint" aria-label="Thread usage">
-                  {threadUsageLabel(props.controller.threadUsage)}
-                </span>
-              )}
               {props.controller.threadUsage.limits
                 .filter((limit) => limit.status !== "allowed")
                 .map((limit) => (
@@ -1570,13 +1566,6 @@ function forkTitle(sourceTitle: string): string {
     : title;
 }
 
-function threadUsageLabel(usage: CodeController["threadUsage"]): string | undefined {
-  // Zero tokens with no report is not a free thread; it is nothing to say yet.
-  if (usage.inputTokens === 0 && usage.outputTokens === 0) return undefined;
-  const tokens = `${compactTokens(usage.inputTokens)} in · ${compactTokens(usage.outputTokens)} out`;
-  return usage.costUsd === undefined ? tokens : `${tokens} · ${formatUsd(usage.costUsd)}`;
-}
-
 function providerLimitLabel(limit: CodeController["threadUsage"]["limits"][number]): string {
   const share =
     limit.utilization === undefined ? undefined : `${Math.round(limit.utilization * 100)}% used`;
@@ -1593,12 +1582,6 @@ function providerLimitLabel(limit: CodeController["threadUsage"]["limits"][numbe
     (part): part is string => part !== undefined,
   );
   return parts.join(" · ");
-}
-
-function compactTokens(tokens: number): string {
-  if (tokens < 1_000) return String(tokens);
-  if (tokens < 1_000_000) return `${(tokens / 1_000).toFixed(1)}k`;
-  return `${(tokens / 1_000_000).toFixed(2)}M`;
 }
 
 function formatUsd(cost: number): string {

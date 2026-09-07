@@ -511,9 +511,10 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Thread usage")).toHaveTextContent("12.4k in · 3.1k out · $0.42");
-    // A limit is shown once it is worth acting on; a healthy one stays in the
-    // context meter's panel so the strip does not list every window a provider has.
+    // Spend lives in the context meter's panel, not on the strip. A limit is
+    // shown once it is worth acting on; a healthy one stays in the panel so
+    // the strip does not list every window a provider has.
+    expect(screen.queryByText(/12\.4k in/)).not.toBeInTheDocument();
     expect(screen.getByText(/5-hour limit · low · 87% used/)).toBeVisible();
     expect(screen.queryByText(/7-day limit/)).not.toBeInTheDocument();
   });
@@ -523,8 +524,8 @@ describe("CodeThreadWorkspace", () => {
 
     // Zero tokens with no report is not the same as a thread that cost
     // nothing: the strip says nothing rather than "$0.00" or a sentence about it.
-    expect(screen.queryByLabelText("Thread usage")).not.toBeInTheDocument();
     expect(screen.queryByText(/\$0/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument();
   });
 
   it("keeps the restore control off a thread that cannot change the checkout", async () => {

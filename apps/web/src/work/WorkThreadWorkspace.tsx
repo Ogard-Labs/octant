@@ -1320,17 +1320,20 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                 {errorMessage}
               </span>
             )}
-            <span className="composer-status__hint" role="status">
-              {steered.pending !== undefined
-                ? "Sent. It runs when the turn in progress finishes."
-                : completionLocked
-                  ? "Reactivate this task before creating another file or changing its provider."
-                  : turnRunning
-                    ? "Enter sends when this response finishes"
-                    : props.turnClient === undefined
-                      ? "Enter saves a Markdown artifact · Shift+Enter for a new line"
-                      : "Enter to send · Shift+Enter for a new line · # mentions a thread · @ mentions a file"}
-            </span>
+            {steered.pending !== undefined ||
+            completionLocked ||
+            turnRunning ||
+            props.turnClient === undefined ? (
+              <span className="composer-status__hint" role="status">
+                {steered.pending !== undefined
+                  ? "Sent. It runs when the turn in progress finishes."
+                  : completionLocked
+                    ? "Reactivate this task before creating another file or changing its provider."
+                    : turnRunning
+                      ? "Enter sends when this response finishes"
+                      : "Enter saves a Markdown artifact · Shift+Enter for a new line"}
+              </span>
+            ) : null}
           </div>
         }
       />
