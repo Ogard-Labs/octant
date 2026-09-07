@@ -157,23 +157,17 @@ html[data-theme="dark"] .settings-view {
   white-space: nowrap;
 }
 
-/* .setpane-title/.setpane-note carry the type; the header only spaces the
-   sections below it, and the note's own end margin must not stack on top. */
+/* The shared title/subtitle roles carry the type; this header only spaces the
+   sections below it, and the subtitle's own end margin must not stack on top. */
 .settings-view__header {
   margin-bottom: 18px;
 }
 
-.settings-view__header .setpane-title,
 .settings-view__header h1 {
   color: var(--octant-text-primary);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xl);
-  font-weight: 600;
-  letter-spacing: -0.025em;
-  line-height: 1.2;
 }
 
-.settings-view__header .setpane-note {
+.settings-view__header .oct-subtitle {
   max-width: 62ch;
   margin-top: 6px;
   margin-bottom: 0;

@@ -358,6 +358,24 @@ describe("useProviderController", () => {
     expect(api.bootstrap).toHaveBeenCalledTimes(2);
   });
 
+  it("does not keep a transient probe interruption as a page alert", async () => {
+    const pending = deferred<Awaited<ReturnType<ProviderClient["probe"]>>>();
+    const api = client();
+    vi.mocked(api.probe).mockReturnValueOnce(pending.promise);
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let check!: Promise<boolean>;
+    act(() => {
+      check = result.current.probe(id);
+    });
+    pending.reject({ category: "interrupted", message: "provider restarted" });
+    await expect(check).resolves.toBe(false);
+    await waitFor(() => expect(result.current.probingIds.has(id)).toBe(false));
+
+    expect(result.current.message).toBeUndefined();
+  });
+
   it("creates non-secret configuration before storing a bearer credential", async () => {
     const calls: string[] = [];
     const api = client();

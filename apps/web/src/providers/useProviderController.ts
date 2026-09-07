@@ -2586,7 +2586,15 @@ export function useProviderController(options: ProviderControllerOptions) {
         } catch {
           // The locally cleared snapshot remains fail-closed when authority is unavailable.
         }
-        if (mounted.current) setMessage(redactedProbeFailureMessage(error));
+        // A probe can be interrupted while the host is restarting or while a
+        // discovery sweep is being superseded. That transient lifecycle state
+        // is not a provider configuration problem and must not linger as the
+        // page-level alert after the next registry snapshot is ready. Other
+        // probe failures remain visible through the shared alert and the row's
+        // authoritative readiness details.
+        if (mounted.current && !isInterruptedFailure(error)) {
+          setMessage(redactedProbeFailureMessage(error));
+        }
         return false;
       } finally {
         if (mounted.current) {
@@ -2852,4 +2860,13 @@ function redactedProbeFailureMessage(error: unknown): string {
   if (error.category === "protocol") return "Provider returned an invalid response.";
   if (error.category === "provider-failed") return "Provider operation failed.";
   return "Octant Provider service is unavailable.";
+}
+
+function isInterruptedFailure(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "category" in error &&
+    error.category === "interrupted"
+  );
 }

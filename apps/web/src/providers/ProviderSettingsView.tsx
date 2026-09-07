@@ -266,8 +266,8 @@ export interface ProviderSettingsViewProps {
 }
 
 export function ProviderSettingsView(props: ProviderSettingsViewProps) {
-  // The settings shell already renders the pane's `.setpane-title` and
-  // `.setpane-note`; repeating an identity heading here read as three titles
+  // The settings shell already renders the pane's `.oct-title` and
+  // `.oct-subtitle`; repeating an identity heading here read as three titles
   // in a row, so the pane goes straight to content and keeps global knobs in
   // a trailing Defaults group.
   return (

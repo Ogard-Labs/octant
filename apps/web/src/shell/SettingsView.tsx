@@ -340,11 +340,11 @@ export function SettingsView(props: SettingsViewProps) {
         <main className="settings-view__content">
           <div className="settings-view__content-inner">
             <header className="settings-view__header">
-              <h1 className="setpane-title" id="settings-heading">
+              <h1 className="oct-title" id="settings-heading">
                 {currentSectionLabel}
               </h1>
               {!hasQuery && SECTION_DESCRIPTIONS[route.activeSection] !== undefined ? (
-                <p className="setpane-note">{SECTION_DESCRIPTIONS[route.activeSection]}</p>
+                <p className="oct-subtitle">{SECTION_DESCRIPTIONS[route.activeSection]}</p>
               ) : null}
             </header>
             {hasQuery ? (
