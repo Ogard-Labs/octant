@@ -2,6 +2,7 @@ import { GitPullRequest, Plus } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState, type Ref } from "react";
 import { useDismissOnOutsidePointer } from "../lib/useDismissOnOutsidePointer";
 import { DockToolIcon } from "./dockToolIcons";
+import { IconButton } from "./IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 
@@ -57,20 +58,14 @@ export function DockUtilityLauncher(props: DockUtilityLauncherProps) {
 
   return (
     <span className="dock-utility-launcher" ref={region}>
-      <OctantButton
-        aria-label="Add tool"
+      <IconButton
         aria-controls={disclosureId}
         aria-expanded={open}
-        className="dock-utility-launcher__trigger"
+        icon={Plus}
+        label="Add tool"
         onClick={() => setOpen((current) => !current)}
         ref={trigger}
-        size="icon"
-        title="Add tool"
-        type="button"
-        variant="ghost"
-      >
-        <Plus aria-hidden="true" size={14} strokeWidth={1.8} />
-      </OctantButton>
+      />
       {open ? (
         <span
           className="workspace-disclosure dock-utility-launcher__disclosure"

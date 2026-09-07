@@ -74,6 +74,7 @@ describe("right sidebar tool launcher", () => {
       />,
     );
     expect(screen.getByRole("button", { name: "Add tool" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add tool" })).toHaveClass("shell-icon-button");
   });
 
   it("opens available tools and restores focus to the trigger", () => {
