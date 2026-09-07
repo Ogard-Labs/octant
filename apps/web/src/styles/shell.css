@@ -2909,7 +2909,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-home__fact--chip[data-checks="pending"]::before {
-  border: 1px solid currentColor;
+  border: 1px solid currentcolor;
 }
 
 .code-home__fact--chip[data-checks="failing"] {
