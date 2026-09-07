@@ -1457,18 +1457,20 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             {/* Limits sit at the far end of the same line, and only once one is
                 worth acting on; the context meter's panel keeps the account of
                 what a turn spent. */}
-            <span className="composer-status__trailing">
-              {props.controller.threadUsage.limits
-                .filter((limit) => limit.status !== "allowed")
-                .map((limit) => (
-                  <span
-                    className={`code-thread-workspace__limit code-thread-workspace__limit--${limit.status}`}
-                    key={limit.window}
-                  >
-                    {providerLimitLabel(limit)}
-                  </span>
-                ))}
-            </span>
+            {props.controller.threadUsage.limits.some((limit) => limit.status !== "allowed") ? (
+              <span className="composer-status__trailing">
+                {props.controller.threadUsage.limits
+                  .filter((limit) => limit.status !== "allowed")
+                  .map((limit) => (
+                    <span
+                      className={`code-thread-workspace__limit code-thread-workspace__limit--${limit.status}`}
+                      key={limit.window}
+                    >
+                      {providerLimitLabel(limit)}
+                    </span>
+                  ))}
+              </span>
+            ) : null}
           </div>
         }
       />

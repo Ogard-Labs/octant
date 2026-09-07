@@ -84,6 +84,19 @@ describe("CodeThreadWorkspace", () => {
     expect(sendFollowUp).toHaveBeenCalledWith("check tests too", [], [], [], "approval-gated");
   });
 
+  it("keeps the line under the row empty while nothing is running", () => {
+    const { container } = render(
+      <CodeThreadWorkspace
+        controller={controller()}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    // Idle, the status line says nothing and takes no height; the live
+    // region stays mounted so its first announcement is never dropped.
+    expect(container.querySelector(".composer-status")).toBeEmptyDOMElement();
+  });
+
   it("keeps new-thread setup hidden while an existing transcript is loading", () => {
     render(
       <CodeThreadWorkspace

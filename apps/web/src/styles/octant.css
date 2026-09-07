@@ -4396,6 +4396,14 @@ input.switch:checked::after {
   font-size: var(--oct-text-xs);
   line-height: 1.35;
 }
+/* Idle, the line holds nothing, so its box collapses and an idle Work or
+   Code frame is the height of Chat's. The live region stays mounted and
+   displayed: toggling `display` on a live region drops its first
+   announcement in some readers. */
+.composer-status:empty {
+  min-height: 0;
+  padding-bottom: 0;
+}
 .composer-status__hint {
   min-width: 0;
   flex: 1 1 auto;

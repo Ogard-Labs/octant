@@ -108,7 +108,6 @@
   height: var(--oct-rail-tab-h);
   max-width: 12rem;
   align-items: center;
-  overflow: hidden;
   padding-inline-end: 2px;
   color: var(--oct-muted);
   border-radius: var(--oct-radius-sm);
@@ -159,12 +158,12 @@
    room only when wanted widened the tab under the pointer and shifted every
    tab after it, so the strip moved whenever the pointer crossed it. */
 .dock-tool-strip__close {
-  width: 22px;
-  min-width: 22px;
-  height: 22px;
-  min-height: 22px;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
   padding: 0;
-  border-radius: var(--oct-radius-xs, 3px);
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-muted);
   opacity: 0;
 }
@@ -178,10 +177,15 @@
 /* In the overflow menu there is no tab to hover, so the control that closes a
    tool has to be visible to be usable at all. */
 .dock-tool-strip__close--overflow {
-  width: 26px;
-  min-width: 26px;
-  min-height: 26px;
   opacity: 1;
+}
+
+/* The recipe's press translate and the icon button's press scale moved the
+   strip under the pointer — the very defect the fixed-width close exists to
+   prevent — so the strip's controls hold still when pressed. */
+.dock-tool-strip__select:active,
+.dock-tool-strip__close:active {
+  transform: none;
 }
 
 .dock-tool-strip__close:hover {
@@ -372,14 +376,6 @@
   display: inline-flex;
   flex: none;
   margin-left: 2px;
-}
-
-.dock-utility-launcher__trigger {
-  width: var(--oct-rail-button-h);
-  min-height: var(--oct-rail-button-h);
-  height: var(--oct-rail-button-h);
-  padding: 0;
-  font-size: var(--oct-text-xs);
 }
 
 .dock-utility-launcher__disclosure {
