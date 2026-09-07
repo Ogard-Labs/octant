@@ -872,7 +872,7 @@
 
 /* Inside the Chat composer the mention chips form the leading chips row. */
 .chat-composer .thread-mention__chips {
-  padding: var(--oct-space-3) var(--oct-space-3) 0;
+  padding: var(--oct-space-3) var(--oct-composer-gutter) 0;
 }
 
 .thread-mention__chip-receipt {

@@ -333,7 +333,9 @@
   justify-content: space-between;
   gap: 6px 12px;
   margin: 0;
-  padding: 8px 12px;
+  /* Tray items carry 7px of their own inset, so their icons land on the
+     frame's gutter. */
+  padding: 6px calc(var(--oct-composer-gutter) - 7px);
   color: var(--oct-meta);
   background: var(--octant-tray);
   border-top: 1px solid var(--oct-border);

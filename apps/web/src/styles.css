@@ -6245,7 +6245,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .code-thread-workspace__queue,
 .code-thread-workspace__attachments {
   margin: 0;
-  padding: var(--oct-space-3) var(--oct-space-3) 0;
+  padding: var(--oct-space-3) var(--oct-composer-gutter) 0;
 }
 
 /* Attached images, in the composer and on the message that carried them.

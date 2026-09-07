@@ -115,7 +115,7 @@ describe("the public-block visual language", () => {
     expect(input).toMatch(/border-radius:\s*0/);
     expect(input).toMatch(/box-shadow:\s*none/);
     expect(input).toMatch(/border:\s*0/);
-    expect(input).toMatch(/padding:\s*18px 16px 12px/);
+    expect(input).toMatch(/padding:\s*18px var\(--oct-composer-gutter\) 12px/);
   });
 
   it("lets focus lift the composer instead of framing the prompt", () => {

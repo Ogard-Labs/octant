@@ -176,6 +176,9 @@
   --oct-space-1: 4px;
   --oct-space-2: 8px;
   --oct-space-3: 12px;
+  /* The typed text's left edge; every row of the composer frame starts there.
+     Measured before: 16 text, 12 chips and tray, 14 + 8 row controls. */
+  --oct-composer-gutter: 16px;
   --oct-space-4: 16px;
   --oct-space-5: 20px;
   --oct-space-6: 24px;
@@ -4206,14 +4209,14 @@ input.switch:checked::after {
   display: flex;
   flex-wrap: wrap;
   gap: var(--oct-space-2);
-  padding: var(--oct-space-3) var(--oct-space-3) 0;
+  padding: var(--oct-space-3) var(--oct-composer-gutter) 0;
 }
 .composer-input {
   display: block;
   width: 100%;
   min-height: 48px;
   max-height: 180px;
-  padding: 18px 16px 12px;
+  padding: 18px var(--oct-composer-gutter) 12px;
   border: 0;
   border-radius: 0;
   background: none;
@@ -4246,7 +4249,9 @@ input.switch:checked::after {
   align-items: center;
   min-height: 36px;
   gap: 6px;
-  padding: 0 12px 12px 14px;
+  /* A text trigger carries 8px of its own inset, so it lands on the gutter;
+     the send circle's right edge lands on it too. */
+  padding: 0 var(--oct-composer-gutter) 12px calc(var(--oct-composer-gutter) - 8px);
   border-top: 0;
 }
 .composer-row .composer-gap {
@@ -4390,7 +4395,7 @@ input.switch:checked::after {
   gap: 2px 12px;
   min-height: 18px;
   margin: 0;
-  padding: 0 14px 10px;
+  padding: 0 var(--oct-composer-gutter) 10px;
   color: var(--oct-meta);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
