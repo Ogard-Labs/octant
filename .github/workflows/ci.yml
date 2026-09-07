@@ -35,6 +35,10 @@ jobs:
       # case-sensitive filesystem; the gate reads git, not the checkout.
       - run: bun run paths:check
       - run: bun run wiring:check
+      # The component-boundary and stylesheet gates. These are the rules a
+      # recipe change is most likely to break, so they belong on the PR and
+      # not only in a local `bun run verify`.
+      - run: bun run ui:check
       - run: bun run decisions:check
       - run: bun run typecheck --filter=!@octant/desktop --filter=!@octant/scripts
       # scripts tests build the Swift helpers and package the app; they run on the macOS job.

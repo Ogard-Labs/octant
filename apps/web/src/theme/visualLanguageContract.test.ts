@@ -132,6 +132,86 @@ describe("the public-block visual language", () => {
     );
   });
 
+  it("gives a focused button one mark, not an outline and a ring", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const rule = system.match(/\[data-slot="button"\]:focus-visible\s*\{[^}]+\}/)?.[0] ?? "";
+
+    // A button's focus mark is the outline, chosen because the halo read as a
+    // highlighter circle drawn around the label. The shared rule paints a halo
+    // on anything focusable, so the button rule has to clear it or the button
+    // wears both. Only the shell's icon buttons escaped that, and only because
+    // their own CSS zeroes the shadow for unrelated reasons.
+    expect(rule).toMatch(/outline:\s*2px solid var\(--oct-accent-fg\)/);
+    expect(rule).toMatch(/box-shadow:\s*none/);
+  });
+
+  it("paints keyboard focus once, for every control, without reshaping it", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const withoutComments = system.replace(/\/\*[\s\S]*?\*\//g, "");
+    const rule = withoutComments.match(/(?:^|\n)\s*:focus-visible\s*\{[^}]+\}/)?.[0] ?? "";
+
+    // Assert the rule was found before asserting about it. Matching only a
+    // column-zero selector let the negative checks below pass on an empty
+    // string, so an indented or listed rule would have slipped through saying
+    // whatever it liked.
+    expect(rule).not.toBe("");
+
+    // One app-wide ring (0090). Scoping it away from owned recipes left every
+    // button with no indicator at all, because the recipes do not paint focus
+    // and every one of them carries a `data-slot`.
+    expect(rule).toMatch(/box-shadow:\s*var\(--oct-focus-ring\)/);
+    expect(withoutComments).not.toMatch(/:focus-visible:not\(\[data-slot\]\)/);
+
+    // No radius here: a box-shadow already follows the control's own corner,
+    // and naming one snapped a focused control to a shape it does not have.
+    expect(rule).not.toMatch(/border-radius/);
+  });
+
+  it("keeps one transcript rhythm across Chat, Work, and Code", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const chat = readFileSync(join(webRoot, "styles/chat.css"), "utf8");
+    const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
+    const transcripts = [
+      "chat/ChatTranscript.tsx",
+      "work/WorkThreadWorkspace.tsx",
+      "code/CodeThreadWorkspace.tsx",
+    ].map((path) => readFileSync(join(webRoot, path), "utf8"));
+    const composers = [
+      "chat/ChatComposer.tsx",
+      "work/WorkThreadWorkspace.tsx",
+      "code/CodeThreadWorkspace.tsx",
+    ].map((path) => readFileSync(join(webRoot, path), "utf8"));
+
+    // The bubble, its time, the reply, the composer frame, its controls, and
+    // its status line are painted once, in the system. Before this Work's
+    // message was a full-width sticky slab, Chat's bubble carried a hairline
+    // shadow over its border, Code drew message and status classes of its
+    // own, and each mode's composer row sized its controls differently.
+    expect(system).toMatch(/\.turn-user \.bubble \{[^}]*box-shadow:\s*none/);
+    expect(system).toMatch(/\.turn-user \{[^}]*justify-items:\s*end/);
+    expect(system).not.toMatch(/\.turn-user \{[^}]*position:\s*sticky/);
+    expect(system).toMatch(
+      /\.composer-row button,\n\.composer-row \[role="button"\],\n\.composer-row \[role="combobox"\] \{\n  min-height: 30px;\n  height: 30px;/,
+    );
+    expect(chat).not.toMatch(/\.chat-transcript \.turn-user/);
+    expect(chat).not.toMatch(/\.chat-composer__status \{/);
+    expect(styles).not.toMatch(/\.code-thread-workspace__message--user/);
+    expect(styles).not.toMatch(/\.code-thread-workspace__composer \.composer-(?:input|row)\b/);
+    expect(styles).not.toMatch(/\.code-thread-workspace__status \{/);
+    for (const source of transcripts) {
+      expect(source).toContain("transcript-scroll");
+      expect(source).toContain("turn-user");
+      expect(source).toContain("turn-agent");
+      expect(source).toContain("<TurnTime");
+      expect(source).toContain("<ChatRichText");
+    }
+    for (const source of composers) {
+      expect(source).toContain("thread-composer");
+      // Chat composes its status class with its live/quiet modifiers.
+      expect(source).toMatch(/className=\{?[`"]composer-status\b/);
+    }
+  });
+
   it("keeps the keyboard focus ring on the switch its own reset would swallow", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const track = system.match(/\.octant-switch\[data-slot="switch"\]\s*\{[^}]+\}/)?.[0] ?? "";

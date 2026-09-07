@@ -33,7 +33,7 @@ Avoid dashboard walls, decorative gradients, neon developer styling, permanent
 low-frequency controls, oversized setup cards, pill-shaped everything, and
 invented data. A feature that is not available must explain why and offer the
 next useful action, or stay out of the primary layout. The one thing allowed
-to be decorative is the application ground (0085): the theme's own dither, or
+to be decorative is the application ground (0091): the theme's own dither, or
 a person's photo under it, behind the start screens or behind everything.
 
 ## Language
@@ -93,19 +93,23 @@ the bundled colour presets lean every surface toward one hue and colour the acce
 contrast bars gate them. Text is three greys (primary,
 secondary, muted) and never a fourth. Hairlines separate; fills select. The
 focus ring is painted once, by the global `:focus-visible` rule, as a
-two-pixel halo of the foreground at reduced opacity on every theme: a
-coloured ring read as a website's link outline, not an app control. A field
-recipe does not add a second border or halo of its own. See
+hairline gap in the background then a muted ring tight to the control: a
+coloured ring reads as a website's link outline, and a wide soft halo reads
+as a web page, not an app. A recipe does not add a focus treatment of its
+own, and the shared rule imposes no radius — the ring follows whatever
+corner the control already has (0090). See
 "Colour system" for the token table. On the marketing site the same three
 greys and the same hairline carry the hierarchy on a white or graphite ground.
 
 ### Shapes and depth
 
-Radius is 10px for controls, 16px for cards and menus, 20px for the composer
-and dialogs. A surface is flat by default. Elevation means one of three
-things and nothing else: a raised discrete object (`--octant-shadow-sm`), the
-composer (`--octant-shadow-md`), or an overlay (`--octant-shadow-overlay`).
-Groups, lists, empty states, and headers are never cards.
+Radius derives from one `--radius` root: a control is the `lg` step, a card or
+menu the `xl` step, and a compact control clamps below both. The composer and
+dialogs stay at 20px. A surface is flat by default. A discrete object is
+bounded by a hairline ring, not lifted; shadow means something that genuinely
+floats — the composer (`--octant-shadow-md`) or an overlay
+(`--octant-shadow-overlay`). Groups, lists, empty states, and headers are
+never cards.
 
 ### Page shell
 
@@ -138,7 +142,7 @@ than grows: a control that needs a list ("Create from…") floats over the
 page. Nothing about delivery is asked up front; it is derived from the band
 and shown on the thread once it exists.
 
-The screen sits on the application ground (0085): an ordered-dither cloud
+The screen sits on the application ground (0091): an ordered-dither cloud
 drawn in `--octant-accent` at one cell per three pixels, or a person's photo
 printed through the same dither with the cloud over it, or the plain page.
 Behind a start screen the ground is masked away behind the composer and fades
@@ -161,7 +165,7 @@ There is one runtime theme authority and one owned control layer:
 | Static product system | Layout, shell geometry, type scale, spacing, motion, domain surface recipes, and `--oct-*` consumers              | `apps/web/src/styles/octant.css`                                           |
 | Runtime bridge        | Maps theme-resolvable `--octant-*` roles to the static system's `--oct-*` roles                                   | `apps/web/src/styles/octant-bridge.css`                                    |
 | shadcn projection     | Projects `--octant-*` roles into `--background`, `--primary`, `--border`, and the other shadcn/Tailwind variables | `apps/web/src/styles/shadcn-theme.css`, `apps/web/src/styles/tailwind.css` |
-| Owned recipes         | Editable shadcn New York recipes and the product-facing adapter API                                               | `apps/web/src/ui/shadcn/`, `apps/web/src/ui/base/`                         |
+| Owned recipes         | Editable Base UI-native shadcn recipes and the product-facing adapter API                                         | `apps/web/src/ui/shadcn/`, `apps/web/src/ui/base/`                         |
 
 The import order in `apps/web/src/styles.css` is load-bearing:
 
@@ -198,9 +202,10 @@ skips `composer-input`, the system prompt (0038), because that surface is
 already painted twice; the rule still holds for it — feature CSS must not
 repaint it a third time — it is simply not machine-checked.
 
-The shadcn registry metadata is in `apps/web/components.json` (`new-york`,
+The shadcn registry metadata is in `apps/web/components.json` (`base-nova`,
 Tailwind v4, CSS variables, Lucide). The checked-in recipes are owned source
-and currently use `@base-ui/react` primitives behind the Octant adapters. This
+and use `@base-ui/react` primitives behind the Octant adapters; 0089 settles
+the style, its density, and the three divergences kept from it. This
 keeps the interaction backend accessible and editable while preserving the
 shadcn composition and visual vocabulary. Feature code imports `ui/base`, not
 `ui/shadcn` or `@base-ui/react` directly. Project and split-workspace context
@@ -217,6 +222,29 @@ right edge. It is set in the interface face at the detail size; only the status
 word carries colour. `TurnHeader` in `apps/web/src/transcript/` is the one
 recipe; a mode maps its own lifecycle onto its vocabulary and adds nothing of
 its own.
+
+### Transcript
+
+The rest of the thread view is one set of recipes in `octant.css` and the
+reply prose in `chat.css`, worn by Chat, Work, and Code alike; a mode positions
+them and repaints nothing. The scroll frame (`transcript-scroll`) keeps 20px
+between rows. A person's message is a right-aligned bubble (`turn-user`,
+`bubble`: control fill, hairline, 16px radius, no shadow) with its time beneath
+it (`turn-time`: detail size, muted, right edge), and carries 12px more air
+above it than the reply before it. A reply (`turn-agent`) is bare prose at the
+transcript size with 1.5 leading; markdown headings inside it are labels
+(14/13/13, weight 500), lists sit 4px apart, and a fenced block is a
+`CodeBlock`: a 28px header strip naming the language with a ghost copy control,
+then detail-size mono on the application ground. Tool rows are 28px each, the
+name at the body size and the state at the right as detail text with a 12px
+mark (spinner, check, cross), parted by hairlines and indented together; a
+settled turn folds them behind "N tool calls". A turn paused on the person is
+an `approval-row`: a card row with a 14px icon, one sentence, Approve as the
+small default button and Deny as the small ghost, and a 2px semantic tick
+inside the hairline rather than a bar. The composer at the foot of a thread is
+`thread-composer`: the same frame in every mode, 30px controls on its row, and
+one `composer-status` line under it (11px meta, hint left, spend and notices
+right).
 
 ## Colour system
 
@@ -327,10 +355,11 @@ Static type tokens in `octant.css` are:
 - Mono metadata uses positive tracking (`--oct-tracking-wide`); display
   headings use restrained negative tracking.
 
-Transcript settings are explicit and centered: Small is 13px, Medium 14px,
-Large 16px; Narrow is 680px, Medium 800px, Wide 1040px. The default thread
-measure is 760px and the column uses `width: min(100% - 40px, measure)` with
-automatic horizontal margins. Welcome composers share a 768px maximum so
+Transcript settings are explicit and centered on the body size: Small is
+12px, Medium 13px, Large 16px; Narrow is 680px, Medium 800px, Wide 1040px. A
+fresh install reads Medium and Narrow, so a question, its reply, and the
+composer under them all read at 13px. The column uses
+`width: min(100% - 40px, measure)` with automatic horizontal margins. Welcome composers share a 768px maximum so
 Chat, Work, and Code start from the same prompt geometry independently of the
 reading-width preference. Canvas documents use a 62ch measure.
 
@@ -346,22 +375,33 @@ marks, and status dots. Leftover `.btn*` recipes are gone; adapters own
 button paint. Phone-only
 surfaces use the larger 22/26/30px mobile radii.
 
-Controls are 44px by default and 34px compact. Dense operating rails use a
-28px navigation row; the title band, the right dock head, and the bottom panel
-toolbar share one 34px rail so their tabs and hairlines sit on one level. Icon sizes are 16/19/22px for small/medium/large actions; touch
+Controls are 44px by default and 34px compact. The shell frame runs on one
+grid, named by the `--oct-title-rail-h`, `--oct-rail-tab-h`,
+`--oct-rail-button-h`, `--oct-nav-head-h`, `--oct-nav-row-h`, and
+`--oct-nav-inset` tokens in `octant.css`: the title band, the window
+controls, the right dock head, and the bottom panel toolbar share one 38px
+rail, on which a 30px tab and a 28px icon control sit on one centreline and
+the band's hairline meets the dock's; the sidebar runs 30px navigation,
+Project, and thread rows between a 40px header row and a 40px account row,
+with every leading icon on a 12px inset and its section labels at 12px in the
+meta ink with a 12px gap above. Hover-only actions (add, more, pin, archive,
+and a tab's pin and close) take no width until their row is hovered or
+focused. Icon sizes are 16/19/22px for small/medium/large actions; touch
 surfaces keep 44px targets. The workspace sidebar defaults to 232px, supports
 resizing, and may collapse completely while leaving Show sidebar and New thread
 in the native title rail. Settings uses a separate compact 248px navigation
 rail. The right dock defaults to 320px when open. A fresh window starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The
-pane/title control rail is 34px in the native host and the status bar is 26px.
+pane/title control rail is 38px in the native host and the status bar is 26px.
 While a route or tool is still loading, its state is one quiet line (spinner,
 then the title) on the page ground, never a raised card: a card with a title
 and a sentence reads as a finished empty state.
 
 Navigation panes stay compact hairline rails. Routine form layouts stay open
-and unshadowed; setup objects, discrete settings objects, welcome composers,
-and cards use the raised card recipe (`OctantCard` / `--octant-shadow-sm`).
+and unshadowed; setup objects, discrete settings objects, and cards use the
+card recipe (`OctantCard`), which draws a hairline ring rather than a shadow —
+a card sits in the page, and shadow is reserved for something that floats
+above it (0090). Welcome composers keep their raised frame.
 Chat, Work, and Code welcome composers share the `.composer` frame (20px,
 `--octant-shadow-md`) and one first-read hierarchy: one question, then the
 composer. Starter actions appear only when recent work does not already give
@@ -398,8 +438,8 @@ is the thread's own state (Running, Done, Waiting, In progress, Ready) with
 changed lines, and the facts line names the Project, the branch (marked
 worktree when managed), the linked pull request with its number and state as
 a chip, and the provider last. Picking an item fills the prompt and attaches
-the issue as the thread's Create from context. The start screen has no image control: image generation lives on
-its own surface.
+the issue as the thread's Create from context. The start screen has no image-generation control: generation lives on
+its own surface. Attaching an image is a composer affordance and is available here.
 The prompt itself is frameless:
 `OctantTextarea` drops the shadcn field recipe when it wears `.composer-input`.
 Composer-row selects drop the same field chrome. Feature CSS must not
@@ -413,7 +453,8 @@ Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
 `--octant-shadow-sm`, `--octant-shadow-md`, `--octant-shadow-lg`,
 `--octant-shadow-overlay`, and `--octant-shadow-pop`. Use the smallest level
 that establishes a genuine layer: navigation panes and open form layouts stay
-unshadowed; compact state and grouped cards use `--octant-shadow-sm`; composers
+unshadowed; the card recipe uses a hairline ring instead of a shadow (0090);
+compact state and grouped surfaces use `--octant-shadow-sm`; composers
 use the catalog-calibrated `--octant-shadow-md`; focused or promoted raised
 objects may use `--octant-shadow-lg`; overlays use only their overlay or pop
 token. A shadow must explain depth, not decorate a flat row.
@@ -438,7 +479,10 @@ row with its threads nested beneath it, pinned Projects leading in their own
 labelled band that is absent when nothing is pinned), then Chats (threads filed
 in no Project; Work and Code call the group Recents). Rows are hairline rails, never
 cards; provider marks are fixed-size inline and can be hidden without changing
-row height or indentation. A thread with unread activity ends its row with a
+row height or indentation. A hovered row takes the soft ink wash and the row
+the workspace is showing takes the selection fill with a hairline edge, the
+same two states the thread tab strip draws, so pointing never looks like
+being there. A thread with unread activity ends its row with a
 small filled dot labelled "New activity", driven by the read cursors the
 window already keeps, never by a poll; working and attention states keep the
 leading status dot. A list longer than eight rows folds behind one quiet "Show
@@ -539,7 +583,10 @@ is neutral explanatory text rather than a warning callout.
 The Board is an operational reading surface with four fixed,
 server-authoritative statuses: Ready, In Progress, Waiting, and Done. All
 four lanes show by default, each named once by mark, label, and count with no
-rule under the head; a Board/List toggle leads the toolbar. A card is a flat
+rule under the head, as a 12px meta label with the count at the lane's
+trailing edge; a Board/List toggle leads the toolbar, and every control on it
+(the segmented choices, search, Filters, Refresh, View) is one 28px rail
+control. A card is a flat
 hairline-edged object on the card fill: the Project as an eyebrow, the title,
 and one line of what the thread waits on or is doing, active runs and failing
 checks, who runs it, and when it last moved. Checkout, branch, plan, and
@@ -590,11 +637,10 @@ Switch, Slider, Checkbox, ToggleGroup, Tabs, DropdownMenu, ContextMenu, Dialog,
 and Tooltip. Composition rules:
 
 - Buttons use `OctantButton` or `OctantIconButton`; variants are default,
-  destructive, destructive-outline, outline, secondary, ghost, and link.
-  Destructive-outline names a risky action on an ordinary page; the filled
-  destructive variant is reserved for the final confirmation. Sizes are
-  default, sm, lg, and icon. Icon-only buttons always have an accessible label
-  and tooltip/title.
+  destructive, outline, secondary, ghost, and link. Destructive is a tonal
+  fill, not a solid one: a red slab reads as the page's subject rather than one
+  action on it. Sizes are xs, sm, default, lg, icon, icon-xs, and icon-sm.
+  Icon-only buttons always have an accessible label and tooltip/title.
 - Form layouts use `OctantFieldGroup` and `OctantField`; labels, descriptions,
   and errors remain associated with their controls. Invalid state uses
   `data-invalid` and `aria-invalid`.
@@ -659,7 +705,7 @@ an approximate brand mark. Unknown providers use a compact truthful monogram.
 
 Functional feedback uses 120–160ms transitions; the base system duration is
 200ms. Use standard easing and no decorative entrance animation. The
-application ground's cloud (0085) is the one ambient motion: at most 24
+application ground's cloud (0091) is the one ambient motion: at most 24
 frames a second, paused while the document is hidden or the pane is off
 screen, still under reduced motion or at speed zero. Running state
 must have a textual or shape distinction in addition to motion. `prefers-reduced-

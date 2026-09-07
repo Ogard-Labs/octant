@@ -175,10 +175,14 @@ describe("shell settings policy", () => {
       firstRunOnboarding: "pending",
       automaticUpdateChecks: true,
       marketplaceFetchesEnabled: true,
+      // A completed thread rests a week before the host archives it.
+      completedThreadArchiveAfterDays: 7,
       // Navigator starts honestly unconfigured: no default model, no reviewer.
       navigatorAssistant: {},
       // Voice starts unconfigured: no transcription or synthesis endpoint.
       voice: {},
+      // Image generation starts with no custom OpenAI-compatible sources.
+      imageGeneration: { customSources: [] },
       // The host has not been told who is using it, so the profile carries no
       // name and no address — only the accent the initials avatar falls back to.
       userProfile: { accent: "indigo", avatar: { kind: "initials" } },
