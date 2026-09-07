@@ -213,7 +213,7 @@ describe("LocalServersGroup", () => {
   it("stops an Octant-owned server without a confirmation step", async () => {
     const stop = vi.fn(async () => true);
     render(<LocalServersGroup controller={controller({ stop })} />);
-    screen.getByRole("button", { name: "Stop" }).click();
+    screen.getByRole("button", { name: /^Stop .+ on port \d+$/ }).click();
     await waitFor(() => expect(stop).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole("dialog")).toBeNull();
   });
@@ -228,7 +228,7 @@ describe("LocalServersGroup", () => {
     });
     render(<LocalServersGroup controller={controller({ snapshot: snapshot([row]), stop })} />);
 
-    await user.click(screen.getByRole("button", { name: "Stop" }));
+    await user.click(screen.getByRole("button", { name: /^Stop .+ on port \d+$/ }));
     const dialog = await screen.findByRole("dialog", { name: "Confirm stop" });
     expect(dialog).toHaveTextContent("node");
     expect(dialog).toHaveTextContent("5173");
@@ -261,7 +261,7 @@ describe("LocalServersGroup", () => {
         })}
       />,
     );
-    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Stop .+ on port \d+$/ })).toBeNull();
     expect(
       screen.getByText("Octant does not own this process and will not stop it."),
     ).toBeVisible();
@@ -282,7 +282,7 @@ describe("LocalServersGroup", () => {
         })}
       />,
     );
-    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Stop .+ on port \d+$/ })).toBeNull();
     expect(
       screen.getByText("Plan threads can list and open local servers but never stop them."),
     ).toBeVisible();

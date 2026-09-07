@@ -312,6 +312,7 @@ function LocalServerRow(props: {
 
         {listener.stop.status === "available" ? (
           <OctantButton
+            aria-label={`Stop ${listener.processName} on port ${String(listener.port)}`}
             disabled={props.busy}
             onClick={() =>
               needsConfirmation ? props.onRequestStop() : void props.onStopImmediately()
