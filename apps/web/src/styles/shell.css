@@ -813,6 +813,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 }
 
 .sidebar-navigation__thread-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -868,32 +869,38 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   font-size: var(--oct-text-xs);
 }
 
-/* The actions take no room until they are wanted: an invisible gutter at the
-   end of every row read as dead space beside the age. They appear, and take
-   their width, on row hover or focus, and stay while any of their popups is
-   open. */
+/* The actions sit over the end of the row and take no room of their own:
+   given a track, they widened the row under the pointer and the selected
+   row's fill changed width as the pointer left it. They appear on row hover
+   or focus, over the age, and stay while any of their popups is open. */
 .sidebar-navigation__thread-actions {
+  position: absolute;
+  top: 50%;
+  right: 4px;
   display: inline-flex;
-  flex: 0 0 auto;
-  width: 0;
-  min-width: 0;
   align-items: center;
   gap: 2px;
-  overflow: hidden;
+  transform: translateY(-50%);
   opacity: 0;
+  pointer-events: none;
   transition: opacity var(--oct-motion-fast) ease;
 }
 
-/* The gutter collapses rather than each control: the icon-button recipe's
-   transparent hairline kept a zero-width button two pixels wide. Revealed,
-   it lets its controls' focus rings out again. */
 .sidebar-navigation__thread-row:hover .sidebar-navigation__thread-actions,
 .sidebar-navigation__thread-row:focus-within .sidebar-navigation__thread-actions,
 .sidebar-navigation__thread-actions:has([aria-expanded="true"]),
 .sidebar-navigation__thread-actions:has([data-popup-open]) {
-  width: auto;
-  overflow: visible;
   opacity: 1;
+  pointer-events: auto;
+}
+
+/* The age gives its place to the actions, so neither is ever drawn over the
+   other. */
+.sidebar-navigation__thread-row:hover .sidebar-navigation__thread-meta,
+.sidebar-navigation__thread-row:focus-within .sidebar-navigation__thread-meta,
+.sidebar-navigation__thread-row:has([aria-expanded="true"]) .sidebar-navigation__thread-meta,
+.sidebar-navigation__thread-row:has([data-popup-open]) .sidebar-navigation__thread-meta {
+  opacity: 0;
 }
 
 .sidebar-navigation__thread-action {
@@ -920,9 +927,8 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 
 @media (pointer: coarse), (max-width: 560px) {
   .sidebar-navigation__thread-actions {
-    width: auto;
-    overflow: visible;
     opacity: 1;
+    pointer-events: auto;
   }
 
   .sidebar-navigation__thread-action--inline {

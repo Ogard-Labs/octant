@@ -154,16 +154,16 @@
   height: var(--oct-icon-sm);
 }
 
-/* The close control is the same 22px mark the thread tabs carry, so the two
-   strips read as one grammar: a tab, then a quiet × that shows on hover, on
-   focus, and on the tab in front, and like theirs takes no width until then. */
+/* The close control is a quiet 22px × that shows on hover, on focus, and on
+   the tab in front. It keeps its width at all times: a close that took its
+   room only when wanted widened the tab under the pointer and shifted every
+   tab after it, so the strip moved whenever the pointer crossed it. */
 .dock-tool-strip__close {
-  width: 0;
-  min-width: 0;
+  width: 22px;
+  min-width: 22px;
   height: 22px;
   min-height: 22px;
   padding: 0;
-  overflow: hidden;
   border-radius: var(--oct-radius-xs, 3px);
   color: var(--oct-muted);
   opacity: 0;
@@ -172,8 +172,6 @@
 .dock-tool-strip__tab:hover .dock-tool-strip__close,
 .dock-tool-strip__tab:focus-within .dock-tool-strip__close,
 .dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"]) .dock-tool-strip__close {
-  width: 22px;
-  min-width: 22px;
   opacity: 1;
 }
 

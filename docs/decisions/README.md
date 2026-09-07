@@ -99,6 +99,7 @@ distilled successor of the earlier long-form design specifications.
 | [0089](0089-base-ui-native-shadcn-style.md)                                  | Product controls follow the Base UI-native shadcn style                                     | Accepted           |
 | [0090](0090-recipes-own-their-own-shape-and-focus.md)                        | Recipes own their shape; the app owns its focus ring                                        | Accepted           |
 | [0091](0091-the-application-ground-is-the-theme-pattern-or-a-photo.md)       | The application ground is the theme's pattern or a person's photo                           | Accepted           |
+| [0092](0092-the-terminal-reads-the-shell-s-own-configuration.md)             | The terminal reads the shell's own configuration                                            | Accepted           |
 
 ## Adding an ADR
 

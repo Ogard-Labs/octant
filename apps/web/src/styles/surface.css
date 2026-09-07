@@ -528,7 +528,10 @@
   background: var(--octant-workspace);
 }
 
-.shell--app-backdrop-sidebar.shell-frame .sidebar {
+/* Both classes are named so this outranks the material's own sidebar paint
+   (`.shell--material-opaque.shell-frame > .sidebar`), which is what kept the
+   sidebar solid with the cover switched on. */
+.shell--app-backdrop.shell--app-backdrop-sidebar.shell-frame > .sidebar {
   background: var(--octant-sidebar-translucent-subtle);
 }
 

@@ -2,7 +2,7 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "n
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { existsSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
 import { SeatbeltConfinementError } from "../process/seatbeltProfile";
 import {
@@ -139,6 +139,47 @@ describe("TerminalProcessPort", () => {
     expect(profile).toContain("(allow pseudo-tty)");
     expect(profile).toContain(`(allow file-write* (subpath "${realpathSync(stateDirectory)}"))`);
     expect(profile).not.toContain("(allow network*)");
+  });
+
+  it("lets the shell read its own configuration from the home and opens it as a login shell", () => {
+    const pty = fakePty();
+    const spawn = vi.fn(() => pty);
+    const fake = createFakeSandboxConfinement();
+    directories.push(fake.root);
+    // The fake confinement's home is its root: a rc, the framework it
+    // sources, and a credential directory beside them.
+    writeFileSync(join(fake.root, ".zshrc"), "source ~/.oh-my-zsh/oh-my-zsh.sh\n");
+    mkdirSync(join(fake.root, ".oh-my-zsh"));
+    writeFileSync(join(fake.root, ".oh-my-zsh", "oh-my-zsh.sh"), "# framework\n");
+    mkdirSync(join(fake.root, ".ssh"));
+    writeFileSync(join(fake.root, ".ssh", "id_ed25519"), "secret\n");
+    const port = new TerminalProcessPort({
+      spawn,
+      killProcessGroup: vi.fn(),
+      confinement: fake.confinement,
+      temporaryDirectory: fake.temporaryDirectory,
+      shellStateDirectory: join(fake.root, "terminal-shell"),
+      seatbeltHomeDirectory: fake.root,
+      networkEgress: "none",
+      platform: "darwin",
+    });
+
+    port.start({
+      shell: "/bin/zsh",
+      cwd: "/private/repo",
+      stateScope: "repo_test",
+      environment: { PATH: "/usr/bin" },
+      columns: 80,
+      rows: 24,
+    });
+
+    const home = realpathSync(fake.root);
+    const profile = launchedProfile(spawn);
+    expect(profile).toContain(`(allow file-read* (subpath "${join(home, ".zshrc")}"))`);
+    expect(profile).toContain(`(allow file-read* (subpath "${join(home, ".oh-my-zsh")}"))`);
+    expect(profile).toContain(`(deny file-read* (subpath "${join(home, ".ssh")}"))`);
+    expect(profile).not.toContain(`(allow file-write* (subpath "${join(home, ".zshrc")}"))`);
+    expect(launchedCall(spawn)[1]).toEqual(expect.arrayContaining(["--", "/bin/zsh", "-l"]));
   });
 
   it("refuses to start a Plan mode terminal rather than spawning a writable shell", () => {
