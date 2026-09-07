@@ -38,11 +38,6 @@
   min-width: 0;
 }
 
-.project-overview__threads .project-threads:focus-visible {
-  outline: 2px solid var(--oct-muted);
-  outline-offset: 2px;
-}
-
 .project-overview__threads .project-nav__status {
   padding: 0;
 }

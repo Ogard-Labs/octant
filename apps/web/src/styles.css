@@ -424,11 +424,6 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   border-radius: 50%;
 }
 
-.thread-activity-pip__visual--interactive:focus-visible {
-  outline: 2px solid var(--oct-muted);
-  outline-offset: -2px;
-}
-
 .thread-activity-pip__visual {
   position: relative;
   display: grid;
@@ -657,7 +652,7 @@ strong {
 
 /* Unlayered element rules beat every Tailwind utility, so a filled Button
    rendered as bare text. Keep the reset in the base layer so recipes can
-   paint; leave the focus outline unlayered so keyboard rings stay as they are. */
+   paint; the shared focus reset stays unlayered with the rest of the shell. */
 @layer base {
   button {
     appearance: none;
@@ -1648,8 +1643,7 @@ strong {
   height: 1px;
 }
 
-.workspace-split__resize:hover::before,
-.workspace-split__resize:has(.workspace-split__resize-input:focus-visible)::before {
+.workspace-split__resize:hover::before {
   background: color-mix(in srgb, var(--octant-focus-ring) 35%, var(--octant-border));
 }
 
@@ -2114,12 +2108,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   width: 46px;
   height: 32px;
   padding: 2px;
-}
-
-.settings-view__checkbox:focus-visible,
-.settings-view__range:focus-visible {
-  outline: 2px solid var(--oct-muted);
-  outline-offset: 2px;
 }
 
 /* No forced color-scheme: the root's declared scheme keeps the native
@@ -2735,7 +2723,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .project-overview__name:focus-visible {
   border-color: var(--oct-accent-fg);
   outline: none;
-  box-shadow: var(--oct-focus-ring);
 }
 
 /* The caption above the folder chooser. It is a paragraph rather than a label
@@ -2777,7 +2764,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .project-dialog__folder:focus-visible {
   border-color: var(--oct-accent-fg);
   outline: none;
-  box-shadow: var(--oct-focus-ring);
 }
 
 .project-dialog__folder:disabled {
@@ -3157,7 +3143,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 /* The name is the page title, editable in place: it wears no field chrome
-   until pointed at, and takes the ordinary focus ring when edited. */
+   until pointed at, and keeps the same quiet focus treatment as the shell. */
 .project-overview__title {
   min-width: 0;
 }
@@ -3413,11 +3399,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border-radius: var(--oct-radius-sm);
   font: inherit;
   font-size: var(--oct-text-xs);
-}
-
-.project-memory-inspector__toolbar select:focus-visible {
-  outline: 2px solid var(--oct-muted);
-  outline-offset: 2px;
 }
 
 .project-memory-status-stack {
@@ -5783,11 +5764,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   background: var(--octant-control-hover);
 }
 
-.composer-model-picker__rail-item:focus-visible {
-  outline: 2px solid var(--oct-muted);
-  outline-offset: -2px;
-}
-
 .composer-model-picker__rail-item--active {
   color: var(--octant-text-primary);
   background: var(--octant-accent-tint);
@@ -5874,7 +5850,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .composer-model-picker__search:focus-within {
   border-color: var(--octant-focus-ring);
-  box-shadow: 0 0 0 2px var(--octant-accent-tint);
 }
 
 .composer-model-picker__search input {
@@ -5921,11 +5896,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .composer-model-picker__catalog:hover {
   background: var(--octant-control-hover);
-}
-
-.composer-model-picker__catalog:focus-visible {
-  outline: 2px solid var(--oct-muted);
-  outline-offset: -2px;
 }
 
 .composer-model-picker__catalog--on {
@@ -5997,12 +5967,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   font: inherit;
   font-size: var(--oct-text-sm);
   text-align: left;
-}
-
-.composer-model-picker__model:focus-visible,
-.composer-model-picker__star:focus-visible {
-  outline: 2px solid var(--oct-muted);
-  outline-offset: -2px;
 }
 
 .composer-model-picker__model-copy {
@@ -6890,11 +6854,6 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   outline: none;
 }
 
-.model-picker__listbox:focus-visible {
-  border-radius: var(--oct-radius-sm);
-  box-shadow: var(--oct-focus-ring);
-}
-
 .model-picker__group {
   display: grid;
   gap: 0;
@@ -7476,10 +7435,6 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   outline: none;
 }
 
-.host-selector__select:focus-visible {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--octant-accent) 45%, transparent);
-}
-
 /* ── Federated host lifecycle (Post-preview B6) ────────────────────────── */
 
 .federated-hosts-lifecycle {
@@ -7953,11 +7908,6 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   opacity: 1;
 }
 
-.code-board__status-option input:focus-visible + span {
-  outline: 2px solid var(--oct-accent-fg);
-  outline-offset: 1px;
-}
-
 .code-board__filter-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -8127,11 +8077,6 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   background: var(--oct-fg-soft);
 }
 
-.code-board .board-card:focus-visible {
-  outline: 2px solid var(--oct-focus);
-  outline-offset: 1px;
-}
-
 .code-board .board-card-top {
   align-items: center;
   gap: var(--oct-space-2);
@@ -8191,12 +8136,6 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   font-family: var(--oct-font-display);
 }
 
-.code-board .code-board__card-details summary:focus-visible {
-  outline: 2px solid var(--oct-focus);
-  outline-offset: 1px;
-  border-radius: var(--oct-radius-sm);
-}
-
 /* Pull-request chips inside a card keep the compact facts grammar and
    truncate so a long PR title never forces the card wider than its column. */
 .board-card-pr-list {
@@ -8233,11 +8172,6 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
 .board-card-pr:hover {
   border-color: var(--oct-border);
   background: var(--oct-fg-soft);
-}
-
-.board-card-pr:focus-visible {
-  outline: 2px solid var(--oct-focus);
-  outline-offset: 1px;
 }
 
 .board-card-pr .icon {

@@ -147,7 +147,7 @@ describe("RightUtilityDock", () => {
     expect(screen.queryByText("Live Browser")).toBeNull();
     expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
     expect(
-      screen.getByRole("heading", { name: "Browser has nothing to describe here" }),
+      screen.getByRole("heading", { name: "Browser is unavailable" }),
     ).toBeVisible();
   });
 

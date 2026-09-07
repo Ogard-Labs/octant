@@ -885,12 +885,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   color: var(--octant-text-secondary);
 }
 
-.settings-card-section > summary:focus-visible {
-  border-radius: var(--oct-radius-sm);
-  outline: none;
-  box-shadow: var(--oct-focus-ring);
-}
-
 /* One disclosure recipe for the "more" a row can hold: a custom font stack,
    network details, the keybindings JSON, what an update check sends. The
    summary is a 12px line with the app's chevron, never the browser's marker. */
@@ -914,12 +908,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .settings-disclosure > summary:hover {
   color: var(--octant-text-primary);
-}
-
-.settings-disclosure > summary:focus-visible {
-  border-radius: var(--oct-radius-sm);
-  outline: none;
-  box-shadow: var(--oct-focus-ring);
 }
 
 .settings-disclosure > summary > svg {
@@ -1211,7 +1199,7 @@ textarea.settings-view__text-input {
 }
 
 /* Selection is carried by `aria-checked` in the markup; the accent ring is
-   reinforcement, and it is not the focus ring — that stays the system's. */
+   reinforcement and is independent of the quiet focus treatment. */
 .settings-view__preset-swatch[aria-checked="true"] {
   outline: 2px solid var(--oct-accent-fg);
   outline-offset: 2px;
@@ -1299,12 +1287,6 @@ textarea.settings-view__text-input {
 .settings-scheme__card[aria-checked="true"] {
   border-color: var(--oct-fg);
   box-shadow: none;
-}
-
-/* Same specificity as the checked ring and declared after it, so keyboard
-   focus stays visible on the card that is already chosen. */
-.settings-scheme__card:focus-visible {
-  box-shadow: var(--oct-focus-ring);
 }
 
 .settings-scheme__preview {

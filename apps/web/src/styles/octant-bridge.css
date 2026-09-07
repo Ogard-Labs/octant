@@ -121,11 +121,8 @@
   --oct-elev-raised: var(--octant-shadow-overlay);
 
   /* ─── focus and scrim ───────────────────────────────────────────────
-     The two-ring shape is the design system's: an inner ring in the
-     ground colour separating the outer ring from the control. Only the
-     colours come from the app. */
-  /* Keyboard focus is a monochrome halo on every theme: a coloured ring read
-     as a link outline on a website, not a control in an app. */
+     The focus role stays available to imported themes and accent tints, but
+     the application does not paint a focus halo around controls. */
   --oct-focus-ring:
     0 0 0 1px var(--octant-workspace), 0 0 0 2px color-mix(in srgb, var(--oct-fg) 62%, transparent);
   /* The theme role is an opaque hex by contract, so the wash is mixed here:

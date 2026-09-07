@@ -147,8 +147,3 @@ fieldset.profile-editor__field > legend {
   outline: 2px solid transparent;
   outline-offset: 2px;
 }
-
-.profile-editor__accent:focus-visible {
-  outline: 2px solid Highlight;
-  outline-offset: 2px;
-}

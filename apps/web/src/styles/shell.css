@@ -407,9 +407,8 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
 }
 
 /* The same feedback the system's .split-handle gives: the hairline takes the
-   accent ink while grabbed or focused. */
-.shell-frame__sidebar-resize:hover::before,
-.shell-frame__sidebar-resize:focus-visible::before {
+   accent ink while grabbed. Keyboard focus remains visually quiet. */
+.shell-frame__sidebar-resize:hover::before {
   background: var(--oct-accent-fg);
 }
 
@@ -1291,10 +1290,6 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   .shell-frame > .window-chrome,
   .shell-frame > .sidebar {
     border-color: var(--octant-border-strong);
-  }
-
-  .sidebar-navigation > .sidebar-item:focus-visible {
-    box-shadow: inset 0 0 0 1px var(--octant-border-strong);
   }
 }
 

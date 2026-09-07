@@ -3519,7 +3519,7 @@ describe("App", () => {
     expect(
       screen.getByRole("region", { name: "Workspace pane: Controller foundation" }),
     ).not.toHaveAttribute("aria-current");
-    await waitFor(() => expect(within(dock).getByText("Current work")).toBeVisible());
+    await waitFor(() => expect(within(dock).getByText("Tools")).toBeVisible());
     expect(within(dock).queryByRole("tab", { name: "Browser" })).not.toBeInTheDocument();
     await user.click(within(dock).getByRole("button", { name: "Terminal" }));
     dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });

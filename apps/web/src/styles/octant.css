@@ -110,8 +110,8 @@
   --oct-elev-raised:
     0 28px 70px light-dark(rgba(38, 37, 30, 0.13), rgba(0, 0, 0, 0.5)),
     0 14px 32px light-dark(rgba(38, 37, 30, 0.1), rgba(0, 0, 0, 0.36)), 0 0 0 1px var(--oct-border);
-  /* Keyboard focus is a neutral hairline ring, not a coloured highlight: the
-     accent ring read as a selection mark on every focused control. */
+  /* Retained for theme and bridge compatibility; controls use selection and
+     expanded fills for state instead of painting a focus halo. */
   --oct-focus-ring: 0 0 0 1px var(--oct-bg), 0 0 0 3px var(--oct-muted);
 
   /* ── type ── */
@@ -430,17 +430,12 @@ h3,
 h4 {
   text-wrap: balance;
 }
-/* One focus treatment for the whole app: a hairline gap then a muted ring, so
-   a focused control reads as an app control rather than a page element with a
-   soft web halo (0090).
-
-   It deliberately sets no radius. A box-shadow already follows the element's
-   own corner, so naming one here only reshaped a focused control to a corner
-   it does not otherwise have — which is the defect that made this rule look
-   like it needed replacing. */
+/* Focus remains keyboard-addressable without painting a halo around controls.
+   Selected and expanded states supply the visible cue where a control has a
+   state of its own. */
 :focus-visible {
   outline: none;
-  box-shadow: var(--oct-focus-ring);
+  box-shadow: none;
 }
 
 /* ─── layout primitives ─────────────────────────────────────────────── */
@@ -926,7 +921,6 @@ h4 {
 .textarea:focus-visible,
 .select:focus-visible {
   border-color: var(--oct-accent-fg);
-  box-shadow: var(--oct-focus-ring);
 }
 .input[aria-invalid="true"] {
   border-color: var(--oct-danger-fg);
@@ -1072,13 +1066,6 @@ input.switch:checked::after {
   background: var(--oct-border);
   box-shadow: none;
   transition: background var(--oct-motion-base) var(--oct-ease-standard);
-}
-/* The track's `box-shadow: none` drops the adapter's own drop shadow, but it
-   also outranks the global `:focus-visible` ring, which is a box-shadow over
-   `outline: none`. Keyboard focus has to put that ring back explicitly or the
-   switch takes focus with nothing to show for it. */
-.octant-switch[data-slot="switch"]:focus-visible {
-  box-shadow: var(--oct-focus-ring);
 }
 .octant-switch[data-slot="switch"][data-checked] {
   background: var(--oct-fg);
@@ -2215,9 +2202,6 @@ input.switch:checked::after {
   background: var(--oct-accent);
   cursor: pointer;
 }
-.range:focus-visible {
-  outline: 2px solid var(--oct-accent-fg);
-}
 
 /* ─── accordion ───────────────────────────────────────────────────────
    <details>, so it works with no script and stays keyboard-accessible. */
@@ -2895,10 +2879,6 @@ input.switch:checked::after {
 .board-card:hover {
   border-color: var(--octant-border-strong);
 }
-.board-card:focus-visible {
-  outline: 2px solid var(--oct-focus);
-  outline-offset: 1px;
-}
 .board-card-top {
   display: flex;
   align-items: center;
@@ -3028,10 +3008,6 @@ input.switch:checked::after {
 }
 .issuerow:hover {
   background: var(--oct-fg-soft);
-}
-.issuerow:focus-visible {
-  outline: 2px solid var(--oct-focus);
-  outline-offset: -1px;
 }
 .issuerow .issuerow-main {
   min-width: 0;
@@ -3557,8 +3533,7 @@ input.switch:checked::after {
   inset-block: 0;
   inset-inline: -12px;
 }
-.split-handle:hover,
-.split-handle:focus-visible {
+.split-handle:hover {
   background: var(--oct-accent-fg);
 }
 /* while dragging, stop the pointer selecting text in the panes it crosses */
@@ -4146,9 +4121,7 @@ input.switch:checked::after {
    floating them over the text. */
 /* The composer is a raised object, not a field ruled onto the page: it sits a
    step above the surface behind it and carries its hairline as an inset ring
-   so the ring never joins layout or escapes the rounded corners. Focus
-   brightens that ring and deepens the lift instead of painting a hard border,
-   which previously flashed a full-strength line around the whole box. */
+   so the ring never joins layout or escapes the rounded corners. */
 .composer {
   border: 0;
   border-radius: var(--oct-radius-lg);
@@ -4160,13 +4133,6 @@ input.switch:checked::after {
 }
 .composer:focus-within {
   box-shadow: var(--octant-shadow-lg);
-}
-/* Focus lifts the composer's shadow and shows the caret; it draws no
-   outline. A text field takes :focus-visible on click as well as on Tab,
-   so any edge rule framed the prompt on every click and read as a
-   highlighted field rather than the raised object it is. */
-.composer:focus-within:has(.composer-input:focus-visible) {
-  outline: none;
 }
 .composer-chips {
   display: flex;
@@ -4196,13 +4162,6 @@ input.switch:checked::after {
 }
 .composer-input:focus {
   outline: none;
-}
-/* The frame's :focus-within accent border is the composer's focus
-   affordance; editable elements match :focus-visible on every focus, so
-   without this the global ring draws a second box inside the frame (same
-   treatment as .zen-notes textarea). */
-.composer-input:focus-visible {
-  box-shadow: none;
 }
 .composer-input::placeholder {
   color: var(--oct-meta);
@@ -4249,7 +4208,7 @@ input.switch:checked::after {
    box inside it. Reset control by control, the rule kept coming undone: the
    model picker was named and cleared while every control added after it — the
    access menu, the pool control, whatever arrives next — still carried its
-   recipe's own border and 3px focus ring, and each of those read as an
+   recipe's own border and halo, and each of those read as an
    outlined field nested in the prompt. State it once for the row instead. */
 .composer-row button,
 .composer-row [role="button"],
@@ -4257,17 +4216,6 @@ input.switch:checked::after {
 .composer-row input {
   border-color: transparent;
   box-shadow: none;
-}
-/* The reset above outranks the global ring (0,1,1 over 0,1,0), so the row
-   names the same ring back once for every control it silenced. The accent
-   outline that stood here read as a selection, and it left the button-recipe
-   controls with no mark at all. No outline is declared so the meter's own
-   prefers-contrast outline keeps winning. */
-.composer-row button:focus-visible,
-.composer-row [role="button"]:focus-visible,
-.composer-row [role="combobox"]:focus-visible,
-.composer-row input:focus-visible {
-  box-shadow: var(--oct-focus-ring);
 }
 /* The send control is the row's one filled affordance, so it stays a circle. */
 .composer-row button[data-size="icon"] {

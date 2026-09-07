@@ -243,11 +243,6 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   box-shadow: none;
 }
 
-.thread-search__field input:focus-visible {
-  border: 0;
-  box-shadow: none;
-}
-
 .thread-search__scope,
 .thread-search__listing,
 .thread-search__status {

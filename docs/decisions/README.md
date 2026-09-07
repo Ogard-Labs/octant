@@ -101,6 +101,7 @@ distilled successor of the earlier long-form design specifications.
 | [0091](0091-the-application-ground-is-the-theme-pattern-or-a-photo.md)       | The application ground is the theme's pattern or a person's photo                           | Accepted           |
 | [0092](0092-the-terminal-reads-the-shell-s-own-configuration.md)             | The terminal reads the shell's own configuration                                            | Accepted           |
 | [0093](0093-app-owned-tools-use-managed-runtime-transports.md)               | App-owned tools use managed runtime transports                                              | Accepted           |
+| [0094](0094-focus-is-quiet-selection-carries-state.md)                       | Focus is quiet; selection carries state                                                     | Accepted           |
 
 ## Adding an ADR
 

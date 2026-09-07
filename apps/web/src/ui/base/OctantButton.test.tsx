@@ -59,7 +59,7 @@ describe("OctantButton", () => {
     expect(screen.getByRole("button", { name: "Close dock" }).className).not.toContain("btn-send");
   });
 
-  it("layers the element reset so recipes can paint and leaves keyboard focus to the shared ring", () => {
+  it("layers the element reset while keeping focus visually quiet", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
     const { body: baseLayer, remainder } = extractNamedLayer(styles, "base");
 
@@ -69,9 +69,8 @@ describe("OctantButton", () => {
     expect(baseLayer).not.toContain("button:focus-visible");
 
     expect(remainder).not.toMatch(/(?:^|\n)button\s*\{/);
-    // Keyboard focus is painted once, by the shared rule in octant.css (0090).
-    // The stylesheet does not add a treatment of its own here; a second accent
-    // outline doubled it.
+    // The stylesheet keeps focus visually quiet here; a feature-specific
+    // outline would reintroduce a second focus language.
     expect(remainder).not.toMatch(/(?:^|\n)button:focus-visible\s*\{/);
     expect(styles).not.toContain("outline: 2px solid var(--octant-focus-ring);");
     expect(styles).not.toContain(".project-button--primary");

@@ -99,8 +99,7 @@
   transition: box-shadow var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
-.artifact-card__button:hover,
-.artifact-card__button:focus-visible {
+.artifact-card__button:hover {
   box-shadow: var(--octant-shadow-md);
 }
 

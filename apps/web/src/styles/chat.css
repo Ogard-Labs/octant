@@ -627,7 +627,7 @@
   font-size: calc(11 * var(--oct-text-step));
 }
 
-/* The composer's frame, placement, focus ring, input, chips row, bottom row,
+/* The composer's frame, placement, focus state, input, chips row, bottom row,
    status line, and send control are the system's (`.composer`,
    `.thread-composer`, `.composer-status`); this block only pads the pieces
    the system does not know about. */

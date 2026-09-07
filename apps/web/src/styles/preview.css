@@ -146,12 +146,6 @@
   background: color-mix(in oklab, var(--oct-fg) 3%, transparent);
 }
 
-.preview-table td:focus,
-.preview-table th:focus {
-  outline: 2px solid var(--oct-accent-fg);
-  outline-offset: -2px;
-}
-
 /* Workbook viewer: OctantTabs/OctantTabsTab own the tab strip's color,
    border, and selected-state paint (0046). This class only sizes the
    strip so many worksheets scroll horizontally instead of overflowing

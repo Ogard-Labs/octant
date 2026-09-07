@@ -392,10 +392,6 @@
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
 }
-.composer-tray [role="combobox"]:focus-visible {
-  box-shadow: var(--oct-focus-ring);
-}
-
 /* The shared row already carries a gap before send. A surface that places
    its own gap ahead of the model and access controls makes that first gap
    the only stretch, so the pickers sit beside send instead of centred. */

@@ -149,11 +149,6 @@
   overflow: visible;
 }
 
-.execution-context-picker__listbox:focus-visible {
-  border-radius: var(--oct-radius-sm);
-  box-shadow: var(--oct-focus-ring);
-}
-
 /*
  * An option is a hairline row (0072), not a bordered card: the OctantButton
  * recipe centres one non-wrapping label at a fixed control height, so the row

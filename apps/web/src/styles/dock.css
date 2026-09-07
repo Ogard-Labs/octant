@@ -32,9 +32,8 @@
 }
 
 /* The same feedback the system's .split-handle gives: the hairline takes the
-   accent ink while grabbed or focused. */
-.right-utility-dock__resize:hover::before,
-.right-utility-dock__resize:focus-visible::before {
+   accent ink while grabbed. Keyboard focus remains visually quiet. */
+.right-utility-dock__resize:hover::before {
   background: var(--oct-accent-fg);
 }
 
@@ -492,8 +491,7 @@
   content: "";
 }
 
-.bottom-utility-panel__resize:hover::before,
-.bottom-utility-panel__resize:focus-visible::before {
+.bottom-utility-panel__resize:hover::before {
   background: var(--oct-accent-fg);
 }
 
