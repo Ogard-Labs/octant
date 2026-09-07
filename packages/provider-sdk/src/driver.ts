@@ -11,6 +11,7 @@ import type {
   ProviderResumeCursor,
   ProviderRuntimeEvent,
   ProviderSessionId,
+  ProviderToolDefinition,
   WorkThreadId,
   ProviderToolAnswer,
   ProviderTurnInput,
@@ -51,6 +52,8 @@ export interface ProviderSessionStart {
    * rest; absent means provider defaults.
    */
   readonly modelOptionValues?: ProviderModelOptionValues;
+  /** App-managed tools made available when the provider session starts. */
+  readonly tools?: ReadonlyArray<ProviderToolDefinition>;
 }
 
 export interface ProviderSessionHandle {

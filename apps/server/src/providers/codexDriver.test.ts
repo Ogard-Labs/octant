@@ -116,6 +116,7 @@ function fixture(
     readonly threadResume?: (input: CodexThreadResumeInput) => Promise<CodexThreadResult>;
     readonly threadStart?: (input: CodexThreadStartInput) => Promise<CodexThreadResult>;
     readonly respondApproval?: (input: unknown) => Promise<void>;
+    readonly respondTool?: (input: unknown) => Promise<void>;
     readonly turnStart?: () => Promise<{
       readonly turn: { readonly id: string; readonly status: "inProgress" };
     }>;
@@ -170,6 +171,10 @@ function fixture(
     respondApproval: async (value) => {
       calls.push({ method: "approval/respond", input: value });
       await input.respondApproval?.(value);
+    },
+    respondTool: async (value) => {
+      calls.push({ method: "tool/respond", input: value });
+      await input.respondTool?.(value);
     },
     subscribe: (listener) => {
       calls.push({ method: "subscribe" });
@@ -332,6 +337,31 @@ function permissionsApproval(
         network: { enabled: true },
         fileSystem: null,
       },
+    },
+  };
+}
+
+function dynamicToolCall(
+  input: {
+    readonly id?: number | string;
+    readonly threadId?: string;
+    readonly turnId?: string;
+    readonly callId?: string;
+    readonly tool?: string;
+    readonly arguments?: unknown;
+  } = {},
+): CodexServerMessage {
+  return {
+    kind: "request",
+    id: input.id ?? "provider-tool-request",
+    method: "item/tool/call",
+    params: {
+      threadId: input.threadId ?? "thread-1",
+      turnId: input.turnId ?? "turn-1",
+      callId: input.callId ?? "call-1",
+      namespace: null,
+      tool: input.tool ?? "octant_browser",
+      arguments: input.arguments ?? { operation: "screenshot" },
     },
   };
 }
@@ -657,6 +687,176 @@ describe("Codex thread and turn lifecycle", () => {
       method: "turn/interrupt",
       input: { threadId: "thread-1", turnId: "turn-1" },
     });
+    await acquired.close();
+  });
+
+  it("registers dynamic app tools at thread start and answers a correlated tool call", async () => {
+    let emit: (message: CodexServerMessage) => void = () => undefined;
+    const f = fixture({
+      turnStart: async () => {
+        emit(
+          notification("turn/started", {
+            threadId: "thread-1",
+            turn: { id: "turn-1", status: "inProgress" },
+          }),
+        );
+        emit(dynamicToolCall());
+        return { turn: { id: "turn-1", status: "inProgress" } };
+      },
+    });
+    emit = f.emit;
+    const registry = new ProviderRuntimeRegistry();
+    const driver = makeCodexDriver(f.options({ runtimeRegistry: registry }));
+    registry.setObservedState(await Effect.runPromise(Effect.scoped(driver.probe({ instanceId }))));
+    const acquired = await acquireConnection(driver);
+    const tool = {
+      name: "octant_browser",
+      description: "Inspect the active browser context.",
+      inputSchema: { type: "object", properties: { operation: { type: "string" } } },
+    } as const;
+
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        tools: [tool],
+      }),
+    );
+    expect(f.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
+      dynamicTools: [{ type: "function", ...tool }],
+    });
+
+    const eventsPromise = takeEvents(acquired.connection, 1);
+    await Effect.runPromise(
+      acquired.connection.send({
+        sessionId,
+        prompt: "Inspect the page.",
+        attachments: [],
+        tools: [tool],
+      }),
+    );
+    const [event] = await eventsPromise;
+    expect(event).toMatchObject({
+      kind: "tool-request",
+      requestId: "request-1",
+      toolName: "octant_browser",
+      inputJson: '{"operation":"screenshot"}',
+    });
+    if (event === undefined || event.kind !== "tool-request") {
+      throw new Error("Expected an app-tool request event.");
+    }
+    const signal = acquired.connection.toolRequestSignal?.({
+      sessionId,
+      requestId: event.requestId,
+    });
+    expect(signal?.aborted).toBe(false);
+
+    await Effect.runPromise(
+      acquired.connection.answerTool({
+        sessionId,
+        requestId: event.requestId,
+        resultJson: '{"heading":"Example"}',
+        isError: false,
+      }),
+    );
+    expect(f.calls.find(({ method }) => method === "tool/respond")?.input).toEqual({
+      providerRequestId: "provider-tool-request",
+      result: {
+        success: true,
+        contentItems: [{ type: "inputText", text: '{"heading":"Example"}' }],
+      },
+    });
+    await acquired.close();
+  });
+
+  it("aborts an app-tool signal when its session stops", async () => {
+    let emit: (message: CodexServerMessage) => void = () => undefined;
+    const f = fixture({
+      turnStart: async () => {
+        emit(
+          notification("turn/started", {
+            threadId: "thread-1",
+            turn: { id: "turn-1", status: "inProgress" },
+          }),
+        );
+        emit(dynamicToolCall());
+        return { turn: { id: "turn-1", status: "inProgress" } };
+      },
+    });
+    emit = f.emit;
+    const registry = new ProviderRuntimeRegistry();
+    const driver = makeCodexDriver(f.options({ runtimeRegistry: registry }));
+    registry.setObservedState(await Effect.runPromise(Effect.scoped(driver.probe({ instanceId }))));
+    const acquired = await acquireConnection(driver);
+    await startSession(acquired.connection);
+    const eventsPromise = takeEvents(acquired.connection, 1);
+    await Effect.runPromise(
+      acquired.connection.send({
+        sessionId,
+        prompt: "Inspect the page.",
+        attachments: [],
+        tools: [{ name: "octant_browser", inputSchema: {} }],
+      }),
+    );
+    const [event] = await eventsPromise;
+    if (event === undefined || event.kind !== "tool-request") {
+      throw new Error("Expected an app-tool request event.");
+    }
+    const signal = acquired.connection.toolRequestSignal?.({
+      sessionId,
+      requestId: event.requestId,
+    });
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    expect(signal?.aborted).toBe(true);
+    expect(
+      acquired.connection.toolRequestSignal?.({ sessionId, requestId: event.requestId }).aborted,
+    ).toBe(true);
+    await acquired.close();
+  });
+
+  it("aborts an app-tool signal when the provider terminal event arrives first", async () => {
+    let emit: (message: CodexServerMessage) => void = () => undefined;
+    const f = fixture({
+      turnStart: async () => {
+        emit(
+          notification("turn/started", {
+            threadId: "thread-1",
+            turn: { id: "turn-1", status: "inProgress" },
+          }),
+        );
+        emit(dynamicToolCall());
+        emit(
+          notification("turn/completed", {
+            threadId: "thread-1",
+            turn: { id: "turn-1", status: "completed" },
+          }),
+        );
+        return { turn: { id: "turn-1", status: "inProgress" } };
+      },
+    });
+    emit = f.emit;
+    const registry = new ProviderRuntimeRegistry();
+    const driver = makeCodexDriver(f.options({ runtimeRegistry: registry }));
+    registry.setObservedState(await Effect.runPromise(Effect.scoped(driver.probe({ instanceId }))));
+    const acquired = await acquireConnection(driver);
+    await startSession(acquired.connection);
+    const eventsPromise = takeEvents(acquired.connection, 1);
+    await Effect.runPromise(
+      acquired.connection.send({
+        sessionId,
+        prompt: "Inspect the page.",
+        attachments: [],
+        tools: [{ name: "octant_browser", inputSchema: {} }],
+      }),
+    );
+    const [event] = await eventsPromise;
+    if (event === undefined || event.kind !== "tool-request") {
+      throw new Error("Expected an app-tool request event.");
+    }
+    expect(
+      acquired.connection.toolRequestSignal?.({ sessionId, requestId: event.requestId }).aborted,
+    ).toBe(true);
     await acquired.close();
   });
 

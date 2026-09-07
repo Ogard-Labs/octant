@@ -13,6 +13,7 @@ import {
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
+  type ProviderToolDefinition,
   type ProviderTurnInput,
   type UtcTimestamp,
 } from "@octant/contracts";
@@ -20,7 +21,6 @@ import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/dr
 import {
   attachmentMediaTypeToModality,
   renderProviderTurnPrompt,
-  unsupportedAnswerTool,
   unsupportedChatCapabilities,
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
@@ -39,6 +39,7 @@ import {
   decodeTurnInterruptResult,
   decodeTurnStartResult,
   type CodexAccountReadResult,
+  type CodexDynamicToolSpec,
   type CodexModelListResult,
   type CodexRpcId,
   type CodexServerMessage,
@@ -57,6 +58,7 @@ export interface CodexThreadStartInput {
   readonly serviceTier?: string;
   /** app-server config overrides; `model_reasoning_effort` carries the reasoning selection. */
   readonly config?: { readonly model_reasoning_effort: string };
+  readonly dynamicTools?: readonly CodexDynamicToolSpec[];
 }
 
 export interface CodexThreadResumeInput {
@@ -85,6 +87,7 @@ export interface CodexClientPort {
   turnStart(input: CodexTurnStartInput): Promise<CodexTurnResult>;
   turnInterrupt(input: { readonly threadId: string; readonly turnId: string }): Promise<void>;
   respondApproval(input: CodexApprovalResponse): Promise<void>;
+  respondTool(input: CodexApprovalResponse): Promise<void>;
   subscribe(listener: (message: CodexServerMessage) => void): () => void;
 }
 
@@ -118,6 +121,14 @@ interface SessionState {
   active: boolean;
   context?: CodexEventContext;
   readonly pendingApprovals: Map<string, CodexPendingApproval>;
+  readonly pendingTools: Map<
+    string,
+    {
+      readonly providerRequestId: CodexRpcId;
+      readonly controller: AbortController;
+      readonly turnId: string;
+    }
+  >;
 }
 
 const capabilities = {
@@ -134,6 +145,7 @@ const capabilities = {
   taskProgress: "supported",
   nativeChildAgents: "unsupported",
   ...unsupportedChatCapabilities,
+  appManagedTools: "supported",
 } as const;
 
 function codexChatCapabilities(
@@ -159,6 +171,18 @@ function codexTurnInput(input: ProviderTurnInput): readonly CodexTurnInputItem[]
     });
   }
   return items;
+}
+
+function codexDynamicTools(
+  tools: ReadonlyArray<ProviderToolDefinition> | undefined,
+): readonly CodexDynamicToolSpec[] | undefined {
+  if (tools === undefined || tools.length === 0) return undefined;
+  return tools.map((tool) => ({
+    type: "function" as const,
+    name: tool.name,
+    description: tool.description ?? `App-managed tool ${tool.name}`,
+    inputSchema: tool.inputSchema,
+  }));
 }
 
 const MAX_MODEL_PAGES = 10;
@@ -251,6 +275,9 @@ export function makeCodexClient(connection: CodexAppServerConnection): CodexClie
       await rpc.request("turn/interrupt", input, decodeTurnInterruptResult);
     },
     respondApproval: async ({ providerRequestId, result }) => {
+      await rpc.respond(providerRequestId, result);
+    },
+    respondTool: async ({ providerRequestId, result }) => {
       await rpc.respond(providerRequestId, result);
     },
     subscribe: (listener) => {
@@ -483,6 +510,11 @@ function makeConnection(
     const sessions = new Map<ProviderSessionId, SessionState>();
     const sessionsByThread = new Map<string, SessionState>();
     const pendingApprovalOwners = new Map<string, ProviderSessionId>();
+    const abortedToolSignal = (() => {
+      const controller = new AbortController();
+      controller.abort();
+      return controller.signal;
+    })();
     let unsubscribe: (() => void) | undefined;
     let pendingLifecycleRegistrations = 0;
 
@@ -511,6 +543,10 @@ function makeConnection(
       }
       state.pendingApprovals.clear();
     };
+    const clearPendingTools = (state: SessionState) => {
+      for (const pending of state.pendingTools.values()) pending.controller.abort();
+      state.pendingTools.clear();
+    };
     const unsubscribeWhenIdle = () => {
       if (
         pendingLifecycleRegistrations > 0 ||
@@ -531,6 +567,7 @@ function makeConnection(
       if (state.terminal) return;
       state.terminal = true;
       clearPendingApprovals(state);
+      clearPendingTools(state);
       deactivate(state);
       const context = state.context ?? makeEventContext(state, factories);
       offer({
@@ -640,11 +677,29 @@ function makeConnection(
           offer(item.approval.event);
           continue;
         }
+        if (item.kind === "tool") {
+          state.outputAccepted = true;
+          if (state.pendingTools.has(item.tool.requestId)) {
+            terminalEvent(state, {
+              kind: "failed",
+              failure: failure("protocol", "Codex app-tool request correlation was not unique."),
+            });
+            return;
+          }
+          state.pendingTools.set(item.tool.requestId, {
+            providerRequestId: item.tool.providerRequestId,
+            controller: new AbortController(),
+            turnId: item.tool.turnId,
+          });
+          offer(item.tool.event);
+          continue;
+        }
         if (!isTerminal(item.event)) state.outputAccepted = true;
         offer(item.event);
         if (isTerminal(item.event)) {
           state.terminal = true;
           clearPendingApprovals(state);
+          clearPendingTools(state);
           deactivate(state);
           unsubscribeWhenIdle();
           return;
@@ -718,6 +773,7 @@ function makeConnection(
       if (previous !== undefined) {
         previous.terminal = true;
         clearPendingApprovals(previous);
+        clearPendingTools(previous);
         deactivate(previous);
         sessionsByThread.delete(previous.threadId);
       }
@@ -732,6 +788,7 @@ function makeConnection(
         terminal: false,
         active: false,
         pendingApprovals: new Map(),
+        pendingTools: new Map(),
       };
       sessions.set(input.sessionId, state);
       sessionsByThread.set(state.threadId, state);
@@ -740,6 +797,10 @@ function makeConnection(
     };
 
     return {
+      toolRequestSignal: ({ sessionId, requestId }) => {
+        const state = sessions.get(sessionId);
+        return state?.pendingTools.get(requestId)?.controller.signal ?? abortedToolSignal;
+      },
       subscribe: Effect.succeed(Stream.fromQueue(queue).pipe(Stream.takeUntil(isTerminal))),
       start: (input) =>
         withPendingLifecycle(() =>
@@ -765,12 +826,14 @@ function makeConnection(
               }
               optionSettings = codexModelOptionSettings(observedModel, requestedOptions);
             }
+            const dynamicTools = codexDynamicTools(input.tools);
             const thread = yield* request(() =>
               client.threadStart({
                 cwd: projectRoot,
                 model: input.modelId,
                 ...settings,
                 ...optionSettings,
+                ...(dynamicTools === undefined ? {} : { dynamicTools }),
               }),
             );
             if (
@@ -890,6 +953,7 @@ function makeConnection(
             Effect.sync(() => {
               state.terminal = true;
               clearPendingApprovals(state);
+              clearPendingTools(state);
               deactivate(state);
               sessions.delete(sessionId);
               sessionsByThread.delete(state.threadId);
@@ -947,7 +1011,44 @@ function makeConnection(
         ),
       answerUserInput: () =>
         Effect.fail(failure("unsupported", "Codex stable user questions are unsupported.")),
-      answerTool: () => unsupportedAnswerTool(capabilities.appManagedTools),
+      answerTool: (input) =>
+        stateFor(input.sessionId).pipe(
+          Effect.flatMap((state) => {
+            if (state.terminal) {
+              return Effect.fail(failure("protocol", "Codex session is already terminal."));
+            }
+            const pending = state.pendingTools.get(input.requestId);
+            if (
+              pending === undefined ||
+              pending.turnId !== state.activeTurnId ||
+              state.context?.requestIds.get(pending.providerRequestId) !== input.requestId
+            ) {
+              return Effect.fail(
+                failure("protocol", "Codex app-tool request is not pending for this turn."),
+              );
+            }
+            state.pendingTools.delete(input.requestId);
+            pending.controller.abort();
+            return request(() =>
+              client.respondTool({
+                providerRequestId: pending.providerRequestId,
+                result: {
+                  success: !input.isError,
+                  contentItems: [{ type: "inputText", text: input.resultJson }],
+                },
+              }),
+            ).pipe(
+              Effect.catchAll((providerFailure) =>
+                Effect.sync(() =>
+                  terminalEvent(state, {
+                    kind: "waiting",
+                    message: "Codex app-tool response failed; resume must be verified.",
+                  }),
+                ).pipe(Effect.zipRight(Effect.fail(providerFailure))),
+              ),
+            );
+          }),
+        ),
     };
   });
 }
