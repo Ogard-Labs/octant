@@ -51,6 +51,9 @@ export interface BrowserAutomationServiceOptions {
   readonly schedule?: (delayMs: number, callback: () => void) => () => void;
 }
 
+/** How long a picture of a page stays current before a preview may ask for another. */
+const PEEK_INTERVAL_MS = 1_500;
+
 interface OwnedContext {
   readonly windowId: WindowId;
   readonly threadId: BrowserThreadId;
@@ -586,6 +589,59 @@ export class BrowserAutomationService {
     const owned = this.#current(windowId, threadId);
     if (owned === undefined) return { status: "ready", threadId, evidence: [] };
     return this.inspect(windowId, threadId, owned.record.contextId);
+  }
+
+  /**
+   * The thread's Browser as it stands, with a fresh look at the page when the
+   * runtime can take one. A page the person drives records no action, so its
+   * picture was whatever the agent last saw — usually nothing. A peek records
+   * no evidence and takes no authority: it reads what the context already
+   * shows, and no more often than the interval however often a preview asks.
+   */
+  async peekThread(
+    windowId: WindowId,
+    threadId: BrowserThreadId,
+    signal?: AbortSignal,
+  ): Promise<BrowserAutomationSnapshot> {
+    const owned = this.#current(windowId, threadId);
+    const peek = this.#runtime.peek;
+    if (
+      owned !== undefined &&
+      peek !== undefined &&
+      // A live context is "running" for as long as it exists; "waiting" is one
+      // still being created, whose page is not there to look at yet.
+      owned.status === "running" &&
+      !this.#observedWithin(owned, PEEK_INTERVAL_MS)
+    ) {
+      try {
+        const observed = await peek(owned.record.contextId, signal ?? new AbortController().signal);
+        owned.observation = {
+          contextId: owned.record.contextId,
+          actionId: owned.record.actionId,
+          correlationId: owned.record.correlationId,
+          authority: owned.record.authority,
+          ...(observed.url === undefined ? {} : { url: observed.url }),
+          ...(observed.title === undefined ? {} : { title: observed.title }),
+          ...(observed.contentHash === undefined ? {} : { contentHash: observed.contentHash }),
+          ...(observed.screenshotDataUrl === undefined
+            ? {}
+            : { screenshotDataUrl: observed.screenshotDataUrl }),
+          ...(observed.viewport === undefined ? {} : { viewport: observed.viewport }),
+          revision: ++owned.observationRevision,
+          observedAt: this.#clock() as BrowserObservation["observedAt"],
+          stale: false,
+        };
+      } catch {
+        // The last observation stands; a peek that fails changes nothing.
+      }
+    }
+    return this.inspectThread(windowId, threadId);
+  }
+
+  #observedWithin(owned: OwnedContext, intervalMs: number): boolean {
+    const observedAt = owned.observation?.observedAt;
+    if (observedAt === undefined || owned.observation?.stale === true) return false;
+    return Date.parse(this.#clock()) - Date.parse(observedAt) < intervalMs;
   }
 
   async releaseThread(

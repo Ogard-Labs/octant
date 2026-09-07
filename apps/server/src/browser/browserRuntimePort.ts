@@ -93,6 +93,16 @@ export interface BrowserRuntimePort {
     point: { readonly x: number; readonly y: number },
     signal: AbortSignal,
   ) => Promise<BrowserPointObservation>;
+  /**
+   * Look at the page as it stands without acting on it: address, title, and
+   * a picture when the page is not a credential form. A page the person
+   * drives themselves records no action, so this is how its preview stays
+   * current. Optional: a runtime that cannot picture its page offers none.
+   */
+  readonly peek?: (
+    contextId: BrowserContextId,
+    signal: AbortSignal,
+  ) => Promise<BrowserRuntimeObservation>;
   readonly closeContext: (contextId: BrowserContextId) => Promise<void>;
   readonly closeAll: () => Promise<void>;
   readonly reconcile?: () => Promise<void>;

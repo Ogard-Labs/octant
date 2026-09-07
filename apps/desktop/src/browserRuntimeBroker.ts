@@ -16,6 +16,7 @@ const ROUTES = new Set([
   "/v1/contexts/inspect-target",
   "/v1/contexts/gone",
   "/v1/contexts/act",
+  "/v1/contexts/peek",
   "/v1/contexts/close",
   "/v1/contexts/close-all",
 ]);
@@ -150,6 +151,10 @@ async function handleBrokerRequest(
         return failure("invalid-request", 400);
       }
       return Response.json(await host.inspectTarget(body.contextId, body.selector));
+    }
+    if (url.pathname === "/v1/contexts/peek") {
+      if (!isUuid(body.contextId)) return failure("invalid-request", 400);
+      return Response.json(await host.peek(body.contextId));
     }
     if (url.pathname === "/v1/contexts/act") {
       if (!isUuid(body.contextId) || !isBrowserAction(body.request)) {

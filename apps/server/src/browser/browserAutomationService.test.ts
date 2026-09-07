@@ -88,6 +88,14 @@ function harness(
         contentHash: String(contextId),
       };
     }),
+    peek: vi.fn(async (contextId) => {
+      if (!contexts.has(contextId)) throw new Error("missing context");
+      return {
+        url: "https://example.com/driven",
+        title: "Driven by hand",
+        screenshotDataUrl: "data:image/jpeg;base64,AAAA",
+      };
+    }),
     closeContext: vi.fn(async (contextId) => void contexts.delete(contextId)),
     closeAll: vi.fn(async () => void contexts.clear()),
     onProcessExit: (listener) => {
@@ -114,7 +122,7 @@ function harness(
       ? {}
       : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
     uuid: () => ids.shift() ?? crypto.randomUUID(),
-    clock: () => "2026-07-27T20:00:00.000Z",
+    clock: () => new Date(now).toISOString(),
     now: () => now,
     schedule: (_delay, callback) => {
       expire = callback;
@@ -180,6 +188,24 @@ describe("BrowserAutomationService", () => {
       policy,
     });
     expect(created.context?.presentation).toBe("headless");
+  });
+
+  it("shows a fresh picture of a page the person drives, without recording an action", async () => {
+    const { advance, runtime, service } = harness();
+    await service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const before = service.inspectThread(windowId, threadOne);
+    advance(2_000);
+
+    const peeked = await service.peekThread(windowId, threadOne);
+
+    expect(runtime.peek).toHaveBeenCalledTimes(1);
+    expect(peeked.observation?.screenshotDataUrl).toBe("data:image/jpeg;base64,AAAA");
+    expect(peeked.observation?.url).toBe("https://example.com/driven");
+    expect(peeked.observation?.stale).toBe(false);
+    expect(peeked.evidence).toEqual(before.evidence);
+    // Asked again at once, the picture stands and the runtime is left alone.
+    await service.peekThread(windowId, threadOne);
+    expect(runtime.peek).toHaveBeenCalledTimes(1);
   });
 
   it("reattaches one current context per window and thread and releases only that scope", async () => {

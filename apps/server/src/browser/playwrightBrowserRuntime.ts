@@ -316,6 +316,11 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     }
   }
 
+  async peek(contextId: BrowserContextId, signal: AbortSignal): Promise<BrowserRuntimeObservation> {
+    const page = await this.#page(contextId, signal);
+    return this.#observe(page, false, this.#contexts.get(contextId)?.protectCredentials ?? true);
+  }
+
   async act(
     contextId: BrowserContextId,
     request: BrowserActionRequest,

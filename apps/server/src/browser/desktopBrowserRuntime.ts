@@ -77,6 +77,10 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
     return this.#request("/v1/contexts/inspect-target", { contextId, selector }, signal);
   }
 
+  peek(contextId: BrowserContextId, signal: AbortSignal): Promise<BrowserRuntimeObservation> {
+    return this.#request("/v1/contexts/peek", { contextId }, signal);
+  }
+
   act(
     contextId: BrowserContextId,
     request: BrowserActionRequest,

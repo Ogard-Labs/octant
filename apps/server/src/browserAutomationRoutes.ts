@@ -30,7 +30,8 @@ export interface BrowserAutomationRouteDependencies {
   readonly service: Pick<
     BrowserAutomationService,
     "create" | "act" | "cancel" | "stop" | "inspect" | "inspectThread" | "releaseThread"
-  >;
+  > &
+    Partial<Pick<BrowserAutomationService, "peekThread">>;
   readonly authority: BrowserAuthorityResolver;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxRequestBodySize: number;
@@ -119,12 +120,13 @@ export function createBrowserAutomationRouteHandler(
       }
       if (url.pathname === "/api/browser/contexts/current") {
         const input = decodeBrowserThreadContextCommand(decoded.value);
-        return success(
-          decodeBrowserAutomationSnapshot(
-            dependencies.service.inspectThread(windowId, input.threadId),
-          ),
-          origin,
-        );
+        // The preview polls this route, so it is where a page the person
+        // drives gets its picture refreshed.
+        const snapshot =
+          dependencies.service.peekThread === undefined
+            ? dependencies.service.inspectThread(windowId, input.threadId)
+            : await dependencies.service.peekThread(windowId, input.threadId);
+        return success(decodeBrowserAutomationSnapshot(snapshot), origin);
       }
       if (url.pathname === "/api/browser/contexts/release") {
         const input = decodeBrowserThreadContextCommand(decoded.value);

@@ -8,6 +8,10 @@ function host() {
   return {
     available: () => true,
     act: vi.fn(async () => ({ url: "https://example.com/" })),
+    peek: vi.fn(async () => ({
+      url: "https://example.com/",
+      screenshotDataUrl: "data:image/jpeg;base64,AAAA",
+    })),
     closeAll: vi.fn(async () => undefined),
     closeContext: vi.fn(async () => undefined),
     createContext: vi.fn(async () => undefined),
@@ -45,6 +49,32 @@ describe("BrowserRuntimeBroker", () => {
       );
       expect(invalid.status).toBe(400);
       expect(surface.act).toHaveBeenCalledOnce();
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("returns a picture of the page on peek without treating it as an action", async () => {
+    const surface = host();
+    const broker = await startBrowserRuntimeBroker(surface as never);
+    try {
+      const response = await broker.fetchForTest(
+        new Request(new URL("v1/contexts/peek", broker.url), {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-octant-browser-broker-token": broker.token,
+          },
+          body: JSON.stringify({ contextId }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        url: "https://example.com/",
+        screenshotDataUrl: "data:image/jpeg;base64,AAAA",
+      });
+      expect(surface.peek).toHaveBeenCalledWith(contextId);
+      expect(surface.act).not.toHaveBeenCalled();
     } finally {
       await broker.close();
     }
