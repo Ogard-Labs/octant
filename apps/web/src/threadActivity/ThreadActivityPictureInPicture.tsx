@@ -379,7 +379,7 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
           <footer className="thread-activity-pip__footer">
             <span>
               {activeKind === "browser"
-                ? (currentBrowserSnapshot?.observation?.url ?? "Thread-owned Browser")
+                ? (currentBrowserSnapshot?.observation?.url ?? "Browser")
                 : latestComputerUseDetail(currentComputerSession)}
             </span>
             <IconButton
@@ -418,16 +418,17 @@ function BrowserActivityPreview(props: {
       </OctantButton>
     );
   }
+  // Without a picture there is nothing to frame: a box holding an icon and
+  // two sentences was the preview's whole height with nothing previewed. One
+  // line says where the page is, and the header already offers the way there.
   return (
-    <div className="thread-activity-pip__visual thread-activity-pip__empty">
-      <Globe2 aria-hidden="true" size={24} strokeWidth={1.5} />
-      <strong>{observation?.stale === true ? "Preview is stale" : "Browser is active"}</strong>
-      <span>
-        {props.snapshot.context?.presentation === "native-live"
-          ? "Open the Browser tab for the live native surface."
-          : "Waiting for the next safe page snapshot."}
-      </span>
-    </div>
+    <p className="thread-activity-pip__note">
+      {props.snapshot.context?.presentation === "native-live"
+        ? "Live in the Browser tab."
+        : observation?.stale === true
+          ? "Preview is stale; waiting for the next page snapshot."
+          : "Waiting for the next page snapshot."}
+    </p>
   );
 }
 

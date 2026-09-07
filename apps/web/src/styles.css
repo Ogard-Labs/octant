@@ -466,6 +466,14 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   line-height: 1.45;
 }
 
+.thread-activity-pip__note {
+  margin: 0;
+  padding: 2px 10px 8px;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
+}
+
 .thread-activity-pip__approval {
   display: flex;
   justify-content: center;

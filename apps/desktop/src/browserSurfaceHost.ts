@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { originAllowed as sameSiteOriginAllowed } from "@octant/domain";
 import type {
   BrowserActionRequest,
   BrowserContextId,
@@ -824,8 +825,7 @@ function normalizeUrl(value: string): string {
 function originAllowed(target: string, allowedOrigins: ReadonlyArray<string>): boolean {
   if (target === "about:blank") return true;
   try {
-    const origin = new URL(normalizeUrl(target)).origin;
-    return allowedOrigins.some((allowed) => new URL(normalizeUrl(allowed)).origin === origin);
+    return sameSiteOriginAllowed(normalizeUrl(target), allowedOrigins.map(normalizeUrl));
   } catch {
     return false;
   }

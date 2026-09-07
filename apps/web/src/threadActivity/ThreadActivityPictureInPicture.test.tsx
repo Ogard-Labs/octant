@@ -330,7 +330,7 @@ describe("ThreadActivityPictureInPicture", () => {
         <div>Conversation</div>
       </ThreadActivityPictureInPicture>,
     );
-    expect(await screen.findByText("Preview is stale")).toBeVisible();
+    expect(await screen.findByText(/Preview is stale/)).toBeVisible();
     expect(screen.queryByRole("img", { name: /browser activity/i })).not.toBeInTheDocument();
   });
 

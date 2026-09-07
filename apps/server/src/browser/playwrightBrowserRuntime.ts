@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { originAllowed } from "@octant/domain";
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { isAbsolute } from "node:path";
@@ -848,20 +849,4 @@ function httpUrlForWebSocket(target: string): string {
   } catch {
     return target;
   }
-}
-
-function originAllowed(target: string, allowedOrigins: ReadonlyArray<string>): boolean {
-  let targetOrigin: string;
-  try {
-    targetOrigin = new URL(target).origin;
-  } catch {
-    return false;
-  }
-  return allowedOrigins.some((allowed) => {
-    try {
-      return new URL(allowed).origin === targetOrigin;
-    } catch {
-      return false;
-    }
-  });
 }

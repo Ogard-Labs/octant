@@ -344,14 +344,18 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
               aria-hidden="true"
               className="workspace-pane__window-drag-space window-drag-region"
             />
-            <OctantIconButton
-              className="workspace-pane__close"
-              label={`Close ${surface.title}`}
-              onClick={() => props.onClosePane(pane.paneId)}
-              type="button"
-            >
-              <X aria-hidden="true" size={14} strokeWidth={1.8} />
-            </OctantIconButton>
+            {/* Alone in the window there is nothing to close into; the × is a
+                split's control, for giving one pane's room back to the other. */}
+            {props.layout.kind === "pane" ? null : (
+              <OctantIconButton
+                className="workspace-pane__close"
+                label={`Close ${surface.title}`}
+                onClick={() => props.onClosePane(pane.paneId)}
+                type="button"
+              >
+                <X aria-hidden="true" size={14} strokeWidth={1.8} />
+              </OctantIconButton>
+            )}
           </OctantContextMenuTrigger>
           <PaneMenu
             canSplit={canSplit}

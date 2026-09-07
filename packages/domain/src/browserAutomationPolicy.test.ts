@@ -5,6 +5,7 @@ import {
   canRecordBrowserObservation,
   isContextExpired,
   shouldProtectCredentialField,
+  originAllowed,
   remoteBrowserActionReach,
 } from "./browserAutomationPolicy";
 import type {
@@ -265,5 +266,24 @@ describe("what a paired device may do in the host's browser", () => {
   it("keeps typing into the page and closing its tabs on the host", () => {
     expect(remoteBrowserActionReach("type").kind).toBe("denied");
     expect(remoteBrowserActionReach("close-tab").kind).toBe("denied");
+  });
+});
+
+describe("originAllowed", () => {
+  it("treats a site's www host and its bare host as one place", () => {
+    expect(originAllowed("https://www.vg.no/", ["https://vg.no"])).toBe(true);
+    expect(originAllowed("https://vg.no/front", ["https://www.vg.no"])).toBe(true);
+  });
+
+  it("lets an http allowlist entry cover the https page it upgrades to, never the reverse", () => {
+    expect(originAllowed("https://example.com/", ["http://example.com"])).toBe(true);
+    expect(originAllowed("http://example.com/", ["https://example.com"])).toBe(false);
+  });
+
+  it("keeps every other host and every port exact", () => {
+    expect(originAllowed("https://login.vg.no/", ["https://vg.no"])).toBe(false);
+    expect(originAllowed("https://evil-vg.no/", ["https://vg.no"])).toBe(false);
+    expect(originAllowed("http://127.0.0.1:4321/", ["http://127.0.0.1:5173"])).toBe(false);
+    expect(originAllowed("about:blank", ["https://vg.no"])).toBe(false);
   });
 });

@@ -105,7 +105,8 @@ describe("WorkspaceView Code tab registration", () => {
     render(<WorkspaceView {...propsFor(codeTab("code-overview", "Planning"))} />);
 
     expect(await screen.findByTitle("Drag to move or split")).toHaveTextContent("Planning");
-    expect(screen.getByRole("button", { name: "Close Planning" })).toBeVisible();
+    // Alone in the window there is nothing to close into.
+    expect(screen.queryByRole("button", { name: "Close Planning" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tablist", { name: "Open threads" })).not.toBeInTheDocument();
   });
 
