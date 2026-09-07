@@ -59,7 +59,9 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
       data-environment-status={props.summary.identity.status}
     >
       <header className="thread-environment-dock__header">
-        <h2>Environment</h2>
+        {/* The dock strip's tab already says Environment; the rail shows the
+            facts and the heading stays for readers who navigate by heading. */}
+        <h2 className="visually-hidden">Environment</h2>
         <span>{[props.summary.identity.label, ...facts].join(" · ")}</span>
       </header>
       <div className="thread-environment-dock__body">{props.children}</div>

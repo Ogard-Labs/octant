@@ -229,7 +229,6 @@ function AvailableDiff(
     <section aria-label="Review" className="code-diff-pane">
       <header className="code-diff-pane__toolbar">
         <div>
-          <span>Review</span>
           <h1>{props.snapshot.title}</h1>
         </div>
         <p>

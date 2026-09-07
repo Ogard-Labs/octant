@@ -409,10 +409,67 @@
   height: 100%;
 }
 
-/* A tool's own toolbar sits directly under the dock head, so it takes the
-   same rail height; two hairline bars four pixels apart read as two rails. */
-.right-utility-dock__tool .code-file-explorer-panel__toolbar {
+/* The strip names the tool, so a tool's own head is the dock head's rail:
+   one height, one ground, one hairline. Measured before this rule, seven
+   heads stood 34–59px tall on three tints, and two hairline bars a few
+   pixels apart read as two rails. */
+.right-utility-dock__tool
+  :is(
+    .code-file-explorer-panel__toolbar,
+    .code-delivery-pane__toolbar,
+    .code-diff-pane__toolbar,
+    .browser-workspace__chrome,
+    .side-chat__header,
+    .thread-environment-dock__header
+  ) {
+  display: flex;
   min-height: var(--oct-title-rail-h);
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: 4px var(--oct-space-3) 3px;
+  background: transparent;
+  border-bottom: 1px solid var(--oct-border);
+}
+
+/* A rail holds one line: the title yields before the count and the layout
+   control do, and the layout control keeps the rail's 28px button height so
+   the rail stays 38px instead of wrapping onto two lines. */
+.right-utility-dock__tool :is(.code-diff-pane__toolbar, .code-delivery-pane__toolbar) > div {
+  display: block;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.right-utility-dock__tool :is(.code-diff-pane__toolbar, .code-delivery-pane__toolbar) h1 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.right-utility-dock__tool :is(.code-diff-pane__toolbar, .code-delivery-pane__toolbar) p {
+  flex: none;
+  white-space: nowrap;
+}
+
+.right-utility-dock__tool .code-diff-pane__toolbar [data-slot="toggle-group"] {
+  flex: none;
+  padding: 0;
+}
+
+.right-utility-dock__tool .browser-workspace {
+  grid-template-rows: var(--oct-title-rail-h) minmax(0, 1fr);
+}
+
+.right-utility-dock__tool .browser-workspace--message {
+  grid-template-rows: var(--oct-title-rail-h) auto minmax(0, 1fr);
+}
+
+/* The notice is body copy about what the tool cannot do; a 38px rail holds
+   the title alone, so the notice reads under it at the body's inset. */
+.right-utility-dock__tool .side-chat__notice {
+  margin: 0;
+  padding: var(--oct-space-2) var(--oct-space-3) 0;
 }
 
 .bottom-utility-panel {

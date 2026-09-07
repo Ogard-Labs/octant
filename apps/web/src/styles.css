@@ -3711,7 +3711,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 }
 .thread-environment-dock__body {
   display: grid;
-  padding: 0 14px 18px;
+  padding: 0 var(--oct-space-3) 18px;
 }
 .thread-environment-dock__body > * + * {
   border-top: 1px solid var(--oct-hairline);
