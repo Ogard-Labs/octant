@@ -7947,10 +7947,24 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
 }
 
 .code-board__view-popover {
+  display: grid;
   left: auto;
   right: 0;
-  min-width: 190px;
+  min-width: 220px;
   padding: var(--oct-space-2);
+  gap: var(--oct-space-2);
+}
+
+.code-board__view-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+}
+
+.code-board__view-label {
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-detail);
 }
 
 .code-board__view-popover label {
@@ -8311,10 +8325,6 @@ ul.board-col-body {
 
   .code-board__subtitle {
     display: none;
-  }
-
-  .code-board__grouping {
-    order: 2;
   }
 
   .code-board__search {
@@ -8691,9 +8701,8 @@ ul.board-col-body {
   grid-template-columns: 16px minmax(0, 1fr);
   width: 100%;
   height: auto;
-  min-height: 66px;
   gap: 10px;
-  padding: 10px 8px;
+  padding: 8px;
   border: 0;
   border-bottom: 1px solid var(--oct-border-soft);
   border-radius: 0;

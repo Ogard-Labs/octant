@@ -201,33 +201,6 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
       />
 
       <div aria-label="Board controls" className="surface-toolbar" role="group">
-        <OctantToggleGroup<CodeBoardLayout>
-          aria-label="Layout"
-          className="code-board__layout"
-          onValueChange={(value) => {
-            const selected = value[0];
-            if (selected !== "board" && selected !== "list") return;
-            setLayout(selected);
-            writeStoredLayout(storage, selected);
-          }}
-          value={[layout]}
-        >
-          <OctantToggleGroupItem value="board">Board</OctantToggleGroupItem>
-          <OctantToggleGroupItem value="list">List</OctantToggleGroupItem>
-        </OctantToggleGroup>
-        <OctantToggleGroup<CodeBoardGrouping>
-          aria-label="Group by"
-          className="code-board__grouping"
-          onValueChange={(value) => {
-            const selected = value[0];
-            if (selected === "status" || selected === "project") changeGrouping(selected);
-          }}
-          value={[grouping]}
-        >
-          <OctantToggleGroupItem value="status">Status</OctantToggleGroupItem>
-          <OctantToggleGroupItem value="project">Project</OctantToggleGroupItem>
-        </OctantToggleGroup>
-
         <label className="surface-toolbar__search code-board__search">
           <span className="sr-only">Search threads</span>
           <Search aria-hidden="true" size={14} strokeWidth={1.8} />
@@ -411,6 +384,38 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
             triggerLabel="View"
             triggerVariant="ghost"
           >
+            <div className="code-board__view-row">
+              <span className="code-board__view-label">Layout</span>
+              <OctantToggleGroup<CodeBoardLayout>
+                aria-label="Layout"
+                className="code-board__layout"
+                onValueChange={(value) => {
+                  const selected = value[0];
+                  if (selected !== "board" && selected !== "list") return;
+                  setLayout(selected);
+                  writeStoredLayout(storage, selected);
+                }}
+                value={[layout]}
+              >
+                <OctantToggleGroupItem value="board">Board</OctantToggleGroupItem>
+                <OctantToggleGroupItem value="list">List</OctantToggleGroupItem>
+              </OctantToggleGroup>
+            </div>
+            <div className="code-board__view-row">
+              <span className="code-board__view-label">Group by</span>
+              <OctantToggleGroup<CodeBoardGrouping>
+                aria-label="Group by"
+                className="code-board__grouping"
+                onValueChange={(value) => {
+                  const selected = value[0];
+                  if (selected === "status" || selected === "project") changeGrouping(selected);
+                }}
+                value={[grouping]}
+              >
+                <OctantToggleGroupItem value="status">Status</OctantToggleGroupItem>
+                <OctantToggleGroupItem value="project">Project</OctantToggleGroupItem>
+              </OctantToggleGroup>
+            </div>
             <label>
               <OctantCheckbox
                 checked={showEmptyGroups}

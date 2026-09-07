@@ -155,19 +155,6 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
       />
 
       <div aria-label="Board controls" className="surface-toolbar" role="group">
-        <OctantToggleGroup<WorkBoardGrouping>
-          aria-label="Group by"
-          className="code-board__grouping"
-          onValueChange={(value) => {
-            const selected = value[0];
-            if (selected === "status" || selected === "project") changeGrouping(selected);
-          }}
-          value={[grouping]}
-        >
-          <OctantToggleGroupItem value="status">Status</OctantToggleGroupItem>
-          <OctantToggleGroupItem value="project">Project</OctantToggleGroupItem>
-        </OctantToggleGroup>
-
         <label className="surface-toolbar__search code-board__search">
           <span className="sr-only">Search threads</span>
           <Search aria-hidden="true" size={14} strokeWidth={1.8} />
@@ -328,6 +315,21 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
             triggerLabel="View"
             triggerVariant="ghost"
           >
+            <div className="code-board__view-row">
+              <span className="code-board__view-label">Group by</span>
+              <OctantToggleGroup<WorkBoardGrouping>
+                aria-label="Group by"
+                className="code-board__grouping"
+                onValueChange={(value) => {
+                  const selected = value[0];
+                  if (selected === "status" || selected === "project") changeGrouping(selected);
+                }}
+                value={[grouping]}
+              >
+                <OctantToggleGroupItem value="status">Status</OctantToggleGroupItem>
+                <OctantToggleGroupItem value="project">Project</OctantToggleGroupItem>
+              </OctantToggleGroup>
+            </div>
             <label>
               <OctantCheckbox
                 checked={showEmptyGroups}

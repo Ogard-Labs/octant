@@ -138,7 +138,7 @@ describe("CodeProjectPullRequests", () => {
     expect(within(octant).getByText("Linked: Manual refresh")).toBeVisible();
     expect(
       within(notes).getByText(
-        "No github.com origin detected. Add one to this Project to enable pull-request refresh.",
+        "No github.com origin. Add one to list this Project's pull requests.",
       ),
     ).toBeVisible();
     expect(octant.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -346,7 +346,6 @@ describe("CodeProjectPullRequests", () => {
     const rowContent = ruleBody(stylesheet, ".code-project-pull-requests__row-content");
     const row = ruleBody(stylesheet, ".code-project-pull-requests__row");
     expect(row).toMatch(/height:\s*auto/);
-    expect(row).toMatch(/min-height:\s*66px/);
     expect(rowContent).toMatch(/display:\s*grid/);
     expect(rowContent).toMatch(
       /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(250px,\s*auto\)/,
