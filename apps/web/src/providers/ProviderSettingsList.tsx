@@ -1192,7 +1192,9 @@ function ProviderRow(props: ProviderRowProps) {
                     className="provider-model-visibility"
                     aria-labelledby={`models-${props.instance.id}`}
                   >
-                    <h4 id={`models-${props.instance.id}`}>Models</h4>
+                    <h4 className="oct-section-label" id={`models-${props.instance.id}`}>
+                      Models
+                    </h4>
                     <p className="oct-row-detail">Choose which models appear in new selections.</p>
                     <OctantInput
                       aria-label={`Filter ${props.instance.displayName} models`}
@@ -1252,7 +1254,9 @@ function ProviderRow(props: ProviderRowProps) {
                     ) : null}
                   </section>
                   <section aria-labelledby={`capabilities-${props.instance.id}`}>
-                    <h4 id={`capabilities-${props.instance.id}`}>Capabilities</h4>
+                    <h4 className="oct-section-label" id={`capabilities-${props.instance.id}`}>
+                      Capabilities
+                    </h4>
                     <dl>
                       {capabilityLabels.map(([key, label]) => (
                         <div key={key}>

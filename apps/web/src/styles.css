@@ -2471,7 +2471,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .provider-card__discovery {
   display: grid;
-  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   padding-top: 4px;
   border-top: 1px solid var(--octant-border);
@@ -2479,10 +2479,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .provider-card__discovery h4 {
   margin-bottom: 8px;
-  color: var(--octant-text-secondary);
-  font-size: calc(11 * var(--oct-text-step));
-  text-transform: none;
-  letter-spacing: 0;
 }
 
 .provider-card__discovery ul {
