@@ -1,0 +1,107 @@
+# Design system assessment
+
+Date: 8 September 2026
+
+## Overall assessment
+
+Octant has a coherent foundation: a neutral default palette, shared typography,
+compact navigation, flat working regions, and a small set of owned controls.
+The main source of inconsistency is the accumulation of feature-specific
+styles and older rules alongside that foundation. A new visual system would
+add another layer to maintain. Continuing to consolidate the existing one is
+the better direction.
+
+This pass improves the high-frequency surfaces while preserving themes,
+backgrounds, mode navigation, saved profiles, and task data. The default design
+language is monochrome; optional tinted themes, provider identity, diffs,
+errors, and meaningful warning states remain distinct.
+
+## Evidence and limits
+
+The assessment covers `DESIGN.md`, the theme package, renderer fallback and
+bridge, shared control recipes, shell, composers, Settings, model pickers,
+Environment, activity preview, thread navigation, and pull request surfaces.
+It also uses the supplied screenshots and the native inspection performed
+before the Mac was locked.
+
+Final rendered verification is pending. The lock screen prevents native and
+browser UI inspection, so source and component-test evidence below must not
+be treated as final visual acceptance. In particular, native transparency,
+physical title-bar clicks, and popup collision behavior need an unlocked Mac.
+
+## Surface assessment
+
+| Area                      | Current direction and changes                                                                                                                                                                                          | Verification still needed                                                                                   |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Default palette           | Runtime defaults are neutral. The static action accent no longer defaults to brass. Routine Waiting marks use neutral ink; warnings retain their semantic role. The optional brass preset remains available.           | Compare neutral light/dark defaults and tinted presets at normal and increased contrast.                    |
+| Typography                | Page titles and subtitles use shared roles. Generic section headings use the display weight instead of a global 600-weight override.                                                                                   | Check hierarchy in Settings, PR detail, and dense dock sections at all interface sizes.                     |
+| Workspace shell           | Main and Settings navigation use the same saved sidebar width. The native leading controls reserve space when the sidebar is collapsed; split close controls stay at the pane's trailing edge.                         | Physical close clicks with one and several panes, collapsed sidebar, and narrow windows.                    |
+| Materials and backgrounds | Main and Settings sidebars follow the host-resolved material. Explicit opaque and reduced-transparency fallbacks remain. Background and theme controls are preserved.                                                  | Confirm native translucency and readability with maximum background intensity and a custom photo.           |
+| Composer                  | Shared attachment behavior, one chip-removal treatment, consistent posture wording, and compact control rows reduce variation across modes.                                                                            | Keyboard, paste, drop, unsupported-image feedback, and narrow composer wrapping.                            |
+| Model picker              | Provider refresh preserves the active rail. The popup anchors to the trigger's trailing edge, uses a smaller stable frame, and scrolls internally. Select lists do not cover their own trigger with the selected item. | Open near every viewport edge; switch short/long catalogs, search, resize, and reopen after changing model. |
+| Model visibility          | Provider model lists have a filter and reversible Shown/Hidden controls. Visibility persists across discovery. Existing task bindings remain usable.                                                                   | Hide, refresh, reopen, restore, and verify the all-hidden new-task state in the live app.                   |
+| Settings                  | Shared title/subtitle roles, open sections, aligned rows, and scoped alerts replace several local treatments. Saved profiles remain visible while the long execution-context chooser is disclosed on demand.           | Check control alignment and error/loading states across every Settings page.                                |
+| Environment               | The surface stays flat in the dock. Facts, actions, and disclosures share a compact rhythm. Server counts distinguish the checkout from elsewhere. Delivers controls have consistent icon spacing.                     | Expand/collapse every group at narrow width; verify long branch/path labels and zero states.                |
+| Activity preview          | The preview belongs over the conversation. Environment contains the visibility control, not the preview itself.                                                                                                        | Position, resizing, keyboard controls, stop/approval controls, and multiple panes.                          |
+| Thread list and menus     | Time and row actions have a reserved trailing region. Hover details have a bounded layout; context menus use the shared adapter and a constrained width.                                                               | Long titles, active/unread/pinned states, pointer hover, keyboard opening, and dismissal.                   |
+| Pull requests             | The main list uses shared page and section headers, regular rows, and responsive metadata.                                                                                                                             | Empty/error/loading states and long titles in both the list and dock reader.                                |
+| Permission states         | Failed or interrupted turns clear unusable approvals. Browser grants are scoped to an isolated session and revoked on cancellation.                                                                                    | Complete an approved live browser turn and verify denial, stop, and expiry through the rendered UI.         |
+
+## Remaining findings
+
+### Provider identity is still incomplete
+
+The requested branded provider logos have not been added. Automatic approval
+review rejected both the asset bundling and the proposed exception to the
+existing asset policy. `ProviderGlyph` still renders the existing original
+marks and accessible labels. This needs explicit approval of a small licensed
+asset bundle; approximating brand marks is not a substitute.
+
+### Feature styles still duplicate shared control appearance
+
+The stylesheet baseline currently records 390 control-repaint exceptions
+across 22 files, 12 off-scale font-size exceptions, 12 literal-motion
+exceptions, nine `!important` exceptions, and 12 heavier-weight exceptions.
+These are tracked migration debt, not 435 independently verified visual bugs.
+The checks prevent growth but do not mean every existing surface conforms.
+
+Consolidate these when a surface is next changed: move appearance into the
+existing recipe, retain feature layout rules, and lower the baseline. Avoid a
+large stylesheet move during a functional fix.
+
+### Secondary text has an extra implementation tier
+
+The written language describes three text strengths, while
+`octant-bridge.css` also derives `--oct-fg-2` from primary text at 90%.
+This makes some secondary labels stronger than labels using the actual
+secondary token. A later, visually verified pass should choose one consistent
+secondary role and check light/dark contrast before changing all consumers.
+
+### Profiles need a product decision, not an accidental removal
+
+Personal profile and execution profiles describe different concepts. The
+execution-profile workflow still has saved data, editing, and resolution
+behavior. This pass reduces its visual weight without deleting it. Decide
+whether to retain and clearly name that capability or deliberately retire it
+with a data-preservation plan.
+
+## Acceptance checklist for the unlocked app
+
+1. Compare main and Settings sidebar widths after resizing, reopening, and
+   switching modes; verify translucent and opaque host states.
+2. Exercise split close controls with the sidebar open and collapsed using
+   physical pointer clicks, then keyboard navigation.
+3. Open the model picker above and below the composer, switch providers,
+   filter, and resize; neither the page nor popup should jump.
+4. Test model visibility across all picker surfaces, including an existing
+   task on a hidden model and a new task with every model hidden.
+5. Inspect Environment expanded and collapsed, with no servers, checkout
+   servers, and servers elsewhere; the preview must remain over the conversation.
+6. Check Settings, thread hover/menu, PR list/detail, and composers at narrow
+   widths and large interface text. Confirm quiet visible keyboard cues.
+7. Repeat the core views in neutral light/dark, a tinted preset, reduced
+   motion/transparency, and with the custom background enabled.
+
+The foundation is suitable for continued polish. Final acceptance should be
+based on these rendered checks, with the preserved customization options
+enabled, rather than on stylesheet checks alone.

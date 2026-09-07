@@ -5726,13 +5726,13 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   box-sizing: border-box;
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr);
-  width: min(640px, 90vw);
+  width: min(560px, 90vw);
   /* A fixed box, not a cap. The rail switches provider inside one open menu,
      and provider lists differ wildly in length — a twelve-model list next to
      an empty one resized the panel between clicks, so the menu appeared to
      jump under the pointer. A stable height costs some empty space on short
      lists and buys a menu that holds still. The list pane scrolls. */
-  height: min(60vh, 520px);
+  height: min(56vh, 420px);
   max-height: calc(100dvh - 24px);
   padding: 0;
   overflow: hidden;
@@ -6108,7 +6108,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 @media (max-width: 640px) {
   .composer-model-picker__menu {
     width: calc(100vw - 32px);
-    height: min(70vh, 520px);
+    height: min(70vh, 420px);
   }
 }
 
