@@ -673,6 +673,75 @@ function localServersWiring(
   return { props, browserAutomationClient, create, act, stop };
 }
 
+describe("WorkspaceView pane title facts", () => {
+  it("names the thread's pull request and Project/branch beside the pane title", async () => {
+    const base = propsFor(codeTab("code-overview", "Faster issue validation"));
+    const project = {
+      id: ids.project,
+      type: "code",
+      name: "Octant",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      binding: { canonicalRoot: "/Users/example/code/octant" },
+      codeAccessPersistence: "current-session",
+    } as never;
+    const navigation = [
+      {
+        threadId: codeIds.thread,
+        projectId: ids.project,
+        pullRequestSummaries: {
+          items: [
+            {
+              identity: {
+                projectId: ids.project,
+                repositoryOwner: "acme",
+                repositoryName: "octant",
+                number: 917,
+              },
+              title: "Faster issue validation",
+              state: "open",
+              checks: "failing",
+              review: "pending",
+              mergeability: "mergeable",
+              freshness: "fresh",
+              readyToMerge: false,
+            },
+          ],
+          hiddenCount: 0,
+        },
+      },
+    ];
+    const bootstrap = {
+      threads: [{ id: codeIds.thread, checkoutId: codeIds.checkout }],
+      checkouts: [
+        {
+          id: codeIds.checkout,
+          head: { kind: "branch", name: "fix/validation", oid: "a".repeat(40) },
+        },
+      ],
+    };
+    render(
+      <WorkspaceView
+        {...base}
+        codeController={{ ...(base.codeController as object), navigation, bootstrap } as never}
+        projects={[project]}
+      />,
+    );
+
+    const header = (
+      await screen.findByRole("region", { name: "Workspace pane: Faster issue validation" })
+    ).querySelector<HTMLElement>(".workspace-pane__header")!;
+    const chip = within(header).getByText("#917");
+    expect(chip).toHaveAttribute("data-tone", "open");
+    expect(chip).toHaveAttribute("data-checks", "failing");
+    expect(within(header).getByText("Octant/fix/validation")).toBeVisible();
+  });
+});
+
 describe("WorkspaceView concurrent Code threads", () => {
   it("shows each open Code thread its own composition rather than the focused one's", async () => {
     const threadBId = "b0000000-0000-4000-8000-000000000002";

@@ -432,16 +432,13 @@ describe("CodeHome", () => {
     const rows = within(next).getAllByRole("button");
     expect(rows[0]).toHaveTextContent("#12 Open");
     expect(rows[0]).toHaveTextContent("checks failing");
-    expect(rows[0]!.querySelector(".code-home__fact--chip")).toHaveAttribute(
-      "data-checks",
-      "failing",
-    );
+    expect(rows[0]!.querySelector(".pull-request-chip")).toHaveAttribute("data-checks", "failing");
     expect(rows[1]).toHaveTextContent("#13 Open");
     expect(rows[1]).toHaveTextContent("checks pending");
     // A merged request has nothing left to check; its chip never says so.
     expect(rows[2]).toHaveTextContent("#273 Merged");
     expect(rows[2]).not.toHaveTextContent("checks");
-    expect(rows[2]!.querySelector(".code-home__fact--chip")).not.toHaveAttribute("data-checks");
+    expect(rows[2]!.querySelector(".pull-request-chip")).not.toHaveAttribute("data-checks");
   });
 
   it("names the thread's own state and leaves the pull request to the facts", () => {

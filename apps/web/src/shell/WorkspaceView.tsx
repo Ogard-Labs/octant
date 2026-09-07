@@ -26,7 +26,7 @@ import type {
 } from "@octant/contracts/canvasContext";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ComposerContextMeterGate } from "../context/composerContextMeterScope";
-import { SplitWorkspace } from "./SplitWorkspace";
+import { SplitWorkspace, type PaneFacts } from "./SplitWorkspace";
 import { ProjectOverview } from "../projects/ProjectOverview";
 import type { OctantHostBridge } from "./hostBridge";
 import type { ProviderController } from "../providers/useProviderController";
@@ -458,6 +458,48 @@ export function WorkspaceView(props: WorkspaceViewProps) {
   const contextProject = props.projects.find(
     (project) => String(project.id) === String(contextProjectId),
   );
+  const codeBootstrap = props.codeController.bootstrap;
+  // Test doubles hand the view a controller with no navigation at all; the
+  // header then simply shows no facts rather than refusing to render.
+  const codeNavigation = props.codeController.navigation ?? [];
+  const paneFactsByThreadId = useMemo(() => {
+    const facts = new Map<string, PaneFacts>();
+    const checkouts = new Map(
+      (codeBootstrap?.checkouts ?? []).map((checkout) => [String(checkout.id), checkout]),
+    );
+    for (const item of codeNavigation) {
+      const thread = codeBootstrap?.threads.find(
+        (candidate) => String(candidate.id) === String(item.threadId),
+      );
+      const head =
+        thread === undefined ? undefined : checkouts.get(String(thread.checkoutId))?.head;
+      const branch = head?.kind === "branch" ? head.name : undefined;
+      const project = props.projects.find(
+        (candidate) => String(candidate.id) === String(item.projectId),
+      );
+      const summary = item.pullRequestSummaries?.items[0];
+      const path =
+        project === undefined
+          ? undefined
+          : branch === undefined
+            ? project.name
+            : `${project.name}/${branch}`;
+      if (summary === undefined && path === undefined) continue;
+      facts.set(String(item.threadId), {
+        ...(summary === undefined
+          ? {}
+          : {
+              pullRequest: {
+                number: summary.identity.number,
+                state: summary.state,
+                checks: summary.checks,
+              },
+            }),
+        ...(path === undefined ? {} : { path }),
+      });
+    }
+    return facts;
+  }, [codeBootstrap, codeNavigation, props.projects]);
 
   return (
     <TabActivationProvider
@@ -478,6 +520,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
         )}
         <SplitWorkspace
           {...(contextProject === undefined ? {} : { contextLabel: contextProject.name })}
+          paneFactsByThreadId={paneFactsByThreadId}
           drag={props.drag}
           layout={props.layout}
           mode={props.mode}

@@ -1705,20 +1705,32 @@ strong {
   padding: 2px 0 2px 4px;
 }
 
-/* The Project chip and the close sit in the band with the title: the chip
-   in the same quiet ink as the sidebar's, the close visible at rest because
-   it is the pane's one inline action and a hidden close read as no close. */
-.workspace-pane__project {
-  flex: 0 0 auto;
-  max-width: 16ch;
+/* After the title, where the work is: Project/branch in the editor's mono at
+   meta ink, the way a person names a change. It is what tells two panes on
+   one Project apart, so it yields before the title does but never vanishes
+   while there is room for a few characters. The close stays visible at rest
+   because it is the pane's one inline action and a hidden close read as no
+   close. */
+.workspace-pane__path {
+  flex: 0 1 auto;
+  min-width: 6ch;
+  max-width: 36ch;
   overflow: hidden;
-  padding: 1px 6px 2px;
-  border-radius: var(--oct-radius-xs, 3px);
-  color: var(--octant-text-muted);
-  background: var(--oct-fg-soft);
+  color: var(--oct-meta);
+  font-family: var(--octant-editor-font-family);
   font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.workspace-pane__path::before {
+  content: "·";
+  margin-right: 6px;
+}
+
+/* The request rides inside the grip with the title, so it drags with it. */
+.workspace-pane__pull-request {
+  flex: 0 0 auto;
 }
 
 .workspace-pane__close {

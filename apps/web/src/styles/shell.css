@@ -2880,37 +2880,48 @@ form > .work-composer-adapter__attachments {
   color: var(--oct-meta);
 }
 
-.code-home__fact--chip {
+/* One pull-request mark wherever a request is named (home list, pane title,
+   board): the glyph, the number, the state as tone. */
+.pull-request-chip {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
   padding: 1px 7px;
   border-radius: var(--oct-radius-pill);
+  color: var(--oct-fg-2);
   background: var(--octant-control);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
 }
 
 /* The chip spends colour on the request's state: open in the accent, merged
-   in green, closed in grey. */
-.code-home__fact--chip[data-tone="open"] {
+   in green, closed and draft in grey. */
+.pull-request-chip[data-tone="open"] {
   color: var(--oct-accent-fg);
   background: var(--oct-accent-soft);
 }
 
-.code-home__fact--chip[data-tone="closed"] {
+.pull-request-chip[data-tone="closed"],
+.pull-request-chip[data-tone="draft"] {
   color: var(--oct-muted);
 }
 
-.code-home__fact--chip[data-tone="merged"] {
+.pull-request-chip[data-tone="merged"] {
   color: var(--octant-success-text);
   background: var(--octant-success-surface);
 }
 
-.code-home__fact--chip > svg {
+.pull-request-chip > svg {
+  flex: 0 0 auto;
   color: inherit;
 }
 
 /* An open request's checks ride the same chip as a mark before the words:
    a filled dot when they fail, a hollow one while they run. Passing checks
    ask nothing of the reader and show nothing. */
-.code-home__fact--chip[data-checks="failing"]::before,
-.code-home__fact--chip[data-checks="pending"]::before {
+.pull-request-chip[data-checks="failing"]::before,
+.pull-request-chip[data-checks="pending"]::before {
   content: "";
   width: 6px;
   height: 6px;
@@ -2918,19 +2929,19 @@ form > .work-composer-adapter__attachments {
   border-radius: 50%;
 }
 
-.code-home__fact--chip[data-checks="failing"]::before {
+.pull-request-chip[data-checks="failing"]::before {
   background: var(--octant-danger-text);
 }
 
-.code-home__fact--chip[data-checks="pending"]::before {
+.pull-request-chip[data-checks="pending"]::before {
   border: 1px solid currentcolor;
 }
 
-.code-home__fact--chip[data-checks="failing"] {
+.pull-request-chip[data-checks="failing"] {
   color: var(--octant-danger-text);
 }
 
-.code-home__fact-checks::before {
+.pull-request-chip__checks::before {
   content: "· ";
 }
 

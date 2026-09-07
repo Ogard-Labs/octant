@@ -21,6 +21,7 @@ import {
 import { WorkspaceDragStatus, WorkspaceDropOverlay } from "./WorkspaceDropOverlay";
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
+import { PullRequestChip, type PullRequestChipProps } from "../code/PullRequestChip";
 import type { ThreadProviderIdentity } from "./navigationModel";
 
 const splitContainerStyle = { height: "100%", minHeight: 0, minWidth: 0, width: "100%" };
@@ -65,9 +66,20 @@ export interface SplitWorkspaceProps {
    * server-refused, so one label is true of them all.
    */
   readonly contextLabel?: string;
+  /**
+   * What a thread's pane says about where its work is: the pull request it
+   * carries and its Project/branch. Read the way a person names a change,
+   * so two panes on one Project tell apart by more than their titles.
+   */
+  readonly paneFactsByThreadId?: ReadonlyMap<string, PaneFacts>;
   /** Start screens alone in the window keep the title band clear. */
   readonly showSinglePaneHeader?: boolean;
   readonly totalWorkspacePaneCount: number;
+}
+
+export interface PaneFacts {
+  readonly pullRequest?: Pick<PullRequestChipProps, "number" | "state" | "checks">;
+  readonly path?: string;
 }
 
 interface WorkspaceNodeProps extends SplitWorkspaceProps {
@@ -282,6 +294,9 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
     props.showProviderIcons === false || !("threadId" in surface)
       ? undefined
       : props.providerByThreadId?.get(String(surface.threadId));
+  const facts =
+    "threadId" in surface ? props.paneFactsByThreadId?.get(String(surface.threadId)) : undefined;
+  const path = "threadId" in surface ? (facts?.path ?? props.contextLabel) : undefined;
   const showHeader = props.layout.kind !== "pane" || props.showSinglePaneHeader !== false;
   return (
     <section
@@ -333,11 +348,21 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                   />
                 </span>
               )}
+              {facts?.pullRequest === undefined ? null : (
+                <PullRequestChip
+                  className="workspace-pane__pull-request"
+                  number={facts.pullRequest.number}
+                  state={facts.pullRequest.state}
+                  {...(facts.pullRequest.checks === undefined
+                    ? {}
+                    : { checks: facts.pullRequest.checks })}
+                />
+              )}
               <span className="workspace-pane__title">{surface.title}</span>
             </span>
-            {props.contextLabel === undefined || !("threadId" in surface) ? null : (
-              <span aria-hidden="true" className="workspace-pane__project">
-                {props.contextLabel}
+            {path === undefined ? null : (
+              <span aria-hidden="true" className="workspace-pane__path" title={path}>
+                {path}
               </span>
             )}
             <span

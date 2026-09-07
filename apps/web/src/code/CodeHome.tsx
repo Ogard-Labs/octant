@@ -26,6 +26,7 @@ import {
 } from "../github/readIssuesAcrossRepositories";
 import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
 import { OctantButton } from "../ui/base/OctantButton";
+import { PullRequestChip } from "./PullRequestChip";
 
 const UP_NEXT_LIMIT = 6;
 const FRESH_ISSUE_LIMIT = 4;
@@ -40,12 +41,6 @@ const CATEGORY_LABELS: Readonly<Record<GithubAssignedWorkItem["category"], strin
   issue: "Assigned to you",
   "pull-request": "Your pull request",
   "review-request": "Review requested",
-};
-
-const PULL_REQUEST_STATE_LABELS: Readonly<Record<"open" | "merged" | "closed", string>> = {
-  open: "Open",
-  merged: "Merged",
-  closed: "Closed",
 };
 
 export interface CodeHomeThreadTarget {
@@ -485,19 +480,13 @@ function ContinueFacts(props: {
         </span>
       )}
       {pullRequest === undefined ? null : (
-        <span
-          className="code-home__fact code-home__fact--chip"
-          data-checks={pullRequest.state === "open" ? card.checks.state : undefined}
-          data-tone={pullRequest.state}
-        >
-          <GitPullRequest aria-hidden="true" size={12} strokeWidth={1.8} />#{pullRequest.number}{" "}
-          {PULL_REQUEST_STATE_LABELS[pullRequest.state]}
-          {checksNote(pullRequest.state, card.checks.state) === undefined ? null : (
-            <span className="code-home__fact-checks">
-              {checksNote(pullRequest.state, card.checks.state)}
-            </span>
-          )}
-        </span>
+        <PullRequestChip
+          checks={card.checks.state}
+          className="code-home__fact"
+          number={pullRequest.number}
+          showState
+          state={pullRequest.state}
+        />
       )}
       {provider === undefined ? null : (
         <span className="code-home__fact code-home__fact--muted">{provider}</span>
@@ -511,15 +500,6 @@ function ContinueFacts(props: {
  * mark. A merged or closed request has nothing left to check, and a passing
  * or unknown run says nothing a person needs to act on.
  */
-function checksNote(
-  pullRequestState: "open" | "merged" | "closed",
-  checks: CodeBoardCard["checks"]["state"],
-): string | undefined {
-  if (pullRequestState !== "open") return undefined;
-  if (checks === "failing") return "checks failing";
-  if (checks === "pending") return "checks pending";
-  return undefined;
-}
 
 async function readAssignedGithub(
   client: GithubClient | undefined,
