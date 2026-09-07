@@ -88,7 +88,9 @@ const DARK_OCTANT_TOKENS: Readonly<Record<string, string>> = {
   "divider-strong": "#787773",
   "text-primary": "#f2f1ed",
   "text-secondary": "#959490",
-  "text-muted": "#787773",
+  // 4.8:1 on the workspace. The earlier #787773 read at 4.1:1, under the AA
+  // line for the small meta text this role is used for.
+  "text-muted": "#84837e",
   "primary-foreground": "#14130f",
   "focus-ring": "#d9a441",
   selection: "#353430",
@@ -194,7 +196,9 @@ function tintedTokens(mode: ThemePresetMode, spec: TintedPresetSpec): Record<str
     "divider-strong": color(l.divider, tint),
     "text-primary": color(0.95, 0.005),
     "text-secondary": color(0.74, 0.008),
-    "text-muted": color(0.63, 0.008),
+    // 0.63 sat at 4.1:1 on a tinted ground; 0.67 clears AA for the small
+    // meta text this role carries.
+    "text-muted": color(0.67, 0.008),
     selection: color(l.selection, 0.025),
     accent: color(0.76, chroma),
     "accent-text": color(0.76, chroma),

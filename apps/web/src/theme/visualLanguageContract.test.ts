@@ -132,17 +132,13 @@ describe("the public-block visual language", () => {
     );
   });
 
-  it("gives a focused button one mark, not an outline and a ring", () => {
+  it("gives a focused button the shared ring and no accent outline of its own", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
-    const rule = system.match(/\[data-slot="button"\]:focus-visible\s*\{[^}]+\}/)?.[0] ?? "";
 
-    // A button's focus mark is the outline, chosen because the halo read as a
-    // highlighter circle drawn around the label. The shared rule paints a halo
-    // on anything focusable, so the button rule has to clear it or the button
-    // wears both. Only the shell's icon buttons escaped that, and only because
-    // their own CSS zeroes the shadow for unrelated reasons.
-    expect(rule).toMatch(/outline:\s*2px solid var\(--oct-accent-fg\)/);
-    expect(rule).toMatch(/box-shadow:\s*none/);
+    // An accent outline drawn on buttons over the shared ring lit every
+    // clicked sidebar row in the theme's accent, which read as a selection
+    // rather than as focus. A button wears the one mark every control wears.
+    expect(system).not.toMatch(/\[data-slot="button"\]:focus-visible\s*\{[^}]*outline:/);
   });
 
   it("paints keyboard focus once, for every control, without reshaping it", () => {
