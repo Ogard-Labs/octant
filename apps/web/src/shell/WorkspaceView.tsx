@@ -878,13 +878,17 @@ function renderCodeTab(
                   onCopyLocalServerUrl: (url: string) => navigator.clipboard.writeText(url),
                 })}
             tab={tab}
-            sources={[
-              ...new Map(
-                codeController.conversation
-                  .flatMap((message) => message.attachments ?? [])
-                  .map((attachment) => [String(attachment.attachmentId), attachment]),
-              ).values(),
-            ]}
+            sources={
+              codeController.conversationHistory !== "loaded"
+                ? []
+                : [
+                    ...new Map(
+                      codeController.conversation
+                        .flatMap((message) => message.attachments ?? [])
+                        .map((attachment) => [String(attachment.attachmentId), attachment]),
+                    ).values(),
+                  ]
+            }
             sourceClient={codeController.client}
             onOpenGit={() => props.onOpenCodeSurface("code-git", tab.threadId, "Git")}
             onCreatePullRequest={() =>
