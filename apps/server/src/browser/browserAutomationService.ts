@@ -604,17 +604,22 @@ export class BrowserAutomationService {
     signal?: AbortSignal,
   ): Promise<BrowserAutomationSnapshot> {
     const owned = this.#current(windowId, threadId);
-    const peek = this.#runtime.peek;
+    // Called on the runtime, never detached: a runtime's peek reaches for its
+    // own state, and a bare reference to it arrived there with no `this`.
+    const runtime = this.#runtime;
     if (
       owned !== undefined &&
-      peek !== undefined &&
+      runtime.peek !== undefined &&
       // A live context is "running" for as long as it exists; "waiting" is one
       // still being created, whose page is not there to look at yet.
       owned.status === "running" &&
       !this.#observedWithin(owned, PEEK_INTERVAL_MS)
     ) {
       try {
-        const observed = await peek(owned.record.contextId, signal ?? new AbortController().signal);
+        const observed = await runtime.peek(
+          owned.record.contextId,
+          signal ?? new AbortController().signal,
+        );
         owned.observation = {
           contextId: owned.record.contextId,
           actionId: owned.record.actionId,
@@ -631,8 +636,12 @@ export class BrowserAutomationService {
           observedAt: this.#clock() as BrowserObservation["observedAt"],
           stale: false,
         };
-      } catch {
-        // The last observation stands; a peek that fails changes nothing.
+      } catch (error) {
+        // The last observation stands; a peek that fails changes nothing for
+        // the thread, but the host log says why the preview has no picture.
+        console.warn(
+          `Octant Browser peek failed: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`,
+        );
       }
     }
     return this.inspectThread(windowId, threadId);
