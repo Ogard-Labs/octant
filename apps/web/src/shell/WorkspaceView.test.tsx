@@ -62,6 +62,44 @@ const codeTabs: ReadonlyArray<
   ],
 ];
 
+describe("WorkspaceView welcome", () => {
+  const welcome = {
+    id: ids.tab,
+    kind: "welcome",
+    mode: "code",
+    title: "Welcome to Code",
+  } as WorkspaceTab;
+  const codeProject = (lifecycle: "active" | "archived"): ProjectSummary =>
+    ({
+      id: ids.project,
+      type: "code",
+      name: "Octant",
+      lifecycle,
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: "2026-07-21T00:00:00.000Z",
+      updatedAt: "2026-07-21T00:00:00.000Z",
+      binding: { canonicalRoot: "/Users/example/code/octant" },
+      codeAccessPersistence: "current-session",
+    }) as never;
+
+  it("asks for a folder, not a task, when the only Code Project is archived", async () => {
+    render(<WorkspaceView {...propsFor(welcome)} projects={[codeProject("archived")]} />);
+
+    // An archived Project is not somewhere a task can start, so the page
+    // reads as it does with no Project at all.
+    expect(await screen.findByRole("heading", { name: "Add a folder to start" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Start a Code thread" })).not.toBeInTheDocument();
+  });
+
+  it("leads with a task once an active Code Project is bound", async () => {
+    render(<WorkspaceView {...propsFor(welcome)} projects={[codeProject("active")]} />);
+
+    expect(await screen.findByRole("heading", { name: "Start a Code thread" })).toBeVisible();
+  });
+});
+
 describe("WorkspaceView Code tab registration", () => {
   it("uses the window thread strip instead of duplicating an unsplit pane header", async () => {
     render(<WorkspaceView {...propsFor(codeTab("code-overview", "Planning"))} />);

@@ -983,3 +983,136 @@ describe("ProjectThreadRows", () => {
     expect(card).not.toHaveTextContent("Invalid Date");
   });
 });
+
+describe("completing and snoozing from a thread row", () => {
+  it("completes a thread from its right-click menu and offers Reopen once it is completed", async () => {
+    const onCompleteThread = vi.fn();
+    const onReopenThread = vi.fn();
+    const { rerender } = render(
+      <ProjectThreadRows
+        actions={{ onCompleteThread, onReopenThread }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+    expect(screen.queryByRole("menuitem", { name: "Reopen" })).toBeNull();
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Complete" }));
+    expect(onCompleteThread).toHaveBeenCalledWith("thread-one");
+
+    rerender(
+      <ProjectThreadRows
+        actions={{ onCompleteThread, onReopenThread }}
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, completedAt: "2026-09-01T10:00:00.000Z", shelf: "completed" }]}
+      />,
+    );
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+    expect(screen.queryByRole("menuitem", { name: "Complete" })).toBeNull();
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Reopen" }));
+    expect(onReopenThread).toHaveBeenCalledWith("thread-one");
+  });
+
+  it("snoozes a thread until a wake time chosen from the Snooze submenu", async () => {
+    const onSnoozeThread = vi.fn();
+    render(
+      <ProjectThreadRows
+        actions={{ onSnoozeThread }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+    // A submenu opens on hover, the way it does under a pointer; keyboard
+    // users reach the same list with the right arrow.
+    await userEvent.hover(await screen.findByRole("menuitem", { name: "Snooze" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: /^Tomorrow/ }));
+
+    expect(onSnoozeThread).toHaveBeenCalledTimes(1);
+    const [threadId, until] = onSnoozeThread.mock.calls[0] as [string, string];
+    expect(threadId).toBe("thread-one");
+    expect(Date.parse(until)).toBeGreaterThan(Date.now());
+    expect(new Date(until).getHours()).toBe(9);
+  });
+
+  it("offers Wake instead of Snooze on a snoozed row and says when it comes back", async () => {
+    const onSnoozeThread = vi.fn();
+    const onWakeThread = vi.fn();
+    render(
+      <ProjectThreadRows
+        actions={{ onSnoozeThread, onWakeThread }}
+        onSelectThread={vi.fn()}
+        threads={[
+          {
+            ...thread,
+            shelf: "snoozed",
+            snooze: { until: "2026-09-08T09:00:00.000Z", at: "2026-09-07T10:00:00.000Z" },
+            wakeLabel: "23h",
+          },
+        ]}
+      />,
+    );
+
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    expect(row).toHaveAttribute("data-shelf", "snoozed");
+    expect(row).toHaveTextContent("23h");
+    await userEvent.pointer({ target: row, keys: "[MouseRight]" });
+    expect(screen.queryByRole("menuitem", { name: "Snooze" })).toBeNull();
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Wake" }));
+    expect(onWakeThread).toHaveBeenCalledWith("thread-one");
+    expect(onSnoozeThread).not.toHaveBeenCalled();
+  });
+
+  it("marks a row whose snooze ended as Woke until it is opened", () => {
+    render(
+      <ProjectThreadRows
+        onSelectThread={vi.fn()}
+        threads={[
+          {
+            ...thread,
+            snooze: { until: "2026-09-07T09:00:00.000Z", at: "2026-09-06T10:00:00.000Z" },
+            woke: true,
+          },
+        ]}
+      />,
+    );
+    const woke = screen.getByText("Woke");
+    expect(woke).toHaveAttribute("title", "Snooze ended");
+    expect(screen.getByRole("button", { name: /Controller foundation/ })).toContainElement(woke);
+  });
+
+  it("reaches Complete and each wake time from the overflow menu too", async () => {
+    const onCompleteThread = vi.fn();
+    const onSnoozeThread = vi.fn();
+    render(
+      <ProjectThreadRows
+        actions={{ onCompleteThread, onSnoozeThread, onPinThread: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+
+    const overflow = screen.getByRole("button", { name: "Thread actions" });
+    await userEvent.click(overflow);
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Complete thread" }));
+    expect(onCompleteThread).toHaveBeenCalledWith("thread-one");
+
+    await userEvent.click(overflow);
+    await userEvent.click(await screen.findByRole("menuitem", { name: /Snooze · Tomorrow/ }));
+    expect(onSnoozeThread).toHaveBeenCalledTimes(1);
+    expect(Date.parse((onSnoozeThread.mock.calls[0] as [string, string])[1])).toBeGreaterThan(
+      Date.now(),
+    );
+  });
+});

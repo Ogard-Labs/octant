@@ -228,7 +228,10 @@ function AvailableDiff(
           <span>Review</span>
           <h1>{props.snapshot.title}</h1>
         </div>
-        <p>{props.snapshot.changedPaths.length.toLocaleString()} changed paths</p>
+        <p>
+          {props.snapshot.changedPaths.length.toLocaleString()}{" "}
+          {props.snapshot.changedPaths.length === 1 ? "changed path" : "changed paths"}
+        </p>
         <OctantToggleGroup<"side-by-side" | "inline">
           aria-label="Diff layout"
           onValueChange={(value) => {

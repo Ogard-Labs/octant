@@ -61,12 +61,8 @@ import { useThreadMentions } from "../chat/useThreadMentions";
 import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
 import { CodeTranscriptRow } from "./CodeTranscriptRow";
 import { providerModelLabel } from "../providers/providerModelLabel";
-import {
-  TurnHeader,
-  turnTimeLabel,
-  turnTimeTitle,
-  type TurnHeaderOutcome,
-} from "../transcript/TurnHeader";
+import { providerLimitWindowLabel } from "../providers/providerLimitWindow";
+import { TurnHeader, TurnTime, type TurnHeaderOutcome } from "../transcript/TurnHeader";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
@@ -435,8 +431,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // part of the host's authoritative conversation.
   const pendingMessage =
     steered.pending === undefined ? null : (
-      <article className="code-thread-workspace__message code-thread-workspace__message--user">
-        <TrackerReferenceText asParagraph text={steered.pending.prompt} />
+      <article aria-label="Your message" className="code-thread-workspace__message turn-user">
+        <div className="bubble">
+          <TrackerReferenceText asParagraph text={steered.pending.prompt} />
+        </div>
         {steered.pending.access === previousUserPolicy(messages, messages.length) ? null : (
           <p className="code-thread-workspace__turn-access">
             Access · {CODE_ACCESS_POSTURE_LABEL[steered.pending.access]}
@@ -539,9 +537,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     );
     if (sent) {
       attachments.takeForSend();
-      setDraft("");
-      threadMentions.clear();
-      pathMentions.clear();
+      // Only the draft that was sent is cleared: typing during the awaited send
+      // bumps the revision, and that newer draft stays. The host keeps the
+      // draft per thread and hands it back whenever the composer re-syncs, so
+      // the sent message came back into the box until the stored copy was
+      // cleared as well.
+      if (draftRevisionRef.current === draftRevision) {
+        setDraft("");
+        props.controller.setPendingDraft?.("");
+        threadMentions.clear();
+        pathMentions.clear();
+      }
     } else {
       setTurnAccessOverride((current) => current ?? override);
     }
@@ -801,7 +807,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       {props.controller.turnStatus === "waiting" ? (
         <div className="code-thread-workspace__waiting thread-column" role="status">
           <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
-          <span>{waitingTurnLabel(props.controller.providerRequests)}</span>
+          <span>
+            {props.controller.providerRequests.length === 0 &&
+            props.controller.turnError !== undefined
+              ? `Waiting · ${props.controller.turnError}`
+              : waitingTurnLabel(props.controller.providerRequests)}
+          </span>
         </div>
       ) : props.controller.turnError === undefined ||
         (props.controller.turnStatus === "failed" &&
@@ -875,7 +886,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       )}
 
       {messages.length === 0 && pendingMessage === null ? (
-        <div className="code-thread-workspace__conversation" role="log" aria-live="polite">
+        <div
+          className="code-thread-workspace__conversation transcript-scroll"
+          role="log"
+          aria-live="polite"
+        >
           <div className="code-thread-workspace__transcript thread-column">
             {props.controller.conversationHistory === "loading" ? (
               <ShellState
@@ -919,9 +934,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       ) : (
         <TranscriptWindow
           align="start"
-          className="code-thread-workspace__conversation"
+          className="code-thread-workspace__conversation transcript-scroll"
           estimateSize={96}
-          gap={18}
+          gap={20}
           itemKey={(message) => message.id}
           items={messages}
           key={String(props.threadId)}
@@ -941,13 +956,20 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               message.operationId === undefined
                 ? undefined
                 : checkpoints.byAnchor.get(String(message.operationId));
+            const gallery =
+              message.attachments === undefined ? null : (
+                <CodeAttachmentGallery
+                  attachments={message.attachments}
+                  {...(props.attachmentClient === undefined
+                    ? {}
+                    : { client: props.attachmentClient })}
+                  threadId={props.threadId}
+                />
+              );
             return (
               <div className="code-thread-workspace__row">
                 {handoff ? (
-                  <OctantSeparatorWithLabel
-                    aria-label="Provider handoff"
-                    className="uppercase tracking-wide"
-                  >
+                  <OctantSeparatorWithLabel aria-label="Provider handoff">
                     Provider handoff ·{" "}
                     {providerModelLabel(providerGroups, {
                       providerInstanceId: message.providerInstanceId,
@@ -956,7 +978,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   </OctantSeparatorWithLabel>
                 ) : null}
                 <article
-                  className={`code-thread-workspace__message code-thread-workspace__message--${message.role === "user" ? "user" : "agent"}`}
+                  aria-label={message.role === "user" ? "Your message" : "Assistant message"}
+                  className={`code-thread-workspace__message ${message.role === "user" ? "turn-user" : "turn-agent"}`}
                 >
                   <TurnActionMenu
                     actions={codeTurnActions({
@@ -1000,59 +1023,59 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       }
                     }}
                   >
-                    {message.role === "assistant" ? (
-                      <TurnHeader
-                        outcome={turnHeaderOutcome(message.status)}
-                        provider={
-                          message.providerInstanceId === undefined || message.modelId === undefined
-                            ? "Octant Code"
-                            : providerModelLabel(providerGroups, {
-                                providerInstanceId: message.providerInstanceId,
-                                modelId: message.modelId,
-                              })
-                        }
-                        {...(message.status === undefined || message.status === "completed"
-                          ? {}
-                          : { label: turnStatusLabel(message.status) })}
-                        {...(message.at === undefined ? {} : { at: message.at })}
-                      />
-                    ) : null}
-                    {message.attachments === undefined ? null : (
-                      <CodeAttachmentGallery
-                        attachments={message.attachments}
-                        {...(props.attachmentClient === undefined
-                          ? {}
-                          : { client: props.attachmentClient })}
-                        threadId={props.threadId}
-                      />
-                    )}
-                    {activity === undefined ? null : (
-                      <CodeTranscriptRow
-                        activity={activity}
-                        running={message.status === "incomplete"}
-                        settled={message.status === "completed"}
-                      />
-                    )}
-                    {/* An assistant reply is markdown — a plan arrives as a
-                    heading and a numbered list, and rendering it as one long
-                    line is what made plans unreadable here. What the user typed
-                    stays exactly as they typed it. */}
-                    {message.role === "assistant" && message.text.length > 0 ? (
-                      <ChatRichText body={message.text} />
-                    ) : message.text.length > 0 ? (
-                      <TrackerReferenceText asParagraph text={message.text} />
+                    {message.role === "user" ? (
+                      <>
+                        {/* What the user typed stays exactly as they typed it,
+                            in the shared bubble, with the time beneath it. */}
+                        <div className="bubble">
+                          {gallery}
+                          {message.text.length > 0 ? (
+                            <TrackerReferenceText asParagraph text={message.text} />
+                          ) : null}
+                        </div>
+                        {message.at === undefined ? null : <TurnTime at={message.at} />}
+                      </>
                     ) : (
-                      <p>{busy ? "Thinking…" : ""}</p>
+                      <>
+                        <TurnHeader
+                          outcome={turnHeaderOutcome(message.status)}
+                          provider={
+                            message.providerInstanceId === undefined ||
+                            message.modelId === undefined
+                              ? "Octant Code"
+                              : providerModelLabel(providerGroups, {
+                                  providerInstanceId: message.providerInstanceId,
+                                  modelId: message.modelId,
+                                })
+                          }
+                          {...(message.status === undefined || message.status === "completed"
+                            ? {}
+                            : {
+                                label: turnStatusLabel(
+                                  message.status,
+                                  props.controller.providerRequests,
+                                ),
+                              })}
+                          {...(message.at === undefined ? {} : { at: message.at })}
+                        />
+                        {gallery}
+                        {activity === undefined ? null : (
+                          <CodeTranscriptRow
+                            activity={activity}
+                            running={message.status === "incomplete"}
+                            settled={message.status === "completed"}
+                          />
+                        )}
+                        {/* An assistant reply is markdown — a plan arrives as a
+                            heading and a numbered list, and rendering it as one
+                            long line is what made plans unreadable here. */}
+                        {message.text.length > 0 ? (
+                          <ChatRichText body={message.text} />
+                        ) : (
+                          <p>{busy ? "Thinking…" : ""}</p>
+                        )}
+                      </>
                     )}
-                    {message.role === "user" && turnTimeLabel(message.at) !== undefined ? (
-                      <time
-                        className="code-thread-workspace__turn-time code-thread-workspace__turn-time--user"
-                        dateTime={message.at}
-                        title={turnTimeTitle(message.at)}
-                      >
-                        {turnTimeLabel(message.at)}
-                      </time>
-                    ) : null}
                     {message.role === "user" &&
                     message.executionPolicy !== undefined &&
                     message.executionPolicy !== previousUserPolicy(messages, index) ? (
@@ -1177,7 +1200,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           : { onCreatePullRequest: props.onCreatePullRequest })}
       />
       <ThreadComposer
-        className="code-thread-workspace__composer thread-column"
+        className="thread-composer code-thread-workspace__composer thread-column"
         chips={
           <>
             {/*
@@ -1378,14 +1401,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           },
         }}
         footer={
-          <div aria-live="polite" className="code-thread-workspace__status">
-            <span className="code-thread-workspace__hint">
+          <div aria-live="polite" className="composer-status">
+            <span className="composer-status__hint code-thread-workspace__hint">
               {providerChanging
                 ? "Checking the selected provider…"
                 : steered.pending !== undefined
                   ? "Sent · runs when the response in progress finishes"
                   : busy
-                    ? "Enter to send · it runs when this response finishes"
+                    ? "Enter sends when this response finishes"
                     : "Enter to send · Shift+Enter for a new line"}
             </span>
             {accessMessage === undefined ? null : (
@@ -1421,17 +1444,27 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 {forkMessage}
               </span>
             )}
-            <span className="code-thread-workspace__hint" aria-label="Thread usage">
-              {threadUsageLabel(props.controller.threadUsage)}
+            {/* Spend and limits sit at the far end of the same line. A provider
+                that has reported nothing shows nothing here rather than a
+                sentence saying so, and a limit appears only once it is worth
+                acting on; the context meter's panel keeps the full account. */}
+            <span className="composer-status__trailing">
+              {threadUsageLabel(props.controller.threadUsage) === undefined ? null : (
+                <span className="code-thread-workspace__hint" aria-label="Thread usage">
+                  {threadUsageLabel(props.controller.threadUsage)}
+                </span>
+              )}
+              {props.controller.threadUsage.limits
+                .filter((limit) => limit.status !== "allowed")
+                .map((limit) => (
+                  <span
+                    className={`code-thread-workspace__limit code-thread-workspace__limit--${limit.status}`}
+                    key={limit.window}
+                  >
+                    {providerLimitLabel(limit)}
+                  </span>
+                ))}
             </span>
-            {props.controller.threadUsage.limits.map((limit) => (
-              <span
-                className={`code-thread-workspace__limit code-thread-workspace__limit--${limit.status}`}
-                key={limit.window}
-              >
-                {providerLimitLabel(limit)}
-              </span>
-            ))}
           </div>
         }
       />
@@ -1537,10 +1570,9 @@ function forkTitle(sourceTitle: string): string {
     : title;
 }
 
-function threadUsageLabel(usage: CodeController["threadUsage"]): string {
-  if (usage.inputTokens === 0 && usage.outputTokens === 0) {
-    return "This thread's provider has reported no usage yet.";
-  }
+function threadUsageLabel(usage: CodeController["threadUsage"]): string | undefined {
+  // Zero tokens with no report is not a free thread; it is nothing to say yet.
+  if (usage.inputTokens === 0 && usage.outputTokens === 0) return undefined;
   const tokens = `${compactTokens(usage.inputTokens)} in · ${compactTokens(usage.outputTokens)} out`;
   return usage.costUsd === undefined ? tokens : `${tokens} · ${formatUsd(usage.costUsd)}`;
 }
@@ -1557,7 +1589,7 @@ function providerLimitLabel(limit: CodeController["threadUsage"]["limits"][numbe
         })}`;
   const state =
     limit.status === "exhausted" ? "spent" : limit.status === "warning" ? "low" : undefined;
-  const parts = [limit.window.replaceAll("_", " "), state, share, resets].filter(
+  const parts = [providerLimitWindowLabel(limit.window), state, share, resets].filter(
     (part): part is string => part !== undefined,
   );
   return parts.join(" · ");
@@ -1577,7 +1609,7 @@ function waitingTurnLabel(requests: CodeController["providerRequests"]): string 
   const latest = requests.at(-1);
   if (latest?.kind === "approval") return "Waiting for approval";
   if (latest?.kind === "input") return "Waiting for your input";
-  return "Waiting for approval or input";
+  return "Waiting";
 }
 
 function codeTurnSettlement(status: CodeTurnStatus): TurnSettlement | "idle" {
@@ -1638,12 +1670,17 @@ function turnHeaderOutcome(
       : status;
 }
 
-function turnStatusLabel(status: "waiting" | "interrupted" | "failed" | "incomplete"): string {
+function turnStatusLabel(
+  status: "waiting" | "interrupted" | "failed" | "incomplete",
+  requests: CodeController["providerRequests"],
+): string {
   switch (status) {
     case "waiting":
-      // Keep the runstatus slot filled while paused so the transcript does not
-      // jump when the elapsed indicator would otherwise drop.
-      return "Waiting for approval";
+      // A turn waits for an approval or an answer only while the host holds
+      // the request; a turn parked by the host itself (a rate limit, an
+      // unconfirmed checkout, a lost session) is waiting on nothing the
+      // person can click, and used to be mislabelled as an approval.
+      return waitingTurnLabel(requests);
     case "interrupted":
       return "Interrupted";
     case "failed":
@@ -1658,18 +1695,22 @@ function ProviderApprovalPrompt(props: {
   readonly onAnswer: (decision: "approved" | "denied") => void;
 }) {
   return (
-    <div
-      className="callout callout-warn thread-column code-thread-workspace__callout code-thread-workspace__provider-request"
-      role="group"
-      aria-label="Provider approval"
-    >
-      <span>{props.summary}</span>
-      <OctantButton onClick={() => props.onAnswer("approved")} type="button">
-        Approve
-      </OctantButton>
-      <OctantButton onClick={() => props.onAnswer("denied")} type="button" variant="ghost">
-        Deny
-      </OctantButton>
+    <div aria-label="Provider approval" className="approval-row thread-column" role="group">
+      <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
+      <span className="approval-row__text">{props.summary}</span>
+      <div className="approval-row__actions">
+        <OctantButton onClick={() => props.onAnswer("approved")} size="sm" type="button">
+          Approve
+        </OctantButton>
+        <OctantButton
+          onClick={() => props.onAnswer("denied")}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          Deny
+        </OctantButton>
+      </div>
     </div>
   );
 }
@@ -1683,32 +1724,36 @@ function ProviderInputPrompt(props: {
   const trimmed = answer.trim();
   return (
     <form
-      className="callout callout-warn thread-column code-thread-workspace__callout code-thread-workspace__provider-request"
       aria-label="Provider question"
+      className="approval-row thread-column code-thread-workspace__provider-request"
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
         if (trimmed.length > 0) props.onAnswer(trimmed);
       }}
     >
-      <span>{props.prompt}</span>
-      {props.options.map((option) => (
-        <OctantButton
-          key={option}
-          onClick={() => props.onAnswer(option)}
-          type="button"
-          variant="ghost"
-        >
-          {option}
-        </OctantButton>
-      ))}
+      <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
+      <span className="approval-row__text">{props.prompt}</span>
+      <div className="approval-row__actions">
+        {props.options.map((option) => (
+          <OctantButton
+            key={option}
+            onClick={() => props.onAnswer(option)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            {option}
+          </OctantButton>
+        ))}
+      </div>
       <OctantInput
         aria-label="Answer"
         onChange={(event) => setAnswer(event.target.value)}
         placeholder="Type an answer"
         value={answer}
       />
-      <OctantButton disabled={trimmed.length === 0} type="submit">
+      <OctantButton disabled={trimmed.length === 0} size="sm" type="submit">
         Send answer
       </OctantButton>
     </form>

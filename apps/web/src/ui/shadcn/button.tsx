@@ -5,7 +5,7 @@ import { cn } from "./utils";
 
 /*
  * No focus treatment here: the app paints one ring for every control, globally
- * (0086). The style's own `focus-visible:ring-*` is a wide soft halo, which is
+ * (0090). The style's own `focus-visible:ring-*` is a wide soft halo, which is
  * what makes an interface read as a web page rather than an app.
  *
  * A press moves the button down a pixel, except where it opens something — a

@@ -109,6 +109,21 @@ describe("Code aggregate contracts", () => {
 
   it("decodes one strict Code thread with an immutable delivery target", () => {
     expect(decodeCodeThread(thread)).toEqual(thread);
+    // A completed or snoozed thread carries its rest on the record; a journal
+    // written before either existed still decodes because both are optional.
+    expect(
+      decodeCodeThread({
+        ...thread,
+        completedAt: now,
+        snooze: { until: "2026-01-02T09:00:00.000Z", at: now, duringTurn: true },
+      }),
+    ).toMatchObject({
+      completedAt: now,
+      snooze: { until: "2026-01-02T09:00:00.000Z", at: now, duringTurn: true },
+    });
+    expect(() =>
+      decodeCodeThread({ ...thread, snooze: { until: now, at: now, reason: "later" } }),
+    ).toThrow();
     expect(decodeCodeThread({ ...thread, workingDirectory: "packages/app" })).toMatchObject({
       workingDirectory: "packages/app",
     });
@@ -222,6 +237,33 @@ describe("Code aggregate contracts", () => {
         workingDirectory: "packages/app",
       }).kind,
     ).toBe("change-code-thread-working-directory");
+    for (const kind of [
+      "complete-code-thread",
+      "reopen-code-thread",
+      "wake-code-thread",
+    ] as const) {
+      expect(decodeCodeCommand({ kind, threadId: ids.thread, expectedVersion: 1 })).toEqual({
+        kind,
+        threadId: ids.thread,
+        expectedVersion: 1,
+      });
+    }
+    expect(
+      decodeCodeCommand({
+        kind: "snooze-code-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        until: "2026-01-02T09:00:00.000Z",
+      }),
+    ).toEqual({
+      kind: "snooze-code-thread",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      until: "2026-01-02T09:00:00.000Z",
+    });
+    expect(() =>
+      decodeCodeCommand({ kind: "snooze-code-thread", threadId: ids.thread, expectedVersion: 1 }),
+    ).toThrow();
     expect(
       decodeCodeCommand({
         kind: "update-code-settings",

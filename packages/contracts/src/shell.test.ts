@@ -68,8 +68,10 @@ const settings = {
   firstRunOnboarding: "pending",
   automaticUpdateChecks: true,
   marketplaceFetchesEnabled: true,
+  completedThreadArchiveAfterDays: 7,
   navigatorAssistant: {},
   voice: {},
+  imageGeneration: { customSources: [] },
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
 
