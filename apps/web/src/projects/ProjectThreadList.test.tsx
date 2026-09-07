@@ -268,6 +268,7 @@ describe("ProjectThreadRows", () => {
 
     await userEvent.pointer({ target: row, keys: "[MouseRight]" });
     expect(row).toHaveAttribute("aria-expanded", "true");
+    expect(document.querySelector(".thread-row-context-menu")).toBeInTheDocument();
   });
 
   it("pins a thread from its own right-click menu", async () => {
@@ -571,6 +572,9 @@ describe("ProjectThreadRows", () => {
     expect(card).toHaveTextContent("Core Project");
     expect(card).toHaveTextContent("Pinned");
     expect(card).toHaveTextContent("Unread");
+    expect(card.querySelector(".thread-row-info-card__header")).toHaveTextContent(
+      "Controller foundation",
+    );
   });
 
   it("lets keyboard users reach and activate the pin action", async () => {

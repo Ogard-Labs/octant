@@ -323,19 +323,19 @@ function ThreadRowInfoCard(props: {
   });
   return (
     <span className="thread-row-info-card">
-      {states.length === 0 && age === undefined ? null : (
-        <span className="thread-row-info-card__header">
-          <span className="thread-row-info-card__states">
-            {states.map((state) => (
-              <span className="thread-row-info-card__state" key={state}>
-                {state}
-              </span>
-            ))}
-          </span>
-          {age === undefined ? null : <span className="thread-row-info-card__age">{age}</span>}
+      <span className="thread-row-info-card__header">
+        <span className="thread-row-info-card__title">{props.thread.title}</span>
+        {age === undefined ? null : <span className="thread-row-info-card__age">{age}</span>}
+      </span>
+      {states.length === 0 ? null : (
+        <span className="thread-row-info-card__states">
+          {states.map((state) => (
+            <span className="thread-row-info-card__state" key={state}>
+              {state}
+            </span>
+          ))}
         </span>
       )}
-      <span className="thread-row-info-card__title">{props.thread.title}</span>
       {facts.length === 0 ? null : (
         <span className="thread-row-info-card__facts">
           {facts.map((fact) => (

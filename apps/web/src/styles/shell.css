@@ -620,6 +620,14 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   text-align: left;
 }
 
+/* Keep the row's trailing actions in a reserved gutter. They are revealed on
+   hover/focus, so the title and timestamp must occupy the same width in both
+   states instead of sliding under the action buttons. */
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)
+  > .sidebar-navigation__thread {
+  padding-inline-end: 56px;
+}
+
 .sidebar-navigation__thread:hover {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
@@ -965,11 +973,11 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   max-width: 296px;
 }
 
-/* State and recency answer "does this need me, and how stale is it" before the
-   title is read, so they lead the card on one line. */
+/* The title and recency share one compact line so the card is scannable before
+   the supporting state and context details below it. */
 .thread-row-info-card__header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   justify-content: space-between;
 }
@@ -998,9 +1006,13 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 }
 
 .thread-row-info-card__title {
+  min-width: 0;
+  overflow: hidden;
   color: var(--oct-fg);
   font-weight: 500;
   line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* One fact per line. Dot-joined into a single paragraph, the same facts wrapped
@@ -1106,6 +1118,46 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   padding: 2px 6px;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+}
+
+/* Thread menus are action palettes, not generic context popups. A bounded
+   width keeps long titles from widening the menu, while the shared menu item
+   semantics still own keyboard highlight and disabled states. */
+.thread-row-context-menu {
+  display: grid;
+  width: min(296px, calc(100vw - 24px));
+  min-width: min(240px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-1);
+  overflow: hidden;
+  border-radius: var(--oct-radius-lg);
+}
+
+.thread-row-context-menu__label {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  padding: var(--oct-space-2) var(--oct-space-2) var(--oct-space-1);
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-display);
+  line-height: var(--oct-leading-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-row-context-menu [role="menuitem"] {
+  min-height: 32px;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-1) var(--oct-space-2);
+  border-radius: var(--oct-radius-sm);
+  font-size: var(--oct-text-sm);
+}
+
+.thread-row-context-menu [role="separator"] {
+  margin: var(--oct-space-1) 0;
 }
 
 .sidebar-navigation__thread-rename {

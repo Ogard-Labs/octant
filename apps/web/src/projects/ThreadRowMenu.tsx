@@ -113,9 +113,11 @@ export function ThreadRowMenu(props: {
   const threadId = props.thread.navigationId ?? props.thread.threadId;
   const pinned = props.thread.pinned === true;
   return (
-    <OctantContextMenuContent>
+    <OctantContextMenuContent className="thread-row-context-menu">
       <OctantContextMenuGroup>
-        <OctantContextMenuLabel>{props.thread.title}</OctantContextMenuLabel>
+        <OctantContextMenuLabel className="thread-row-context-menu__label">
+          {props.thread.title}
+        </OctantContextMenuLabel>
       </OctantContextMenuGroup>
       {props.actions.onPinInPane === undefined ? null : (
         <OctantContextMenuItem

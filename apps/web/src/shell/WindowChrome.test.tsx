@@ -462,6 +462,16 @@ describe("WindowChrome", () => {
     );
   });
 
+  it("keeps thread row actions in a reserved gutter and bounds the context menu", () => {
+    expect(
+      cssRule(
+        ".sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions) > .sidebar-navigation__thread",
+      ),
+    ).toContain("padding-inline-end: 56px;");
+    expect(cssRule(".thread-row-info-card__header")).toContain("justify-content: space-between;");
+    expect(cssRule(".thread-row-context-menu")).toContain("width: min(296px, calc(100vw - 24px));");
+  });
+
   it("exposes the native sidebar canvas and integrated titlebar while keeping workspace surfaces opaque", () => {
     expect(cssRule('html[data-octant-native-host="true"]')).toContain("background: transparent;");
     expect(cssRule('html[data-octant-native-host="true"] .shell.shell-frame')).toContain(
