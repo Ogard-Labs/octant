@@ -21,7 +21,7 @@ import { CodeCheckoutProvider } from "./CodeCheckoutContext";
 import { EnvironmentGitGroup } from "./EnvironmentGitGroup";
 import { EnvironmentGroup } from "./EnvironmentGroup";
 import { EnvironmentPullRequests } from "./EnvironmentPullRequests";
-import { countGroupedLocalServerListeners } from "./localServerGroups";
+import { countGroupedLocalServerListenersByScope } from "./localServerGroups";
 import { LocalServersGroup } from "./LocalServersGroup";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
 import { useCodeEnvironmentController } from "./useCodeEnvironmentController";
@@ -131,10 +131,10 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
-  const runningServerCount =
+  const runningServerCounts =
     localServers.snapshot === undefined
       ? undefined
-      : countGroupedLocalServerListeners(localServers.snapshot);
+      : countGroupedLocalServerListenersByScope(localServers.snapshot);
   const workingDirectory = readyObservation?.workingDirectory;
   const threadVersion = readyObservation?.threadVersion;
 
@@ -161,7 +161,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                 changes: readyObservation.changes,
               }),
           ...(workingDirectory === undefined ? {} : { workingLocation: String(workingDirectory) }),
-          ...(runningServerCount === undefined ? {} : { runningServerCount }),
+          ...(runningServerCounts === undefined ? {} : { runningServerCounts }),
         }}
       >
         <section className="environment-checkout" aria-label="Checkout">
@@ -245,7 +245,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           {...(localServers.snapshot === undefined
             ? {}
             : {
-                summary: `${String(countGroupedLocalServerListeners(localServers.snapshot))} running`,
+                summary: `${String(runningServerCounts?.currentCheckout ?? 0)} in checkout · ${String(runningServerCounts?.other ?? 0)} elsewhere`,
               })}
           title="Local servers"
         >

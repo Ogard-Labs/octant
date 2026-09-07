@@ -11,6 +11,11 @@ export interface LocalServerListenerGroup {
   readonly primary: LocalServerListener;
 }
 
+export interface LocalServerGroupCounts {
+  readonly currentCheckout: number;
+  readonly other: number;
+}
+
 /**
  * Collapse duplicate loopback sockets that are one logical process on one
  * port. Vite routinely binds `127.0.0.1` and `::1` together; listing both as
@@ -43,10 +48,18 @@ export function groupLocalServerListeners(
 export function countGroupedLocalServerListeners(
   snapshot: Pick<LocalServerSnapshot, "currentCheckout" | "other">,
 ): number {
-  return (
-    groupLocalServerListeners(snapshot.currentCheckout).length +
-    groupLocalServerListeners(snapshot.other).length
-  );
+  const counts = countGroupedLocalServerListenersByScope(snapshot);
+  return counts.currentCheckout + counts.other;
+}
+
+/** Keep the two attribution scopes visible to compact Environment summaries. */
+export function countGroupedLocalServerListenersByScope(
+  snapshot: Pick<LocalServerSnapshot, "currentCheckout" | "other">,
+): LocalServerGroupCounts {
+  return {
+    currentCheckout: groupLocalServerListeners(snapshot.currentCheckout).length,
+    other: groupLocalServerListeners(snapshot.other).length,
+  };
 }
 
 function groupKey(listener: LocalServerListener): string {

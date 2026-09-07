@@ -73,7 +73,7 @@ describe("LocalServersGroup", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "This checkout" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: /This checkout/ })).toBeVisible();
     expect(
       screen.queryByRole("button", { name: "More actions for node on port 3000" }),
     ).not.toBeInTheDocument();

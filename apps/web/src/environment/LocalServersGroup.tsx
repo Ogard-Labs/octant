@@ -138,7 +138,12 @@ function LocalServerGroupSection(
   if (props.groups.length === 0) return null;
   return (
     <section aria-label={props.heading} className="local-servers__group">
-      <h3 className="local-servers__group-heading">{props.heading}</h3>
+      <h3
+        aria-label={`${props.heading}, ${String(props.groups.length)} ${props.groups.length === 1 ? "server" : "servers"}`}
+        className="local-servers__group-heading"
+      >
+        {props.heading} ({String(props.groups.length)})
+      </h3>
       {props.groups.map((group) => {
         const listener = group.primary;
         return (

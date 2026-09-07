@@ -91,6 +91,22 @@ describe("the thread environment panel", () => {
     expect(screen.queryByText("octant · octant · Clean")).not.toBeInTheDocument();
   });
 
+  it("labels servers in this checkout separately from servers elsewhere", async () => {
+    render(
+      <ThreadEnvironmentPanel
+        open
+        summary={{ identity, runningServerCounts: { currentCheckout: 0, other: 1 } }}
+      >
+        <p>Checkout facts</p>
+      </ThreadEnvironmentPanel>,
+    );
+    expect(
+      await screen.findByText(
+        "Octant · feature/name · 0 servers in this checkout · 1 server elsewhere",
+      ),
+    ).toBeVisible();
+  });
+
   it("renders nothing while closed and nothing for an inactive pane", () => {
     const { rerender } = render(
       <>
