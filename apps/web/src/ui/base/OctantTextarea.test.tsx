@@ -19,7 +19,7 @@ describe("OctantTextarea", () => {
   });
 
   it("leaves keyboard focus to the one ring the app paints", () => {
-    // Focus is a single global treatment (0086). A recipe that painted its own
+    // Focus is a single global treatment (0090). A recipe that painted its own
     // would swap an app control's crisp ring for the style's wide soft halo,
     // one control at a time.
     render(<OctantTextarea aria-label="Notes" />);

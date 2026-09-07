@@ -100,9 +100,11 @@ export function ProjectMemoryInspector(props: ProjectMemoryInspectorProps) {
     >
       <header className="project-memory-inspector__header">
         <div>
-          <span>Project context</span>
+          {/* On the Project page the page already names the Project and the
+              heading is one section label among the others. */}
+          {props.embedded ? null : <span>Project context</span>}
           <h2>Memory</h2>
-          <p>{props.project.name}</p>
+          {props.embedded ? null : <p>{props.project.name}</p>}
         </div>
         {props.embedded || props.onClose === undefined ? null : (
           <OctantButton

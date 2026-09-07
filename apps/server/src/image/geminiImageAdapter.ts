@@ -138,7 +138,7 @@ async function generateGeminiImage(input: {
   const response = await performImageHttpRequest({
     url: `${GEMINI_IMAGE_API_BASE_URL}/models/${encodeURIComponent(modelId)}:generateContent`,
     method: "POST",
-    auth: "goog-api-key",
+    auth: { header: "x-goog-api-key" },
     instanceId: String(input.adapterInstanceId),
     credentialResolver: input.credentialResolver,
     body: JSON.stringify(body),

@@ -93,7 +93,11 @@ export function TurnHeader(props: TurnHeaderProps) {
           )}
         </span>
         {time === undefined || props.at === undefined ? null : (
-          <time className="turn-header__time" dateTime={props.at} title={turnTimeTitle(props.at)}>
+          <time
+            className="turn-header__time turn-time"
+            dateTime={props.at}
+            title={turnTimeTitle(props.at)}
+          >
             {time}
           </time>
         )}
@@ -103,6 +107,21 @@ export function TurnHeader(props: TurnHeaderProps) {
           failure every time its row scrolled back in. */}
       {props.reason === undefined ? null : <p className="turn-header__reason">{props.reason}</p>}
     </>
+  );
+}
+
+/**
+ * When a person's message was sent, under its bubble on the same edge: the
+ * one time treatment the turn header also uses at its end. Renders nothing
+ * for a timestamp the host did not give in a form a clock can read.
+ */
+export function TurnTime(props: { readonly at: string }) {
+  const label = turnTimeLabel(props.at);
+  if (label === undefined) return null;
+  return (
+    <time className="turn-time" dateTime={props.at} title={turnTimeTitle(props.at)}>
+      {label}
+    </time>
   );
 }
 
