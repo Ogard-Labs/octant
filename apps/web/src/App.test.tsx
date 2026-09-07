@@ -393,6 +393,31 @@ describe("App", () => {
     }
   });
 
+  it("refuses to send the window capability over plain HTTP to a host off loopback, and says so", async () => {
+    const originalHref = window.location.href;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      throw new Error(`unexpected fetch ${typeof input === "string" ? input : input.toString()}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    window.history.replaceState(
+      null,
+      "",
+      `/?serverUrl=${encodeURIComponent("http://192.168.1.5:13773")}`,
+    );
+    try {
+      render(<App />);
+      expect(
+        await screen.findByText(
+          "Octant refuses to send this window's capability over plain HTTP to 192.168.1.5:13773. Open the Machine over https://, or on its loopback address.",
+        ),
+      ).toBeVisible();
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      window.history.replaceState(null, "", originalHref);
+    }
+  });
+
   it("fails closed before rendering the shell when an injected capability is invalid", () => {
     render(
       <App

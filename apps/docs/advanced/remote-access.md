@@ -50,7 +50,9 @@ recovery phrase, or localStorage fallback.
 - **HTTPS only**, with a browser-trusted certificate (a Tailscale certificate
   or an admin-provided LAN certificate). Certificate validation is never
   disabled and no trust root is silently installed; there is no plaintext
-  fallback.
+  fallback. The browser holds the same line before it sends anything: a launch
+  address that is plain HTTP to any host other than loopback is refused with an
+  explanation, never used.
 - Exact-origin CORS, HSTS, CSP, `frame-ancestors 'none'`, no service worker,
   and no WebSocket in Phase 14 — HTTPS plus NDJSON replay streams.
 - Tailscale is transport reachability only, never identity.
