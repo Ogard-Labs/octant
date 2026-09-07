@@ -18,6 +18,7 @@ export const SETTINGS_SECTION_IDS = [
   "code",
   "navigator-assistant",
   "voice",
+  "image-generation",
   "providers",
   "profiles",
   "agents",

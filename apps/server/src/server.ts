@@ -187,6 +187,10 @@ import {
   type CodeWorktreeSourcePreviewPort,
   type ManagedCodeThreadCreationPort,
 } from "./code/codeService";
+import {
+  CompletedThreadArchiveSweep,
+  type CompletedThreadArchiveInput,
+} from "./completedThreadArchiveSweep";
 import { createCodeOperationRuntime, type CodeOperationRuntime } from "./code/codeOperationRuntime";
 import { CodePlannerService } from "./code/codePlannerService";
 import {
@@ -2584,6 +2588,18 @@ export function startOctantServer(
       });
     // Revocation is wired at construction, before any window can hold a watch.
     activeCodeService = codeService;
+    // What the Code service lends the host's completed-thread timer. Only the
+    // in-process service can archive on the host's behalf; an injected route
+    // service is a test double and lends nothing.
+    const codeCompletedThreadSource =
+      codeService instanceof CodeService
+        ? {
+            mode: "code" as const,
+            threads: () => persistence.readCodeThreads(),
+            archive: (threadId: string, input: CompletedThreadArchiveInput) =>
+              codeService.archiveCompletedThread(decodeCodeThreadId(threadId), input),
+          }
+        : undefined;
     const codeBoardEventStore = new CodeOperationEventStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -3330,6 +3346,9 @@ export function startOctantServer(
         },
         nativeHarnessTools: (input) => nativeHarnessComposition?.forCode(input),
         nativeHarness: nativeHarnessHooks,
+        onProviderTurnRequested: (threadId) => {
+          if (codeService instanceof CodeService) codeService.noteProviderTurnRequested(threadId);
+        },
         supportsAppManagedTools: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
           return (
@@ -3580,7 +3599,7 @@ export function startOctantServer(
           bootstrap.checkouts.map((checkout) => [String(checkout.id), checkout] as const),
         );
         const boardThreads: CodeBoardThread[] = bootstrap.threads
-          .filter((thread) => thread.lifecycle !== "archived")
+          .filter((thread) => thread.lifecycle !== "archived" && thread.completedAt === undefined)
           .map((thread) => {
             const project = projectById.get(String(thread.projectId));
             return {
@@ -4203,6 +4222,9 @@ export function startOctantServer(
               scopeId: decodeImageGenerationScopeId(String(thread.id)),
               port: {
                 listInstances: () => persistence.readProviderInstances(),
+                readImageGenerationCustomSources: () =>
+                  (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                    .imageGeneration.customSources,
                 enqueue: (input) => imageJobService.enqueue(input),
                 listJobs: (scopeId) => imageJobService.listByScope(scopeId),
               },
@@ -4313,6 +4335,9 @@ export function startOctantServer(
       projection: persistence.imageJobProjection,
       attachments: generatedImageStore,
       readProviderInstance: (id) => persistence.readProviderInstance(id),
+      readImageGenerationCustomSources: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration
+          .customSources,
       credentialResolver:
         credentialResolver ??
         ({
@@ -4501,6 +4526,7 @@ export function startOctantServer(
       linearIssueContext: linearIssueContextService,
     });
     const workTurnService = new WorkTurnService({
+      onTurnRequested: (threadId) => workThreadService.noteTurnRequested(threadId),
       persistence,
       resolveAppManagedTools: (input) => nativeHarnessComposition?.forWork(input),
       nativeHarness: nativeHarnessHooks,
@@ -5151,6 +5177,8 @@ export function startOctantServer(
     const imageRoutes = createImageRouteHandler({
       jobs: imageJobService,
       listInstances: () => persistence.readProviderInstances(),
+      readImageGenerationSettings: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration,
       authorizeScope: async (windowId, threadKind, scopeId) => {
         const threadId = String(scopeId);
         // The library is host-wide: window capability already proved the
@@ -6326,6 +6354,28 @@ export function startOctantServer(
       now: () => new Date().toISOString() as UtcTimestamp,
     });
     automationScheduler.start();
+    // The host's own timer for completed threads, fed by every mode's service
+    // that can archive on the host's behalf (decision 0088).
+    const completedThreadArchiveSweep = new CompletedThreadArchiveSweep({
+      sources: [
+        codeCompletedThreadSource,
+        {
+          mode: "chat" as const,
+          threads: () => persistence.readChatThreads(),
+          archive: (threadId: string, input: CompletedThreadArchiveInput) =>
+            chatService.archiveCompletedThread(decodeChatThreadId(threadId), input),
+        },
+        {
+          mode: "work" as const,
+          threads: () => workThreadProjection.list(),
+          archive: (threadId: string, input: CompletedThreadArchiveInput) =>
+            workThreadService.archiveCompletedThread(decodeWorkThreadId(threadId), input),
+        },
+      ].flatMap((source) => (source === undefined ? [] : [source])),
+      archiveAfterDays: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+          .completedThreadArchiveAfterDays,
+    });
     const automationRoutes = createAutomationRouteHandler({
       projection: persistence.automationProjection,
       commands: {
@@ -6475,7 +6525,7 @@ export function startOctantServer(
             projects.active.map((project) => [String(project.id), project] as const),
           );
           const boardThreads: WorkBoardThread[] = bootstrap.threads
-            .filter((thread) => thread.lifecycle !== "archived")
+            .filter((thread) => thread.lifecycle !== "archived" && thread.completedAt === undefined)
             .map((thread) => {
               const project = projectById.get(String(thread.projectId));
               const currentRevisionId =
@@ -6888,6 +6938,10 @@ export function startOctantServer(
                   : "bind-failed";
             }
           }
+          // The completed-thread timer starts only once the host is serving,
+          // so a host that fails to bind never archives anything on its own,
+          // and the stop below is registered before the first pass runs.
+          completedThreadArchiveSweep.start();
           return {
             url: localServer.url,
             ...(remoteListener === undefined ? {} : { remoteListener }),
@@ -6956,6 +7010,7 @@ export function startOctantServer(
           } catch (error) {
             shutdownFailure ??= error;
           }
+          completedThreadArchiveSweep.stop();
           providerUsageLimitsService.stop();
           try {
             managedCloneService.close();

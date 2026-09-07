@@ -21,6 +21,7 @@ import {
 import { MentionableThreadId } from "./threadMention";
 import { NavigatorAssistantSettings } from "./navigatorAssistant";
 import { VoiceSettings } from "./speech";
+import { ImageGenerationSettings } from "./imageGeneration";
 import { DEFAULT_AVATAR_ACCENT, DEFAULT_USER_AVATAR, UserProfile } from "./userProfile";
 import { SidebarBackground, DEFAULT_SIDEBAR_BACKGROUND } from "./theme";
 
@@ -276,6 +277,14 @@ export type TranscriptTextSize = typeof TranscriptTextSize.Type;
 export const TranscriptWidth = Schema.Literal("narrow", "medium", "wide");
 export type TranscriptWidth = typeof TranscriptWidth.Type;
 
+export const MIN_COMPLETED_THREAD_ARCHIVE_DAYS = 1;
+export const MAX_COMPLETED_THREAD_ARCHIVE_DAYS = 365;
+export const CompletedThreadArchiveAfterDays = Schema.Int.pipe(
+  Schema.between(MIN_COMPLETED_THREAD_ARCHIVE_DAYS, MAX_COMPLETED_THREAD_ARCHIVE_DAYS),
+);
+export type CompletedThreadArchiveAfterDays = typeof CompletedThreadArchiveAfterDays.Type;
+export const DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS: CompletedThreadArchiveAfterDays = 7;
+
 export const ShellSettings = Schema.Struct({
   chatEnabled: Schema.Boolean,
   workEnabled: Schema.Boolean,
@@ -323,6 +332,17 @@ export const ShellSettings = Schema.Struct({
    */
   marketplaceFetchesEnabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   /**
+   * How long a completed thread rests in the Completed shelf before the host
+   * archives it. `null` means never. Archiving keeps everything and is the
+   * only thing this timer does; a purge still needs its own confirmation
+   * (`docs/decisions/0035`). A store persisted before completion shipped
+   * decodes to the week the feature was introduced with.
+   */
+  completedThreadArchiveAfterDays: Schema.optionalWith(
+    Schema.NullOr(CompletedThreadArchiveAfterDays),
+    { default: () => DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS },
+  ),
+  /**
    * The release ring to follow, once someone has chosen one.
    *
    * Deliberately without a default. A build already knows its own ring from
@@ -354,6 +374,12 @@ export const ShellSettings = Schema.Struct({
   // speech status reports as `unconfigured` rather than guessing an endpoint.
   voice: Schema.optionalWith(VoiceSettings, {
     default: () => ({}),
+  }),
+  // Custom image-generation settings section. A store persisted before this
+  // shipped decodes to no custom sources — the same OpenAI-compatible-only
+  // reuse Voice already uses, so nothing here can point at an arbitrary URL.
+  imageGeneration: Schema.optionalWith(ImageGenerationSettings, {
+    default: () => ({ customSources: [] }),
   }),
   // Who is using this host. A store persisted before profiles shipped decodes
   // to the empty profile rather than a name guessed from the OS account: the

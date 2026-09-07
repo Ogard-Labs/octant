@@ -79,7 +79,7 @@ export function SidebarProfile(props: SidebarProfileProps) {
           aria-label={`Account menu, ${label}`}
           className="sidebar-item window-no-drag justify-start"
         >
-          <UserAvatar profile={props.profile} size={22} />
+          <UserAvatar profile={props.profile} size={20} />
           <span className="sidebar-label">{label}</span>
           <ChevronUp aria-hidden="true" className="sidebar-profile__chevron" size={14} />
         </OctantMenuTrigger>

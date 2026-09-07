@@ -98,21 +98,35 @@ export function ImageGenerationSheet(props: ImageGenerationSheetProps) {
         ? {}
         : { parentArtifactRef: props.parentArtifactRef }),
     };
-    if (options?.kind === "openai-image-http") {
-      await props.onSubmit({
-        ...draft,
-        ...(quality === OPTION_DEFAULT ? {} : { quality: quality as OpenAiImageQuality }),
-        ...(size === OPTION_DEFAULT ? {} : { size: size as OpenAiImageSize }),
-      });
+    if (options === undefined) {
+      await props.onSubmit(draft);
       return;
     }
-    await props.onSubmit({
-      ...draft,
-      ...(aspectRatio === OPTION_DEFAULT
-        ? {}
-        : { aspectRatio: aspectRatio as GeminiImageAspectRatio }),
-      ...(resolution === OPTION_DEFAULT ? {} : { resolution }),
-    });
+    switch (options.kind) {
+      case "openai-image-http":
+        await props.onSubmit({
+          ...draft,
+          ...(quality === OPTION_DEFAULT ? {} : { quality: quality as OpenAiImageQuality }),
+          ...(size === OPTION_DEFAULT ? {} : { size: size as OpenAiImageSize }),
+        });
+        return;
+      case "gemini-native-image-http":
+        await props.onSubmit({
+          ...draft,
+          ...(aspectRatio === OPTION_DEFAULT
+            ? {}
+            : { aspectRatio: aspectRatio as GeminiImageAspectRatio }),
+          ...(resolution === OPTION_DEFAULT ? {} : { resolution }),
+        });
+        return;
+      // A custom OpenAI-compatible source, BFL, and Ideogram have no
+      // Settings-configured quality, size, or aspect ratio of their own.
+      case "openai-compatible-http":
+      case "bfl-image-http":
+      case "ideogram-image-http":
+        await props.onSubmit(draft);
+        return;
+    }
   }
 
   return (

@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { AgentProfileId } from "./agentProfile";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
+import { ThreadRestFields } from "./threadRest";
 import { GithubIssueContextRequest } from "./githubIssueContext";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { BindingRevisionId, ProjectId } from "./projects";
@@ -239,6 +240,8 @@ export const CodeThread = Schema.Struct({
    * thread started on its own.
    */
   forkedFrom: Schema.optional(CodeThreadForkOrigin),
+  /** Completed and snoozed rest, shared with Chat and Work; see {@link ThreadRestFields}. */
+  ...ThreadRestFields,
   lifecycle: CodeThreadLifecycle,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
@@ -501,6 +504,32 @@ export const CodeCommand = Schema.Union(
     kind: Schema.Literal("pin-code-thread"),
     ...CodeThreadCommandFields,
     pinned: Schema.Boolean,
+  }).annotations(strict),
+  /**
+   * Put a finished thread away without archiving it. The host refuses while a
+   * turn is running or the thread waits on the person, so a thread never
+   * disappears with work in flight.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("complete-code-thread"),
+    ...CodeThreadCommandFields,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("reopen-code-thread"),
+    ...CodeThreadCommandFields,
+  }).annotations(strict),
+  /**
+   * Hide the thread until `until`. The wake time is the first kind of wake
+   * condition; the host refuses one that is not in the future.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("snooze-code-thread"),
+    ...CodeThreadCommandFields,
+    until: UtcTimestamp,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("wake-code-thread"),
+    ...CodeThreadCommandFields,
   }).annotations(strict),
   /**
    * Move a thread onto the checkout its Project binds now.

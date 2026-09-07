@@ -21,6 +21,16 @@ import type {
 const STREAM_CHUNK_CHARACTERS = 65_536;
 const DIFF_MAX_CHARACTERS = 65_536;
 const LABEL_MAX_CHARACTERS = 256;
+/** A prompt is read at a glance; a command longer than this is cut with an ellipsis. */
+const APPROVAL_TARGET_MAX_CHARACTERS = 120;
+/**
+ * Token shapes a shell command might carry as literals. The prompt still
+ * shows that something is there; the journal never learns what. The issue
+ * context services keep their own vendor-specific lists; this one is the
+ * provider-neutral floor for text a provider composed.
+ */
+const SECRET_SHAPED =
+  /(?:bearer\s+[A-Za-z0-9._-]{20,}|(?:refresh_token|access_token|api[_-]?key|token)\s*[=:]\s*\S+|authorization\s*:\s*[^\r\n]+|\b(?:sk-[A-Za-z0-9_-]{16,}|gh[opusr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|lin_api_[A-Za-z0-9_]+|xox[abp]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b)/gi;
 const SUMMARY_MAX_CHARACTERS = 1_024;
 const PATH_MAX_CHARACTERS = 4_096;
 const DIGEST_INPUT_MAX_CHARACTERS = 1_048_576;
@@ -496,9 +506,11 @@ function resultMetadataIsValid(
 ): boolean {
   const noPermissionDenials = message.permissionDenials.length === 0;
   if (message.subtype === "success") {
+    // A denied tool is an ordinary way for a turn to end: the person said no
+    // at the approval and the model finished without it. Reading the denial
+    // list as a contradiction failed every turn that was ever refused.
     return (
       message.outcome === "success" &&
-      noPermissionDenials &&
       (message.terminalReason === undefined || message.terminalReason === "completed")
     );
   }
@@ -1025,6 +1037,43 @@ function mapQuestion(
   };
 }
 
+/**
+ * What the prompt is about, from the tool's own input and nothing else: the
+ * checkout-relative path a file tool names, or the command a shell tool would
+ * run, on one line and bounded. A path outside the checkout yields nothing
+ * (the hook refuses it anyway), and the runtime's own title, display name,
+ * blocked path, and request id never cross. The runtime still redacts
+ * secrets and the checkout root from the text before it is journaled.
+ */
+function approvalTarget(
+  context: ClaudeEventContext,
+  request: ClaudeToolRequest,
+): string | undefined {
+  const input = request.input;
+  if (request.toolName === "Bash") {
+    const command = input.command;
+    if (typeof command !== "string") return undefined;
+    let line = command.replace(/\s+/g, " ");
+    for (let pass = 0; pass < 5; pass += 1) {
+      SECRET_SHAPED.lastIndex = 0;
+      if (!SECRET_SHAPED.test(line)) break;
+      line = line.replaceAll(SECRET_SHAPED, "[redacted]");
+    }
+    return normalized(line, APPROVAL_TARGET_MAX_CHARACTERS);
+  }
+  const path =
+    typeof input.file_path === "string"
+      ? input.file_path
+      : typeof input.path === "string"
+        ? input.path
+        : undefined;
+  if (path === undefined) return undefined;
+  const relativePath = confinedRelativePath(context, path);
+  return relativePath === undefined
+    ? undefined
+    : normalized(relativePath, APPROVAL_TARGET_MAX_CHARACTERS);
+}
+
 export function mapClaudeToolRequest(
   context: ClaudeEventContext,
   request: ClaudeToolRequest,
@@ -1046,11 +1095,17 @@ export function mapClaudeToolRequest(
   });
   if (correlated.kind === "failure") return correlated;
   const normalizedRequestId = correlated.requestId;
+  const target = approvalTarget(context, request);
   const requestEvent = mappedEvent(context, {
     kind: "approval-request",
     requestId: normalizedRequestId,
     action: toolName,
-    description: `Claude requests permission to use ${toolName}.`,
+    // A person can only judge a prompt that says what it is for. "Claude
+    // requests permission to use Edit." was approved blind every time.
+    description:
+      target === undefined
+        ? `Claude requests permission to use ${toolName}.`
+        : `${toolName} · ${target}`,
   });
   return {
     kind: "approval",

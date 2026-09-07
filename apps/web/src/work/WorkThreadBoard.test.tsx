@@ -229,7 +229,7 @@ describe("WorkThreadBoard", () => {
     expect(screen.getByText("Kept")).toBeVisible();
   });
 
-  it("shows Project, confined root binding, request, artifacts, citations, goal, delivery, child runs, follow-up, recovery, and activity", async () => {
+  it("keeps the card face to what needs the person, who runs it, and when it moved; the rest waits for the list view", async () => {
     const loadBoard = vi.fn(async () =>
       view([
         {
@@ -277,21 +277,26 @@ describe("WorkThreadBoard", () => {
 
     await screen.findByRole("button", { name: "Full card" });
     const article = cardFor("Full card");
+    // The Project is the card's eyebrow, the latest child-run line its
+    // activity; both stay off the facts line.
+    expect(article).toHaveTextContent("Project A");
     expect(article).toHaveTextContent("Drafting the export outline");
     const facts = article.querySelector(".board-card-facts");
     if (facts === null) throw new Error("Expected card facts");
-    expect(facts).toHaveTextContent("Project A");
-    expect(facts).toHaveTextContent("research/brief");
-    expect(facts).toHaveTextContent("Studio · model-a");
+    expect(facts).toHaveTextContent(/Project projection missing/);
     expect(facts).toHaveTextContent("Approval: Write the export");
-    expect(facts).toHaveTextContent("Brief.md");
-    expect(facts).toHaveTextContent("3 citations · stale");
-    expect(facts).toHaveTextContent("Goal · active");
-    expect(facts).toHaveTextContent("Full card · pending");
-    expect(facts).toHaveTextContent("1 active run");
     expect(facts).toHaveTextContent("Follow-up");
-    expect(facts).toHaveTextContent("Stale evidence");
-    expect(within(article).getByText(/Project projection missing/)).toBeVisible();
+    expect(facts).toHaveTextContent("Recovering");
+    expect(facts).toHaveTextContent("Goal · active");
+    expect(facts).toHaveTextContent("Studio");
+    expect(facts).toHaveTextContent(/\d+d ago/);
+    // Folder, model, artifacts, citations, and delivery wait for the list view.
+    expect(facts).not.toHaveTextContent("research/brief");
+    expect(facts).not.toHaveTextContent("model-a");
+    expect(facts).not.toHaveTextContent("Brief.md");
+    expect(facts).not.toHaveTextContent("3 citations");
+    expect(facts).not.toHaveTextContent("Full card · pending");
+    expect(article.querySelector(".code-board__card-details")).toBeNull();
   });
 
   it("switches to Project grouping without issuing another board query", async () => {
