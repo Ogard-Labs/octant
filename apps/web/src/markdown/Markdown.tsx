@@ -81,6 +81,16 @@ const components: Components = {
     return <CodeBlock code={code} {...(language === undefined ? {} : { language })} />;
   },
   code: ({ children }) => <code>{children}</code>,
+  // An image is named, never fetched. `![](https://…)` in model output or in an
+  // agent-written document would otherwise reach that host the moment the text
+  // rendered, with no one having clicked anything — and the URL itself carries
+  // whatever the author put in it. Neither parser this replaced could render an
+  // image at all, so loading one is not a behaviour anything here relies on.
+  img: ({ alt, src }) => (
+    <span className="markdown-image" title={typeof src === "string" ? src : undefined}>
+      {alt === undefined || alt === "" ? "Image" : alt}
+    </span>
+  ),
   a: ({ href, children }) =>
     href === undefined || href === "" ? (
       <>{children}</>

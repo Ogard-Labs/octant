@@ -1175,3 +1175,10 @@
 .chat-rich-text li > input[type="checkbox"] {
   margin-inline-end: 6px;
 }
+
+/* An image is named rather than loaded, so it reads as a placeholder instead
+   of as ordinary prose that happens to be missing. */
+.chat-rich-text .markdown-image {
+  color: var(--oct-muted);
+  font-style: italic;
+}
