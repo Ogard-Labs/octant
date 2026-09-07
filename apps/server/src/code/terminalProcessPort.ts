@@ -36,6 +36,11 @@ export function shellStateEnvironment(directory: string): Record<string, string>
     // no partial line preceded it; in the dock it read as a rendering fault.
     PROMPT_EOL_MARK: "",
     HISTFILE: join(directory, "zsh_history"),
+    // Completion dumps and the framework's cache default to the home, which
+    // the shell can now read but still never writes; left there, the first
+    // prompt opened under "rm: ~/.zcompdump-…: Operation not permitted".
+    ZSH_COMPDUMP: join(directory, "zcompdump"),
+    ZSH_CACHE_DIR: join(directory, "cache", "zsh"),
     XDG_CACHE_HOME: join(directory, "cache"),
     XDG_STATE_HOME: join(directory, "state"),
     STARSHIP_CACHE: join(directory, "cache", "starship"),

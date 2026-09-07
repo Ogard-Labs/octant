@@ -4246,19 +4246,29 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   text-transform: none;
 }
 
+/* One line per server, in a list rather than a stack of cards: the name, its
+   address, and its state read left to right, and the controls sit at the end.
+   Five cards of four rows each made a fifteen-server host a wall. */
 .local-servers__row {
   display: grid;
-  gap: 6px;
-  padding: 8px 10px;
-  border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-sm);
-  background: var(--octant-control);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-height: 30px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--octant-border);
+}
+
+.local-servers__row:last-child {
+  border-bottom: 0;
 }
 
 .local-servers__identity {
-  display: grid;
+  display: flex;
   min-width: 0;
-  gap: 2px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--oct-space-2);
 }
 
 .local-servers__name {
@@ -4289,15 +4299,20 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .local-servers__actions {
   display: flex;
-  flex-wrap: wrap;
+  flex: none;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
 }
 
 .local-servers__actions button {
   height: 22px;
-  padding: 0 8px;
+  padding: 0 6px;
+  color: var(--octant-text-muted);
   font-size: calc(11 * var(--oct-text-step));
+}
+
+.local-servers__actions button:hover {
+  color: var(--oct-fg);
 }
 
 .local-servers__action-feedback,

@@ -436,6 +436,139 @@
 }
 
 /* Changed-file list beside the two-sided comparison of the selected file. */
+/* The stacked list scrolls as one page; each file keeps its header in view
+   while its own lines pass under it. */
+.code-diff-pane__stack {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.unified-diff {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-4);
+  padding: var(--oct-space-3) var(--oct-space-4) var(--oct-space-6);
+}
+
+.unified-diff__file {
+  overflow: hidden;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+}
+
+.unified-diff__file-header {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-border);
+  background: var(--oct-surface-warm);
+  font-size: var(--oct-text-xs);
+}
+
+.unified-diff__path {
+  min-width: 0;
+  flex: 1 1 auto;
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-display);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unified-diff__renamed,
+.unified-diff__change {
+  flex: none;
+  color: var(--oct-muted);
+}
+
+.unified-diff__counts {
+  display: inline-flex;
+  flex: none;
+  gap: 6px;
+  font-family: var(--oct-font-mono);
+}
+
+.unified-diff__additions {
+  color: var(--oct-success-fg);
+}
+
+.unified-diff__deletions {
+  color: var(--oct-danger-fg);
+}
+
+.unified-diff__binary {
+  margin: 0;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.unified-diff__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
+}
+
+.unified-diff__number {
+  width: 1%;
+  min-width: 3.5ch;
+  padding: 0 6px;
+  color: var(--oct-meta);
+  text-align: right;
+  vertical-align: top;
+  user-select: none;
+}
+
+.unified-diff__marker {
+  width: 1%;
+  padding: 0 2px 0 6px;
+  color: var(--oct-meta);
+  text-align: center;
+  vertical-align: top;
+  user-select: none;
+}
+
+.unified-diff__code {
+  padding: 0 var(--oct-space-3) 0 6px;
+  white-space: pre;
+  tab-size: 4;
+}
+
+.unified-diff__line[data-kind="added"] {
+  background: var(--oct-success-soft);
+}
+
+.unified-diff__line[data-kind="added"] .unified-diff__marker {
+  color: var(--oct-success-fg);
+}
+
+.unified-diff__line[data-kind="removed"] {
+  background: var(--oct-danger-soft);
+}
+
+.unified-diff__line[data-kind="removed"] .unified-diff__marker {
+  color: var(--oct-danger-fg);
+}
+
+.unified-diff__gap td {
+  padding: 3px var(--oct-space-3);
+  color: var(--oct-meta);
+  background: var(--oct-fg-soft);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+}
+
 .code-diff-pane__body {
   display: flex;
   min-height: 0;

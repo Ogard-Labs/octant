@@ -14,6 +14,28 @@
 
 export type DiffFileChange = "created" | "deleted" | "modified" | "renamed";
 
+export type DiffLineKind = "context" | "added" | "removed";
+
+export interface DiffLine {
+  readonly kind: DiffLineKind;
+  readonly text: string;
+  /** Line number on the original side; absent for an added line. */
+  readonly oldNumber?: number;
+  /** Line number on the modified side; absent for a removed line. */
+  readonly newNumber?: number;
+}
+
+/** One `@@` region, numbered on both sides so a reader can place it in the file. */
+export interface DiffHunk {
+  readonly oldStart: number;
+  readonly oldLines: number;
+  readonly newStart: number;
+  readonly newLines: number;
+  /** What git printed after the range: usually the enclosing function. */
+  readonly heading: string;
+  readonly lines: ReadonlyArray<DiffLine>;
+}
+
 export interface ParsedDiffFile {
   /** Stable key for lists and model URIs. */
   readonly id: string;
@@ -29,6 +51,19 @@ export interface ParsedDiffFile {
   readonly modified: string;
   /** True when the diff carried no textual hunks (binary or metadata only). */
   readonly binary: boolean;
+  /** The changed regions in order, as git printed them. */
+  readonly hunks: ReadonlyArray<DiffHunk>;
+}
+
+interface HunkAccumulator {
+  readonly oldStart: number;
+  readonly oldLines: number;
+  readonly newStart: number;
+  readonly newLines: number;
+  readonly heading: string;
+  readonly lines: DiffLine[];
+  oldNext: number;
+  newNext: number;
 }
 
 interface FileAccumulator {
@@ -40,9 +75,10 @@ interface FileAccumulator {
   original: string[];
   modified: string[];
   sawHunk: boolean;
+  hunks: HunkAccumulator[];
 }
 
-const HUNK = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/;
+const HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@ ?(.*)$/;
 
 function newAccumulator(): FileAccumulator {
   return {
@@ -52,6 +88,7 @@ function newAccumulator(): FileAccumulator {
     original: [],
     modified: [],
     sawHunk: false,
+    hunks: [],
   };
 }
 
@@ -96,6 +133,7 @@ function finish(accumulator: FileAccumulator, index: number): ParsedDiffFile | u
     original: accumulator.original.join("\n"),
     modified: accumulator.modified.join("\n"),
     binary: !accumulator.sawHunk,
+    hunks: accumulator.hunks.map(({ oldNext: _oldNext, newNext: _newNext, ...hunk }) => hunk),
   };
 }
 
@@ -131,28 +169,60 @@ export function parseUnifiedDiff(diff: string): ReadonlyArray<ParsedDiffFile> {
       accumulator.newPath = stripPrefix(line.slice(4));
       continue;
     }
-    if (HUNK.test(line)) {
+    const range = HUNK.exec(line);
+    if (range !== null) {
       accumulator.sawHunk = true;
       // A gap between hunks is not contiguous text; mark it so neither side
       // reads as one continuous file.
       if (accumulator.original.length > 0) accumulator.original.push("");
       if (accumulator.modified.length > 0) accumulator.modified.push("");
+      const oldStart = Number(range[1]);
+      const newStart = Number(range[3]);
+      accumulator.hunks.push({
+        oldStart,
+        oldLines: range[2] === undefined ? 1 : Number(range[2]),
+        newStart,
+        newLines: range[4] === undefined ? 1 : Number(range[4]),
+        heading: (range[5] ?? "").trim(),
+        lines: [],
+        oldNext: oldStart,
+        newNext: newStart,
+      });
       continue;
     }
     if (!accumulator.sawHunk) continue;
+    const hunk = accumulator.hunks.at(-1);
     if (line.startsWith("+")) {
       accumulator.additions += 1;
       accumulator.modified.push(line.slice(1));
+      if (hunk !== undefined) {
+        hunk.lines.push({ kind: "added", text: line.slice(1), newNumber: hunk.newNext });
+        hunk.newNext += 1;
+      }
       continue;
     }
     if (line.startsWith("-")) {
       accumulator.deletions += 1;
       accumulator.original.push(line.slice(1));
+      if (hunk !== undefined) {
+        hunk.lines.push({ kind: "removed", text: line.slice(1), oldNumber: hunk.oldNext });
+        hunk.oldNext += 1;
+      }
       continue;
     }
     if (line.startsWith(" ")) {
       accumulator.original.push(line.slice(1));
       accumulator.modified.push(line.slice(1));
+      if (hunk !== undefined) {
+        hunk.lines.push({
+          kind: "context",
+          text: line.slice(1),
+          oldNumber: hunk.oldNext,
+          newNumber: hunk.newNext,
+        });
+        hunk.oldNext += 1;
+        hunk.newNext += 1;
+      }
       continue;
     }
     // `\ No newline at end of file` and any trailing blank line carry no content.

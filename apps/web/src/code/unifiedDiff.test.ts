@@ -29,6 +29,26 @@ describe("unified diff parsing", () => {
     expect(file?.binary).toBe(false);
   });
 
+  it("numbers every hunk line on both sides so a stacked view can place it in the file", () => {
+    const [file] = parseUnifiedDiff(modified);
+    expect(file?.hunks).toEqual([
+      {
+        oldStart: 10,
+        oldLines: 4,
+        newStart: 10,
+        newLines: 5,
+        heading: "export function app() {",
+        lines: [
+          { kind: "context", text: "  const a = 1;", oldNumber: 10, newNumber: 10 },
+          { kind: "removed", text: "  return a;", oldNumber: 11 },
+          { kind: "added", text: "  const b = 2;", newNumber: 11 },
+          { kind: "added", text: "  return a + b;", newNumber: 12 },
+          { kind: "context", text: "  // end", oldNumber: 12, newNumber: 13 },
+        ],
+      },
+    ]);
+  });
+
   it("separates every file in a multi-file diff", () => {
     const files = parseUnifiedDiff(
       [
