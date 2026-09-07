@@ -4127,6 +4127,7 @@ describe("App", () => {
       "aria-selected",
       "true",
     );
+    await user.click(await within(dock).findByRole("button", { name: "Side by side" }));
     expect(await within(dock).findByRole("navigation", { name: "Changed files" })).toBeVisible();
     expect(thread).toBeVisible();
     expect(screen.queryByRole("heading", { name: "No Code Project open" })).not.toBeInTheDocument();

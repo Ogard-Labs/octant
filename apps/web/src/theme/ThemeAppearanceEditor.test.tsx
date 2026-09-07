@@ -118,7 +118,7 @@ describe("ThemeAppearanceEditor", () => {
     const light = screen.getByLabelText("Light preset");
     expect(light).toHaveTextContent("System");
     await user.click(light);
-    expect(await screen.findByRole("option", { name: "Octant" })).toBeVisible();
+    expect(await screen.findByRole("option", { name: "Brass" })).toBeVisible();
   });
 
   it("omits the Octant appearance pack when that plugin is not effective", async () => {
@@ -132,7 +132,7 @@ describe("ThemeAppearanceEditor", () => {
     const light = screen.getByLabelText("Light preset");
     expect(light).toHaveTextContent("System");
     await user.click(light);
-    expect(screen.queryByRole("option", { name: "Octant" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Brass" })).not.toBeInTheDocument();
   });
 });
 

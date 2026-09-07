@@ -33,12 +33,22 @@ const RUN_DIFF = [
   "",
 ].join("\n");
 
+/**
+ * The file list, its counts, and the per-file controls belong to the
+ * side-by-side layout; the stacked default has no separate file navigation.
+ */
+async function chooseSideBySide() {
+  const control = await screen.findByRole("button", { name: "Side by side" });
+  if (control.getAttribute("aria-pressed") !== "true") await userEvent.setup().click(control);
+}
+
 describe("Review beside the active thread", () => {
   it("shows changed files, line counts, and the selected-file comparison", async () => {
     const fixture = runtime();
     render(<DockReviewTool {...bound()} loadRuntime={fixture.loadRuntime} />);
 
     expect(screen.getByRole("status")).toHaveTextContent("Loading Git diff");
+    await chooseSideBySide();
     const files = await screen.findByRole("navigation", { name: "Changed files" });
     expect(
       within(files)
@@ -52,14 +62,15 @@ describe("Review beside the active thread", () => {
     expect(screen.queryByRole("heading", { name: "Loading Review" })).not.toBeInTheDocument();
   });
 
-  it("toggles inline and side-by-side layouts", async () => {
+  it("opens the side-by-side editor and returns to the stacked list", async () => {
     const user = userEvent.setup();
     const fixture = runtime();
     render(<DockReviewTool {...bound()} loadRuntime={fixture.loadRuntime} />);
+    await chooseSideBySide();
     await screen.findByRole("navigation", { name: "Changed files" });
     await waitFor(() => expect(fixture.options?.renderSideBySide).toBe(true));
-    await user.click(screen.getByRole("button", { name: "Inline" }));
-    expect(fixture.session?.setRenderSideBySide).toHaveBeenCalledWith(false);
+    await user.click(screen.getByRole("button", { name: "Unified" }));
+    expect(screen.queryByRole("navigation", { name: "Changed files" })).not.toBeInTheDocument();
   });
 
   it("shows a compact clean state when the checkout and run have nothing to compare", async () => {
@@ -95,6 +106,7 @@ describe("Review beside the active thread", () => {
     expect(
       await screen.findByRole("heading", { name: "Changes vs origin/development" }),
     ).toBeVisible();
+    await chooseSideBySide();
     expect(await screen.findByRole("button", { name: /src\/run\.ts/ })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
   });
@@ -132,6 +144,7 @@ describe("Review beside the active thread", () => {
   it("clears the previous thread's files before the next checkout loads", async () => {
     const first = bound();
     const { rerender } = render(<DockReviewTool {...first} loadRuntime={runtime().loadRuntime} />);
+    await chooseSideBySide();
     expect(await screen.findByRole("button", { name: /src\/index\.ts/ })).toBeVisible();
 
     let resolveNext: (value: CodeOperationResult) => void = () => undefined;
@@ -156,6 +169,7 @@ describe("Review beside the active thread", () => {
     expect(screen.queryByRole("button", { name: /src\/index\.ts/ })).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Loading Git diff");
     resolveNext(dirtyObservation(ids.operation));
+    await chooseSideBySide();
     expect(await screen.findByRole("navigation", { name: "Changed files" })).toBeVisible();
   });
 
@@ -183,6 +197,7 @@ describe("Review beside the active thread", () => {
       />,
     );
 
+    await chooseSideBySide();
     await user.click(await screen.findByRole("button", { name: "Discard changes" }));
     expect(executeOperation).not.toHaveBeenCalledWith(
       expect.objectContaining({ kind: "discard-git-changes" }),
@@ -196,6 +211,7 @@ describe("Review beside the active thread", () => {
 
   it("offers no discard in Plan mode", async () => {
     render(<DockReviewTool {...bound({}, "plan")} loadRuntime={runtime().loadRuntime} />);
+    await chooseSideBySide();
     expect(await screen.findByRole("navigation", { name: "Changed files" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
   });
@@ -215,6 +231,7 @@ describe("Review beside the active thread", () => {
         watchClient={{ watch: watch as never }}
       />,
     );
+    await chooseSideBySide();
     expect(await screen.findByRole("navigation", { name: "Changed files" })).toBeVisible();
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Git state changed; refresh the diff.",
