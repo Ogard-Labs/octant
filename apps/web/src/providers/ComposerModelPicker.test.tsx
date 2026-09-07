@@ -64,6 +64,24 @@ describe("ComposerModelPicker", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("keeps the active provider when discovery refreshes the groups", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const { rerender } = render(<ComposerModelPicker groups={groups()} onSelect={onSelect} />);
+
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const menu = await screen.findByRole("dialog", { name: "Choose provider and model" });
+    await user.click(within(menu).getByRole("option", { name: "Remote Claude" }));
+    expect(within(menu).getByRole("option", { name: "Model Three" })).toBeVisible();
+
+    // Discovery emits a fresh array as provider state changes. The user's
+    // active rail choice must survive that refresh instead of snapping back
+    // to the selected model's provider.
+    rerender(<ComposerModelPicker groups={groups({ degraded: true })} onSelect={onSelect} />);
+    expect(within(menu).getByRole("option", { name: "Model Three" })).toBeVisible();
+    expect(within(menu).queryByRole("option", { name: "Model One" })).not.toBeInTheDocument();
+  });
+
   it("renders the provider rail as icon-only buttons with accessible names", async () => {
     const user = userEvent.setup();
     render(<ComposerModelPicker groups={groups()} onSelect={vi.fn()} />);

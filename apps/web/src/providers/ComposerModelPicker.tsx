@@ -81,10 +81,19 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
 
   useEffect(() => {
     if (!open) return;
-    setActiveRailId(railIdFor(selectedGroup) ?? railIdFor(props.groups[0]));
-    setCatalogFilter(undefined);
-    setFavorites(readModelFavorites());
-  }, [open, props.groups, selectedGroup?.instance.id]);
+    // Provider discovery is live and can replace the groups array while the
+    // menu is open. Keep the rail the user chose as long as that entry still
+    // exists; resetting to the selected model on every refresh made the pane
+    // appear to bounce between providers under the pointer. Reconcile only
+    // when the active entry was actually removed.
+    setActiveRailId((current) => {
+      const stillAvailable =
+        current === FAVORITES_RAIL_ID ||
+        (current === OCTANT_RAIL_ID && harnessGroups.length > 0) ||
+        (current !== undefined && props.groups.some((group) => group.instance.id === current));
+      return stillAvailable ? current : (railIdFor(selectedGroup) ?? railIdFor(props.groups[0]));
+    });
+  }, [open, props.groups, selectedGroup, harnessGroups.length]);
 
   if (props.groups.length === 0) {
     return (
@@ -330,7 +339,12 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
       <OctantPopover
         className="composer-model-picker__menu"
         onOpenChange={(next) => {
-          if (next) setQuery("");
+          if (next) {
+            setQuery("");
+            setCatalogFilter(undefined);
+            setFavorites(readModelFavorites());
+            setActiveRailId(railIdFor(selectedGroup) ?? railIdFor(props.groups[0]));
+          }
           setOpen(next);
         }}
         open={open}
