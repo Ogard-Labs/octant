@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -30,6 +30,13 @@ export function OctantContextMenu(props: OctantContextMenuProps) {
   // menu open and say so. Base UI does not set `aria-expanded` for a context
   // menu, and the trigger rendered here reaches every caller of it.
   const [open, setOpen] = useState(false);
+  // An item's accessible name is its label alone. Base UI names an item from
+  // its content, so a described item read as "Rename Change the thread's
+  // title" — the same defect the dropdown adapter already names its parts to
+  // avoid. `label` only steers typeahead; it does not name the item.
+  const menuId = useId();
+  const labelId = (index: number) => `${menuId}-item-${index}-label`;
+  const descriptionId = (index: number) => `${menuId}-item-${index}-description`;
   return (
     <ContextMenu onOpenChange={setOpen}>
       <ContextMenuTrigger
@@ -39,8 +46,12 @@ export function OctantContextMenu(props: OctantContextMenuProps) {
         {props.children}
       </ContextMenuTrigger>
       <ContextMenuContent>
-        {props.items.map((item) => (
+        {props.items.map((item, index) => (
           <ContextMenuItem
+            aria-labelledby={labelId(index)}
+            {...(item.description === undefined
+              ? {}
+              : { "aria-describedby": descriptionId(index) })}
             className="gap-2"
             closeOnClick
             key={item.value}
@@ -57,9 +68,13 @@ export function OctantContextMenu(props: OctantContextMenuProps) {
               </span>
             )}
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate font-medium">{item.label}</span>
+              <span className="truncate font-medium" id={labelId(index)}>
+                {item.label}
+              </span>
               {item.description === undefined ? null : (
-                <span className="truncate text-xs text-muted-foreground">{item.description}</span>
+                <span className="truncate text-xs text-muted-foreground" id={descriptionId(index)}>
+                  {item.description}
+                </span>
               )}
             </span>
           </ContextMenuItem>

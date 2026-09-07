@@ -158,14 +158,6 @@ export function OctantMenu(props: OctantMenuProps) {
                     key={item.value}
                     label={item.label}
                     {...(item.disabled === true ? { disabled: true } : {})}
-                    // Base UI leaves Space to the browser here, which scrolls the
-                    // page instead of choosing the highlighted option.
-                    onKeyDown={(event) => {
-                      if (event.key === " ") {
-                        event.preventDefault();
-                        event.currentTarget.click();
-                      }
-                    }}
                     value={item.value}
                   >
                     {itemBody(item, index)}
