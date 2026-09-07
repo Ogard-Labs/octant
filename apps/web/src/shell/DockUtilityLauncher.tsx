@@ -5,6 +5,7 @@ import { DockToolIcon } from "./dockToolIcons";
 import { IconButton } from "./IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
+import { MULTI_INSTANCE_DOCK_SURFACES } from "./rightUtilityDockModel";
 
 export interface DockUtilityLauncherSurface {
   readonly id: RightUtilityDockSurfaceId;
@@ -86,7 +87,7 @@ export function DockUtilityLauncher(props: DockUtilityLauncherProps) {
           />
           {references.length === 0 ? null : (
             <>
-              <span className="workspace-disclosure__caption">Relevant to this task</span>
+              <span className="workspace-disclosure__caption">Relevant to this thread</span>
               {references.map((reference) => (
                 <OctantButton
                   className="workspace-disclosure__action window-no-drag"
@@ -134,7 +135,9 @@ export function DockToolLaunchList(props: {
           variant="ghost"
         >
           <DockToolIcon surface={surface.id} />
-          <span>{surface.label}</span>
+          <span>
+            {MULTI_INSTANCE_DOCK_SURFACES.has(surface.id) ? `New ${surface.label}` : surface.label}
+          </span>
         </OctantButton>
       ))}
     </>

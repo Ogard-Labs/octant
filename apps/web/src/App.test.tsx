@@ -3661,7 +3661,7 @@ describe("App", () => {
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     await user.click(within(dock).getByRole("button", { name: "Browser" }));
     await user.click(within(dock).getByRole("button", { name: "Add tool" }));
-    const browserActions = within(dock).getAllByRole("button", { name: "Browser" });
+    const browserActions = within(dock).getAllByRole("button", { name: "New Browser" });
     const addBrowser = browserActions.at(-1);
     if (addBrowser === undefined) throw new Error("Expected the Browser add action.");
     await user.click(addBrowser);

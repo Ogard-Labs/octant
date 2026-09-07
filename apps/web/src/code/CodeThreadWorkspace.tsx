@@ -16,9 +16,10 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import { CirclePause, UserRoundCog } from "lucide-react";
+import { CirclePause, UserRoundCog, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { composerPlaceholder, FILE_HINT, THREAD_HINT } from "../composer/composerPlaceholder";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
@@ -1237,7 +1238,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       onClick={() => attachments.remove(reference.attachmentId)}
                       type="button"
                     >
-                      ×
+                      <X aria-hidden="true" size={12} strokeWidth={1.8} />
                     </OctantButton>
                   </span>
                 ))}
@@ -1360,6 +1361,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           ariaLabel: "Thread context",
           leading: (
             <>
+              <ComposerAttachButton
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                busy={attachments.busy}
+                refusedReason={
+                  props.attachmentClient === undefined
+                    ? "Image attachments are unavailable on this host."
+                    : boundModelReadsImages(providerGroups, thread) === false
+                      ? `${providerModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`
+                      : undefined
+                }
+                onRefused={attachments.refuse}
+                onFileSelected={(file) => void attachments.attach([file])}
+              />
               <ComposerVoiceButton
                 disabled={busy}
                 onTranscript={(transcript) => {

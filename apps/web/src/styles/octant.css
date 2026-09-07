@@ -4211,6 +4211,9 @@ input.switch:checked::after {
   gap: var(--oct-space-2);
   padding: var(--oct-space-3) var(--oct-composer-gutter) 0;
 }
+.composer-attachment-input {
+  display: none;
+}
 .composer-input {
   display: block;
   width: 100%;
@@ -4453,6 +4456,10 @@ input.switch:checked::after {
   background: none;
   color: var(--oct-meta);
   padding: 0;
+}
+.chip .chip-x svg {
+  width: 12px;
+  height: 12px;
 }
 .chip .chip-x::before {
   content: "";

@@ -421,6 +421,12 @@ for the managed-clone flow in place, so there is no second repository control
 beside the Project. Access is
 a titled menu on the prompt card, next to the model picker, and carries the
 "Remember for this Project" switch.
+All six composers use `ComposerAttachButton` for their file chooser. The visible
+button is the only tab stop; an unsupported model keeps the button reachable
+and explains the refusal in the surface's status line. It never opens the file
+chooser or uploads while refused. Model, access, and destination controls keep
+one type scale and the global focus ring. Access labels read "Plan · read-only"
+and "Ask for approvals" in both new and existing threads.
 Under the Code composer the start screen is an agent home rather than a
 blank prompt: suggested prompts as small cards (a label and the
 sentence they fill in), then three sections that share one card grid, two
@@ -576,8 +582,15 @@ folder, running servers), and its body is a definition list of git facts,
 row-styled actions, and collapsible groups on the dock's own ground. It summarizes Project, branch, clean/dirty state, working folder,
 changes, local servers, pull-request
 identity, sources, and compact active/completed subagent rows with lifecycle,
-model, and retained final response when authoritative. It is not a permanent
-stack of cards and does not duplicate the Agents dock. Missing checkout context
+model, and retained final response when authoritative. It stays flat on the dock's own background, with no surrounding card. Checkout
+facts and the existing Commit or push and Create pull request flows come first.
+Other servers stay behind a disclosure; none are stopped or removed by hiding
+them. Empty subagents keep a collapsed count and their Open Agents action.
+Sources list the current thread's journaled image attachments when present.
+Computer use offers Picture in Picture show/hide for the same live activity
+preview that floats over the main conversation. The preview never occupies
+Environment, and hiding it never stops its session. Browser stop and computer-use
+approval controls stay with the preview. It does not duplicate the Agents dock. Missing checkout context
 is neutral explanatory text rather than a warning callout.
 
 The Board is an operational reading surface with four fixed,
@@ -623,7 +636,9 @@ app has a separate design system under `apps/mobile/design-system`.
 True page tabs, segmented choices, and pane identity are intentionally
 different. `OctantTabs` owns a flat rail with selected fill and keyboard tab
 semantics. `OctantToggleGroup` owns the enclosed track used for mutually
-exclusive values. The split-pane grip alone owns active-pane paint. Feature
+exclusive values. Each split pane keeps its close action on the trailing edge of its header;
+only a pane underneath the window controls reserves space for that cluster.
+The split-pane grip alone owns active-pane paint. Feature
 styles may size or scroll these primitives but may not restore a local tab
 track, underline recipe, or persistent active border.
 

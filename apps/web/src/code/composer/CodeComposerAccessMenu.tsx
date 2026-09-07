@@ -12,12 +12,12 @@ export const CODE_COMPOSER_ACCESS_OPTIONS: ReadonlyArray<{
 }> = [
   {
     id: "plan",
-    label: "Plan",
+    label: "Plan · read-only",
     detail: "Read-only. No commands or file changes.",
   },
   {
     id: "approval-gated",
-    label: "Approval",
+    label: "Ask for approvals",
     detail: "Ask before commands and file changes.",
   },
   {

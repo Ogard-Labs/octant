@@ -66,7 +66,7 @@ function cssRule(selector: string, occurrence = 0): string {
   const matches = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/gs)].filter((match) =>
     match[1]
       ?.split(",")
-      .map((candidate) => candidate.trim())
+      .map((candidate) => candidate.trim().replace(/\s+/g, " "))
       .includes(selector),
   );
   expect(matches, `missing CSS rule for ${selector}`).not.toHaveLength(0);
@@ -879,6 +879,35 @@ describe("WindowChrome", () => {
     // won the hit test over every control in this row and swallowed the click.
     expect(header).toContain("margin-right: var(--octant-window-chrome-reserved-width");
     expect(header).not.toMatch(/padding:[^;]*--octant-window-chrome-reserved-width/);
+  });
+
+  it("lets split close controls reach their pane edge wherever window controls are absent", () => {
+    expect(cssRule(".workspace-pane__close")).toContain("margin-inline-start: auto");
+    expect(
+      cssRule(
+        '.workspace-split[data-orientation="horizontal"] > :first-child .workspace-pane__header',
+      ),
+    ).toContain("margin-right: 0");
+    expect(
+      cssRule(
+        '.workspace-split[data-orientation="vertical"] > :last-child .workspace-pane__header',
+      ),
+    ).toContain("margin-right: 0");
+    expect(cssRule(".shell--wide-context-open .workspace-pane__header")).toContain(
+      "margin-right: 0",
+    );
+  });
+
+  it("keeps the leading split title clear of native controls when navigation is collapsed", () => {
+    const nativeCollapsed = cssRule(
+      'html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__header',
+    );
+    expect(nativeCollapsed).toContain("padding-left: var(--octant-window-chrome-leading-width");
+    expect(
+      cssRule(
+        '.shell--sidebar-collapsed .workspace-split[data-orientation="horizontal"] > :last-child .workspace-pane__header',
+      ),
+    ).toContain("padding-left: var(--oct-space-3)");
   });
 
   it("keeps the window controls above the pane header rather than tied with it", () => {

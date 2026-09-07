@@ -1,6 +1,7 @@
+import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts";
 import type { CreateHostViewScope, PickerGroup, ModelPickerSelection } from "@octant/domain";
-import { FolderOpen, Paperclip, ShieldCheck } from "lucide-react";
+import { FolderOpen, ShieldCheck } from "lucide-react";
 import { useState, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
 import { clipboardHasImage } from "../chat/composerImagePaste";
 import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
@@ -246,45 +247,17 @@ export function WorkOverview(props: WorkOverviewProps) {
             rows={3}
             value={draft}
           />
-          <label>
-            <span className="work-composer-adapter__visually-hidden">Add attachment</span>
-            {/* ui-boundary-exception: native-file-input */}
-            <input
-              aria-label="Choose attachment file"
-              accept="image/png,image/jpeg,image/webp,image/gif"
-              className="work-composer-adapter__file-input"
-              disabled={!createAvailable || submitting || imageSupport === false}
-              onChange={(event) => {
-                const file = event.currentTarget.files?.item(0);
-                if (file !== null && file !== undefined) {
-                  if (imageSupport === false) {
-                    images.refuse(
-                      "The selected model does not accept images. Choose an image-capable model.",
-                    );
-                  } else {
-                    images.attach([file]);
-                  }
-                }
-                event.currentTarget.value = "";
-              }}
-              type="file"
-            />
-          </label>
-          <OctantButton
-            aria-label="Add attachment"
-            disabled={!createAvailable || submitting || imageSupport === false}
-            onClick={(event) => {
-              event.preventDefault();
-              event.currentTarget.parentElement
-                ?.querySelector<HTMLInputElement>('input[type="file"]')
-                ?.click();
-            }}
-            size="icon"
-            type="button"
-            variant="ghost"
-          >
-            <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
-          </OctantButton>
+          <ComposerAttachButton
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            busy={!createAvailable || submitting}
+            refusedReason={
+              imageSupport === false
+                ? "The selected model does not accept images. Choose an image-capable model."
+                : undefined
+            }
+            onRefused={images.refuse}
+            onFileSelected={(file) => images.attach([file])}
+          />
           <OctantButton
             className="project-button"
             disabled={!createAvailable || submitting || draft.trim() === ""}

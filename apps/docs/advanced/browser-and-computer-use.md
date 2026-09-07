@@ -68,6 +68,19 @@ assertion verifying a tap — is not yet built. Today that workbench offers
 Simulator screenshots, destination controls, and the `octant_apple` tool;
 see [Apple Development Workbench](/advanced/apple-workbench).
 
+## Picture in Picture
+
+Active Work and Code threads show a compact activity preview over the main
+conversation. The Code Environment panel has a **Picture in Picture** control
+for showing or hiding that preview. Hiding it changes presentation only; it
+does not stop the browser or computer-use session.
+
+Point at the preview or focus it with the keyboard to reveal its controls.
+A browser preview opens the same thread-owned Browser tab. Stop remains
+available, and computer-use approvals stay visible when they need a decision.
+The preview does not live inside Environment and does not open a separate OS
+window.
+
 ## Boundaries
 
 Browser and computer use are provider-neutral and app-managed. Interactive

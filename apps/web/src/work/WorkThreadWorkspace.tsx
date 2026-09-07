@@ -1,3 +1,4 @@
+import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import {
   decodeWorkAttachmentId,
   decodeWorkAttachmentMediaType,
@@ -26,7 +27,7 @@ import {
   type WorkTurnClient,
 } from "@octant/client-runtime/work-turn-client";
 import type { FileMentionClient, ThreadMentionClient } from "@octant/client-runtime";
-import { Check, CirclePause, FileText, Globe2, Paperclip } from "lucide-react";
+import { Check, CirclePause, FileText, Globe2 } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -1259,44 +1260,17 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               )}
               {props.turnClient === undefined ? null : (
                 <>
-                  <label>
-                    <span className="work-composer-adapter__visually-hidden">Add attachment</span>
-                    {/* ui-boundary-exception: native-file-input */}
-                    <input
-                      aria-label="Choose attachment file"
-                      accept="image/png,image/jpeg,image/webp,image/gif"
-                      className="work-composer-adapter__file-input"
-                      disabled={creating || completionLocked || imageSupport === false}
-                      onChange={(event) => {
-                        const file = event.currentTarget.files?.item(0);
-                        if (file !== null && file !== undefined) {
-                          if (imageSupport === false) {
-                            images.refuse(
-                              "The selected model does not accept images. Choose an image-capable model.",
-                            );
-                          } else {
-                            images.attach([file]);
-                          }
-                        }
-                        event.currentTarget.value = "";
-                      }}
-                      type="file"
-                    />
-                  </label>
-                  <OctantButton
-                    aria-label="Add attachment"
-                    disabled={creating || completionLocked || imageSupport === false}
-                    onClick={(event) => {
-                      event.currentTarget.parentElement
-                        ?.querySelector<HTMLInputElement>('input[type="file"]')
-                        ?.click();
-                    }}
-                    size="icon"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
-                  </OctantButton>
+                  <ComposerAttachButton
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    busy={creating || completionLocked}
+                    refusedReason={
+                      imageSupport === false
+                        ? "The selected model does not accept images. Choose an image-capable model."
+                        : undefined
+                    }
+                    onRefused={images.refuse}
+                    onFileSelected={(file) => images.attach([file])}
+                  />
                 </>
               )}
               <ComposerVoiceButton

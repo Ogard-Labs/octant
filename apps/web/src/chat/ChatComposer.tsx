@@ -1,3 +1,4 @@
+import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import {
   useId,
   useLayoutEffect,
@@ -7,7 +8,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { Globe2, Paperclip, Slash, SlidersHorizontal, X } from "lucide-react";
+import { Globe2, Slash, SlidersHorizontal, X } from "lucide-react";
 import type { ChatAttachmentId } from "@octant/contracts/chat";
 import { clipboardHasImage, collectPastedImages } from "./composerImagePaste";
 import {
@@ -236,6 +237,7 @@ export function ChatComposer(props: ChatComposerProps) {
     props.sendDisabledReason ??
     (trimmedDraft.length === 0 && !hasQuoteChips ? "Enter a message before sending." : undefined);
   const [sendPending, setSendPending] = useState(false);
+  const [attachmentNotice, setAttachmentNotice] = useState<string>();
   const [sendError, setSendError] = useState<string | undefined>(undefined);
   const sendDisabledReason = sendPending ? "Sending message…" : baseSendDisabledReason;
   const stopDisabledReason =
@@ -262,7 +264,11 @@ export function ChatComposer(props: ChatComposerProps) {
     sendDisabledReason,
     sendError,
     sendPending,
-    statusMessage: props.statusMessage,
+    statusMessage:
+      props.statusMessage ??
+      (attachment.kind === "unavailable" && attachment.reason === attachmentNotice
+        ? attachmentNotice
+        : undefined),
     stopDisabledReason,
     isSending: props.isSending,
     hasPendingMessage: props.hasPendingMessage === true,
@@ -659,36 +665,15 @@ export function ChatComposer(props: ChatComposerProps) {
   const rowLeading = (
     <>
       <div className="chat-composer__leading">
-        <label>
-          <span className="chat-composer__visually-hidden">Add attachment</span>
-          {/* ui-boundary-exception: native-file-input */}
-          <input
-            aria-label="Choose attachment file"
-            disabled={attachment.kind === "unavailable" || props.attachmentBusy === true}
-            onChange={(event) => {
-              const file = event.currentTarget.files?.item(0);
-              if (file !== null && file !== undefined) props.onFileSelected(file);
-              event.currentTarget.value = "";
-            }}
-            type="file"
-          />
-        </label>
-        <OctantButton
-          aria-label="Add attachment"
-          disabled={attachment.kind === "unavailable" || props.attachmentBusy === true}
-          onClick={(event) => {
-            const input =
-              event.currentTarget.parentElement?.querySelector<HTMLInputElement>(
-                'input[type="file"]',
-              );
-            input?.click();
+        <ComposerAttachButton
+          busy={props.attachmentBusy}
+          refusedReason={attachment.kind === "unavailable" ? attachment.reason : undefined}
+          onRefused={setAttachmentNotice}
+          onFileSelected={(file) => {
+            setAttachmentNotice(undefined);
+            props.onFileSelected(file);
           }}
-          size="icon"
-          type="button"
-          variant="ghost"
-        >
-          <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
-        </OctantButton>
+        />
         <ComposerVoiceButton
           disabled={props.isSending}
           onTranscript={(transcript) =>
@@ -921,7 +906,7 @@ function composeStatus(input: {
   } else if (input.sendDisabledReason !== undefined && !input.hasPendingMessage) {
     quiet.push(input.sendDisabledReason);
   }
-  const messages = [...quiet, ...loud];
+  const messages = [...new Set([...quiet, ...loud])];
   return {
     text: messages.length > 0 ? messages.join(" ") : "Ready to send.",
     loud: loud.length > 0,

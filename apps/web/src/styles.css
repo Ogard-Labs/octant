@@ -1705,6 +1705,18 @@ strong {
   padding: 2px 0 2px 4px;
 }
 
+/* Only the top-right pane shares its edge with window controls. Reserving
+   their width in every split pulled each close button away from its edge. */
+.workspace-split[data-orientation="horizontal"] > :first-child .workspace-pane__header {
+  margin-right: 0;
+}
+.workspace-split[data-orientation="vertical"] > :last-child .workspace-pane__header {
+  margin-right: 0;
+}
+.shell--wide-context-open .workspace-pane__header {
+  margin-right: 0;
+}
+
 /* After the title, where the work is: Project/branch in the editor's mono at
    meta ink, the way a person names a change. It is what tells two panes on
    one Project apart, so it yields before the title does but never vanishes
@@ -1735,6 +1747,7 @@ strong {
 
 .workspace-pane__close {
   flex: 0 0 auto;
+  margin-inline-start: auto;
   width: 24px;
   height: 24px;
   min-height: 24px;
@@ -1760,6 +1773,24 @@ html[data-octant-native-host="true"] .workspace-pane__header {
    and New thread cluster kept clear of the pane tab. */
 .shell--sidebar-collapsed .workspace-pane__header {
   padding-left: var(--octant-window-chrome-leading-width, 148px);
+}
+
+/* Native header padding must not cover the leading controls when navigation
+   is collapsed. Only the top-left pane shares that part of the title bar. */
+html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__header {
+  padding-left: var(--octant-window-chrome-leading-width, 148px);
+}
+.shell--sidebar-collapsed
+  .workspace-split[data-orientation="horizontal"]
+  > :last-child
+  .workspace-pane__header {
+  padding-left: var(--oct-space-3);
+}
+.shell--sidebar-collapsed
+  .workspace-split[data-orientation="vertical"]
+  > :last-child
+  .workspace-pane__header {
+  padding-left: var(--oct-space-3);
 }
 
 /* The grip carries the pane's surface title and is its one drag handle, in
@@ -3711,14 +3742,51 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 }
 .thread-environment-dock__body {
   display: grid;
-  padding: 0 var(--oct-space-3) 18px;
+  align-content: start;
+  gap: 10px;
+  padding: 14px 18px 18px;
 }
 .thread-environment-dock__body > * + * {
   border-top: 1px solid var(--oct-hairline);
+  padding-top: 10px;
+}
+.environment-checkout {
+  min-width: 0;
+}
+.environment-quick-action {
+  display: flex;
+  width: 100%;
+  justify-content: flex-start;
+  gap: 12px;
+  min-height: 32px;
+  padding: 0;
+  font-weight: var(--oct-weight-regular);
+}
+.environment-quick-action__detail {
+  margin-inline-start: auto;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+.environment-section-label {
+  margin: 0 0 6px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-regular);
+}
+.environment-changes-action {
+  min-height: 28px;
+  height: auto;
+  padding: 0 6px;
+  margin-inline-start: -6px;
+}
+.thread-environment-dock .environment-group .environment-group {
+  border: 0;
+  margin-top: 4px;
 }
 /* Title and action share one row so a section's action sits with the section
    it belongs to, rather than floating between two of them. */
 .thread-environment-dock .environment-group__head {
+  border-bottom: 0;
   display: flex;
   align-items: center;
   gap: var(--oct-space-2);
@@ -3779,16 +3847,16 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   background: transparent;
 }
 .thread-environment-dock .environment-git-group__row {
-  grid-template-columns: 96px minmax(0, 1fr);
+  grid-template-columns: 104px minmax(0, 1fr);
   gap: var(--oct-space-2);
 }
 .thread-environment-dock .environment-git-group__row + .environment-git-group__row {
   border-top: 0;
 }
 .thread-environment-dock .environment-git-group__row dt {
-  gap: var(--oct-space-2);
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
+  gap: 12px;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
 }
 .thread-environment-dock .environment-git-group__row dd {
   color: var(--oct-fg-2);
@@ -3799,6 +3867,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 }
 .thread-environment-dock .environment-git-group__identity-secondary {
   font-size: var(--oct-text-xs);
+  max-width: 100%;
 }
 /* Actions read as rows, not links: same height as a group header, foreground
    text, no underline, and they start where the group titles start. */
@@ -4235,7 +4304,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   transition: transform var(--oct-motion-fast) ease;
 }
 
-.environment-group--open .environment-group__chevron {
+.environment-group--open > .environment-group__head .environment-group__chevron {
   transform: rotate(90deg);
 }
 

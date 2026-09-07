@@ -1,3 +1,4 @@
+import { ThreadActivityPreviewContext } from "./ThreadActivityEnvironment";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import type { BrowserThreadId } from "@octant/contracts/browser-automation";
@@ -256,158 +257,167 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
         ? "Browser"
         : "Computer Use";
 
-  return (
-    <div className="thread-activity-frame">
-      <div className="thread-activity-frame__content">{props.children}</div>
-      {!hasActivity ? null : collapsed ? (
-        <>
-          <OctantButton
-            aria-label={`Show ${collapsedLabel} activity preview`}
-            className="thread-activity-pip-trigger window-no-drag"
-            onClick={() => setCollapsed(false)}
-            type="button"
-            variant="secondary"
-          >
-            <span className="thread-activity-pip__pulse" />
-            {activeKind === "browser" ? (
-              <Globe2 aria-hidden="true" size={14} strokeWidth={1.7} />
-            ) : (
-              <MonitorUp aria-hidden="true" size={14} strokeWidth={1.7} />
-            )}
-            <span>{collapsedLabel} active</span>
-            <Eye aria-hidden="true" size={14} strokeWidth={1.7} />
-          </OctantButton>
-          {activeKind === "computer-use" && currentComputerSession !== undefined ? (
-            <div className="thread-activity-pip__collapsed-controls">
-              {currentComputerSession.pendingApproval === undefined ? null : (
-                <>
-                  <OctantButton
-                    disabled={busy}
-                    onClick={() => void decideComputerUse("approved")}
-                    size="sm"
-                    type="button"
-                  >
-                    Approve once
-                  </OctantButton>
-                  <OctantButton
-                    disabled={busy}
-                    onClick={() => void decideComputerUse("denied")}
-                    size="sm"
-                    type="button"
-                    variant="secondary"
-                  >
-                    Deny
-                  </OctantButton>
-                </>
-              )}
+  const preview = !hasActivity ? null : collapsed ? (
+    <>
+      <OctantButton
+        aria-label={`Show ${collapsedLabel} activity preview`}
+        className="thread-activity-pip-trigger window-no-drag"
+        onClick={() => setCollapsed(false)}
+        type="button"
+        variant="secondary"
+      >
+        <span className="thread-activity-pip__pulse" />
+        {activeKind === "browser" ? (
+          <Globe2 aria-hidden="true" size={14} strokeWidth={1.7} />
+        ) : (
+          <MonitorUp aria-hidden="true" size={14} strokeWidth={1.7} />
+        )}
+        <span>{collapsedLabel} active</span>
+        <Eye aria-hidden="true" size={14} strokeWidth={1.7} />
+      </OctantButton>
+      {activeKind === "computer-use" && currentComputerSession !== undefined ? (
+        <div className="thread-activity-pip__collapsed-controls">
+          {currentComputerSession.pendingApproval === undefined ? null : (
+            <>
               <OctantButton
                 disabled={busy}
-                onClick={() => void stopComputerUse()}
+                onClick={() => void decideComputerUse("approved")}
+                size="sm"
+                type="button"
+              >
+                Approve once
+              </OctantButton>
+              <OctantButton
+                disabled={busy}
+                onClick={() => void decideComputerUse("denied")}
                 size="sm"
                 type="button"
                 variant="secondary"
               >
-                Stop Computer Use
+                Deny
               </OctantButton>
-            </div>
-          ) : null}
-        </>
-      ) : (
-        <aside
-          aria-label="Thread activity preview"
-          className="thread-activity-pip"
-          data-activity-kind={activeKind}
-        >
-          {/* The preview is the pictures, stacked, and nothing else at rest:
+            </>
+          )}
+          <OctantButton
+            disabled={busy}
+            onClick={() => void stopComputerUse()}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            Stop Computer Use
+          </OctantButton>
+        </div>
+      ) : null}
+    </>
+  ) : (
+    <aside
+      aria-label="Thread activity preview"
+      className="thread-activity-pip"
+      data-activity-kind={activeKind}
+    >
+      {/* The preview is the pictures, stacked, and nothing else at rest:
               each card's name, status, and controls sit over its top edge and
               show under the pointer. A card without a picture keeps them out
               in the open, since there is nothing for them to cover. */}
-          {currentBrowserSnapshot === undefined ? null : (
-            <section
-              aria-label="Browser activity"
-              className="thread-activity-pip__card"
-              data-kind="browser"
-            >
-              <BrowserActivityPreview
-                {...(props.onOpenBrowser === undefined
-                  ? {}
-                  : { onOpenBrowser: props.onOpenBrowser })}
-                snapshot={currentBrowserSnapshot}
+      {currentBrowserSnapshot === undefined ? null : (
+        <section
+          aria-label="Browser activity"
+          className="thread-activity-pip__card"
+          data-kind="browser"
+        >
+          <BrowserActivityPreview
+            {...(props.onOpenBrowser === undefined ? {} : { onOpenBrowser: props.onOpenBrowser })}
+            snapshot={currentBrowserSnapshot}
+          />
+          <div className="thread-activity-pip__controls">
+            <span className="thread-activity-pip__identity">
+              <span className="thread-activity-pip__pulse" />
+              <Globe2 aria-hidden="true" size={14} strokeWidth={1.7} />
+              <strong>Browser</strong>
+              <span>
+                {activityStatus("browser", currentBrowserSnapshot, currentComputerSession)}
+              </span>
+            </span>
+            <span className="thread-activity-pip__header-actions">
+              {props.onOpenBrowser === undefined ? null : (
+                <IconButton
+                  icon={ExternalLink}
+                  label="Open Browser tab"
+                  onClick={props.onOpenBrowser}
+                />
+              )}
+              <IconButton
+                icon={EyeOff}
+                label="Hide activity preview"
+                onClick={() => setCollapsed(true)}
               />
-              <div className="thread-activity-pip__controls">
-                <span className="thread-activity-pip__identity">
-                  <span className="thread-activity-pip__pulse" />
-                  <Globe2 aria-hidden="true" size={14} strokeWidth={1.7} />
-                  <strong>Browser</strong>
-                  <span>
-                    {activityStatus("browser", currentBrowserSnapshot, currentComputerSession)}
-                  </span>
-                </span>
-                <span className="thread-activity-pip__header-actions">
-                  {props.onOpenBrowser === undefined ? null : (
-                    <IconButton
-                      icon={ExternalLink}
-                      label="Open Browser tab"
-                      onClick={props.onOpenBrowser}
-                    />
-                  )}
-                  <IconButton
-                    icon={EyeOff}
-                    label="Hide activity preview"
-                    onClick={() => setCollapsed(true)}
-                  />
-                  <IconButton
-                    disabled={busy}
-                    icon={Square}
-                    label="Stop Browser"
-                    onClick={() => void stopBrowser()}
-                  />
-                </span>
-              </div>
-            </section>
-          )}
-          {currentComputerSession === undefined ? null : (
-            <section
-              aria-label="Computer Use activity"
-              className="thread-activity-pip__card"
-              data-kind="computer-use"
-            >
-              <ComputerUseActivityPreview
-                busy={busy}
-                onApprove={() => void decideComputerUse("approved")}
-                onDeny={() => void decideComputerUse("denied")}
-                session={currentComputerSession}
+              <IconButton
+                disabled={busy}
+                icon={Square}
+                label="Stop Browser"
+                onClick={() => void stopBrowser()}
               />
-              <div className="thread-activity-pip__controls">
-                <span className="thread-activity-pip__identity">
-                  <span className="thread-activity-pip__pulse" />
-                  <MonitorUp aria-hidden="true" size={14} strokeWidth={1.7} />
-                  <strong>Computer Use</strong>
-                  <span>
-                    {activityStatus("computer-use", currentBrowserSnapshot, currentComputerSession)}
-                  </span>
-                </span>
-                <span className="thread-activity-pip__header-actions">
-                  {currentBrowserSnapshot === undefined ? (
-                    <IconButton
-                      icon={EyeOff}
-                      label="Hide activity preview"
-                      onClick={() => setCollapsed(true)}
-                    />
-                  ) : null}
-                  <IconButton
-                    disabled={busy}
-                    icon={Square}
-                    label="Stop Computer Use"
-                    onClick={() => void stopComputerUse()}
-                  />
-                </span>
-              </div>
-            </section>
-          )}
-        </aside>
+            </span>
+          </div>
+        </section>
       )}
-    </div>
+      {currentComputerSession === undefined ? null : (
+        <section
+          aria-label="Computer Use activity"
+          className="thread-activity-pip__card"
+          data-kind="computer-use"
+        >
+          <ComputerUseActivityPreview
+            busy={busy}
+            onApprove={() => void decideComputerUse("approved")}
+            onDeny={() => void decideComputerUse("denied")}
+            session={currentComputerSession}
+          />
+          <div className="thread-activity-pip__controls">
+            <span className="thread-activity-pip__identity">
+              <span className="thread-activity-pip__pulse" />
+              <MonitorUp aria-hidden="true" size={14} strokeWidth={1.7} />
+              <strong>Computer Use</strong>
+              <span>
+                {activityStatus("computer-use", currentBrowserSnapshot, currentComputerSession)}
+              </span>
+            </span>
+            <span className="thread-activity-pip__header-actions">
+              {currentBrowserSnapshot === undefined ? (
+                <IconButton
+                  icon={EyeOff}
+                  label="Hide activity preview"
+                  onClick={() => setCollapsed(true)}
+                />
+              ) : null}
+              <IconButton
+                disabled={busy}
+                icon={Square}
+                label="Stop Computer Use"
+                onClick={() => void stopComputerUse()}
+              />
+            </span>
+          </div>
+        </section>
+      )}
+    </aside>
+  );
+  const presentation = useMemo(
+    () => ({
+      available: hasActivity,
+      hidden: collapsed,
+      setHidden: setCollapsed,
+    }),
+    [hasActivity, collapsed],
+  );
+  return (
+    <ThreadActivityPreviewContext.Provider value={presentation}>
+      <div className="thread-activity-frame">
+        <div className="thread-activity-frame__content">{props.children}</div>
+        {preview}
+      </div>
+    </ThreadActivityPreviewContext.Provider>
   );
 }
 

@@ -1,3 +1,4 @@
+import { X } from "lucide-react";
 import type { WorkComposerImages } from "./useWorkComposerImages";
 import { OctantButton } from "../../ui/base/OctantButton";
 
@@ -26,7 +27,7 @@ export function WorkImageAttachmentChips(props: { readonly images: WorkComposerI
             onClick={() => images.remove(attachment.id)}
             type="button"
           >
-            ×
+            <X aria-hidden="true" size={12} strokeWidth={1.8} />
           </OctantButton>
         </span>
       ))}

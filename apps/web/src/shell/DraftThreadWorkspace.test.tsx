@@ -288,7 +288,9 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByText("my-repo")).toBeVisible();
     // The branch context now lives on the branch selector trigger.
     expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("feature/test");
-    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Approval");
+    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent(
+      "Ask for approvals",
+    );
   });
 
   it("shows the authoritative Environment health in the context strip", () => {

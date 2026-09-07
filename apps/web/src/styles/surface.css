@@ -375,12 +375,25 @@
   align-items: center;
   gap: 5px;
   min-height: 24px;
+  height: 24px;
   padding: 0 7px;
-  color: var(--oct-meta);
-  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
   font-weight: 500;
   white-space: nowrap;
+}
+
+.composer-tray [role="combobox"] {
+  min-height: 24px;
+  height: 24px;
+  padding: 0 7px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+.composer-tray [role="combobox"]:focus-visible {
+  box-shadow: var(--oct-focus-ring);
 }
 
 /* The shared row already carries a gap before send. A surface that places

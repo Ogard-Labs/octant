@@ -8,7 +8,7 @@ describe("CodeComposerAccessMenu", () => {
     render(<CodeComposerAccessMenu onChange={onChange} value="approval-gated" />);
 
     const trigger = screen.getByRole("button", { name: "Access policy" });
-    expect(trigger).toHaveTextContent("Approval");
+    expect(trigger).toHaveTextContent("Ask for approvals");
     fireEvent.click(trigger);
     expect(screen.getByRole("option", { name: /Full access/ })).toHaveTextContent(
       "Allow commands and edits without prompts.",

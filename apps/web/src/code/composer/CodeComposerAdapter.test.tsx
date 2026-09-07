@@ -126,7 +126,7 @@ describe("CodeComposerAdapter", () => {
 
   it("renders approval policy selector", () => {
     const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
-    expect(html).toContain("Approval");
+    expect(html).toContain("Ask for approvals");
     expect(html).toContain("Access policy");
   });
 

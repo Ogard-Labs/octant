@@ -49,7 +49,7 @@ export function CodeWorkspaceSelector(props: CodeWorkspaceSelectorProps) {
           <ChevronDown aria-hidden="true" size={12} />
         </>
       }
-      triggerClassName="code-composer-choice__trigger"
+      triggerClassName="code-composer-choice__trigger composer-tray__item"
       triggerLabel="Workspace"
       {...(props.disabled === undefined ? {} : { triggerDisabled: props.disabled })}
     >

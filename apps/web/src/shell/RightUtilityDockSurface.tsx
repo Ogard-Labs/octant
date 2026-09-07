@@ -117,7 +117,17 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
             title={`${activeSurface?.label ?? "Tool"} has nothing to describe here`}
           />
         ) : activeTab === undefined ? null : (
-          <div key={activeTab.id} className="right-utility-dock__tool">
+          <div
+            key={activeTab.id}
+            className="right-utility-dock__tool"
+            data-dock-inset={
+              activeSurface?.id === "plan" ||
+              activeSurface?.id === "delivery" ||
+              activeSurface?.id === "agents"
+                ? "true"
+                : undefined
+            }
+          >
             {props.renderTab?.(dockTabDescriptor(activeTab)) ??
               contents[dockTabSurface(activeTab).id]}
           </div>

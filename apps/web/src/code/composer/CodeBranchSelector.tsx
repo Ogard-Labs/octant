@@ -61,7 +61,7 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
           <ChevronDown aria-hidden="true" className="code-branch-selector__chevron" size={12} />
         </>
       }
-      triggerClassName="code-branch-selector__trigger"
+      triggerClassName="code-branch-selector__trigger composer-tray__item"
       triggerLabel="Base branch"
       {...(props.disabled === undefined ? {} : { triggerDisabled: props.disabled })}
     >

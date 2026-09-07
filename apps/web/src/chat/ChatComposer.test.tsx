@@ -236,7 +236,9 @@ describe("ChatComposer", () => {
       onFileSelected,
     });
 
-    expect(screen.getByRole("button", { name: "Add attachment" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add attachment" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Add attachment" }));
+    expect(screen.getByRole("status")).not.toHaveClass("chat-composer__status--quiet");
     expect(screen.getByRole("status")).toHaveTextContent(
       "The selected model cannot accept attachments.",
     );
@@ -244,6 +246,17 @@ describe("ChatComposer", () => {
     const file = new File(["image"], "diagram.png", { type: "image/png" });
     await user.upload(screen.getByLabelText("Choose attachment file"), file);
     expect(onFileSelected).not.toHaveBeenCalled();
+  });
+
+  it("clears an attachment refusal when the selected provider becomes capable", async () => {
+    const user = userEvent.setup();
+    const { props, rerender } = renderComposer({
+      attachment: { kind: "unavailable", reason: "Attachments are unavailable." },
+    });
+    await user.click(screen.getByRole("button", { name: "Add attachment" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Attachments are unavailable.");
+    rerender(<ChatComposer {...props} attachment={{ kind: "supported" }} />);
+    expect(screen.getByRole("status")).not.toHaveTextContent("Attachments are unavailable.");
   });
 
   it("forwards the selected File without reading or exposing a file path", async () => {

@@ -792,26 +792,6 @@ function renderCodeTab(
       </CodeWorkspaceErrorBoundary>
     );
   }
-  const surface = (
-    <ThreadActivityPictureInPicture
-      enabled={codeController.conversationHistory === "loaded"}
-      {...(props.browserAutomationClient === undefined
-        ? {}
-        : { browserClient: props.browserAutomationClient })}
-      {...(props.computerUseClient === undefined
-        ? {}
-        : { computerUseClient: props.computerUseClient })}
-      {...(props.onComputerUseSessionChange === undefined
-        ? {}
-        : { onComputerUseSessionChange: props.onComputerUseSessionChange })}
-      {...(props.onOpenSurface === undefined
-        ? {}
-        : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
-      threadId={tab.threadId as never}
-    >
-      {content}
-    </ThreadActivityPictureInPicture>
-  );
   return (
     <CodeWorkspaceErrorBoundary key={tab.id}>
       <ThreadPlanProvider
@@ -819,70 +799,105 @@ function renderCodeTab(
         enabled={codeController.conversationHistory === "loaded"}
         threadId={String(tab.threadId)}
       >
-        <CodeThreadEnvironment
-          active={paneIsActive(props, paneId)}
-          observe={codeController.conversationHistory === "loaded"}
-          {...(props.environmentDockOpen === undefined
+        <ThreadActivityPictureInPicture
+          enabled={codeController.conversationHistory === "loaded"}
+          {...(props.browserAutomationClient === undefined
             ? {}
-            : { environmentOpen: props.environmentDockOpen })}
-          {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
-          {...(codeController.activeView?.thread.deliveryTarget.outcomeKind === undefined
+            : { browserClient: props.browserAutomationClient })}
+          {...(props.computerUseClient === undefined
             ? {}
-            : { deliveryOutcome: codeController.activeView.thread.deliveryTarget.outcomeKind })}
-          {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
-          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-          {...(props.openInApplications === undefined
+            : { computerUseClient: props.computerUseClient })}
+          {...(props.onComputerUseSessionChange === undefined
             ? {}
-            : { openInApplications: props.openInApplications })}
-          {...(project === undefined ? {} : { project })}
-          {...(props.onNewThreadInProject === undefined
+            : { onComputerUseSessionChange: props.onComputerUseSessionChange })}
+          {...(props.onOpenSurface === undefined
             ? {}
-            : { onNewThreadInProject: props.onNewThreadInProject })}
-          {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
-          {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
-          {...(props.projectWindowCapability === undefined
-            ? {}
-            : { windowCapability: props.projectWindowCapability })}
-          {...(props.localServerClient === undefined
-            ? {}
-            : { localServerClient: props.localServerClient })}
-          {...(props.githubClient === undefined ? {} : { githubClient: props.githubClient })}
-          {...(pullRequestRepository === undefined ? {} : { pullRequestRepository })}
-          {...(browserAutomationClient === undefined || onOpenSurface === undefined
-            ? {}
-            : {
-                onOpenLocalServer: async (target: LocalServerOpenTarget) => {
-                  const browserThreadId = tab.threadId as unknown as BrowserThreadId;
-                  const contextId = await openLocalServerBrowserContext(
-                    browserAutomationClient,
-                    browserThreadId,
-                    target,
-                  );
-                  // Named by the context it just created, so this Open gets its
-                  // own tab instead of taking over the thread's Browser tab.
-                  // The shell recovers a rejected tab mutation rather than
-                  // throwing, so only its adoption answer proves the context
-                  // gained a close path; without one it is released here and
-                  // the Open is reported as the failure it was.
-                  const adopted = await onOpenSurface("browser", paneId, contextId);
-                  if (adopted) return;
-                  await releaseBrowserContext(browserAutomationClient, browserThreadId, contextId);
-                  throw new Error("No Browser tab adopted the context opened for this server.");
-                },
-              })}
-          {...(globalThis.navigator?.clipboard === undefined
-            ? {}
-            : {
-                onCopyLocalServerUrl: (url: string) => navigator.clipboard.writeText(url),
-              })}
-          tab={tab}
-          onExecute={codeController.execute}
-          {...(props.onOpenReview === undefined
-            ? {}
-            : { onOpenChanges: () => props.onOpenReview?.(tab.threadId) })}
+            : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
+          threadId={tab.threadId as never}
         >
-          {surface}
-        </CodeThreadEnvironment>
+          <CodeThreadEnvironment
+            active={paneIsActive(props, paneId)}
+            observe={codeController.conversationHistory === "loaded"}
+            {...(props.environmentDockOpen === undefined
+              ? {}
+              : { environmentOpen: props.environmentDockOpen })}
+            {...(props.agentRunClient === undefined
+              ? {}
+              : { agentRunClient: props.agentRunClient })}
+            {...(codeController.activeView?.thread.deliveryTarget.outcomeKind === undefined
+              ? {}
+              : { deliveryOutcome: codeController.activeView.thread.deliveryTarget.outcomeKind })}
+            {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
+            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+            {...(props.openInApplications === undefined
+              ? {}
+              : { openInApplications: props.openInApplications })}
+            {...(project === undefined ? {} : { project })}
+            {...(props.onNewThreadInProject === undefined
+              ? {}
+              : { onNewThreadInProject: props.onNewThreadInProject })}
+            {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
+            {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
+            {...(props.projectWindowCapability === undefined
+              ? {}
+              : { windowCapability: props.projectWindowCapability })}
+            {...(props.localServerClient === undefined
+              ? {}
+              : { localServerClient: props.localServerClient })}
+            {...(props.githubClient === undefined ? {} : { githubClient: props.githubClient })}
+            {...(pullRequestRepository === undefined ? {} : { pullRequestRepository })}
+            {...(browserAutomationClient === undefined || onOpenSurface === undefined
+              ? {}
+              : {
+                  onOpenLocalServer: async (target: LocalServerOpenTarget) => {
+                    const browserThreadId = tab.threadId as unknown as BrowserThreadId;
+                    const contextId = await openLocalServerBrowserContext(
+                      browserAutomationClient,
+                      browserThreadId,
+                      target,
+                    );
+                    // Named by the context it just created, so this Open gets its
+                    // own tab instead of taking over the thread's Browser tab.
+                    // The shell recovers a rejected tab mutation rather than
+                    // throwing, so only its adoption answer proves the context
+                    // gained a close path; without one it is released here and
+                    // the Open is reported as the failure it was.
+                    const adopted = await onOpenSurface("browser", paneId, contextId);
+                    if (adopted) return;
+                    await releaseBrowserContext(
+                      browserAutomationClient,
+                      browserThreadId,
+                      contextId,
+                    );
+                    throw new Error("No Browser tab adopted the context opened for this server.");
+                  },
+                })}
+            {...(globalThis.navigator?.clipboard === undefined
+              ? {}
+              : {
+                  onCopyLocalServerUrl: (url: string) => navigator.clipboard.writeText(url),
+                })}
+            tab={tab}
+            sources={[
+              ...new Map(
+                codeController.conversation
+                  .flatMap((message) => message.attachments ?? [])
+                  .map((attachment) => [String(attachment.attachmentId), attachment]),
+              ).values(),
+            ]}
+            sourceClient={codeController.client}
+            onOpenGit={() => props.onOpenCodeSurface("code-git", tab.threadId, "Git")}
+            onCreatePullRequest={() =>
+              props.onOpenCodeSurface("code-pr", tab.threadId, "Pull request")
+            }
+            onExecute={codeController.execute}
+            {...(props.onOpenReview === undefined
+              ? {}
+              : { onOpenChanges: () => props.onOpenReview?.(tab.threadId) })}
+          >
+            {content}
+          </CodeThreadEnvironment>
+        </ThreadActivityPictureInPicture>
       </ThreadPlanProvider>
     </CodeWorkspaceErrorBoundary>
   );

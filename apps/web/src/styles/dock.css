@@ -550,16 +550,20 @@
   height: 100%;
 }
 
-.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .browser-workspace),
-.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .side-chat),
-.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .code-file-explorer-panel),
-.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .canvas-workspace-tab),
-.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .dock-canvas-tool),
-.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .dock-document-tool),
-.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .code-diff-pane),
-.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) [data-code-tab-kind]) {
+/* Tools with their own headers and scrolling meet the dock rail directly.
+   Prose panels opt into an inset without shifting Files or Environment. */
+.right-utility-dock__content {
   padding: 0;
   overflow: hidden;
+}
+
+.right-utility-dock__tool[data-dock-inset="true"] {
+  padding: var(--oct-space-4);
+  overflow: auto;
+}
+
+.right-utility-dock__tool[data-dock-inset="true"] > .shell-state {
+  padding: 0;
 }
 
 .octant-dialog__backdrop {

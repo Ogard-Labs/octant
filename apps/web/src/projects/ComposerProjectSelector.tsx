@@ -193,7 +193,7 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-label={`Project: ${selectionLabel}`}
-        className="composer-folder-selector__trigger"
+        className="composer-folder-selector__trigger composer-tray__item"
         disabled={props.disabled}
         onClick={() => (open ? close() : setOpen(true))}
         ref={triggerRef}

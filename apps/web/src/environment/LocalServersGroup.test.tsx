@@ -57,7 +57,7 @@ function controller(overrides: Record<string, unknown> = {}) {
 }
 
 describe("LocalServersGroup", () => {
-  it("groups this checkout's servers above other leftovers", async () => {
+  it("keeps other servers behind a disclosure while this checkout stays visible", async () => {
     const user = userEvent.setup();
     const leftover = listener({
       listenerId: "lsn_ffffffffffffffffffffffffffffffff" as LocalServerListenerId,
@@ -73,8 +73,11 @@ describe("LocalServersGroup", () => {
       />,
     );
 
-    const headings = screen.getAllByRole("heading").map((heading) => heading.textContent);
-    expect(headings).toEqual(["This checkout", "Other leftovers"]);
+    expect(screen.getByRole("heading", { name: "This checkout" })).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "More actions for node on port 3000" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Other servers 1" }));
     const leftoverMore = screen.getByRole("button", {
       name: "More actions for node on port 3000",
     });

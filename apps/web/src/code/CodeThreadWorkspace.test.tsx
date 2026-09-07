@@ -1,3 +1,4 @@
+import { decodeCodeAttachmentId } from "@octant/contracts/code";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import type { CodeAttachmentId, CodeBoardCard, CodeBoardView, ThreadPlan } from "@octant/contracts";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -735,6 +736,51 @@ describe("CodeThreadWorkspace", () => {
     const composer = screen.getByLabelText("Follow-up message");
     await user.type(composer, "match this mockup");
     pasteImage(composer);
+
+    expect(await screen.findByAltText("pasted.png")).toBeInTheDocument();
+    expect(putAttachment).toHaveBeenCalledOnce();
+
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    // The turn names what the host answered with, never bytes the composer held.
+    expect(sendFollowUp).toHaveBeenCalledWith(
+      "match this mockup",
+      [],
+      [reference],
+      [],
+      "approval-gated",
+    );
+    // Sending is not a discard: the image belongs to the turn that carried it.
+    expect(discardAttachment).not.toHaveBeenCalled();
+  });
+
+  it("uploads an image chosen from the composer before the turn and sends it by the host's own reference", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => true);
+    const reference = {
+      attachmentId: decodeCodeAttachmentId("40000000-0000-4000-8000-000000000001"),
+      // The host decides the name it kept; the composer shows that one back.
+      displayName: "pasted.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "b".repeat(64),
+    };
+    const putAttachment = vi.fn(async () => reference);
+    const discardAttachment = vi.fn(async () => undefined);
+    render(
+      <CodeThreadWorkspace
+        attachmentClient={{ putAttachment, discardAttachment, attachment: vi.fn() }}
+        controller={controller({ sendFollowUp })}
+        threadId={threadId}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "match this mockup");
+    expect(screen.getByRole("button", { name: "Add attachment" })).toBeEnabled();
+    await user.upload(
+      screen.getByLabelText("Choose attachment file"),
+      new File(["png"], "pasted.png", { type: "image/png" }),
+    );
 
     expect(await screen.findByAltText("pasted.png")).toBeInTheDocument();
     expect(putAttachment).toHaveBeenCalledOnce();

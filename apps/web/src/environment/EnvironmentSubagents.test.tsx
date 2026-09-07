@@ -41,7 +41,8 @@ function environmentClient(
 }
 
 describe("EnvironmentSubagents", () => {
-  it("says a task has delegated nothing rather than hiding the section", async () => {
+  it("keeps an empty subagent summary compact and lets the reader expand it", async () => {
+    const user = userEvent.setup();
     render(
       <EnvironmentSubagents
         client={environmentClient({
@@ -56,6 +57,7 @@ describe("EnvironmentSubagents", () => {
     // indistinguishable from a missing feature.
     expect(await screen.findByText("Subagents")).toBeVisible();
     expect(await screen.findByText("0 active · 0 done")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /^Subagents/ }));
     expect(
       await screen.findByText("This task has not delegated any work to a subagent."),
     ).toBeVisible();

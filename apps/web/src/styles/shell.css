@@ -1419,10 +1419,6 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 
 .composer-folder-selector__trigger {
   max-width: min(15rem, 42vw);
-  height: 24px;
-  padding: 0 6px;
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-detail);
 }
 
 .composer-folder-selector__label {
@@ -1922,35 +1918,7 @@ form > .work-composer-adapter__attachments {
 /* ── Branch / worktree source selector ─────────────────────────────── */
 
 .code-branch-selector__trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
   max-width: min(20rem, 50vw);
-  min-height: 24px;
-  padding: 0 7px;
-  color: var(--octant-text-secondary);
-  background: transparent;
-  border: 0;
-  border-radius: var(--oct-radius-sm);
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--oct-text-detail);
-  font-weight: 500;
-}
-
-.code-branch-selector__trigger:hover:not(:disabled) {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-}
-
-.code-branch-selector__trigger:focus-visible {
-  outline: 2px solid var(--oct-muted);
-  outline-offset: 2px;
-}
-
-.code-branch-selector__trigger:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 .code-branch-selector__trigger-label {
@@ -2044,36 +2012,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-composer-choice__trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
   max-width: min(16rem, 46vw);
-  min-height: 24px;
-  padding: 0 7px;
-  white-space: nowrap;
-  color: var(--octant-text-secondary);
-  background: transparent;
-  border: 0;
-  border-radius: var(--oct-radius-sm);
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--oct-text-detail);
-  font-weight: 500;
-}
-
-.code-composer-choice__trigger:hover:not(:disabled) {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-}
-
-.code-composer-choice__trigger:focus-visible {
-  outline: 2px solid var(--oct-muted);
-  outline-offset: 2px;
-}
-
-.code-composer-choice__trigger:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 /* Measured on the running row, this was the only border left on any control in
