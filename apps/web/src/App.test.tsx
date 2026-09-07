@@ -838,6 +838,133 @@ describe("App", () => {
     );
   });
 
+  it("chooses a visible Chat model when the stored default is hidden", async () => {
+    const user = userEvent.setup();
+    const chatApi = chats();
+    const execute = vi.mocked(chatApi.execute);
+    const baseExecute = execute.getMockImplementation()!;
+    execute.mockImplementation(async (command) => {
+      if (command.kind === "change-chat-provider") {
+        const created = await baseExecute({ kind: "create-chat-thread", title: "ignored" });
+        if (created?.kind !== "thread-created") throw new Error("Expected created Chat thread");
+        return decodeChatCommandResult({
+          kind: "thread-updated",
+          thread: {
+            ...created.thread,
+            providerInstanceId: command.providerInstanceId,
+            modelId: command.modelId,
+            version: 2,
+          },
+        });
+      }
+      return baseExecute(command);
+    });
+    const providerApi = providersWithToolModel();
+    const providerBootstrap = await providerApi.bootstrap();
+    const instance = providerBootstrap.instances[0];
+    const observed = providerBootstrap.observedStates[0];
+    if (instance === undefined || observed === undefined)
+      throw new Error("Expected provider fixture");
+    const visibleModel = providerModel({
+      id: "visible-model",
+      displayName: "Visible model",
+      toolCalling: "supported",
+      evidence: "supported",
+    });
+    const hiddenModel = providerModel({
+      id: "gpt-5",
+      displayName: "GPT-5",
+      toolCalling: "supported",
+      evidence: "supported",
+    });
+    const hiddenProviderApi = {
+      ...providerApi,
+      bootstrap: vi.fn(async () => ({
+        ...providerBootstrap,
+        defaults: {
+          ...providerBootstrap.defaults,
+          hiddenModels: [{ providerInstanceId: instance.id, modelId: hiddenModel.id }],
+        },
+        observedStates: [{ ...observed, models: [hiddenModel, visibleModel] }],
+      })),
+    };
+
+    render(
+      <App
+        chatClient={chatApi}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={hiddenProviderApi}
+        shellClient={client(chatShellBootstrap())}
+      />,
+    );
+
+    const welcome = await screen.findByRole("region", { name: "Chat welcome" });
+    await user.type(within(welcome).getByRole("textbox", { name: "First message" }), "Visible");
+    await user.click(within(welcome).getByRole("button", { name: "Start chat" }));
+
+    await waitFor(() =>
+      expect(
+        execute.mock.calls.some(
+          ([command]) =>
+            command.kind === "change-chat-provider" && command.modelId === "visible-model",
+        ),
+      ).toBe(true),
+    );
+    expect(
+      execute.mock.calls.some(
+        ([command]) => command.kind === "send-chat-turn" && command.prompt === "Visible",
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses a new Chat task when every provider model is hidden", async () => {
+    const user = userEvent.setup();
+    const chatApi = chats();
+    const providerApi = providersWithToolModel();
+    const providerBootstrap = await providerApi.bootstrap();
+    const instance = providerBootstrap.instances[0];
+    const observed = providerBootstrap.observedStates[0];
+    if (instance === undefined || observed === undefined)
+      throw new Error("Expected provider fixture");
+    const hiddenProviderApi = {
+      ...providerApi,
+      bootstrap: vi.fn(async () => ({
+        ...providerBootstrap,
+        defaults: {
+          ...providerBootstrap.defaults,
+          hiddenModels: observed.models.map((model) => ({
+            providerInstanceId: instance.id,
+            modelId: model.id,
+          })),
+        },
+      })),
+    };
+
+    render(
+      <App
+        chatClient={chatApi}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={hiddenProviderApi}
+        shellClient={client(chatShellBootstrap())}
+      />,
+    );
+
+    const welcome = await screen.findByRole("region", { name: "Chat welcome" });
+    await user.type(within(welcome).getByRole("textbox", { name: "First message" }), "Blocked");
+    await user.click(within(welcome).getByRole("button", { name: "Start chat" }));
+
+    expect(chatApi.execute).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "create-chat-thread" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "No visible Chat model is available. Re-enable a model in Settings first.",
+    );
+  });
+
   it("ignores a draft provider selection that became unselectable before create", async () => {
     const user = userEvent.setup();
     const chatApi = chats();

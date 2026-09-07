@@ -106,7 +106,7 @@ import {
   preselectCreateHost,
   resolveDraftProviderSelection,
 } from "@octant/domain";
-import type { CreateHostViewScope, ModelPickerSelection } from "@octant/domain";
+import type { CreateHostViewScope, ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { assertCreateDestinationFromHosts } from "./shell/assertCreateDestination";
 import { resolveSidebarBackground } from "@octant/theme/backgrounds";
 import {
@@ -2317,15 +2317,25 @@ function LaunchedShell(
     draftProviderInstanceId,
     draftModelId,
   );
-  const effectiveDraftProviderInstanceId =
-    activeMode === "work" ? workProviderChoice?.instanceId : draftProviderInstanceId;
-  const effectiveDraftModelId = activeMode === "work" ? workProviderChoice?.modelId : draftModelId;
   const draftProviderGroups =
     activeMode === "chat"
       ? chatProviderGroups
       : activeMode === "work"
         ? workProviderGroups
         : codeProviderGroups;
+  const rawDraftSelection =
+    draftProviderInstanceId !== undefined && draftModelId !== undefined
+      ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
+      : undefined;
+  const visibleDraftSelection =
+    resolveDraftProviderSelection(draftProviderGroups, rawDraftSelection) ??
+    firstSelectableProviderSelection(draftProviderGroups);
+  const effectiveDraftProviderInstanceId =
+    activeMode === "work"
+      ? workProviderChoice?.instanceId
+      : visibleDraftSelection?.providerInstanceId;
+  const effectiveDraftModelId =
+    activeMode === "work" ? workProviderChoice?.modelId : visibleDraftSelection?.modelId;
   const executionProfileScope = useMemo(
     () =>
       activeProjectId === undefined
@@ -3810,6 +3820,13 @@ function LaunchedShell(
         String(candidate.id) === String(projectId),
     );
     if (project === undefined) return false;
+    const selection =
+      resolveDraftProviderSelection(chatProviderGroups, rawDraftSelection) ??
+      firstSelectableProviderSelection(chatProviderGroups);
+    if (selection === undefined && chatProviderGroups.length > 0) {
+      setDraftError("No visible Chat model is available. Re-enable a model in Settings first.");
+      return false;
+    }
     const title = prompt.length > 60 ? `${prompt.slice(0, 57)}…` : prompt;
     const created = await chatController.execute({
       kind: "create-chat-thread",
@@ -3822,12 +3839,6 @@ function LaunchedShell(
     // turn fails. Open its exact thread before either follow-up command so the
     // user can see the failure and retry instead of creating a duplicate.
     if (!(await controller.openChatThread(thread.id, thread.title, project.id))) return false;
-    const selection = resolveDraftProviderSelection(
-      draftProviderGroups,
-      draftProviderInstanceId !== undefined && draftModelId !== undefined
-        ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
-        : undefined,
-    );
     if (
       selection !== undefined &&
       (thread.providerInstanceId !== selection.providerInstanceId ||
@@ -4038,6 +4049,13 @@ function LaunchedShell(
     setRailPlaceholder(undefined);
     try {
       if (mode === "chat") {
+        const draftSelection =
+          resolveDraftProviderSelection(chatProviderGroups, rawDraftSelection) ??
+          firstSelectableProviderSelection(chatProviderGroups);
+        if (draftSelection === undefined && chatProviderGroups.length > 0) {
+          setDraftError("No visible Chat model is available. Re-enable a model in Settings first.");
+          return;
+        }
         const title = prompt.length > 60 ? `${prompt.slice(0, 57)}…` : prompt;
         const chatDraftProjectId =
           draftProjectId ??
@@ -4056,12 +4074,6 @@ function LaunchedShell(
           return;
         }
         let thread = result.thread;
-        const draftSelection = resolveDraftProviderSelection(
-          draftProviderGroups,
-          draftProviderInstanceId !== undefined && draftModelId !== undefined
-            ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
-            : undefined,
-        );
         if (
           draftSelection !== undefined &&
           (thread.providerInstanceId !== draftSelection.providerInstanceId ||
@@ -5974,4 +5986,19 @@ function focusLogicalOpener(opener: InspectorOpener): void {
       ? opener.element
       : document.querySelector<HTMLElement>(`[data-${opener.logicalTarget}-opener="true"]`);
   current?.focus();
+}
+
+function firstSelectableProviderSelection(
+  groups: ReadonlyArray<PickerGroup>,
+): ModelPickerSelection | undefined {
+  for (const group of groups) {
+    for (const section of group.sections) {
+      for (const picker of section.models) {
+        if (picker.unavailableReason === undefined) {
+          return { providerInstanceId: group.instance.id, modelId: picker.model.id };
+        }
+      }
+    }
+  }
+  return undefined;
 }
