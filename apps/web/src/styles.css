@@ -301,11 +301,50 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
 
 .thread-activity-pip {
   display: grid;
-  width: clamp(248px, 24vw, 312px);
+  width: clamp(200px, 20vw, 256px);
+  gap: 8px;
+  animation: thread-activity-pip-enter var(--oct-motion-fast) cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* One floating picture per tool, and nothing around it. */
+.thread-activity-pip__card {
+  position: relative;
   overflow: hidden;
   border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-overlay);
-  animation: thread-activity-pip-enter var(--oct-motion-fast) cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Name, status, and controls ride the picture's top edge and show under the
+   pointer or keyboard focus. A card with no picture keeps them in the open. */
+.thread-activity-pip__controls {
+  position: absolute;
+  z-index: 1;
+  inset: 0 0 auto;
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 4px 8px 10px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--octant-app-background) 82%, transparent),
+    transparent
+  );
+  opacity: 0;
+  transition: opacity var(--oct-motion-fast) ease;
+}
+
+.thread-activity-pip__card:hover .thread-activity-pip__controls,
+.thread-activity-pip__card:focus-within .thread-activity-pip__controls,
+.thread-activity-pip__card:not(:has(img)) .thread-activity-pip__controls {
+  opacity: 1;
+}
+
+.thread-activity-pip__card:not(:has(img)) .thread-activity-pip__controls {
+  position: static;
+  padding-bottom: 4px;
+  background: none;
 }
 
 .thread-activity-pip-trigger {
@@ -340,20 +379,6 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   font-size: var(--oct-text-xs);
 }
 
-.thread-activity-pip__header,
-.thread-activity-pip__footer {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.thread-activity-pip__header {
-  min-height: 38px;
-  padding: 5px 6px 5px 10px;
-}
-
 .thread-activity-pip__identity,
 .thread-activity-pip__header-actions {
   display: flex;
@@ -384,8 +409,7 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   gap: 1px;
 }
 
-.thread-activity-pip__header-actions .shell-icon-button,
-.thread-activity-pip__footer .shell-icon-button {
+.thread-activity-pip__header-actions .shell-icon-button {
   width: 26px;
   height: 26px;
   min-width: 26px;
@@ -415,11 +439,15 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   color: var(--octant-text-secondary);
   background: var(--octant-surface-inset);
   border: 0;
-  border-top: 1px solid var(--octant-border);
-  border-bottom: 1px solid var(--octant-border);
 }
 
+/* The picture is a button so it opens the tab, but the button recipe sizes
+   itself to its content and centres it; a tall capture of a narrow pane then
+   sat as a sliver in the middle of the card. The picture is the whole card
+   width, cropped from its top. */
 .thread-activity-pip__visual--interactive {
+  display: block;
+  height: 148px;
   padding: 0;
   cursor: pointer;
 }
@@ -468,7 +496,7 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
 
 .thread-activity-pip__note {
   margin: 0;
-  padding: 2px 10px 8px;
+  padding: 0 10px 10px;
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
   line-height: 1.4;
@@ -484,19 +512,6 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
 .thread-activity-pip__approval button {
   height: 28px;
   font-size: var(--oct-text-xs);
-}
-
-.thread-activity-pip__footer {
-  min-height: 36px;
-  padding: 5px 6px 5px 10px;
-}
-
-.thread-activity-pip__footer > span {
-  overflow: hidden;
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 @keyframes thread-activity-pip-enter {

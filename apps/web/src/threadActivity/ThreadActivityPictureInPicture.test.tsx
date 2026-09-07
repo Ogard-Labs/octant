@@ -247,7 +247,8 @@ describe("ThreadActivityPictureInPicture", () => {
 
     await user.click(screen.getByRole("button", { name: "Approve once" }));
     await waitFor(() => expect(computerUse.decide).toHaveBeenCalledOnce());
-    expect(screen.getAllByText("Computer Use running")).toHaveLength(2);
+    // The state reads once, on the card itself; there is no footer repeating it.
+    expect(screen.getByText("Computer Use running")).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Stop Computer Use" }));
     await waitFor(() => expect(computerUse.stop).toHaveBeenCalledOnce());

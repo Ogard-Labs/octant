@@ -8,7 +8,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { IconButton } from "../shell/IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 
 type ActivityKind = "browser" | "computer-use";
 
@@ -319,78 +318,93 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
           className="thread-activity-pip"
           data-activity-kind={activeKind}
         >
-          <header className="thread-activity-pip__header">
-            <div className="thread-activity-pip__identity">
-              <span className="thread-activity-pip__pulse" />
-              {activeKind === "browser" ? (
-                <Globe2 aria-hidden="true" size={14} strokeWidth={1.7} />
-              ) : (
-                <MonitorUp aria-hidden="true" size={14} strokeWidth={1.7} />
-              )}
-              <strong>{activeKind === "browser" ? "Browser" : "Computer Use"}</strong>
-              <span>
-                {activityStatus(activeKind, currentBrowserSnapshot, currentComputerSession)}
-              </span>
-            </div>
-            <div className="thread-activity-pip__header-actions">
-              {activeKind === "browser" && props.onOpenBrowser !== undefined ? (
-                <IconButton
-                  icon={ExternalLink}
-                  label="Open Browser tab"
-                  onClick={props.onOpenBrowser}
-                />
-              ) : null}
-              <IconButton
-                icon={EyeOff}
-                label="Hide activity preview"
-                onClick={() => setCollapsed(true)}
-              />
-            </div>
-          </header>
-
-          {availableKinds.length < 2 || activeKind === undefined ? null : (
-            <OctantToggleGroup<ActivityKind>
-              aria-label="Active tools"
-              onValueChange={(value) => {
-                const selected = value[0];
-                if (selected !== undefined) setSelectedKind(selected);
-              }}
-              value={[activeKind]}
+          {/* The preview is the pictures, stacked, and nothing else at rest:
+              each card's name, status, and controls sit over its top edge and
+              show under the pointer. A card without a picture keeps them out
+              in the open, since there is nothing for them to cover. */}
+          {currentBrowserSnapshot === undefined ? null : (
+            <section
+              aria-label="Browser activity"
+              className="thread-activity-pip__card"
+              data-kind="browser"
             >
-              <OctantToggleGroupItem value="browser">Browser</OctantToggleGroupItem>
-              <OctantToggleGroupItem value="computer-use">Computer Use</OctantToggleGroupItem>
-            </OctantToggleGroup>
+              <BrowserActivityPreview
+                {...(props.onOpenBrowser === undefined
+                  ? {}
+                  : { onOpenBrowser: props.onOpenBrowser })}
+                snapshot={currentBrowserSnapshot}
+              />
+              <div className="thread-activity-pip__controls">
+                <span className="thread-activity-pip__identity">
+                  <span className="thread-activity-pip__pulse" />
+                  <Globe2 aria-hidden="true" size={14} strokeWidth={1.7} />
+                  <strong>Browser</strong>
+                  <span>
+                    {activityStatus("browser", currentBrowserSnapshot, currentComputerSession)}
+                  </span>
+                </span>
+                <span className="thread-activity-pip__header-actions">
+                  {props.onOpenBrowser === undefined ? null : (
+                    <IconButton
+                      icon={ExternalLink}
+                      label="Open Browser tab"
+                      onClick={props.onOpenBrowser}
+                    />
+                  )}
+                  <IconButton
+                    icon={EyeOff}
+                    label="Hide activity preview"
+                    onClick={() => setCollapsed(true)}
+                  />
+                  <IconButton
+                    disabled={busy}
+                    icon={Square}
+                    label="Stop Browser"
+                    onClick={() => void stopBrowser()}
+                  />
+                </span>
+              </div>
+            </section>
           )}
-
-          {activeKind === "browser" && currentBrowserSnapshot !== undefined ? (
-            <BrowserActivityPreview
-              {...(props.onOpenBrowser === undefined ? {} : { onOpenBrowser: props.onOpenBrowser })}
-              snapshot={currentBrowserSnapshot}
-            />
-          ) : activeKind === "computer-use" && currentComputerSession !== undefined ? (
-            <ComputerUseActivityPreview
-              busy={busy}
-              onApprove={() => void decideComputerUse("approved")}
-              onDeny={() => void decideComputerUse("denied")}
-              session={currentComputerSession}
-            />
-          ) : null}
-
-          <footer className="thread-activity-pip__footer">
-            <span>
-              {activeKind === "browser"
-                ? (currentBrowserSnapshot?.observation?.url ?? "Browser")
-                : latestComputerUseDetail(currentComputerSession)}
-            </span>
-            <IconButton
-              disabled={busy}
-              icon={Square}
-              label={activeKind === "browser" ? "Stop Browser" : "Stop Computer Use"}
-              onClick={() =>
-                activeKind === "browser" ? void stopBrowser() : void stopComputerUse()
-              }
-            />
-          </footer>
+          {currentComputerSession === undefined ? null : (
+            <section
+              aria-label="Computer Use activity"
+              className="thread-activity-pip__card"
+              data-kind="computer-use"
+            >
+              <ComputerUseActivityPreview
+                busy={busy}
+                onApprove={() => void decideComputerUse("approved")}
+                onDeny={() => void decideComputerUse("denied")}
+                session={currentComputerSession}
+              />
+              <div className="thread-activity-pip__controls">
+                <span className="thread-activity-pip__identity">
+                  <span className="thread-activity-pip__pulse" />
+                  <MonitorUp aria-hidden="true" size={14} strokeWidth={1.7} />
+                  <strong>Computer Use</strong>
+                  <span>
+                    {activityStatus("computer-use", currentBrowserSnapshot, currentComputerSession)}
+                  </span>
+                </span>
+                <span className="thread-activity-pip__header-actions">
+                  {currentBrowserSnapshot === undefined ? (
+                    <IconButton
+                      icon={EyeOff}
+                      label="Hide activity preview"
+                      onClick={() => setCollapsed(true)}
+                    />
+                  ) : null}
+                  <IconButton
+                    disabled={busy}
+                    icon={Square}
+                    label="Stop Computer Use"
+                    onClick={() => void stopComputerUse()}
+                  />
+                </span>
+              </div>
+            </section>
+          )}
         </aside>
       )}
     </div>
@@ -500,10 +514,6 @@ function computerUseState(state: ComputerUseSessionView["state"]): string {
     : state === "stopping"
       ? "Computer Use stopping"
       : "Computer Use running";
-}
-
-function latestComputerUseDetail(session: ComputerUseSessionView | undefined): string {
-  return session?.events.at(-1)?.detail ?? "Host-controlled activity";
 }
 
 function isAbortError(error: unknown): boolean {

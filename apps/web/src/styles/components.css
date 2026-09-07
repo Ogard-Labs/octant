@@ -86,7 +86,7 @@
 
 /* The native activity overlay may keep translucency because it floats above
    the workspace instead of behaving like an application menu or form. */
-.thread-activity-pip,
+.thread-activity-pip__card,
 .thread-activity-pip__collapsed-controls {
   background: var(--octant-glass-bg);
   border: 1px solid var(--octant-glass-border);
@@ -98,7 +98,7 @@
 
 /* Reduced transparency (app setting or OS): opaque floating surface. */
 html[data-octant-reduced-transparency="true"] .octant-glass,
-html[data-octant-reduced-transparency="true"] .thread-activity-pip,
+html[data-octant-reduced-transparency="true"] .thread-activity-pip__card,
 html[data-octant-reduced-transparency="true"] .thread-activity-pip__collapsed-controls {
   background: var(--octant-floating);
   border-color: var(--octant-border-strong);
@@ -108,7 +108,7 @@ html[data-octant-reduced-transparency="true"] .thread-activity-pip__collapsed-co
 
 @media (prefers-reduced-transparency: reduce) {
   .octant-glass,
-  .thread-activity-pip,
+  .thread-activity-pip__card,
   .thread-activity-pip__collapsed-controls {
     background: var(--octant-floating);
     border-color: var(--octant-border-strong);
@@ -120,7 +120,7 @@ html[data-octant-reduced-transparency="true"] .thread-activity-pip__collapsed-co
 /* No backdrop-filter support: keep surfaces readable with an opaque fill. */
 @supports not (backdrop-filter: blur(1px)) {
   .octant-glass,
-  .thread-activity-pip,
+  .thread-activity-pip__card,
   .thread-activity-pip__collapsed-controls {
     background: var(--octant-floating);
   }
