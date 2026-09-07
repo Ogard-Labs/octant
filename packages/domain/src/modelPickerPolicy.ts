@@ -243,7 +243,15 @@ export function isDraftSelectionSelectable(
 ): boolean {
   if (selection === undefined) return true;
   const model = findPickerModel(groups, selection);
-  return model !== undefined && model.unavailableReason === undefined;
+  const group = groups.find((candidate) => candidate.instance.id === selection.providerInstanceId);
+  // Hidden models remain discoverable for rendering an existing thread's
+  // binding, but a draft must never carry an auto-selected hidden model into a
+  // new thread. The composer can then choose another visible model.
+  return (
+    model !== undefined &&
+    model.unavailableReason === undefined &&
+    group?.hiddenCurrent?.model.id !== selection.modelId
+  );
 }
 
 // A retained draft pair may become stale while the draft stays open (provider

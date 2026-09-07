@@ -13,6 +13,7 @@ import {
   driverLabel,
   endpointHostOf,
   filterModelPickerGroups,
+  findPickerModel,
   modelBadges,
   modelCatalog,
   pickerCatalogs,
@@ -569,8 +570,11 @@ describe("model picker policy", () => {
         expect.objectContaining({ model: visible }),
       ]);
       expect(groups[0]!.hiddenCurrent).toEqual(expect.objectContaining({ model: hidden }));
-      expect(isDraftSelectionSelectable(groups, hiddenSelection)).toBe(true);
-      expect(resolveDraftProviderSelection(groups, hiddenSelection)).toEqual(hiddenSelection);
+      expect(findPickerModel(groups, hiddenSelection)).toEqual(
+        expect.objectContaining({ model: hidden }),
+      );
+      expect(isDraftSelectionSelectable(groups, hiddenSelection)).toBe(false);
+      expect(resolveDraftProviderSelection(groups, hiddenSelection)).toBeUndefined();
     });
 
     it("leaves a provider group with no selectable models when all are hidden", () => {
