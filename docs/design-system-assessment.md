@@ -53,9 +53,10 @@ this Settings pass does not establish those results.
 - All 17 available Settings destinations were inspected in the local browser
   client. General profile fields, provider configuration, model lists, and
   narrow navigation were checked in expanded states.
-- The shared picker held the same 560 × 403 px bounds at a 1280 × 720 viewport
-  while switching between 5-model and 237-model catalogs and while searching.
-  The 760 px layout uses the Settings drawer and a viewport-bounded popup.
+- The shared picker held its bounds while switching between small and large
+  catalogs and while searching. Its fixed viewport-based height leaves room for
+  the trigger in short windows. At 760 × 720, both catalogs stayed inside the
+  viewport and the Settings navigation used its drawer.
 - A live model hide/restore preserved the expanded provider and its filter text.
   The model was restored. A separate regression covers focus preservation while
   discovery refreshes the provider registry.
