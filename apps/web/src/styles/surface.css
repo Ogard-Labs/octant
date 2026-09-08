@@ -552,9 +552,9 @@
   background: var(--octant-workspace);
 }
 
-/* Both classes are named so this outranks the material's own sidebar paint
-   (`.shell--material-opaque.shell-frame > .sidebar`), which is what kept the
-   sidebar solid with the cover switched on. */
-.shell--app-backdrop.shell--app-backdrop-sidebar.shell-frame > .sidebar {
+/* Opaque sidebars need a wash to reveal the application ground. Translucent
+   sidebars already have one: overriding it here replaced Strong vibrancy with
+   Subtle in the main window while Settings retained the selected material. */
+.shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-opaque.shell-frame > .sidebar {
   background: var(--octant-sidebar-translucent-subtle);
 }

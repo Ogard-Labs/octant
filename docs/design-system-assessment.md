@@ -264,8 +264,14 @@ inspection, no commands were entered, and their displayed sessions were stopped.
 
 Initial native evidence confirmed matching sidebar widths and populated checkout
 strips under both inputs. It also reproduced the main/Settings material mismatch.
-The opaque backing is corrected in source, but the Mac locked before final native
-material and physical-control verification; that remains an explicit gate.
+After the Mac was unlocked, native verification exposed another override: the
+application background replaced Strong sidebar vibrancy with Subtle while
+Settings kept Strong. That fallback now applies only to opaque sidebars. The
+native main and Settings materials match with the current Plum theme, Strong
+vibrancy, and sidebar-covered background. Sidebar collapse/restore and dock
+close/reopen passed, and the original layout was restored. The regression test
+failed before the fix and all 40 window-chrome tests passed afterward. Native
+traffic-light close/minimize/fullscreen actions were not exercised.
 
 Remaining refinements include familiar labels in Usage instead of raw ids,
 less repetitive setup wording, the image-source/profile distinction, and

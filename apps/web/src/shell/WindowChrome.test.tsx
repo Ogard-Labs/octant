@@ -45,6 +45,7 @@ const rootStyles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8"
   .replace('@import "./styles/chat.css";', "")
   .replace('@import "./styles/code.css";', "");
 const shellStyles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
+const surfaceStyles = readFileSync(resolve(process.cwd(), "src/styles/surface.css"), "utf8");
 const dockStyles = readFileSync(resolve(process.cwd(), "src/styles/dock.css"), "utf8");
 /*
  * Comments are stripped before matching. `cssRule` reads a rule's prelude as
@@ -53,7 +54,9 @@ const dockStyles = readFileSync(resolve(process.cwd(), "src/styles/dock.css"), "
  * the assertion then silently moved on to the next rule sharing that selector,
  * usually one inside a media query.
  */
-const styles = [rootStyles, shellStyles, dockStyles].join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
+const styles = [rootStyles, shellStyles, dockStyles, surfaceStyles]
+  .join("\n")
+  .replace(/\/\*[\s\S]*?\*\//g, "");
 
 function cssRule(selector: string, occurrence = 0): string {
   if (selector === ":root" && occurrence === 0) {
@@ -479,6 +482,17 @@ describe("WindowChrome", () => {
     );
     expect(cssRule(".workspace")).toContain("background: var(--octant-workspace);");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
+  });
+
+  it("preserves the selected translucent material when the background covers the sidebar", () => {
+    expect(
+      cssRule(
+        ".shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-opaque.shell-frame > .sidebar",
+      ),
+    ).toContain("background: var(--octant-sidebar-translucent-subtle);");
+    expect(styles).not.toContain(
+      ".shell--app-backdrop.shell--app-backdrop-sidebar.shell-frame > .sidebar",
+    );
   });
 
   it("clears the workspace and pane fills under a translucent workspace so the glass shows", () => {
