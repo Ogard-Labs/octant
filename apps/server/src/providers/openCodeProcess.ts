@@ -294,14 +294,16 @@ function projectProviders(value: unknown): Record<string, unknown> {
 function removeRawRoutingSecrets(
   value: unknown,
   key: string | undefined,
-  environmentNames: ReadonlySet<string>,
+  environmentNames?: ReadonlySet<string>,
 ): unknown {
   if (key !== undefined && ROUTING_HEADER_KEY.test(key)) return undefined;
   if (key !== undefined && SENSITIVE_ROUTING_KEY.test(key)) {
     if (typeof value !== "string") return undefined;
     const match = SAFE_ENV_REFERENCE.exec(value);
     const name = match?.[1];
-    return name !== undefined && environmentNames.has(name) ? value : undefined;
+    return name !== undefined && (environmentNames === undefined || environmentNames.has(name))
+      ? value
+      : undefined;
   }
   if (Array.isArray(value)) {
     return value
@@ -342,7 +344,8 @@ export function projectOpenCodeRuntimeConfig(resolved: unknown): PrivateRuntimeC
     if (value === undefined) continue;
     sanitized[key] = key === "provider" ? projectProviders(value) : projectRoutingValue(value);
   }
-  const content = JSON.stringify(sanitized);
+  const scrubbed = removeRawRoutingSecrets(sanitized, undefined);
+  const content = JSON.stringify(scrubbed);
   if (content === undefined || Buffer.byteLength(content, "utf8") > PROJECTED_CONFIG_LIMIT) {
     throw new Error("OpenCode resolved configuration exceeds the private routing limit.");
   }
@@ -355,7 +358,15 @@ export async function captureOpenCodeRuntimeConfig(
   resolver: OpenCodeConfigResolver,
 ): Promise<PrivateRuntimeConfig | undefined> {
   const resolved = await resolver(input);
-  return resolved === undefined ? undefined : projectOpenCodeRuntimeConfig(resolved);
+  if (resolved === undefined) return undefined;
+  const projected = projectOpenCodeRuntimeConfig(resolved);
+  const environmentNames = new Set(Object.keys(input.environment ?? process.env));
+  const scrubbed = removeRawRoutingSecrets(
+    JSON.parse(projected.content) as unknown,
+    undefined,
+    environmentNames,
+  );
+  return { content: JSON.stringify(scrubbed) };
 }
 
 function stripJsoncComments(content: string): string {
@@ -462,6 +473,7 @@ function versionNumbers(version: string): readonly [number, number, number] | un
 
 /** Isolation guards are attested only for the runtime version verified by the hostile fixture. */
 export function supportsOpenCodeIsolation(version: string): boolean {
+  if (version !== "1.18.21") return false;
   const numbers = versionNumbers(version);
   if (numbers === undefined) return false;
   // The hostile fixture proves this exact release. Other patches and minors
@@ -1024,7 +1036,10 @@ export function makeOpenCodeProcessLive(
             { ...resolvedOptions, runtimeConfig },
             runtime,
             probe.version,
-            supportsOpenCodeIsolation(probe.version),
+            // Version and launch flags alone are not an OS confinement receipt.
+            // OpenCode's process-specific Seatbelt lifecycle is not wired yet,
+            // so leave this capability absent and keep app-managed tools closed.
+            false,
             input.onProcessStarted,
           ).pipe(
             Effect.tap((managed) =>

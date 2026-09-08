@@ -163,6 +163,8 @@ describe("probeOpenCodeBinary", () => {
     expect(supportsOpenCodeIsolation("1.18.21")).toBe(true);
     expect(supportsOpenCodeIsolation("1.18.22")).toBe(false);
     expect(supportsOpenCodeIsolation("1.18.20")).toBe(false);
+    expect(supportsOpenCodeIsolation("1.18.21-custom")).toBe(false);
+    expect(supportsOpenCodeIsolation("1.18.21+patched")).toBe(false);
     expect(supportsOpenCodeIsolation("1.17.19")).toBe(false);
     expect(supportsOpenCodeIsolation("1.19.0")).toBe(false);
     expect(supportsOpenCodeIsolation("opencode2 v0.0.0-beta-18721")).toBe(false);
@@ -210,7 +212,7 @@ describe("probeOpenCodeBinary", () => {
             }).start({ binaryPath, cwd: root }),
           ),
         );
-        expect(server.isolatedConfiguration).toBe(true);
+        expect(server.isolatedConfiguration).toBeUndefined();
         expect(() => readFileSync(markerPath)).toThrow();
       } finally {
         rmSync(root, { recursive: true, force: true });
@@ -259,6 +261,7 @@ describe("probeOpenCodeBinary", () => {
     expect(parsed).not.toHaveProperty("skills");
     expect(parsed).not.toHaveProperty("provider.airouter.models.Qwen3.6.options");
     expect(parsed).not.toHaveProperty("provider.airouter.models.Qwen3.6.headers");
+    expect(parsed).toHaveProperty("provider.airouter.options.apiKey", "{env:OPENAI_API_KEY}");
     expect(JSON.stringify(parsed)).not.toContain("private-instruction-must-not-cross");
   });
 
@@ -294,7 +297,7 @@ describe("probeOpenCodeBinary", () => {
       binaryPath: "/synthetic/opencode",
       cwd: "/synthetic/project",
     });
-    expect(captured?.content).toContain("synthetic-secret");
+    expect(captured?.content).not.toContain("synthetic-secret");
     expect(captured?.content).not.toContain("foreign");
   });
 
@@ -540,7 +543,7 @@ describe("OpenCodeProcessPort", () => {
       dependencies,
     );
 
-  it("starts with a private config profile, preserves provider data ownership, and attests isolation", async () => {
+  it("starts with a private config profile while withholding isolation without an OS receipt", async () => {
     const fixture = profileRecordingWrapper("isolation-supported");
     const inheritedEnvironment = {
       ...process.env,
@@ -564,7 +567,7 @@ describe("OpenCodeProcessPort", () => {
           expect(values).toContain("config-content=<unset>");
           expect(values).toContain("config-dir=");
           expect(values).toContain("data=/synthetic/provider-data");
-          expect(server.isolatedConfiguration).toBe(true);
+          expect(server.isolatedConfiguration).toBeUndefined();
           expect(readFileSync(config, "utf8")).toContain('"permission"');
           return config;
         }),
@@ -599,7 +602,7 @@ describe("OpenCodeProcessPort", () => {
             throw new Error("Expected a private OpenCode config path.");
           }
           const config = readFileSync(configPath, "utf8");
-          expect(server.isolatedConfiguration).toBe(true);
+          expect(server.isolatedConfiguration).toBeUndefined();
           expect(config).toContain("synthetic/model");
           expect(config).toContain("https://provider.invalid/v1");
           expect(config).not.toContain("foreign-plugin");
