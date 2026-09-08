@@ -62,6 +62,9 @@ this Settings pass does not establish those results.
   discovery refreshes the provider registry.
 - Changing Settings sections resets the content scroll to zero. Deep links
   retain their requested row, and ordinary model updates do not reset scroll.
+- Access summaries and menus use the same posture wording across composers,
+  Settings, profiles, Agents, and Automation. The former per-composer file-input
+  hiding rules were removed after the shared attachment control took ownership.
 - Thread context menus now use aligned icons, compact 26 px rows, a 248 px
   width, and grouped Copy actions. The rendered main menu is approximately
   323 px high for the current thread; submenus reuse its row recipe.
@@ -93,13 +96,13 @@ this Settings pass does not establish those results.
 
 ## Remaining findings
 
-### Provider identity is still incomplete
+### Provider identity uses a shared asset catalogue
 
-The requested branded provider logos have not been added. Automatic approval
-review rejected both the asset bundling and the proposed exception to the
-existing asset policy. `ProviderGlyph` still renders the existing original
-marks and accessible labels. This needs explicit approval of a small licensed
-asset bundle; approximating brand marks is not a substitute.
+Settings and the model picker now use the same bundled provider logos, with
+per-asset source metadata and distribution notices. Generic endpoints retain a
+generic mark because the endpoint can represent more than one provider. Black Forest Labs
+and Ideogram now use sourced SVG marks as well, replacing the remaining
+image-provider placeholders.
 
 ### Feature styles still duplicate shared control appearance
 

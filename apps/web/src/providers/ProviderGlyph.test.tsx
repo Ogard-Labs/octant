@@ -33,7 +33,7 @@ describe("ProviderGlyph", () => {
     },
   );
 
-  it("draws an original mark for the BFL image kind instead of falling back to a monogram", () => {
+  it("renders the bundled BFL identity mark", () => {
     const { container } = render(
       <ProviderGlyph displayName="FLUX" driverKind="bfl-image" size={14} />,
     );
@@ -43,7 +43,7 @@ describe("ProviderGlyph", () => {
     expect(container.querySelector(".provider-glyph--monogram")).toBeNull();
   });
 
-  it("draws an original mark for the Ideogram image kind instead of falling back to a monogram", () => {
+  it("renders the bundled Ideogram identity mark", () => {
     const { container } = render(
       <ProviderGlyph displayName="Ideogram" driverKind="ideogram-image" size={14} />,
     );

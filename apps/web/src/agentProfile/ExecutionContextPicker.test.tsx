@@ -52,7 +52,7 @@ describe("ExecutionContextPicker", () => {
     expect(html).toContain("OpenAI");
     expect(html).toContain("GPT-4o");
     expect(html).toContain("This Mac");
-    expect(html).toContain("Approval");
+    expect(html).toContain("Ask for approvals");
     expect(html).toContain("FS");
   });
 
@@ -61,7 +61,7 @@ describe("ExecutionContextPicker", () => {
       <ExecutionContextPicker entries={entries} onSelect={() => {}} />,
     );
     expect(html).toContain("Code Reviewer");
-    expect(html).toContain("Plan");
+    expect(html).toContain("Plan · read-only");
     expect(html).toContain("Read-only");
   });
 

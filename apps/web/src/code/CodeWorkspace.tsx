@@ -1161,7 +1161,7 @@ function terminalRecoveryFailureCategory(error: unknown): string | undefined {
 function ApprovalUnavailable(props: { readonly surface: string }) {
   return (
     <ShellState
-      eyebrow="Approval gated"
+      eyebrow="Ask for approvals"
       message="This window has no active approval bridge. Octant will not bypass or simulate approval authority."
       state="warning"
       title={`${props.surface} approval unavailable`}

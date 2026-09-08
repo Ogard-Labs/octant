@@ -18,7 +18,7 @@ describe("CodeSettingsView", () => {
 
     expect(screen.getByText(/apply only to new Code threads/i)).toBeVisible();
     expect(screen.getByRole("combobox", { name: "Default Code access" })).toHaveTextContent(
-      "Approval",
+      "Ask for approvals",
     );
     expect(screen.getByRole("button", { name: "Session" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByRole("button", { name: /Save/i })).toBeNull();
@@ -27,7 +27,7 @@ describe("CodeSettingsView", () => {
     await chooseSelectFieldOption(
       user,
       screen.getByRole("combobox", { name: "Default Code access" }),
-      "Plan",
+      "Plan · read-only",
     );
 
     expect(update).toHaveBeenCalledWith({

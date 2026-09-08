@@ -433,10 +433,10 @@ function ProfileForm(props: {
             aria-label="Execution policy"
             onValueChange={(value) => setPolicy(value as typeof policy)}
             options={[
-              { id: "plan", label: "Plan (read-only)" },
-              { id: "approval-gated", label: "Approval gated" },
+              { id: "plan", label: "Plan · read-only" },
+              { id: "approval-gated", label: "Ask for approvals" },
               { id: "auto-accept-edits", label: "Auto-accept edits" },
-              { id: "full-access", label: "Full access (still bounded by Project)" },
+              { id: "full-access", label: "Full access" },
             ]}
             value={policy}
           />

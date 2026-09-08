@@ -1663,11 +1663,6 @@ form > .work-composer-adapter__attachments {
   white-space: nowrap;
 }
 
-.work-composer-adapter__file-input,
-.work-composer-adapter__composer-bar input[type="file"] {
-  display: none;
-}
-
 .create-from-issue-control {
   display: flex;
   flex-direction: column;

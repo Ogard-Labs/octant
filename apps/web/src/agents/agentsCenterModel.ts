@@ -56,8 +56,8 @@ export function agentRunAuthoritySummary(authority: AgentRunCenterSummary["autho
   ).filter((key) => authority[key]);
   const capabilityText = capabilities.length === 0 ? "no capabilities" : capabilities.join(", ");
   const executionPolicyLabels = {
-    plan: "Plan (read-only)",
-    "approval-gated": "Approval-gated",
+    plan: "Plan · read-only",
+    "approval-gated": "Ask for approvals",
     "auto-accept-edits": "Auto-accept edits",
     "full-access": "Full access",
   } as const;

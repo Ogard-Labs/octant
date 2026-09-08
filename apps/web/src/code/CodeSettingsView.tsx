@@ -29,9 +29,9 @@ const ACCESS_OPTIONS: ReadonlyArray<{
   readonly id: CodeSettings["defaultExecutionPolicy"];
   readonly label: string;
 }> = [
-  { id: "approval-gated", label: "Approval" },
+  { id: "approval-gated", label: "Ask for approvals" },
   { id: "auto-accept-edits", label: "Auto-accept edits" },
-  { id: "plan", label: "Plan" },
+  { id: "plan", label: "Plan · read-only" },
   { id: "full-access", label: "Full access" },
 ];
 

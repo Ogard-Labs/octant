@@ -149,8 +149,8 @@ export function automationTriggerSummary(
 // ── Authority summary ────────────────────────────────────────────────────────
 
 const executionPolicyLabels = {
-  plan: "Plan (read-only)",
-  "approval-gated": "Approval-gated",
+  plan: "Plan · read-only",
+  "approval-gated": "Ask for approvals",
   "auto-accept-edits": "Auto-accept edits",
   "full-access": "Full access",
 } as const;

@@ -3,9 +3,9 @@ import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 /** Words for an agent profile's default policy, so a row never relies on colour. */
 export const EXECUTION_POLICY_LABEL: Record<ProviderExecutionPolicy, string> = {
   "full-access": "Full access",
-  "approval-gated": "Approval gated",
+  "approval-gated": "Ask for approvals",
   "auto-accept-edits": "Auto-accept edits",
-  plan: "Plan",
+  plan: "Plan · read-only",
 };
 
 export const visuallyHiddenStyle = {

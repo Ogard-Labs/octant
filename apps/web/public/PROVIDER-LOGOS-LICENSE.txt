@@ -272,8 +272,8 @@ Source paths:
 - https://github.com/lobehub/lobe-icons/blob/master/packages/static-svg/icons/bfl.svg
 - https://github.com/lobehub/lobe-icons/blob/master/packages/static-svg/icons/ideogram.svg
 
-These paths are distributed by the `@lobehub/icons-static-svg` package. The
-package README identifies the package as MIT licensed and credits LobeHub.
+These paths are distributed by the `@lobehub/icons-static-svg@1.94.0` package.
+The package README identifies the package as MIT licensed and credits LobeHub.
 
 Copyright © 2023 LobeHub.
 

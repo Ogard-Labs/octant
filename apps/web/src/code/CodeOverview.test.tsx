@@ -21,7 +21,7 @@ describe("CodeOverview", () => {
 
     expect(screen.getByRole("heading", { name: "Controller foundation" })).toBeVisible();
     expect(screen.getAllByText("development").length).toBeGreaterThan(0);
-    expect(screen.getByText("Approval gated")).toBeVisible();
+    expect(screen.getByText("Ask for approvals")).toBeVisible();
     expect(screen.getByText("Active")).toBeVisible();
     expect(screen.getByText("feature/controller → development")).toBeVisible();
     expect(screen.getByRole("region", { name: "Code status summary" })).toBeVisible();
@@ -174,7 +174,9 @@ describe("CodeOverview", () => {
     expect(screen.getByText("#806 · open")).toBeVisible();
     expect(screen.getByText("1 active · 2 completed")).toBeVisible();
     expect(screen.getByText("In progress")).toBeVisible();
-    expect(screen.getByText("Approval gated")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Controller foundation" }).closest("article"),
+    ).toHaveTextContent("Ask for approvals");
     expect(screen.getByText("Follow-up")).toBeVisible();
     // Rarely-glanced facts stay reachable behind the per-thread disclosure.
     fireEvent.click(screen.getByText("Details"));
