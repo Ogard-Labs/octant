@@ -289,8 +289,8 @@ describe("WindowChrome", () => {
     expect(sectionLabel).toContain("letter-spacing: 0;");
     expect(sectionLabel).toContain("text-transform: none;");
     expect(sectionLabel).not.toContain("mono");
-    expect(cssRule('.sidebar-navigation__thread-status[data-activity="unread"]')).toContain(
-      "background: var(--octant-text-secondary);",
+    expect(cssRule(".sidebar-navigation__thread-status")).toContain(
+      "color: var(--octant-text-secondary);",
     );
   });
 

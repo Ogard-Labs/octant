@@ -1257,6 +1257,33 @@ describe("CodeThreadWorkspace", () => {
     });
   });
 
+  it("keeps provider requests immediately above the composer", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          providerRequests: [
+            {
+              kind: "approval",
+              approvalId: "30000000-0000-4000-8000-000000000003" as never,
+              summary: "skill: Approval is required for this action.",
+            },
+          ],
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    const approval = screen.getByRole("group", { name: "Provider approval" });
+    const composer = screen
+      .getByRole("textbox", { name: "Follow-up message" })
+      .closest(".thread-composer");
+    const requests = approval.closest(".code-thread-workspace__provider-requests");
+
+    expect(approval).toHaveClass("approval-row--request");
+    expect(requests).not.toBeNull();
+    expect(requests?.nextElementSibling).toBe(composer);
+  });
+
   it("marks a provider handoff between replayed assistant turns", () => {
     render(
       <CodeThreadWorkspace

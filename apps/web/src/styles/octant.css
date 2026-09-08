@@ -32,19 +32,19 @@
   color-scheme: light dark;
 
   /* ── ground and type ── */
-  --oct-bg: light-dark(#f2f1ed, #14130f);
-  --oct-surface: light-dark(#e6e5e0, #1c1b16);
-  --oct-surface-warm: light-dark(#ebeae5, #232219);
-  --oct-fg: light-dark(#26251e, #f2f1ed);
-  --oct-fg-2: light-dark(rgba(38, 37, 30, 0.9), rgba(242, 241, 237, 0.9));
-  --oct-muted: light-dark(rgba(38, 37, 30, 0.68), rgba(242, 241, 237, 0.58));
-  --oct-meta: light-dark(rgba(38, 37, 30, 0.62), rgba(242, 241, 237, 0.45));
-  --oct-border: light-dark(rgba(38, 37, 30, 0.14), rgba(242, 241, 237, 0.13));
-  --oct-border-soft: light-dark(rgba(38, 37, 30, 0.07), rgba(242, 241, 237, 0.07));
+  --oct-bg: light-dark(#ffffff, #1a1a1a);
+  --oct-surface: light-dark(#fdfdfc, #232323);
+  --oct-surface-warm: light-dark(#f0f0ef, #2b2b2b);
+  --oct-fg: light-dark(#1b1b1b, #f0f0f0);
+  --oct-fg-2: color-mix(in oklab, var(--oct-fg) 90%, transparent);
+  --oct-muted: light-dark(#4f4f4f, #a9a9a9);
+  --oct-meta: light-dark(#6b6b6b, #8a8a8a);
+  --oct-border: light-dark(#e0e0de, #303030);
+  --oct-border-soft: color-mix(in oklab, var(--oct-fg) 7%, transparent);
   /* the chosen row: an opaque ground a step past hover, because active
      rows in palettes and pickers scroll under sticky chrome and a
      translucent tint would shift as content passes beneath it */
-  --oct-selection: light-dark(#d9d8d4, #353430);
+  --oct-selection: light-dark(#ebebea, #2c2c2c);
 
   /* Monochrome actions. The runtime theme owns optional tinted accents. */
   --oct-accent: light-dark(#1b1b1b, #f0f0f0);
@@ -95,16 +95,16 @@
 
   /* the hero canvas draws lines in this colour; JS resolves it rather
      than reading raw channel triplets */
-  --oct-grid-line: light-dark(#26251e, #f2f1ed);
+  --oct-grid-line: light-dark(#1b1b1b, #f0f0f0);
 
   /* ── elevation and focus ── */
   --oct-elev-flat: none;
   --oct-elev-ring: 0 0 0 1px var(--oct-border);
   --oct-elev-subtle:
-    0 1px 4px light-dark(rgba(38, 37, 30, 0.1), rgba(0, 0, 0, 0.28)), 0 0 0 1px var(--oct-border);
+    0 1px 4px light-dark(rgba(27, 27, 27, 0.1), rgba(0, 0, 0, 0.28)), 0 0 0 1px var(--oct-border);
   --oct-elev-raised:
-    0 28px 70px light-dark(rgba(38, 37, 30, 0.13), rgba(0, 0, 0, 0.5)),
-    0 14px 32px light-dark(rgba(38, 37, 30, 0.1), rgba(0, 0, 0, 0.36)), 0 0 0 1px var(--oct-border);
+    0 28px 70px light-dark(rgba(27, 27, 27, 0.13), rgba(0, 0, 0, 0.5)),
+    0 14px 32px light-dark(rgba(27, 27, 27, 0.1), rgba(0, 0, 0, 0.36)), 0 0 0 1px var(--oct-border);
   /* Retained for theme and bridge compatibility; controls use selection and
      expanded fills for state instead of painting a focus halo. */
   --oct-focus-ring: 0 0 0 1px var(--oct-bg), 0 0 0 3px var(--oct-muted);
@@ -230,9 +230,9 @@
 
   /* the wash behind a modal. Dark needs more of it because the ground is
      already dark and a weak scrim leaves the page competing with the dialog. */
-  --oct-scrim: light-dark(rgba(38, 37, 30, 0.38), rgba(0, 0, 0, 0.64));
+  --oct-scrim: light-dark(rgba(27, 27, 27, 0.38), rgba(0, 0, 0, 0.64));
   /* the travelling highlight in a skeleton */
-  --oct-sheen: light-dark(rgba(38, 37, 30, 0.07), rgba(242, 241, 237, 0.08));
+  --oct-sheen: light-dark(rgba(27, 27, 27, 0.07), rgba(240, 240, 240, 0.08));
   /* one indent step in a file tree */
   --oct-tree-indent: 14px;
 
@@ -265,8 +265,8 @@
   /* chart chrome. The grid is deliberately fainter than --oct-border-soft:
      it repeats a dozen times inside one small frame, and at border weight
      it reads as a table rather than as a backdrop. */
-  --oct-chart-grid: light-dark(rgba(38, 37, 30, 0.1), rgba(242, 241, 237, 0.09));
-  --oct-chart-axis: light-dark(rgba(38, 37, 30, 0.22), rgba(242, 241, 237, 0.2));
+  --oct-chart-grid: light-dark(rgba(27, 27, 27, 0.1), rgba(240, 240, 240, 0.09));
+  --oct-chart-axis: light-dark(rgba(27, 27, 27, 0.22), rgba(240, 240, 240, 0.2));
   --oct-chart-h: 180px;
 
   /* canvas document. The measure is narrower than the prose measure —
@@ -328,21 +328,21 @@
      fill opacity move together — a thicker glass is both more opaque and
      more diffuse, which is what keeps text on it readable as the panel
      carries more weight. */
-  --oct-glass-thin: light-dark(rgba(255, 255, 255, 0.28), rgba(38, 37, 30, 0.28));
-  --oct-glass-regular: light-dark(rgba(255, 255, 255, 0.42), rgba(38, 37, 30, 0.4));
-  --oct-glass-thick: light-dark(rgba(255, 255, 255, 0.58), rgba(45, 43, 36, 0.55));
-  --oct-glass-chrome: light-dark(rgba(255, 255, 255, 0.5), rgba(45, 43, 36, 0.48));
+  --oct-glass-thin: light-dark(rgba(255, 255, 255, 0.28), rgba(27, 27, 27, 0.28));
+  --oct-glass-regular: light-dark(rgba(255, 255, 255, 0.42), rgba(27, 27, 27, 0.4));
+  --oct-glass-thick: light-dark(rgba(255, 255, 255, 0.58), rgba(45, 45, 45, 0.55));
+  --oct-glass-chrome: light-dark(rgba(255, 255, 255, 0.5), rgba(45, 45, 45, 0.48));
   --oct-glass-blur-thin: 32px;
   --oct-glass-blur-regular: 48px;
   --oct-glass-blur-thick: 62px;
   --oct-glass-blur-chrome: 40px;
-  --oct-glass-stroke: light-dark(rgba(38, 37, 30, 0.1), rgba(242, 241, 237, 0.14));
-  --oct-glass-stroke-strong: light-dark(rgba(38, 37, 30, 0.16), rgba(242, 241, 237, 0.22));
+  --oct-glass-stroke: light-dark(rgba(27, 27, 27, 0.1), rgba(240, 240, 240, 0.14));
+  --oct-glass-stroke-strong: light-dark(rgba(27, 27, 27, 0.16), rgba(240, 240, 240, 0.22));
   --oct-glass-highlight: light-dark(rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.1));
   /* Laid over the atmosphere so the backdrop has a known floor. 66% is
      the measured minimum that keeps every ink-weight text role legible
      over any image, on glass or bare; see .phone-atmos::after. */
-  --oct-glass-floor: light-dark(rgba(242, 241, 237, 0.66), rgba(20, 19, 15, 0.66));
+  --oct-glass-floor: light-dark(rgba(240, 240, 240, 0.66), rgba(20, 19, 15, 0.66));
 
   /* Phone radii are far larger than desktop's 8/10/12. A small radius on
      a 390px-wide panel reads as a hard corner; the phone's whole chrome
@@ -362,7 +362,7 @@
   --oct-stage-reading: light-dark(#b8e8d4, #1f4a3a);
   --oct-stage-editing: light-dark(#bfd9ff, #243b5c);
   --oct-stage-grepping: light-dark(#d9cff5, #3a2f55);
-  --oct-stage-done: light-dark(#f2dfa0, #4a4020);
+  --oct-stage-done: var(--oct-fg-soft);
 
   /* The device viewport this system draws into. iPhone logical points. */
   --oct-phone-w: 390px;
@@ -2513,6 +2513,20 @@ input.switch:checked::after {
   align-items: center;
   gap: 6px;
   margin-inline-start: auto;
+}
+
+/* Provider and extension requests are waiting state, not a decorative brass
+   accent. Keep the actionable row in the same neutral surface language as the
+   composer; semantic warning colour remains available to real warnings. */
+.approval-row--request {
+  padding-left: 12px;
+  background: var(--octant-card);
+}
+.approval-row--request::before {
+  display: none;
+}
+.approval-row--request > svg {
+  color: var(--oct-muted);
 }
 
 @media (max-width: 680px) {
@@ -7587,8 +7601,8 @@ input.switch:checked::after {
      Losing a step of hierarchy is the honest cost of putting text on a
      photograph. The alternative is a fourth weight that is legible in the
      styleguide's own atmosphere and not in the user's. */
-  --oct-muted: light-dark(rgba(38, 37, 30, 0.9), rgba(242, 241, 237, 0.9));
-  --oct-meta: light-dark(rgba(38, 37, 30, 0.68), rgba(242, 241, 237, 0.68));
+  --oct-muted: color-mix(in oklab, var(--oct-fg) 90%, transparent);
+  --oct-meta: light-dark(rgba(27, 27, 27, 0.68), rgba(240, 240, 240, 0.68));
 }
 
 /* ─── atmosphere ──────────────────────────────────────────────────────

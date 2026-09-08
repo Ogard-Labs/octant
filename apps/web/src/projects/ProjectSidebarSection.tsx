@@ -93,7 +93,12 @@ import {
 import { IconButton } from "../shell/IconButton";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import { groupThreadsByProject } from "./projectThreadGrouping";
-import { ProjectThreadList, ProjectThreadRows, ProjectThreadStatus } from "./ProjectThreadList";
+import {
+  ProjectThreadList,
+  ProjectThreadRows,
+  ProjectThreadStatus,
+  ThreadStatusMark,
+} from "./ProjectThreadList";
 import type { ThreadRowActions } from "./ThreadRowMenu";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -1042,27 +1047,16 @@ function ActivityThreadButton(props: {
       type="button"
       variant="ghost"
     >
-      {/* The mark leads the row from a gutter every row reserves, so the marked
-          and unmarked titles start on the same edge. */}
-      {props.thread.attention === "unread" ? (
-        <span aria-label="Unread" className="activity-nav__glyph" data-indicator="unread">
-          ●
-        </span>
-      ) : props.thread.attention === "follow-up" ? (
-        <span aria-label="Follow-up" className="activity-nav__glyph" data-indicator="follow-up">
-          ◆
-        </span>
-      ) : props.thread.attention === "live" ? (
-        <span aria-label="Live" className="activity-nav__glyph" data-indicator="live">
-          ◐
-        </span>
-      ) : (
-        <span aria-hidden="true" className="activity-nav__glyph" />
-      )}
       <span className="sidebar-navigation__thread-copy">
         <span className="sidebar-navigation__thread-title">{props.thread.title}</span>
         <span className="sidebar-navigation__thread-project">{props.thread.projectName}</span>
       </span>
+      <ThreadStatusMark
+        activity={props.thread.activity}
+        unread={props.thread.unread}
+        woke={props.thread.woke}
+        followUp={props.thread.followUp}
+      />
     </OctantButton>
   );
 }

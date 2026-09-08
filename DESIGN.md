@@ -290,8 +290,9 @@ Status roles are paired to the surface where they render. Use the text role
 for labels and the surface role for a background; never rely on hue alone:
 
 Routine Waiting, idle, and unselected states use neutral text and marks.
-Warning colour is reserved for an actionable warning or pending approval,
-not every thread that can be resumed. Success, failure, diffs, provider marks,
+Pending approval requests use a neutral surface and muted icon, without a
+warning stripe. Warning colour is reserved for an actionable warning, not
+every thread that can be resumed. Success, failure, diffs, provider marks,
 and categorical data may retain semantic colour alongside a label or shape.
 
 | Meaning       | Surface                                                      | Text/border                                                                                 |
@@ -495,13 +496,14 @@ cards; provider marks are fixed-size inline and can be hidden without changing
 row height or indentation. A hovered row takes the soft ink wash and the row
 the workspace is showing takes the selection fill with a hairline edge, the
 same two states the thread tab strip draws, so pointing never looks like
-being there. A thread with unread activity ends its row with a
-small filled dot labelled "New activity", driven by the read cursors the
-window already keeps, never by a poll; working and attention states keep the
-leading status dot. A list longer than eight rows folds behind one quiet "Show
+being there. Provider identity remains at the leading edge. One fixed trailing
+status position shows a working spinner, an attention symbol, a clock when a
+snooze ends, or a neutral unread dot, in that priority order. Its accessible
+label and hover details retain overlapping states; a row never renders a
+second activity dot or a separate "Woke" label. A list longer than eight rows folds behind one quiet "Show
 more (n)" row that becomes "Show less"; the active thread stays visible while
-folded. Keyboard focus is the one neutral ring, and the Project row keeps its
-context menu. Project View and Project Overview are real features, not
+folded. Keyboard focus uses neutral fill and text emphasis, and the Project row keeps
+its context menu. Project View and Project Overview are real features, not
 decorative shortcuts.
 
 Primary sidebar destinations are New thread, Board, and Pull requests

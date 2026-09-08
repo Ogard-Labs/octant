@@ -1,4 +1,8 @@
-import type { ChatThreadNavigationItem } from "./navigationModel";
+import {
+  threadRowActivity,
+  type ChatThreadNavigationItem,
+  type ThreadRowActivity,
+} from "./navigationModel";
 
 export const ACTIVITY_VIEW_STORAGE_KEY = "octant.sidebar.activity-view.v1";
 export const ALL_ACTIVITY_VIEW_MODES = ["chat", "work", "code"] as const;
@@ -36,6 +40,10 @@ export interface SidebarActivityProject {
 }
 
 export interface SidebarActivityThread {
+  readonly activity: ThreadRowActivity;
+  readonly unread: boolean;
+  readonly followUp: boolean;
+  readonly woke: boolean;
   readonly attention: SidebarActivityAttention;
   readonly pinned?: boolean;
   readonly navigationId: string;
@@ -168,7 +176,12 @@ function toActivityThread(
     thread.projectId === undefined
       ? unfiledLabel
       : (projectNames.get(thread.projectId) ?? unfiledLabel);
+  const activity = threadRowActivity(thread);
   return {
+    activity,
+    unread: activity === "unread" || thread.unread === true,
+    followUp: thread.followUp === true,
+    woke: thread.woke === true,
     attention: activityAttention(thread),
     ...(thread.pinned === true ? { pinned: true } : {}),
     navigationId: thread.navigationId ?? thread.threadId,

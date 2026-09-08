@@ -118,20 +118,23 @@ describe("ProjectThreadRows", () => {
     expect(provider?.nextElementSibling).toBe(title);
   });
 
-  it("keeps activity at the left edge of the thread title", () => {
-    render(
-      <ProjectThreadRows onSelectThread={vi.fn()} threads={[{ ...thread, activity: "working" }]} />,
-    );
-
+  it.each([
+    {
+      activity: "working",
+      unread: true,
+      woke: true,
+      label: "Working · Snooze ended · New activity",
+    },
+    { activity: "attention", unread: true, woke: false, label: "Needs attention · New activity" },
+    { activity: "unread", unread: true, woke: true, label: "Snooze ended · New activity" },
+  ] as const)("combines overlapping row states into one trailing indicator: $label", (state) => {
+    render(<ProjectThreadRows onSelectThread={vi.fn()} threads={[{ ...thread, ...state }]} />);
     const row = screen.getByRole("button", { name: /Controller foundation/ });
-    const activity = row.querySelector(".sidebar-navigation__thread-status");
-    const provider = row.querySelector(".sidebar-navigation__thread-provider");
-    const title = row.querySelector(".sidebar-navigation__thread-copy");
-    expect(activity).toHaveAttribute("data-activity", "working");
-    expect(activity?.compareDocumentPosition(provider ?? row)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    expect(provider?.compareDocumentPosition(title ?? row)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    const indicator = within(row).getByRole("img", { name: state.label });
+    expect(within(row).getAllByRole("img")).toHaveLength(1);
+    expect(row.lastElementChild).toBe(indicator);
+    expect(row.firstElementChild).toHaveClass("sidebar-navigation__thread-provider");
+    expect(within(row).queryByText("Woke")).toBeNull();
   });
 
   it("marks an unread thread with a dot at the end of its row and clears it when read", () => {
@@ -140,10 +143,9 @@ describe("ProjectThreadRows", () => {
     );
     const row = screen.getByRole("button", { name: /Controller foundation/ });
     const dot = within(row).getByRole("img", { name: "New activity" });
-    expect(dot).toHaveClass("sidebar-navigation__thread-unread-dot");
+    expect(dot).toHaveAttribute("data-activity", "unread");
     // The mark ends the row: the title comes first, the dot last.
     expect(row.lastElementChild).toBe(dot);
-    expect(row.querySelector('[data-activity="unread"]')).toBeNull();
 
     rerender(
       <ProjectThreadRows onSelectThread={vi.fn()} threads={[{ ...thread, unread: false }]} />,
@@ -1110,7 +1112,7 @@ describe("completing and snoozing from a thread row", () => {
     expect(onSnoozeThread).not.toHaveBeenCalled();
   });
 
-  it("marks a row whose snooze ended as Woke until it is opened", () => {
+  it("marks a row whose snooze ended with one labelled clock", () => {
     render(
       <ProjectThreadRows
         onSelectThread={vi.fn()}
@@ -1123,7 +1125,7 @@ describe("completing and snoozing from a thread row", () => {
         ]}
       />,
     );
-    const woke = screen.getByText("Woke");
+    const woke = screen.getByRole("img", { name: "Snooze ended" });
     expect(woke).toHaveAttribute("title", "Snooze ended");
     expect(screen.getByRole("button", { name: /Controller foundation/ })).toContainElement(woke);
   });

@@ -858,35 +858,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         </div>
       ) : null}
 
-      {props.controller.providerRequests.map((request) =>
-        request.kind === "approval" ? (
-          <ProviderApprovalPrompt
-            key={String(request.approvalId)}
-            onAnswer={(decision) =>
-              void props.controller.answerProviderRequest({
-                kind: "approval",
-                approvalId: request.approvalId,
-                decision,
-              })
-            }
-            summary={request.summary}
-          />
-        ) : (
-          <ProviderInputPrompt
-            key={request.requestId}
-            onAnswer={(response) =>
-              void props.controller.answerProviderRequest({
-                kind: "input",
-                requestId: request.requestId,
-                response,
-              })
-            }
-            options={request.options}
-            prompt={request.prompt}
-          />
-        ),
-      )}
-
       {messages.length === 0 && pendingMessage === null ? (
         <div
           className="code-thread-workspace__conversation transcript-scroll"
@@ -1204,6 +1175,41 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           ? {}
           : { onCreatePullRequest: props.onCreatePullRequest })}
       />
+      {props.controller.providerRequests.length === 0 ? null : (
+        <div
+          aria-label="Pending provider requests"
+          className="code-thread-workspace__provider-requests thread-column"
+        >
+          {props.controller.providerRequests.map((request) =>
+            request.kind === "approval" ? (
+              <ProviderApprovalPrompt
+                key={String(request.approvalId)}
+                onAnswer={(decision) =>
+                  void props.controller.answerProviderRequest({
+                    kind: "approval",
+                    approvalId: request.approvalId,
+                    decision,
+                  })
+                }
+                summary={request.summary}
+              />
+            ) : (
+              <ProviderInputPrompt
+                key={request.requestId}
+                onAnswer={(response) =>
+                  void props.controller.answerProviderRequest({
+                    kind: "input",
+                    requestId: request.requestId,
+                    response,
+                  })
+                }
+                options={request.options}
+                prompt={request.prompt}
+              />
+            ),
+          )}
+        </div>
+      )}
       <ThreadComposer
         className="thread-composer code-thread-workspace__composer thread-column"
         chips={
@@ -1705,7 +1711,7 @@ function ProviderApprovalPrompt(props: {
   readonly onAnswer: (decision: "approved" | "denied") => void;
 }) {
   return (
-    <div aria-label="Provider approval" className="approval-row thread-column" role="group">
+    <div aria-label="Provider approval" className="approval-row approval-row--request" role="group">
       <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
       <span className="approval-row__text">{props.summary}</span>
       <div className="approval-row__actions">
@@ -1735,7 +1741,7 @@ function ProviderInputPrompt(props: {
   return (
     <form
       aria-label="Provider question"
-      className="approval-row thread-column code-thread-workspace__provider-request"
+      className="approval-row approval-row--request code-thread-workspace__provider-request"
       noValidate
       onSubmit={(event) => {
         event.preventDefault();

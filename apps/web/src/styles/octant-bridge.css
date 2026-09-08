@@ -7,8 +7,7 @@
    ThemeSettingsProvider / TypographyProvider) is the single source of
    visual truth; `--oct-*` is a consumer, exactly like shadcn-theme.css.
 
-   Two rules, both measured rather than assumed (see the design system's
-   octant-oo-bridge.css, which this file adapts):
+   Two rules keep runtime theme adaptation predictable:
 
      1. Map only what the host varies at RUNTIME. Colours and fonts
         change per theme; space, radii, motion and the type scale do not.
@@ -26,7 +25,7 @@
 :root {
   /* ─── ground ────────────────────────────────────────────────────────
      Octant's three steps line up with the app's three: the page ground,
-     the card raised off it, and the warmer strip inside a card. */
+     the card raised off it, and the neutral control surface. */
   --oct-bg: var(--octant-workspace);
   --oct-surface: var(--octant-floating);
   --oct-surface-warm: var(--octant-control);

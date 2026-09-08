@@ -1108,31 +1108,6 @@ h6 {
   font-size: var(--oct-text-sm);
 }
 
-/* 8px wide like the thread-status dot, so activity titles and tree titles
-   start on the same edge. */
-.activity-nav__glyph {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  min-width: 8px;
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
-  line-height: 1;
-}
-
-.activity-nav__glyph[data-indicator="unread"] {
-  color: var(--octant-text-primary);
-}
-
-.activity-nav__glyph[data-indicator="follow-up"] {
-  color: var(--octant-warning-text);
-}
-
-.activity-nav__glyph[data-indicator="live"] {
-  color: var(--octant-text-secondary);
-}
-
 /* A Project name is a section header over its thread rows, not a row among
    them: generous room above each header, none below, and no per-row seams. */
 .project-block + .project-block {
@@ -6191,13 +6166,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   font-size: var(--oct-text-sm);
 }
 
-/* Placement only: the recipe is the system's `.approval-row`, the measure the
-   shared `.thread-column`, the distance the same one a notice keeps. */
-.code-thread-workspace > .approval-row {
-  flex: 0 0 auto;
-  margin: 12px auto 0;
-}
-
 .code-thread-workspace__waiting svg {
   flex: 0 0 auto;
   color: var(--octant-warning-text);
@@ -6219,6 +6187,22 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 /* A provider's question takes the approval row with its answer field. */
 .code-thread-workspace__provider-request > input {
   flex: 1 1 200px;
+}
+
+/* Provider questions are actionable composer state. Keep them with the
+   composer at the foot of the thread so the answer never gets separated from
+   the message field by a long transcript. The shared request row supplies
+   its controls and neutral surface; this wrapper owns the stack and measure. */
+.code-thread-workspace__provider-requests {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 8px;
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+.code-thread-workspace__provider-requests .approval-row {
+  width: 100%;
 }
 
 /* The scroll frame and its padding are the system's `.transcript-scroll`. */

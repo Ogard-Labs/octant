@@ -1073,7 +1073,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       {pendingToolApproval === undefined ? null : (
         <section
           aria-label="Extension tool approval"
-          className="approval-row chat-workspace__tool-approval thread-column"
+          className="approval-row approval-row--request chat-workspace__tool-approval thread-column"
           role="group"
         >
           <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />

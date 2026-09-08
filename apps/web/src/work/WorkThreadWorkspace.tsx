@@ -1108,7 +1108,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           }
           if (row.kind === "request") {
             return (
-              <div className="approval-row" role="status">
+              <div className="approval-row approval-row--request" role="status">
                 <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
                 <span className="approval-row__text">
                   {row.request.detail.kind === "approval"

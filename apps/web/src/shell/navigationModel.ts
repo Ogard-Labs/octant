@@ -169,6 +169,14 @@ export interface ChatThreadNavigationItem {
   readonly wakeLabel?: string;
 }
 
+/** The same activity precedence applies in the Project tree and Activity view. */
+export function threadRowActivity(thread: ChatThreadNavigationItem): ThreadRowActivity {
+  if (thread.activity !== undefined) return thread.activity;
+  if (thread.followUp === true) return "attention";
+  if (thread.unread === true) return "unread";
+  return "idle";
+}
+
 export function buildChatThreadNavigation(
   threads: ReadonlyArray<ChatThreadNavigationSource>,
 ): ReadonlyArray<ChatThreadNavigationItem> {
