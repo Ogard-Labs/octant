@@ -5,7 +5,7 @@ import { createElement, type ReactNode } from "react";
  * does not add a runtime image request. Each source and license is recorded in
  * the table below; the renderer treats all of them as single-color paths.
  * Redistribution notices for the non-CC0 assets live in
- * `../../public/PROVIDER-LOGOS-LICENSE.txt` beside this module.
+ * `../../public/PROVIDER-LOGOS-LICENSE.txt`, distributed with the renderer.
  */
 
 export interface ProviderLogoSpec {

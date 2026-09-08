@@ -42,7 +42,7 @@ poor fit and would make the same provider render differently while offline.
 
 - Settings rows, model-picker rails, thread metadata, and usage surfaces share
   one stable identity primitive with no network dependency.
-- `apps/web/src/providers/PROVIDER_LOGO_LICENSES.md` preserves the required
+- `apps/web/public/PROVIDER-LOGOS-LICENSE.txt` preserves the required
   MIT and Apache-2.0 notices for the repository-sourced marks.
 - Adding another provider requires a reviewed path and source/license entry;
   unsupported or private endpoints remain clearly generic.

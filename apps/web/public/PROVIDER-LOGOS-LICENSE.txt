@@ -264,4 +264,3 @@ claiming CC0 or another license.
 
 Provider names and marks remain trademarks of their respective owners. They are
 shown only to identify the configured provider.
-
