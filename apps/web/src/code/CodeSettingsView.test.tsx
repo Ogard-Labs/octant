@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
@@ -12,6 +12,26 @@ const settings = {
 } as const;
 
 describe("CodeSettingsView", () => {
+  it("refreshes saved defaults without replacing an unfinished editor field", () => {
+    const onUpdate = vi.fn(async () => true);
+    const { rerender } = render(
+      <CodeSettingsView onUpdate={onUpdate} settings={settings as never} />,
+    );
+    const field = screen.getByRole("textbox", { name: "External editor executable" });
+    field.focus();
+    fireEvent.change(field, { target: { value: "/unfinished" } });
+    rerender(
+      <CodeSettingsView
+        onUpdate={onUpdate}
+        settings={{ ...settings, version: 2, defaultExecutionPolicy: "plan" } as never}
+      />,
+    );
+    expect(screen.getByRole("textbox", { name: "External editor executable" })).toBe(field);
+    expect(field).toHaveValue("/unfinished");
+    expect(field).toHaveFocus();
+    expect(screen.getByRole("combobox", { name: "Default Code access" })).toHaveTextContent("Plan");
+  });
+
   it("keeps a chosen default the moment it is chosen, with no Save step", async () => {
     const update = vi.fn(async () => true);
     render(<CodeSettingsView onUpdate={update} settings={settings as never} />);

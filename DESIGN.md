@@ -102,10 +102,10 @@ greys and the same hairline carry the hierarchy on a white or graphite ground.
 ### Shapes and depth
 
 Radius derives from one `--radius` root: a control is the `lg` step, a card or
-menu the `xl` step, and a compact control clamps below both. The composer and
-dialogs stay at 20px. A surface is flat by default. A discrete object is
+menu the `xl` step, and a compact control clamps below both. Welcome composers and
+dialogs stay at 20px; follow-up composers use the shared medium radius (0098). A surface is flat by default. A discrete object is
 bounded by a hairline ring, not lifted; shadow means something that genuinely
-floats — the composer (`--octant-shadow-md`) or an overlay
+floats — a welcome composer (`--octant-shadow-md`) or an overlay
 (`--octant-shadow-overlay`). Groups, lists, empty states, and headers are
 never cards.
 
@@ -236,13 +236,13 @@ transcript size with 1.5 leading; markdown headings inside it are labels
 then detail-size mono on the application ground. Tool rows are 28px each, the
 name at the body size and the state at the right as detail text with a 12px
 mark (spinner, check, cross), parted by hairlines and indented together; a
-settled turn folds them behind "N tool calls". A turn paused on the person is
-an `approval-row`: a card row with a 14px icon, one sentence, Approve as the
-small default button and Deny as the small ghost, and a 2px semantic tick
-inside the hairline rather than a bar. The composer at the foot of a thread is
-`thread-composer`: the same frame in every mode, 30px controls on its row, and
-one `composer-status` line under it (11px meta, hint left, spend and notices
-right).
+settled turn folds them behind "N tool calls". A turn paused on the person uses a neutral composer-adjacent request row with
+an icon and explicit answer controls. Follow-up composers use one compact
+hairline message surface across Chat, Work, and Code. A fixed 28px feedback
+lane above the toolbar keeps controls still when notices appear or disappear;
+long messages remain accessible and scrollable. The Code checkout strip is
+attached underneath, rather than floating above the input. Input growth from
+extra typed lines is intentional; status changes do not resize the frame (0098).
 
 ## Colour system
 
@@ -372,7 +372,7 @@ reading-width preference. Canvas documents use a 62ch measure.
 Spacing is a 4px base scale: 4, 8, 12, 16, 20, 24, 32, and 48px. Use `gap-*`
 for stacks and groups; do not reintroduce `space-x-*` or `space-y-*` utility
 chains. The desktop radius scale is 10px compact control, 16px panel and card, 20px
-composer and dialog, and 9999px only for compact chips, meters, or circular icon
+welcome composer and dialog, the shared medium follow-up radius, and 9999px only for compact chips, meters, or circular icon
 controls. Product
 chrome uses those tokens. Pixel radii of 1–4px remain only for chart bars,
 marks, and status dots. Leftover `.btn*` recipes are gone; adapters own
@@ -468,8 +468,8 @@ Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
 `--octant-shadow-overlay`, and `--octant-shadow-pop`. Use the smallest level
 that establishes a genuine layer: navigation panes and open form layouts stay
 unshadowed; the card recipe uses a hairline ring instead of a shadow (0090);
-compact state and grouped surfaces use `--octant-shadow-sm`; composers
-use the catalog-calibrated `--octant-shadow-md`; focused or promoted raised
+compact state and grouped surfaces use `--octant-shadow-sm`; welcome composers
+use `--octant-shadow-md`, while follow-up composers use a hairline boundary; focused or promoted raised
 objects may use `--octant-shadow-lg`; overlays use only their overlay or pop
 token. A shadow must explain depth, not decorate a flat row.
 
@@ -846,3 +846,14 @@ inventory, shell/settings/project/dock styles, the task visualizer, context
 meter, usage surfaces, and decisions 0016, 0027, 0038, 0044, 0045, and 0046.
 Values marked as defaults come directly from those files; layout guidance
 follows the rendered contracts encoded by their selectors and tests.
+
+### Settings stability
+
+Background refresh preserves already loaded controls and active drafts. Use the
+initial loading view only before a surface has data. Provider and theme feedback
+occupy bounded, scrollable status slots; a changed status must not push the form
+below it. Provider metadata uses fixed columns and shows Checking during probes.
+Last observed model facts are presentation only and never authorize selection
+or execution. Saved Chat/Code revisions reconcile untouched fields without
+remounting the form. Keep deliberate section expansion, text growth, and manual
+resizing distinct from unsolicited layout movement.

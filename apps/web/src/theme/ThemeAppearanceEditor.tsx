@@ -47,11 +47,13 @@ export function ThemeAppearanceEditor(props: {
   };
   return (
     <div className="settings-theme-editor" aria-label="Appearance preview controls">
-      {theme.error !== undefined ? (
-        <p className="settings-view__error" role="alert">
-          {theme.error}
-        </p>
-      ) : null}
+      <div className="settings-feedback-slot" aria-live="polite">
+        {theme.error !== undefined ? (
+          <p className="settings-view__error" role="alert">
+            {theme.error}
+          </p>
+        ) : null}
+      </div>
       <section
         aria-label="Theme"
         className="settings-card-section settings-card-section--open settings-theme-editor__scheme-section"

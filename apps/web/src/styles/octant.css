@@ -4312,6 +4312,61 @@ input.switch:checked::after {
   flex: 0 0 auto;
   margin: 0 auto 12px;
 }
+
+/* Existing conversations keep the message surface distinct from its binding.
+   Feedback has a stable lane above the toolbar, including while it is empty. */
+.composer.composer--follow-up,
+.composer.composer--follow-up:focus-within {
+  background: var(--octant-tray);
+  border-radius: var(--oct-radius-md);
+  box-shadow: none;
+}
+.thread-composer__surface {
+  min-width: 0;
+  background: var(--octant-card);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+}
+.thread-composer__surface:focus-within {
+  border-color: var(--octant-border-strong);
+}
+.thread-composer__surface > label {
+  display: block;
+}
+.thread-composer__surface .composer-input {
+  min-height: 40px;
+  padding: 12px 12px 6px;
+}
+.thread-composer__surface > .composer-row {
+  min-height: 32px;
+  padding: 0 8px 4px;
+}
+.thread-composer__feedback {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 28px;
+  min-width: 0;
+  padding-inline: 12px;
+  overflow: auto;
+}
+.thread-composer__feedback > .composer-status {
+  flex: 1 0 auto;
+  flex-wrap: nowrap;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  white-space: nowrap;
+}
+.thread-composer__context {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  min-width: 0;
+  padding-inline: 12px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
 /* The quiet line under the composer's toolbar: the keyboard hint or a
    receipt on the left, spend and limits on the right. One recipe replaces
    the three footers Chat, Work, and Code drew under the same frame (and, in

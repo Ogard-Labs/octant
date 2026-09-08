@@ -46,6 +46,12 @@ export interface ProviderSettingsViewProps {
   readonly discovery?: ReactNode;
   readonly defaults: ProviderDefaults;
   readonly observedByInstance: ReadonlyMap<ProviderInstanceId, ProviderObservedState>;
+  /**
+   * A presentation-only projection used while a probe replaces an observation.
+   * It may retain the last known model geometry, but never feeds authority or
+   * model eligibility decisions.
+   */
+  readonly presentationObservedByInstance?: ReadonlyMap<ProviderInstanceId, ProviderObservedState>;
   readonly probingIds: ReadonlySet<ProviderInstanceId>;
   readonly busy: boolean;
   readonly credentialManagementAvailable: boolean;
@@ -276,21 +282,23 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
   // a trailing Defaults group.
   return (
     <div className="provider-settings">
-      {props.status === "loading" ? <p role="status">Loading providers…</p> : null}
-      {props.status === "disconnected" ? (
-        <OctantButton
-          className="settings-view__action"
-          onClick={() => void props.onRetry()}
-          type="button"
-        >
-          Retry provider connection
-        </OctantButton>
-      ) : null}
-      {props.message === undefined ? null : (
-        <p className="provider-settings__alert" role="alert">
-          {props.message}
-        </p>
-      )}
+      <div aria-live="polite" className="provider-settings__message-slot">
+        {props.status === "loading" ? <p role="status">Loading providers…</p> : null}
+        {props.status === "disconnected" ? (
+          <OctantButton
+            className="settings-view__action"
+            onClick={() => void props.onRetry()}
+            type="button"
+          >
+            Retry provider connection
+          </OctantButton>
+        ) : null}
+        {props.message === undefined ? null : (
+          <p className="provider-settings__alert" role="alert">
+            {props.message}
+          </p>
+        )}
+      </div>
       {props.discovery}
       <ProviderSettingsList
         busy={props.busy}
@@ -321,6 +329,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         discoverySnapshot={props.discoverySnapshot}
         instances={props.instances}
         observedByInstance={props.observedByInstance}
+        {...(props.presentationObservedByInstance === undefined
+          ? {}
+          : { presentationObservedByInstance: props.presentationObservedByInstance })}
         probingIds={props.probingIds}
         status={props.status}
         onAgentEligibleModelsChange={props.onAgentEligibleModelsChange}

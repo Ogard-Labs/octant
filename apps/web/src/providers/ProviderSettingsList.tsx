@@ -95,11 +95,17 @@ export type ProviderSettingsListProps = Pick<
   | "onHiddenModelsChange"
 > & {
   readonly discoverySnapshot: DiscoverySnapshot | undefined;
+  readonly presentationObservedByInstance?: ReadonlyMap<ProviderInstanceId, ProviderObservedState>;
   readonly createForm?: ReactNode;
 };
 
 export function ProviderSettingsList(props: ProviderSettingsListProps) {
   const [reordering, setReordering] = useState(false);
+  // The registry projection is authoritative and can be intentionally empty
+  // during a probe. Settings may use the last observed facts for geometry
+  // while the probe is pending; eligibility controls below still use the
+  // authoritative map and therefore fail closed.
+  const presentationObserved = props.presentationObservedByInstance ?? props.observedByInstance;
   // Row order is the order the model picker offers providers in, so the list
   // renders in that order and the row grips edit it directly.
   const ordered = useMemo(() => {
@@ -118,14 +124,14 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
     for (const instance of ordered) {
       if (!instance.enabled) {
         off += 1;
-      } else if (props.observedByInstance.get(instance.id)?.readiness === "ready") {
+      } else if (presentationObserved.get(instance.id)?.readiness === "ready") {
         ready += 1;
       } else {
         needsSetup += 1;
       }
     }
     return { ready, needsSetup, off };
-  }, [ordered, props.observedByInstance]);
+  }, [ordered, presentationObserved]);
 
   function move(index: number, direction: -1 | 1) {
     const next = index + direction;
@@ -189,9 +195,9 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
                 {...(props.discoverySnapshot === undefined
                   ? {}
                   : { discoverySnapshot: props.discoverySnapshot })}
-                {...(props.observedByInstance.get(instance.id) === undefined
+                {...(presentationObserved.get(instance.id) === undefined
                   ? {}
-                  : { observed: props.observedByInstance.get(instance.id)! })}
+                  : { observed: presentationObserved.get(instance.id)! })}
                 onChangeBinary={props.onChangeBinary}
                 onChangeClaudeConfiguration={props.onChangeClaudeConfiguration}
                 onChangeMistralVibeConfiguration={props.onChangeMistralVibeConfiguration}

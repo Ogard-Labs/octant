@@ -57,6 +57,62 @@ this Settings pass does not establish those results.
   remain available. Destructive and permission-related controls were not used
   during visual review.
 
+## Settings stability assessment
+
+The 8 September follow-up applied the frontend-design and production UX skill
+criteria to all 17 available Settings destinations at 1280 × 720. Linear was
+plugin-gated and inspected in source and component tests. The established
+neutral palette, 800px measure, sentence-case hierarchy, and common control
+edge fit a desktop workspace. Precision and predictable editing matter more
+here than additional decoration or page animation.
+
+| Surface               | Assessment                                                                                                                                                                |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| General               | Shared row grammar; no unsolicited movement observed.                                                                                                                     |
+| Appearance            | Consistent but dense; error feedback now has reserved space. User-triggered font expansion keeps its scroll anchor.                                                       |
+| Keybindings           | Compact; the editor disclosure is an intentional compound control.                                                                                                        |
+| Navigator             | Bounded model chooser and clear empty state.                                                                                                                              |
+| Voice                 | Consistent endpoint groups; long guidance wraps within the reading column.                                                                                                |
+| Image Generation      | Empty and disabled states retain ordinary field geometry.                                                                                                                 |
+| Chat                  | Saved revisions update untouched values while retaining active drafts and focus. Manual textarea resizing remains available.                                              |
+| Code                  | Saved defaults no longer remount the editor form; unfinished editor fields survive revisions.                                                                             |
+| Providers & Models    | Fixed metadata columns, bounded model catalog, reserved feedback, and presentation-only model facts during checks. Authoritative eligibility still clears during probing. |
+| Profiles              | Bounded catalog with deliberate expansion; direct pointer interaction preserves the page anchor.                                                                          |
+| Agents                | Sparse and consistent with the shared field recipe.                                                                                                                       |
+| Octant Harness        | Aligned slot rows; long but navigable with the same page structure.                                                                                                       |
+| Skills & Extensions   | Refresh retains installed controls; initial loading remains a distinct state. A failed refresh identifies the retained snapshot as the last loaded settings.              |
+| GitHub                | Existing ready content remains mounted during refresh.                                                                                                                    |
+| Usage                 | Existing data and filters remain visible during refresh.                                                                                                                  |
+| Host                  | Largest information surface; approximately 6,480px in the audited state. Density is a future hierarchy improvement, not evidence of refresh bounce.                       |
+| Advanced              | Consistent maintenance and diagnostics fields.                                                                                                                            |
+| Linear (plugin-gated) | Refresh retains the workspace and advanced draft; failure is shown inline. Verified by component regression, not a live authenticated integration.                        |
+
+Direct pointer checks disproved the apparent scroll jumps produced by locator
+clicks: the test tool had scrolled targets before clicking. No global scroll
+restoration listener was added. Page navigation and deep-link focus keep their
+existing behavior. Initial loading, explicit section expansion, textarea
+resizing, and typing additional lines can legitimately change document height.
+
+Provider connection forms retain their explicit revision reset when the
+underlying instance configuration changes. These forms contain authentication
+attempt state and uncontrolled configuration fields; this pass does not replace
+that lifecycle with a generic draft cache. Model visibility updates belong to
+the separate defaults revision and preserve the provider row and filter.
+
+Appearance, Skills & Extensions, and Host remain density outliers. Their
+capabilities are preserved; further grouping should be designed around real
+user workflows instead of mechanically collapsing every section. The audit
+found no brass default surface. Semantic warning colours and provider identity
+marks remain intentional.
+
+The final follow-up composer was checked in a separate local headless browser
+at 1280 × 900 and 760 × 720 after the Mac locked. Neither viewport overflowed
+horizontally. With a simulated long feedback message, its measured frame stayed
+at 520 × 134px at the same position. Provider discovery and list bounds also
+remained unchanged across the sampled scan interval. Native checkout facts were
+unavailable in that browser session; component tests cover the attached context
+strip. Native transparency remains outside this evidence.
+
 ## Rendered follow-up evidence
 
 - All 17 available Settings destinations were inspected in the local browser

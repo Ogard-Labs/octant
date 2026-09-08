@@ -1159,6 +1159,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       />
 
       <ThreadComposer
+        presentation="follow-up"
         className="thread-composer thread-column"
         chips={
           <>
@@ -1304,7 +1305,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         footer={
           <div aria-live="polite" className="composer-status">
             {errorMessage === undefined ? null : (
-              <span className="composer-status__notice" role="alert">
+              <span className="composer-status__notice" role="alert" title={errorMessage}>
                 {errorMessage}
               </span>
             )}

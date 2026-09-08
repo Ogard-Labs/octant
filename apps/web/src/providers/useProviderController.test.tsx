@@ -301,6 +301,61 @@ describe("useProviderController", () => {
     expect(result.current.observedByInstance.get(id)?.readiness).toBe("ready");
   });
 
+  it("retains prior probe facts for Settings while clearing authoritative observations", async () => {
+    const pending = deferred<Awaited<ReturnType<ProviderClient["probe"]>>>();
+    const api = client();
+    vi.mocked(api.bootstrap).mockResolvedValueOnce(snapshot([provider()], [observation()]));
+    vi.mocked(api.probe).mockReturnValueOnce(pending.promise);
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.observedByInstance.get(id)?.readiness).toBe("ready"));
+
+    let check!: Promise<boolean>;
+    act(() => {
+      check = result.current.probe(id);
+    });
+
+    expect(result.current.observedByInstance.get(id)).toBeUndefined();
+    expect(result.current.presentationObservedByInstance.get(id)?.models).toHaveLength(1);
+    expect(result.current.presentationObservedByInstance.get(id)?.readiness).toBe("ready");
+
+    pending.resolve(observation({ models: [] }));
+    await expect(check).resolves.toBe(true);
+    await waitFor(() => expect(result.current.probingIds.has(id)).toBe(false));
+    expect(result.current.presentationObservedByInstance.get(id)?.models).toEqual([]);
+  });
+
+  it("retains model facts for every pending provider in a concurrent scan", async () => {
+    const otherId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000092");
+    const first = Promise.withResolvers<ProviderObservedState>();
+    const second = Promise.withResolvers<ProviderObservedState>();
+    const api = client();
+    vi.mocked(api.bootstrap).mockResolvedValueOnce(
+      snapshot(
+        [provider(), provider({ id: otherId })],
+        [observation(), observation({ instanceId: otherId })],
+      ),
+    );
+    vi.mocked(api.probe).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    let checks: Promise<boolean>[] = [];
+    act(() => {
+      checks = [result.current.probe(id), result.current.probe(otherId)];
+    });
+    expect(result.current.observedByInstance.size).toBe(0);
+    expect(result.current.presentationObservedByInstance.size).toBe(2);
+    await act(async () => {
+      first.resolve(observation());
+      await checks[0];
+    });
+    expect(result.current.presentationObservedByInstance.size).toBe(2);
+    await act(async () => {
+      second.resolve(observation({ instanceId: otherId }));
+      await checks[1];
+    });
+    expect(result.current.observedByInstance.size).toBe(2);
+  });
+
   it("clears prior discovery immediately and installs authoritative probe failure", async () => {
     const pending = deferred<Awaited<ReturnType<ProviderClient["probe"]>>>();
     const failed = failureObservation("unauthenticated");
@@ -354,6 +409,7 @@ describe("useProviderController", () => {
     await waitFor(() =>
       expect(result.current.message).toBe("Octant Provider service is unavailable."),
     );
+    expect(result.current.presentationObservedByInstance.get(id)).toBeUndefined();
     expect(result.current.message).not.toMatch(/secret provider|secret refresh/i);
     expect(api.bootstrap).toHaveBeenCalledTimes(2);
   });

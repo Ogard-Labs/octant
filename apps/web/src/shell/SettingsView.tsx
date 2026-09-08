@@ -500,7 +500,6 @@ function ActiveSectionContent({
       return props.chatController?.bootstrap !== undefined ? (
         <div id="settings-chat">
           <ChatSettingsView
-            key={props.chatController.bootstrap.settings.version}
             {...(props.chatController.settingsMessage === undefined
               ? {}
               : { message: props.chatController.settingsMessage })}
@@ -516,7 +515,6 @@ function ActiveSectionContent({
       return props.codeController?.bootstrap !== undefined ? (
         <div className="settings-code-stack" id="settings-code">
           <CodeSettingsView
-            key={props.codeController.bootstrap.settings.version}
             onUpdate={props.codeController.updateSettings}
             settings={props.codeController.bootstrap.settings}
           />
@@ -718,6 +716,7 @@ function ProvidersSection(props: {
           ? {}
           : { message: props.providerController.message })}
         observedByInstance={props.providerController.observedByInstance}
+        presentationObservedByInstance={props.providerController.presentationObservedByInstance}
         onChangeBinary={props.providerController.changeBinary}
         onChangeClaudeConfiguration={props.providerController.changeClaudeConfiguration}
         onChangeDevinConfiguration={props.providerController.changeDevinConfiguration}

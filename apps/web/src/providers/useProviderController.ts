@@ -94,10 +94,19 @@ export function useProviderController(options: ProviderControllerOptions) {
   const client = options.client ?? fallbackClient;
   const mounted = useRef(true);
   const authoritative = useRef<ProviderRegistrySnapshot | undefined>(undefined);
+  // Settings should keep its geometry while a probe replaces an observation,
+  // but the provider registry must still clear that observation immediately
+  // so no stale capability can authorize a turn. Keep this second projection
+  // presentation-only and reconcile it whenever authoritative state changes.
+  const pendingProbes = useRef(new Set<ProviderInstanceId>());
+  const presentationObserved = useRef(new Map<ProviderInstanceId, ProviderObservedState>());
   const mutationQueue = useRef(settledMutationQueue);
   const credentialCleanupRequired = useRef<Set<ProviderInstanceId>>(new Set());
   const credentialStatusUnconfirmed = useRef<Set<ProviderInstanceId>>(new Set());
   const [snapshot, setSnapshot] = useState<ProviderRegistrySnapshot>();
+  const [presentationObservedSnapshot, setPresentationObservedSnapshot] = useState<
+    ReadonlyMap<ProviderInstanceId, ProviderObservedState>
+  >(new Map());
   const [status, setStatus] = useState<ProviderControllerStatus>("loading");
   const [message, setMessage] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -111,7 +120,20 @@ export function useProviderController(options: ProviderControllerOptions) {
       }
     }
     authoritative.current = value;
+    const nextPresentation = new Map<ProviderInstanceId, ProviderObservedState>();
+    const preserved = pendingProbes.current;
+    const instanceIds = new Set(value.instances.map((instance) => instance.id));
+    for (const observed of value.observedStates) {
+      nextPresentation.set(observed.instanceId, observed);
+    }
+    for (const instanceId of preserved) {
+      if (!instanceIds.has(instanceId) || nextPresentation.has(instanceId)) continue;
+      const prior = presentationObserved.current.get(instanceId);
+      if (prior !== undefined) nextPresentation.set(instanceId, prior);
+    }
+    presentationObserved.current = nextPresentation;
     if (!mounted.current) return;
+    setPresentationObservedSnapshot(new Map(nextPresentation));
     setSnapshot(value);
     setStatus("ready");
   }, []);
@@ -2569,6 +2591,7 @@ export function useProviderController(options: ProviderControllerOptions) {
   const probe = useCallback(
     async (instanceId: ProviderInstanceId) => {
       if (client === undefined) return false;
+      pendingProbes.current.add(instanceId);
       const current = authoritative.current;
       if (current !== undefined) {
         install({
@@ -2608,6 +2631,17 @@ export function useProviderController(options: ProviderControllerOptions) {
         }
         return false;
       } finally {
+        pendingProbes.current.delete(instanceId);
+        // A failed probe and failed bootstrap must not leave a ready-looking
+        // presentation behind after Checking ends.
+        if (
+          !authoritative.current?.observedStates.some((state) => state.instanceId === instanceId)
+        ) {
+          presentationObserved.current.delete(instanceId);
+          if (mounted.current)
+            setPresentationObservedSnapshot(new Map(presentationObserved.current));
+        }
+
         if (mounted.current) {
           setProbingIds((current) => {
             const next = new Set(current);
@@ -2684,6 +2718,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     observedByInstance: new Map(
       snapshot?.observedStates.map((value) => [value.instanceId, value] as const) ?? [],
     ) as ReadonlyMap<ProviderInstanceId, ProviderObservedState>,
+    presentationObservedByInstance: presentationObservedSnapshot,
     busy,
     probingIds,
     credentialManagementAvailable: hostBridge !== undefined,

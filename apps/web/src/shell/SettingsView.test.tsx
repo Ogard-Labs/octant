@@ -447,6 +447,28 @@ describe("SettingsView", () => {
     expect(probe).toHaveBeenCalledWith(discoveredId);
   });
 
+  it("keeps the active Chat field and draft when another default is saved", () => {
+    const controller = chatControllerFixture();
+    const { props, rerender } = renderSettings({ chatController: controller });
+    navigateTo("Chat");
+    const field = screen.getByLabelText("Calm personality instructions");
+    field.focus();
+    fireEvent.change(field, { target: { value: "An unfinished draft" } });
+    const bootstrap = decodeChatBootstrap({
+      ...controller.bootstrap,
+      settings: {
+        ...controller.bootstrap?.settings,
+        version: 2,
+        defaultResearchEnabled: true,
+      },
+    });
+    rerender(<SettingsView {...props} chatController={{ ...controller, bootstrap }} />);
+    expect(screen.getByLabelText("Calm personality instructions")).toBe(field);
+    expect(field).toHaveFocus();
+    expect(field).toHaveValue("An unfinished draft");
+    expect(screen.getByRole("switch", { name: "Enable research by default" })).toBeChecked();
+  });
+
   it("integrates authoritative Chat defaults as a searchable section", () => {
     const chatController = {
       ...chatControllerFixture(),

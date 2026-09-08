@@ -329,10 +329,17 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       setStatus("ready");
     } catch {
       setStatus("unavailable");
+      setFailure({
+        category: "unavailable",
+        message: "Extensions could not be refreshed. The last loaded settings are shown.",
+      });
     }
   }, [props.client, scope]);
 
   useEffect(() => {
+    // A different client or activation scope must load its own snapshot.
+    setSnapshot(undefined);
+    setEffective(undefined);
     void reload();
   }, [reload]);
 
@@ -579,7 +586,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
     [props.client, reload, installingSkill, snapshot],
   );
 
-  if (status === "unavailable") {
+  if (status === "unavailable" && snapshot === undefined) {
     return (
       <section
         aria-label={props.showHeading === false ? "Skills & Extensions" : undefined}
@@ -597,7 +604,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
     );
   }
 
-  if (status === "loading" || snapshot === undefined) {
+  if (snapshot === undefined) {
     return (
       <section
         aria-label={props.showHeading === false ? "Skills & Extensions" : undefined}
@@ -652,6 +659,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
 
   return (
     <section
+      aria-busy={status === "loading"}
       aria-label={props.showHeading === false ? "Skills & Extensions" : undefined}
       aria-labelledby={props.showHeading === false ? undefined : "extensions-settings-heading"}
       className="extensions-settings"
@@ -1336,12 +1344,14 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         </>
       )}
 
-      {failure !== undefined ? (
-        <p className="extensions-settings__failure" role="status">
-          <span>{failure.category}</span>
-          <span>{failure.message}</span>
-        </p>
-      ) : null}
+      <div className="settings-feedback-slot" aria-live="polite">
+        {failure !== undefined ? (
+          <p className="extensions-settings__failure" role="status">
+            <span>{failure.category}</span>
+            <span>{failure.message}</span>
+          </p>
+        ) : null}
+      </div>
     </section>
   );
 }

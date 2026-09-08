@@ -78,6 +78,9 @@ export interface ThreadComposerRow {
  * surface: the component takes over markup, not behavior.
  */
 export interface ThreadComposerProps {
+  readonly presentation?: "follow-up";
+  /** Existing-thread checkout context, attached beneath the message surface. */
+  readonly context?: ReactNode;
   /** Naming the frame promotes it to a `<section>` landmark (Chat). */
   readonly ariaLabel?: string | undefined;
   /** Appended after `composer`; positions the frame within the surface. */
@@ -95,8 +98,10 @@ export interface ThreadComposerProps {
 }
 
 export function ThreadComposer(props: ThreadComposerProps) {
-  const frameClassName = props.className === undefined ? "composer" : `composer ${props.className}`;
-  const body = (
+  const baseClassName = props.className === undefined ? "composer" : `composer ${props.className}`;
+  const followUp = props.presentation === "follow-up";
+  const frameClassName = followUp ? `${baseClassName} composer--follow-up` : baseClassName;
+  const message = (
     <>
       {props.chips}
       {props.label === undefined ? (
@@ -111,16 +116,35 @@ export function ThreadComposer(props: ThreadComposerProps) {
         </label>
       )}
       {props.typeahead}
-      <div
-        {...(props.row.ariaLabel === undefined ? {} : { "aria-label": props.row.ariaLabel })}
-        className={
-          props.row.className === undefined ? "composer-row" : `composer-row ${props.row.className}`
-        }
-        {...(props.row.toolbar === true ? { role: "toolbar" } : {})}
-      >
-        {props.row.leading}
-        <ThreadComposerTrailing actions={props.row.actions} />
+    </>
+  );
+  const controls = (
+    <div
+      {...(props.row.ariaLabel === undefined ? {} : { "aria-label": props.row.ariaLabel })}
+      className={
+        props.row.className === undefined ? "composer-row" : `composer-row ${props.row.className}`
+      }
+      {...(props.row.toolbar === true ? { role: "toolbar" } : {})}
+    >
+      {props.row.leading}
+      <ThreadComposerTrailing actions={props.row.actions} />
+    </div>
+  );
+  const body = followUp ? (
+    <>
+      <div className="thread-composer__surface">
+        {message}
+        <div className="thread-composer__feedback">{props.footer}</div>
+        {controls}
       </div>
+      {props.context === undefined ? null : (
+        <div className="thread-composer__context">{props.context}</div>
+      )}
+    </>
+  ) : (
+    <>
+      {message}
+      {controls}
       {props.footer}
     </>
   );

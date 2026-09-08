@@ -106,6 +106,7 @@ distilled successor of the earlier long-form design specifications.
 
 | [0096](0096-settings-editors-share-the-page-layout.md) | Settings editors share the page layout | Accepted |
 | [0097](0097-opencode2-uses-http-discovery-and-acp-turns.md) | OpenCode 2 uses HTTP discovery and ACP turns | Accepted |
+| [0098](0098-follow-up-composers-separate-message-and-context.md) | Follow-up composers separate the message and its context | Accepted |
 
 ## Adding an ADR
 

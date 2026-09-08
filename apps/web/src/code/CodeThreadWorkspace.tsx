@@ -1170,11 +1170,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           threadKind="code-thread"
         />
       )}
-      <CodeCheckoutBar
-        {...(props.onCreatePullRequest === undefined
-          ? {}
-          : { onCreatePullRequest: props.onCreatePullRequest })}
-      />
       {props.controller.providerRequests.length === 0 ? null : (
         <div
           aria-label="Pending provider requests"
@@ -1211,6 +1206,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         </div>
       )}
       <ThreadComposer
+        presentation="follow-up"
+        context={
+          <CodeCheckoutBar
+            {...(props.onCreatePullRequest === undefined
+              ? {}
+              : { onCreatePullRequest: props.onCreatePullRequest })}
+          />
+        }
         className="thread-composer code-thread-workspace__composer thread-column"
         chips={
           <>
@@ -1445,7 +1448,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               </span>
             ) : null}
             {accessMessage === undefined ? null : (
-              <span className="code-thread-workspace__hint" role="status">
+              <span className="code-thread-workspace__hint" role="status" title={accessMessage}>
                 {accessMessage}
               </span>
             )}
@@ -1473,7 +1476,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               </span>
             )}
             {forkMessage === undefined ? null : (
-              <span className="code-thread-workspace__hint" role="alert">
+              <span className="code-thread-workspace__hint" role="alert" title={forkMessage}>
                 {forkMessage}
               </span>
             )}
@@ -1488,6 +1491,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     <span
                       className={`code-thread-workspace__limit code-thread-workspace__limit--${limit.status}`}
                       key={limit.window}
+                      title={providerLimitLabel(limit)}
                     >
                       {providerLimitLabel(limit)}
                     </span>

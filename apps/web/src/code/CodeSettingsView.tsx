@@ -44,6 +44,30 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   const [argumentsText, setArgumentsText] = useState(
     props.settings.externalEditor?.arguments.join("\n") ?? "",
   );
+  const [previousSettings, setPreviousSettings] = useState(props.settings);
+  if (previousSettings !== props.settings) {
+    setPreviousSettings(props.settings);
+    setExecutionPolicy((current) =>
+      current === previousSettings.defaultExecutionPolicy
+        ? props.settings.defaultExecutionPolicy
+        : current,
+    );
+    setPermissionPersistence((current) =>
+      current === previousSettings.defaultPermissionPersistence
+        ? props.settings.defaultPermissionPersistence
+        : current,
+    );
+    setExecutable((current) =>
+      current === (previousSettings.externalEditor?.executable ?? "")
+        ? (props.settings.externalEditor?.executable ?? "")
+        : current,
+    );
+    setArgumentsText((current) =>
+      current === (previousSettings.externalEditor?.arguments.join("\n") ?? "")
+        ? (props.settings.externalEditor?.arguments.join("\n") ?? "")
+        : current,
+    );
+  }
   const [message, setMessage] = useState<string>();
 
   /**
@@ -184,9 +208,11 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
             />
           </SettingRow>
         </div>
-        {message === undefined ? null : (
-          <OctantFieldError className="settings-section-line">{message}</OctantFieldError>
-        )}
+        <div className="settings-feedback-slot" aria-live="polite">
+          {message === undefined ? null : (
+            <OctantFieldError className="settings-section-line">{message}</OctantFieldError>
+          )}
+        </div>
       </div>
     </section>
   );

@@ -691,6 +691,34 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   scroll-margin-top: 16px;
 }
 
+/* Feedback is part of the provider surface's reserved geometry. A probe or
+   discovery failure may change the message, but it must not push the list and
+   defaults down by a different amount on every state transition. */
+.settings-feedback-slot,
+.provider-settings__message-slot {
+  height: 42px;
+  overflow-y: auto;
+}
+
+.settings-feedback-slot > :first-child,
+.provider-settings__message-slot > :first-child {
+  margin-block: 0;
+}
+
+.provider-settings__message-slot {
+  height: 32px;
+  /* Reuse the page heading's existing separation for feedback. */
+  margin-block: -32px -20px;
+}
+
+.provider-settings__message-slot .provider-settings__alert {
+  padding: 5px 8px;
+}
+
+.provider-settings__message-slot:empty {
+  visibility: hidden;
+}
+
 .settings-view__content-inner > section {
   padding: 0;
   margin: 0 0 32px;
@@ -732,11 +760,70 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   padding-inline: 0;
 }
 
+/* Scanning and partial-result messages share one reserved line so the
+   configured-provider section does not jump when discovery finishes. */
+.provider-discovery__status-slot {
+  height: 48px;
+  overflow-y: auto;
+}
+
+.provider-discovery__status-slot:empty {
+  visibility: hidden;
+}
+
+.provider-discovery__scan-action {
+  min-width: 88px;
+  justify-content: center;
+  white-space: nowrap;
+}
+
 /* The row's trailing control keeps a hair of room before the rule ends: a
    switch or icon button flush with the last pixel drew its shadow and focus
    ring past the hairline, so the controls looked cut off at the edge. */
 .settings-card-section--open > .provlist > .provrow {
   padding-inline: 0 4px;
+}
+
+/* Observation and action columns are explicit rather than content-sized.
+   "Checking", a model count, and an authentication state then replace one
+   another in place without moving the provider name or trailing controls. */
+.settings-card-section--open > .provlist > .provrow[data-reordering="false"] {
+  grid-template-columns: 32px minmax(0, 1fr) 84px 112px 68px;
+}
+
+.settings-card-section--open > .provlist > .provrow[data-reordering="true"] {
+  grid-template-columns: 24px 32px minmax(0, 1fr) 84px 112px 68px;
+}
+
+.settings-card-section--open > .provlist .prov-models {
+  min-width: 84px;
+  text-align: end;
+}
+
+.settings-card-section--open > .provlist .prov-status {
+  min-width: 112px;
+  justify-items: end;
+}
+
+.settings-card-section--open > .provlist .prov-actions {
+  min-width: 68px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 560px) {
+  .settings-card-section--open > .provlist > .provrow[data-reordering="false"] {
+    grid-template-columns: 16px minmax(0, 1fr) auto;
+  }
+
+  .settings-card-section--open > .provlist > .provrow[data-reordering="true"] {
+    grid-template-columns: 24px 16px minmax(0, 1fr) auto;
+  }
+
+  .settings-card-section--open > .provlist .prov-models,
+  .settings-card-section--open > .provlist .prov-status,
+  .settings-card-section--open > .provlist .prov-actions {
+    min-width: 0;
+  }
 }
 
 .settings-card-section > .setgroup > .setrow:first-child {

@@ -125,6 +125,31 @@ describe("ProviderSettingsView", () => {
     expect(screen.getByLabelText("Display name for Existing CLI")).toBeVisible();
   });
 
+  it("uses presentation-only probe facts for row geometry when authority is empty", () => {
+    const props = fixture();
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...props}
+        presentationObservedByInstance={new Map([[id, observation()]])}
+      />,
+    );
+
+    expect(screen.getByText("1 model")).toBeVisible();
+    expect(screen.getByRole("region", { name: "Providers" })).toBeVisible();
+  });
+
+  it("keeps a stable feedback slot while provider status changes", () => {
+    const props = fixture();
+    const view = renderProviderSettings(<ProviderSettingsView {...props} />);
+    const slot = document.querySelector(".provider-settings__message-slot");
+    if (!(slot instanceof HTMLElement)) throw new Error("Expected provider feedback slot");
+
+    view.rerender(<ProviderSettingsView {...props} message="Provider operation failed." />);
+
+    expect(document.querySelector(".provider-settings__message-slot")).toBe(slot);
+    expect(within(slot).getByRole("alert")).toHaveTextContent("Provider operation failed.");
+  });
+
   it("keeps configured provider controls behind a compact details disclosure", async () => {
     const user = userEvent.setup();
     renderProviderSettings(<ProviderSettingsView {...fixture()} />);

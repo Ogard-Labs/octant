@@ -811,6 +811,7 @@ export function ChatComposer(props: ChatComposerProps) {
 
   return (
     <ThreadComposer
+      presentation="follow-up"
       ariaLabel="Chat composer"
       chips={chips}
       className={`thread-composer chat-composer thread-column${props.isSending ? " chat-composer--running" : ""}`}
@@ -822,6 +823,7 @@ export function ChatComposer(props: ChatComposerProps) {
           }`}
           id={statusId}
           role="status"
+          title={status.text}
         >
           {status.text}
         </div>
