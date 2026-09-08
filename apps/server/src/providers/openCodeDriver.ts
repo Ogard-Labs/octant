@@ -25,7 +25,7 @@ import {
 } from "@octant/provider-sdk/chat-conformance";
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
 import type { Event, PermissionRuleset, Provider, Session } from "@opencode-ai/sdk/v2/types";
-import { Cause, Effect, Exit, Option, Queue, Scope, Stream } from "effect";
+import { Cause, Effect, Exit, Option, PubSub, Scope, Stream } from "effect";
 import { mapOpenCodeEvent } from "./openCodeEventMapper";
 import type { ManagedToolAnswer, ManagedToolCallContext } from "./managedMcpTools";
 import {
@@ -50,7 +50,7 @@ export interface OpenCodeClientPort {
     readonly modelId: string;
     readonly prompt: string;
     readonly attachments?: ProviderTurnInput["attachments"];
-    readonly tools?: ReadonlyArray<string>;
+    readonly permission: PermissionRuleset;
   }) => Promise<void>;
   readonly addMcpServer: (input: { readonly name: string; readonly url: string }) => Promise<void>;
   readonly disconnectMcpServer: (name: string) => Promise<void>;
@@ -91,8 +91,13 @@ interface SessionState {
   readonly approvals: Set<string>;
   readonly questions: Set<string>;
   readonly toolNames: Set<string>;
-  readonly pendingToolAnswers: Map<string, (answer: ManagedToolAnswer) => void>;
+  readonly pendingToolAnswers: Map<string, PendingToolAnswer>;
   managedTools: ManagedToolsLease | undefined;
+}
+
+interface PendingToolAnswer {
+  readonly controller: AbortController;
+  readonly resolve: (answer: ManagedToolAnswer) => void;
 }
 
 interface ManagedToolsLease {
@@ -115,7 +120,7 @@ const capabilities = {
   taskProgress: "supported",
   nativeChildAgents: "unsupported",
   ...unsupportedChatCapabilities,
-  appManagedTools: "supported",
+  appManagedTools: "unsupported",
 } as const;
 
 function openCodeInputModalities(model: Provider["models"][string]): ProviderInputModality[] {
@@ -130,6 +135,7 @@ function openCodeInputModalities(model: Provider["models"][string]): ProviderInp
 
 function openCodeChatCapabilities(
   models: ReadonlyArray<{ readonly inputModalities: readonly ProviderInputModality[] }>,
+  isolatedConfiguration: boolean,
 ): ProviderCapabilities {
   return {
     ...capabilities,
@@ -138,7 +144,7 @@ function openCodeChatCapabilities(
     )
       ? "supported"
       : "unsupported",
-    appManagedTools: "supported",
+    appManagedTools: isolatedConfiguration ? "supported" : "unsupported",
   };
 }
 
@@ -225,17 +231,18 @@ export function makeOfficialOpenCodeClient(
             throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
           })()
         : resultData(await client.session.get({ sessionID: sessionId }, { throwOnError: true })),
-    prompt: async ({ sessionId, providerId, modelId, prompt, attachments = [], tools = [] }) => {
+    prompt: async ({ sessionId, providerId, modelId, prompt, attachments = [], permission }) => {
       if (beta) {
         throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
       }
+      await client.session.update(
+        { sessionID: sessionId, permission },
+        { throwOnError: true, signal: AbortSignal.timeout(10_000) },
+      );
       await client.session.promptAsync(
         {
           sessionID: sessionId,
           model: { providerID: providerId, modelID: modelId },
-          ...(tools.length === 0
-            ? {}
-            : { tools: Object.fromEntries(tools.map((tool) => [tool, true])) }),
           parts: openCodePromptParts(prompt, attachments),
         },
         { throwOnError: true },
@@ -251,20 +258,26 @@ export function makeOfficialOpenCodeClient(
           name,
           config: { type: "remote", url, enabled: true, oauth: false },
         },
-        { throwOnError: true },
+        { throwOnError: true, signal: AbortSignal.timeout(10_000) },
       );
     },
     disconnectMcpServer: async (name) => {
       if (beta) {
         throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
       }
-      await client.mcp.disconnect({ name, directory: projectRoot }, { throwOnError: true });
+      await client.mcp.disconnect(
+        { name, directory: projectRoot },
+        { throwOnError: true, signal: AbortSignal.timeout(10_000) },
+      );
     },
     abort: async (sessionId) => {
       if (beta) {
         throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
       }
-      await client.session.abort({ sessionID: sessionId }, { throwOnError: true });
+      await client.session.abort(
+        { sessionID: sessionId },
+        { throwOnError: true, signal: AbortSignal.timeout(10_000) },
+      );
     },
     replyPermission: async (requestId, reply) => {
       if (beta) {
@@ -299,7 +312,13 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
             const client = clientFactory(runtime, projectRoot);
             const health = yield* request(client.health);
             const providers = yield* request(client.providers);
-            return normalizeOpenCodeProbe(instanceId, health, providers, clock());
+            return normalizeOpenCodeProbe(
+              instanceId,
+              health,
+              providers,
+              clock(),
+              runtime.isolatedConfiguration === true,
+            );
           }),
     acquire: ({ instanceId, projectRoot }) =>
       instanceId !== options.instanceId
@@ -313,13 +332,26 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
                 ),
               );
             }
-            const runtime = yield* acquireRuntime(options, projectRoot);
+            // A legacy MCP call carries no native session identity. Keep its
+            // bearer endpoint inside a dedicated process with one live session.
+            const runtime = yield* options.process.start({
+              binaryPath: options.binaryPath,
+              cwd: projectRoot,
+              onProcessStarted: (process) =>
+                options.runtimeRegistry.trackProcess(options.instanceId, process),
+            });
+            const processMonitor = yield* Effect.acquireRelease(
+              Effect.sync(() => monitorProcessExit(runtime.pid)),
+              (monitor) => Effect.sync(monitor.cancel),
+            );
             return yield* makeConnection(
               options,
               clientFactory(runtime, projectRoot),
               projectRoot,
               clock,
               makeCorrelation,
+              runtime.isolatedConfiguration === true,
+              processMonitor,
             );
           }),
   };
@@ -400,18 +432,22 @@ function makeConnection(
   projectRoot: string,
   clock: () => string,
   makeCorrelation: () => string,
+  isolatedConfiguration: boolean,
+  processMonitor: { readonly exited: Promise<void>; readonly cancel: () => void },
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
-    const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
     const sessionsBySource = new Map<string, SessionState>();
     const sourceBySession = new Map<ProviderSessionId, string>();
     const pendingBySource = new Map<string, Event[]>();
     const subscriptionAbort = new AbortController();
     let subscriptionReady: Promise<void> | undefined;
     let streamFailure: ProviderFailure | undefined;
+    let sessionSetupInFlight = false;
+    let closing = false;
 
     const offer = (event: ProviderRuntimeEvent) => {
-      Effect.runFork(Queue.offer(queue, event));
+      Effect.runFork(PubSub.publish(events, event));
     };
     const activate = (state: SessionState) => {
       if (state.active) return;
@@ -429,21 +465,42 @@ function makeConnection(
         Math.max(0, options.runtimeRegistry.activeSessionCount(options.instanceId) - 1),
       );
     };
+    const managedToolReleases = new Map<SessionState, Promise<void>>();
     const releaseManagedTools = async (state: SessionState): Promise<void> => {
+      const inFlight = managedToolReleases.get(state);
+      if (inFlight !== undefined) return inFlight;
       const lease = state.managedTools;
       if (lease === undefined) return;
       state.managedTools = undefined;
-      await client.disconnectMcpServer(lease.serverName).catch(() => undefined);
-      await lease.bridge.close();
+      const release = (async () => {
+        await lease.bridge.close();
+        await client.disconnectMcpServer(lease.serverName).catch(() => undefined);
+      })();
+      managedToolReleases.set(state, release);
+      try {
+        await release;
+      } finally {
+        if (managedToolReleases.get(state) === release) managedToolReleases.delete(state);
+      }
+    };
+    const cancelPendingTools = (state: SessionState): void => {
+      for (const pending of state.pendingToolAnswers.values()) {
+        pending.controller.abort();
+        pending.resolve({ resultJson: '{"error":"tool-interrupted"}', isError: true });
+      }
+      state.pendingToolAnswers.clear();
+    };
+    const retireState = (state: SessionState): void => {
+      state.terminal = true;
+      cancelPendingTools(state);
+      state.approvals.clear();
+      state.questions.clear();
+      deactivate(state);
+      void releaseManagedTools(state).catch(() => undefined);
     };
     const emitInterrupted = (state: SessionState, message: string) => {
       if (state.terminal) return;
-      state.terminal = true;
-      for (const resolve of state.pendingToolAnswers.values()) {
-        resolve({ resultJson: '{"error":"tool-interrupted"}', isError: true });
-      }
-      state.pendingToolAnswers.clear();
-      deactivate(state);
+      retireState(state);
       offer({
         kind: "interrupted",
         instanceId: options.instanceId,
@@ -462,21 +519,28 @@ function makeConnection(
         }
       },
     );
+    const processExit = processMonitor.exited.then(() => {
+      if (closing) return;
+      streamFailure = fail("provider-failed", "Provider runtime exited unexpectedly.");
+      subscriptionAbort.abort();
+      for (const state of sessionsBySource.values()) {
+        emitInterrupted(state, "Provider runtime exited unexpectedly.");
+      }
+    });
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
+        closing = true;
+        processMonitor.cancel();
+        await processExit;
         removeInvalidation();
         for (const state of sessionsBySource.values()) {
-          for (const resolve of state.pendingToolAnswers.values()) {
-            resolve({ resultJson: '{"error":"tool-interrupted"}', isError: true });
-          }
-          state.pendingToolAnswers.clear();
-          deactivate(state);
+          retireState(state);
         }
         subscriptionAbort.abort();
-        Effect.runFork(Queue.shutdown(queue));
         for (const state of sessionsBySource.values()) {
           await releaseManagedTools(state);
         }
+        await Effect.runPromise(PubSub.shutdown(events));
       }),
     );
 
@@ -485,8 +549,7 @@ function makeConnection(
       streamFailure = fail("protocol", "Provider event stream ended unexpectedly.");
       for (const state of sessionsBySource.values()) {
         if (state.terminal) continue;
-        state.terminal = true;
-        deactivate(state);
+        retireState(state);
         offer({
           kind: "failed",
           instanceId: options.instanceId,
@@ -501,6 +564,7 @@ function makeConnection(
 
     const ensureSubscription = () =>
       request(async () => {
+        if (streamFailure !== undefined) throw streamFailure;
         if (subscriptionReady === undefined) {
           subscriptionReady = client.subscribe(subscriptionAbort.signal).then((events) => {
             void (async () => {
@@ -519,7 +583,7 @@ function makeConnection(
                       pendingBySource.set(sourceId, pending);
                     }
                   } else {
-                    mapAndOffer(state, event, options.instanceId, clock, offer, deactivate);
+                    mapAndOffer(state, event, options.instanceId, clock, offer, retireState);
                   }
                 }
               } finally {
@@ -536,7 +600,7 @@ function makeConnection(
     ): Effect.Effect<[string, SessionState], ProviderFailure> => {
       const source = sourceBySession.get(sessionId);
       const state = source === undefined ? undefined : sessionsBySource.get(source);
-      return source === undefined || state === undefined
+      return source === undefined || state === undefined || state.sessionId !== sessionId
         ? Effect.fail(fail("protocol", "Provider session is not active."))
         : Effect.succeed([source, state]);
     };
@@ -556,21 +620,24 @@ function makeConnection(
         !state.toolNames.has(name) ||
         state.terminal ||
         state.sourceId === undefined ||
-        context?.sessionId !== state.sourceId
+        (context?.metadata.sessionID !== undefined && context.metadata.sessionID !== state.sourceId)
       ) {
         return { resultJson: '{"error":"tool-unavailable"}', isError: true };
       }
+      if (signal.aborted) return { resultJson: '{"error":"tool-interrupted"}', isError: true };
       const requestId = `opencode-tool-${crypto.randomUUID()}`;
       return new Promise((resolve) => {
-        const cancel = () => {
-          if (!state.pendingToolAnswers.delete(requestId)) return;
-          signal.removeEventListener("abort", cancel);
-          resolve({ resultJson: '{"error":"tool-interrupted"}', isError: true });
-        };
-        state.pendingToolAnswers.set(requestId, (answer) => {
+        const controller = new AbortController();
+        const finish = (answer: ManagedToolAnswer) => {
           signal.removeEventListener("abort", cancel);
           resolve({ resultJson: answer.resultJson, isError: answer.isError });
-        });
+        };
+        const cancel = () => {
+          if (!state.pendingToolAnswers.delete(requestId)) return;
+          controller.abort();
+          finish({ resultJson: '{"error":"tool-interrupted"}', isError: true });
+        };
+        state.pendingToolAnswers.set(requestId, { controller, resolve: finish });
         signal.addEventListener("abort", cancel, { once: true });
         offer({
           kind: "tool-request",
@@ -594,6 +661,18 @@ function makeConnection(
         ? Effect.void
         : Effect.tryPromise({
             try: async () => {
+              if (!isolatedConfiguration) {
+                throw fail("unsupported", "App tools require an isolated provider configuration.");
+              }
+              const catalogNames = definitions.map((definition) =>
+                definition.name.replace(/[^a-zA-Z0-9_-]/g, "_"),
+              );
+              if (new Set(catalogNames).size !== definitions.length) {
+                throw fail(
+                  "invalid-configuration",
+                  "App tool names collide in the provider catalogue.",
+                );
+              }
               const catalogKey = JSON.stringify(definitions);
               if (
                 state.managedTools !== undefined &&
@@ -628,120 +707,194 @@ function makeConnection(
                 : fail("unsupported", "OpenCode could not register app-managed tools."),
           });
 
-    return {
-      subscribe: Effect.succeed(Stream.fromQueue(queue).pipe(Stream.takeUntil(isTerminalEvent))),
-      start: (input) =>
-        ensureSubscription().pipe(
-          Effect.flatMap(() =>
-            streamFailure === undefined
-              ? Effect.succeed(
-                  newSessionState(
-                    input.sessionId,
-                    input.modelId,
-                    input.executionPolicy,
-                    makeCorrelation,
-                    input.tools ?? [],
-                  ),
-                ).pipe(
-                  Effect.tap((state) => prepareManagedTools(state, input.tools ?? [])),
-                  Effect.flatMap((state) =>
-                    request(() =>
-                      client.createSession({
-                        permission: permissionRules(
-                          input.executionPolicy,
-                          state.managedTools?.serverName,
-                        ),
-                      }),
-                    ).pipe(
-                      Effect.tapError(() => Effect.promise(() => releaseManagedTools(state))),
-                      Effect.map((session) => ({ session, state })),
-                    ),
-                  ),
-                )
-              : Effect.fail(streamFailure),
-          ),
-          Effect.flatMap(({ session, state }) => {
-            if (streamFailure !== undefined) {
-              return request(() => client.abort(session.id)).pipe(
-                Effect.ignore,
-                Effect.zipRight(Effect.fail(streamFailure)),
-              );
-            }
-            state.sourceId = session.id;
-            sessionsBySource.set(session.id, state);
-            sourceBySession.set(input.sessionId, session.id);
-            activate(state);
-            for (const event of pendingBySource.get(session.id) ?? []) {
-              mapAndOffer(state, event, options.instanceId, clock, offer, deactivate);
-            }
-            pendingBySource.delete(session.id);
-            return Effect.succeed({
-              sessionId: input.sessionId,
-              resumeCursor: { driverKind: "opencode" as const, value: session.id },
-            });
+    const discardUnregisteredState = (
+      state: SessionState,
+      providerSessionId: string,
+      failure: ProviderFailure,
+    ): Effect.Effect<never, ProviderFailure> =>
+      request(() => client.abort(providerSessionId)).pipe(
+        Effect.ignore,
+        Effect.tap(() =>
+          Effect.promise(async () => {
+            retireState(state);
+            await releaseManagedTools(state);
           }),
         ),
+        Effect.zipRight(Effect.fail(failure)),
+      );
+
+    return {
+      toolRequestSignal: ({ sessionId, requestId }) => {
+        const source = sourceBySession.get(sessionId);
+        const state = source === undefined ? undefined : sessionsBySource.get(source);
+        return state?.pendingToolAnswers.get(requestId)?.controller.signal ?? AbortSignal.abort();
+      },
+      subscribe: Stream.fromPubSub(events, { scoped: true }),
+      start: (input) =>
+        Effect.suspend(() => {
+          if (sourceBySession.has(input.sessionId)) {
+            return Effect.fail(fail("protocol", "Provider session is already active."));
+          }
+          if (
+            sessionSetupInFlight ||
+            [...sessionsBySource.values()].some((state) => !state.terminal)
+          ) {
+            return Effect.fail(fail("protocol", "A provider session is already active."));
+          }
+          sessionSetupInFlight = true;
+          return ensureSubscription().pipe(
+            Effect.flatMap(() =>
+              streamFailure === undefined
+                ? Effect.succeed(
+                    newSessionState(
+                      input.sessionId,
+                      input.modelId,
+                      input.executionPolicy,
+                      makeCorrelation,
+                      input.tools ?? [],
+                    ),
+                  ).pipe(
+                    Effect.tap((state) => prepareManagedTools(state, input.tools ?? [])),
+                    Effect.flatMap((state) =>
+                      request(() =>
+                        client.createSession({
+                          permission: permissionRules(
+                            input.executionPolicy,
+                            state.managedTools?.serverName,
+                          ),
+                        }),
+                      ).pipe(
+                        Effect.tapError(() => Effect.promise(() => releaseManagedTools(state))),
+                        Effect.map((session) => ({ session, state })),
+                      ),
+                    ),
+                  )
+                : Effect.fail(streamFailure),
+            ),
+            Effect.flatMap(({ session, state }) => {
+              if (!isAbsolute(session.directory) || resolve(session.directory) !== projectRoot) {
+                return discardUnregisteredState(
+                  state,
+                  session.id,
+                  fail("unauthorized", "Provider session belongs to a different Project root."),
+                );
+              }
+              if (streamFailure !== undefined) {
+                return discardUnregisteredState(state, session.id, streamFailure);
+              }
+              state.sourceId = session.id;
+              sessionsBySource.set(session.id, state);
+              sourceBySession.set(input.sessionId, session.id);
+              activate(state);
+              for (const event of pendingBySource.get(session.id) ?? []) {
+                mapAndOffer(state, event, options.instanceId, clock, offer, retireState);
+              }
+              pendingBySource.delete(session.id);
+              return Effect.succeed({
+                sessionId: input.sessionId,
+                resumeCursor: { driverKind: "opencode" as const, value: session.id },
+              });
+            }),
+            Effect.ensuring(
+              Effect.sync(() => {
+                sessionSetupInFlight = false;
+              }),
+            ),
+          );
+        }),
       resume: (input) =>
         input.resumeCursor.driverKind !== "opencode"
           ? Effect.fail(fail("stale-resume", "Provider resume cursor does not belong to OpenCode."))
-          : ensureSubscription().pipe(
-              Effect.flatMap(() =>
-                request(() => client.getSession(input.resumeCursor.value)).pipe(
-                  Effect.mapError(() =>
-                    fail("stale-resume", "Provider resume session is no longer available."),
+          : Effect.suspend(() => {
+              if (
+                sessionSetupInFlight ||
+                [...sessionsBySource.values()].some(
+                  (state) => !state.terminal && state.sessionId !== input.sessionId,
+                )
+              ) {
+                return Effect.fail(fail("protocol", "A provider session is already active."));
+              }
+              sessionSetupInFlight = true;
+              return ensureSubscription().pipe(
+                Effect.flatMap(() =>
+                  request(() => client.getSession(input.resumeCursor.value)).pipe(
+                    Effect.mapError(() =>
+                      fail("stale-resume", "Provider resume session is no longer available."),
+                    ),
                   ),
                 ),
-              ),
-              Effect.flatMap((session) =>
-                !isAbsolute(session.directory) || resolve(session.directory) !== projectRoot
-                  ? Effect.fail(
-                      fail("stale-resume", "Provider session belongs to a different Project root."),
-                    )
-                  : Effect.succeed(session),
-              ),
-              Effect.flatMap((session) => {
-                if (streamFailure !== undefined) return Effect.fail(streamFailure);
-                const resumedModel =
-                  session.model === undefined
-                    ? "unknown/unknown"
-                    : `${session.model.providerID}/${session.model.id}`;
-                const priorSource = sourceBySession.get(input.sessionId);
-                const priorState =
-                  priorSource === undefined ? undefined : sessionsBySource.get(priorSource);
-                if (priorState !== undefined) {
-                  priorState.terminal = true;
-                  deactivate(priorState);
-                }
-                const state = newSessionState(
-                  input.sessionId,
-                  resumedModel,
-                  input.executionPolicy,
-                  makeCorrelation,
-                  [],
-                );
-                state.sourceId = session.id;
-                sessionsBySource.set(session.id, state);
-                sourceBySession.set(input.sessionId, session.id);
-                activate(state);
-                for (const event of pendingBySource.get(session.id) ?? []) {
-                  mapAndOffer(state, event, options.instanceId, clock, offer, deactivate);
-                }
-                pendingBySource.delete(session.id);
-                return Effect.succeed({
-                  sessionId: input.sessionId,
-                  resumeCursor: input.resumeCursor,
-                });
-              }),
-            ),
+                Effect.flatMap((session) =>
+                  !isAbsolute(session.directory) || resolve(session.directory) !== projectRoot
+                    ? Effect.fail(
+                        fail(
+                          "stale-resume",
+                          "Provider session belongs to a different Project root.",
+                        ),
+                      )
+                    : Effect.succeed(session),
+                ),
+                Effect.flatMap((session) => {
+                  if (streamFailure !== undefined) return Effect.fail(streamFailure);
+                  const resumedModel =
+                    session.model === undefined
+                      ? "unknown/unknown"
+                      : `${session.model.providerID}/${session.model.id}`;
+                  const priorSource = sourceBySession.get(input.sessionId);
+                  const priorState =
+                    priorSource === undefined ? undefined : sessionsBySource.get(priorSource);
+                  return Effect.promise(async () => {
+                    if (priorState !== undefined) {
+                      retireState(priorState);
+                      await releaseManagedTools(priorState);
+                    }
+                  }).pipe(
+                    Effect.zipRight(
+                      Effect.sync(() => {
+                        const state = newSessionState(
+                          input.sessionId,
+                          resumedModel,
+                          input.executionPolicy,
+                          makeCorrelation,
+                          [],
+                        );
+                        state.sourceId = session.id;
+                        sessionsBySource.set(session.id, state);
+                        sourceBySession.set(input.sessionId, session.id);
+                        activate(state);
+                        for (const event of pendingBySource.get(session.id) ?? []) {
+                          mapAndOffer(state, event, options.instanceId, clock, offer, retireState);
+                        }
+                        pendingBySource.delete(session.id);
+                        return {
+                          sessionId: input.sessionId,
+                          resumeCursor: input.resumeCursor,
+                        };
+                      }),
+                    ),
+                  );
+                }),
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    sessionSetupInFlight = false;
+                  }),
+                ),
+              );
+            }),
       send: (input) =>
         usableStateFor(input.sessionId).pipe(
           Effect.flatMap(([source]) => {
             const state = sessionsBySource.get(source)!;
+            if (state.terminal) {
+              return Effect.fail(fail("protocol", "Provider session is already terminal."));
+            }
             const observed = options.runtimeRegistry.observedState(options.instanceId);
             const model = observed?.models.find((candidate) => candidate.id === state.modelId);
             const rejected = validateChatTurnInput(
               input,
-              observed?.capabilities ?? capabilities,
+              {
+                ...(observed?.capabilities ?? capabilities),
+                appManagedTools: isolatedConfiguration ? "supported" : "unsupported",
+              },
               model,
             );
             if (rejected !== undefined) return Effect.fail(rejected);
@@ -761,12 +914,10 @@ function makeConnection(
                           modelId: modelSelection.modelId,
                           prompt: renderProviderTurnPrompt(input),
                           attachments: input.attachments,
-                          tools:
-                            managedTools === undefined
-                              ? []
-                              : [...state.toolNames].map(
-                                  (toolName) => `${managedTools.serverName}_${toolName}`,
-                                ),
+                          permission: permissionRules(
+                            state.executionPolicy,
+                            managedTools?.serverName,
+                          ),
                         }),
                       );
                     }),
@@ -778,67 +929,69 @@ function makeConnection(
         ),
       interrupt: (sessionId) =>
         usableStateFor(sessionId).pipe(
-          Effect.flatMap(([source]) => request(() => client.abort(source))),
+          Effect.flatMap(([source, state]) =>
+            Effect.sync(() => cancelPendingTools(state)).pipe(
+              Effect.zipRight(request(() => client.abort(source))),
+            ),
+          ),
         ),
       stop: (sessionId) =>
         stateFor(sessionId).pipe(
           Effect.flatMap(([source, state]) =>
-            request(() => client.abort(source)).pipe(
-              Effect.tap(() =>
-                Effect.sync(() => {
-                  state.terminal = true;
-                  for (const resolve of state.pendingToolAnswers.values()) {
-                    resolve({ resultJson: '{"error":"tool-interrupted"}', isError: true });
-                  }
-                  state.pendingToolAnswers.clear();
-                  deactivate(state);
-                }),
-              ),
-              Effect.tap(() => Effect.promise(() => releaseManagedTools(state))),
+            Effect.sync(() => retireState(state)).pipe(
+              Effect.zipRight(request(() => client.abort(source))),
+              Effect.ensuring(Effect.promise(() => releaseManagedTools(state))),
             ),
           ),
         ),
       answerApproval: (input) =>
         usableStateFor(input.sessionId).pipe(
           Effect.flatMap(([, state]) =>
-            state.executionPolicy === "plan"
-              ? Effect.fail(fail("unauthorized", "Plan mode cannot approve provider actions."))
-              : !state.approvals.has(input.requestId)
-                ? Effect.fail(fail("protocol", "Provider approval request is not pending."))
-                : request(() =>
-                    client.replyPermission(
-                      input.requestId,
-                      input.approved
-                        ? (options.permissionPersistence?.() ?? "current-session") ===
-                          "project-default"
-                          ? "always"
-                          : "once"
-                        : "reject",
+            state.terminal
+              ? Effect.fail(fail("protocol", "Provider session is already terminal."))
+              : state.executionPolicy === "plan"
+                ? Effect.fail(fail("unauthorized", "Plan mode cannot approve provider actions."))
+                : !state.approvals.has(input.requestId)
+                  ? Effect.fail(fail("protocol", "Provider approval request is not pending."))
+                  : request(() =>
+                      client.replyPermission(
+                        input.requestId,
+                        input.approved
+                          ? (options.permissionPersistence?.() ?? "current-session") ===
+                            "project-default"
+                            ? "always"
+                            : "once"
+                          : "reject",
+                      ),
+                    ).pipe(
+                      Effect.tap(() => Effect.sync(() => state.approvals.delete(input.requestId))),
                     ),
-                  ).pipe(
-                    Effect.tap(() => Effect.sync(() => state.approvals.delete(input.requestId))),
-                  ),
           ),
         ),
       answerUserInput: (input) =>
         usableStateFor(input.sessionId).pipe(
           Effect.flatMap(([, state]) =>
-            !state.questions.has(input.requestId)
-              ? Effect.fail(fail("protocol", "Provider question request is not pending."))
-              : request(() => client.replyQuestion(input.requestId, input.answer)).pipe(
-                  Effect.tap(() => Effect.sync(() => state.questions.delete(input.requestId))),
-                ),
+            state.terminal
+              ? Effect.fail(fail("protocol", "Provider session is already terminal."))
+              : !state.questions.has(input.requestId)
+                ? Effect.fail(fail("protocol", "Provider question request is not pending."))
+                : request(() => client.replyQuestion(input.requestId, input.answer)).pipe(
+                    Effect.tap(() => Effect.sync(() => state.questions.delete(input.requestId))),
+                  ),
           ),
         ),
       answerTool: (input) =>
         usableStateFor(input.sessionId).pipe(
           Effect.flatMap(([, state]) => {
+            if (state.terminal) {
+              return Effect.fail(fail("protocol", "Provider session is already terminal."));
+            }
             const resolve = state.pendingToolAnswers.get(input.requestId);
             if (resolve === undefined) {
               return Effect.fail(fail("protocol", "Provider tool request is not pending."));
             }
             state.pendingToolAnswers.delete(input.requestId);
-            resolve({ resultJson: input.resultJson, isError: input.isError });
+            resolve.resolve({ resultJson: input.resultJson, isError: input.isError });
             return Effect.void;
           }),
         ),
@@ -893,7 +1046,7 @@ function mapAndOffer(
   instanceId: ProviderInstanceId,
   clock: () => string,
   offer: (event: ProviderRuntimeEvent) => void,
-  deactivate: (state: SessionState) => void,
+  retire: (state: SessionState) => void,
 ): void {
   if (state.terminal) return;
   const mapped = mapOpenCodeEvent(
@@ -918,8 +1071,7 @@ function mapAndOffer(
     if (normalized.kind === "approval-request") state.approvals.add(normalized.requestId);
     if (normalized.kind === "user-input-request") state.questions.add(normalized.requestId);
     if (isTerminalEvent(normalized)) {
-      state.terminal = true;
-      deactivate(state);
+      retire(state);
     }
     state.nextSequence = normalized.sequence + 1;
     offer(normalized);
@@ -959,14 +1111,14 @@ function permissionRules(
       { permission: "todowrite", pattern: "*", action: "deny" },
     ];
   }
+  rules.push(
+    { permission: "*_*", pattern: "*", action: "deny" },
+    { permission: "skill", pattern: "*", action: "deny" },
+  );
   if (managedToolServerName === undefined) return rules;
   // OpenCode prefixes MCP tools as `<server>_<tool>`. Deny every other
   // namespaced tool in this session; only this session's bridge is allowed.
-  return [
-    ...rules,
-    { permission: "*_*", pattern: "*", action: "deny" },
-    { permission: `${managedToolServerName}_*`, pattern: "*", action: "allow" },
-  ];
+  return [...rules, { permission: `${managedToolServerName}_*`, pattern: "*", action: "allow" }];
 }
 
 function splitModelId(value: string): { providerId: string; modelId: string } {
@@ -982,6 +1134,7 @@ export function normalizeOpenCodeProbe(
   health: { readonly version: string },
   providers: { readonly all: ReadonlyArray<Provider>; readonly connected: ReadonlyArray<string> },
   observedAt: string,
+  isolatedConfiguration = false,
 ): ProviderProbeResult {
   const connected = new Set(providers.connected);
   const models = providers.all
@@ -1014,7 +1167,7 @@ export function normalizeOpenCodeProbe(
     processState: "running",
     detectedVersion: health.version,
     models,
-    capabilities: openCodeChatCapabilities(models),
+    capabilities: openCodeChatCapabilities(models, isolatedConfiguration),
     ...(models.length === 0 ? { message: "Authenticate OpenCode with a provider." } : {}),
     ...(models.length > 0 ? { lastSuccessfulProbeAt: observedAt as UtcTimestamp } : {}),
     observedAt: observedAt as UtcTimestamp,

@@ -5,7 +5,8 @@ import {
   decodeProviderSessionId,
 } from "@octant/contracts";
 import type { Event, PermissionRuleset, Provider, Session } from "@opencode-ai/sdk/v2/types";
-import { Effect, Stream } from "effect";
+import { spawn } from "node:child_process";
+import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   makeOpenCodeDriver,
@@ -14,6 +15,7 @@ import {
   type OpenCodeClientPort,
 } from "./openCodeDriver";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import type { OpenCodeProcessPort } from "./openCodeProcess";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000101");
 const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000102");
@@ -21,6 +23,80 @@ const modelId = "anthropic/claude-sonnet" as ProviderModelId;
 const now = "2026-07-15T00:00:00.000Z";
 
 describe("OpenCode driver", () => {
+  it("interrupts a live session when its dedicated provider process exits", async () => {
+    const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], {
+      stdio: "ignore",
+    });
+    const pid = child.pid;
+    if (pid === undefined) throw new Error("Expected a provider fixture process.");
+    const fixture = driverFixture({
+      process: {
+        start: () =>
+          Effect.acquireRelease(
+            Effect.succeed({
+              authorization: "Basic redacted",
+              pid,
+              url: new URL("http://127.0.0.1:1/"),
+            }),
+            () =>
+              Effect.sync(() => {
+                child.kill("SIGKILL");
+              }),
+          ),
+      },
+    });
+    try {
+      const events = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* fixture.driver.acquire({
+              instanceId,
+              projectRoot: "/tmp/project",
+            });
+            const stream = yield* connection.subscribe;
+            const collector = yield* Effect.forkScoped(
+              Stream.runCollect(stream.pipe(Stream.take(1))),
+            );
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            child.kill("SIGKILL");
+            const output = yield* Fiber.join(collector).pipe(Effect.timeout("2 seconds"));
+            expect(fixture.registry.activeSessionCount(instanceId)).toBe(0);
+            return output;
+          }),
+        ),
+      );
+      expect(Array.from(events)).toMatchObject([
+        { kind: "interrupted", message: "Provider runtime exited unexpectedly." },
+      ]);
+    } finally {
+      child.kill("SIGKILL");
+    }
+  });
+
+  it("refuses app tools when the runtime can inherit external configuration", async () => {
+    const fixture = driverFixture({ isolatedConfiguration: false });
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    expect(probe.capabilities.appManagedTools).toBe("unsupported");
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.exit(
+              connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+                tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(String(result)).toContain("unsupported");
+    expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(false);
+  });
+
   it("reports that a model reasons without offering a variant it cannot send", () => {
     expect(
       normalizeOpenCodeProbe(instanceId, { version: "1.18.0" }, providerList(), now),
@@ -136,6 +212,150 @@ describe("OpenCode driver", () => {
       "permission.reply:once",
       "session.abort",
     ]);
+  });
+
+  it("rejects a second start for the same session", async () => {
+    const fixture = driverFixture();
+    const exit = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver
+          .acquire({ instanceId, projectRoot: "/tmp/project" })
+          .pipe(
+            Effect.flatMap((connection) =>
+              connection
+                .start({ sessionId, modelId, executionPolicy: "approval-gated" })
+                .pipe(
+                  Effect.flatMap(() =>
+                    Effect.exit(
+                      connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+                    ),
+                  ),
+                ),
+            ),
+          ),
+      ),
+    );
+    expect(String(exit)).toContain("Provider session is already active");
+    expect(fixture.calls.filter((call) => call === "session.create:ask")).toHaveLength(1);
+  });
+
+  it("rejects a provider session that starts in another Project root", async () => {
+    const fixture = driverFixture({ sessionDirectory: "/tmp/other" });
+    const exit = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver
+          .acquire({ instanceId, projectRoot: "/tmp/project" })
+          .pipe(
+            Effect.flatMap((connection) =>
+              Effect.exit(
+                connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+              ),
+            ),
+          ),
+      ),
+    );
+    expect(String(exit)).toContain("Provider session belongs to a different Project root");
+    expect(fixture.calls).toContain("session.abort");
+  });
+
+  it("gives each subscriber the same terminal stream and rejects sends after completion", async () => {
+    const fixture = driverFixture({
+      events: [
+        textEvent("provider-session", "hello"),
+        permissionEvent("provider-session", "late-approval"),
+        idleEvent("provider-session"),
+      ],
+    });
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const first = yield* connection.subscribe;
+              const second = yield* connection.subscribe;
+              const collectors = yield* Effect.all(
+                [
+                  Effect.fork(
+                    Stream.runCollect(
+                      first.pipe(
+                        Stream.takeUntil((event) =>
+                          ["completed", "failed", "interrupted"].includes(event.kind),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Effect.fork(
+                    Stream.runCollect(
+                      second.pipe(
+                        Stream.takeUntil((event) =>
+                          ["completed", "failed", "interrupted"].includes(event.kind),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+                { concurrency: 2 },
+              );
+              yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 0)));
+              yield* connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+              });
+              const streams = yield* Effect.all(
+                collectors.map((collector) => Fiber.join(collector)),
+                { concurrency: 2 },
+              );
+              const send = yield* Effect.exit(
+                connection.send({ sessionId, prompt: "late", attachments: [], tools: [] }),
+              );
+              const approval = yield* Effect.exit(
+                connection.answerApproval({
+                  sessionId,
+                  requestId: "late-approval",
+                  approved: true,
+                }),
+              );
+              return { streams, send, approval };
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(Array.from(result.streams[0] ?? [])).toEqual(Array.from(result.streams[1] ?? []));
+    expect(String(result.send)).toContain("Provider session is already terminal");
+    expect(String(result.approval)).toContain("Provider session is already terminal");
+  });
+
+  it("retires the old managed-tool bridge before resuming its session", async () => {
+    const fixture = driverFixture();
+    const tool = { name: "octant_browser", inputSchema: { type: "object" } } as const;
+    const resumed = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+          Effect.flatMap((connection) =>
+            connection
+              .start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+                tools: [tool],
+              })
+              .pipe(
+                Effect.flatMap((handle) =>
+                  connection.resume({
+                    sessionId,
+                    resumeCursor: handle.resumeCursor!,
+                    executionPolicy: "approval-gated",
+                  }),
+                ),
+              ),
+          ),
+        ),
+      ),
+    );
+    expect(resumed.sessionId).toBe(sessionId);
+    expect(fixture.calls.some((call) => call.startsWith("mcp.disconnect:"))).toBe(true);
   });
 
   it.each([
@@ -470,19 +690,25 @@ describe("OpenCode driver", () => {
     const fixture = driverFixture({ events });
     const output = await Effect.runPromise(
       Effect.scoped(
-        fixture.driver
-          .acquire({ instanceId, projectRoot: "/tmp/project" })
-          .pipe(
-            Effect.flatMap((connection) =>
-              connection
-                .start({ sessionId, modelId, executionPolicy: "approval-gated" })
-                .pipe(
-                  Effect.flatMap(() =>
-                    Stream.runCollect(Stream.unwrapScoped(connection.subscribe)),
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["completed", "failed", "interrupted"].includes(event.kind),
+                    ),
                   ),
                 ),
-            ),
+              );
+              yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 0)));
+              yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+              return yield* Fiber.join(collector);
+            }),
           ),
+        ),
       ),
     );
     expect(
@@ -505,19 +731,25 @@ describe("OpenCode driver", () => {
     const fixture = driverFixture({ events });
     const output = await Effect.runPromise(
       Effect.scoped(
-        fixture.driver
-          .acquire({ instanceId, projectRoot: "/tmp/project" })
-          .pipe(
-            Effect.flatMap((connection) =>
-              connection
-                .start({ sessionId, modelId, executionPolicy: "approval-gated" })
-                .pipe(
-                  Effect.flatMap(() =>
-                    Stream.runCollect(Stream.unwrapScoped(connection.subscribe)),
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["completed", "failed", "interrupted"].includes(event.kind),
+                    ),
                   ),
                 ),
-            ),
+              );
+              yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 0)));
+              yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+              return yield* Fiber.join(collector);
+            }),
           ),
+        ),
       ),
     );
     const values = Array.from(output);
@@ -616,20 +848,25 @@ describe("OpenCode driver", () => {
         Effect.scoped(
           fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
             Effect.flatMap((connection) =>
-              connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }).pipe(
-                Effect.flatMap(() =>
-                  Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 0))),
-                ),
-                Effect.flatMap(() =>
-                  Effect.exit(
-                    connection.send({ sessionId, prompt: "no", attachments: [], tools: [] }),
+              Effect.gen(function* () {
+                const stream = yield* connection.subscribe;
+                const collector = yield* Effect.fork(
+                  Stream.runCollect(
+                    stream.pipe(
+                      Stream.takeUntil((event) =>
+                        ["completed", "failed", "interrupted"].includes(event.kind),
+                      ),
+                    ),
                   ),
-                ),
-                Effect.map((exit) => ({ exit, events: Stream.unwrapScoped(connection.subscribe) })),
-              ),
-            ),
-            Effect.flatMap(({ exit, events }) =>
-              Stream.runCollect(events).pipe(Effect.map((collected) => ({ exit, collected }))),
+                );
+                yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+                yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 0)));
+                const exit = yield* Effect.exit(
+                  connection.send({ sessionId, prompt: "no", attachments: [], tools: [] }),
+                );
+                const collected = yield* Fiber.join(collector);
+                return { exit, collected };
+              }),
             ),
           ),
         ),
@@ -646,6 +883,8 @@ describe("OpenCode driver", () => {
 
 function driverFixture(
   options: {
+    readonly isolatedConfiguration?: boolean;
+    readonly process?: OpenCodeProcessPort;
     readonly events?: ReadonlyArray<Event>;
     readonly permissionPersistence?:
       | "current-session"
@@ -669,6 +908,9 @@ function driverFixture(
             Effect.sync(() => {
               calls.push("process.start");
               return {
+                ...(options.isolatedConfiguration === false
+                  ? {}
+                  : { isolatedConfiguration: true as const }),
                 authorization: "Basic redacted",
                 pid: process.pid,
                 url: new URL("http://127.0.0.1:1/"),
@@ -716,7 +958,7 @@ function driverFixture(
     driver: makeOpenCodeDriver({
       instanceId,
       binaryPath: "/opt/homebrew/bin/opencode",
-      process: processPort,
+      process: options.process ?? processPort,
       runtimeRegistry: registry,
       clientFactory: () => client,
       permissionPersistence: () =>

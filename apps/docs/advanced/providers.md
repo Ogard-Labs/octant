@@ -44,7 +44,9 @@ Supported app-tool adapters can request an isolated browser session under
 names the origin. Cancelling the task revokes its browser grant, and Plan mode
 refuses browser effects. The native OpenCode CLI adapter currently reports
 app-managed tools as unsupported; its text and native-tool support do not imply
-an app-browser bridge.
+an app-browser bridge. The adapter requires isolated configuration before it can
+expose Octant tools; changing the thread to Full access does not remove that
+requirement.
 
 ### Discovery and auto-registration
 

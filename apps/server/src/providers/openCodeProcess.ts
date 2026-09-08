@@ -16,6 +16,8 @@ export interface OpenCodeBinaryProbe {
 export type OpenCodeRuntime = "legacy" | "beta";
 
 export interface OpenCodeServerConnection {
+  /** Attested only when user/project MCP, plugins, and skills cannot enter the process. */
+  readonly isolatedConfiguration?: true;
   readonly authorization: string;
   readonly pid: number;
   /** Runtime protocol attested by the binary version probe before startup. */

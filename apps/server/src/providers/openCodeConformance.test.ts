@@ -44,12 +44,15 @@ describe("OpenCode provider conformance", () => {
         if (id === "stale") throw new Error("not found");
         return session;
       },
-      prompt: async ({ tools }) => {
-        if (tools !== undefined && tools.length > 0 && managedUrl !== undefined) {
-          await invokeManagedTool(managedUrl, tools[0]!);
+      prompt: async ({ permission }) => {
+        const hasManagedTools = permission.some(
+          (rule) => rule.permission.startsWith("octant-") && rule.action === "allow",
+        );
+        if (hasManagedTools && managedUrl !== undefined) {
+          await invokeManagedTool(managedUrl, "octant_web_research");
         }
         for (const event of runtimeEvents(session.id)) source.emit(event);
-        if (tools !== undefined && tools.length > 0) {
+        if (hasManagedTools) {
           source.emit({ type: "session.idle", properties: { sessionID: session.id } } as Event);
         }
       },
@@ -76,6 +79,7 @@ describe("OpenCode provider conformance", () => {
         start: () =>
           Effect.acquireRelease(
             Effect.succeed({
+              isolatedConfiguration: true,
               authorization: "Basic redacted",
               pid: process.pid,
               url: new URL("http://127.0.0.1:1/"),
@@ -241,9 +245,9 @@ async function invokeManagedTool(url: string, name: string): Promise<void> {
       id: 2,
       method: "tools/call",
       params: {
-        name: name.slice(name.indexOf("_") + 1),
+        name,
         arguments: { query: "hello" },
-        _meta: { sessionID: "provider-session" },
+        _meta: { progressToken: 2 },
       },
     }),
   });

@@ -13,10 +13,10 @@ export interface ManagedToolAnswer {
 }
 
 export interface ManagedToolCallContext {
-  readonly sessionId?: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
 }
 
-/** In-process transport only. Execution still belongs to the app's tool policy. */
+/** The transport supplies the caller; execution belongs to the app's tool policy. */
 export function createManagedMcpTools(
   definitions: ReadonlyArray<ProviderToolDefinition>,
   execute: (
@@ -39,15 +39,12 @@ export function createManagedMcpTools(
   server.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     if (!names.has(request.params.name))
       return { content: [{ type: "text", text: '{"error":"tool-unavailable"}' }], isError: true };
-    const sessionId =
-      typeof request.params._meta?.sessionID === "string"
-        ? request.params._meta.sessionID
-        : undefined;
+    const metadata = request.params._meta;
     const inputJson = JSON.stringify(request.params.arguments ?? {});
     const answer =
-      sessionId === undefined
+      metadata === undefined
         ? await execute(request.params.name, inputJson, extra.signal)
-        : await execute(request.params.name, inputJson, extra.signal, { sessionId });
+        : await execute(request.params.name, inputJson, extra.signal, { metadata });
     return { content: [{ type: "text", text: answer.resultJson }], isError: answer.isError };
   });
   return { kind: "ready", server };

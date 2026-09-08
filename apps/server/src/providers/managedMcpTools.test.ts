@@ -49,7 +49,7 @@ describe("Session-owned app tools", () => {
     }
   });
 
-  it("forwards the provider session identity when the MCP client supplies it", async () => {
+  it("forwards call metadata without interpreting provider-specific fields", async () => {
     const execute = vi.fn(async () => ({ resultJson: "{}", isError: false }));
     const managed = createManagedMcpTools([definition], execute);
     if (managed.kind !== "ready") throw new Error("Expected a valid tool catalogue");
@@ -67,7 +67,7 @@ describe("Session-owned app tools", () => {
         "octant_browser",
         '{"operation":"read-page"}',
         expect.any(AbortSignal),
-        { sessionId: "provider-session" },
+        { metadata: { sessionID: "provider-session" } },
       );
     } finally {
       await client.close();

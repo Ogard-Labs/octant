@@ -6,6 +6,42 @@ afterEach(() => {
 });
 
 describe("official OpenCode client routing", () => {
+  it("preserves the complete session policy without the deprecated prompt tools field", async () => {
+    const requests: Request[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (request: Request) => {
+        requests.push(request.clone());
+        return new Response(JSON.stringify({}), {
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+    const client = makeOfficialOpenCodeClient(
+      { authorization: "Basic redacted", pid: 1, url: new URL("http://127.0.0.1:41722/") },
+      "/tmp/project",
+    );
+    const permission = [
+      { permission: "bash", pattern: "*", action: "deny" },
+      { permission: "external_directory", pattern: "*", action: "deny" },
+      { permission: "*_*", pattern: "*", action: "deny" },
+      { permission: "octant-owned_*", pattern: "*", action: "allow" },
+    ] as const;
+    await client.prompt({
+      sessionId: "session-1",
+      providerId: "provider",
+      modelId: "model",
+      prompt: "hello",
+      permission: [...permission],
+    });
+    expect(requests.map((request) => [request.method, new URL(request.url).pathname])).toEqual([
+      ["PATCH", "/session/session-1"],
+      ["POST", "/session/session-1/prompt_async"],
+    ]);
+    expect(await requests[0]?.json()).toEqual({ permission });
+    expect(await requests[1]?.json()).not.toHaveProperty("tools");
+  });
+
   it("routes the beta health request through its attested API prefix", async () => {
     const requests: Request[] = [];
     vi.stubGlobal(
