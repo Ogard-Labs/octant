@@ -122,6 +122,7 @@ const capabilities = {
   nativeChildAgents: "unsupported",
   ...unsupportedChatCapabilities,
 } as const;
+const MAX_REMEMBERED_TOOL_CALLS = 256;
 
 const PROBE_TOOL_BRIDGE = {
   url: "http://127.0.0.1:1/octant/probe",
@@ -346,6 +347,7 @@ function makeConnection(
   return Effect.gen(function* () {
     const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ProviderSessionId, SessionState>();
+    const rememberedToolCalls = new Map<ProviderSessionId, Map<string, string>>();
 
     const emit = (state: SessionState, value: RuntimeEventWithoutEnvelope) => {
       const event = {
@@ -368,6 +370,20 @@ function makeConnection(
         });
       }
       state.pendingTools.clear();
+    };
+
+    const rememberToolCall = (
+      sessionId: ProviderSessionId,
+      toolCallId: string,
+      toolName: string,
+    ): void => {
+      const calls = rememberedToolCalls.get(sessionId) ?? new Map<string, string>();
+      if (!calls.has(toolCallId) && calls.size >= MAX_REMEMBERED_TOOL_CALLS) {
+        const oldest = calls.keys().next().value;
+        if (oldest !== undefined) calls.delete(oldest);
+      }
+      calls.set(toolCallId, toolName);
+      rememberedToolCalls.set(sessionId, calls);
     };
 
     const closeState = async (state: SessionState) => {
@@ -482,6 +498,7 @@ function makeConnection(
           return protocolFailure(state, "Pi tool start was invalid.");
         }
         state.tools.set(toolCallId, { terminal: false, answered: false, name: toolName });
+        rememberToolCall(state.sessionId, toolCallId, toolName);
         emit(state, { kind: "tool-start", toolCallId, toolName });
         return;
       }
@@ -646,6 +663,7 @@ function makeConnection(
           if (previous !== undefined) await closeState(previous);
           let state!: SessionState;
           const removeEvent = rpc.onEvent((event) => handleEvent(state, event));
+          const priorToolCalls = rememberedToolCalls.get(input.sessionId) ?? new Map();
           state = {
             sessionId: input.sessionId,
             executionPolicy: input.executionPolicy,
@@ -654,7 +672,12 @@ function makeConnection(
             client: rpc,
             removeEvent,
             approvals: new Map(),
-            tools: new Map(),
+            tools: new Map(
+              [...priorToolCalls].map(([toolCallId, name]) => [
+                toolCallId,
+                { terminal: true, answered: true, name },
+              ]),
+            ),
             toolNames: new Set(tools.map((tool) => tool.name)),
             pendingTools: new Map(),
             ...(managedTools === undefined ? {} : { managedTools }),

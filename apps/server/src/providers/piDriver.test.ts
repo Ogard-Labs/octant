@@ -436,6 +436,25 @@ describe("Pi provider driver", () => {
       }),
     );
     expect(starts.at(-1)?.tools).toEqual([tool]);
+    const resumedBridge = starts.at(-1)?.toolBridge as { url: string; token: string } | undefined;
+    expect(resumedBridge).toBeDefined();
+    const replay = await fetch(resumedBridge!.url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-pi-token": resumedBridge!.token,
+      },
+      body: JSON.stringify({
+        toolCallId: "browser-call",
+        name: tool.name,
+        input: { action: "navigate" },
+      }),
+    });
+    expect(replay.status).toBe(200);
+    await expect(replay.json()).resolves.toEqual({
+      resultJson: JSON.stringify({ error: "tool-unavailable" }),
+      isError: true,
+    });
     await Effect.runPromise(
       connection.resume({
         sessionId,
