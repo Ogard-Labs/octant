@@ -84,3 +84,4 @@ export * from "./mobileProviderClient";
 export * from "./mobileWorkClient";
 export * from "./zenClient";
 export * from "./workspacePresetClient";
+export * from "./providerUsageHistoryClient";

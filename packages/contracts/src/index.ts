@@ -98,6 +98,7 @@ export * from "./threadHandOff";
 export * from "./usage";
 export * from "./usageRpc";
 export * from "./usageDashboard";
+export * from "./providerUsageHistory";
 export * from "./imageGeneration";
 export * from "./agentProfile";
 export * from "./agentRun";
