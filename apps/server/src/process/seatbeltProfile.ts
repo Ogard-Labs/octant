@@ -210,10 +210,42 @@ export function confinedExecutableExecPaths(
     add(interpreter.command);
     if (interpreter.program !== undefined) {
       const resolved = resolveOnSearchPath(interpreter.program, searchPath);
-      if (resolved !== undefined) add(resolved);
+      if (resolved !== undefined) {
+        add(resolved);
+        addPythonFrameworkCompanion(resolved, add);
+      }
+    } else {
+      addPythonFrameworkCompanion(interpreter.command, add);
     }
   }
   return [...paths];
+}
+
+/**
+ * Homebrew's Python framework launcher may hand off from `python3.x` to its
+ * bundled `Python.app` executable. Keep that one exact sibling executable in
+ * the allowlist without broadening process execution for other children.
+ */
+function addPythonFrameworkCompanion(interpreter: string, add: (path: string) => void): void {
+  let resolved: string;
+  try {
+    resolved = realpathSync(interpreter);
+  } catch {
+    return;
+  }
+  const versionRoot = resolved.match(
+    /^(.*\/Python\.framework\/Versions\/[^/]+)\/bin\/python[^/]*$/u,
+  )?.[1];
+  if (versionRoot === undefined) return;
+  const companion = join(versionRoot, "Resources/Python.app/Contents/MacOS/Python");
+  try {
+    const metadata = statSync(companion);
+    accessSync(companion, constants.X_OK);
+    if (!metadata.isFile()) return;
+  } catch {
+    return;
+  }
+  add(companion);
 }
 
 function shebangInterpreter(

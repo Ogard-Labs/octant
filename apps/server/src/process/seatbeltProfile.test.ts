@@ -491,6 +491,44 @@ describe("shared Seatbelt profile builder", () => {
     expect(profile).toContain(seatbeltExecRule(realpathSync(interpreter)));
   });
 
+  it("allows the exact Python framework companion launched by a script interpreter", () => {
+    const root = temporaryRoot();
+    const boundRoot = join(root, "project");
+    const temporaryDirectory = join(root, "tmp");
+    const sandboxPath = join(root, "sandbox-exec");
+    const frameworkRoot = join(root, "Python.framework", "Versions", "3.14");
+    const interpreter = join(frameworkRoot, "bin", "python3.14");
+    const companion = join(frameworkRoot, "Resources/Python.app/Contents/MacOS/Python");
+    const script = join(root, "vibe-acp");
+    mkdirSync(boundRoot);
+    mkdirSync(temporaryDirectory);
+    mkdirSync(join(frameworkRoot, "bin"), { recursive: true });
+    mkdirSync(join(frameworkRoot, "Resources/Python.app/Contents/MacOS"), { recursive: true });
+    writeFileSync(sandboxPath, "#!/bin/sh\n", { mode: 0o700 });
+    writeFileSync(interpreter, "#!/bin/sh\n", { mode: 0o700 });
+    writeFileSync(companion, "#!/bin/sh\n", { mode: 0o700 });
+    writeFileSync(script, `#!${interpreter}\n`, { mode: 0o700 });
+
+    const launch = makeSeatbeltConfinementLive({
+      platform: "darwin",
+      sandboxPath,
+      homeDirectory: root,
+      usersDirectory: root,
+    }).prepare({
+      executable: script,
+      args: [],
+      boundRoot,
+      temporaryDirectory,
+      networkEgress: "none",
+      allowProcessExec: false,
+      allowProcessFork: false,
+    });
+
+    const profile = launch.args[1]!;
+    expect(profile).toContain(seatbeltExecRule(realpathSync(companion)));
+    expect(profile).not.toContain("(allow process-exec)\n");
+  });
+
   it("keeps process-exec fully denied for a program with no interpreter beyond itself", () => {
     const root = temporaryRoot();
     const boundRoot = join(root, "project");
