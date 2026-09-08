@@ -273,11 +273,24 @@ close/reopen passed, and the original layout was restored. The regression test
 failed before the fix and all 40 window-chrome tests passed afterward. Native
 traffic-light close/minimize/fullscreen actions were not exercised.
 
-Remaining refinements include familiar labels in Usage instead of raw ids,
-less repetitive setup wording, the image-source/profile distinction, and
-reconciling historical tool rows that still say running after a failed turn.
-These are not hidden by this visual pass. Active agent/Picture in Picture,
-image-generation result, and authenticated Linear states were unavailable.
+The follow-up implements local name resolution in both Usage surfaces, shorter
+setup wording, and an explicit image-source/profile distinction. Full board
+reason text is available through existing fact tooltips and detail views.
+Historical tool rows use their parent turn's terminal status: an unresolved
+call reads Unfinished with no spinner, never an invented success. Distinct
+wrapper and nested tool events remain separate because they have separate ids.
+
+The additional maintainer screenshots exposed Activity heading insets, cramped
+secondary lines, and native document overscroll. Activity labels and titles now
+share an inset, title contrast uses primary text, and project names have more
+leading. The native root cannot scroll and Settings occupies a fixed viewport;
+repeated end-of-page scrolling was checked in the unlocked app. Work's extra
+toolbar is removed, with completion moved into its composer action menu. Chat
+has no generic right or bottom utility region (0099).
+
+Active agent/Picture in Picture, image-generation result, and authenticated
+Linear states were unavailable. The provider configuration-isolation blocker
+for the ordinary OpenCode browser flow remains separate from these UI fixes.
 
 ## Acceptance checklist for the unlocked app
 

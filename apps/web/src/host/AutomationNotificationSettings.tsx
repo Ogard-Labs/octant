@@ -107,12 +107,12 @@ export function AutomationNotificationSettings(props: AutomationNotificationSett
     >
       <h2>Automation notifications</h2>
       <p className="settings-section-note">
-        Opt in to redacted host notifications for waiting, approval, failure, and completion.
-        Payloads never include tokens, prompts, diffs, paths, credentials, or authority receipts.
+        Get notified when an automation needs attention or finishes. Notifications include status
+        only, without prompts, files, credentials, or access details.
       </p>
       <div className="setgroup">
         <SettingRow
-          description="Deliver redacted notifications from this host."
+          description="Send automation status notifications from this host."
           label="Notifications"
           scope="host"
           settingId="host-automation-notifications"
@@ -143,8 +143,8 @@ export function AutomationNotificationSettings(props: AutomationNotificationSett
       )}
       {status.providerDelivery === "unavailable" ? (
         <p className="settings-section-line">
-          Credentialed APNs/FCM delivery is unavailable on this host until provider credentials are
-          configured. Preferences and receipts still persist.
+          Push delivery is not configured on this host. Your notification preference is saved, but
+          notifications cannot be delivered yet.
         </p>
       ) : null}
     </section>

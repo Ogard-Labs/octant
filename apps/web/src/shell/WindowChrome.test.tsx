@@ -480,6 +480,8 @@ describe("WindowChrome", () => {
     expect(cssRule('html[data-octant-native-host="true"] .shell.shell-frame')).toContain(
       "background: transparent;",
     );
+    expect(cssRule('html[data-octant-native-host="true"]')).toContain("overflow: clip;");
+    expect(cssRule(".shell.shell-frame--standalone")).toContain("position: fixed;");
     expect(cssRule(".workspace")).toContain("background: var(--octant-workspace);");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
   });

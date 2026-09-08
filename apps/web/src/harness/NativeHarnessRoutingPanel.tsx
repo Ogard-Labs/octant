@@ -141,14 +141,13 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
       <div className="settings-card-section settings-card-section--open">
         <h2>Model slots</h2>
         <p className="native-harness-panel__lead">
-          Each slot is an ordered list of models: the first is used, the rest are fallbacks. Jobs
-          the harness performs pick a slot. A job whose slot is empty runs on <code>default</code>{" "}
-          with a visible warning.
+          The first model in each role is preferred; the others are fallbacks. An empty role uses{" "}
+          <code>default</code> and shows a warning.
         </p>
         {props.providers.length === 0 ? (
           <p className="native-harness-panel__empty" role="status">
-            Add an OpenAI-compatible or Anthropic-compatible provider first; slots can only name
-            models the harness can drive.
+            Connect an OpenAI-compatible or Anthropic-compatible provider in Providers &amp; Models
+            to assign models here.
           </p>
         ) : null}
         <div className="native-harness-slots">

@@ -577,10 +577,9 @@ function ActiveSectionContent({
         <div id="settings-harness">
           <section className="settings-card-section settings-card-section--open">
             <p className="native-harness-panel__lead">
-              Octant runs API-key and local endpoint models with its own tools, authority checks,
-              and journal. Those endpoints appear together as <strong>Octant</strong> in the model
-              picker. Slots decide which model does which job; whether a lead may start child runs
-              is the subagent creation posture under Agents.
+              Models connected through API keys or local endpoints appear under{" "}
+              <strong>Octant</strong> in the model picker. Assign models to roles below. Child-agent
+              permissions are managed in Agents.
             </p>
           </section>
           <NativeHarnessRoutingPanel

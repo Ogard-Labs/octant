@@ -891,3 +891,21 @@ Focus ring color control because the product does not draw focus rings.
   diffs use the shared code block.
 - Surface actions wrap before titles are squeezed into narrow columns. Settings
   navigation remains a vertical, full-width list inside its narrow drawer.
+
+### Mode-specific utility chrome
+
+Chat has no generic right or bottom utility panel. The conversation uses the
+available workspace width; existing central artifact routes remain available.
+Work shares Code's quiet transcript edge: Browser is a dock tool and completion
+lives in the composer's compact Task actions menu, preserving its confirmation
+flow. See decision 0099.
+
+### Readability and scroll containment
+
+Activity group labels align with their thread titles at the same content inset.
+Titles use primary text; project attribution uses secondary text and a separate
+line with comfortable leading. Native document scrolling is clipped: Settings
+occupies a fixed viewport while content and navigation scroll independently.
+A terminal turn cannot present an unresolved tool call as still running; it
+shows Unfinished unless the tool has its own recorded outcome. Usage resolves
+known provider and task names locally, with original identifiers in tooltips.

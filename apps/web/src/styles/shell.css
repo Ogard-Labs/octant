@@ -1,3 +1,10 @@
+.shell.shell-frame--standalone {
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+  overflow: clip;
+}
+
 .shell.shell-frame {
   --octant-rendered-sidebar-width: var(--octant-sidebar-width, 232px);
   /* Published by WindowChrome from each cluster's measured width. The literals
@@ -743,6 +750,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
 }
 
 .sidebar-navigation__thread-title {
+  color: var(--octant-text-primary);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1783,10 +1791,8 @@ form > .work-composer-adapter__attachments {
   border-bottom: 1px solid var(--octant-border);
 }
 
-.work-thread-workspace__toolbar {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 6px;
+.work-thread-workspace__header:empty {
+  display: none;
 }
 
 .work-thread-workspace__conversation {

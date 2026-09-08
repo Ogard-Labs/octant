@@ -27,7 +27,7 @@ import {
   type WorkTurnClient,
 } from "@octant/client-runtime/work-turn-client";
 import type { FileMentionClient, ThreadMentionClient } from "@octant/client-runtime";
-import { Check, CirclePause, FileText, Globe2 } from "lucide-react";
+import { Check, CirclePause, Ellipsis, FileText } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -48,6 +48,7 @@ import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
 import { useSteeredSend } from "../composer/useSteeredSend";
 import type { TurnSettlement } from "../composer/steeredSend";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
+import { OctantMenu } from "../ui/base/OctantMenu";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
@@ -192,7 +193,6 @@ export interface WorkThreadWorkspaceProps {
   readonly turnClient?: WorkTurnClient;
   readonly requestClient?: WorkRequestClient;
   readonly mutationClient?: WorkMutationClient;
-  readonly onOpenBrowser?: () => void;
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   readonly threadMentionClient?: ThreadMentionClient;
   readonly fileMentionClient?: FileMentionClient;
@@ -947,40 +947,10 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
 
   return (
     <section aria-label="Task workspace" className="work-thread-workspace">
-      <header className="work-thread-workspace__header">
-        {/* The pane's tab already names the task; repeating it here cost a
-            heading, an eyebrow, and a subtitle for nothing. Chat resolved the
-            same duplication by keeping the name for assistive technology only. */}
-        <h1 className="sr-only">{props.title}</h1>
-        {props.childRunStatus}
-        <div aria-label="Work tools" className="work-thread-workspace__toolbar" role="toolbar">
-          {props.onOpenBrowser === undefined ? null : (
-            <OctantButton
-              className="code-thread-workspace__tool window-no-drag"
-              onClick={props.onOpenBrowser}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              <Globe2 aria-hidden="true" size={14} strokeWidth={1.7} />
-              <span>Browser</span>
-            </OctantButton>
-          )}
-          {thread?.lifecycle === "active" && thread.completionConfirmed !== true ? (
-            <OctantButton
-              aria-label="Mark this task complete"
-              disabled={completing || providerChanging || creating}
-              onClick={() => setCompletionFormOpen(true)}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              <Check aria-hidden="true" size={14} strokeWidth={1.8} />
-              <span>{completing ? "Marking complete" : "Mark complete"}</span>
-            </OctantButton>
-          ) : null}
-        </div>
-      </header>
+      <h1 className="sr-only">{props.title}</h1>
+      {props.childRunStatus === undefined ? null : (
+        <header className="work-thread-workspace__header">{props.childRunStatus}</header>
+      )}
 
       {completionFormOpen && thread?.lifecycle === "active" && !completionLocked ? (
         <section aria-label="Mark this task complete" className="work-thread-workspace__completion">
@@ -1282,6 +1252,24 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   />
                 </span>
               )}
+              {thread?.lifecycle === "active" && !completionLocked ? (
+                <OctantMenu
+                  items={[
+                    {
+                      value: "complete",
+                      label: "Mark complete",
+                      icon: <Check aria-hidden="true" size={14} />,
+                      disabled: completing || providerChanging || creating,
+                    },
+                  ]}
+                  onValueChange={() => setCompletionFormOpen(true)}
+                  selectionMode="action"
+                  trigger={<Ellipsis aria-hidden="true" size={16} />}
+                  triggerClassName="shell-icon-button"
+                  triggerLabel="Task actions"
+                  value=""
+                />
+              ) : null}
               <ComposerVoiceButton
                 disabled={creating || completionLocked}
                 onTranscript={(transcript) =>

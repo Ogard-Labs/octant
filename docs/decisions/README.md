@@ -108,6 +108,8 @@ distilled successor of the earlier long-form design specifications.
 | [0097](0097-opencode2-uses-http-discovery-and-acp-turns.md) | OpenCode 2 uses HTTP discovery and ACP turns | Accepted |
 | [0098](0098-follow-up-composers-separate-message-and-context.md) | Follow-up composers separate the message and its context | Accepted |
 
+| [0099](0099-chat-keeps-the-conversation-full-width.md) | Chat keeps the conversation full width | Accepted |
+
 ## Adding an ADR
 
 - Take the next number (`00NN-short-slug.md`); never renumber existing records.

@@ -405,6 +405,26 @@ describe("App", () => {
     expect(screen.queryByRole("main", { name: "Octant workspace" })).not.toBeInTheDocument();
   });
 
+  it("keeps Chat free of generic right and bottom tool panels", async () => {
+    render(
+      <App
+        chatClient={chats()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(splitChatShellBootstrap())}
+      />,
+    );
+    await screen.findByRole("heading", { name: "Exact created chat" });
+    expect(screen.queryByRole("button", { name: /Right sidebar/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /bottom panel/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("complementary", { name: "Right Utility Dock" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("renders independent authoritative Chat sessions in every visible split pane", async () => {
     const chatApi = chats();
 
@@ -1660,11 +1680,8 @@ describe("App", () => {
     expect(screen.getByRole("dialog", { name: "Context window" })).toBeVisible();
     expect(inspect.mock.calls.length).toBe(inspectCalls);
 
-    await showRightUtilityDock(user);
-    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(within(dock).queryByRole("tab", { name: "Context" })).toBeNull();
-    expect(within(dock).queryByRole("button", { name: /^Context$/ })).toBeNull();
-    expect(within(dock).queryByRole("heading", { name: "Context inspector" })).toBeNull();
+    expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open Right sidebar" })).toBeNull();
   });
 
   it("closes the previous pane's context popover and retargets usage when the active pane changes", async () => {

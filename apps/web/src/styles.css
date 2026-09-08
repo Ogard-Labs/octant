@@ -264,6 +264,7 @@ html[data-octant-native-host="true"] body {
      the desktop for its whole length, which reads as the app shrinking or
      vanishing under the pointer. */
   overscroll-behavior: none;
+  overflow: clip;
 }
 
 /* Nothing frosts the transparent window until the host says its glass is on,
@@ -1016,6 +1017,11 @@ h6 {
   font-weight: 400;
 }
 
+.activity-nav__group > .sidebar-section {
+  padding-inline: 6px;
+  color: var(--octant-text-secondary);
+}
+
 .activity-nav__group {
   display: grid;
   gap: 2px;
@@ -1027,9 +1033,9 @@ h6 {
 }
 
 .sidebar-navigation__thread.activity-nav__thread {
-  min-height: 42px;
+  min-height: 48px;
   align-items: flex-start;
-  padding: 5px 6px;
+  padding: 6px;
 }
 
 .sidebar-navigation__thread-copy {
@@ -1040,8 +1046,8 @@ h6 {
 
 .activity-nav__thread .sidebar-navigation__thread-copy {
   flex: 1 1 auto;
-  grid-template-rows: 16px 14px;
-  gap: 1px;
+  grid-template-rows: minmax(20px, auto) minmax(16px, auto);
+  gap: 2px;
 }
 
 .activity-nav__thread .sidebar-navigation__thread-title,
@@ -1049,15 +1055,15 @@ h6 {
   display: block;
   min-width: 0;
   overflow: hidden;
-  line-height: 1;
+  line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .sidebar-navigation__thread-project {
   overflow: hidden;
-  color: var(--octant-text-muted);
-  font-size: calc(11 * var(--oct-text-step));
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

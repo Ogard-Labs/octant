@@ -94,27 +94,27 @@ describe("WorkThreadWorkspace", () => {
     expect(onThreadUpdated).toHaveBeenCalledWith(updated);
   });
 
-  it("opens Browser from the exact Work thread toolbar", async () => {
-    const user = userEvent.setup();
-    const onOpenBrowser = vi.fn();
+  it("keeps Work actions out of a separate row above the conversation", async () => {
     const threadClient = {
       bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
       execute: vi.fn(),
     } as unknown as WorkThreadClient;
-
     render(
       <WorkThreadWorkspace
-        onOpenBrowser={onOpenBrowser}
         providerGroups={[providerGroup()]}
         threadClient={threadClient}
         threadId={threadId}
         title="Draft brief"
       />,
     );
-
     await screen.findByLabelText("Bound provider and model");
-    await user.click(screen.getByRole("button", { name: "Browser" }));
-    expect(onOpenBrowser).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("toolbar", { name: "Work tools" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Mark this task complete" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Task actions" }).closest(".composer-row"),
+    ).not.toBeNull();
   });
 
   it("confirms completion through the user-facing Work action", async () => {
@@ -138,7 +138,8 @@ describe("WorkThreadWorkspace", () => {
     );
 
     await screen.findByLabelText("Bound provider and model");
-    await user.click(screen.getByRole("button", { name: "Mark this task complete" }));
+    await user.click(screen.getByRole("button", { name: "Task actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Mark complete" }));
     await user.type(
       screen.getByRole("textbox", { name: "What this task delivered" }),
       "The reviewed draft is saved in the bound folder.",
@@ -1456,7 +1457,8 @@ describe("WorkThreadWorkspace", () => {
 
     await user.type(await screen.findByLabelText("Work prompt"), "After done");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    await user.click(screen.getByRole("button", { name: "Mark this task complete" }));
+    await user.click(screen.getByRole("button", { name: "Task actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Mark complete" }));
     await user.type(
       screen.getByRole("textbox", { name: "What this task delivered" }),
       "The reviewed draft is saved in the bound folder.",

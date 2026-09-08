@@ -1,3 +1,4 @@
+import { UsageNamesProvider } from "./usage/UsageName";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
@@ -1938,7 +1939,7 @@ function LaunchedShell(
     const surface = bottomPanelSurfaces.find((candidate) => candidate.id === tab.surface);
     return surface === undefined ? [] : [surface];
   });
-  const bottomPanelAvailable = bottomPanelSurfaces.length > 0;
+  const bottomPanelAvailable = activeMode !== "chat" && bottomPanelSurfaces.length > 0;
   // The panel belongs to the thread whose tab opened it. Held only as a window
   // flag, opening a terminal on one thread also opened the panel on every other
   // thread the reader switched to, showing that thread's own empty default
@@ -2020,10 +2021,11 @@ function LaunchedShell(
     [displayedDockState.tabs],
   );
   const dockAvailable =
-    dockThreadId !== undefined ||
-    projectPullRequestReviewOpen ||
-    dockTabs.length > 0 ||
-    launchableDockSurfaces.length > 0;
+    activeMode !== "chat" &&
+    (dockThreadId !== undefined ||
+      projectPullRequestReviewOpen ||
+      dockTabs.length > 0 ||
+      launchableDockSurfaces.length > 0);
   const dockOpen = dockVisible && dockAvailable;
   const bottomPanelHeight = previewBottomPanelHeight ?? bottomPanelPresentation.height;
   const providerController = useProviderController({
@@ -4474,6 +4476,18 @@ function LaunchedShell(
     },
   });
 
+  const usageNames = new Map<string, string>();
+  for (const instance of providerController.instances)
+    usageNames.set(`provider/${instance.id}`, instance.displayName);
+  for (const project of projectController.allProjects)
+    usageNames.set(`project/${project.id}`, project.name);
+  for (const thread of chatController.bootstrap?.threads ?? [])
+    usageNames.set(`chat-thread/${thread.id}`, thread.title);
+  for (const thread of workNavigation.bootstrap?.threads ?? [])
+    usageNames.set(`work-thread/${thread.id}`, thread.title);
+  for (const thread of codeController.bootstrap?.threads ?? [])
+    usageNames.set(`code-thread/${thread.id}`, thread.title);
+
   const usageSurface = (
     <Suspense
       fallback={
@@ -4707,7 +4721,11 @@ function LaunchedShell(
       )}
       <ShellFrame
         standaloneSurface={
-          controller.settingsOpen ? settingsSurface : usageOpen ? usageSurface : undefined
+          controller.settingsOpen || usageOpen ? (
+            <UsageNamesProvider names={usageNames}>
+              {controller.settingsOpen ? settingsSurface : usageSurface}
+            </UsageNamesProvider>
+          ) : undefined
         }
         {...(shellBackdrop === undefined
           ? {}

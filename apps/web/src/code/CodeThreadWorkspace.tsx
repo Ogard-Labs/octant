@@ -1039,7 +1039,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                           <CodeTranscriptRow
                             activity={activity}
                             running={message.status === "incomplete"}
-                            settled={message.status === "completed"}
+                            settled={
+                              message.status === "completed" ||
+                              message.status === "failed" ||
+                              message.status === "interrupted"
+                            }
                           />
                         )}
                         {/* An assistant reply is markdown — a plan arrives as a

@@ -1226,9 +1226,6 @@ function renderNonCodeTab(
                   ? {}
                   : { requestClient: props.workRequestClient })}
                 threadClient={workThreadClient}
-                {...(props.onOpenSurface === undefined
-                  ? {}
-                  : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
                 threadId={tab.threadId}
                 {...(props.revealChatTurn !== undefined &&
                 String(props.revealChatTurn.threadId) === String(tab.threadId)

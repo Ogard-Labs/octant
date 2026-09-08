@@ -738,7 +738,7 @@ function CodeBoardCardView(props: {
           ? cardFacts(card, props.projectName, props.providerLabel)
           : cardSummary(card, props.providerLabel, waitingReason)
         ).map((fact) => (
-          <span className={fact.className ?? "fact"} key={fact.key} title={fact.title}>
+          <span className={fact.className ?? "fact"} key={fact.key} title={fact.title ?? fact.text}>
             {fact.icon}
             {fact.text}
           </span>
@@ -751,7 +751,9 @@ function CodeBoardCardView(props: {
         summaries={card.pullRequestSummaries}
       />
       {props.layout === "list" && waitingReason !== undefined ? (
-        <span className="board-card-blocked">{waitingReason}</span>
+        <span className="board-card-blocked" title={waitingReason}>
+          {waitingReason}
+        </span>
       ) : null}
       {props.layout === "list" ? (
         <details className="code-board__card-details">

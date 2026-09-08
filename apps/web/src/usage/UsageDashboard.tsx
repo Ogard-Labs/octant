@@ -1,3 +1,4 @@
+import { UsageName } from "./UsageName";
 import type {
   UsageExportFormat,
   UsageQueryFilter,
@@ -371,7 +372,9 @@ export function UsageDashboard(props: UsageDashboardProps) {
                 <tbody>
                   {data.byProvider.map((row) => (
                     <tr key={`${row.providerInstanceId}/${row.modelId}`}>
-                      <td>{row.providerInstanceId}</td>
+                      <td>
+                        <UsageName kind="provider" id={row.providerInstanceId} />
+                      </td>
                       <td>{row.modelId}</td>
                       <td>{row.requestCount}</td>
                       <td>{formatNumber(row.totalInputTokens)}</td>
@@ -836,7 +839,7 @@ function TopConsumersSection({
         <thead>
           <tr>
             <th scope="col">Subject type</th>
-            <th scope="col">Subject id</th>
+            <th scope="col">Subject</th>
             <th scope="col">Requests</th>
             <th scope="col">Input tokens</th>
             <th scope="col">Output tokens</th>
@@ -846,7 +849,9 @@ function TopConsumersSection({
           {consumers.map((consumer) => (
             <tr key={`${consumer.subjectType}/${consumer.subjectId}`}>
               <td>{consumer.subjectType}</td>
-              <td>{consumer.subjectId}</td>
+              <td>
+                <UsageName kind={consumer.subjectType} id={consumer.subjectId} />
+              </td>
               <td>{consumer.requestCount}</td>
               <td>{formatNumber(consumer.inputTokens)}</td>
               <td>{formatNumber(consumer.outputTokens)}</td>

@@ -28,7 +28,12 @@ export const TOOL_SUMMARY_PREVIEW_LIMIT = 1_200;
  */
 export const ACCESSIBLE_SUMMARY_LIMIT = 120;
 
-function outcomeLabel(row: CodeActivityRow): string {
+function unfinishedTool(row: CodeActivityRow, settled: boolean): boolean {
+  return settled && row.kind === "tool" && (row.state === "started" || row.state === "running");
+}
+
+function outcomeLabel(row: CodeActivityRow, settled = false): string {
+  if (unfinishedTool(row, settled)) return "unfinished";
   switch (row.state) {
     // A started tool is running: the host journals "started" when the call
     // begins and "completed" or "failed" when the provider reports its end.
@@ -52,7 +57,8 @@ function outcomeLabel(row: CodeActivityRow): string {
  * so a running tool and a running turn spin the same way and a finished one
  * carries the same check.
  */
-function outcomeIcon(row: CodeActivityRow) {
+function outcomeIcon(row: CodeActivityRow, settled: boolean) {
+  if (unfinishedTool(row, settled)) return Circle;
   switch (row.state) {
     case "started":
     case "running":
@@ -81,9 +87,9 @@ function collapsedName(row: CodeActivityRow): string {
   return row.kind === "tool" ? row.toolName : row.summary;
 }
 
-function disclosureName(row: CodeActivityRow): string {
+function disclosureName(row: CodeActivityRow, settled: boolean): string {
   const name = row.kind === "tool" ? row.toolName : boundAccessibleSummary(row.summary);
-  return `${name}, ${outcomeLabel(row)}`;
+  return `${name}, ${outcomeLabel(row, settled)}`;
 }
 
 function clipSummary(
@@ -159,6 +165,7 @@ export function CodeTranscriptRow(props: CodeTranscriptRowProps) {
         open={openIds.has(id)}
         revealed={revealedSummaryIds.has(id)}
         row={row}
+        settled={settled && !running}
         onReveal={() => setRevealedSummaryIds((current) => setHas(current, id, true))}
       />
     );
@@ -244,6 +251,7 @@ export function CodeTranscriptRow(props: CodeTranscriptRowProps) {
 
 function ActivityDisclosure(props: {
   readonly row: CodeActivityRow;
+  readonly settled: boolean;
   readonly open: boolean;
   readonly revealed: boolean;
   readonly onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
@@ -251,18 +259,18 @@ function ActivityDisclosure(props: {
   readonly onReveal: () => void;
 }) {
   const { row } = props;
-  const StateIcon = outcomeIcon(row);
+  const StateIcon = outcomeIcon(row, props.settled);
   return (
     <details
       className="code-transcript-row__disclosure"
       data-kind={row.kind}
-      data-state={row.state}
+      data-state={unfinishedTool(row, props.settled) ? "unfinished" : row.state}
       onToggle={props.onToggle}
       open={props.open}
     >
       <summary
         aria-expanded={props.open}
-        aria-label={disclosureName(row)}
+        aria-label={disclosureName(row, props.settled)}
         onKeyDown={props.onKeyDown}
         role="button"
       >
@@ -273,7 +281,7 @@ function ActivityDisclosure(props: {
           strokeWidth={2}
         />
         <span className="code-transcript-row__name">{collapsedName(row)}</span>
-        <span className="code-transcript-row__outcome">{outcomeLabel(row)}</span>
+        <span className="code-transcript-row__outcome">{outcomeLabel(row, props.settled)}</span>
         <StateIcon
           aria-hidden="true"
           className="code-transcript-row__status-icon"
