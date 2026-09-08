@@ -1539,6 +1539,8 @@ describe("managed Code creation approval", () => {
       },
       message: "Allow full access for this new Code thread?",
     });
+    expect(challenge?.detail).toContain(preparation.branchIntent);
+    expect(challenge?.detail).not.toContain(preparation.resolvedHead);
     expect(managedThreadCreation.prepare).toHaveBeenCalledOnce();
     expect(managedThreadCreation.commit).not.toHaveBeenCalled();
     fixture.close();

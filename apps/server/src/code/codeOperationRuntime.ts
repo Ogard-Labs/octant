@@ -663,7 +663,7 @@ export function createCodeOperationRuntime(
         };
         directPrompt = {
           message: "Allow full access for this new Code thread?",
-          detail: `Create managed worktree from ${source.checkoutHead.kind === "branch" ? `${source.checkoutHead.name} @ ${source.checkoutHead.oid}` : source.checkoutHead.oid} · ${persistenceLabel(command.permissionPersistence)}`,
+          detail: `Create managed worktree from ${source.checkoutHead.kind === "branch" ? source.checkoutHead.name : "detached source"} · ${persistenceLabel(command.permissionPersistence)}`,
         };
       } else {
         thread = options.persistence.readCodeThread(request.effect.threadId);
@@ -997,7 +997,7 @@ function approvalPrompt(
     effectDetail =
       source === undefined
         ? `Create managed worktree · ${persistenceLabel(effect.command.permissionPersistence)}`
-        : `Create managed worktree from ${source.checkoutHead.kind === "branch" ? `${source.checkoutHead.name} @ ${source.checkoutHead.oid}` : source.checkoutHead.oid} · ${persistenceLabel(effect.command.permissionPersistence)}`;
+        : `Create managed worktree from ${source.checkoutHead.kind === "branch" ? source.checkoutHead.name : "detached source"} · ${persistenceLabel(effect.command.permissionPersistence)}`;
   } else if (effect.kind === "change-thread-full-access") {
     message = "Elevate this Code thread to full access?";
     effectDetail = `Full repository and shell access · ${persistenceLabel(effect.permissionPersistence)}`;
