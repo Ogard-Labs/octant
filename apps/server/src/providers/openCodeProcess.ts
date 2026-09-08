@@ -293,16 +293,29 @@ function acquireOpenCodeServer(
     const password = randomBytes(32).toString("base64url");
     const username = runtime === "beta" ? "opencode" : "octant";
     const authorization = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
-    const child = spawn(input.binaryPath, ["serve", "--hostname", "127.0.0.1", "--port", "0"], {
-      cwd: input.cwd,
-      detached: process.platform !== "win32",
-      env: {
-        ...childProcessEnvironment(options.inheritedEnvironment ?? process.env),
-        OPENCODE_SERVER_USERNAME: username,
-        OPENCODE_SERVER_PASSWORD: password,
+    const child = spawn(
+      input.binaryPath,
+      ["serve", "--pure", "--hostname", "127.0.0.1", "--port", "0"],
+      {
+        cwd: input.cwd,
+        detached: process.platform !== "win32",
+        env: {
+          ...childProcessEnvironment(options.inheritedEnvironment ?? process.env),
+          OPENCODE_SERVER_USERNAME: username,
+          OPENCODE_SERVER_PASSWORD: password,
+          // Keep the user's provider catalog and credentials available while
+          // refusing skills loaded from project or global compatibility paths.
+          // `--pure` below disables configured plugin execution as well.
+          OPENCODE_CONFIG_CONTENT: JSON.stringify({
+            permission: { skill: { "*": "deny" }, "*_*": "deny" },
+          }),
+          OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
+          OPENCODE_DISABLE_CLAUDE_CODE: "1",
+          OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
       },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    );
     const childExited = new Promise<void>((resolveExit) => child.once("exit", () => resolveExit()));
     let ownershipReady: Promise<void> = Promise.resolve();
     if (child.pid !== undefined && onProcessStarted !== undefined) {

@@ -53,7 +53,7 @@ if (process.argv.slice(2).join(" ") === "--version") {
 const selectedMode = mode();
 const v2 = selectedMode === "v2-ready";
 if (
-  process.argv.slice(2).join(" ") !== "serve --hostname 127.0.0.1 --port 0" ||
+  process.argv.slice(2).join(" ") !== "serve --pure --hostname 127.0.0.1 --port 0" ||
   process.env.OPENCODE_SERVER_USERNAME !== (v2 ? "opencode" : "octant") ||
   !process.env.OPENCODE_SERVER_PASSWORD
 ) {

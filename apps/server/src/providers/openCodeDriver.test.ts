@@ -174,6 +174,36 @@ describe("OpenCode driver", () => {
     },
   );
 
+  it("isolates MCP tools to the session-owned bridge", async () => {
+    const fixture = driverFixture();
+    await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({
+              sessionId,
+              modelId,
+              executionPolicy: "approval-gated",
+              tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+            }),
+          ),
+        ),
+      ),
+    );
+    const rules = fixture.createdPermissions[0];
+    if (rules === undefined) throw new Error("Expected managed-tool permissions.");
+    const allowRule = rules.find(
+      (rule) =>
+        rule.permission.startsWith("octant-") &&
+        rule.permission.endsWith("_*") &&
+        rule.action === "allow",
+    );
+    if (allowRule === undefined) throw new Error("Expected a session bridge allow rule.");
+    const ownPrefix = allowRule.permission.slice(0, -2);
+    expect(evaluatePermission(rules, `${ownPrefix}_octant_browser`)).toBe("allow");
+    expect(evaluatePermission(rules, "octant-other_octant_browser")).toBe("deny");
+  });
+
   it("rejects every plan-mode approval answer server-side", async () => {
     const fixture = driverFixture({
       events: [permissionEvent("provider-session", "future-write")],
@@ -665,6 +695,12 @@ function driverFixture(
     prompt: async () => {
       calls.push("session.promptAsync");
     },
+    addMcpServer: async ({ name }) => {
+      calls.push(`mcp.add:${name}`);
+    },
+    disconnectMcpServer: async (name) => {
+      calls.push(`mcp.disconnect:${name}`);
+    },
     abort: async () => {
       calls.push("session.abort");
     },
@@ -758,7 +794,13 @@ async function* asyncIterable(
 function evaluatePermission(rules: PermissionRuleset, permission: string): string | undefined {
   let action: string | undefined;
   for (const rule of rules) {
-    if ((rule.permission === "*" || rule.permission === permission) && rule.pattern === "*") {
+    const pattern = new RegExp(
+      `^${rule.permission
+        .split("*")
+        .map((part) => part.replace(/[\\^$.*+?()[\]{}|]/g, "\\\\$&"))
+        .join(".*")}$`,
+    );
+    if (pattern.test(permission) && rule.pattern === "*") {
       action = rule.action;
     }
   }

@@ -12,10 +12,19 @@ export interface ManagedToolAnswer {
   readonly isError: boolean;
 }
 
+export interface ManagedToolCallContext {
+  readonly sessionId?: string;
+}
+
 /** In-process transport only. Execution still belongs to the app's tool policy. */
 export function createManagedMcpTools(
   definitions: ReadonlyArray<ProviderToolDefinition>,
-  execute: (name: string, inputJson: string, signal: AbortSignal) => Promise<ManagedToolAnswer>,
+  execute: (
+    name: string,
+    inputJson: string,
+    signal: AbortSignal,
+    context?: ManagedToolCallContext,
+  ) => Promise<ManagedToolAnswer>,
 ): { readonly kind: "ready"; readonly server: McpServer } | { readonly kind: "invalid" } {
   const tools: Tool[] = [];
   const names = new Set<string>();
@@ -30,11 +39,15 @@ export function createManagedMcpTools(
   server.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     if (!names.has(request.params.name))
       return { content: [{ type: "text", text: '{"error":"tool-unavailable"}' }], isError: true };
-    const answer = await execute(
-      request.params.name,
-      JSON.stringify(request.params.arguments ?? {}),
-      extra.signal,
-    );
+    const sessionId =
+      typeof request.params._meta?.sessionID === "string"
+        ? request.params._meta.sessionID
+        : undefined;
+    const inputJson = JSON.stringify(request.params.arguments ?? {});
+    const answer =
+      sessionId === undefined
+        ? await execute(request.params.name, inputJson, extra.signal)
+        : await execute(request.params.name, inputJson, extra.signal, { sessionId });
     return { content: [{ type: "text", text: answer.resultJson }], isError: answer.isError };
   });
   return { kind: "ready", server };

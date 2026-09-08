@@ -34,6 +34,7 @@ describe("OpenCode provider conformance", () => {
       version: "1",
       time: { created: 1, updated: 1 },
     } as const;
+    let managedUrl: string | undefined;
     const client: OpenCodeClientPort = {
       health: async () => ({ healthy: true, version: "1.18.0" }),
       providers: async () => ({ all: [provider()], connected: ["anthropic"] }),
@@ -43,9 +44,19 @@ describe("OpenCode provider conformance", () => {
         if (id === "stale") throw new Error("not found");
         return session;
       },
-      prompt: async () => {
+      prompt: async ({ tools }) => {
+        if (tools !== undefined && tools.length > 0 && managedUrl !== undefined) {
+          await invokeManagedTool(managedUrl, tools[0]!);
+        }
         for (const event of runtimeEvents(session.id)) source.emit(event);
+        if (tools !== undefined && tools.length > 0) {
+          source.emit({ type: "session.idle", properties: { sessionID: session.id } } as Event);
+        }
       },
+      addMcpServer: async ({ url }) => {
+        managedUrl = url;
+      },
+      disconnectMcpServer: async () => undefined,
       abort: async () => {
         source.emit({
           type: "session.error",
@@ -123,7 +134,21 @@ describe("OpenCode provider conformance", () => {
       driver,
       probeInput: { instanceId },
       acquireInput: { instanceId, projectRoot },
-      sessionStart: { sessionId, modelId, executionPolicy: "approval-gated" },
+      sessionStart: {
+        sessionId,
+        modelId,
+        executionPolicy: "approval-gated",
+        tools: [
+          {
+            name: "octant_web_research",
+            inputSchema: {
+              type: "object",
+              properties: { query: { type: "string" } },
+              required: ["query"],
+            },
+          },
+        ],
+      },
       turn: {
         sessionId,
         prompt: "hello",
@@ -179,6 +204,49 @@ class EventSourceFixture implements AsyncIterable<Event> {
       },
     };
   }
+}
+
+async function invokeManagedTool(url: string, name: string): Promise<void> {
+  const initialize = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "open-code-fixture", version: "1" },
+      },
+    }),
+  });
+  const sessionId = initialize.headers.get("mcp-session-id");
+  if (sessionId === null) throw new Error("Managed MCP fixture did not receive a session.");
+  const headers = {
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+    "mcp-session-id": sessionId,
+  };
+  await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} }),
+  });
+  await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: name.slice(name.indexOf("_") + 1),
+        arguments: { query: "hello" },
+        _meta: { sessionID: "provider-session" },
+      },
+    }),
+  });
 }
 
 function provider() {

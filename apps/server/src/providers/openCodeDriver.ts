@@ -11,6 +11,7 @@ import {
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
+  type ProviderToolDefinition,
   type ProviderTurnInput,
   type UtcTimestamp,
   decodeProviderFailure,
@@ -19,7 +20,6 @@ import {
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import {
   renderProviderTurnPrompt,
-  unsupportedAnswerTool,
   unsupportedChatCapabilities,
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
@@ -27,6 +27,11 @@ import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
 import type { Event, PermissionRuleset, Provider, Session } from "@opencode-ai/sdk/v2/types";
 import { Cause, Effect, Exit, Option, Queue, Scope, Stream } from "effect";
 import { mapOpenCodeEvent } from "./openCodeEventMapper";
+import type { ManagedToolAnswer, ManagedToolCallContext } from "./managedMcpTools";
+import {
+  createOpenCodeManagedToolsBridge,
+  type OpenCodeManagedToolsBridge,
+} from "./openCodeManagedTools";
 import type { OpenCodeProcessPort, OpenCodeServerConnection } from "./openCodeProcess";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
@@ -45,7 +50,10 @@ export interface OpenCodeClientPort {
     readonly modelId: string;
     readonly prompt: string;
     readonly attachments?: ProviderTurnInput["attachments"];
+    readonly tools?: ReadonlyArray<string>;
   }) => Promise<void>;
+  readonly addMcpServer: (input: { readonly name: string; readonly url: string }) => Promise<void>;
+  readonly disconnectMcpServer: (name: string) => Promise<void>;
   readonly abort: (sessionId: string) => Promise<void>;
   readonly replyPermission: (
     requestId: string,
@@ -78,9 +86,19 @@ interface SessionState {
   readonly taskIds: Map<string, string>;
   readonly messageParts: OpenCodeMessageParts;
   readonly modelId: string;
+  sourceId: string | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly approvals: Set<string>;
   readonly questions: Set<string>;
+  readonly toolNames: Set<string>;
+  readonly pendingToolAnswers: Map<string, (answer: ManagedToolAnswer) => void>;
+  managedTools: ManagedToolsLease | undefined;
+}
+
+interface ManagedToolsLease {
+  readonly bridge: OpenCodeManagedToolsBridge;
+  readonly serverName: string;
+  readonly catalogKey: string;
 }
 
 const capabilities = {
@@ -97,6 +115,7 @@ const capabilities = {
   taskProgress: "supported",
   nativeChildAgents: "unsupported",
   ...unsupportedChatCapabilities,
+  appManagedTools: "supported",
 } as const;
 
 function openCodeInputModalities(model: Provider["models"][string]): ProviderInputModality[] {
@@ -119,6 +138,7 @@ function openCodeChatCapabilities(
     )
       ? "supported"
       : "unsupported",
+    appManagedTools: "supported",
   };
 }
 
@@ -205,7 +225,7 @@ export function makeOfficialOpenCodeClient(
             throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
           })()
         : resultData(await client.session.get({ sessionID: sessionId }, { throwOnError: true })),
-    prompt: async ({ sessionId, providerId, modelId, prompt, attachments = [] }) => {
+    prompt: async ({ sessionId, providerId, modelId, prompt, attachments = [], tools = [] }) => {
       if (beta) {
         throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
       }
@@ -213,10 +233,32 @@ export function makeOfficialOpenCodeClient(
         {
           sessionID: sessionId,
           model: { providerID: providerId, modelID: modelId },
+          ...(tools.length === 0
+            ? {}
+            : { tools: Object.fromEntries(tools.map((tool) => [tool, true])) }),
           parts: openCodePromptParts(prompt, attachments),
         },
         { throwOnError: true },
       );
+    },
+    addMcpServer: async ({ name, url }) => {
+      if (beta) {
+        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+      }
+      await client.mcp.add(
+        {
+          directory: projectRoot,
+          name,
+          config: { type: "remote", url, enabled: true, oauth: false },
+        },
+        { throwOnError: true },
+      );
+    },
+    disconnectMcpServer: async (name) => {
+      if (beta) {
+        throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
+      }
+      await client.mcp.disconnect({ name, directory: projectRoot }, { throwOnError: true });
     },
     abort: async (sessionId) => {
       if (beta) {
@@ -387,9 +429,20 @@ function makeConnection(
         Math.max(0, options.runtimeRegistry.activeSessionCount(options.instanceId) - 1),
       );
     };
+    const releaseManagedTools = async (state: SessionState): Promise<void> => {
+      const lease = state.managedTools;
+      if (lease === undefined) return;
+      state.managedTools = undefined;
+      await client.disconnectMcpServer(lease.serverName).catch(() => undefined);
+      await lease.bridge.close();
+    };
     const emitInterrupted = (state: SessionState, message: string) => {
       if (state.terminal) return;
       state.terminal = true;
+      for (const resolve of state.pendingToolAnswers.values()) {
+        resolve({ resultJson: '{"error":"tool-interrupted"}', isError: true });
+      }
+      state.pendingToolAnswers.clear();
       deactivate(state);
       offer({
         kind: "interrupted",
@@ -410,11 +463,20 @@ function makeConnection(
       },
     );
     yield* Effect.addFinalizer(() =>
-      Effect.sync(() => {
+      Effect.promise(async () => {
         removeInvalidation();
-        for (const state of sessionsBySource.values()) deactivate(state);
+        for (const state of sessionsBySource.values()) {
+          for (const resolve of state.pendingToolAnswers.values()) {
+            resolve({ resultJson: '{"error":"tool-interrupted"}', isError: true });
+          }
+          state.pendingToolAnswers.clear();
+          deactivate(state);
+        }
         subscriptionAbort.abort();
         Effect.runFork(Queue.shutdown(queue));
+        for (const state of sessionsBySource.values()) {
+          await releaseManagedTools(state);
+        }
       }),
     );
 
@@ -483,30 +545,129 @@ function makeConnection(
     ): Effect.Effect<[string, SessionState], ProviderFailure> =>
       streamFailure === undefined ? stateFor(sessionId) : Effect.fail(streamFailure);
 
+    const requestManagedTool = async (
+      state: SessionState,
+      name: string,
+      inputJson: string,
+      signal: AbortSignal,
+      context?: ManagedToolCallContext,
+    ): Promise<{ readonly resultJson: string; readonly isError: boolean }> => {
+      if (
+        !state.toolNames.has(name) ||
+        state.terminal ||
+        state.sourceId === undefined ||
+        context?.sessionId !== state.sourceId
+      ) {
+        return { resultJson: '{"error":"tool-unavailable"}', isError: true };
+      }
+      const requestId = `opencode-tool-${crypto.randomUUID()}`;
+      return new Promise((resolve) => {
+        const cancel = () => {
+          if (!state.pendingToolAnswers.delete(requestId)) return;
+          signal.removeEventListener("abort", cancel);
+          resolve({ resultJson: '{"error":"tool-interrupted"}', isError: true });
+        };
+        state.pendingToolAnswers.set(requestId, (answer) => {
+          signal.removeEventListener("abort", cancel);
+          resolve({ resultJson: answer.resultJson, isError: answer.isError });
+        });
+        signal.addEventListener("abort", cancel, { once: true });
+        offer({
+          kind: "tool-request",
+          instanceId: options.instanceId,
+          sessionId: state.sessionId,
+          sequence: state.nextSequence++,
+          correlationId: state.correlationId,
+          occurredAt: clock() as UtcTimestamp,
+          requestId,
+          toolName: name,
+          inputJson,
+        });
+      });
+    };
+
+    const prepareManagedTools = (
+      state: SessionState,
+      definitions: ReadonlyArray<ProviderToolDefinition>,
+    ) =>
+      definitions.length === 0
+        ? Effect.void
+        : Effect.tryPromise({
+            try: async () => {
+              const catalogKey = JSON.stringify(definitions);
+              if (
+                state.managedTools !== undefined &&
+                state.managedTools.catalogKey !== catalogKey
+              ) {
+                throw fail(
+                  "invalid-configuration",
+                  "OpenCode cannot change app-managed tools while its session is active.",
+                );
+              }
+              if (state.managedTools === undefined) {
+                const serverName = `octant-${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
+                const bridge = await createOpenCodeManagedToolsBridge(
+                  definitions,
+                  (name, inputJson, signal, context) =>
+                    requestManagedTool(state, name, inputJson, signal, context),
+                );
+                try {
+                  await client.addMcpServer({ name: serverName, url: bridge.url });
+                } catch (error) {
+                  await bridge.close();
+                  throw error;
+                }
+                state.managedTools = { bridge, serverName, catalogKey };
+                state.toolNames.clear();
+                for (const definition of definitions) state.toolNames.add(definition.name);
+              }
+            },
+            catch: (error) =>
+              error && typeof error === "object" && "category" in error
+                ? (error as ProviderFailure)
+                : fail("unsupported", "OpenCode could not register app-managed tools."),
+          });
+
     return {
       subscribe: Effect.succeed(Stream.fromQueue(queue).pipe(Stream.takeUntil(isTerminalEvent))),
       start: (input) =>
         ensureSubscription().pipe(
           Effect.flatMap(() =>
             streamFailure === undefined
-              ? request(() =>
-                  client.createSession({ permission: permissionRules(input.executionPolicy) }),
+              ? Effect.succeed(
+                  newSessionState(
+                    input.sessionId,
+                    input.modelId,
+                    input.executionPolicy,
+                    makeCorrelation,
+                    input.tools ?? [],
+                  ),
+                ).pipe(
+                  Effect.tap((state) => prepareManagedTools(state, input.tools ?? [])),
+                  Effect.flatMap((state) =>
+                    request(() =>
+                      client.createSession({
+                        permission: permissionRules(
+                          input.executionPolicy,
+                          state.managedTools?.serverName,
+                        ),
+                      }),
+                    ).pipe(
+                      Effect.tapError(() => Effect.promise(() => releaseManagedTools(state))),
+                      Effect.map((session) => ({ session, state })),
+                    ),
+                  ),
                 )
               : Effect.fail(streamFailure),
           ),
-          Effect.flatMap((session) => {
+          Effect.flatMap(({ session, state }) => {
             if (streamFailure !== undefined) {
               return request(() => client.abort(session.id)).pipe(
                 Effect.ignore,
                 Effect.zipRight(Effect.fail(streamFailure)),
               );
             }
-            const state = newSessionState(
-              input.sessionId,
-              input.modelId,
-              input.executionPolicy,
-              makeCorrelation,
-            );
+            state.sourceId = session.id;
             sessionsBySource.set(session.id, state);
             sourceBySession.set(input.sessionId, session.id);
             activate(state);
@@ -556,7 +717,9 @@ function makeConnection(
                   resumedModel,
                   input.executionPolicy,
                   makeCorrelation,
+                  [],
                 );
+                state.sourceId = session.id;
                 sessionsBySource.set(session.id, state);
                 sourceBySession.set(input.sessionId, session.id);
                 activate(state);
@@ -587,14 +750,27 @@ function makeConnection(
               catch: providerFailure,
             }).pipe(
               Effect.flatMap((modelSelection) =>
-                request(() =>
-                  client.prompt({
-                    sessionId: source,
-                    providerId: modelSelection.providerId,
-                    modelId: modelSelection.modelId,
-                    prompt: renderProviderTurnPrompt(input),
-                    attachments: input.attachments,
-                  }),
+                prepareManagedTools(state, input.tools).pipe(
+                  Effect.flatMap(() =>
+                    Effect.gen(function* () {
+                      const managedTools = state.managedTools;
+                      return yield* request(() =>
+                        client.prompt({
+                          sessionId: source,
+                          providerId: modelSelection.providerId,
+                          modelId: modelSelection.modelId,
+                          prompt: renderProviderTurnPrompt(input),
+                          attachments: input.attachments,
+                          tools:
+                            managedTools === undefined
+                              ? []
+                              : [...state.toolNames].map(
+                                  (toolName) => `${managedTools.serverName}_${toolName}`,
+                                ),
+                        }),
+                      );
+                    }),
+                  ),
                 ),
               ),
             );
@@ -611,9 +787,14 @@ function makeConnection(
               Effect.tap(() =>
                 Effect.sync(() => {
                   state.terminal = true;
+                  for (const resolve of state.pendingToolAnswers.values()) {
+                    resolve({ resultJson: '{"error":"tool-interrupted"}', isError: true });
+                  }
+                  state.pendingToolAnswers.clear();
                   deactivate(state);
                 }),
               ),
+              Effect.tap(() => Effect.promise(() => releaseManagedTools(state))),
             ),
           ),
         ),
@@ -649,7 +830,18 @@ function makeConnection(
                 ),
           ),
         ),
-      answerTool: () => unsupportedAnswerTool(capabilities.appManagedTools),
+      answerTool: (input) =>
+        usableStateFor(input.sessionId).pipe(
+          Effect.flatMap(([, state]) => {
+            const resolve = state.pendingToolAnswers.get(input.requestId);
+            if (resolve === undefined) {
+              return Effect.fail(fail("protocol", "Provider tool request is not pending."));
+            }
+            state.pendingToolAnswers.delete(input.requestId);
+            resolve({ resultJson: input.resultJson, isError: input.isError });
+            return Effect.void;
+          }),
+        ),
     };
   });
 }
@@ -659,6 +851,7 @@ function newSessionState(
   modelId: string,
   executionPolicy: ProviderExecutionPolicy,
   makeCorrelation: () => string,
+  tools: ReadonlyArray<ProviderToolDefinition>,
 ): SessionState {
   return {
     sessionId,
@@ -669,9 +862,13 @@ function newSessionState(
     taskIds: new Map(),
     messageParts: new OpenCodeMessageParts(),
     modelId,
+    sourceId: undefined,
     executionPolicy,
     approvals: new Set(),
     questions: new Set(),
+    toolNames: new Set(tools.map((tool) => tool.name)),
+    pendingToolAnswers: new Map(),
+    managedTools: undefined,
   };
 }
 
@@ -729,35 +926,46 @@ function mapAndOffer(
   }
 }
 
-function permissionRules(policy: ProviderExecutionPolicy): PermissionRuleset {
+function permissionRules(
+  policy: ProviderExecutionPolicy,
+  managedToolServerName?: string,
+): PermissionRuleset {
+  let rules: PermissionRuleset;
   if (policy === "full-access") {
-    return [
+    rules = [
       { permission: "*", pattern: "*", action: "allow" },
       { permission: "external_directory", pattern: "*", action: "deny" },
     ];
-  }
-  if (policy === "auto-accept-edits") {
+  } else if (policy === "auto-accept-edits") {
     // Edits inside the bound directory proceed; everything else still asks,
     // and reach outside the directory stays denied outright.
-    return [
+    rules = [
       { permission: "*", pattern: "*", action: "ask" },
       { permission: "edit", pattern: "*", action: "allow" },
       { permission: "external_directory", pattern: "*", action: "deny" },
     ];
-  }
-  if (policy === "approval-gated") {
-    return [
+  } else if (policy === "approval-gated") {
+    rules = [
       { permission: "*", pattern: "*", action: "ask" },
       { permission: "external_directory", pattern: "*", action: "deny" },
     ];
+  } else {
+    rules = [
+      { permission: "*", pattern: "*", action: "ask" },
+      { permission: "edit", pattern: "*", action: "deny" },
+      { permission: "bash", pattern: "*", action: "deny" },
+      { permission: "task", pattern: "*", action: "deny" },
+      { permission: "external_directory", pattern: "*", action: "deny" },
+      { permission: "todowrite", pattern: "*", action: "deny" },
+    ];
   }
+  if (managedToolServerName === undefined) return rules;
+  // OpenCode prefixes MCP tools as `<server>_<tool>`. Deny every other
+  // namespaced tool in this session; only this session's bridge is allowed.
   return [
-    { permission: "*", pattern: "*", action: "ask" },
-    { permission: "edit", pattern: "*", action: "deny" },
-    { permission: "bash", pattern: "*", action: "deny" },
-    { permission: "task", pattern: "*", action: "deny" },
-    { permission: "external_directory", pattern: "*", action: "deny" },
-    { permission: "todowrite", pattern: "*", action: "deny" },
+    ...rules,
+    { permission: "*_*", pattern: "*", action: "deny" },
+    { permission: `${managedToolServerName}_*`, pattern: "*", action: "allow" },
   ];
 }
 
