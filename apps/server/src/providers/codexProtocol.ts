@@ -474,7 +474,7 @@ const DynamicToolCallParams = Schema.Struct({
   threadId: Schema.String,
   turnId: Schema.String,
   callId: Schema.String,
-  namespace: Schema.NullOr(Schema.String),
+  namespace: Schema.optional(Schema.NullOr(Schema.String)),
   tool: Schema.String,
   arguments: Schema.Unknown,
 });

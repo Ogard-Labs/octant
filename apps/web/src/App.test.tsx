@@ -1049,9 +1049,25 @@ describe("App", () => {
     );
   });
 
-  it("ignores a draft provider selection that became unselectable before create", async () => {
+  it("replaces a disabled draft provider with a visible model before sending", async () => {
     const user = userEvent.setup();
     const chatApi = chats();
+    const baseExecute = vi.mocked(chatApi.execute).getMockImplementation();
+    if (baseExecute === undefined) throw new Error("Expected Chat fixture");
+    vi.mocked(chatApi.execute).mockImplementation(async (command) => {
+      const result = await baseExecute(command);
+      if (command.kind !== "change-chat-provider" || result?.kind !== "thread-created")
+        return result;
+      return decodeChatCommandResult({
+        kind: "thread-updated",
+        thread: {
+          ...result.thread,
+          providerInstanceId: command.providerInstanceId,
+          modelId: command.modelId,
+          version: 2,
+        },
+      });
+    });
     const instanceA = openAiProvider("90000000-0000-4000-8000-000000000001", "Primary Gateway");
     const instanceB = openAiProvider("90000000-0000-4000-8000-000000000002", "Backup Gateway");
     let primaryEnabled = true;
@@ -1130,8 +1146,12 @@ describe("App", () => {
     await waitFor(() =>
       expect(execute.mock.calls.some(([command]) => command.kind === "send-chat-turn")).toBe(true),
     );
-    expect(execute.mock.calls.some(([command]) => command.kind === "change-chat-provider")).toBe(
-      false,
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "change-chat-provider",
+        providerInstanceId: instanceB.id,
+        modelId: "backup-1",
+      }),
     );
   });
 
@@ -3522,9 +3542,7 @@ describe("App", () => {
       />,
     );
 
-    expect(
-      await screen.findByRole("region", { name: "Workspace pane: Welcome to Code" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Workspace pane: New task" })).toBeVisible();
   });
 
   it("opens implemented settings and deep-links search results to focused controls", async () => {

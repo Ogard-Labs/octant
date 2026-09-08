@@ -523,33 +523,36 @@ describe("mapCodexMessage", () => {
     ).toMatchObject([{ kind: "event", event: { toolCallId: "tool-1", ...expected } }]);
   });
 
-  it("maps a dynamic app-tool call to the provider-neutral tool request", () => {
-    const result = map(context(), {
-      kind: "request",
-      id: "provider-request-1",
-      method: "item/tool/call",
-      params: {
-        threadId: "thread-1",
-        turnId: "turn-1",
-        callId: "call-1",
-        namespace: null,
-        tool: "octant_browser",
-        arguments: { operation: "screenshot" },
-      },
-    });
-
-    expect(result).toMatchObject([
-      {
-        kind: "tool",
-        tool: {
-          requestId: "request-1",
-          providerRequestId: "provider-request-1",
-          toolName: "octant_browser",
-          inputJson: '{"operation":"screenshot"}',
+  it.each([null, undefined])(
+    "maps an app-tool call with an optional namespace: %s",
+    (namespace) => {
+      const result = map(context(), {
+        kind: "request",
+        id: "provider-request-1",
+        method: "item/tool/call",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          callId: "call-1",
+          ...(namespace === undefined ? {} : { namespace }),
+          tool: "octant_browser",
+          arguments: { operation: "screenshot" },
         },
-      },
-    ]);
-  });
+      });
+
+      expect(result).toMatchObject([
+        {
+          kind: "tool",
+          tool: {
+            requestId: "request-1",
+            providerRequestId: "provider-request-1",
+            toolName: "octant_browser",
+            inputJson: '{"operation":"screenshot"}',
+          },
+        },
+      ]);
+    },
+  );
 
   it("maps completed file changes to confined relative paths and a sanitized tool result", () => {
     const ctx = context();

@@ -512,7 +512,7 @@ function dynamicTool(
     return protocolFailure("Provider repeated an app-tool request ID.");
   }
   const toolName =
-    message.params.namespace === null
+    message.params.namespace === null || message.params.namespace === undefined
       ? message.params.tool.trim()
       : `${message.params.namespace.trim()}/${message.params.tool.trim()}`;
   if (toolName.length === 0 || toolName.length > 128) {

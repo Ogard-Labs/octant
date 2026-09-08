@@ -2327,12 +2327,15 @@ function LaunchedShell(
     draftProviderInstanceId !== undefined && draftModelId !== undefined
       ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
       : undefined;
-  const preferredChatSelection = rawDraftSelection ?? firstRunChatDefault;
+  const preferredChatSelection =
+    resolveDraftProviderSelection(chatProviderGroups, rawDraftSelection) ??
+    resolveDraftProviderSelection(chatProviderGroups, firstRunChatDefault) ??
+    firstSelectableProviderSelection(chatProviderGroups);
   const visibleDraftSelection =
-    resolveDraftProviderSelection(
-      draftProviderGroups,
-      activeMode === "chat" ? preferredChatSelection : rawDraftSelection,
-    ) ?? firstSelectableProviderSelection(draftProviderGroups);
+    activeMode === "chat"
+      ? preferredChatSelection
+      : (resolveDraftProviderSelection(draftProviderGroups, rawDraftSelection) ??
+        firstSelectableProviderSelection(draftProviderGroups));
   const effectiveDraftProviderInstanceId =
     activeMode === "work"
       ? workProviderChoice?.instanceId
@@ -3823,9 +3826,7 @@ function LaunchedShell(
         String(candidate.id) === String(projectId),
     );
     if (project === undefined) return false;
-    const selection =
-      resolveDraftProviderSelection(chatProviderGroups, preferredChatSelection) ??
-      firstSelectableProviderSelection(chatProviderGroups);
+    const selection = preferredChatSelection;
     if (selection === undefined && chatProviderGroups.length > 0) {
       setDraftError("No visible Chat model is available. Re-enable a model in Settings first.");
       return false;
@@ -4052,9 +4053,7 @@ function LaunchedShell(
     setRailPlaceholder(undefined);
     try {
       if (mode === "chat") {
-        const draftSelection =
-          resolveDraftProviderSelection(chatProviderGroups, preferredChatSelection) ??
-          firstSelectableProviderSelection(chatProviderGroups);
+        const draftSelection = preferredChatSelection;
         if (draftSelection === undefined && chatProviderGroups.length > 0) {
           setDraftError("No visible Chat model is available. Re-enable a model in Settings first.");
           return;
