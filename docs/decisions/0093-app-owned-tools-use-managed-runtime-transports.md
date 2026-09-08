@@ -28,6 +28,9 @@ browser operation, even when a narrower isolated session was sufficient.
   tool-enabled turn. Late, duplicate, or cancelled answers are refused.
   Per-request transport cancellation reaches the executor even while it waits
   for approval; a late approval cannot start an expired request.
+- The Codex app-server adapter opts into its experimental API capability during
+  initialize because `thread/start.dynamicTools` is rejected without that
+  negotiation. The adapter uses no other experimental methods or fields.
 - An approval-gated Code thread can request one isolated browser session.
   The request names its allowed origin and uses the thread's existing inline
   approval surface. It grants no shell, filesystem, or general network access

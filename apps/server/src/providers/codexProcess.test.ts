@@ -296,7 +296,7 @@ describe("CodexProcessPort", () => {
         method: "initialize",
         params: {
           clientInfo: { name: "Octant", title: "Octant", version: "0.1.0-test" },
-          capabilities: { experimentalApi: false, requestAttestation: false },
+          capabilities: { experimentalApi: true, requestAttestation: false },
         },
       },
     ]);
