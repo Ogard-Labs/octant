@@ -1,4 +1,5 @@
 import type {
+  BrowserActionRequest,
   BrowserAutomationSnapshot,
   BrowserThreadId,
   CodeBoardView,
@@ -65,17 +66,51 @@ const MAX_APPLE_RESULT_DIAGNOSTICS = 16;
 
 const browserDefinition = {
   name: CODE_BROWSER_TOOL_NAME,
+  description:
+    "Control Octant's built-in browser for this task. Start with navigate and an HTTP(S) URL, then read-page, click or type using CSS selectors, press a key, scroll, wait for a selector, or capture a screenshot. This uses the same isolated page shown in Browser; no external browser skill, debugging URL, or shell command is needed. Browser approval is requested inline when required.",
   inputSchema: {
     type: "object",
     properties: {
       operation: {
         type: "string",
-        enum: ["navigate", "read-page", "click", "type", "scroll", "wait", "screenshot", "stop"],
+        enum: [
+          "navigate",
+          "read-page",
+          "click",
+          "type",
+          "press",
+          "scroll",
+          "wait",
+          "screenshot",
+          "stop",
+        ],
       },
-      url: { type: "string" },
-      selector: { type: "string" },
-      text: { type: "string" },
+      url: { type: "string", maxLength: 4096, description: "HTTP(S) URL for navigate." },
+      selector: {
+        type: "string",
+        maxLength: 4096,
+        description: "CSS selector for click, type, or wait.",
+      },
+      text: {
+        type: "string",
+        maxLength: 65536,
+        description: "Text to fill into the selected field.",
+      },
+      key: { type: "string", description: "Browser key such as Enter, Tab, Escape, or ArrowDown." },
+      deltaX: { type: "integer", minimum: -2000, maximum: 2000 },
+      deltaY: {
+        type: "integer",
+        minimum: -2000,
+        maximum: 2000,
+        description: "Scroll down with positive values, up with negative values.",
+      },
+      expectedObservationRevision: {
+        type: "integer",
+        minimum: 0,
+        description: "Revision from the page observation used to choose this action.",
+      },
     },
+    additionalProperties: false,
     required: ["operation"],
   },
 } as const;
@@ -247,22 +282,7 @@ export interface CodeAppManagedToolsOptions {
     }) => Promise<BrowserAutomationSnapshot>;
     readonly act: (input: {
       readonly windowId: WindowId;
-      readonly request: {
-        readonly actionId: ToolActionRequest["actionId"];
-        readonly contextId: NonNullable<BrowserAutomationSnapshot["context"]>["contextId"];
-        readonly correlationId: ToolActionRequest["correlationId"];
-        readonly authority: ToolActionAuthority;
-        readonly kind:
-          | "navigate"
-          | "click"
-          | "type"
-          | "scroll"
-          | "screenshot"
-          | "extract-text"
-          | "wait";
-        readonly target?: string;
-        readonly value?: string;
-      };
+      readonly request: BrowserActionRequest;
     }) => Promise<BrowserAutomationSnapshot>;
     readonly releaseThread: (
       windowId: WindowId,
@@ -942,6 +962,9 @@ function browserAction(
     contextId: context.contextId,
     correlationId: context.correlationId,
     authority: context.authority,
+    ...(input.expectedObservationRevision === undefined
+      ? {}
+      : { expectedObservationRevision: input.expectedObservationRevision }),
   } as const;
   switch (input.operation) {
     case "navigate":
@@ -958,12 +981,19 @@ function browserAction(
       return input.selector === undefined || input.text === undefined
         ? undefined
         : { ...base, kind: "type" as const, target: input.selector, value: input.text };
+    case "press":
+      return { ...base, kind: "press" as const, value: input.key };
     case "wait":
       return input.selector === undefined
         ? undefined
         : { ...base, kind: "wait" as const, target: input.selector };
     case "scroll":
-      return { ...base, kind: "scroll" as const };
+      return {
+        ...base,
+        kind: "scroll" as const,
+        ...(input.deltaX === undefined ? {} : { deltaX: input.deltaX }),
+        ...(input.deltaY === undefined ? {} : { deltaY: input.deltaY }),
+      };
     case "screenshot":
       return { ...base, kind: "screenshot" as const };
   }
@@ -1055,6 +1085,9 @@ function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = 
                       ? {}
                       : { textTruncated: true }),
                   }),
+              ...(snapshot.observation.revision === undefined
+                ? {}
+                : { revision: snapshot.observation.revision }),
               ...(snapshot.observation.contentHash === undefined
                 ? {}
                 : { contentHash: snapshot.observation.contentHash }),
@@ -1123,11 +1156,16 @@ function parseProposeThreadInput(value: string): ProposeThreadToolInput | undefi
   };
 }
 
-type BrowserToolInput =
-  | { readonly operation: "navigate"; readonly url?: string }
-  | { readonly operation: "read-page" | "scroll" | "screenshot" | "stop" }
-  | { readonly operation: "click" | "wait"; readonly selector?: string }
-  | { readonly operation: "type"; readonly selector?: string; readonly text?: string };
+type BrowserToolInput = {
+  readonly expectedObservationRevision?: number;
+} & (
+  | { readonly operation: "navigate"; readonly url: string }
+  | { readonly operation: "read-page" | "screenshot" | "stop" }
+  | { readonly operation: "scroll"; readonly deltaX?: number; readonly deltaY?: number }
+  | { readonly operation: "click" | "wait"; readonly selector: string }
+  | { readonly operation: "press"; readonly key: string }
+  | { readonly operation: "type"; readonly selector: string; readonly text: string }
+);
 
 function parseTerminalInput(value: string): TerminalToolInput | undefined {
   const parsed = parseObject(value, new Set(["operation", "command"]));
@@ -1152,24 +1190,78 @@ function parseTerminalInput(value: string): TerminalToolInput | undefined {
 }
 
 function parseBrowserInput(value: string): BrowserToolInput | undefined {
-  const parsed = parseObject(value, new Set(["operation", "url", "selector", "text"]));
+  const parsed = parseObject(
+    value,
+    new Set([
+      "operation",
+      "url",
+      "selector",
+      "text",
+      "key",
+      "deltaX",
+      "deltaY",
+      "expectedObservationRevision",
+    ]),
+  );
   if (parsed === undefined) return undefined;
-  const operation = parsed.operation;
+  const revision = parsed.expectedObservationRevision;
   if (
-    operation !== "navigate" &&
-    operation !== "read-page" &&
-    operation !== "click" &&
-    operation !== "type" &&
-    operation !== "scroll" &&
-    operation !== "wait" &&
-    operation !== "screenshot" &&
-    operation !== "stop"
+    revision !== undefined &&
+    (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0)
   )
     return undefined;
-  for (const field of ["url", "selector", "text"] as const) {
-    if (parsed[field] !== undefined && typeof parsed[field] !== "string") return undefined;
+  const common = typeof revision === "number" ? { expectedObservationRevision: revision } : {};
+  const only = (...keys: ReadonlyArray<string>) =>
+    Object.keys(parsed).every(
+      (key) => key === "operation" || key === "expectedObservationRevision" || keys.includes(key),
+    );
+  const text = (field: string, limit: number) =>
+    typeof parsed[field] === "string" && parsed[field].length > 0 && parsed[field].length <= limit;
+  switch (parsed.operation) {
+    case "navigate":
+      return only("url") && text("url", 4096) && typeof parsed.url === "string"
+        ? { ...common, operation: "navigate", url: parsed.url }
+        : undefined;
+    case "click":
+    case "wait":
+      return only("selector") && text("selector", 4096) && typeof parsed.selector === "string"
+        ? { ...common, operation: parsed.operation, selector: parsed.selector }
+        : undefined;
+    case "type":
+      return only("selector", "text") &&
+        text("selector", 4096) &&
+        text("text", 65536) &&
+        typeof parsed.selector === "string" &&
+        typeof parsed.text === "string"
+        ? { ...common, operation: "type", selector: parsed.selector, text: parsed.text }
+        : undefined;
+    case "press":
+      return only("key") && text("key", 64) && typeof parsed.key === "string"
+        ? { ...common, operation: "press", key: parsed.key }
+        : undefined;
+    case "scroll": {
+      if (!only("deltaX", "deltaY")) return undefined;
+      for (const delta of [parsed.deltaX, parsed.deltaY]) {
+        if (
+          delta !== undefined &&
+          (typeof delta !== "number" || !Number.isInteger(delta) || Math.abs(delta) > 2000)
+        )
+          return undefined;
+      }
+      return {
+        ...common,
+        operation: "scroll",
+        ...(typeof parsed.deltaX === "number" ? { deltaX: parsed.deltaX } : {}),
+        ...(typeof parsed.deltaY === "number" ? { deltaY: parsed.deltaY } : {}),
+      };
+    }
+    case "read-page":
+    case "screenshot":
+    case "stop":
+      return only() ? { ...common, operation: parsed.operation } : undefined;
+    default:
+      return undefined;
   }
-  return parsed as BrowserToolInput;
 }
 
 function parseAppleInput(value: string): AppleToolInput | undefined {

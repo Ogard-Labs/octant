@@ -10,10 +10,8 @@ action is re-authorized before any effect.
 
 ## Browser
 
-Browser surfaces open from a Work or Code thread via **Open surface →
-Browser**. The
-host requires exactly one owning thread before it can create an isolated
-context.
+Open **Browser** from a Work or Code thread's tool launcher. The host requires
+exactly one owning thread before it can create an isolated context.
 
 - Each context is an isolated incognito context scoped to exactly one owning
   thread (thread, host, mode, Project or root, provider, action, correlation,
@@ -31,13 +29,29 @@ content hash, and a correlated-evidence count. No launch token, window
 capability, provider credential, typed value, page body, screenshot, or raw
 browser diagnostic enters committed evidence.
 
-The browser pane exposes lifecycle controls — **Start browser**, **Go**,
-**Stop**, and **Cancel** — plus **Click** and **Type** actions against a
-**Selector**, and an optional **Value**. Statuses are `ready`, `waiting`,
-`running`, `stopped`, `unavailable`, `failed`, `interrupted`, and `stale`.
-There is no network start-control route; the renderer requests lifecycle
-through authenticated routes only, and denials produce no observation or
-evidence.
+The Browser pane provides an address bar, history controls, and the isolated
+page. Lifecycle and stop controls remain visible when a session needs them.
+The renderer requests lifecycle through authenticated routes; a denial creates
+no observation or evidence.
+
+### Agent control
+
+Agent control is separate from manual Browser availability. A provider needs a
+verified app-managed tool transport; an authenticated provider or a visible
+Browser tab alone does not prove that transport works.
+
+Where supported, Octant registers `octant_browser` when the provider session
+starts. The agent does not need a separate browser skill, a debugging URL, or
+a shell-launched browser. The tool can navigate, read page text, click and fill
+CSS-selected elements, press a browser key, scroll horizontally or vertically,
+wait for an element, take a screenshot, and stop its session. Page observations
+include a revision that subsequent actions may use to refuse stale targets.
+
+An approval-gated Code task may request an isolated browser session for its
+origin through an inline approval. This does not change the task to Full
+access. Unsupported runtimes, expired grants, changed owners, and cancelled
+requests are refused explicitly. Browser support in Chat is a separate mode
+capability and is not granted by opening a panel.
 
 ## Computer use
 

@@ -678,6 +678,61 @@ describe("Code app-managed tools", () => {
     expect(releaseThread).toHaveBeenCalledWith(windowId, threadId);
   });
 
+  it("lets the agent submit a form and scroll in either direction in its own browser", async () => {
+    const active = browserSnapshot(browserAuthority());
+    const act = vi.fn(async () => active);
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread(),
+      readThread: () => thread(),
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+      browser: {
+        resolveAuthority: browserAuthority,
+        inspectThread: () => active,
+        create: vi.fn(),
+        act,
+        releaseThread: vi.fn(),
+      },
+    });
+    expect(
+      tools.definitions.find((tool) => tool.name === CODE_BROWSER_TOOL_NAME)?.description,
+    ).toContain("built-in browser");
+    const pressed = await tools.execute({
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "press",
+        key: "Enter",
+        expectedObservationRevision: 7,
+      }),
+    });
+    expect(pressed.isError).toBe(false);
+    expect(act).toHaveBeenLastCalledWith({
+      windowId,
+      request: expect.objectContaining({
+        kind: "press",
+        value: "Enter",
+        expectedObservationRevision: 7,
+      }),
+    });
+    await tools.execute({
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "scroll", deltaX: 100, deltaY: -500 }),
+    });
+    expect(act).toHaveBeenLastCalledWith({
+      windowId,
+      request: expect.objectContaining({ kind: "scroll", deltaX: 100, deltaY: -500 }),
+    });
+    act.mockClear();
+    const invalid = await tools.execute({
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "scroll", deltaY: 2001 }),
+    });
+    expect(invalid.isError).toBe(true);
+    expect(act).not.toHaveBeenCalled();
+  });
+
   it("lets the agent stop its thread-owned Browser context", async () => {
     const releaseThread = vi.fn(async () => ({
       status: "ready" as const,

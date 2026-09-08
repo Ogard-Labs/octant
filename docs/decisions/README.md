@@ -110,6 +110,10 @@ distilled successor of the earlier long-form design specifications.
 
 | [0099](0099-chat-keeps-the-conversation-full-width.md) | Chat keeps the conversation full width | Accepted |
 
+| [0100](0100-trusted-inline-task-approvals.md) | Task authority confirmations use a trusted inline surface | Proposed |
+
+| [0101](0101-browser-authority-across-modes.md) | Browser authority follows the thread across modes | Proposed |
+
 ## Adding an ADR
 
 - Take the next number (`00NN-short-slug.md`); never renumber existing records.
