@@ -3,9 +3,10 @@ import {
   type BrowserToolApproval,
   type BrowserToolApprovalDecision,
 } from "@octant/contracts/browser-automation-rpc";
-import type { ToolActionAuthority, ToolApprovalId, WindowId } from "@octant/contracts";
+import { decodeToolApprovalId, type ToolActionAuthority, type WindowId } from "@octant/contracts";
 
 const DEFAULT_TTL_MS = 5 * 60_000;
+const MAX_PENDING_APPROVALS = 32;
 
 interface PendingApproval {
   readonly view: BrowserToolApproval;
@@ -33,7 +34,7 @@ export class BrowserToolApprovalService {
       readonly uuid: () => string;
       readonly now: () => number;
       readonly ttlMs?: number;
-      readonly authorityIsCurrent?: (threadId: string, authority: ToolActionAuthority) => boolean;
+      readonly authorityIsCurrent: (threadId: string, authority: ToolActionAuthority) => boolean;
     },
   ) {
     this.#ttlMs = Math.max(1_000, Math.min(options.ttlMs ?? DEFAULT_TTL_MS, 10 * 60_000));
@@ -47,7 +48,8 @@ export class BrowserToolApprovalService {
     readonly signal?: AbortSignal;
   }): Promise<"approved" | "denied" | "cancelled" | "expired"> {
     if (input.signal?.aborted) return Promise.resolve("cancelled");
-    const approvalId = this.options.uuid() as ToolApprovalId;
+    if (this.#pending.size >= MAX_PENDING_APPROVALS) return Promise.resolve("denied");
+    const approvalId = decodeToolApprovalId(this.options.uuid());
     const view = decodeBrowserToolApproval({
       approvalId,
       threadId: input.threadId,
@@ -80,7 +82,9 @@ export class BrowserToolApprovalService {
         ...(onAbort === undefined ? {} : { onAbort }),
       };
       this.#pending.set(String(approvalId), pending);
-      input.signal?.addEventListener("abort", onAbort!, { once: true });
+      if (input.signal !== undefined && onAbort !== undefined) {
+        input.signal.addEventListener("abort", onAbort, { once: true });
+      }
       if (input.signal?.aborted) settle("cancelled");
     });
   }
@@ -93,12 +97,10 @@ export class BrowserToolApprovalService {
   }
 
   decide(windowId: WindowId, decision: BrowserToolApprovalDecision): boolean {
+    this.#expire();
     const pending = this.#pending.get(String(decision.approvalId));
     if (pending === undefined || pending.windowId !== windowId) return false;
-    if (
-      this.options.authorityIsCurrent !== undefined &&
-      !this.options.authorityIsCurrent(pending.threadId, pending.authority)
-    ) {
+    if (!this.options.authorityIsCurrent(pending.threadId, pending.authority)) {
       pending.resolve("denied");
       return false;
     }

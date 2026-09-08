@@ -14,6 +14,7 @@ describe("BrowserToolApprovalService", () => {
     const service = new BrowserToolApprovalService({
       uuid: () => "40000000-0000-4000-8000-000000000001",
       now: () => Date.parse("2026-09-09T10:00:00.000Z"),
+      authorityIsCurrent: () => true,
     });
     const pending = service.request({
       windowId,
@@ -49,6 +50,7 @@ describe("BrowserToolApprovalService", () => {
     const service = new BrowserToolApprovalService({
       uuid: () => crypto.randomUUID(),
       now: Date.now,
+      authorityIsCurrent: () => true,
     });
     const controller = new AbortController();
     const cancelled = service.request({
@@ -68,5 +70,29 @@ describe("BrowserToolApprovalService", () => {
     });
     service.revokeWindow(windowId);
     await expect(revoked).resolves.toBe("cancelled");
+  });
+
+  it("expires an approval at decision time even when its timer has not fired", async () => {
+    let now = Date.parse("2026-09-09T10:00:00.000Z");
+    const service = new BrowserToolApprovalService({
+      uuid: () => "40000000-0000-4000-8000-000000000005",
+      now: () => now,
+      ttlMs: 1_000,
+      authorityIsCurrent: () => true,
+    });
+    const pending = service.request({
+      windowId,
+      threadId: "50000000-0000-4000-8000-000000000001",
+      authority,
+      origin: "https://example.com",
+    });
+    now += 1_001;
+    expect(
+      service.decide(windowId, {
+        approvalId: "40000000-0000-4000-8000-000000000005" as never,
+        decision: "approved",
+      }),
+    ).toBe(false);
+    await expect(pending).resolves.toBe("expired");
   });
 });

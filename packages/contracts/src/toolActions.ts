@@ -206,6 +206,7 @@ export const decodeToolActionRequest = Schema.decodeUnknownSync(ToolActionReques
 export const decodeToolActionId = Schema.decodeUnknownSync(ToolActionId);
 export const decodeToolActionCapability = Schema.decodeUnknownSync(ToolActionCapability);
 export const decodeToolActionAuthority = Schema.decodeUnknownSync(ToolActionAuthority);
+export const decodeToolApprovalId = Schema.decodeUnknownSync(ToolApprovalId);
 export const decodeToolExtensionId = Schema.decodeUnknownSync(ToolExtensionId);
 export const decodeToolActionCancellation = Schema.decodeUnknownSync(ToolActionCancellation);
 export const decodeToolActionOutcome = Schema.decodeUnknownSync(ToolActionOutcome);
