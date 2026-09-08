@@ -161,11 +161,16 @@ describe("probeOpenCodeBinary", () => {
 
   it("only attests isolation for the verified OpenCode runtime version", () => {
     expect(supportsOpenCodeIsolation("1.18.21")).toBe(true);
+    expect(supportsOpenCodeIsolation("1.18.22")).toBe(false);
+    expect(supportsOpenCodeIsolation("1.18.20")).toBe(false);
     expect(supportsOpenCodeIsolation("1.17.19")).toBe(false);
     expect(supportsOpenCodeIsolation("1.19.0")).toBe(false);
     expect(supportsOpenCodeIsolation("opencode2 v0.0.0-beta-18721")).toBe(false);
   });
 
+  // This is deliberately opt-in: it launches the installed provider runtime
+  // and is evidence for that local version only. Default CI exercises the
+  // synthetic fixture and must not be presented as installed-runtime proof.
   it.skipIf(process.env.OCTANT_OPENCODE_PROFILE_SMOKE !== "1")(
     "keeps hostile project and global plugin fixtures out of the installed runtime",
     async () => {
@@ -224,7 +229,14 @@ describe("probeOpenCodeBinary", () => {
           name: "aiRouter",
           npm: "@ai/router-provider",
           options: { baseURL: "https://router.invalid/v1", apiKey: "{file:/private/key}" },
-          models: { "Qwen3.6": { name: "Qwen3.6", limit: { context: 128000 } } },
+          models: {
+            "Qwen3.6": {
+              name: "Qwen3.6",
+              limit: { context: 128000 },
+              options: { apiKey: "raw-model-secret" },
+              headers: { Authorization: "Bearer raw-model-header" },
+            },
+          },
           instructions: ["private-instruction-must-not-cross"],
         },
       },
@@ -245,6 +257,8 @@ describe("probeOpenCodeBinary", () => {
     expect(parsed).not.toHaveProperty("mcp");
     expect(parsed).not.toHaveProperty("plugin");
     expect(parsed).not.toHaveProperty("skills");
+    expect(parsed).not.toHaveProperty("provider.airouter.models.Qwen3.6.options");
+    expect(parsed).not.toHaveProperty("provider.airouter.models.Qwen3.6.headers");
     expect(JSON.stringify(parsed)).not.toContain("private-instruction-must-not-cross");
   });
 
@@ -350,6 +364,57 @@ describe("probeOpenCodeBinary", () => {
     } finally {
       profile.cleanup();
     }
+  });
+
+  it("drops nested credential objects, tokens, and headers while keeping bounded placeholders", () => {
+    const root = fixtureRoot();
+    const profile = createPrivateOpenCodeProfile(
+      {
+        content: JSON.stringify({
+          provider: {
+            synthetic: {
+              options: {
+                apiKey: "{file:/synthetic/key}",
+                accessToken: "{env:lowercase}",
+                secret: "{file:../secret}",
+                token: "raw-token",
+                headers: [{ name: "Authorization", value: "Bearer raw-header" }],
+                nested: { credential: { value: "raw-nested" }, value: "raw-value" },
+              },
+            },
+          },
+        }),
+      },
+      {},
+      () => root,
+    );
+    try {
+      const configPath = profile.environment.OPENCODE_CONFIG;
+      if (configPath === undefined) throw new Error("Expected a private config path.");
+      const content = readFileSync(configPath, "utf8");
+      expect(content).toContain("{file:/synthetic/key}");
+      expect(content).not.toContain("{env:lowercase}");
+      expect(content).not.toContain("{file:../secret}");
+      expect(content).not.toContain("raw-token");
+      expect(content).not.toContain("raw-header");
+      expect(content).not.toContain("raw-nested");
+      expect(content).not.toContain("raw-value");
+    } finally {
+      profile.cleanup();
+    }
+  });
+
+  it("rejects URL credentials and secret query parameters in provider routing", () => {
+    expect(() =>
+      projectOpenCodeRuntimeConfig({
+        provider: { synthetic: { options: { baseURL: "https://user:pass@example.invalid/v1" } } },
+      }),
+    ).toThrow("URL credentials");
+    expect(() =>
+      projectOpenCodeRuntimeConfig({
+        provider: { synthetic: { options: { baseURL: "https://example.invalid/v1?api_key=raw" } } },
+      }),
+    ).toThrow("secret query");
   });
 
   it("rejects a relative binary path before spawning", async () => {

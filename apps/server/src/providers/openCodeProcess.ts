@@ -68,7 +68,7 @@ const DEFAULT_STARTUP_TIMEOUT_MS = 10_000;
 const VERSION_TIMEOUT_MS = 5_000;
 const PROJECTED_CONFIG_LIMIT = 2 * 1024 * 1024;
 const PROJECTED_CONFIG_DEPTH_LIMIT = 8;
-const MINIMUM_ISOLATED_OPEN_CODE_VERSION = [1, 18, 0] as const;
+const ISOLATED_OPEN_CODE_VERSION = [1, 18, 21] as const;
 const LEGACY_VERSION_PATTERN = /^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
 const BETA_VERSION_PATTERN = /^opencode2 (v\d+\.\d+\.\d+-[0-9A-Za-z.-]+)$/;
 const READINESS_PATTERN = /^(?:opencode )?server listening on (http:\/\/[^\s]+)$/;
@@ -115,14 +115,38 @@ export type OpenCodeConfigResolver = (
 ) => Promise<unknown | undefined>;
 
 type JsonRecord = { readonly [key: string]: unknown };
-const SAFE_SECRET_REFERENCE = /^\{(?:env|file):[^{}\r\n]+\}$/;
-const SENSITIVE_ROUTING_KEY = /(?:api[_-]?key|access[_-]?token|secret|password|credential)/i;
+const SAFE_SECRET_REFERENCE =
+  /^\{(?:env:[A-Z][A-Z0-9_]{0,63}|file:\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]{1,128})\}$/;
+const SENSITIVE_ROUTING_KEY =
+  /(?:api[_-]?key|access[_-]?token|auth(?:entication)?[_-]?(?:key|token)|token|secret|password|credential|authorization|bearer)/i;
+const ROUTING_HEADER_KEY = /^headers?$/i;
+const ROUTING_URL_KEY = /(?:url|uri|endpoint|base[_-]?url)$/i;
+const SECRET_QUERY_KEY =
+  /(?:api[_-]?key|access[_-]?token|auth(?:entication)?[_-]?(?:key|token)|token|secret|password|credential|authorization|bearer)/i;
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function projectRoutingValue(value: unknown, depth = 0): unknown {
+function validateRoutingUrl(key: string | undefined, value: string): void {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return;
+  }
+  if (url.username !== "" || url.password !== "") {
+    throw new Error("OpenCode routing URL contains URL credentials.");
+  }
+  if (key !== undefined && !ROUTING_URL_KEY.test(key) && url.search === "") return;
+  for (const queryKey of url.searchParams.keys()) {
+    if (SECRET_QUERY_KEY.test(queryKey)) {
+      throw new Error("OpenCode routing URL contains a secret query parameter.");
+    }
+  }
+}
+
+function projectRoutingValue(value: unknown, depth = 0, key?: string): unknown {
   if (depth > PROJECTED_CONFIG_DEPTH_LIMIT) {
     throw new Error("OpenCode resolved configuration exceeds the private nesting limit.");
   }
@@ -132,14 +156,73 @@ function projectRoutingValue(value: unknown, depth = 0): unknown {
     typeof value === "number" ||
     typeof value === "boolean"
   ) {
+    if (typeof value === "string") {
+      if (
+        SAFE_SECRET_REFERENCE.test(value) &&
+        (key === undefined || !SENSITIVE_ROUTING_KEY.test(key))
+      ) {
+        throw new Error("OpenCode routing contains an unscoped secret reference.");
+      }
+      validateRoutingUrl(key, value);
+    }
     return value;
   }
-  if (Array.isArray(value)) return value.map((entry) => projectRoutingValue(entry, depth + 1));
+  if (Array.isArray(value)) {
+    return value.map((entry) => projectRoutingValue(entry, depth + 1, key));
+  }
   if (!isRecord(value)) return undefined;
   const projected: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
-    const next = projectRoutingValue(entry, depth + 1);
+    const next = projectRoutingValue(entry, depth + 1, key);
     if (next !== undefined) projected[key] = next;
+  }
+  return projected;
+}
+
+function projectProviderOptions(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  const projected: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    // Provider options are intentionally scalar. Nested objects and arrays are
+    // where arbitrary headers, credentials, and executable configuration hide.
+    if (entry !== null && typeof entry === "object") continue;
+    const next = projectRoutingValue(entry, 0, key);
+    if (next !== undefined) projected[key] = next;
+  }
+  return projected;
+}
+
+function projectProviderModels(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  const modelKeys = new Set([
+    "id",
+    "name",
+    "family",
+    "release_date",
+    "attachment",
+    "reasoning",
+    "temperature",
+    "tool_call",
+    "interleaved",
+    "cost",
+    "limit",
+    "modalities",
+    "experimental",
+    "status",
+    "provider",
+  ]);
+  const projected: Record<string, unknown> = {};
+  for (const [modelId, model] of Object.entries(value)) {
+    if (!isRecord(model)) continue;
+    // Validate the complete model payload before dropping unsupported fields so
+    // oversized or deeply nested resolver output cannot bypass the bounds.
+    projectRoutingValue(model);
+    const projectedModel: Record<string, unknown> = {};
+    for (const key of modelKeys) {
+      const next = projectRoutingValue(model[key], 0, key);
+      if (next !== undefined) projectedModel[key] = next;
+    }
+    projected[modelId] = projectedModel;
   }
   return projected;
 }
@@ -152,7 +235,12 @@ function projectProviders(value: unknown): Record<string, unknown> {
     if (!isRecord(provider)) continue;
     const projectedProvider: Record<string, unknown> = {};
     for (const key of allowedKeys) {
-      const entry = projectRoutingValue(provider[key]);
+      const entry =
+        key === "options"
+          ? projectProviderOptions(provider[key])
+          : key === "models"
+            ? projectProviderModels(provider[key])
+            : projectRoutingValue(provider[key], 0, key);
       if (entry !== undefined) projectedProvider[key] = entry;
     }
     projected[providerId] = projectedProvider;
@@ -161,8 +249,9 @@ function projectProviders(value: unknown): Record<string, unknown> {
 }
 
 function removeRawRoutingSecrets(value: unknown, key?: string): unknown {
-  if (key !== undefined && SENSITIVE_ROUTING_KEY.test(key) && typeof value === "string") {
-    return SAFE_SECRET_REFERENCE.test(value) ? value : undefined;
+  if (key !== undefined && ROUTING_HEADER_KEY.test(key)) return undefined;
+  if (key !== undefined && SENSITIVE_ROUTING_KEY.test(key)) {
+    return typeof value === "string" && SAFE_SECRET_REFERENCE.test(value) ? value : undefined;
   }
   if (Array.isArray(value)) {
     return value
@@ -181,6 +270,14 @@ function removeRawRoutingSecrets(value: unknown, key?: string): unknown {
 /** Projects resolver output to provider/model routing and no executable surfaces. */
 export function projectOpenCodeRuntimeConfig(resolved: unknown): PrivateRuntimeConfig {
   const resolvedRecord = isRecord(resolved) ? resolved : {};
+  const boundedInput = projectRoutingValue(resolvedRecord);
+  const encodedInput = JSON.stringify(boundedInput);
+  if (
+    encodedInput === undefined ||
+    Buffer.byteLength(encodedInput, "utf8") > PROJECTED_CONFIG_LIMIT
+  ) {
+    throw new Error("OpenCode resolved configuration exceeds the private routing limit.");
+  }
   const allowedTopLevel = new Set([
     "$schema",
     "model",
@@ -317,11 +414,12 @@ function versionNumbers(version: string): readonly [number, number, number] | un
 export function supportsOpenCodeIsolation(version: string): boolean {
   const numbers = versionNumbers(version);
   if (numbers === undefined) return false;
-  // The hostile fixture proves the 1.18 line. Future minor releases must
-  // repeat that evidence before they can expose app-managed tools.
+  // The hostile fixture proves this exact release. Other patches and minors
+  // must repeat that evidence before they can expose app-managed tools.
   return (
-    numbers[0] === MINIMUM_ISOLATED_OPEN_CODE_VERSION[0] &&
-    numbers[1] === MINIMUM_ISOLATED_OPEN_CODE_VERSION[1]
+    numbers[0] === ISOLATED_OPEN_CODE_VERSION[0] &&
+    numbers[1] === ISOLATED_OPEN_CODE_VERSION[1] &&
+    numbers[2] === ISOLATED_OPEN_CODE_VERSION[2]
   );
 }
 
