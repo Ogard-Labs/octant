@@ -102,6 +102,7 @@ distilled successor of the earlier long-form design specifications.
 | [0092](0092-the-terminal-reads-the-shell-s-own-configuration.md)             | The terminal reads the shell's own configuration                                            | Accepted           |
 | [0093](0093-app-owned-tools-use-managed-runtime-transports.md)               | App-owned tools use managed runtime transports                                              | Accepted           |
 | [0094](0094-focus-is-quiet-selection-carries-state.md)                       | Focus is quiet; selection carries state                                                     | Accepted           |
+| [0095](0095-bundled-provider-logo-marks.md)                                  | Bundled provider logo marks stay offline and licensed                                       | Accepted           |
 
 ## Adding an ADR
 

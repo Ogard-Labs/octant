@@ -1,6 +1,7 @@
 import type { ProviderDriverKind } from "@octant/contracts";
 import { providerGlyphColorForKind } from "@octant/theme";
 import type { ReactNode } from "react";
+import { PROVIDER_LOGOS } from "./providerLogoPaths";
 
 export interface ProviderGlyphProps {
   readonly driverKind: ProviderDriverKind | string;
@@ -11,6 +12,7 @@ export interface ProviderGlyphProps {
 
 interface GlyphSpec {
   readonly mark: ReactNode;
+  readonly viewBox?: string;
 }
 
 // Original abstract marks, one per driver kind. All draw on a 16×16 grid with
@@ -184,7 +186,7 @@ export function providerGlyphColor(driverKind: string): string {
 
 export function ProviderGlyph(props: ProviderGlyphProps) {
   const size = props.size ?? 16;
-  const spec = GLYPHS[props.driverKind];
+  const spec = PROVIDER_LOGOS[props.driverKind] ?? GLYPHS[props.driverKind];
   const className = `provider-glyph${props.className === undefined ? "" : ` ${props.className}`}`;
   if (spec === undefined) {
     return (
@@ -206,7 +208,7 @@ export function ProviderGlyph(props: ProviderGlyphProps) {
       focusable="false"
       height={size}
       style={{ color: providerGlyphColor(props.driverKind) }}
-      viewBox="0 0 16 16"
+      viewBox={spec.viewBox ?? "0 0 16 16"}
       width={size}
     >
       {spec.mark}

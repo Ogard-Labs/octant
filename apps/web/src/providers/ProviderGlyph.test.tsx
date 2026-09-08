@@ -42,4 +42,26 @@ describe("ProviderGlyph", () => {
     expect(glyph).toHaveAttribute("data-driver-kind", "ideogram-image");
     expect(container.querySelector(".provider-glyph--monogram")).toBeNull();
   });
+
+  it.each([
+    ["claude", "Claude Code"],
+    ["codex", "Codex CLI"],
+    ["devin", "Devin ACP"],
+    ["grok", "Grok Build"],
+    ["kilo", "Kilo ACP"],
+    ["kimi-code", "Kimi Code CLI"],
+    ["mistral-vibe", "Mistral Vibe ACP"],
+    ["opencode", "OpenCode CLI"],
+    ["pi", "Pi RPC"],
+    ["copilot", "GitHub Copilot"],
+  ] as const)("uses a bundled brand mark for %s", (driverKind, displayName) => {
+    const { container } = render(
+      <ProviderGlyph displayName={displayName} driverKind={driverKind} size={16} />,
+    );
+
+    const glyph = container.querySelector("svg.provider-glyph");
+    expect(glyph).toHaveAttribute("viewBox");
+    expect(glyph).not.toHaveAttribute("viewBox", "0 0 16 16");
+    expect(glyph?.querySelector("path")).toHaveAttribute("fill", "currentColor");
+  });
 });
