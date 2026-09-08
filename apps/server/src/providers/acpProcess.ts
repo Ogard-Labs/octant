@@ -143,6 +143,30 @@ function canonicalExistingDirectory(
   });
 }
 
+function canonicalExistingReadPaths(
+  profile: AcpProviderProfile,
+): Effect.Effect<ReadonlyArray<string>, ProviderFailure> {
+  return Effect.try({
+    try: () => {
+      const paths: string[] = [];
+      for (const path of profile.process.hostReadPaths ?? []) {
+        if (!isAbsolute(path) || resolve(path) !== path) throw new Error();
+        if (!existsSync(path)) continue;
+        const canonical = realpathSync(path);
+        const metadata = statSync(canonical);
+        if (!metadata.isFile() && !metadata.isDirectory()) throw new Error();
+        paths.push(canonical);
+      }
+      return [...new Set(paths)];
+    },
+    catch: () =>
+      failure(
+        "invalid-configuration",
+        `${profile.displayName} user-owned configuration path is not safe to read.`,
+      ),
+  });
+}
+
 function canonicalManagedDirectory(
   path: string,
   label: string,
@@ -301,6 +325,17 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
         const name = profile.displayName;
         const invalidBinary = validateBinaryPath(profile, input.binaryPath);
         if (invalidBinary !== undefined) return yield* Effect.fail(invalidBinary);
+        if (
+          profile.process.requiresChildServer === true &&
+          (input.mode === "chat" || input.executionPolicy === "plan")
+        ) {
+          return yield* Effect.fail(
+            failure(
+              "incompatible",
+              `${profile.displayName} cannot run in Chat or Plan mode because its ACP entrypoint requires a child server; use Code or Work mode.`,
+            ),
+          );
+        }
         const managedHome = yield* canonicalManagedDirectory(
           input.managedHome,
           `${name} managed home`,
@@ -423,6 +458,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           managedHome,
           options.hostAuthenticationPath,
         );
+        const hostReadPaths = yield* canonicalExistingReadPaths(profile);
         yield* writeManagedFiles(profile, { managedHome, executionPolicy: input.executionPolicy });
         const root =
           input.root === input.managedHome
@@ -466,6 +502,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 root,
                 managedHome,
                 ...hostAuthentication.readPaths,
+                ...hostReadPaths,
                 binaryDirectory,
                 binaryRuntimeDirectory,
                 configuredBinaryDirectory,
@@ -475,6 +512,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 root,
                 managedHome,
                 ...hostAuthentication.readPaths,
+                ...hostReadPaths,
                 binaryRuntimeDirectory,
                 configuredBinaryDirectory,
               ],

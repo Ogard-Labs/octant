@@ -105,6 +105,7 @@ distilled successor of the earlier long-form design specifications.
 | [0095](0095-bundled-provider-logo-marks.md)                                  | Bundled provider logo marks stay offline and licensed                                       | Accepted           |
 
 | [0096](0096-settings-editors-share-the-page-layout.md) | Settings editors share the page layout | Accepted |
+| [0097](0097-opencode2-uses-http-discovery-and-acp-turns.md) | OpenCode 2 uses HTTP discovery and ACP turns | Accepted |
 
 ## Adding an ADR
 

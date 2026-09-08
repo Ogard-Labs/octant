@@ -28,6 +28,7 @@ const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeAcpAgent.py", import.m
 const directories: string[] = [];
 
 const kilo = acpProviderProfiles.kilo;
+const opencode = acpProviderProfiles.opencode;
 const devin = acpProviderProfiles.devin;
 const vibe = acpProviderProfiles["mistral-vibe"];
 const kimi = acpProviderProfiles["kimi-code"];
@@ -38,11 +39,14 @@ const gemini = acpProviderProfiles.gemini;
 const copilot = acpProviderProfiles.copilot;
 const cline = acpProviderProfiles.cline;
 const qwen = acpProviderProfiles.qwen;
-const profiles = Object.values(acpProviderProfiles);
+const profiles = Object.values(acpProviderProfiles).filter(
+  (profile) => profile.kind !== "opencode",
+);
 const denyDefaultProfiles = [kilo, devin, vibe, grok, goose, glm, gemini, copilot, cline, qwen];
 
 /** `--version` outputs per profile: [ready, too-old, malformed]. */
 const versionOutputs: Record<AcpProviderProfile["kind"], readonly [string, string, string]> = {
+  opencode: ["opencode2 v0.0.0-beta-18721", "opencode2 v0.0.0-beta-18720", "opencode2 preview"],
   kilo: ["7.4.11", "0.9.9", "kilo release 7.4.11 extra"],
   devin: ["devin 3000.1.27 (0d4bf12e)", "devin 3000.1.26 (0d4bf12e)", "devin release 3000.1.27"],
   "mistral-vibe": ["vibe-acp 2.24.1", "vibe-acp 2.24.0", "mistral vibe release 2.24.1 extra"],
@@ -64,6 +68,7 @@ const versionOutputs: Record<AcpProviderProfile["kind"], readonly [string, strin
   qwen: ["0.23.0", "0.22.9", "qwen-code release 0.23.0 private-noise"],
 };
 const readyVersions: Record<AcpProviderProfile["kind"], string> = {
+  opencode: "0.0.0",
   kilo: "7.4.11",
   devin: "3000.1.27",
   "mistral-vibe": "2.24.1",
@@ -437,6 +442,100 @@ describe("ACP process lifecycle", () => {
       await expect.poll(() => pids.every((pid) => !isRunning(pid)), { timeout: 3_000 }).toBe(true);
     },
   );
+});
+
+describe("ACP child-server profiles", () => {
+  it("describes the beta OpenCode ACP launch and keeps structured questions unsupported", () => {
+    expect(opencode.process.args({ root: "/tmp/project", managedHome: "/tmp/managed" })).toEqual([
+      "acp",
+    ]);
+    expect(opencode.process.versionPattern.test("opencode2 v0.0.0-beta-18721")).toBe(true);
+    expect(opencode.userQuestions).toBe("unsupported");
+    const environment = sanitizeAcpEnvironment(
+      opencode,
+      { PATH: "/usr/bin" },
+      { managedHome: "/tmp/managed" },
+    );
+    const expectedConfig =
+      [
+        join(homedir(), ".config/opencode/opencode.jsonc"),
+        join(homedir(), ".config/opencode/opencode.json"),
+      ].find((path) => existsSync(path)) ?? join(homedir(), ".config/opencode/opencode.jsonc");
+    expect(environment).toMatchObject({
+      OPENCODE_CONFIG: expectedConfig,
+      OPENCODE_CONFIG_DIR: "/tmp/managed/config",
+      OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1",
+      OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
+      OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
+      OPENCODE_PURE: "1",
+    });
+    expect(JSON.parse(environment.OPENCODE_CONFIG_CONTENT ?? "{}")).toMatchObject({
+      permissions: expect.arrayContaining([
+        { action: "external_directory", effect: "deny", resource: "*" },
+        { action: "skill", effect: "deny", resource: "*" },
+      ]),
+    });
+  });
+
+  it("refuses chat and plan before spawning a nested OpenCode server", async () => {
+    const target = fixture(opencode);
+    const confinement = makeAcpConfinementLive({
+      platform: "darwin",
+      sandboxPath: target.sandboxPath,
+      temporaryDirectory: join(target.canonicalRoot, "tmp"),
+      hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+    });
+    for (const [mode, executionPolicy] of [
+      ["chat", "approval-gated"],
+      ["code", "plan"],
+    ] as const) {
+      const result = await failureOf(
+        confinement.prepare({
+          profile: opencode,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome: join(target.canonicalRoot, "managed-home"),
+          mode,
+          executionPolicy,
+          environment: { PATH: "/usr/bin" },
+        }),
+      );
+      expect(result).toEqual({
+        category: "incompatible",
+        message:
+          "OpenCode 2 cannot run in Chat or Plan mode because its ACP entrypoint requires a child server; use Code or Work mode.",
+      });
+    }
+  });
+
+  it("reads the existing user configuration without granting it write access", async () => {
+    const target = fixture(opencode);
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+      }).prepare({
+        profile: opencode,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome: join(target.canonicalRoot, "managed-home"),
+        mode: "code",
+        executionPolicy: "approval-gated",
+        environment: { PATH: "/usr/bin" },
+      }),
+    );
+    const hostConfigs = [
+      join(homedir(), ".config/opencode/opencode.jsonc"),
+      join(homedir(), ".config/opencode/opencode.json"),
+    ].filter((path) => existsSync(path));
+    for (const hostConfig of hostConfigs) {
+      const canonical = realpathSync(hostConfig);
+      expect(launch.args[1]).toContain(`(allow file-read* (subpath "${canonical}"))`);
+      expect(launch.args[1]).not.toContain(`(allow file-write* (subpath "${canonical}"))`);
+    }
+  });
 });
 
 describe.each(denyDefaultProfiles)("ACP deny-default confinement ($displayName)", (profile) => {

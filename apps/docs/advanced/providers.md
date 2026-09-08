@@ -62,11 +62,19 @@ Ollama, Kimi Code ACP, Grok Build ACP, Goose ACP, GLM Agent, Gemini CLI ACP,
 GitHub Copilot ACP, Cline ACP, and Qwen Code ACP.
 
 The beta `opencode2` executable appears separately as **OpenCode 2 preview**.
-Octant can discover it and run a bounded loopback health check, but keeps its
-provider catalog and thread sessions unavailable until the runtime can carry
-Octant's per-session permission rules. This preview status is explicit; it
-never falls back to an unconfined session or treats the beta version as the
-legacy OpenCode runtime.
+Octant uses its bounded loopback HTTP API to discover the provider catalog and
+models, then uses the executable's ACP transport for Code and Work sessions.
+The ACP path carries `session/request_permission`, model and mode selection,
+streaming updates, resume, and cancellation through the shared ACP driver. Chat
+and Plan sessions stay unavailable because the beta `acp` entrypoint starts a
+same-binary server child and those modes do not grant process-spawn authority.
+Octant never falls back to an unconfined session or treats the beta version as
+the legacy OpenCode runtime. App-managed browser tools remain a separate
+capability and are not implied by this ACP transport.
+The launch keeps the user's existing global OpenCode config readable while
+writing runtime cache, state, and temporary files under Octant's managed home;
+the provider-owned auth directory is the only host data path with write access.
+Custom plugins and discovered skills are suppressed for the ACP child process.
 
 ### API endpoints
 

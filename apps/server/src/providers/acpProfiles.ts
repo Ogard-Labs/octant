@@ -8,6 +8,7 @@
  * guards, managed-home layout, Seatbelt strategy, ACP mode mapping, and
  * capability quirks. Everything else is shared behavior.
  */
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ProviderDriverKind, ProviderExecutionPolicy } from "@octant/contracts";
@@ -16,6 +17,7 @@ import type { AcpInitializeResult } from "./acpProtocol";
 export type AcpProviderKind = Extract<
   ProviderDriverKind,
   | "kilo"
+  | "opencode"
   | "devin"
   | "mistral-vibe"
   | "kimi-code"
@@ -80,6 +82,10 @@ export interface AcpProcessProfile {
   readonly npmPackageName?: string;
   readonly passthroughVariables: ReadonlyArray<string>;
   readonly guards: Readonly<Record<string, string>>;
+  /** User-owned configuration files the provider needs to read, never write. */
+  readonly hostReadPaths?: ReadonlyArray<string>;
+  /** The CLI starts a same-binary stdio server before serving ACP messages. */
+  readonly requiresChildServer?: boolean;
   readonly environment: (input: {
     readonly managedHome: string;
     readonly executionPolicy: ProviderExecutionPolicy;
@@ -155,6 +161,79 @@ const HOST_PASSTHROUGH_VARIABLES: ReadonlyArray<string> = [
   "TZ",
   "USER",
 ];
+
+function opencodeConfiguration(executionPolicy: ProviderExecutionPolicy) {
+  const sideEffects = executionPolicy === "full-access" ? "allow" : "ask";
+  return {
+    permissions: [
+      { action: "read", resource: "*", effect: "allow" },
+      { action: "edit", resource: "*", effect: sideEffects },
+      { action: "shell", resource: "*", effect: sideEffects },
+      { action: "external_directory", resource: "*", effect: "deny" },
+      { action: "skill", resource: "*", effect: "deny" },
+      { action: "question", resource: "*", effect: "deny" },
+    ],
+  } as const;
+}
+
+const opencodeGlobalConfigPaths = [
+  join(homedir(), ".config/opencode/opencode.jsonc"),
+  join(homedir(), ".config/opencode/opencode.json"),
+] as const;
+
+function opencodeGlobalConfigPath(): string {
+  return opencodeGlobalConfigPaths.find((path) => existsSync(path)) ?? opencodeGlobalConfigPaths[0];
+}
+
+const opencodeProfile: AcpProviderProfile = {
+  kind: "opencode",
+  displayName: "OpenCode 2",
+  reasoningOptionId: "effort",
+  sessionMode: (_mode, policy) => (policy === "plan" ? "plan" : "build"),
+  chatSessionRoot: "project-root",
+  userQuestions: "unsupported",
+  resumeMethod: "session/resume",
+  closesSessions: true,
+  authenticateOnProbe: false,
+  authentication: { kind: "provider-owned" },
+  unauthenticatedMessage: "OpenCode 2 is not authenticated. Run opencode2 auth login, then retry.",
+  process: {
+    agentName: "OpenCode",
+    versionPattern:
+      /^opencode2 v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\r?\n?$/,
+    minimumVersion: [0, 0, 0],
+    passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    requiresChildServer: true,
+    hostReadPaths: opencodeGlobalConfigPaths,
+    guards: {
+      NO_COLOR: "1",
+      OPENCODE_DISABLE_AUTOUPDATE: "1",
+      OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
+      OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
+      OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1",
+      OPENCODE_DISABLE_LSP_DOWNLOAD: "1",
+      OPENCODE_DISABLE_TERMINAL_TITLE: "1",
+      OPENCODE_PURE: "1",
+    },
+    environment: ({ executionPolicy, managedHome }) => ({
+      OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfiguration(executionPolicy)),
+      OPENCODE_CONFIG: opencodeGlobalConfigPath(),
+      OPENCODE_CONFIG_DIR: join(managedHome, "config"),
+      XDG_CACHE_HOME: join(managedHome, "cache"),
+      XDG_CONFIG_HOME: join(managedHome, "config"),
+      XDG_STATE_HOME: join(managedHome, "state"),
+      TMPDIR: join(managedHome, "tmp"),
+    }),
+    args: () => ["acp"],
+    managedFiles: () => [],
+    hostAuthentication: {
+      kind: "directory",
+      defaultPath: join(homedir(), ".local/share/opencode"),
+      loginHint: "Run opencode2 auth login, then retry.",
+    },
+    confinement: { kind: "deny-default-seatbelt" },
+  },
+};
 
 function kiloConfiguration(executionPolicy: ProviderExecutionPolicy) {
   const permission =
@@ -805,6 +884,7 @@ const kimiProfile: AcpProviderProfile = {
 };
 
 export const acpProviderProfiles: Readonly<Record<AcpProviderKind, AcpProviderProfile>> = {
+  opencode: opencodeProfile,
   kilo: kiloProfile,
   devin: devinProfile,
   "mistral-vibe": vibeProfile,
