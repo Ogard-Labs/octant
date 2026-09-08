@@ -167,13 +167,14 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   code: "Defaults for Code threads and delivery.",
   "navigator-assistant": "The models Navigator uses to converse and to review images.",
   voice: "The providers that turn speech into text and text into speech.",
-  "image-generation":
-    "Pick an already-connected provider and model to also generate images. Add the provider itself, with its endpoint and key, under Providers & Models first.",
+  "image-generation": "Choose connected providers and models for image generation.",
   providers: "Connect providers, manage authentication, and pick default models.",
   profiles: "Reusable execution profiles for agent runs.",
   agents: "How agent runs behave in this app.",
   harness: "Octant's own agent loop for API-key and local models: which model does which job.",
   skills: "Skills and extensions available to agents.",
+  github: "Connection and repository access on the selected host.",
+  host: "Host status, local storage, and recovery.",
   usage: "Activity and usage across providers.",
   advanced: "Layout resets and diagnostics.",
 };

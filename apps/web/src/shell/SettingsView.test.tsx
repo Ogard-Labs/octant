@@ -699,18 +699,14 @@ describe("SettingsView", () => {
     expect(styles).toMatch(/\.settings-scheme__card\s*\{[^}]*height:\s*auto;/);
   });
 
-  it("keeps routine Settings groups open while discrete objects remain raised", () => {
+  it("keeps preference sections and inline editors on the flat page ground", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 
     expect(styles).toMatch(
       /\.settings-view\s*\{[\s\S]*background:\s*var\(--octant-app-background\)/,
     );
-    expect(styles).toMatch(
-      /\.settings-card-section\s*\{[\s\S]*background:\s*var\(--octant-settings-card\)/,
-    );
-    expect(styles).toMatch(
-      /\.settings-card-section\s*\{[\s\S]*box-shadow:\s*var\(--octant-shadow-sm\)/,
-    );
+    expect(styles).toMatch(/\.settings-card-section\s*\{[^}]*background:\s*transparent/);
+    expect(styles).toMatch(/\.settings-card-section\s*\{[^}]*box-shadow:\s*none/);
     expect(styles).toMatch(/\.settings-card-section--open\s*\{[\s\S]*box-shadow:\s*none/);
     expect(styles).toContain("border-radius: var(--oct-radius-md)");
     // Code defaults are SettingRows in the shared open sections; there is no

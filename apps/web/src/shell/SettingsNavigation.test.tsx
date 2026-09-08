@@ -59,7 +59,7 @@ describe("SettingsNavigation", () => {
       /\.settings-navigation \.setnav-item,\s*\.settings-view__back\s*\{[^}]*border-radius:\s*var\(--oct-radius-sm\);/s,
     );
     expect(settingsStyles).toMatch(
-      /\.setgroup\s*\{[^}]*border-radius:\s*var\(--oct-radius-md\);[^}]*box-shadow:\s*var\(--octant-shadow-sm\);/s,
+      /\.setgroup\s*\{[^}]*border-radius:\s*0;[^}]*box-shadow:\s*none;/s,
     );
     expect(settingsStyles).toMatch(/\.settings-panel\s*\{[^}]*box-shadow:\s*none;/s);
     expect(settingsStyles).toMatch(/\.settings-panel\s*\{[^}]*background:\s*transparent;/s);

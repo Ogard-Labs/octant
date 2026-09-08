@@ -31,12 +31,12 @@ describe("right sidebar tool launcher", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Add tool" }));
-    expect(screen.getByRole("button", { name: "New Terminal" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Terminal" })).toBeVisible();
 
     // Left open over whatever comes next, the reader's following click is spent
     // dismissing the menu rather than doing what they clicked.
     fireEvent.pointerDown(screen.getByRole("button", { name: "Elsewhere" }));
-    expect(screen.queryByRole("button", { name: "New Terminal" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Terminal" })).not.toBeInTheDocument();
   });
 
   it("offers the pull requests this task is already about, not just tool kinds", () => {
@@ -94,7 +94,7 @@ describe("right sidebar tool launcher", () => {
     expect(trigger).toHaveTextContent("");
     fireEvent.click(trigger);
     expect(screen.getByRole("button", { name: "New Browser" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "New Terminal" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Terminal" })).toBeVisible();
     expect(screen.getByRole("button", { name: "iOS Simulator" })).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "iOS Simulator" }));

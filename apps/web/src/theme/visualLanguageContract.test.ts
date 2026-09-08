@@ -336,7 +336,7 @@ describe("the public-block visual language", () => {
     expect(legend).toMatch(/font-size:\s*var\(--oct-text-sm\)/);
   });
 
-  it("uses open Settings groups for routine controls and raised cards for discrete objects", () => {
+  it("uses the open layout for Settings groups and inline editors", () => {
     const settings = readFileSync(join(webRoot, "styles/settings.css"), "utf8");
 
     expect(settings).toMatch(
@@ -344,9 +344,7 @@ describe("the public-block visual language", () => {
     );
     expect(settings).toMatch(/--oct-settings-reading-width:\s*680px/);
     expect(settings).toMatch(/\.settings-view__content-inner\s*\{[^}]*margin:\s*0/);
-    expect(settings).toMatch(
-      /\.settings-card-section\s*\{[^}]*box-shadow:\s*var\(--octant-shadow-sm\)/,
-    );
+    expect(settings).toMatch(/\.settings-card-section\s*\{[^}]*box-shadow:\s*none/);
     expect(settings).toMatch(
       /\.settings-card-section--open\s*\{[^}]*background:\s*transparent[^}]*box-shadow:\s*none/,
     );

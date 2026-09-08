@@ -1035,11 +1035,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                             <TrackerReferenceText asParagraph text={message.text} />
                           ) : null}
                         </div>
-                        {message.at === undefined ? null : <TurnTime at={message.at} />}
+                        {message.at === undefined ? null : (
+                          <TurnTime at={message.at} copyValue={message.text} />
+                        )}
                       </>
                     ) : (
                       <>
                         <TurnHeader
+                          copyValue={message.text}
                           outcome={turnHeaderOutcome(message.status)}
                           provider={
                             message.providerInstanceId === undefined ||
@@ -1540,7 +1543,7 @@ function codeTurnActions(input: {
       ...(input.restoring ? { disabled: true } : {}),
     });
   }
-  actions.push({ label: "Copy references", value: "copy-references" });
+  actions.push({ label: "Copy message", value: "copy-references" });
   return actions;
 }
 

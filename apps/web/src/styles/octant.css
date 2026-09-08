@@ -4141,7 +4141,7 @@ input.switch:checked::after {
   gap: var(--oct-space-2);
   padding: var(--oct-space-3) var(--oct-composer-gutter) 0;
 }
-.composer-attachment-input {
+.composer-attachment-input[hidden] {
   display: none;
 }
 .composer-input {
@@ -7059,13 +7059,13 @@ input.switch:checked::after {
 .prov-meta {
   display: block;
   margin-top: 1px;
-  font-family: var(--oct-font-mono);
+  font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   color: var(--oct-meta);
   overflow-wrap: anywhere;
 }
 .prov-models {
-  font-family: var(--oct-font-mono);
+  font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   color: var(--oct-meta);
   font-variant-numeric: tabular-nums;

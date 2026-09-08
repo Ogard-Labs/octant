@@ -141,6 +141,31 @@ describe("ProviderSettingsView", () => {
     expect(screen.getByRole("button", { name: "Check connection for Existing CLI" })).toBeVisible();
   });
 
+  it("preserves an expanded model filter while provider discovery refreshes the registry", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ observed: observation() });
+    const view = renderProviderSettings(<ProviderSettingsView {...props} />);
+    await user.click(screen.getByRole("button", { name: "Details for Existing CLI" }));
+    const filter = screen.getByRole("textbox", { name: "Filter Existing CLI models" });
+    await user.type(filter, "Model");
+
+    view.rerender(<ProviderSettingsView {...props} status="loading" />);
+    expect(screen.getByRole("textbox", { name: "Filter Existing CLI models" })).toBe(filter);
+    expect(filter).toHaveValue("Model");
+    expect(filter).toHaveFocus();
+    expect(
+      screen.getByRole("button", { name: "Check connection for Existing CLI" }),
+    ).toBeDisabled();
+
+    view.rerender(<ProviderSettingsView {...props} />);
+    expect(filter).toHaveValue("Model");
+    expect(filter).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Details for Existing CLI" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
   it("creates, edits, toggles, probes, and removes through accessible controls", async () => {
     const user = userEvent.setup();
     const props = fixture();
@@ -1715,7 +1740,13 @@ describe("ProviderSettingsView", () => {
   it("hides an observed model from new pickers while keeping its Settings toggle reversible", async () => {
     const user = userEvent.setup();
     const props = fixture({ observed: observation() });
-    const rendered = renderExpanded(<ProviderSettingsView {...props} />);
+    const rendered = renderProviderSettings(<ProviderSettingsView {...props} />);
+
+    await user.click(screen.getByRole("button", { name: "Details for Existing CLI" }));
+    expect(screen.getByRole("button", { name: "Configure Existing CLI" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
 
     const filter = screen.getByRole("textbox", { name: /Filter .* models/ });
     await user.type(filter, "missing model");

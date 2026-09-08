@@ -2254,9 +2254,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   resize: vertical;
 }
 
-.provider-settings__alert,
-.provider-card__guidance,
-.provider-card__authority-note {
+.provider-settings__alert {
   padding: 10px 12px;
   color: var(--octant-text-secondary);
   background: var(--octant-control);
@@ -2266,10 +2264,17 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   line-height: 1.45;
 }
 
+.provider-card__guidance,
+.provider-card__authority-note {
+  margin: 0;
+  padding: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  line-height: 1.45;
+}
+
 .provider-card__authority-note {
   color: var(--octant-text-muted);
-  background: color-mix(in srgb, var(--octant-control) 75%, transparent);
-  border-color: var(--octant-border);
 }
 
 /* The form is rows in the open section, not a raised card inside it. */
@@ -2399,20 +2404,24 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   transform: rotate(180deg);
 }
 
-/* A provider instance's expanded setup and auth panel is the one discrete
-   object in the list (0072): it takes the raised recipe under its open row. */
+/* Expanded preferences share the row edge; only floating overlays are raised. */
 .prov-details {
   display: grid;
   gap: 12px;
   grid-column: 1 / -1;
-  margin: var(--oct-space-3) 0 var(--oct-space-1);
-  padding: var(--oct-space-4);
-  background: var(--octant-settings-card);
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-sm);
+  margin: 0 0 var(--oct-space-3);
+  padding: var(--oct-space-3) 0 0 36px;
+  min-width: 0;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 @media (max-width: 560px) {
+  .prov-details {
+    padding-inline-start: 0;
+  }
+
   .provrow > .prov-actions {
     grid-area: 1 / 3;
     justify-self: end;
@@ -2424,13 +2433,14 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--oct-space-2);
 }
 
 .provider-card__facts {
   margin-top: 3px;
   color: var(--octant-text-muted);
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
 }
 
 .provider-card__facts span:not(:last-child)::after {
@@ -2448,7 +2458,9 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .provider-card__configuration {
   display: grid;
-  gap: 12px;
+  gap: var(--oct-space-4);
+  padding-top: var(--oct-space-3);
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .provider-card__configuration[data-expanded="false"] {
@@ -2478,7 +2490,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .provider-card__discovery h4 {
-  margin-bottom: 8px;
+  margin: 0 0 var(--oct-space-2);
 }
 
 .provider-card__discovery ul {
@@ -5729,7 +5741,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
      jump under the pointer. A stable height costs some empty space on short
      lists and buys a menu that holds still. The list pane scrolls. */
   height: min(56vh, 420px);
-  max-height: calc(100dvh - 24px);
+  max-height: min(calc(100dvh - 24px), var(--available-height, 420px));
   padding: 0;
   overflow: hidden;
   background: var(--octant-surface);

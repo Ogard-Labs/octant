@@ -24,10 +24,53 @@ Environment, activity preview, thread navigation, and pull request surfaces.
 It also uses the supplied screenshots and the native inspection performed
 before the Mac was locked.
 
-Final rendered verification is pending. The lock screen prevents native and
-browser UI inspection, so source and component-test evidence below must not
-be treated as final visual acceptance. In particular, native transparency,
-physical title-bar clicks, and popup collision behavior need an unlocked Mac.
+A follow-up rendered review on 8 September covered all 17 available Settings
+destinations in the local browser client, including expanded provider and
+profile forms. That review found and corrected full-page model catalogs in
+Chat/Navigator, inherited scroll on page navigation, and boxed harness slots.
+Native transparency and physical title-bar clicks remain separate native QA;
+this Settings pass does not establish those results.
+
+## Settings follow-up
+
+- Shared preference sections and inline provider editors now use the flat page
+  ground, a common reading edge, and hairline rows. Compact Save buttons retain
+  provider-specific accessible names. Theme previews and actual review dialogs
+  keep their meaningful boundaries.
+- Model visibility is available after expanding a provider. It remains
+  reversible, and hiding the last model no longer triggers automatic discovery
+  and a Settings remount.
+- Chat and Navigator use the shared compact chooser, rather than rendering the
+  entire model catalog inside the page.
+- Settings navigation resets only on a section change; model updates preserve
+  the current scroll, while deep links retain their focused destination.
+- All original Settings capabilities, user themes, backgrounds, and profiles
+  remain available. Destructive and permission-related controls were not used
+  during visual review.
+
+## Rendered follow-up evidence
+
+- All 17 available Settings destinations were inspected in the local browser
+  client. General profile fields, provider configuration, model lists, and
+  narrow navigation were checked in expanded states.
+- The shared picker held the same 560 × 403 px bounds at a 1280 × 720 viewport
+  while switching between 5-model and 237-model catalogs and while searching.
+  The 760 px layout uses the Settings drawer and a viewport-bounded popup.
+- A live model hide/restore preserved the expanded provider and its filter text.
+  The model was restored. A separate regression covers focus preservation while
+  discovery refreshes the provider registry.
+- Changing Settings sections resets the content scroll to zero. Deep links
+  retain their requested row, and ordinary model updates do not reset scroll.
+- Thread context menus now use aligned icons, compact 26 px rows, a 248 px
+  width, and grouped Copy actions. The rendered main menu is approximately
+  323 px high for the current thread; submenus reuse its row recipe.
+- Message timestamp and copy controls reveal together on hover or keyboard
+  focus, preserving a 28 px reserved row. Touch and increased-contrast layouts
+  keep them visible. Code calls its secondary action Copy message; Chat calls
+  its combined turn/attachment/citation copy Copy turn with sources.
+- Provider marks are bundled with source metadata and distribution notices.
+  Generic compatibility endpoints remain generic. Background and theme options
+  remain available, including explicitly selected tinted presets.
 
 ## Surface assessment
 

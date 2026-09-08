@@ -140,6 +140,7 @@ const WORK_TRANSCRIPT_RECONNECTING_MESSAGE = "Work transcript is reconnecting.";
  * turn ended without one.
  */
 function WorkTurnHeader(props: {
+  readonly copyValue?: string;
   readonly turn: WorkTurnState;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
 }) {
@@ -148,6 +149,7 @@ function WorkTurnHeader(props: {
   return (
     <TurnHeader
       at={props.turn.updatedAt}
+      copyValue={props.copyValue}
       outcome={outcome}
       provider={providerModelLabel(props.providerGroups, props.turn.authority)}
       {...(workedFor === undefined ? {} : { workedFor })}
@@ -1030,7 +1032,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   <div className="bubble">
                     <TrackerReferenceText asParagraph text={row.entry.text} />
                   </div>
-                  {row.at === undefined ? null : <TurnTime at={row.at} />}
+                  {row.at === undefined ? null : (
+                    <TurnTime at={row.at} copyValue={row.entry.text} />
+                  )}
                 </article>
               );
             }
@@ -1039,7 +1043,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             return (
               <article aria-label="Assistant message" className="turn-agent">
                 {row.head === undefined ? null : (
-                  <WorkTurnHeader providerGroups={props.providerGroups ?? []} turn={row.head} />
+                  <WorkTurnHeader
+                    copyValue={row.entry.text}
+                    providerGroups={props.providerGroups ?? []}
+                    turn={row.head}
+                  />
                 )}
                 {row.entry.text === "" ? null : <ChatRichText body={row.entry.text} />}
               </article>

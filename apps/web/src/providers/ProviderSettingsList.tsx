@@ -136,7 +136,8 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
     void props.onProviderOrderChange(reordered.map((instance) => instance.id));
   }
 
-  return props.status !== "ready" ? null : (
+  const busy = props.busy || props.status !== "ready";
+  return props.status !== "ready" && ordered.length === 0 ? null : (
     <>
       <section
         aria-label="Providers"
@@ -179,7 +180,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
           <div className="provlist">
             {ordered.map((instance, index) => (
               <ProviderRow
-                busy={props.busy}
+                busy={busy}
                 count={ordered.length}
                 credentialManagementAvailable={props.credentialManagementAvailable}
                 index={index}
@@ -240,7 +241,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
       {ordered.length === 0 ? null : (
         <AgentEligibleModelsControls
           agentEligibleModels={props.defaults.agentEligibleModels}
-          busy={props.busy}
+          busy={busy}
           instances={props.instances}
           observedByInstance={props.observedByInstance}
           onAgentEligibleModelsChange={props.onAgentEligibleModelsChange}
@@ -564,11 +565,11 @@ function ProviderRow(props: ProviderRowProps) {
       </span>
       <span className="prov-main">
         <span className="prov-name oct-row-label">{name}</span>
-        <span className="prov-meta oct-meta oct-meta--mono">
+        <span className="prov-meta oct-meta">
           {label} {runtimeLabel}
         </span>
       </span>
-      <span className="prov-models oct-meta oct-meta--mono">
+      <span className="prov-models oct-meta">
         {props.observed === undefined ||
         (props.observed.models.length === 0 && props.observed.readiness !== "ready")
           ? null
@@ -892,23 +893,21 @@ function ProviderRow(props: ProviderRowProps) {
           isPi ||
           isOhMyPi ? (
             <p className="provider-card__authority-note">
-              “Remember for this Project” cannot create persistent provider authority, so approvals
-              stay one-shot. Select “Current session only” to allow a supported approval for the
-              current session.
+              Provider approvals stay one-shot. Use “Current session only”; “Remember for this
+              Project” does not extend provider authority.
             </p>
           ) : null}
           <div className="provider-card__actions">
             {isImageProfile ? null : (
               <OctantButton
+                aria-label={`Check connection for ${props.instance.displayName}`}
                 disabled={disabled || !props.instance.enabled}
                 onClick={() => void props.onProbe(props.instance.id)}
                 size="sm"
                 type="button"
                 variant="outline"
               >
-                {props.probing
-                  ? "Checking connection…"
-                  : `Check connection for ${props.instance.displayName}`}
+                {props.probing ? "Checking…" : "Check connection"}
               </OctantButton>
             )}
             <OctantButton
@@ -927,13 +926,14 @@ function ProviderRow(props: ProviderRowProps) {
               />
             </OctantButton>
             <OctantButton
+              aria-label={`Remove ${props.instance.displayName}`}
               disabled={disabled || (usesCredential && !props.credentialManagementAvailable)}
               onClick={() => void props.onRemove(props.instance.id)}
               size="sm"
               type="button"
               variant="destructive"
             >
-              Remove {props.instance.displayName}
+              Remove
             </OctantButton>
           </div>
           {configurationOpen ? (
@@ -962,8 +962,14 @@ function ProviderRow(props: ProviderRowProps) {
                     required
                   />
                 </label>
-                <OctantButton disabled={disabled} type="submit">
-                  Save name for {props.instance.displayName}
+                <OctantButton
+                  disabled={disabled}
+                  type="submit"
+                  variant="outline"
+                  size="sm"
+                  aria-label={`Save name for ${props.instance.displayName}`}
+                >
+                  Save
                 </OctantButton>
               </form>
               {isCli ? (
@@ -990,8 +996,14 @@ function ProviderRow(props: ProviderRowProps) {
                       required
                     />
                   </label>
-                  <OctantButton disabled={disabled} type="submit">
-                    Save binary path for {props.instance.displayName}
+                  <OctantButton
+                    disabled={disabled}
+                    type="submit"
+                    variant="outline"
+                    size="sm"
+                    aria-label={`Save binary path for ${props.instance.displayName}`}
+                  >
+                    Save
                   </OctantButton>
                 </form>
               ) : isClaude ? (
@@ -1186,90 +1198,91 @@ function ProviderRow(props: ProviderRowProps) {
                   onClearCredential={props.onClearProviderCredential}
                 />
               ) : null}
-              {props.observed === undefined ? null : (
-                <div className="provider-card__discovery">
-                  <section
-                    className="provider-model-visibility"
-                    aria-labelledby={`models-${props.instance.id}`}
-                  >
-                    <h4 className="oct-section-label" id={`models-${props.instance.id}`}>
-                      Models
-                    </h4>
-                    <p className="oct-row-detail">Choose which models appear in new selections.</p>
-                    <OctantInput
-                      aria-label={`Filter ${props.instance.displayName} models`}
-                      onChange={(event) => setModelQuery(event.currentTarget.value)}
-                      placeholder="Filter models"
-                      value={modelQuery}
-                    />
-                    {props.observed.models.length === 0 ? (
-                      <p>No models reported.</p>
-                    ) : (
-                      <ul>
-                        {visibleModelRows.map((model) => {
-                          const hidden = props.hiddenModels.some(
-                            (ref) =>
-                              ref.providerInstanceId === props.instance.id &&
-                              ref.modelId === model.id,
-                          );
-                          const modelLabel =
-                            !isHttp && !isAnthropicHttp && !isFoundry
-                              ? model.displayName
-                              : `${model.displayName} · ${titleCase(model.source)} · ${titleCase(model.verification)}`;
-                          return (
-                            <li key={model.id}>
-                              <span>{modelLabel}</span>
-                              <label>
-                                <OctantCheckbox
-                                  aria-label={`${hidden ? "Show" : "Hide"} ${model.displayName} in model pickers`}
-                                  checked={!hidden}
-                                  className="window-no-drag"
-                                  disabled={disabled}
-                                  onChange={(event) => {
-                                    const next = props.hiddenModels.filter(
-                                      (ref) =>
-                                        !(
-                                          ref.providerInstanceId === props.instance.id &&
-                                          ref.modelId === model.id
-                                        ),
-                                    );
-                                    if (!event.currentTarget.checked) {
-                                      next.push({
-                                        providerInstanceId: props.instance.id,
-                                        modelId: model.id,
-                                      });
-                                    }
-                                    void props.onHiddenModelsChange(next);
-                                  }}
-                                />
-                                <span>{hidden ? "Hidden" : "Shown"}</span>
-                              </label>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                    {props.observed.models.length > 0 && visibleModelRows.length === 0 ? (
-                      <p className="oct-row-detail">No models match this filter.</p>
-                    ) : null}
-                  </section>
-                  <section aria-labelledby={`capabilities-${props.instance.id}`}>
-                    <h4 className="oct-section-label" id={`capabilities-${props.instance.id}`}>
-                      Capabilities
-                    </h4>
-                    <dl>
-                      {capabilityLabels.map(([key, label]) => (
-                        <div key={key}>
-                          <dt>{label}</dt>
-                          <dd>{titleCase(props.observed!.capabilities[key])}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </section>
-                </div>
-              )}
             </div>
           ) : null}
+          {props.observed === undefined ? null : (
+            <div className="provider-card__discovery">
+              <section
+                className="provider-model-visibility"
+                aria-labelledby={`models-${props.instance.id}`}
+              >
+                <h4 className="oct-section-label" id={`models-${props.instance.id}`}>
+                  Models
+                </h4>
+                <p className="oct-row-detail">Choose which models appear in new selections.</p>
+                {props.observed.models.length === 0 ? null : (
+                  <OctantInput
+                    aria-label={`Filter ${props.instance.displayName} models`}
+                    onChange={(event) => setModelQuery(event.currentTarget.value)}
+                    placeholder="Filter models"
+                    value={modelQuery}
+                  />
+                )}
+                {props.observed.models.length === 0 ? (
+                  <p>No models reported.</p>
+                ) : (
+                  <ul>
+                    {visibleModelRows.map((model) => {
+                      const hidden = props.hiddenModels.some(
+                        (ref) =>
+                          ref.providerInstanceId === props.instance.id && ref.modelId === model.id,
+                      );
+                      const modelLabel =
+                        !isHttp && !isAnthropicHttp && !isFoundry
+                          ? model.displayName
+                          : `${model.displayName} · ${titleCase(model.source)} · ${titleCase(model.verification)}`;
+                      return (
+                        <li key={model.id}>
+                          <span>{modelLabel}</span>
+                          <label>
+                            <OctantCheckbox
+                              aria-label={`${hidden ? "Show" : "Hide"} ${model.displayName} in model pickers`}
+                              checked={!hidden}
+                              className="window-no-drag"
+                              disabled={disabled}
+                              onChange={(event) => {
+                                const next = props.hiddenModels.filter(
+                                  (ref) =>
+                                    !(
+                                      ref.providerInstanceId === props.instance.id &&
+                                      ref.modelId === model.id
+                                    ),
+                                );
+                                if (!event.currentTarget.checked) {
+                                  next.push({
+                                    providerInstanceId: props.instance.id,
+                                    modelId: model.id,
+                                  });
+                                }
+                                void props.onHiddenModelsChange(next);
+                              }}
+                            />
+                            <span>{hidden ? "Hidden" : "Shown"}</span>
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                {props.observed.models.length > 0 && visibleModelRows.length === 0 ? (
+                  <p className="oct-row-detail">No models match this filter.</p>
+                ) : null}
+              </section>
+              <section aria-labelledby={`capabilities-${props.instance.id}`}>
+                <h4 className="oct-section-label" id={`capabilities-${props.instance.id}`}>
+                  Capabilities
+                </h4>
+                <dl>
+                  {capabilityLabels.map(([key, label]) => (
+                    <div key={key}>
+                      <dt>{label}</dt>
+                      <dd>{titleCase(props.observed!.capabilities[key])}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            </div>
+          )}
         </div>
       ) : null}
     </article>

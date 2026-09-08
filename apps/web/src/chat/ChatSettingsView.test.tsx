@@ -44,7 +44,10 @@ describe("ChatSettingsView", () => {
       ),
     ).toBeVisible();
 
-    await user.click(screen.getByRole("option", { name: /Model B Plus/ }));
+    expect(screen.queryByRole("option", { name: /Model B Plus/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Default Chat provider and model" }));
+    await user.type(screen.getByRole("searchbox"), "Model B Plus");
+    await user.click(screen.getByRole("option", { name: "Model B Plus" }));
     await user.click(screen.getByLabelText("Enable research by default"));
     await chooseSelectFieldOption(
       user,

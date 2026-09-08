@@ -469,7 +469,7 @@ describe("WindowChrome", () => {
       ),
     ).toContain("padding-inline-end: 56px;");
     expect(cssRule(".thread-row-info-card__header")).toContain("justify-content: space-between;");
-    expect(cssRule(".thread-row-context-menu")).toContain("width: min(296px, calc(100vw - 24px));");
+    expect(cssRule(".thread-row-context-menu")).toContain("width: min(248px, calc(100vw - 24px));");
   });
 
   it("exposes the native sidebar canvas and integrated titlebar while keeping workspace surfaces opaque", () => {

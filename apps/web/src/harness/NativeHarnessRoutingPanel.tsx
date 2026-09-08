@@ -262,7 +262,7 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
             );
           })}
         </div>
-        <h3>Jobs</h3>
+        <h3 className="oct-section-label">Jobs</h3>
         <div className="native-harness-jobs">
           {NativeHarnessJob.literals.map((job) => {
             const bound =
@@ -274,6 +274,7 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                 <span>{JOB_LABELS[job]}</span>
                 <OctantSelectField
                   aria-label={`${JOB_LABELS[job]} slot`}
+                  className="settings-view__select"
                   onValueChange={(value) =>
                     setDraft({
                       ...draft,

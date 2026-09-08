@@ -25,7 +25,6 @@ import {
   OctantContextMenuContent,
   OctantContextMenuGroup,
   OctantContextMenuItem,
-  OctantContextMenuLabel,
   OctantContextMenuSeparator,
   OctantContextMenuSub,
   OctantContextMenuSubContent,
@@ -149,15 +148,12 @@ export function ThreadRowMenu(props: {
       ? props.actions.onSnoozeThread
       : props.actions.onWakeThread) !== undefined;
   return (
-    <OctantContextMenuContent className="thread-row-context-menu">
-      <OctantContextMenuGroup>
-        <OctantContextMenuLabel className="thread-row-context-menu__label">
-          {props.thread.title}
-        </OctantContextMenuLabel>
-      </OctantContextMenuGroup>
+    <OctantContextMenuContent
+      aria-label={`Actions for ${props.thread.title}`}
+      className="thread-row-context-menu"
+    >
       {hasThreadActions ? (
         <>
-          <OctantContextMenuSeparator />
           <OctantContextMenuGroup>
             {props.actions.onPinInPane === undefined ? null : (
               <OctantContextMenuItem
@@ -271,7 +267,7 @@ export function ThreadRowMenu(props: {
                 >
                   <MenuContent icon={Clock}>Snooze</MenuContent>
                 </OctantContextMenuSubTrigger>
-                <OctantContextMenuSubContent className="thread-row-context-menu__submenu">
+                <OctantContextMenuSubContent className="thread-row-context-menu">
                   {resolveSnoozePresets(new Date()).map((preset) => (
                     <OctantContextMenuItem
                       className="thread-row-context-menu__item thread-row-context-menu__snooze-item"
@@ -324,7 +320,7 @@ export function ThreadRowMenu(props: {
           <OctantContextMenuSubTrigger className="thread-row-context-menu__item" label="Copy">
             <MenuContent icon={Copy}>Copy</MenuContent>
           </OctantContextMenuSubTrigger>
-          <OctantContextMenuSubContent className="thread-row-context-menu__submenu">
+          <OctantContextMenuSubContent className="thread-row-context-menu">
             <OctantContextMenuItem
               className="thread-row-context-menu__item"
               label="Copy title"

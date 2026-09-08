@@ -1108,28 +1108,14 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   width: min(248px, calc(100vw - 24px));
   min-width: min(224px, calc(100vw - 24px));
   max-width: calc(100vw - 24px);
-  gap: var(--oct-space-1);
+  gap: 0;
   padding: var(--oct-space-1);
   overflow: hidden;
-  border-radius: var(--oct-radius-lg);
-}
-
-.thread-row-context-menu__label {
-  display: block;
-  min-width: 0;
-  max-width: 100%;
-  padding: var(--oct-space-2) var(--oct-space-2) var(--oct-space-1);
-  overflow: hidden;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-display);
-  line-height: var(--oct-leading-body);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  border-radius: var(--oct-radius-md);
 }
 
 .thread-row-context-menu [role="menuitem"] {
-  min-height: 28px;
+  min-height: 26px;
   gap: var(--oct-space-2);
   padding: 3px var(--oct-space-2);
   border-radius: var(--oct-radius-sm);
@@ -1157,12 +1143,6 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   flex: 1 1 auto;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.thread-row-context-menu__submenu {
-  width: min(248px, calc(100vw - 24px));
-  min-width: min(224px, calc(100vw - 24px));
-  max-width: calc(100vw - 24px);
 }
 
 .thread-row-context-menu__snooze-item .thread-row-context-menu__item-label {

@@ -5,7 +5,6 @@ import { DockToolIcon } from "./dockToolIcons";
 import { IconButton } from "./IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
-import { MULTI_INSTANCE_DOCK_SURFACES } from "./rightUtilityDockModel";
 
 export interface DockUtilityLauncherSurface {
   readonly id: RightUtilityDockSurfaceId;
@@ -135,9 +134,7 @@ export function DockToolLaunchList(props: {
           variant="ghost"
         >
           <DockToolIcon surface={surface.id} />
-          <span>
-            {MULTI_INSTANCE_DOCK_SURFACES.has(surface.id) ? `New ${surface.label}` : surface.label}
-          </span>
+          <span>{surface.id === "browser" ? `New ${surface.label}` : surface.label}</span>
         </OctantButton>
       ))}
     </>

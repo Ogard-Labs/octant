@@ -28,7 +28,7 @@ describe("shared control paint ownership", () => {
     expect(controlRules).not.toMatch(/rgb\(/);
   });
 
-  it("lifts the composer and Settings cards with Octant depth tokens", () => {
+  it("keeps composer depth while preference groups remain flat", () => {
     const composerRules = between(
       systemStyles,
       "/* The composer is a raised object, not a field ruled onto the page:",
@@ -39,8 +39,8 @@ describe("shared control paint ownership", () => {
     expect(composerRules).toMatch(/box-shadow:\s*var\(--octant-shadow-md\)/);
     expect(composerRules).toMatch(/--octant-(?:card|floating|workspace)/);
     expect(composerRules).not.toMatch(/rgb\(/);
-    expect(settingsGroupRules).toMatch(/--octant-settings-card/);
-    expect(settingsGroupRules).toMatch(/--octant-shadow-sm/);
+    expect(settingsGroupRules).toMatch(/background:\s*transparent/);
+    expect(settingsGroupRules).toMatch(/box-shadow:\s*none/);
     expect(settingsGroupRules).not.toMatch(/rgb\(/);
   });
 

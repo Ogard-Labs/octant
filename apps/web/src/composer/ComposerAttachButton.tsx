@@ -22,7 +22,7 @@ export function ComposerAttachButton(props: ComposerAttachButtonProps) {
   }
   return (
     <>
-      <label className="composer-attachment-input" htmlFor={inputId}>
+      <label className="composer-attachment-input" hidden htmlFor={inputId}>
         Choose attachment file
         {/* ui-boundary-exception: native-file-input */}
         <input

@@ -18,8 +18,9 @@ import { ProviderGlyph } from "./ProviderGlyph";
 
 export interface ComposerModelPickerProps {
   readonly groups: ReadonlyArray<PickerGroup>;
-  readonly selectedProviderInstanceId?: ProviderInstanceId;
-  readonly selectedModelId?: ProviderModelId;
+  readonly selectedProviderInstanceId?: ProviderInstanceId | undefined;
+  readonly selectedModelId?: ProviderModelId | undefined;
+  readonly unselectedLabel?: string;
   readonly onSelect: (selection: ModelPickerSelection) => void;
   readonly onOpenSettings?: () => void;
   /** Opens Settings → Octant Harness, shown from the Octant entry. */
@@ -128,6 +129,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     props.groups[0]!;
   const selectedLabel =
     selectedModelLabel(props.groups, props.selectedProviderInstanceId, props.selectedModelId) ??
+    props.unselectedLabel ??
     activeGroup.sections[0]?.models[0]?.model.displayName ??
     activeGroup.instance.displayName;
   const favoritesActive = !searching && activeRailId === FAVORITES_RAIL_ID;

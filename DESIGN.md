@@ -516,9 +516,9 @@ anchored to the navigation edge by a 32–56px workspace gutter instead of
 floating in the middle of wide windows. Navigation groups use quiet separators
 rather than competing labels. Routine related rows stay open on the application
 ground with hairline separators. Keybindings have their own destination and raw
-JSON stays behind an advanced disclosure. Profiles, provider instances, install
-reviews, visual theme choices, and other discrete objects use raised cards
-(`--octant-shadow-sm`). A destructive group is an open section at the end of
+JSON stays behind an advanced disclosure. Inline profile and provider editors
+share the flat page ground and aligned row edges (0096). Install reviews, visual
+theme previews, and confirmation dialogs retain their discrete boundaries. A destructive group is an open section at the end of
 its page, marked by that placement and by its confirm control, not by heading
 colour or a card. Labels and descriptions align left, controls align
 right, and compound editors may expand below. A section label may carry the
@@ -530,9 +530,16 @@ Loading and status lines are one quiet sentence; only an error keeps a box.
 Essential labels and explanatory
 text are at least 12px at the default interface scale. Every control uses the
 owned Octant/shadcn adapter, inherits the interface typography projection, and
-saves immediately.
+either saves immediately or uses a compact Save action for a compound form.
+Save controls retain a contextual accessible name. Model visibility changes keep
+the open editor, filter, focus, and drafts stable; hiding the last model does not
+trigger provider discovery.
 Scope metadata remains available to assistive technology but does not compete
 with the setting label.
+
+Chat and Navigator defaults use the same compact model chooser as composers,
+with the current selection in the row and the searchable catalog in a bounded
+popup. Unconfigured defaults say Choose model.
 
 Operational settings use progressive disclosure. Provider and skill lists lead
 with compact readiness counts. Provider rows show identity, one effective
@@ -719,9 +726,17 @@ Lucide is the product icon library. Use 14–16px for compact controls and
 convention and let the recipe size them. Icons clarify labels and do not
 replace an essential label without an accessible name.
 
-Provider identity uses Octant-owned, bundled marks selected by `ProviderGlyph`.
-Never fetch a remote logo, copy a product asset into Octant, use emoji, or draw
-an approximate brand mark. Unknown providers use a compact truthful monogram.
+Provider identity uses locally bundled, licensed provider logos selected by
+`ProviderGlyph` (0095). This is the explicit identity-asset exception to the
+originality rule; it does not permit copying another application’s UI assets or
+implementation. Keep source and license provenance with each mark. Never fetch
+a logo at runtime, use emoji, or draw an approximate brand mark. Unknown or
+private providers keep a truthful fallback. The same marks appear in Settings,
+model pickers, and thread metadata.
+
+Message timestamps and direct Copy controls share one reserved row. They appear
+on message hover or keyboard focus and stay visible on touch and high-contrast
+interfaces. Revealing them must not move the transcript.
 
 ## Motion and interaction
 

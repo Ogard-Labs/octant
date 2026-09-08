@@ -104,6 +104,8 @@ distilled successor of the earlier long-form design specifications.
 | [0094](0094-focus-is-quiet-selection-carries-state.md)                       | Focus is quiet; selection carries state                                                     | Accepted           |
 | [0095](0095-bundled-provider-logo-marks.md)                                  | Bundled provider logo marks stay offline and licensed                                       | Accepted           |
 
+| [0096](0096-settings-editors-share-the-page-layout.md) | Settings editors share the page layout | Accepted |
+
 ## Adding an ADR
 
 - Take the next number (`00NN-short-slug.md`); never renumber existing records.

@@ -6,7 +6,7 @@ import type {
 } from "@octant/contracts/providers";
 import { buildModelPickerGroups } from "@octant/domain";
 import { useMemo, useState } from "react";
-import { ModelPicker } from "../providers/ModelPicker";
+import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { SettingRow } from "../settings/primitives";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -154,7 +154,9 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
           scope="host"
           settingId="chat-default-model"
         >
-          <ModelPicker
+          <ComposerModelPicker
+            menuSide="bottom"
+            unselectedLabel="Choose model"
             ariaLabel="Default Chat provider and model"
             groups={groups}
             onSelect={(selection) => {

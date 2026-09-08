@@ -539,7 +539,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
    first row's own border-top, so the note draws none of its own. */
 .setgroup-note {
   margin: 0;
-  padding: 0 20px 12px;
+  padding: 0 0 12px;
   max-width: 64ch;
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
@@ -552,12 +552,9 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="sidebar-background"],
 .setrow[data-setting-id="app-background"],
 .setrow[data-setting-id="environment-presentation"],
-.setrow[data-setting-id="default-model"],
-.setrow[data-setting-id="vision-reviewer"],
 .setrow[data-setting-id="user-profile"],
 .setrow[data-setting-id="keybindings"],
 .setrow[data-setting-id="export-diagnostics"],
-.setrow[data-setting-id="chat-default-model"],
 .setrow[data-setting-id="chat-personality"],
 .setrow[data-setting-id="code-editor-arguments"],
 .setrow[data-setting-id="execution-context"],
@@ -569,12 +566,9 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="sidebar-background"] > .setrow-control,
 .setrow[data-setting-id="app-background"] > .setrow-control,
 .setrow[data-setting-id="environment-presentation"] > .setrow-control,
-.setrow[data-setting-id="default-model"] > .setrow-control,
-.setrow[data-setting-id="vision-reviewer"] > .setrow-control,
 .setrow[data-setting-id="user-profile"] > .setrow-control,
 .setrow[data-setting-id="keybindings"] > .setrow-control,
 .setrow[data-setting-id="export-diagnostics"] > .setrow-control,
-.setrow[data-setting-id="chat-default-model"] > .setrow-control,
 .setrow[data-setting-id="chat-personality"] > .setrow-control,
 .setrow[data-setting-id="code-editor-arguments"] > .setrow-control,
 .setrow[data-setting-id="execution-context"] > .setrow-control,
@@ -716,16 +710,14 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   gap: 16px;
 }
 
-/* A discrete object section is the card. Routine groups opt into the open
-   modifier below; neither treatment leaves a label floating above a second
-   grey well. */
+/* All preference sections share an open layout, including expanded editors. */
 .settings-card-section {
   display: grid;
   gap: 0;
-  overflow: hidden;
-  background: var(--octant-settings-card);
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-sm);
+  overflow: visible;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .settings-card-section--open {
@@ -756,7 +748,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   padding-inline: 0 4px;
 }
 
-.settings-card-section--open > .setgroup > .setrow:first-child {
+.settings-card-section > .setgroup > .setrow:first-child {
   border-top: 1px solid var(--oct-hairline);
 }
 
@@ -844,7 +836,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-card-section > summary,
 .settings-card-section > legend {
   margin: 0;
-  padding: 20px 20px 0;
+  padding: 10px 0 8px;
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
@@ -860,7 +852,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-card-section > legend {
   float: left;
   width: 100%;
-  padding: 20px 20px 0;
+  padding: 10px 0 8px;
 }
 
 .settings-card-section > summary {
@@ -916,7 +908,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .settings-profile-disclosure > summary {
   min-height: 52px;
-  padding: 12px 16px;
+  padding: 12px 0;
 }
 
 .settings-profile-disclosure__summary-copy {
@@ -964,14 +956,12 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   border-top: 0;
 }
 
-/* Standalone groups are cards. A group already inside settings-card-section
-   must not grow a second well. */
 .setgroup {
-  overflow: hidden;
+  overflow: visible;
   border: 0;
-  border-radius: var(--oct-radius-md);
-  background: var(--octant-settings-card);
-  box-shadow: var(--octant-shadow-sm);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .settings-card-section > .setgroup,
@@ -991,7 +981,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 }
 
 .settings-view .provider-settings.settings-card-section > .provider-settings__intro {
-  padding: 20px 20px 0;
+  padding: 10px 0 8px;
 }
 
 .settings-view .provider-settings.settings-card-section > .provider-settings__hint,
@@ -1043,7 +1033,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .setgroup-head {
   min-height: 48px;
-  padding: 16px 20px 8px;
+  padding: 10px 0 8px;
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
@@ -1067,7 +1057,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .setrow {
   column-gap: 24px;
-  padding: 16px 20px;
+  padding: 14px 0;
   font-family: var(--oct-font-display);
 }
 
@@ -1386,7 +1376,7 @@ textarea.settings-view__text-input {
 .setgroup > .settings-view__toggle,
 .provider-settings__form > .settings-view__field,
 .provider-settings__form > .settings-view__toggle {
-  padding: 16px 20px;
+  padding: 14px 0;
 }
 
 /* Typography and Accessibility rows are ordinary setrows: 44px, label in the
@@ -2129,4 +2119,14 @@ textarea.settings-view__text-input {
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+/* The same compact chooser is used in Settings and conversation composers. */
+.settings-view .composer-model-picker {
+  max-width: var(--oct-settings-control);
+}
+
+.settings-view .composer-model-picker__trigger {
+  width: 100%;
+  justify-content: space-between;
 }

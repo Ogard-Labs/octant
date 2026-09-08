@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { TurnTime } from "./TurnHeader";
 import { copyText, TurnActionMenu } from "./TurnActionMenu";
 
 const actions = [
@@ -109,6 +110,18 @@ describe("the turn action menu", () => {
     expect(block).not.toContain("display: none");
     expect(block).toMatch(/@media \(max-width: 680px\)[\s\S]*opacity: 1/);
     expect(block).toMatch(/@media \(prefers-contrast: more\)[\s\S]*opacity: 1/);
+  });
+
+  it("copies a message from the action beside its timestamp", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    const { container } = render(
+      <TurnTime at="2026-09-08T06:00:00Z" copyValue="A message to copy" />,
+    );
+    const action = screen.getByRole("button", { name: "Copy message" });
+    expect(action.parentElement).toBe(container.querySelector("time")?.parentElement);
+    await user.click(action);
+    expect(writeText).toHaveBeenCalledWith("A message to copy");
   });
 
   it("writes the turn's references when the host exposes a clipboard", async () => {

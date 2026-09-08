@@ -13,6 +13,7 @@ describe("Composer attachment", () => {
     await user.click(screen.getByRole("button", { name: "Add attachment" }));
     expect(choose).toHaveBeenCalledOnce();
     expect(input).toHaveAttribute("tabindex", "-1");
+    expect(input).not.toBeVisible();
     const file = new File(["image"], "reference.png", { type: "image/png" });
     await user.upload(input, file);
     await user.upload(input, file);
