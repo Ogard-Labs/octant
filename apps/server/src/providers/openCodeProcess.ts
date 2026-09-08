@@ -3,19 +3,31 @@ import {
   chmodSync,
   constants,
   accessSync,
+  existsSync,
+  mkdirSync,
   mkdtempSync,
+  realpathSync,
   readFileSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import type { Readable } from "node:stream";
-import type { ProviderFailure } from "@octant/contracts";
-import { Effect, type Scope } from "effect";
+import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
+import { Cause, Effect, Exit, Option, type Scope } from "effect";
 import { childProcessEnvironment } from "../childProcessEnvironment";
+import {
+  makeSeatbeltConfinementLive,
+  SeatbeltConfinementError,
+  type SeatbeltConfinementPort,
+} from "../process/seatbeltProfile";
+import {
+  materializeOsNetworkEgress,
+  resolveDefaultThreadEgressPolicy,
+} from "../process/threadEgressPolicy";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 
 export interface OpenCodeBinaryProbe {
@@ -40,6 +52,12 @@ export interface OpenCodeServerConnection {
 export interface OpenCodeProcessStartInput {
   readonly binaryPath: string;
   readonly cwd: string;
+  /** Product mode used to derive the OS process policy before launch. */
+  readonly mode?: "chat" | "work" | "code";
+  /** Effective thread policy used to derive filesystem/process/network limits. */
+  readonly executionPolicy?: ProviderExecutionPolicy;
+  /** Exact loopback ports owned by this connection's app-managed tool bridges. */
+  readonly loopbackPorts?: ReadonlyArray<number>;
 }
 
 export interface OpenCodeProcessPort {
@@ -52,6 +70,7 @@ export interface OpenCodeProcessPort {
 
 export interface OpenCodeProcessOptions {
   readonly inheritedEnvironment?: NodeJS.ProcessEnv;
+  readonly confinement?: SeatbeltConfinementPort;
   /** Optional host-owned routing projection; credentials remain provider-owned. */
   readonly runtimeConfigResolver?: OpenCodeConfigResolver;
   readonly onDiagnostic?: (message: string) => void;
@@ -83,6 +102,7 @@ type OpenCodeChild = ChildProcessByStdio<null, Readable, Readable>;
 interface ResolvedOpenCodeProcessOptions {
   readonly inheritedEnvironment: NodeJS.ProcessEnv | undefined;
   readonly runtimeConfig: PrivateRuntimeConfig;
+  readonly confinement: SeatbeltConfinementPort;
   readonly onDiagnostic: ((message: string) => void) | undefined;
   readonly shutdownTimeoutMs: number;
   readonly startupTimeoutMs: number;
@@ -507,7 +527,10 @@ function scrubOpenCodeConfigEnvironment(environment: NodeJS.ProcessEnv): NodeJS.
 function privateDirectory(prefix: string, root: string): string {
   const directory = mkdtempSync(`${root}/octant-${prefix}-`);
   chmodSync(directory, 0o700);
-  return directory;
+  // macOS exposes /var/folders through a /private symlink. Keep the path in
+  // the child environment identical to the path used in Seatbelt rules so an
+  // allowed private directory is not denied through its alternate spelling.
+  return realpathSync(directory);
 }
 
 /** Creates owner-only runtime paths without changing the provider's auth store. */
@@ -521,6 +544,12 @@ export function createPrivateOpenCodeProfile(
   try {
     const configHome = privateDirectory("config-home", root);
     directories.push(configHome);
+    // OpenCode resolves its layered config beneath `$XDG_CONFIG_HOME/opencode`
+    // even when OPENCODE_CONFIG points at the private root file. Create that
+    // private directory up front so startup never needs an unlisted parent.
+    const providerConfigDirectory = join(configHome, "opencode");
+    mkdirSync(providerConfigDirectory, { mode: 0o700 });
+    directories.push(providerConfigDirectory);
     const configDirectory = privateDirectory("config-dir", root);
     directories.push(configDirectory);
     const configPath = join(configHome, "opencode.json");
@@ -690,6 +719,120 @@ function cleanupDefect(terminate: () => Promise<void>): Effect.Effect<void> {
   }).pipe(Effect.orDie);
 }
 
+function existingAbsolutePaths(paths: ReadonlyArray<string | undefined>): ReadonlyArray<string> {
+  const resolved = new Set<string>();
+  for (const path of paths) {
+    if (path === undefined || !isAbsolute(path) || !existsSync(path)) continue;
+    try {
+      resolved.add(realpathSync(path));
+    } catch {
+      // A path can disappear between the existence and realpath checks; omit
+      // it so the confinement profile cannot grant a stale location.
+    }
+  }
+  return [...resolved];
+}
+
+interface OpenCodeLaunch {
+  readonly command: string;
+  readonly args: ReadonlyArray<string>;
+  readonly cwd: string;
+  readonly environment: NodeJS.ProcessEnv;
+}
+
+function prepareOpenCodeLaunch(
+  input: OpenCodeProcessStartInput,
+  profile: PrivateOpenCodeProfile,
+  confinement: SeatbeltConfinementPort,
+): Effect.Effect<OpenCodeLaunch, ProviderFailure> {
+  const mode = input.mode ?? "code";
+  const executionPolicy = input.executionPolicy ?? "approval-gated";
+  const args = ["serve", "--pure", "--hostname", "127.0.0.1", "--port", "0"];
+  return Effect.try({
+    try: () => {
+      const root = realpathSync(input.cwd);
+      if (!statSync(root).isDirectory()) throw new Error("project root is not a directory");
+      const binaryPath = realpathSync(input.binaryPath);
+      const binaryDirectory = dirname(binaryPath);
+      const runtimeDirectory = dirname(binaryDirectory);
+      const temporaryDirectory = profile.environment.TMPDIR ?? "/tmp";
+      const configDirectory = profile.environment.OPENCODE_CONFIG_DIR;
+      const configHome = profile.environment.XDG_CONFIG_HOME;
+      const cacheHome = profile.environment.XDG_CACHE_HOME;
+      const stateHome = profile.environment.XDG_STATE_HOME;
+      const dataHome = profile.environment.XDG_DATA_HOME;
+      // OpenCode's provider-owned auth/state lives under this child; the
+      // parent XDG data directory belongs to unrelated applications.
+      const providerDataDirectory = dataHome === undefined ? undefined : join(dataHome, "opencode");
+      const loopbackPorts = input.loopbackPorts ?? [];
+      if (loopbackPorts.some((port) => !Number.isInteger(port) || port < 1 || port > 65_535)) {
+        throw new Error("OpenCode app-managed tool bridge port is invalid.");
+      }
+      const readRoots = existingAbsolutePaths([
+        root,
+        binaryDirectory,
+        runtimeDirectory,
+        temporaryDirectory,
+        configDirectory,
+        configHome,
+        cacheHome,
+        stateHome,
+        providerDataDirectory,
+      ]);
+      const writeRoots = existingAbsolutePaths([
+        configDirectory,
+        configHome,
+        cacheHome,
+        stateHome,
+        providerDataDirectory,
+      ]);
+      if (executionPolicy === "full-access") {
+        return {
+          command: input.binaryPath,
+          args,
+          cwd: root,
+          environment: profile.environment,
+        };
+      }
+      const networkEgress = materializeOsNetworkEgress(
+        resolveDefaultThreadEgressPolicy({ mode, executionPolicy }),
+      );
+      const launch = confinement.prepare({
+        executable: input.binaryPath,
+        args,
+        boundRoot: root,
+        temporaryDirectory,
+        additionalWriteRoots: writeRoots,
+        readRoots,
+        privateHomeAllowPaths: readRoots,
+        networkEgress,
+        writeBoundRoot: !(executionPolicy === "plan" || mode === "chat"),
+        allowProcessExec: !(executionPolicy === "plan" || mode === "chat"),
+        allowProcessFork: !(executionPolicy === "plan" || mode === "chat"),
+        allowFileReadStar: true,
+        ...(loopbackPorts.length === 0
+          ? {}
+          : {
+              extraRules: loopbackPorts.map(
+                (port) => `(allow network-outbound (remote ip "localhost:${port}"))`,
+              ),
+            }),
+      });
+      return { ...launch, cwd: root, environment: profile.environment };
+    },
+    catch: (error) =>
+      failure(
+        error instanceof SeatbeltConfinementError && error.reason === "invalid-configuration"
+          ? "invalid-configuration"
+          : "incompatible",
+        error instanceof SeatbeltConfinementError ||
+          (error instanceof Error && error.message.includes("tool bridge port"))
+          ? error.message
+          : "OpenCode process confinement could not be prepared.",
+      ),
+  });
+}
+
 function safeDiagnostic(handler: OpenCodeProcessOptions["onDiagnostic"], message: string): void {
   try {
     handler?.(message);
@@ -824,22 +967,31 @@ function acquireOpenCodeServer(
     const password = randomBytes(32).toString("base64url");
     const username = runtime === "beta" ? "opencode" : "octant";
     const authorization = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+    const prepared = Effect.runSyncExit(prepareOpenCodeLaunch(input, profile, options.confinement));
+    if (Exit.isFailure(prepared)) {
+      profile.cleanup();
+      resume(
+        Effect.fail(
+          Option.getOrElse(Cause.failureOption(prepared.cause), () =>
+            failure("incompatible", "OpenCode process confinement could not be prepared."),
+          ),
+        ),
+      );
+      return cleanupDefect(async () => undefined);
+    }
+    const launch = prepared.value;
     let child: OpenCodeChild;
     try {
-      child = spawn(
-        input.binaryPath,
-        ["serve", "--pure", "--hostname", "127.0.0.1", "--port", "0"],
-        {
-          cwd: input.cwd,
-          detached: process.platform !== "win32",
-          env: {
-            ...profile.environment,
-            OPENCODE_SERVER_USERNAME: username,
-            OPENCODE_SERVER_PASSWORD: password,
-          },
-          stdio: ["ignore", "pipe", "pipe"],
+      child = spawn(launch.command, launch.args, {
+        cwd: launch.cwd,
+        detached: process.platform !== "win32",
+        env: {
+          ...launch.environment,
+          OPENCODE_SERVER_USERNAME: username,
+          OPENCODE_SERVER_PASSWORD: password,
         },
-      );
+        stdio: ["ignore", "pipe", "pipe"],
+      });
     } catch {
       profile.cleanup();
       resume(Effect.fail(failure("unavailable", "OpenCode server could not be started.")));
@@ -929,7 +1081,9 @@ function acquireOpenCodeServer(
               connection: {
                 authorization,
                 pid: child.pid!,
-                ...(isolationAttested ? { isolatedConfiguration: true as const } : {}),
+                ...(isolationAttested && launch.command !== input.binaryPath
+                  ? { isolatedConfiguration: true as const }
+                  : {}),
                 runtime,
                 version,
                 url,
@@ -1003,6 +1157,7 @@ export function makeOpenCodeProcessLive(
     shutdownTimeoutMs: options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
     startupTimeoutMs: options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS,
     terminateProcessGroup: dependencies.terminateProcessGroup,
+    confinement: options.confinement ?? makeSeatbeltConfinementLive(),
   };
 
   return {
@@ -1036,10 +1191,7 @@ export function makeOpenCodeProcessLive(
             { ...resolvedOptions, runtimeConfig },
             runtime,
             probe.version,
-            // Version and launch flags alone are not an OS confinement receipt.
-            // OpenCode's process-specific Seatbelt lifecycle is not wired yet,
-            // so leave this capability absent and keep app-managed tools closed.
-            false,
+            supportsOpenCodeIsolation(probe.version),
             input.onProcessStarted,
           ).pipe(
             Effect.tap((managed) =>

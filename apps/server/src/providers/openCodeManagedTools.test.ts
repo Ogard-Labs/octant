@@ -19,6 +19,11 @@ describe("OpenCode managed tool bridge", () => {
     }));
     const bridge = await createOpenCodeManagedToolsBridge([definition], execute);
     try {
+      let attested = false;
+      const attestation = bridge.attested.then(() => {
+        attested = true;
+      });
+      expect(attested).toBe(false);
       const initialize = await fetch(bridge.url, {
         method: "POST",
         headers: {
@@ -37,6 +42,7 @@ describe("OpenCode managed tool bridge", () => {
         }),
       });
       expect(initialize.status).toBe(200);
+      expect(attested).toBe(false);
       const sessionId = initialize.headers.get("mcp-session-id");
       expect(sessionId).toBeTruthy();
       const headers = {
@@ -55,6 +61,8 @@ describe("OpenCode managed tool bridge", () => {
         body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
       });
       expect(await rpcJson(listed)).toMatchObject({ result: { tools: [definition] } });
+      await attestation;
+      expect(attested).toBe(true);
       const resultResponse = await fetch(bridge.url, {
         method: "POST",
         headers,

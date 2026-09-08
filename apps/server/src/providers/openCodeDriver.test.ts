@@ -15,7 +15,7 @@ import {
   type OpenCodeClientPort,
 } from "./openCodeDriver";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
-import type { OpenCodeProcessPort } from "./openCodeProcess";
+import type { OpenCodeProcessPort, OpenCodeProcessStartInput } from "./openCodeProcess";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000101");
 const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000102");
@@ -23,6 +23,111 @@ const modelId = "anthropic/claude-sonnet" as ProviderModelId;
 const now = "2026-07-15T00:00:00.000Z";
 
 describe("OpenCode driver", () => {
+  it("does not start a provider process until the session supplies its execution policy", async () => {
+    const fixture = driverFixture();
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* fixture.driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "code",
+          });
+          expect(fixture.calls).not.toContain("process.start");
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
+          expect(fixture.calls).toContain("process.start");
+          expect(fixture.processInputs[0]).toMatchObject({
+            cwd: "/tmp/project",
+            mode: "code",
+            executionPolicy: "plan",
+          });
+        }),
+      ),
+    );
+  });
+
+  it("does not widen the process authority when a live session resumes with another policy", async () => {
+    const fixture = driverFixture();
+    const exit = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({ sessionId, modelId, executionPolicy: "plan" }).pipe(
+              Effect.flatMap((handle) =>
+                Effect.exit(
+                  connection.resume({
+                    sessionId,
+                    resumeCursor: handle.resumeCursor!,
+                    executionPolicy: "approval-gated",
+                  }),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(String(exit)).toContain("unauthorized");
+    expect(fixture.processInputs).toHaveLength(1);
+    expect(fixture.processInputs[0]?.executionPolicy).toBe("plan");
+  });
+
+  it("proves MCP declaration support through a confined loopback probe lease", async () => {
+    const fixture = driverFixture();
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    if (process.platform === "darwin") {
+      expect(probe.capabilities.appManagedTools).toBe("supported");
+      expect(fixture.processInputs[0]).toMatchObject({
+        mode: "chat",
+        executionPolicy: "plan",
+        loopbackPorts: [expect.any(Number)],
+      });
+      expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(true);
+      expect(fixture.calls.some((call) => call.startsWith("mcp.disconnect:"))).toBe(true);
+    } else {
+      expect(probe.capabilities.appManagedTools).toBe("unsupported");
+      expect(fixture.processInputs[0]).toMatchObject({
+        mode: "chat",
+        executionPolicy: "plan",
+      });
+      expect(fixture.processInputs[0]?.loopbackPorts).toBeUndefined();
+      expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(false);
+    }
+  });
+
+  it("keeps app tools unsupported when the provider rejects the MCP declaration", async () => {
+    const fixture = driverFixture({ mcpSupported: false });
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    expect(probe.capabilities.appManagedTools).toBe("unsupported");
+  });
+
+  it("requires app-managed tools to be registered before the process lease starts", async () => {
+    const fixture = driverFixture();
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }).pipe(
+              Effect.flatMap(() =>
+                Effect.exit(
+                  connection.send({
+                    sessionId,
+                    prompt: "late tool",
+                    attachments: [],
+                    tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+                  }),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(String(result)).toContain("must be registered when the session starts");
+    expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(false);
+    expect(fixture.calls).not.toContain("session.promptAsync");
+  });
+
   it("interrupts a live session when its dedicated provider process exits", async () => {
     const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], {
       stdio: "ignore",
@@ -77,6 +182,7 @@ describe("OpenCode driver", () => {
     const fixture = driverFixture({ isolatedConfiguration: false });
     const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
     expect(probe.capabilities.appManagedTools).toBe("unsupported");
+    const probeCallCount = fixture.calls.length;
     const result = await Effect.runPromise(
       Effect.scoped(
         fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
@@ -94,7 +200,9 @@ describe("OpenCode driver", () => {
       ),
     );
     expect(String(result)).toContain("unsupported");
-    expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(false);
+    expect(fixture.calls.slice(probeCallCount).some((call) => call.startsWith("mcp.add:"))).toBe(
+      false,
+    );
   });
 
   it("reports that a model reasons without offering a variant it cannot send", () => {
@@ -410,6 +518,7 @@ describe("OpenCode driver", () => {
         ),
       ),
     );
+    expect(fixture.processInputs[0]?.loopbackPorts).toHaveLength(1);
     const rules = fixture.createdPermissions[0];
     if (rules === undefined) throw new Error("Expected managed-tool permissions.");
     const allowRule = rules.find(
@@ -605,7 +714,17 @@ describe("OpenCode driver", () => {
     });
     const exit = await Effect.runPromise(
       Effect.scoped(
-        Effect.exit(fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" })),
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.exit(
+              connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+              }),
+            ),
+          ),
+        ),
       ),
     );
     expect(String(exit)).toContain("invalid-configuration");
@@ -895,18 +1014,21 @@ function driverFixture(
       readonly category: "invalid-configuration";
       readonly message: string;
     };
+    readonly mcpSupported?: boolean;
     readonly streamEnd?: "hang" | "eof" | "throw";
   } = {},
 ) {
   const calls: string[] = [];
+  const processInputs: OpenCodeProcessStartInput[] = [];
   const createdPermissions: PermissionRuleset[] = [];
   const registry = new ProviderRuntimeRegistry();
   const processPort = {
-    start: () =>
+    start: (input: OpenCodeProcessStartInput) =>
       options.processFailure === undefined
         ? Effect.acquireRelease(
             Effect.sync(() => {
               calls.push("process.start");
+              processInputs.push(input);
               return {
                 ...(options.isolatedConfiguration === false
                   ? {}
@@ -937,8 +1059,43 @@ function driverFixture(
     prompt: async () => {
       calls.push("session.promptAsync");
     },
-    addMcpServer: async ({ name }) => {
+    addMcpServer: async ({ name, url }) => {
+      if (options.mcpSupported === false) throw new Error("MCP transport is unavailable");
       calls.push(`mcp.add:${name}`);
+      const initialize = await fetch(url, {
+        method: "POST",
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: "probe-initialize",
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-06-18",
+            capabilities: {},
+            clientInfo: { name: "fixture", version: "1" },
+          },
+        }),
+      });
+      if (!initialize.ok) throw new Error("MCP initialize failed");
+      const session = initialize.headers.get("mcp-session-id");
+      const listed = await fetch(url, {
+        method: "POST",
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+          ...(session === null ? {} : { "mcp-session-id": session }),
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: "probe-tools",
+          method: "tools/list",
+          params: {},
+        }),
+      });
+      if (!listed.ok) throw new Error("MCP tools/list failed");
     },
     disconnectMcpServer: async (name) => {
       calls.push(`mcp.disconnect:${name}`);
@@ -953,6 +1110,7 @@ function driverFixture(
   };
   return {
     calls,
+    processInputs,
     createdPermissions,
     registry,
     driver: makeOpenCodeDriver({

@@ -17,6 +17,9 @@ const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
 
 export interface OpenCodeManagedToolsBridge {
   readonly url: string;
+  readonly port: number;
+  /** Resolves only after the provider initializes and lists this bridge's tools. */
+  readonly attested: Promise<void>;
   readonly close: () => Promise<void>;
 }
 
@@ -110,6 +113,21 @@ export async function createOpenCodeManagedToolsBridge(
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: randomUUID });
   await managed.server.connect(new OpenCodeMcpTransport(transport));
 
+  let initialized = false;
+  let listed = false;
+  let attest: () => void = () => undefined;
+  const attested = new Promise<void>((resolve) => {
+    attest = resolve;
+  });
+  const observeProtocolRequest = (body: unknown): void => {
+    if (typeof body !== "object" || body === null || Array.isArray(body)) return;
+    if (!("method" in body)) return;
+    const method = body.method;
+    if (method === "initialize") initialized = true;
+    if (method === "tools/list") listed = true;
+    if (initialized && listed) attest();
+  };
+
   let closed = false;
   let loopbackHost: string | undefined;
   const server = createServer((request, response) => {
@@ -129,6 +147,7 @@ export async function createOpenCodeManagedToolsBridge(
     }
     void (async () => {
       const body = request.method === "POST" ? await readRequestBody(request) : undefined;
+      observeProtocolRequest(body);
       await transport.handleRequest(request, response, body);
     })().catch(() => {
       if (!response.headersSent) {
@@ -169,6 +188,8 @@ export async function createOpenCodeManagedToolsBridge(
 
   return {
     url: `http://127.0.0.1:${address.port}${path}`,
+    port: address.port,
+    attested,
     close: async () => {
       if (closed) return;
       closed = true;

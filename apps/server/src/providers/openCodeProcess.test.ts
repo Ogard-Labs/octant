@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -26,9 +27,17 @@ import {
   type OpenCodeProcessOptions,
   type OpenCodeProcessPort,
 } from "./openCodeProcess";
+import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeOpenCodeCli.ts", import.meta.url));
 const directories: string[] = [];
+
+const passthroughConfinement: SeatbeltConfinementPort = {
+  prepare: (input) => ({
+    command: input.executable,
+    args: input.args,
+  }),
+};
 
 function fixtureRoot(mode = "ready"): string {
   const directory = mkdtempSync(join(tmpdir(), "octant-opencode-"));
@@ -212,7 +221,7 @@ describe("probeOpenCodeBinary", () => {
             }).start({ binaryPath, cwd: root }),
           ),
         );
-        expect(server.isolatedConfiguration).toBeUndefined();
+        expect(server.isolatedConfiguration).toBe(true);
         expect(() => readFileSync(markerPath)).toThrow();
       } finally {
         rmSync(root, { recursive: true, force: true });
@@ -538,10 +547,43 @@ describe("OpenCodeProcessPort", () => {
         startupTimeoutMs: 2_000,
         shutdownTimeoutMs: 150,
         runtimeConfigResolver: async () => undefined,
+        confinement: passthroughConfinement,
         ...overrides,
       },
       dependencies,
     );
+
+  it("passes the explicit mode and policy to the OS confinement port before spawning", async () => {
+    const fixture = profileRecordingWrapper("isolation-supported");
+    let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
+    const confinement: SeatbeltConfinementPort = {
+      prepare: (input) => {
+        captured = input;
+        return { command: input.executable, args: input.args };
+      },
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement,
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+        }).start({
+          binaryPath: fixture.binaryPath,
+          cwd: fixture.root,
+          mode: "work",
+          executionPolicy: "plan",
+        }),
+      ),
+    );
+    expect(captured).toMatchObject({
+      boundRoot: realpathSync(fixture.root),
+      networkEgress: "none",
+      writeBoundRoot: false,
+      allowProcessExec: false,
+      allowProcessFork: false,
+    });
+  });
 
   it("starts with a private config profile while withholding isolation without an OS receipt", async () => {
     const fixture = profileRecordingWrapper("isolation-supported");

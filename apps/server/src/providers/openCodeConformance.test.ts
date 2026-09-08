@@ -35,6 +35,7 @@ describe("OpenCode provider conformance", () => {
       time: { created: 1, updated: 1 },
     } as const;
     let managedUrl: string | undefined;
+    let managedSessionId: string | undefined;
     const client: OpenCodeClientPort = {
       health: async () => ({ healthy: true, version: "1.18.0" }),
       providers: async () => ({ all: [provider()], connected: ["anthropic"] }),
@@ -48,16 +49,22 @@ describe("OpenCode provider conformance", () => {
         const hasManagedTools = permission.some(
           (rule) => rule.permission.startsWith("octant-") && rule.action === "allow",
         );
-        if (hasManagedTools && managedUrl !== undefined) {
-          await invokeManagedTool(managedUrl, "octant_web_research");
-        }
         for (const event of runtimeEvents(session.id)) source.emit(event);
-        if (hasManagedTools) {
-          source.emit({ type: "session.idle", properties: { sessionID: session.id } } as Event);
+        if (hasManagedTools && managedUrl !== undefined) {
+          // Provider prompts return before the model's MCP call completes;
+          // keep the fixture's request asynchronous so the conformance
+          // harness can observe and answer the app-owned tool request.
+          void invokeManagedTool(managedUrl, "octant_web_research", managedSessionId).then(
+            () =>
+              source.emit({ type: "session.idle", properties: { sessionID: session.id } } as Event),
+            () =>
+              source.emit({ type: "session.idle", properties: { sessionID: session.id } } as Event),
+          );
         }
       },
       addMcpServer: async ({ url }) => {
         managedUrl = url;
+        managedSessionId = await attestManagedBridge(url);
       },
       disconnectMcpServer: async () => undefined,
       abort: async () => {
@@ -210,33 +217,46 @@ class EventSourceFixture implements AsyncIterable<Event> {
   }
 }
 
-async function invokeManagedTool(url: string, name: string): Promise<void> {
-  const initialize = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: "2025-06-18",
-        capabilities: {},
-        clientInfo: { name: "open-code-fixture", version: "1" },
+async function invokeManagedTool(
+  url: string,
+  name: string,
+  existingSessionId: string | undefined,
+): Promise<void> {
+  let sessionId = existingSessionId;
+  if (sessionId === undefined) {
+    const initialize = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
       },
-    }),
-  });
-  const sessionId = initialize.headers.get("mcp-session-id");
-  if (sessionId === null) throw new Error("Managed MCP fixture did not receive a session.");
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "open-code-fixture", version: "1" },
+        },
+      }),
+    });
+    if (!initialize.ok) throw new Error("Managed MCP fixture initialization failed.");
+    sessionId = initialize.headers.get("mcp-session-id") ?? undefined;
+    if (sessionId === undefined) throw new Error("Managed MCP fixture did not receive a session.");
+  }
   const headers = {
     "content-type": "application/json",
     accept: "application/json, text/event-stream",
     "mcp-session-id": sessionId,
   };
-  await fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} }),
-  });
+  if (existingSessionId === undefined) {
+    await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} }),
+    });
+  }
   await fetch(url, {
     method: "POST",
     headers,
@@ -251,6 +271,43 @@ async function invokeManagedTool(url: string, name: string): Promise<void> {
       },
     }),
   });
+}
+
+async function attestManagedBridge(url: string): Promise<string> {
+  const initialize = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "open-code-probe-fixture", version: "1" },
+      },
+    }),
+  });
+  if (!initialize.ok) throw new Error("Managed MCP fixture initialization failed.");
+  const sessionId = initialize.headers.get("mcp-session-id");
+  if (sessionId === null) throw new Error("Managed MCP fixture did not receive a session.");
+  const headers = {
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+    "mcp-session-id": sessionId,
+  };
+  await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} }),
+  });
+  const listed = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+  });
+  if (!listed.ok) throw new Error("Managed MCP fixture tools/list failed.");
+  return sessionId;
 }
 
 function provider() {

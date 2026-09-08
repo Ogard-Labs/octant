@@ -85,7 +85,7 @@ interface SessionState {
   active: boolean;
   readonly taskIds: Map<string, string>;
   readonly messageParts: OpenCodeMessageParts;
-  readonly modelId: string;
+  modelId: string;
   sourceId: string | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly approvals: Set<string>;
@@ -104,6 +104,8 @@ interface ManagedToolsLease {
   readonly bridge: OpenCodeManagedToolsBridge;
   readonly serverName: string;
   readonly catalogKey: string;
+  /** The bridge survives a same-process resume; route calls to the live session. */
+  readonly owner: { state: SessionState };
 }
 
 const capabilities = {
@@ -164,9 +166,27 @@ function resultData<A>(result: { readonly data: A | undefined }): A {
 const BETA_API_TIMEOUT_MS = 5_000;
 const BETA_INCOMPATIBILITY_MESSAGE =
   "OpenCode 2 preview is discovery-only: its API cannot carry Octant's session permission rules yet.";
+const MCP_PROBE_TIMEOUT_MS = 5_000;
 
 function betaRequestOptions() {
   return { throwOnError: true as const, signal: AbortSignal.timeout(BETA_API_TIMEOUT_MS) };
+}
+
+function awaitOpenCodeMcpAttestation(bridge: OpenCodeManagedToolsBridge): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve(false), MCP_PROBE_TIMEOUT_MS);
+    timeout.unref?.();
+    void bridge.attested.then(
+      () => {
+        clearTimeout(timeout);
+        resolve(true);
+      },
+      () => {
+        clearTimeout(timeout);
+        resolve(false);
+      },
+    );
+  });
 }
 
 export function openCodePromptParts(prompt: string, attachments: ProviderTurnInput["attachments"]) {
@@ -301,6 +321,7 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
   const clientFactory = options.clientFactory ?? makeOfficialOpenCodeClient;
   const clock = options.clock ?? (() => new Date().toISOString());
   const makeCorrelation = options.correlationId ?? (() => crypto.randomUUID());
+  const resumeToolCatalogs = new Map<string, ReadonlyArray<ProviderToolDefinition>>();
   return {
     kind: "opencode",
     probe: ({ instanceId }) =>
@@ -308,19 +329,71 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
         ? Effect.fail(fail("invalid-configuration", "Provider instance does not match driver."))
         : Effect.gen(function* () {
             const projectRoot = resolve(process.cwd());
-            const runtime = yield* acquireRuntime(options, projectRoot);
+            // Probe the app-owned transport with an empty, private catalogue.
+            // This is a non-generating declaration check: it does not send a
+            // model prompt and its bridge is closed before the probe scope
+            // returns. Linux intentionally skips it because bwrap cannot
+            // express the exact loopback-only rule required by the bridge.
+            const bridge =
+              process.platform === "darwin"
+                ? yield* Effect.acquireRelease(
+                    Effect.tryPromise({
+                      try: () =>
+                        createOpenCodeManagedToolsBridge([], async () => ({
+                          resultJson: '{"error":"probe-only"}',
+                          isError: true,
+                        })),
+                      catch: () => fail("unavailable", "OpenCode MCP probe bridge is unavailable."),
+                    }),
+                    (ownedBridge) => Effect.promise(() => ownedBridge.close()),
+                  )
+                : undefined;
+            const runtime = yield* acquireRuntime(
+              options,
+              projectRoot,
+              bridge === undefined ? [] : [bridge.port],
+            );
             const client = clientFactory(runtime, projectRoot);
             const health = yield* request(client.health);
             const providers = yield* request(client.providers);
-            return normalizeOpenCodeProbe(
+            const mcpAccepted =
+              bridge === undefined
+                ? false
+                : yield* Effect.tryPromise({
+                    try: async () => {
+                      const name = `octant-probe-${crypto.randomUUID().replaceAll("-", "")}`;
+                      try {
+                        await client.addMcpServer({ name, url: bridge.url });
+                        const attested = await awaitOpenCodeMcpAttestation(bridge);
+                        await client.disconnectMcpServer(name);
+                        return attested;
+                      } catch {
+                        return false;
+                      }
+                    },
+                    catch: () => false,
+                  }).pipe(Effect.orDie);
+            const normalized = normalizeOpenCodeProbe(
               instanceId,
               health,
               providers,
               clock(),
-              runtime.isolatedConfiguration === true,
+              runtime.isolatedConfiguration === true && mcpAccepted,
             );
+            if (
+              process.platform === "linux" &&
+              normalized.models.length > 0 &&
+              normalized.capabilities.appManagedTools === "unsupported"
+            ) {
+              return {
+                ...normalized,
+                message:
+                  "OpenCode app-managed tools require macOS loopback confinement on this host.",
+              };
+            }
+            return normalized;
           }),
-    acquire: ({ instanceId, projectRoot }) =>
+    acquire: ({ instanceId, projectRoot, mode }) =>
       instanceId !== options.instanceId
         ? Effect.fail(fail("invalid-configuration", "Provider instance does not match driver."))
         : Effect.gen(function* () {
@@ -332,32 +405,24 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
                 ),
               );
             }
-            // A legacy MCP call carries no native session identity. Keep its
-            // bearer endpoint inside a dedicated process with one live session.
-            const runtime = yield* options.process.start({
-              binaryPath: options.binaryPath,
-              cwd: projectRoot,
-              onProcessStarted: (process) =>
-                options.runtimeRegistry.trackProcess(options.instanceId, process),
-            });
-            const processMonitor = yield* Effect.acquireRelease(
-              Effect.sync(() => monitorProcessExit(runtime.pid)),
-              (monitor) => Effect.sync(monitor.cancel),
-            );
             return yield* makeConnection(
               options,
-              clientFactory(runtime, projectRoot),
+              clientFactory,
               projectRoot,
+              mode ?? "code",
               clock,
               makeCorrelation,
-              runtime.isolatedConfiguration === true,
-              processMonitor,
+              resumeToolCatalogs,
             );
           }),
   };
 }
 
-function acquireRuntime(options: OpenCodeDriverOptions, projectRoot: string) {
+function acquireRuntime(
+  options: OpenCodeDriverOptions,
+  projectRoot: string,
+  loopbackPorts: ReadonlyArray<number> = [],
+) {
   return options.runtimeRegistry.acquireRuntime(options.instanceId, {
     idleMs: options.idleLeaseMs ?? 30_000,
     start: async () => {
@@ -369,6 +434,9 @@ function acquireRuntime(options: OpenCodeDriverOptions, projectRoot: string) {
             .start({
               binaryPath: options.binaryPath,
               cwd: projectRoot,
+              mode: "chat",
+              executionPolicy: "plan",
+              ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
               onProcessStarted: async (process) => {
                 receipt = await options.runtimeRegistry.trackProcess(options.instanceId, process);
                 return receipt;
@@ -428,12 +496,12 @@ function monitorProcessExit(pid: number): {
 
 function makeConnection(
   options: OpenCodeDriverOptions,
-  client: OpenCodeClientPort,
+  clientFactory: NonNullable<OpenCodeDriverOptions["clientFactory"]>,
   projectRoot: string,
+  mode: "chat" | "work" | "code",
   clock: () => string,
   makeCorrelation: () => string,
-  isolatedConfiguration: boolean,
-  processMonitor: { readonly exited: Promise<void>; readonly cancel: () => void },
+  resumeToolCatalogs: Map<string, ReadonlyArray<ProviderToolDefinition>>,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
     const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
@@ -445,6 +513,12 @@ function makeConnection(
     let streamFailure: ProviderFailure | undefined;
     let sessionSetupInFlight = false;
     let closing = false;
+    let client: OpenCodeClientPort | undefined;
+    let runtimeScope: Scope.CloseableScope | undefined;
+    let processMonitor: { readonly exited: Promise<void>; readonly cancel: () => void } | undefined;
+    let runtimePolicy: ProviderExecutionPolicy | undefined;
+    let runtimeIsolated = false;
+    let runtimeLoopbackPorts: ReadonlyArray<number> = [];
 
     const offer = (event: ProviderRuntimeEvent) => {
       Effect.runFork(PubSub.publish(events, event));
@@ -474,7 +548,7 @@ function makeConnection(
       state.managedTools = undefined;
       const release = (async () => {
         await lease.bridge.close();
-        await client.disconnectMcpServer(lease.serverName).catch(() => undefined);
+        await client?.disconnectMcpServer(lease.serverName).catch(() => undefined);
       })();
       managedToolReleases.set(state, release);
       try {
@@ -511,6 +585,101 @@ function makeConnection(
         message,
       });
     };
+    const samePorts = (left: ReadonlyArray<number>, right: ReadonlyArray<number>): boolean =>
+      left.length === right.length && left.every((port, index) => port === right[index]);
+    const closeRuntime = async (): Promise<void> => {
+      processMonitor?.cancel();
+      if (runtimeScope !== undefined) {
+        await Effect.runPromise(Scope.close(runtimeScope, Exit.void));
+      }
+      runtimeScope = undefined;
+      processMonitor = undefined;
+      client = undefined;
+      runtimePolicy = undefined;
+      runtimeIsolated = false;
+      runtimeLoopbackPorts = [];
+      subscriptionReady = undefined;
+    };
+    const ensureRuntime = (
+      executionPolicy: ProviderExecutionPolicy,
+      loopbackPorts: ReadonlyArray<number>,
+    ): Effect.Effect<OpenCodeClientPort, ProviderFailure> =>
+      Effect.tryPromise({
+        try: async () => {
+          if (client !== undefined && runtimePolicy !== undefined) {
+            if (runtimePolicy !== executionPolicy) {
+              throw fail(
+                "unauthorized",
+                "OpenCode process authority cannot be widened on an active connection.",
+              );
+            }
+            if (!samePorts(runtimeLoopbackPorts, loopbackPorts)) {
+              throw fail(
+                "unauthorized",
+                "OpenCode process tool bridges cannot change on an active connection.",
+              );
+            }
+            return client;
+          }
+          const scope = await Effect.runPromise(Scope.make());
+          try {
+            const startedExit = await Effect.runPromiseExit(
+              options.process
+                .start({
+                  binaryPath: options.binaryPath,
+                  cwd: projectRoot,
+                  mode,
+                  executionPolicy,
+                  ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
+                  onProcessStarted: (process) =>
+                    options.runtimeRegistry.trackProcess(options.instanceId, process),
+                })
+                .pipe(Effect.provideService(Scope.Scope, scope)),
+            );
+            if (Exit.isFailure(startedExit)) {
+              throw Option.getOrElse(Cause.failureOption(startedExit.cause), () =>
+                fail("provider-failed", "OpenCode process failed without a typed failure."),
+              );
+            }
+            const started = startedExit.value;
+            const monitor = monitorProcessExit(started.pid);
+            const nextClient = clientFactory(started, projectRoot);
+            runtimeScope = scope;
+            processMonitor = monitor;
+            runtimePolicy = executionPolicy;
+            runtimeIsolated = started.isolatedConfiguration === true;
+            runtimeLoopbackPorts = loopbackPorts;
+            client = nextClient;
+            void monitor.exited.then(() => {
+              if (closing) return;
+              streamFailure = fail("provider-failed", "Provider runtime exited unexpectedly.");
+              subscriptionAbort.abort();
+              for (const state of sessionsBySource.values()) {
+                emitInterrupted(state, "Provider runtime exited unexpectedly.");
+              }
+            });
+            return nextClient;
+          } catch (error) {
+            await Effect.runPromise(Scope.close(scope, Exit.void));
+            throw error;
+          }
+        },
+        catch: (error) => {
+          if (
+            typeof error === "object" &&
+            error !== null &&
+            "category" in error &&
+            "message" in error
+          ) {
+            try {
+              return decodeProviderFailure(error);
+            } catch {
+              return fail("protocol", "OpenCode returned an invalid process failure.");
+            }
+          }
+          return providerFailure(error);
+        },
+      });
     const removeInvalidation = options.runtimeRegistry.onRuntimeInvalidated(
       options.instanceId,
       () => {
@@ -519,20 +688,9 @@ function makeConnection(
         }
       },
     );
-    const processExit = processMonitor.exited.then(() => {
-      if (closing) return;
-      streamFailure = fail("provider-failed", "Provider runtime exited unexpectedly.");
-      subscriptionAbort.abort();
-      for (const state of sessionsBySource.values()) {
-        emitInterrupted(state, "Provider runtime exited unexpectedly.");
-      }
-    });
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
         closing = true;
-        processMonitor.cancel();
-        await processExit;
-        removeInvalidation();
         for (const state of sessionsBySource.values()) {
           retireState(state);
         }
@@ -540,6 +698,8 @@ function makeConnection(
         for (const state of sessionsBySource.values()) {
           await releaseManagedTools(state);
         }
+        await closeRuntime();
+        removeInvalidation();
         await Effect.runPromise(PubSub.shutdown(events));
       }),
     );
@@ -562,11 +722,11 @@ function makeConnection(
       }
     };
 
-    const ensureSubscription = () =>
+    const ensureSubscription = (runtimeClient: OpenCodeClientPort) =>
       request(async () => {
         if (streamFailure !== undefined) throw streamFailure;
         if (subscriptionReady === undefined) {
-          subscriptionReady = client.subscribe(subscriptionAbort.signal).then((events) => {
+          subscriptionReady = runtimeClient.subscribe(subscriptionAbort.signal).then((events) => {
             void (async () => {
               try {
                 for await (const event of events) {
@@ -661,9 +821,6 @@ function makeConnection(
         ? Effect.void
         : Effect.tryPromise({
             try: async () => {
-              if (!isolatedConfiguration) {
-                throw fail("unsupported", "App tools require an isolated provider configuration.");
-              }
               const catalogNames = definitions.map((definition) =>
                 definition.name.replace(/[^a-zA-Z0-9_-]/g, "_"),
               );
@@ -685,18 +842,13 @@ function makeConnection(
               }
               if (state.managedTools === undefined) {
                 const serverName = `octant-${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
+                const owner = { state };
                 const bridge = await createOpenCodeManagedToolsBridge(
                   definitions,
                   (name, inputJson, signal, context) =>
-                    requestManagedTool(state, name, inputJson, signal, context),
+                    requestManagedTool(owner.state, name, inputJson, signal, context),
                 );
-                try {
-                  await client.addMcpServer({ name: serverName, url: bridge.url });
-                } catch (error) {
-                  await bridge.close();
-                  throw error;
-                }
-                state.managedTools = { bridge, serverName, catalogKey };
+                state.managedTools = { bridge, serverName, catalogKey, owner };
                 state.toolNames.clear();
                 for (const definition of definitions) state.toolNames.add(definition.name);
               }
@@ -712,7 +864,7 @@ function makeConnection(
       providerSessionId: string,
       failure: ProviderFailure,
     ): Effect.Effect<never, ProviderFailure> =>
-      request(() => client.abort(providerSessionId)).pipe(
+      request(() => client?.abort(providerSessionId) ?? Promise.resolve()).pipe(
         Effect.ignore,
         Effect.tap(() =>
           Effect.promise(async () => {
@@ -742,35 +894,56 @@ function makeConnection(
             return Effect.fail(fail("protocol", "A provider session is already active."));
           }
           sessionSetupInFlight = true;
-          return ensureSubscription().pipe(
+          const state = newSessionState(
+            input.sessionId,
+            input.modelId,
+            input.executionPolicy,
+            makeCorrelation,
+            input.tools ?? [],
+          );
+          return prepareManagedTools(state, input.tools ?? []).pipe(
             Effect.flatMap(() =>
-              streamFailure === undefined
-                ? Effect.succeed(
-                    newSessionState(
-                      input.sessionId,
-                      input.modelId,
-                      input.executionPolicy,
-                      makeCorrelation,
-                      input.tools ?? [],
-                    ),
-                  ).pipe(
-                    Effect.tap((state) => prepareManagedTools(state, input.tools ?? [])),
-                    Effect.flatMap((state) =>
-                      request(() =>
-                        client.createSession({
-                          permission: permissionRules(
-                            input.executionPolicy,
-                            state.managedTools?.serverName,
-                          ),
-                        }),
-                      ).pipe(
-                        Effect.tapError(() => Effect.promise(() => releaseManagedTools(state))),
-                        Effect.map((session) => ({ session, state })),
+              ensureRuntime(
+                input.executionPolicy,
+                state.managedTools === undefined ? [] : [state.managedTools.bridge.port],
+              ),
+            ),
+            Effect.flatMap((runtimeClient) => {
+              if (state.managedTools !== undefined && !runtimeIsolated) {
+                return Effect.promise(() => releaseManagedTools(state)).pipe(
+                  Effect.zipRight(
+                    Effect.fail(
+                      fail(
+                        "unsupported",
+                        "OpenCode app tools require a confined provider process.",
                       ),
                     ),
-                  )
-                : Effect.fail(streamFailure),
-            ),
+                  ),
+                );
+              }
+              const attachManagedTools =
+                state.managedTools === undefined
+                  ? Promise.resolve()
+                  : runtimeClient.addMcpServer({
+                      name: state.managedTools.serverName,
+                      url: state.managedTools.bridge.url,
+                    });
+              return request(() => attachManagedTools).pipe(
+                Effect.zipRight(ensureSubscription(runtimeClient)),
+                Effect.zipRight(
+                  request(() =>
+                    runtimeClient.createSession({
+                      permission: permissionRules(
+                        input.executionPolicy,
+                        state.managedTools?.serverName,
+                      ),
+                    }),
+                  ),
+                ),
+                Effect.tapError(() => Effect.promise(() => releaseManagedTools(state))),
+                Effect.map((session) => ({ session, state })),
+              );
+            }),
             Effect.flatMap(({ session, state }) => {
               if (!isAbsolute(session.directory) || resolve(session.directory) !== projectRoot) {
                 return discardUnregisteredState(
@@ -785,6 +958,7 @@ function makeConnection(
               state.sourceId = session.id;
               sessionsBySource.set(session.id, state);
               sourceBySession.set(input.sessionId, session.id);
+              resumeToolCatalogs.set(session.id, input.tools ?? []);
               activate(state);
               for (const event of pendingBySource.get(session.id) ?? []) {
                 mapAndOffer(state, event, options.instanceId, clock, offer, retireState);
@@ -815,63 +989,84 @@ function makeConnection(
                 return Effect.fail(fail("protocol", "A provider session is already active."));
               }
               sessionSetupInFlight = true;
-              return ensureSubscription().pipe(
+              const tools = resumeToolCatalogs.get(input.resumeCursor.value) ?? [];
+              const priorSource = sourceBySession.get(input.sessionId);
+              const priorState =
+                priorSource === undefined ? undefined : sessionsBySource.get(priorSource);
+              const inheritedTools = priorState?.managedTools;
+              if (priorState !== undefined && inheritedTools !== undefined) {
+                priorState.managedTools = undefined;
+              }
+              const state = newSessionState(
+                input.sessionId,
+                "unknown/unknown",
+                input.executionPolicy,
+                makeCorrelation,
+                tools,
+              );
+              if (inheritedTools !== undefined) {
+                inheritedTools.owner.state = state;
+                state.managedTools = inheritedTools;
+              }
+              return Effect.promise(async () => {
+                if (priorState !== undefined) {
+                  retireState(priorState);
+                  await releaseManagedTools(priorState);
+                }
+              }).pipe(
+                Effect.zipRight(prepareManagedTools(state, tools)),
                 Effect.flatMap(() =>
-                  request(() => client.getSession(input.resumeCursor.value)).pipe(
-                    Effect.mapError(() =>
-                      fail("stale-resume", "Provider resume session is no longer available."),
-                    ),
+                  ensureRuntime(
+                    input.executionPolicy,
+                    state.managedTools === undefined ? [] : [state.managedTools.bridge.port],
                   ),
                 ),
-                Effect.flatMap((session) =>
-                  !isAbsolute(session.directory) || resolve(session.directory) !== projectRoot
-                    ? Effect.fail(
-                        fail(
-                          "stale-resume",
-                          "Provider session belongs to a different Project root.",
+                Effect.flatMap((runtimeClient) => {
+                  const attachManagedTools =
+                    state.managedTools === undefined || inheritedTools !== undefined
+                      ? Promise.resolve()
+                      : runtimeClient.addMcpServer({
+                          name: state.managedTools.serverName,
+                          url: state.managedTools.bridge.url,
+                        });
+                  return request(() => attachManagedTools).pipe(
+                    Effect.zipRight(ensureSubscription(runtimeClient)),
+                    Effect.zipRight(
+                      request(() => runtimeClient.getSession(input.resumeCursor.value)).pipe(
+                        Effect.mapError(() =>
+                          fail("stale-resume", "Provider resume session is no longer available."),
                         ),
-                      )
-                    : Effect.succeed(session),
-                ),
-                Effect.flatMap((session) => {
-                  if (streamFailure !== undefined) return Effect.fail(streamFailure);
+                      ),
+                    ),
+                    Effect.map((session) => ({ runtimeClient, session })),
+                  );
+                }),
+                Effect.flatMap(({ session }) => {
+                  if (
+                    !isAbsolute(session.directory) ||
+                    resolve(session.directory) !== projectRoot
+                  ) {
+                    return Effect.fail(
+                      fail("stale-resume", "Provider session belongs to a different Project root."),
+                    );
+                  }
                   const resumedModel =
                     session.model === undefined
                       ? "unknown/unknown"
                       : `${session.model.providerID}/${session.model.id}`;
-                  const priorSource = sourceBySession.get(input.sessionId);
-                  const priorState =
-                    priorSource === undefined ? undefined : sessionsBySource.get(priorSource);
-                  return Effect.promise(async () => {
-                    if (priorState !== undefined) {
-                      retireState(priorState);
-                      await releaseManagedTools(priorState);
-                    }
-                  }).pipe(
-                    Effect.zipRight(
-                      Effect.sync(() => {
-                        const state = newSessionState(
-                          input.sessionId,
-                          resumedModel,
-                          input.executionPolicy,
-                          makeCorrelation,
-                          [],
-                        );
-                        state.sourceId = session.id;
-                        sessionsBySource.set(session.id, state);
-                        sourceBySession.set(input.sessionId, session.id);
-                        activate(state);
-                        for (const event of pendingBySource.get(session.id) ?? []) {
-                          mapAndOffer(state, event, options.instanceId, clock, offer, retireState);
-                        }
-                        pendingBySource.delete(session.id);
-                        return {
-                          sessionId: input.sessionId,
-                          resumeCursor: input.resumeCursor,
-                        };
-                      }),
-                    ),
-                  );
+                  state.modelId = resumedModel;
+                  state.sourceId = session.id;
+                  sessionsBySource.set(session.id, state);
+                  sourceBySession.set(input.sessionId, session.id);
+                  activate(state);
+                  for (const event of pendingBySource.get(session.id) ?? []) {
+                    mapAndOffer(state, event, options.instanceId, clock, offer, retireState);
+                  }
+                  pendingBySource.delete(session.id);
+                  return Effect.succeed({
+                    sessionId: input.sessionId,
+                    resumeCursor: input.resumeCursor,
+                  });
                 }),
                 Effect.ensuring(
                   Effect.sync(() => {
@@ -889,11 +1084,23 @@ function makeConnection(
             }
             const observed = options.runtimeRegistry.observedState(options.instanceId);
             const model = observed?.models.find((candidate) => candidate.id === state.modelId);
+            const runtimeClient = client;
+            if (runtimeClient === undefined) {
+              return Effect.fail(fail("protocol", "OpenCode provider process is not active."));
+            }
+            if (input.tools.length > 0 && state.managedTools === undefined) {
+              return Effect.fail(
+                fail(
+                  "unsupported",
+                  "OpenCode app-managed tools must be registered when the session starts.",
+                ),
+              );
+            }
             const rejected = validateChatTurnInput(
               input,
               {
                 ...(observed?.capabilities ?? capabilities),
-                appManagedTools: isolatedConfiguration ? "supported" : "unsupported",
+                appManagedTools: runtimeIsolated ? "supported" : "unsupported",
               },
               model,
             );
@@ -908,7 +1115,7 @@ function makeConnection(
                     Effect.gen(function* () {
                       const managedTools = state.managedTools;
                       return yield* request(() =>
-                        client.prompt({
+                        runtimeClient.prompt({
                           sessionId: source,
                           providerId: modelSelection.providerId,
                           modelId: modelSelection.modelId,
@@ -929,32 +1136,46 @@ function makeConnection(
         ),
       interrupt: (sessionId) =>
         usableStateFor(sessionId).pipe(
-          Effect.flatMap(([source, state]) =>
-            Effect.sync(() => cancelPendingTools(state)).pipe(
-              Effect.zipRight(request(() => client.abort(source))),
-            ),
-          ),
+          Effect.flatMap(([source, state]) => {
+            const activeClient = client;
+            return Effect.sync(() => cancelPendingTools(state)).pipe(
+              Effect.zipRight(
+                activeClient === undefined
+                  ? Effect.fail(fail("protocol", "OpenCode provider process is not active."))
+                  : request(() => activeClient.abort(source)),
+              ),
+            );
+          }),
         ),
       stop: (sessionId) =>
         stateFor(sessionId).pipe(
-          Effect.flatMap(([source, state]) =>
-            Effect.sync(() => retireState(state)).pipe(
-              Effect.zipRight(request(() => client.abort(source))),
+          Effect.flatMap(([source, state]) => {
+            const activeClient = client;
+            return Effect.sync(() => retireState(state)).pipe(
+              Effect.zipRight(
+                activeClient === undefined
+                  ? Effect.void
+                  : request(() => activeClient.abort(source)),
+              ),
               Effect.ensuring(Effect.promise(() => releaseManagedTools(state))),
-            ),
-          ),
+            );
+          }),
         ),
       answerApproval: (input) =>
         usableStateFor(input.sessionId).pipe(
-          Effect.flatMap(([, state]) =>
-            state.terminal
+          Effect.flatMap(([, state]) => {
+            const activeClient = client;
+            if (activeClient === undefined) {
+              return Effect.fail(fail("protocol", "OpenCode provider process is not active."));
+            }
+            return state.terminal
               ? Effect.fail(fail("protocol", "Provider session is already terminal."))
               : state.executionPolicy === "plan"
                 ? Effect.fail(fail("unauthorized", "Plan mode cannot approve provider actions."))
                 : !state.approvals.has(input.requestId)
                   ? Effect.fail(fail("protocol", "Provider approval request is not pending."))
                   : request(() =>
-                      client.replyPermission(
+                      activeClient.replyPermission(
                         input.requestId,
                         input.approved
                           ? (options.permissionPersistence?.() ?? "current-session") ===
@@ -965,20 +1186,24 @@ function makeConnection(
                       ),
                     ).pipe(
                       Effect.tap(() => Effect.sync(() => state.approvals.delete(input.requestId))),
-                    ),
-          ),
+                    );
+          }),
         ),
       answerUserInput: (input) =>
         usableStateFor(input.sessionId).pipe(
-          Effect.flatMap(([, state]) =>
-            state.terminal
+          Effect.flatMap(([, state]) => {
+            const activeClient = client;
+            if (activeClient === undefined) {
+              return Effect.fail(fail("protocol", "OpenCode provider process is not active."));
+            }
+            return state.terminal
               ? Effect.fail(fail("protocol", "Provider session is already terminal."))
               : !state.questions.has(input.requestId)
                 ? Effect.fail(fail("protocol", "Provider question request is not pending."))
-                : request(() => client.replyQuestion(input.requestId, input.answer)).pipe(
+                : request(() => activeClient.replyQuestion(input.requestId, input.answer)).pipe(
                     Effect.tap(() => Effect.sync(() => state.questions.delete(input.requestId))),
-                  ),
-          ),
+                  );
+          }),
         ),
       answerTool: (input) =>
         usableStateFor(input.sessionId).pipe(
