@@ -242,23 +242,20 @@ const DEVIN_CONFIGURATION = {
     agents_standard: false,
   },
   plugin_dirs: [],
+  // Devin enables native subagents by default. Octant owns delegation and
+  // exposes its own bounded AgentRun surface, so the provider's run_subagent
+  // and read_subagent tools must be absent from every managed session.
+  subagents_enabled: false,
   auto_update: false,
   notify: "never",
   attribution: false,
-} as const;
-const DEVIN_AGENT_CONFIGURATION = {
-  system_instructions: "Operate only through Octant-provided context, tools, and authority.",
-  allowed_tools: ["read", "edit", "grep", "glob", "exec"],
-  permissions: { allow: [], deny: [], ask: [] },
-  mcp_servers: [],
-  extensions: [],
 } as const;
 
 function devinConfigPath(managedHome: string): string {
   return join(managedHome, ".config/devin/config.json");
 }
-function devinAgentConfigPath(managedHome: string): string {
-  return join(managedHome, ".config/devin/octant-agent.json");
+function devinMcpConfigPath(managedHome: string): string {
+  return join(managedHome, ".config/devin/mcp_config.json");
 }
 
 const devinProfile: AcpProviderProfile = {
@@ -285,11 +282,11 @@ const devinProfile: AcpProviderProfile = {
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
     guards: { DEVIN_PERMISSION_MODE: "auto", NO_COLOR: "1" },
     environment: ({ managedHome }) => ({ HOME: managedHome }),
+    // Devin 3000.4.x removed the standalone --agent-config flag. Passing it
+    // makes the CLI exit with usage status before writing an ACP response.
     args: ({ managedHome }) => [
       "--config",
       devinConfigPath(managedHome),
-      "--agent-config",
-      devinAgentConfigPath(managedHome),
       "--respect-workspace-trust",
       "true",
       "--permission-mode",
@@ -302,8 +299,11 @@ const devinProfile: AcpProviderProfile = {
         content: `${JSON.stringify(DEVIN_CONFIGURATION, null, 2)}\n`,
       },
       {
-        path: devinAgentConfigPath(managedHome),
-        content: `${JSON.stringify(DEVIN_AGENT_CONFIGURATION, null, 2)}\n`,
+        // Devin 3000.3 moved MCP configuration out of config.json. Keep the
+        // dedicated managed file empty alongside the ACP session's empty
+        // client-provided server list.
+        path: devinMcpConfigPath(managedHome),
+        content: "{}\n",
       },
     ],
     hostAuthentication: {

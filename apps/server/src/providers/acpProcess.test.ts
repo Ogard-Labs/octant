@@ -151,7 +151,10 @@ const passthroughConfinement: AcpConfinementPort = {
 function port(overrides: Partial<AcpProcessOptions> = {}) {
   return makeAcpProcessLive({
     confinement: passthroughConfinement,
-    startupTimeoutMs: 500,
+    // The process suite runs profiles in parallel under the monorepo test
+    // load. Keep fixture startup tolerant of scheduler contention; production
+    // uses the separate 10s default in acpProcess.ts.
+    startupTimeoutMs: 2_000,
     shutdownTimeoutMs: 100,
     ...overrides,
   });
@@ -280,6 +283,34 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
 });
 
 describe("ACP process lifecycle", () => {
+  it("uses Devin's supported ACP launch flags", () => {
+    const managedHome = "/private/tmp/octant-devin-home";
+    expect(devin.process.args({ root: "/private/tmp/octant-root", managedHome })).toEqual([
+      "--config",
+      join(managedHome, ".config/devin/config.json"),
+      "--respect-workspace-trust",
+      "true",
+      "--permission-mode",
+      "auto",
+      "acp",
+    ]);
+    const files = devin.process.managedFiles({
+      managedHome,
+      executionPolicy: "approval-gated",
+    });
+    expect(files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: join(managedHome, ".config/devin/mcp_config.json") }),
+      ]),
+    );
+    expect(files.map((file) => file.path)).not.toContain(
+      join(managedHome, ".config/devin/octant-agent.json"),
+    );
+    expect(files.find((file) => file.path.endsWith("/config.json"))?.content).toContain(
+      '"subagents_enabled": false',
+    );
+  });
+
   it("injects a Mistral Vibe API key only when selected", () => {
     const environment = sanitizeAcpEnvironment(
       vibe,
@@ -340,7 +371,11 @@ describe("ACP process lifecycle", () => {
     let processCount = 0;
     const connectionPromise = Effect.runPromise(
       Effect.scoped(
-        port().start({
+        // This test deliberately waits for the second ownership callback
+        // before allowing initialization to continue. Keep enough startup
+        // budget for the fixture process when the full server suite is busy;
+        // production startup defaults stay unchanged.
+        port({ startupTimeoutMs: 5_000 }).start({
           profile: kilo,
           binaryPath: target.binaryPath,
           root: target.root,
@@ -356,12 +391,20 @@ describe("ACP process lifecycle", () => {
       ),
     );
 
-    await vi.waitFor(() => expect(spawnRecord(target.root)).toBeDefined());
-    expect(records(target.root).some((record) => record.kind === "message")).toBe(false);
-    releaseOwnership();
-    await expect(connectionPromise).resolves.toMatchObject({
-      initialized: { protocolVersion: 1 },
-    });
+    // Observe failures immediately even while the test waits for the fixture
+    // to start; always release the held receipt before deleting its directory.
+    void connectionPromise.catch(() => undefined);
+    try {
+      await vi.waitFor(() => expect(spawnRecord(target.root)).toBeDefined(), { timeout: 5_000 });
+      expect(records(target.root).some((record) => record.kind === "message")).toBe(false);
+      releaseOwnership();
+      await expect(connectionPromise).resolves.toMatchObject({
+        initialized: { protocolVersion: 1 },
+      });
+    } finally {
+      releaseOwnership();
+      await connectionPromise.catch(() => undefined);
+    }
   });
 
   it.each(["descendant", "stubborn-descendant"])(
