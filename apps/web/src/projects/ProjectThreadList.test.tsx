@@ -302,6 +302,38 @@ describe("ProjectThreadRows", () => {
     expect(screen.queryByRole("menuitem", { name: "Pin" })).toBeNull();
   });
 
+  it("groups copy actions under one compact submenu and marks actions with icons", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    render(
+      <ProjectThreadRows
+        actions={{ onPinThread: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+
+    const menu = document.querySelector(".thread-row-context-menu");
+    expect(menu).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Copy" })).toBeVisible();
+    expect(screen.queryByRole("menuitem", { name: "Copy title" })).toBeNull();
+    expect(menu?.querySelectorAll(".thread-row-context-menu__icon").length).toBeGreaterThan(0);
+
+    await userEvent.hover(screen.getByRole("menuitem", { name: "Copy" }));
+    expect(await screen.findByRole("menuitem", { name: "Copy title" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Copy thread ID" })).toBeVisible();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Copy title" }));
+    expect(writeText).toHaveBeenCalledWith("Controller foundation");
+  });
+
   it("renames a thread in place from its own right-click menu", async () => {
     const onRenameThread = vi.fn();
     render(
