@@ -312,6 +312,7 @@ function acquireOpenCodeServer(
           OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
           OPENCODE_DISABLE_CLAUDE_CODE: "1",
           OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1",
+          OPENCODE_DISABLE_CLAUDE_CODE_PROMPT: "1",
         },
         stdio: ["ignore", "pipe", "pipe"],
       },
