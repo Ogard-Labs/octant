@@ -10,6 +10,7 @@ import { Effect, Exit, Scope, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { makePiDriver, type PiClientPort } from "./piDriver";
 import { piToolCatalogAttestation, type PiProcessPort, type PiRpcConnection } from "./piProcess";
+import { createPiManagedToolsBridge, type PiManagedToolsBridge } from "./piManagedTools";
 import type { PiRpcEvent } from "./piRpcClient";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
@@ -90,6 +91,7 @@ class FakeClient implements PiClientPort {
 function fixture(version = "0.80.10") {
   const client = new FakeClient();
   const starts: Array<Record<string, unknown>> = [];
+  const lifecycle: string[] = [];
   let active = 0;
   let released = 0;
   const connection = {
@@ -105,11 +107,13 @@ function fixture(version = "0.80.10") {
         Effect.sync(() => {
           client.attestedTools = input.tools ?? [];
           starts.push(input);
+          lifecycle.push("process-start");
           active += 1;
           return connection;
         }),
         () =>
           Effect.sync(() => {
+            lifecycle.push("process-release");
             active -= 1;
             released += 1;
           }),
@@ -129,8 +133,27 @@ function fixture(version = "0.80.10") {
       let id = 0;
       return () => `approval-${++id}`;
     })(),
+    managedToolsFactory: async (definitions, execute) => {
+      lifecycle.push("bridge-open");
+      const bridge = await createPiManagedToolsBridge(definitions, execute);
+      return {
+        ...bridge,
+        close: async () => {
+          lifecycle.push("bridge-close");
+          await bridge.close();
+        },
+      } satisfies PiManagedToolsBridge;
+    },
   });
-  return { driver, client, starts, registry, active: () => active, released: () => released };
+  return {
+    driver,
+    client,
+    starts,
+    lifecycle,
+    registry,
+    active: () => active,
+    released: () => released,
+  };
 }
 
 function deferredExit() {
@@ -341,7 +364,7 @@ describe("Pi provider driver", () => {
   });
 
   it("round-trips an app-managed tool and carries its catalogue across resume", async () => {
-    const { driver, client, starts } = fixture("0.85.1");
+    const { driver, client, starts, lifecycle } = fixture("0.85.1");
     const tool: ProviderToolDefinition = {
       name: "octant_browser",
       description: "Use the Octant Browser session.",
@@ -435,6 +458,7 @@ describe("Pi provider driver", () => {
         executionPolicy: "approval-gated",
       }),
     );
+    expect(lifecycle.indexOf("process-release")).toBeLessThan(lifecycle.indexOf("bridge-close"));
     expect(starts.at(-1)?.tools).toEqual([tool]);
     const resumedBridge = starts.at(-1)?.toolBridge as { url: string; token: string } | undefined;
     expect(resumedBridge).toBeDefined();

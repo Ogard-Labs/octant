@@ -63,6 +63,8 @@ export interface PiDriverOptions {
   readonly clock?: () => string;
   readonly correlationId?: () => string;
   readonly requestId?: () => string;
+  /** Test seam for asserting bridge/process teardown ordering. */
+  readonly managedToolsFactory?: typeof createPiManagedToolsBridge;
 }
 
 interface ResumeIdentity {
@@ -224,6 +226,7 @@ function client(connection: PiRpcConnection): PiClientPort {
 
 export function makePiDriver(options: PiDriverOptions): ProviderDriver {
   const clientFactory = options.clientFactory ?? client;
+  const managedToolsFactory = options.managedToolsFactory ?? createPiManagedToolsBridge;
   const clock = options.clock ?? (() => new Date().toISOString());
   const makeCorrelation = options.correlationId ?? (() => crypto.randomUUID());
   const makeRequestId = options.requestId ?? (() => crypto.randomUUID());
@@ -314,6 +317,7 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
       }
       return makeConnection(options, projectRoot, mode, resumeIdentities, {
         clientFactory,
+        managedToolsFactory,
         clock,
         makeCorrelation,
         makeRequestId,
@@ -335,6 +339,7 @@ function makeConnection(
   resumeIdentities: Map<string, ResumeIdentity>,
   factories: {
     readonly clientFactory: (connection: PiRpcConnection) => PiClientPort;
+    readonly managedToolsFactory: typeof createPiManagedToolsBridge;
     readonly clock: () => string;
     readonly makeCorrelation: () => string;
     readonly makeRequestId: () => string;
@@ -395,8 +400,11 @@ function makeConnection(
       }
       state.approvals.clear();
       cancelPendingTools(state);
-      await state.managedTools?.close().catch(() => undefined);
-      await Effect.runPromise(Scope.close(state.scope, Exit.void));
+      try {
+        await Effect.runPromise(Scope.close(state.scope, Exit.void));
+      } finally {
+        await state.managedTools?.close().catch(() => undefined);
+      }
       options.runtimeRegistry.setActiveSessionCount(
         options.instanceId,
         Math.max(0, options.runtimeRegistry.activeSessionCount(options.instanceId) - 1),
@@ -603,7 +611,7 @@ function makeConnection(
         let currentState: SessionState | undefined;
         try {
           if (tools.length > 0) {
-            managedTools = await createPiManagedToolsBridge(tools, (call) => {
+            managedTools = await factories.managedToolsFactory(tools, (call) => {
               if (currentState === undefined) {
                 return Promise.resolve({
                   resultJson: JSON.stringify({ error: "tool-unavailable" }),
@@ -714,8 +722,11 @@ function makeConnection(
           void processConnection.exited.then(handleExit, handleExit);
           return state;
         } catch (error) {
-          await managedTools?.close().catch(() => undefined);
-          await Effect.runPromise(Scope.close(scope, Exit.void));
+          try {
+            await Effect.runPromise(Scope.close(scope, Exit.void));
+          } finally {
+            await managedTools?.close().catch(() => undefined);
+          }
           throw error;
         }
       });
