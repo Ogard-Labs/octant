@@ -448,6 +448,9 @@ import { createZenBackgroundRouteHandler } from "./zenBackgroundRoutes";
 import { createUsageRouteHandler } from "./usageRoutes";
 import { CacheStatsProjection } from "./cacheStatsProjection";
 import { createUsageDashboardRouteHandler } from "./usageDashboardRoutes";
+import { createLocalUsageHistoryRouteHandler } from "./localUsageHistoryRoutes";
+import { createClaudeLocalUsageHistorySource } from "./providers/claudeUsageHistory";
+import { createCodexLocalUsageHistorySource } from "./providers/codexUsageHistory";
 import { resolveWindowProjectScope, type UsageProjectScope } from "./usageProjectScope";
 import { SideChatSidecarStore } from "./chat/sideChatSidecarStore";
 import {
@@ -2088,6 +2091,15 @@ export function startOctantServer(
       readWindowProjectScope: readWindowUsageProjectScope,
       cacheStats,
       latencyStats: () => latencyStats.read(),
+    });
+    const localUsageHistorySources = [
+      createCodexLocalUsageHistorySource({ root: join(homedir(), ".codex", "sessions") }),
+      createClaudeLocalUsageHistorySource({ root: join(homedir(), ".claude", "projects") }),
+    ] as const;
+    const localUsageHistoryRoutes = createLocalUsageHistoryRouteHandler({
+      windowAuthorityStore,
+      sources: localUsageHistorySources,
+      clock: () => new Date().toISOString(),
     });
     const usageRoutes = createUsageRouteHandler({
       connection: persistence.connection,
@@ -6750,6 +6762,7 @@ export function startOctantServer(
       (await threadMentionRoutes(request)) ??
       (await fileMentionRoutes(request)) ??
       (await usageDashboardRoutes(request)) ??
+      (await localUsageHistoryRoutes(request)) ??
       (await usageRoutes(request)) ??
       (await diagnosticsExportRoutes(request)) ??
       (await threadExportRoutes(request)) ??
