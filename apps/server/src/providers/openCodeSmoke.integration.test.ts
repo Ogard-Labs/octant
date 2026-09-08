@@ -64,50 +64,40 @@ describe("real OpenCode integration", () => {
       if (binaryPath === undefined) throw new Error("The enabled smoke requires an installed CLI.");
       const requestedModel = process.env.OCTANT_OPENCODE_TOOL_MODEL;
       if (requestedModel === undefined)
-        throw new Error("Set OCTANT_OPENCODE_TOOL_MODEL to a configured model id or display name.");
+        throw new Error(
+          "Set OCTANT_OPENCODE_TOOL_MODEL to an anonymous model available in an empty profile.",
+        );
       const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000303");
       const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000304");
       const registry = new ProviderRuntimeRegistry();
       const projectRoot = realpathSync(mkdtempSync(join(tmpdir(), "octant-managed-tool-smoke-")));
-      const isolatedHome = process.env.OCTANT_OPENCODE_TOOL_ISOLATED === "1";
       const processPort = makeOpenCodeProcessLive({
         startupTimeoutMs: 20_000,
-        ...(isolatedHome
-          ? {
-              inheritedEnvironment: {
-                PATH: process.env.PATH,
-                HOME: projectRoot,
-                XDG_CONFIG_HOME: join(projectRoot, "config"),
-                XDG_DATA_HOME: join(projectRoot, "data"),
-                XDG_STATE_HOME: join(projectRoot, "state"),
-                XDG_CACHE_HOME: join(projectRoot, "cache"),
-                OPENCODE_DISABLE_AUTOUPDATE: "1",
-                OPENCODE_DISABLE_LSP_DOWNLOAD: "1",
-                OPENCODE_DISABLE_PROJECT_CONFIG: "1",
-                OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
-              },
-            }
-          : {}),
+        inheritedEnvironment: {
+          PATH: process.env.PATH,
+          HOME: projectRoot,
+          XDG_CONFIG_HOME: join(projectRoot, "config"),
+          XDG_DATA_HOME: join(projectRoot, "data"),
+          XDG_STATE_HOME: join(projectRoot, "state"),
+          XDG_CACHE_HOME: join(projectRoot, "cache"),
+          OPENCODE_DISABLE_AUTOUPDATE: "1",
+          OPENCODE_DISABLE_LSP_DOWNLOAD: "1",
+          OPENCODE_DISABLE_PROJECT_CONFIG: "1",
+          OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
+        },
       });
       const driver = makeOpenCodeDriver({
         instanceId,
         binaryPath,
-        process: isolatedHome
-          ? {
-              start: (input) =>
-                processPort
-                  .start({ ...input, cwd: projectRoot })
-                  .pipe(
-                    Effect.map((runtime) => ({ ...runtime, isolatedConfiguration: true as const })),
-                  ),
-            }
-          : processPort,
-        ...(isolatedHome
-          ? {
-              clientFactory: (runtime: Parameters<typeof makeOfficialOpenCodeClient>[0]) =>
-                makeOfficialOpenCodeClient(runtime, projectRoot),
-            }
-          : {}),
+        process: {
+          start: (input) =>
+            processPort
+              .start({ ...input, cwd: projectRoot })
+              .pipe(
+                Effect.map((runtime) => ({ ...runtime, isolatedConfiguration: true as const })),
+              ),
+        },
+        clientFactory: (runtime) => makeOfficialOpenCodeClient(runtime, projectRoot),
         runtimeRegistry: registry,
         idleLeaseMs: 0,
         permissionPersistence: () => "current-session",

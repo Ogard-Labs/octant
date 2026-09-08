@@ -97,5 +97,9 @@ describe("ProviderGlyph", () => {
     expect(PROVIDER_LOGOS["oh-my-pi"]?.source.license).toBe("MIT");
     expect(PROVIDER_LOGOS.goose?.source.license).toBe("Apache-2.0");
     expect(PROVIDER_LOGOS.glm?.source.license).toBe("Apache-2.0");
+    expect(PROVIDER_LOGOS["bfl-image"]?.source.license).toBe("MIT");
+    expect(PROVIDER_LOGOS["bfl-image"]?.source.source).toContain("/icons/bfl.svg");
+    expect(PROVIDER_LOGOS["ideogram-image"]?.source.license).toBe("MIT");
+    expect(PROVIDER_LOGOS["ideogram-image"]?.source.source).toContain("/icons/ideogram.svg");
   });
 });
