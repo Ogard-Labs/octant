@@ -10,6 +10,8 @@ import {
   type ProviderInstanceId,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
+  type ProviderToolAnswer,
+  type ProviderToolDefinition,
 } from "@octant/contracts";
 import { decidesCodeEffectsByApproval } from "@octant/domain";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
@@ -17,12 +19,17 @@ import {
   rejectUnsupportedChatTurn,
   renderProviderTurnPrompt,
   textOnlyInputModalities,
-  unsupportedAnswerTool,
   unsupportedChatCapabilities,
 } from "@octant/provider-sdk/chat-conformance";
 import { Effect, Exit, Queue, Scope, Stream } from "effect";
 import type { PiProcessPort, PiRpcConnection, PiSessionMode } from "./piProcess";
 import { PiRpcFailure, type PiRpcEvent, type PiRpcResponse } from "./piRpcClient";
+import {
+  createPiManagedToolsBridge,
+  type PiManagedToolCall,
+  type PiManagedToolAnswer,
+  type PiManagedToolsBridge,
+} from "./piManagedTools";
 import { type ProviderRuntimeRegistry, trackProviderProcess } from "./providerRuntimeRegistry";
 
 export interface PiClientPort {
@@ -57,6 +64,7 @@ interface ResumeIdentity {
   readonly root: string;
   readonly mode: PiSessionMode;
   readonly modelId: string;
+  readonly tools: ReadonlyArray<ProviderToolDefinition>;
 }
 
 interface PendingApproval {
@@ -72,12 +80,20 @@ interface SessionState {
   readonly client: PiClientPort;
   readonly removeEvent: () => void;
   readonly approvals: Map<string, PendingApproval>;
-  readonly tools: Map<string, { terminal: boolean }>;
+  readonly tools: Map<string, { terminal: boolean; name: string }>;
+  readonly toolNames: ReadonlySet<string>;
+  readonly pendingTools: Map<string, PendingPiTool>;
+  readonly managedTools?: PiManagedToolsBridge;
   correlationId: CorrelationId;
   sequence: number;
   promptActive: boolean;
   terminal: boolean;
   closed: boolean;
+}
+
+interface PendingPiTool {
+  readonly controller: AbortController;
+  readonly resolve: (answer: PiManagedToolAnswer) => void;
 }
 
 type RuntimeEventWithoutEnvelope = ProviderRuntimeEvent extends infer RuntimeEvent
@@ -100,6 +116,7 @@ const capabilities = {
   taskProgress: "unavailable",
   nativeChildAgents: "unsupported",
   ...unsupportedChatCapabilities,
+  appManagedTools: "supported",
 } as const;
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
@@ -286,6 +303,17 @@ function makeConnection(
       Effect.runFork(Queue.offer(queue, event));
     };
 
+    const cancelPendingTools = (state: SessionState): void => {
+      for (const pending of state.pendingTools.values()) {
+        pending.controller.abort();
+        pending.resolve({
+          resultJson: JSON.stringify({ error: "tool-interrupted" }),
+          isError: true,
+        });
+      }
+      state.pendingTools.clear();
+    };
+
     const closeState = async (state: SessionState) => {
       if (state.closed) return;
       state.closed = true;
@@ -294,6 +322,8 @@ function makeConnection(
         await state.client.respondToUi(approval.uiId, { confirmed: false }).catch(() => undefined);
       }
       state.approvals.clear();
+      cancelPendingTools(state);
+      await state.managedTools?.close().catch(() => undefined);
       await Effect.runPromise(Scope.close(state.scope, Exit.void));
       options.runtimeRegistry.setActiveSessionCount(
         options.instanceId,
@@ -324,6 +354,50 @@ function makeConnection(
       emit(state, { kind: "failed", failure: failure("protocol", message) });
     };
 
+    const requestManagedTool = async (
+      state: SessionState,
+      call: PiManagedToolCall,
+    ): Promise<PiManagedToolAnswer> => {
+      if (
+        state.closed ||
+        state.terminal ||
+        !state.toolNames.has(call.name) ||
+        state.tools.get(call.toolCallId)?.name !== call.name
+      ) {
+        return { resultJson: JSON.stringify({ error: "tool-unavailable" }), isError: true };
+      }
+      if (call.signal.aborted) {
+        return { resultJson: JSON.stringify({ error: "tool-interrupted" }), isError: true };
+      }
+      const requestId = factories.makeRequestId();
+      if (state.pendingTools.has(requestId)) {
+        protocolFailure(state, "Pi app-managed tool request identity was repeated.");
+        return { resultJson: JSON.stringify({ error: "tool-unavailable" }), isError: true };
+      }
+      const controller = new AbortController();
+      const answer = new Promise<PiManagedToolAnswer>((resolveAnswer) => {
+        const finish = (value: PiManagedToolAnswer) => {
+          state.pendingTools.delete(requestId);
+          call.signal.removeEventListener("abort", cancel);
+          resolveAnswer(value);
+        };
+        const cancel = () => {
+          controller.abort();
+          finish({ resultJson: JSON.stringify({ error: "tool-interrupted" }), isError: true });
+        };
+        state.pendingTools.set(requestId, { controller, resolve: finish });
+        call.signal.addEventListener("abort", cancel, { once: true });
+        if (call.signal.aborted) cancel();
+      });
+      emit(state, {
+        kind: "tool-request",
+        requestId,
+        toolName: call.name,
+        inputJson: call.inputJson,
+      });
+      return answer;
+    };
+
     const handleEvent = (state: SessionState, event: PiRpcEvent) => {
       if (state.closed) return;
       if (state.terminal && event.type !== "extension_ui_request") return;
@@ -343,7 +417,7 @@ function makeConnection(
         if (toolCallId === undefined || toolName === undefined || state.tools.has(toolCallId)) {
           return protocolFailure(state, "Pi tool start was invalid.");
         }
-        state.tools.set(toolCallId, { terminal: false });
+        state.tools.set(toolCallId, { terminal: false, name: toolName });
         emit(state, { kind: "tool-start", toolCallId, toolName });
         return;
       }
@@ -387,7 +461,8 @@ function makeConnection(
           toolCallId === undefined ||
           tool === undefined ||
           tool.terminal ||
-          toolName === undefined
+          toolName === undefined ||
+          tool.name !== toolName
         ) {
           void state.client.respondToUi(uiId, { confirmed: false });
           return protocolFailure(state, "Pi approval correlation was invalid.");
@@ -431,14 +506,32 @@ function makeConnection(
       readonly sessionId: ProviderSessionId;
       readonly modelId: string;
       readonly executionPolicy: ProviderExecutionPolicy;
+      readonly tools: ReadonlyArray<ProviderToolDefinition>;
     }) =>
       request(async () => {
         const selection = modelSelection(input.modelId);
         if (selection === undefined)
           throw failure("invalid-configuration", "Pi model ID must include provider/model.");
+        // Plan mode refuses browser effects and keeps provider egress closed,
+        // so do not register an app-tool bridge that could never reach the
+        // host without widening the sandbox network policy.
+        const tools = input.executionPolicy === "plan" ? [] : input.tools;
         const scope = await Effect.runPromise(Scope.make());
         let receipt: Awaited<ReturnType<ProviderRuntimeRegistry["trackProcess"]>> | undefined;
+        let managedTools: PiManagedToolsBridge | undefined;
+        let currentState: SessionState | undefined;
         try {
+          if (tools.length > 0) {
+            managedTools = await createPiManagedToolsBridge(tools, (call) => {
+              if (currentState === undefined) {
+                return Promise.resolve({
+                  resultJson: JSON.stringify({ error: "tool-unavailable" }),
+                  isError: true,
+                });
+              }
+              return requestManagedTool(currentState, call);
+            });
+          }
           const processConnection = await Effect.runPromise(
             options.process
               .start({
@@ -449,6 +542,8 @@ function makeConnection(
                 sessionId: input.sessionId,
                 mode,
                 executionPolicy: input.executionPolicy,
+                ...(tools.length === 0 ? {} : { tools }),
+                ...(managedTools === undefined ? {} : { toolBridge: managedTools.config }),
                 onProcessStarted: async (process) => {
                   receipt = await options.runtimeRegistry.trackProcess(options.instanceId, process);
                   return receipt;
@@ -478,17 +573,22 @@ function makeConnection(
             removeEvent,
             approvals: new Map(),
             tools: new Map(),
+            toolNames: new Set(tools.map((tool) => tool.name)),
+            pendingTools: new Map(),
+            ...(managedTools === undefined ? {} : { managedTools }),
             correlationId: factories.makeCorrelation() as CorrelationId,
             sequence: 1,
             promptActive: false,
             terminal: false,
             closed: false,
           };
+          currentState = state;
           sessions.set(input.sessionId, state);
           resumeIdentities.set(input.sessionId, {
             root: projectRoot,
             mode,
             modelId: input.modelId,
+            tools,
           });
           options.runtimeRegistry.setActiveSessionCount(
             options.instanceId,
@@ -509,15 +609,19 @@ function makeConnection(
           void processConnection.exited.then(handleExit, handleExit);
           return state;
         } catch (error) {
+          await managedTools?.close().catch(() => undefined);
           await Effect.runPromise(Scope.close(scope, Exit.void));
           throw error;
         }
       });
 
     return {
+      toolRequestSignal: ({ sessionId, requestId }) =>
+        sessions.get(sessionId)?.pendingTools.get(requestId)?.controller.signal ??
+        AbortSignal.abort(),
       subscribe: Effect.succeed(Stream.fromQueue(queue)),
       start: (input) =>
-        createState(input).pipe(
+        createState({ ...input, tools: input.tools ?? [] }).pipe(
           Effect.map(() => ({
             sessionId: input.sessionId,
             resumeCursor: { driverKind: "pi" as const, value: input.sessionId },
@@ -542,6 +646,7 @@ function makeConnection(
           sessionId: input.sessionId,
           modelId: identity.modelId,
           executionPolicy: input.executionPolicy,
+          tools: identity.tools,
         }).pipe(
           Effect.map(() => ({ sessionId: input.sessionId, resumeCursor: input.resumeCursor })),
           Effect.mapError(() => failure("stale-resume", "Pi session could not be resumed.")),
@@ -577,6 +682,7 @@ function makeConnection(
                   if (!state.terminal) {
                     state.promptActive = false;
                     state.terminal = true;
+                    cancelPendingTools(state);
                     emit(state, { kind: "interrupted", message: "Pi turn was interrupted." });
                   }
                 }),
@@ -621,7 +727,19 @@ function makeConnection(
         ),
       answerUserInput: () =>
         Effect.fail(failure("unsupported", "Pi does not expose provider user questions.")),
-      answerTool: () => unsupportedAnswerTool(capabilities.appManagedTools),
+      answerTool: (input: ProviderToolAnswer) =>
+        stateFor(input.sessionId).pipe(
+          Effect.flatMap((state) => {
+            const pending = state.pendingTools.get(input.requestId);
+            if (pending === undefined) {
+              return Effect.fail(
+                failure("protocol", "Pi app-managed tool request is not pending."),
+              );
+            }
+            pending.resolve({ resultJson: input.resultJson, isError: input.isError });
+            return Effect.void;
+          }),
+        ),
     };
   });
 }

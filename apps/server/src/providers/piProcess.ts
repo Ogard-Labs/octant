@@ -14,7 +14,11 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
+import type {
+  ProviderExecutionPolicy,
+  ProviderFailure,
+  ProviderToolDefinition,
+} from "@octant/contracts";
 import { Effect, type Scope } from "effect";
 import { makePiRpcClient, type PiRpcClient } from "./piRpcClient";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
@@ -23,6 +27,7 @@ import {
   materializeOsNetworkEgress,
   resolveDefaultThreadEgressPolicy,
 } from "../process/threadEgressPolicy";
+import type { PiManagedToolBridgeConfig } from "./piManagedTools";
 
 export type PiSessionMode = "chat" | "work" | "code";
 
@@ -43,6 +48,8 @@ export interface PiConfinementPort {
     readonly mode: PiSessionMode;
     readonly executionPolicy: ProviderExecutionPolicy;
     readonly environment: NodeJS.ProcessEnv;
+    readonly tools?: ReadonlyArray<ProviderToolDefinition>;
+    readonly toolBridge?: PiManagedToolBridgeConfig;
   }) => Effect.Effect<PiLaunchSpec, ProviderFailure>;
 }
 
@@ -64,6 +71,8 @@ export interface PiProcessPort {
     readonly mode: PiSessionMode;
     readonly executionPolicy: ProviderExecutionPolicy;
     readonly onProcessStarted?: ProviderProcessStartedListener;
+    readonly tools?: ReadonlyArray<ProviderToolDefinition>;
+    readonly toolBridge?: PiManagedToolBridgeConfig;
   }) => Effect.Effect<PiRpcConnection, ProviderFailure, Scope.Scope>;
 }
 
@@ -84,6 +93,7 @@ export interface PiProcessOptions {
 
 const SIDE_EFFECT_TOOLS = ["bash", "edit", "write"] as const;
 const ALL_TOOLS = "bash,edit,write,read,grep,find,ls";
+const BUILT_IN_TOOL_NAMES = new Set(ALL_TOOLS.split(","));
 const READ_TOOLS = "read,grep,find,ls";
 const SAFE_ENVIRONMENT = new Set([
   "COLORTERM",
@@ -139,6 +149,72 @@ export default function octantApprovalBridge(pi: ExtensionAPI) {
 }
 `;
 
+function javascriptLiteral(value: unknown): string {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) throw new Error("Pi extension data could not be serialized.");
+  return serialized.replaceAll("\u2028", "\\u2028").replaceAll("\u2029", "\\u2029");
+}
+
+export function piExtensionSource(tools: ReadonlyArray<ProviderToolDefinition>): string {
+  if (tools.length === 0) return APPROVAL_BRIDGE;
+  return `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+const definitions = ${javascriptLiteral(tools)};
+const bridgeUrl = process.env.OCTANT_PI_TOOL_BRIDGE_URL;
+const bridgeToken = process.env.OCTANT_PI_TOOL_BRIDGE_TOKEN;
+const sideEffects = new Set(${javascriptLiteral(SIDE_EFFECT_TOOLS)});
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export default function octantManagedTools(pi: ExtensionAPI) {
+  if (bridgeUrl !== undefined && bridgeToken !== undefined) {
+    for (const definition of definitions) {
+      pi.registerTool({
+        name: definition.name,
+        label: \`Octant \${definition.name}\`,
+        description: definition.description ?? \`Octant-managed \${definition.name}\`,
+        parameters: definition.inputSchema,
+        async execute(toolCallId, params, signal) {
+          if (signal?.aborted) throw new Error("Octant tool interrupted.");
+          const response = await fetch(bridgeUrl, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              "x-octant-pi-token": bridgeToken,
+            },
+            body: JSON.stringify({ toolCallId, name: definition.name, input: params }),
+            signal,
+          });
+          if (!response.ok) throw new Error("Octant tool bridge rejected the request.");
+          const result: unknown = await response.json();
+          if (!isRecord(result) || typeof result.resultJson !== "string" || typeof result.isError !== "boolean") {
+            throw new Error("Octant tool bridge returned an invalid result.");
+          }
+          if (result.isError) throw new Error(result.resultJson);
+          return { content: [{ type: "text", text: result.resultJson }], details: {} };
+        },
+      });
+    }
+  }
+
+  pi.on("tool_call", async (event, ctx) => {
+    if (!sideEffects.has(event.toolName)) return undefined;
+    if (process.env.OCTANT_PI_APPROVALS === "disabled") return undefined;
+    if (!ctx.hasUI || typeof event.toolCallId !== "string" || event.toolCallId.length === 0) {
+      return { block: true, reason: "Octant approval unavailable" };
+    }
+    const approved = await ctx.ui.confirm(
+      \`Octant approval:\${event.toolCallId}:\${event.toolName}\`,
+      "Allow this side effect for the current session?",
+    );
+    return approved ? undefined : { block: true, reason: "Octant approval denied" };
+  });
+}
+`;
+}
+
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
   return { category, message };
 }
@@ -169,13 +245,16 @@ export function piArguments(
   sessionId: string,
   mode: PiSessionMode,
   executionPolicy: ProviderExecutionPolicy,
+  appToolNames: ReadonlyArray<string> = [],
 ): ReadonlyArray<string> {
-  const tools =
+  const builtInTools =
     mode === "chat"
-      ? ["--no-tools"]
+      ? []
       : executionPolicy === "plan"
-        ? ["--tools", READ_TOOLS]
-        : ["--tools", ALL_TOOLS];
+        ? READ_TOOLS.split(",")
+        : ALL_TOOLS.split(",");
+  const selectedTools = [...builtInTools, ...appToolNames];
+  const tools = selectedTools.length === 0 ? ["--no-tools"] : ["--tools", selectedTools.join(",")];
   return [
     "--mode",
     "rpc",
@@ -306,6 +385,26 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
         );
         const root =
           input.root === piHome ? piHome : yield* existingDirectory(input.root, "Pi Project root");
+        const tools = input.tools ?? [];
+        if (tools.length > 0 && input.toolBridge === undefined) {
+          return yield* Effect.fail(
+            failure("invalid-configuration", "Pi app-managed tool bridge is missing."),
+          );
+        }
+        if (tools.some((tool) => !/^[A-Za-z0-9_-]+$/.test(tool.name))) {
+          return yield* Effect.fail(
+            failure("invalid-configuration", "Pi app-managed tool name is not CLI-safe."),
+          );
+        }
+        const names = tools.map((tool) => tool.name);
+        if (
+          new Set(names).size !== names.length ||
+          names.some((name) => BUILT_IN_TOOL_NAMES.has(name))
+        ) {
+          return yield* Effect.fail(
+            failure("invalid-configuration", "Pi app-managed tool name collides with a built-in."),
+          );
+        }
         const bridgePath = join(piHome, "octant-approval-bridge.ts");
         yield* Effect.try({
           try: () => {
@@ -314,7 +413,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
               `${JSON.stringify({ defaultProjectTrust: "never", enableInstallTelemetry: false }, null, 2)}\n`,
               { mode: 0o600 },
             );
-            writeFileSync(bridgePath, APPROVAL_BRIDGE, { mode: 0o600 });
+            writeFileSync(bridgePath, piExtensionSource(tools), { mode: 0o600 });
             chmodSync(bridgePath, 0o600);
             prepareProviderOwnedLink(piHome, credentialPath, "auth.json");
             prepareProviderOwnedLink(piHome, modelsPath, "models.json");
@@ -323,13 +422,23 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
             failure("invalid-configuration", "Pi managed configuration could not be prepared."),
         });
         const approvals = input.executionPolicy === "full-access" ? "disabled" : "enabled";
-        const environment = { ...input.environment, OCTANT_PI_APPROVALS: approvals };
+        const environment = {
+          ...input.environment,
+          OCTANT_PI_APPROVALS: approvals,
+          ...(input.toolBridge === undefined
+            ? {}
+            : {
+                OCTANT_PI_TOOL_BRIDGE_URL: input.toolBridge.url,
+                OCTANT_PI_TOOL_BRIDGE_TOKEN: input.toolBridge.token,
+              }),
+        };
         const args = piArguments(
           bridgePath,
           sessionDirectory,
           input.sessionId,
           input.mode,
           input.executionPolicy,
+          tools.map((tool) => tool.name),
         );
         if (input.executionPolicy === "full-access") {
           return { command: input.binaryPath, args, cwd: root, environment };

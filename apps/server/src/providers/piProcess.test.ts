@@ -11,9 +11,15 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ProviderToolDefinition } from "@octant/contracts";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
-import { makePiConfinementLive, piArguments, sanitizePiEnvironment } from "./piProcess";
+import {
+  makePiConfinementLive,
+  piArguments,
+  piExtensionSource,
+  sanitizePiEnvironment,
+} from "./piProcess";
 
 const roots: string[] = [];
 
@@ -43,6 +49,27 @@ afterEach(async () => {
 });
 
 describe("Pi process boundary", () => {
+  it("registers only the supplied app-managed tools in the explicit extension", () => {
+    const tool: ProviderToolDefinition = {
+      name: "octant_browser",
+      description: "Use the Octant Browser session.",
+      inputSchema: { type: "object", properties: { action: { type: "string" } } },
+    };
+    const extension = piExtensionSource([tool]);
+
+    expect(extension).toContain("pi.registerTool");
+    expect(extension).toContain('"name":"octant_browser"');
+    expect(extension).toContain("name: definition.name");
+    expect(extension).toContain("OCTANT_PI_TOOL_BRIDGE_URL");
+    expect(extension).toContain("x-octant-pi-token");
+    expect(extension).not.toContain("registerCommand");
+    expect(
+      piArguments("/bridge.ts", "/sessions", "code-1", "code", "approval-gated", [tool.name]),
+    ).toEqual(
+      expect.arrayContaining(["--tools", "bash,edit,write,read,grep,find,ls,octant_browser"]),
+    );
+  });
+
   it("writes isolated configuration, links provider-owned auth, and loads only the Octant bridge", async () => {
     const f = fixture();
     const confinement = makePiConfinementLive({
@@ -102,6 +129,34 @@ describe("Pi process boundary", () => {
     expect(bridge).toMatch(/ctx\.ui\.confirm/);
     expect(bridge).toMatch(/OCTANT_PI_APPROVALS/);
     expect(bridge).not.toMatch(/install|registerTool|registerCommand/);
+
+    const managed = fixture();
+    const managedTool: ProviderToolDefinition = {
+      name: "octant_browser",
+      inputSchema: { type: "object", properties: {} },
+    };
+    const managedLaunch = await Effect.runPromise(
+      confinement.prepare({
+        binaryPath: managed.binary,
+        root: managed.root,
+        piHome: managed.home,
+        sessionDirectory: join(managed.home, "sessions"),
+        sessionId: "managed-1",
+        mode: "code",
+        executionPolicy: "approval-gated",
+        environment: sanitizePiEnvironment({ PATH: "/usr/bin" }, managed.home),
+        tools: [managedTool],
+        toolBridge: { url: "http://127.0.0.1:43210/octant/test", token: "test-token" },
+      }),
+    );
+    expect(managedLaunch.args).toContain("bash,edit,write,read,grep,find,ls,octant_browser");
+    expect(managedLaunch.environment.OCTANT_PI_TOOL_BRIDGE_URL).toBe(
+      "http://127.0.0.1:43210/octant/test",
+    );
+    expect(managedLaunch.environment.OCTANT_PI_TOOL_BRIDGE_TOKEN).toBe("test-token");
+    const managedBridge = readFileSync(join(managed.home, "octant-approval-bridge.ts"), "utf8");
+    expect(managedBridge).toContain('"name":"octant_browser"');
+    expect(managedBridge).toContain("pi.registerTool");
   });
 
   it("maps modes to the minimum Pi tools and keeps full access genuine", async () => {
