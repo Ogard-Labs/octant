@@ -227,8 +227,8 @@ describe("probeOpenCodeBinary", () => {
       provider: {
         airouter: {
           name: "aiRouter",
-          npm: "@ai/router-provider",
-          options: { baseURL: "https://router.invalid/v1", apiKey: "{file:/private/key}" },
+          npm: "@ai-sdk/openai-compatible",
+          options: { baseURL: "https://router.invalid/v1", apiKey: "{env:OPENAI_API_KEY}" },
           models: {
             "Qwen3.6": {
               name: "Qwen3.6",
@@ -250,7 +250,7 @@ describe("probeOpenCodeBinary", () => {
       provider: {
         airouter: {
           name: "aiRouter",
-          options: { baseURL: "https://router.invalid/v1", apiKey: "{file:/private/key}" },
+          options: { baseURL: "https://router.invalid/v1", apiKey: "{env:OPENAI_API_KEY}" },
         },
       },
     });
@@ -301,10 +301,11 @@ describe("probeOpenCodeBinary", () => {
   it("builds a private profile that leaves provider data ownership unchanged", () => {
     const root = fixtureRoot();
     const profile = createPrivateOpenCodeProfile(
-      { content: '{"provider":{"airouter":{"options":{"apiKey":"{file:/synthetic/key}"}}}}' },
+      { content: '{"provider":{"airouter":{"options":{"apiKey":"{env:OPENAI_API_KEY}"}}}}' },
       {
         HOME: "/synthetic/home",
         PATH: "/synthetic/bin",
+        OPENAI_API_KEY: "synthetic-provider-key",
         XDG_DATA_HOME: "/synthetic/data",
         XDG_CONFIG_HOME: "/synthetic/user-config",
         OPENCODE_CONFIG: "/synthetic/opencode.jsonc",
@@ -324,7 +325,7 @@ describe("probeOpenCodeBinary", () => {
       expect(configPath).toBeTypeOf("string");
       if (configPath === undefined) throw new Error("Expected a private config path.");
       expect(statSync(configPath).mode & 0o777).toBe(0o600);
-      expect(readFileSync(configPath, "utf8")).toContain("{file:/synthetic/key}");
+      expect(readFileSync(configPath, "utf8")).toContain("{env:OPENAI_API_KEY}");
       expect(readFileSync(configPath, "utf8")).toContain('"permission"');
       for (const name of [
         "XDG_CONFIG_HOME",
@@ -374,9 +375,9 @@ describe("probeOpenCodeBinary", () => {
           provider: {
             synthetic: {
               options: {
-                apiKey: "{file:/synthetic/key}",
+                apiKey: "{env:OPENAI_API_KEY}",
                 accessToken: "{env:lowercase}",
-                secret: "{file:../secret}",
+                secret: "{file:/synthetic/key}",
                 token: "raw-token",
                 headers: [{ name: "Authorization", value: "Bearer raw-header" }],
                 nested: { credential: { value: "raw-nested" }, value: "raw-value" },
@@ -385,16 +386,16 @@ describe("probeOpenCodeBinary", () => {
           },
         }),
       },
-      {},
+      { OPENAI_API_KEY: "synthetic-provider-key" },
       () => root,
     );
     try {
       const configPath = profile.environment.OPENCODE_CONFIG;
       if (configPath === undefined) throw new Error("Expected a private config path.");
       const content = readFileSync(configPath, "utf8");
-      expect(content).toContain("{file:/synthetic/key}");
+      expect(content).toContain("{env:OPENAI_API_KEY}");
       expect(content).not.toContain("{env:lowercase}");
-      expect(content).not.toContain("{file:../secret}");
+      expect(content).not.toContain("{file:/synthetic/key}");
       expect(content).not.toContain("raw-token");
       expect(content).not.toContain("raw-header");
       expect(content).not.toContain("raw-nested");
@@ -415,6 +416,24 @@ describe("probeOpenCodeBinary", () => {
         provider: { synthetic: { options: { baseURL: "https://example.invalid/v1?api_key=raw" } } },
       }),
     ).toThrow("secret query");
+  });
+
+  it("rejects unbundled provider SDK module specs", () => {
+    for (const npm of [
+      "file:///tmp/provider.mjs",
+      "https://example.invalid/provider",
+      "git+ssh://example.invalid/provider",
+      "unknown-provider",
+    ]) {
+      expect(() => projectOpenCodeRuntimeConfig({ provider: { synthetic: { npm } } })).toThrow(
+        "bundled provider SDK package",
+      );
+      expect(() =>
+        projectOpenCodeRuntimeConfig({
+          provider: { synthetic: { models: { model: { provider: { npm } } } } },
+        }),
+      ).toThrow("bundled provider SDK package");
+    }
   });
 
   it("rejects a relative binary path before spawning", async () => {
@@ -560,7 +579,7 @@ describe("OpenCodeProcessPort", () => {
       model: "synthetic/model",
       provider: {
         synthetic: {
-          npm: "@synthetic/provider",
+          npm: "@ai-sdk/openai-compatible",
           options: { baseURL: "https://provider.invalid/v1" },
         },
       },

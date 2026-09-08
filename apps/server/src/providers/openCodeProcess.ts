@@ -115,17 +115,50 @@ export type OpenCodeConfigResolver = (
 ) => Promise<unknown | undefined>;
 
 type JsonRecord = { readonly [key: string]: unknown };
-const SAFE_SECRET_REFERENCE =
-  /^\{(?:env:[A-Z][A-Z0-9_]{0,63}|file:\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]{1,128})\}$/;
+const SAFE_ENV_REFERENCE = /^\{env:([A-Z][A-Z0-9_]{0,63})\}$/;
 const SENSITIVE_ROUTING_KEY =
   /(?:api[_-]?key|access[_-]?token|auth(?:entication)?[_-]?(?:key|token)|token|secret|password|credential|authorization|bearer)/i;
 const ROUTING_HEADER_KEY = /^headers?$/i;
 const ROUTING_URL_KEY = /(?:url|uri|endpoint|base[_-]?url)$/i;
 const SECRET_QUERY_KEY =
   /(?:api[_-]?key|access[_-]?token|auth(?:entication)?[_-]?(?:key|token)|token|secret|password|credential|authorization|bearer)/i;
+const BUNDLED_PROVIDER_SDK_PACKAGES = new Set([
+  "@ai-sdk/amazon-bedrock",
+  "@ai-sdk/amazon-bedrock/mantle",
+  "@ai-sdk/anthropic",
+  "@ai-sdk/azure",
+  "@ai-sdk/google",
+  "@ai-sdk/google-vertex",
+  "@ai-sdk/google-vertex/anthropic",
+  "@ai-sdk/openai",
+  "@ai-sdk/openai-compatible",
+  "@openrouter/ai-sdk-provider",
+  "@ai-sdk/xai",
+  "@ai-sdk/mistral",
+  "@ai-sdk/groq",
+  "@ai-sdk/deepinfra",
+  "@ai-sdk/cerebras",
+  "@ai-sdk/cohere",
+  "@ai-sdk/gateway",
+  "@ai-sdk/togetherai",
+  "@ai-sdk/perplexity",
+  "@ai-sdk/vercel",
+  "@ai-sdk/alibaba",
+  "gitlab-ai-provider",
+  "@ai-sdk/github-copilot",
+  "venice-ai-sdk-provider",
+]);
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function bundledProviderPackage(value: unknown, label: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !BUNDLED_PROVIDER_SDK_PACKAGES.has(value)) {
+    throw new Error(`OpenCode ${label} must use a bundled provider SDK package.`);
+  }
+  return value;
 }
 
 function validateRoutingUrl(key: string | undefined, value: string): void {
@@ -157,12 +190,6 @@ function projectRoutingValue(value: unknown, depth = 0, key?: string): unknown {
     typeof value === "boolean"
   ) {
     if (typeof value === "string") {
-      if (
-        SAFE_SECRET_REFERENCE.test(value) &&
-        (key === undefined || !SENSITIVE_ROUTING_KEY.test(key))
-      ) {
-        throw new Error("OpenCode routing contains an unscoped secret reference.");
-      }
       validateRoutingUrl(key, value);
     }
     return value;
@@ -189,6 +216,16 @@ function projectProviderOptions(value: unknown): Record<string, unknown> {
     const next = projectRoutingValue(entry, 0, key);
     if (next !== undefined) projected[key] = next;
   }
+  return projected;
+}
+
+function projectModelProvider(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  const projected: Record<string, unknown> = {};
+  const npm = bundledProviderPackage(value.npm, "model provider");
+  if (npm !== undefined) projected.npm = npm;
+  const api = projectRoutingValue(value.api, 0, "api");
+  if (api !== undefined) projected.api = api;
   return projected;
 }
 
@@ -219,7 +256,10 @@ function projectProviderModels(value: unknown): Record<string, unknown> {
     projectRoutingValue(model);
     const projectedModel: Record<string, unknown> = {};
     for (const key of modelKeys) {
-      const next = projectRoutingValue(model[key], 0, key);
+      const next =
+        key === "provider"
+          ? projectModelProvider(model[key])
+          : projectRoutingValue(model[key], 0, key);
       if (next !== undefined) projectedModel[key] = next;
     }
     projected[modelId] = projectedModel;
@@ -234,13 +274,16 @@ function projectProviders(value: unknown): Record<string, unknown> {
   for (const [providerId, provider] of Object.entries(value)) {
     if (!isRecord(provider)) continue;
     const projectedProvider: Record<string, unknown> = {};
+    const npm = bundledProviderPackage(provider.npm, "provider");
     for (const key of allowedKeys) {
       const entry =
-        key === "options"
-          ? projectProviderOptions(provider[key])
-          : key === "models"
-            ? projectProviderModels(provider[key])
-            : projectRoutingValue(provider[key], 0, key);
+        key === "npm"
+          ? npm
+          : key === "options"
+            ? projectProviderOptions(provider[key])
+            : key === "models"
+              ? projectProviderModels(provider[key])
+              : projectRoutingValue(provider[key], 0, key);
       if (entry !== undefined) projectedProvider[key] = entry;
     }
     projected[providerId] = projectedProvider;
@@ -248,20 +291,27 @@ function projectProviders(value: unknown): Record<string, unknown> {
   return projected;
 }
 
-function removeRawRoutingSecrets(value: unknown, key?: string): unknown {
+function removeRawRoutingSecrets(
+  value: unknown,
+  key: string | undefined,
+  environmentNames: ReadonlySet<string>,
+): unknown {
   if (key !== undefined && ROUTING_HEADER_KEY.test(key)) return undefined;
   if (key !== undefined && SENSITIVE_ROUTING_KEY.test(key)) {
-    return typeof value === "string" && SAFE_SECRET_REFERENCE.test(value) ? value : undefined;
+    if (typeof value !== "string") return undefined;
+    const match = SAFE_ENV_REFERENCE.exec(value);
+    const name = match?.[1];
+    return name !== undefined && environmentNames.has(name) ? value : undefined;
   }
   if (Array.isArray(value)) {
     return value
-      .map((entry) => removeRawRoutingSecrets(entry))
+      .map((entry) => removeRawRoutingSecrets(entry, undefined, environmentNames))
       .filter((entry): entry is Exclude<typeof entry, undefined> => entry !== undefined);
   }
   if (!isRecord(value)) return value;
   const sanitized: Record<string, unknown> = {};
   for (const [entryKey, entry] of Object.entries(value)) {
-    const next = removeRawRoutingSecrets(entry, entryKey);
+    const next = removeRawRoutingSecrets(entry, entryKey, environmentNames);
     if (next !== undefined) sanitized[entryKey] = next;
   }
   return sanitized;
@@ -469,19 +519,6 @@ export function createPrivateOpenCodeProfile(
     } catch {
       throw new Error("OpenCode private routing configuration is not valid JSON.");
     }
-    const bounded = projectOpenCodeRuntimeConfig(parsed);
-    const boundedParsed: unknown = JSON.parse(bounded.content);
-    const scrubbed = removeRawRoutingSecrets(boundedParsed);
-    if (isRecord(scrubbed)) projected = scrubbed;
-    // These rules are owned by Octant and override any resolver output. The
-    // provider can still read its auth data through XDG_DATA_HOME, while
-    // executable extensions and compatibility tools stay denied.
-    const ownedConfig: Record<string, unknown> = {
-      ...projected,
-      permission: { skill: { "*": "deny" }, "*_*": "deny" },
-    };
-    writeFileSync(configPath, JSON.stringify(ownedConfig), { mode: 0o600 });
-    chmodSync(configPath, 0o600);
     const cacheHome = privateDirectory("cache", root);
     directories.push(cacheHome);
     const stateHome = privateDirectory("state", root);
@@ -508,6 +545,23 @@ export function createPrivateOpenCodeProfile(
       XDG_CONFIG_HOME: configHome,
       XDG_STATE_HOME: stateHome,
     });
+    const bounded = projectOpenCodeRuntimeConfig(parsed);
+    const boundedParsed: unknown = JSON.parse(bounded.content);
+    const scrubbed = removeRawRoutingSecrets(
+      boundedParsed,
+      undefined,
+      new Set(Object.keys(environment)),
+    );
+    if (isRecord(scrubbed)) projected = scrubbed;
+    // These rules are owned by Octant and override any resolver output. The
+    // provider can still read its auth data through XDG_DATA_HOME, while
+    // executable extensions and compatibility tools stay denied.
+    const ownedConfig: Record<string, unknown> = {
+      ...projected,
+      permission: { skill: { "*": "deny" }, "*_*": "deny" },
+    };
+    writeFileSync(configPath, JSON.stringify(ownedConfig), { mode: 0o600 });
+    chmodSync(configPath, 0o600);
     let closed = false;
     return {
       environment,
