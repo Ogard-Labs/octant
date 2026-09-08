@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { ProviderToolDefinition } from "@octant/contracts";
 
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
+const MAX_TOOL_JSON_BYTES = 64 * 1024;
 const MAX_TOOL_CALL_ID_LENGTH = 256;
 
 export interface PiManagedToolBridgeConfig {
@@ -82,7 +83,7 @@ function readRequestBody(request: IncomingMessage): Promise<unknown> {
 }
 
 function validJson(value: string): boolean {
-  if (Buffer.byteLength(value, "utf8") > MAX_REQUEST_BYTES) return false;
+  if (Buffer.byteLength(value, "utf8") > MAX_TOOL_JSON_BYTES) return false;
   try {
     JSON.parse(value);
     return true;
