@@ -599,6 +599,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(props.windowCapability === undefined
             ? {}
             : { windowCapability: props.windowCapability })}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
           onCreateThread={(input) => {
             const submitted = {
               ...input,

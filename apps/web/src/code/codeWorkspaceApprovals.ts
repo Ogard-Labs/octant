@@ -30,6 +30,7 @@ export function nativeCodeWorkspaceApprovals(
       : {
           updateAnchor: async (bounds: CodeOperationApprovalAnchor["bounds"]) =>
             await hostBridge.updateCodeOperationApprovalAnchor?.({
+              kind: "thread",
               projectId: String(view.thread.projectId),
               threadId: String(view.thread.id),
               bounds,

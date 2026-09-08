@@ -45,6 +45,7 @@ const challenge = decodeCodeOperationApprovalChallenge({
 
 function anchor(): CodeOperationApprovalAnchor {
   return {
+    kind: "thread",
     projectId: ids.project,
     threadId: ids.thread,
     bounds: { x: 80, y: 600, width: 640, height: 96 },
@@ -132,6 +133,39 @@ describe("Code operation approval view controller", () => {
     await expect(result).resolves.toBe(ids.approval);
     expect(fixture.host.detach).toHaveBeenCalledWith(fixture.window, fixture.view);
     expect(fixture.view.webContents.close).toHaveBeenCalledOnce();
+  });
+
+  it("cancels a server challenge that arrives after the owner closes during preparation", async () => {
+    const fixture = makeFixture();
+    let release: ((value: typeof challenge) => void) | undefined;
+    fixture.prepare.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    fixture.controller.updateAnchor({
+      window: fixture.window,
+      windowId: "window-1",
+      anchor: anchor(),
+    });
+    const result = fixture.controller.request({
+      window: fixture.window,
+      windowId: "window-1",
+      windowCapability: "window-capability",
+      request,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fixture.controller.closeWindow("window-1");
+    release?.(challenge);
+    await expect(result).resolves.toBeUndefined();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fixture.cancel).toHaveBeenCalledWith({
+      challengeId: ids.challenge,
+      windowId: "window-1",
+      windowCapability: "window-capability",
+    });
+    expect(fixture.host.createView).not.toHaveBeenCalled();
   });
 
   it("cancels by default without calling the confirmation endpoint", async () => {

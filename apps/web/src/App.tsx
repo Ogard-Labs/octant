@@ -3939,7 +3939,40 @@ function LaunchedShell(
         setDraftError(plan.message);
         return false;
       }
-      const created = await codeController.execute(plan.command);
+      let command = plan.command;
+      if (input.executionPolicy === "full-access") {
+        const requestApproval = props.hostBridge?.requestCodeOperationApproval;
+        const presentation = input.presentation;
+        if (requestApproval === undefined || presentation === undefined) {
+          setDraftError(
+            "Full access needs the native approval surface. Keep Ask for approvals or retry.",
+          );
+          return false;
+        }
+        const effect =
+          command.kind === "create-managed-code-thread"
+            ? { kind: "create-managed-code-thread-full-access", command }
+            : command.kind === "create-code-thread"
+              ? { kind: "create-thread-full-access", thread: command.thread }
+              : undefined;
+        if (effect === undefined) {
+          setDraftError("Full access could not be prepared for this Code thread.");
+          return false;
+        }
+        const approvalId = await requestApproval(effect as never, {
+          projectId: String(project.id),
+          composerId: presentation.composerId,
+        });
+        if (approvalId === undefined) {
+          setDraftError("Full access was not confirmed. Nothing was created.");
+          return false;
+        }
+        command =
+          command.kind === "create-managed-code-thread" || command.kind === "create-code-thread"
+            ? { ...command, approvalId: approvalId as never }
+            : command;
+      }
+      const created = await codeController.execute(command);
       if (created?.kind !== "managed-thread-created" && created?.kind !== "thread-created") {
         setDraftError(
           codeController.lastExecuteError.current?.message ??

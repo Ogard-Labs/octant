@@ -7,6 +7,9 @@ import {
   decodeCodeOperationApprovalRequest,
   decodeCodeOperationApprovalConfirmation,
   decodeCodeCheckoutId,
+  decodeCodeCheckoutIdentity,
+  decodeCodeCheckoutHead,
+  decodeCodeThread,
   decodeCodeOperationCommand,
   decodeCodeEvidenceBatchResponse,
   decodeCodeRelativePath,
@@ -80,7 +83,7 @@ import type {
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
 import type { ProviderContextBlock } from "@octant/contracts";
-import { CodeServiceError } from "./codeService";
+import { CodeServiceError, type ManagedCodeThreadCreationPort } from "./codeService";
 import { RepositoryTestRunner } from "./repositoryTestRunner";
 import { RepositoryTestDiscoveryService } from "./repositoryTestDiscoveryService";
 import { CURATED_SCAFFOLDS, curatedScaffoldTools } from "../scaffold/curatedScaffoldCatalog";
@@ -140,6 +143,7 @@ export interface CodeOperationRuntimeOptions {
   readonly attachments?: CodeAttachmentStore;
   readonly approvalValidator?: CodeApprovalValidationPort;
   readonly approvalStore?: CodeOperationApprovalStore;
+  readonly managedThreadCreation?: ManagedCodeThreadCreationPort;
   readonly sessionAuthority?: CodeSessionAuthorityStore;
   readonly actor: EventActor;
   readonly clock: () => string;
@@ -569,6 +573,7 @@ export function createCodeOperationRuntime(
     prepareApproval: async (windowId, rawRequest) => {
       if (approvalStore === undefined) return undefined;
       const request = decodeCodeOperationApprovalRequest(rawRequest);
+      let approvalEffect = request.effect;
       let thread: CodeThread | undefined;
       let checkout: CodeCheckoutIdentity | undefined;
       if (request.effect.kind === "operation") {
@@ -603,6 +608,69 @@ export function createCodeOperationRuntime(
         ) {
           return undefined;
         }
+      } else if (request.effect.kind === "create-managed-code-thread-full-access") {
+        const creation = options.managedThreadCreation;
+        const command = request.effect.command;
+        if (creation === undefined || command.approvalId !== undefined) return undefined;
+        const prepared = await creation.prepare(
+          {
+            authenticatedWindowId: windowId,
+            projectId: command.projectId,
+            bindingRevisionId: command.bindingRevisionId,
+            threadId: command.threadId,
+            branchIntent: command.deliveryTarget.branchIntent,
+            sourceBranch: command.sourceBranch,
+            startFromOrigin: command.startFromOrigin,
+            ...(command.remoteName === undefined ? {} : { remoteName: command.remoteName }),
+            ...(command.sourceRevision === undefined
+              ? {}
+              : { sourceRevision: command.sourceRevision }),
+          },
+          new AbortController().signal,
+        );
+        if (prepared.status !== "prepared") return undefined;
+        const source = {
+          bindingRevisionId: command.bindingRevisionId,
+          repositoryId: prepared.preparation.repositoryId,
+          checkoutId: prepared.preparation.checkoutId,
+          checkoutHead: decodeCodeCheckoutHead({
+            kind: "branch",
+            name: prepared.preparation.branchIntent,
+            oid: prepared.preparation.resolvedHead,
+          }),
+        };
+        if (
+          request.effect.source !== undefined &&
+          JSON.stringify(request.effect.source) !== JSON.stringify(source)
+        ) {
+          return undefined;
+        }
+        approvalEffect = { ...request.effect, source };
+        thread = decodeCodeThread({
+          id: command.threadId,
+          projectId: command.projectId,
+          bindingRevisionId: command.bindingRevisionId,
+          repositoryId: prepared.preparation.repositoryId,
+          checkoutId: prepared.preparation.checkoutId,
+          title: command.title,
+          lifecycle: "active",
+          providerInstanceId: command.providerInstanceId,
+          modelId: command.modelId,
+          executionPolicy: command.executionPolicy,
+          permissionPersistence: command.permissionPersistence,
+          deliveryTarget: command.deliveryTarget,
+          version: 1,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+        checkout = decodeCodeCheckoutIdentity({
+          id: prepared.preparation.checkoutId,
+          repositoryId: prepared.preparation.repositoryId,
+          kind: "existing-worktree",
+          availability: "available",
+          head: source.checkoutHead,
+          observedAt: new Date().toISOString(),
+        });
       } else {
         thread = options.persistence.readCodeThread(request.effect.threadId);
         checkout =
@@ -622,13 +690,13 @@ export function createCodeOperationRuntime(
         }
       }
       if (thread === undefined || checkout === undefined) return undefined;
-      const command = request.effect.kind === "operation" ? request.effect.command : undefined;
+      const command = approvalEffect.kind === "operation" ? approvalEffect.command : undefined;
       const context = await approvalContext(options, command, thread, checkout);
       if (context === undefined) return undefined;
-      const prompt = approvalPrompt(request.effect, thread, checkout, context.pullRequestTarget);
+      const prompt = approvalPrompt(approvalEffect, thread, checkout, context.pullRequestTarget);
       return approvalStore.prepare({
         windowId,
-        effect: request.effect,
+        effect: approvalEffect,
         contextDigest: approvalContextDigest(context),
         projectId: thread.projectId,
         threadId: thread.id,
@@ -915,6 +983,13 @@ function approvalPrompt(
   if (effect.kind === "create-thread-full-access") {
     message = "Allow full access for this Code thread?";
     effectDetail = `Full repository and shell access · ${persistenceLabel(effect.thread.permissionPersistence)}`;
+  } else if (effect.kind === "create-managed-code-thread-full-access") {
+    message = "Allow full access for this new Code thread?";
+    const source = effect.source;
+    effectDetail =
+      source === undefined
+        ? `Create managed worktree · ${persistenceLabel(effect.command.permissionPersistence)}`
+        : `Create managed worktree from ${source.checkoutHead.kind === "branch" ? `${source.checkoutHead.name} @ ${source.checkoutHead.oid}` : source.checkoutHead.oid} · ${persistenceLabel(effect.command.permissionPersistence)}`;
   } else if (effect.kind === "change-thread-full-access") {
     message = "Elevate this Code thread to full access?";
     effectDetail = `Full repository and shell access · ${persistenceLabel(effect.permissionPersistence)}`;

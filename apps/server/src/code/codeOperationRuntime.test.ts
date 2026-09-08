@@ -1467,6 +1467,93 @@ describe("CodeOperationRuntime", () => {
   });
 });
 
+describe("managed Code creation approval", () => {
+  const managedCommand = {
+    kind: "create-managed-code-thread" as const,
+    threadId: decodeCodeThreadId("90000000-0000-4000-8000-000000000009"),
+    projectId: thread().projectId,
+    bindingRevisionId: thread().bindingRevisionId,
+    title: "Managed runtime",
+    providerInstanceId: thread().providerInstanceId,
+    modelId: thread().modelId,
+    executionPolicy: "full-access" as const,
+    permissionPersistence: "current-session" as const,
+    deliveryTarget: thread().deliveryTarget,
+    sourceBranch: "feature/runtime" as never,
+    startFromOrigin: true,
+    remoteName: "origin",
+  };
+
+  it("prepares a server-derived source challenge and refuses a stale source", async () => {
+    const preparation = {
+      repositoryId: thread().repositoryId,
+      checkoutId: decodeCodeCheckoutId("90000000-0000-4000-8000-000000000010"),
+      branchIntent: "feature/runtime",
+      resolvedHead: "b".repeat(40),
+      mode: "origin" as const,
+      sourceBranch: "feature/runtime",
+      remoteName: "origin",
+    };
+    const managedThreadCreation = {
+      prepare: vi.fn(async () => ({ status: "prepared" as const, preparation })),
+      commit: vi.fn(),
+      cleanup: vi.fn(),
+    };
+    const fixture = runtimeFixture({
+      approvalValidator: false,
+      managedThreadCreation: managedThreadCreation as never,
+    });
+    const request = {
+      effect: { kind: "create-managed-code-thread-full-access" as const, command: managedCommand },
+    };
+    const challenge = await fixture.runtime.prepareApproval(windowId, request);
+    expect(challenge).toMatchObject({
+      projectId: thread().projectId,
+      threadId: managedCommand.threadId,
+      checkoutId: preparation.checkoutId,
+      checkoutHead: {
+        kind: "branch",
+        name: preparation.branchIntent,
+        oid: preparation.resolvedHead,
+      },
+      message: "Allow full access for this new Code thread?",
+    });
+    expect(managedThreadCreation.prepare).toHaveBeenCalledOnce();
+    expect(managedThreadCreation.commit).not.toHaveBeenCalled();
+    fixture.close();
+
+    const stale = runtimeFixture({
+      approvalValidator: false,
+      managedThreadCreation: {
+        prepare: vi.fn(async () => ({
+          status: "prepared" as const,
+          preparation: { ...preparation, resolvedHead: "c".repeat(40) },
+        })),
+        commit: vi.fn(),
+        cleanup: vi.fn(),
+      } as never,
+    });
+    await expect(
+      stale.runtime.prepareApproval(windowId, {
+        effect: {
+          ...request.effect,
+          source: {
+            bindingRevisionId: managedCommand.bindingRevisionId,
+            repositoryId: preparation.repositoryId,
+            checkoutId: preparation.checkoutId,
+            checkoutHead: {
+              kind: "branch",
+              name: preparation.branchIntent as never,
+              oid: preparation.resolvedHead,
+            },
+          },
+        },
+      }),
+    ).resolves.toBeUndefined();
+    stale.close();
+  });
+});
+
 function runtimeFixture(options: {
   provider?: ProviderDriver | undefined;
   browserAutomation?: Parameters<typeof createCodeOperationRuntime>[0]["browserAutomation"];
@@ -1483,6 +1570,7 @@ function runtimeFixture(options: {
     input: Parameters<GitObservationPort["readDiff"]>[0],
   ) => Promise<GitScopedDiffResult>;
   approvalValidator?: boolean | (() => boolean);
+  managedThreadCreation?: Parameters<typeof createCodeOperationRuntime>[0]["managedThreadCreation"];
   failRuntimeWorkJournal?: boolean;
   throwRuntimeWorkReporter?: boolean;
   onProviderTurnRequested?: (threadId: CodeThreadId) => void;
@@ -1581,6 +1669,9 @@ function runtimeFixture(options: {
       },
       read: async (reference) => evidenceValues.get(reference.contentId),
     },
+    ...(options.managedThreadCreation === undefined
+      ? {}
+      : { managedThreadCreation: options.managedThreadCreation }),
     ...(options.approvalValidator === false
       ? {}
       : {

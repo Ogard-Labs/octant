@@ -66,6 +66,8 @@ import type {
   MentionableThreadId,
 } from "@octant/contracts";
 import type { CodeCommand, CodeCommandResult, CodeWorktreeRef } from "@octant/contracts/code";
+import type { OctantHostBridge } from "../../shell/hostBridge";
+import { boundsInsideViewport } from "../../browser/useNativeBrowserSurface";
 
 export interface CodeComposerAdapterProps {
   /** The person's name from their profile, for the greeting on the hero. */
@@ -138,6 +140,7 @@ export interface CodeComposerAdapterProps {
   ) => Promise<CodeCommandResult | undefined>;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
+  readonly hostBridge?: OctantHostBridge;
 }
 
 export interface CodeComposerSuggestion {
@@ -167,6 +170,8 @@ export interface CodeComposerSubmitInput {
   readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
   readonly issueContext?: GithubIssueContextRequest;
   readonly linearIssueContext?: LinearIssueContextRequest;
+  /** Local draft identity used only to anchor a native approval view. */
+  readonly presentation?: { readonly composerId: string };
 }
 
 /**
@@ -179,6 +184,38 @@ const LAST_RESORT_BASE_BRANCH = "development";
 export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const [prompt, setPrompt] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composerIdRef = useRef(globalThis.crypto.randomUUID());
+  useEffect(() => {
+    const update = props.hostBridge?.updateCodeOperationApprovalAnchor;
+    if (update === undefined || props.projectId === undefined) return;
+    let disposed = false;
+    const sync = () => {
+      if (disposed) return;
+      const composer = textareaRef.current?.closest<HTMLElement>(".thread-composer");
+      if (composer === undefined || composer === null) return;
+      const rect = composer.getBoundingClientRect();
+      void update({
+        kind: "draft",
+        projectId: String(props.projectId),
+        composerId: composerIdRef.current,
+        bounds: boundsInsideViewport(rect, window.innerWidth, window.innerHeight),
+      }).catch(() => undefined);
+    };
+    const resize = new ResizeObserver(sync);
+    const composer = textareaRef.current?.closest<HTMLElement>(".thread-composer");
+    if (composer !== undefined && composer !== null) resize.observe(composer);
+    window.addEventListener("resize", sync);
+    window.addEventListener("scroll", sync, true);
+    sync();
+    return () => {
+      disposed = true;
+      resize.disconnect();
+      window.removeEventListener("resize", sync);
+      window.removeEventListener("scroll", sync, true);
+      const cancel = props.hostBridge?.cancelCodeOperationApproval;
+      if (cancel !== undefined) void cancel().catch(() => undefined);
+    };
+  }, [props.hostBridge, props.projectId]);
   const appliedPromptRevision = useRef<number | undefined>(undefined);
   const promptRequest = props.promptRequest;
   useEffect(() => {
@@ -419,6 +456,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             startFromOrigin,
             remoteName: resolvedWorktreeRemote,
           },
+          presentation: { composerId: composerIdRef.current },
           ...(staged.length === 0 ? {} : { images: staged }),
           ...(threadMentionIds.length === 0 ? {} : { threadMentionIds }),
         });

@@ -94,6 +94,7 @@ describe("native Code workspace approvals", () => {
     await approvals?.updateAnchor?.({ x: 12, y: 400, width: 640, height: 96 });
     await approvals?.cancel?.();
     expect(updateCodeOperationApprovalAnchor).toHaveBeenCalledWith({
+      kind: "thread",
       projectId: "70000000-0000-4000-8000-000000000001",
       threadId: "10000000-0000-4000-8000-000000000001",
       bounds: { x: 12, y: 400, width: 640, height: 96 },

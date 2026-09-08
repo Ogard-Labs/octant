@@ -14,11 +14,19 @@ export interface CodeOperationApprovalBounds {
   readonly height: number;
 }
 
-export interface CodeOperationApprovalAnchor {
-  readonly projectId: string;
-  readonly threadId: string;
-  readonly bounds: CodeOperationApprovalBounds;
-}
+export type CodeOperationApprovalAnchor =
+  | {
+      readonly kind: "thread";
+      readonly projectId: string;
+      readonly threadId: string;
+      readonly bounds: CodeOperationApprovalBounds;
+    }
+  | {
+      readonly kind: "draft";
+      readonly projectId: string;
+      readonly composerId: string;
+      readonly bounds: CodeOperationApprovalBounds;
+    };
 
 export interface CodeOperationApprovalViewPort {
   readonly webContents: {
@@ -72,8 +80,10 @@ interface PendingApproval<TWindow> {
   readonly windowId: string;
   readonly windowCapability: string;
   readonly request: CodeOperationApprovalRequest;
+  readonly presentation?: { readonly projectId: string; readonly composerId: string };
   readonly projectId: string;
   readonly threadId: string;
+  readonly composerId: string | undefined;
   token: string;
   readonly resolve: (approvalId: CodeApprovalId | undefined) => void;
   anchorTimer: ReturnType<typeof setTimeout> | undefined;
@@ -90,21 +100,59 @@ interface PendingApproval<TWindow> {
 const DEFAULT_EXPIRY_MS = 5 * 60_000;
 const DEFAULT_ANCHOR_WAIT_MS = 1_000;
 
-function threadAndProject(request: CodeOperationApprovalRequest): {
+function threadAndProject(
+  request: CodeOperationApprovalRequest,
+  presentation: { readonly projectId: string; readonly composerId: string } | undefined,
+): {
   readonly projectId: string | undefined;
   readonly threadId: string;
+  readonly composerId: string | undefined;
 } {
+  if (
+    (request.effect.kind === "create-thread-full-access" ||
+      request.effect.kind === "create-managed-code-thread-full-access") &&
+    presentation !== undefined
+  ) {
+    return {
+      projectId: presentation.projectId,
+      threadId: String(
+        request.effect.kind === "create-thread-full-access"
+          ? request.effect.thread.id
+          : request.effect.command.threadId,
+      ),
+      composerId: presentation.composerId,
+    };
+  }
   switch (request.effect.kind) {
     case "operation":
-      return { projectId: undefined, threadId: String(request.effect.command.threadId) };
+      return {
+        projectId: undefined,
+        threadId: String(request.effect.command.threadId),
+        composerId: undefined,
+      };
     case "apple-action":
-      return { projectId: undefined, threadId: String(request.effect.request.threadId) };
+      return {
+        projectId: undefined,
+        threadId: String(request.effect.request.threadId),
+        composerId: undefined,
+      };
     case "change-thread-full-access":
-      return { projectId: undefined, threadId: String(request.effect.threadId) };
+      return {
+        projectId: undefined,
+        threadId: String(request.effect.threadId),
+        composerId: undefined,
+      };
     case "create-thread-full-access":
       return {
         projectId: String(request.effect.thread.projectId),
         threadId: String(request.effect.thread.id),
+        composerId: undefined,
+      };
+    case "create-managed-code-thread-full-access":
+      return {
+        projectId: String(request.effect.command.projectId),
+        threadId: String(request.effect.command.threadId),
+        composerId: undefined,
       };
   }
 }
@@ -188,14 +236,23 @@ export function createCodeOperationApprovalViewController<TWindow>(
         windowId: pending.windowId,
         windowCapability: pending.windowCapability,
       });
-      if (
+      const stale =
         pending.finished ||
         pendingByWindow.get(pending.windowId) !== pending ||
         pending.generation !== generation ||
         (pending.anchor !== undefined &&
           pending.anchor.projectId !== String(challenge.projectId)) ||
-        options.host.isWindowDestroyed(pending.window)
-      ) {
+        options.host.isWindowDestroyed(pending.window);
+      if (stale) {
+        if (options.cancel !== undefined) {
+          void options
+            .cancel({
+              challengeId: String(challenge.challengeId),
+              windowId: pending.windowId,
+              windowCapability: pending.windowCapability,
+            })
+            .catch(() => undefined);
+        }
         return;
       }
       const bounds =
@@ -235,9 +292,10 @@ export function createCodeOperationApprovalViewController<TWindow>(
       readonly windowId: string;
       readonly windowCapability: string;
       readonly request: CodeOperationApprovalRequest;
+      readonly presentation?: { readonly projectId: string; readonly composerId: string };
     }): Promise<CodeApprovalId | undefined> => {
       cancel(input.windowId);
-      const identity = threadAndProject(input.request);
+      const identity = threadAndProject(input.request, input.presentation);
       const anchor = anchorByWindow.get(input.windowId);
       let pending: PendingApproval<TWindow> | undefined;
       const promise = new Promise<CodeApprovalId | undefined>((resolve) => {
@@ -249,6 +307,7 @@ export function createCodeOperationApprovalViewController<TWindow>(
           windowId: input.windowId,
           windowCapability: input.windowCapability,
           request: input.request,
+          composerId: identity.composerId,
           projectId: identity.projectId ?? "",
           threadId: identity.threadId,
           token: "",
@@ -257,8 +316,10 @@ export function createCodeOperationApprovalViewController<TWindow>(
           expiryTimer: undefined,
           anchor:
             anchor === undefined ||
-            anchor.threadId !== identity.threadId ||
-            (identity.projectId !== undefined && anchor.projectId !== identity.projectId)
+            (identity.projectId !== undefined && anchor.projectId !== identity.projectId) ||
+            (identity.composerId !== undefined
+              ? anchor.kind !== "draft" || anchor.composerId !== identity.composerId
+              : anchor.kind !== "thread" || anchor.threadId !== identity.threadId)
               ? undefined
               : anchor,
           challenge: undefined,
@@ -285,8 +346,10 @@ export function createCodeOperationApprovalViewController<TWindow>(
       const pending = pendingByWindow.get(input.windowId);
       if (
         pending === undefined ||
-        pending.threadId !== input.anchor.threadId ||
-        (pending.projectId !== "" && pending.projectId !== input.anchor.projectId)
+        (pending.projectId !== "" && pending.projectId !== input.anchor.projectId) ||
+        (pending.composerId !== undefined
+          ? input.anchor.kind !== "draft" || input.anchor.composerId !== pending.composerId
+          : input.anchor.kind !== "thread" || input.anchor.threadId !== pending.threadId)
       ) {
         if (pending !== undefined) {
           pending.anchor = undefined;

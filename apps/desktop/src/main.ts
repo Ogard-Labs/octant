@@ -2563,22 +2563,30 @@ function installIpcHandlers(): void {
       }
     }
   });
-  ipcMain.handle(IPC_CHANNELS.requestCodeOperationApproval, async (event, request: unknown) => {
-    const context = ownedWindowContext(event);
-    if (activeServerUrl === undefined) {
-      throw new Error("Octant Code approval is unavailable.");
-    }
-    const decoded = decodeCodeOperationApprovalRequest(request);
-    if (codeOperationApprovalViews === undefined) {
-      throw new Error("Octant Code approval is unavailable.");
-    }
-    return await codeOperationApprovalViews.request({
-      window: context.window,
-      windowId: context.windowId,
-      windowCapability: context.capability,
-      request: decoded,
-    });
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.requestCodeOperationApproval,
+    async (event, request: unknown, requestPresentation: unknown) => {
+      const context = ownedWindowContext(event);
+      if (activeServerUrl === undefined) {
+        throw new Error("Octant Code approval is unavailable.");
+      }
+      const decoded = decodeCodeOperationApprovalRequest(request);
+      if (codeOperationApprovalViews === undefined) {
+        throw new Error("Octant Code approval is unavailable.");
+      }
+      const presentation =
+        requestPresentation === undefined
+          ? undefined
+          : decodeCodeOperationApprovalPresentation(requestPresentation);
+      return await codeOperationApprovalViews.request({
+        window: context.window,
+        windowId: context.windowId,
+        windowCapability: context.capability,
+        request: decoded,
+        ...(presentation === undefined ? {} : { presentation }),
+      });
+    },
+  );
   ipcMain.handle(IPC_CHANNELS.updateCodeOperationApprovalAnchor, (event, value: unknown) => {
     const context = ownedTopLevelWindowContext(event);
     const anchor = decodeCodeOperationApprovalAnchor(value);
@@ -2910,10 +2918,24 @@ function isStrictRecord(value: unknown, keys: readonly string[]): value is Recor
 }
 
 function decodeCodeOperationApprovalAnchor(value: unknown): CodeOperationApprovalAnchor {
-  if (!isStrictRecord(value, ["bounds", "projectId", "threadId"])) {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    !("kind" in value) ||
+    (value.kind !== "thread" && value.kind !== "draft")
+  ) {
     throw new Error("Octant rejected invalid Code approval anchor bounds.");
   }
-  const bounds = value.bounds;
+  const record = value as Record<string, unknown>;
+  const expectedKeys =
+    record.kind === "thread"
+      ? ["bounds", "kind", "projectId", "threadId"]
+      : ["bounds", "composerId", "kind", "projectId"];
+  if (!isStrictRecord(record, expectedKeys)) {
+    throw new Error("Octant rejected invalid Code approval anchor bounds.");
+  }
+  const bounds = record.bounds;
   if (!isStrictRecord(bounds, ["height", "width", "x", "y"])) {
     throw new Error("Octant rejected invalid Code approval anchor bounds.");
   }
@@ -2925,16 +2947,20 @@ function decodeCodeOperationApprovalAnchor(value: unknown): CodeOperationApprova
     typeof height !== "number" ||
     ![x, y, width, height].every(Number.isFinite) ||
     [x, y, width, height].some((entry) => entry < 0 || entry > 32_768) ||
-    typeof value.projectId !== "string" ||
-    !UUID_PATTERN.test(value.projectId) ||
-    typeof value.threadId !== "string" ||
-    !UUID_PATTERN.test(value.threadId)
+    typeof record.projectId !== "string" ||
+    !UUID_PATTERN.test(record.projectId) ||
+    (record.kind === "thread" &&
+      (typeof record.threadId !== "string" || !UUID_PATTERN.test(record.threadId))) ||
+    (record.kind === "draft" &&
+      (typeof record.composerId !== "string" || !UUID_PATTERN.test(record.composerId)))
   ) {
     throw new Error("Octant rejected invalid Code approval anchor bounds.");
   }
   return {
-    projectId: value.projectId,
-    threadId: value.threadId,
+    projectId: record.projectId,
+    ...(record.kind === "thread"
+      ? { kind: "thread" as const, threadId: record.threadId as string }
+      : { kind: "draft" as const, composerId: record.composerId as string }),
     bounds: {
       x,
       y,
@@ -2967,6 +2993,22 @@ function decodeCodeOperationApprovalViewDecision(value: unknown): {
     challengeId: value.challengeId,
     decision: value.decision,
   };
+}
+
+function decodeCodeOperationApprovalPresentation(value: unknown): {
+  readonly projectId: string;
+  readonly composerId: string;
+} {
+  if (
+    !isStrictRecord(value, ["composerId", "projectId"]) ||
+    typeof value.projectId !== "string" ||
+    !UUID_PATTERN.test(value.projectId) ||
+    typeof value.composerId !== "string" ||
+    !UUID_PATTERN.test(value.composerId)
+  ) {
+    throw new Error("Octant rejected invalid Code approval presentation.");
+  }
+  return { projectId: value.projectId, composerId: value.composerId };
 }
 
 function ownedWindow(event: IpcMainInvokeEvent): BrowserWindow {

@@ -116,16 +116,29 @@ export interface BrowserSurfaceRequest {
   };
 }
 
-export interface CodeOperationApprovalAnchor {
-  readonly projectId: string;
-  readonly threadId: string;
-  readonly bounds: {
-    readonly x: number;
-    readonly y: number;
-    readonly width: number;
-    readonly height: number;
-  };
-}
+export type CodeOperationApprovalAnchor =
+  | {
+      readonly kind: "thread";
+      readonly projectId: string;
+      readonly threadId: string;
+      readonly bounds: {
+        readonly x: number;
+        readonly y: number;
+        readonly width: number;
+        readonly height: number;
+      };
+    }
+  | {
+      readonly kind: "draft";
+      readonly projectId: string;
+      readonly composerId: string;
+      readonly bounds: {
+        readonly x: number;
+        readonly y: number;
+        readonly width: number;
+        readonly height: number;
+      };
+    };
 
 export type ProjectWindowTarget =
   | Readonly<{ kind: "project"; projectId: string }>
@@ -194,6 +207,7 @@ export interface OctantHostBridge {
   readonly openInNewWindow?: (target: ProjectWindowTarget) => Promise<void> | void;
   readonly requestCodeOperationApproval?: (
     request: CodeOperationApprovalRequest,
+    presentation?: { readonly projectId: string; readonly composerId: string },
   ) => Promise<string | undefined>;
   /** Positions an owner-only native approval view; it cannot confirm one. */
   readonly updateCodeOperationApprovalAnchor?: (

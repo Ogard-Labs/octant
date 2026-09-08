@@ -247,6 +247,7 @@ describe("desktop preload bridge", () => {
       },
     } as never);
     await bridge.updateCodeOperationApprovalAnchor({
+      kind: "thread",
       projectId,
       threadId: "20000000-0000-4000-8000-000000000001",
       bounds: { x: 12, y: 400, width: 640, height: 96 },
@@ -306,6 +307,7 @@ describe("desktop preload bridge", () => {
       [
         IPC_CHANNELS.updateCodeOperationApprovalAnchor,
         {
+          kind: "thread",
           projectId,
           threadId: "20000000-0000-4000-8000-000000000001",
           bounds: { x: 12, y: 400, width: 640, height: 96 },

@@ -21,6 +21,7 @@ import {
   CodeTestRunId,
   CodeThread,
   CodeThreadId,
+  CreateManagedCodeThreadCommand,
   MAX_CODE_TURN_ATTACHMENTS,
   WorktreeReceiptId,
 } from "./code";
@@ -1803,6 +1804,20 @@ export const CodeApprovalEffect = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("create-thread-full-access"),
     thread: CodeThread.pipe(Schema.filter((thread) => thread.executionPolicy === "full-access")),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("create-managed-code-thread-full-access"),
+    command: CreateManagedCodeThreadCommand.pipe(
+      Schema.filter((command) => command.executionPolicy === "full-access"),
+    ),
+    source: Schema.optional(
+      Schema.Struct({
+        bindingRevisionId: Schema.UUID,
+        repositoryId: CodeRepositoryId,
+        checkoutId: CodeCheckoutId,
+        checkoutHead: CodeCheckoutHead,
+      }).annotations(strict),
+    ),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-thread-full-access"),
