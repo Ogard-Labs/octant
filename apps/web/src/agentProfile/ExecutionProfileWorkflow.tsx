@@ -124,7 +124,7 @@ export function ExecutionProfileWorkflow(props: {
    * In Settings the same pieces are two open sections (0072): the context
    * picker as a stacked row under its label, then the saved profiles as rows
    * with Reload and Create on the label line. The page already titles itself
-   * "Profiles", so neither section repeats that word.
+   * "Execution profiles", so its sections name the context and saved entries.
    */
   const settingsBody = (
     <>

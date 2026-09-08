@@ -857,3 +857,21 @@ Last observed model facts are presentation only and never authorize selection
 or execution. Saved Chat/Code revisions reconcile untouched fields without
 remounting the form. Keep deliberate section expansion, text growth, and manual
 resizing distinct from unsolicited layout movement.
+
+### Optional Settings details
+
+Keep common preferences and host health visible. Use the shared
+`SettingsDisclosure` for optional inventories or specialist controls; it keeps
+its contents mounted so closing it does not discard an unfinished field.
+A deep-linked setting reveals its enclosing details before receiving focus.
+Appearance keeps interface typography visible, with editor and terminal fonts
+in named disclosures. Host data inventory lives under Stored data. Installed
+skills and collision diagnostics scroll within a bounded collection while
+search, counts, and Show all remain outside that scroller.
+
+Execution profiles are retained and named explicitly in Settings. They are
+saved agent defaults, distinct from the person's identity in General. The
+legacy `--oct-fg-2` alias maps directly to `--octant-text-secondary`; primary,
+secondary, and metadata remain the only text strengths. The theme schema keeps
+its focus compatibility role for imports, but Appearance does not expose a
+Focus ring color control because the product does not draw focus rings.

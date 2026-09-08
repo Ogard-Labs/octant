@@ -1,3 +1,4 @@
+import { ChevronRight } from "lucide-react";
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import type { SettingsScope } from "./registry";
 
@@ -72,6 +73,12 @@ export function SettingRow({
 
   useEffect(() => {
     if (!focused || rowRef.current === null) return;
+    // Deep links must reveal their destination before moving keyboard focus.
+    let ancestor = rowRef.current.parentElement;
+    while (ancestor !== null) {
+      if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
+      ancestor = ancestor.parentElement;
+    }
     const control = rowRef.current.querySelector<HTMLElement>(
       'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
     );
@@ -179,5 +186,27 @@ export function SettingsState(props: {
     >
       {props.children}
     </p>
+  );
+}
+
+/** Optional details keep their controls mounted so closing them preserves drafts. */
+export function SettingsDisclosure(props: {
+  readonly title: string;
+  readonly description?: ReactNode;
+  readonly children: ReactNode;
+}) {
+  return (
+    <details className="settings-disclosure settings-disclosure--section">
+      <summary>
+        <span className="settings-disclosure__label">
+          <span>{props.title}</span>
+          {props.description === undefined ? null : (
+            <span className="settings-disclosure__description">{props.description}</span>
+          )}
+        </span>
+        <ChevronRight aria-hidden="true" size={14} />
+      </summary>
+      <div className="settings-disclosure__body">{props.children}</div>
+    </details>
   );
 }

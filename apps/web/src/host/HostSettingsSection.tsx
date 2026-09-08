@@ -18,7 +18,13 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantInput } from "../ui/base/OctantInput";
-import { SettingRow, SettingsFactList, SettingsPanel, SettingsState } from "../settings/primitives";
+import {
+  SettingRow,
+  SettingsDisclosure,
+  SettingsFactList,
+  SettingsPanel,
+  SettingsState,
+} from "../settings/primitives";
 import {
   AutomationNotificationSettings,
   type AutomationNotificationSettingsProps,
@@ -85,6 +91,8 @@ export function HostSettingsSection({
   const backupLabelId = useId();
   const [statusState, setStatusState] = useState<StatusState>({ kind: "loading" });
   const [dataMapState, setDataMapState] = useState<DataMapState>({ kind: "loading" });
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshMessage, setRefreshMessage] = useState<string>();
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [lifecycleMessage, setLifecycleMessage] = useState<LifecycleMessage>();
   const [backupLabel, setBackupLabel] = useState("");
@@ -92,15 +100,18 @@ export function HostSettingsSection({
   const [restoreOutcome, setRestoreOutcome] = useState<HostRestoreOutcome>();
 
   const refresh = useCallback(async () => {
+    setRefreshing(true);
+    setRefreshMessage(undefined);
     try {
       const status = await client.status();
       setStatusState({ kind: "ready", status });
     } catch (error) {
-      setStatusState({
-        kind: "error",
-        message:
-          error instanceof Error ? error.message : "The host control service is unreachable.",
-      });
+      const message =
+        error instanceof Error ? error.message : "The host control service is unreachable.";
+      setStatusState((current) =>
+        current.kind === "ready" ? current : { kind: "error", message },
+      );
+      setRefreshMessage(message);
     }
     try {
       const report = await client.readDataMap();
@@ -110,6 +121,8 @@ export function HostSettingsSection({
         kind: "error",
         message: error instanceof Error ? error.message : "The host data map is unreachable.",
       });
+    } finally {
+      setRefreshing(false);
     }
   }, [client]);
 
@@ -210,11 +223,22 @@ export function HostSettingsSection({
     trimmedBackupLabel === "" || BACKUP_LABEL_PATTERN.test(trimmedBackupLabel);
 
   return (
-    <section aria-label="Host" className="host-settings" id="settings-host">
+    <section aria-label="Host" aria-busy={refreshing} className="host-settings" id="settings-host">
+      <div className="settings-feedback-slot" aria-live="polite">
+        {refreshMessage === undefined ? null : (
+          <SettingsState kind="error">{refreshMessage}</SettingsState>
+        )}
+      </div>
       <section aria-label="Identity" className="settings-card-section settings-card-section--open">
         <div className="settings-section-head">
           <h2>Identity</h2>
-          <OctantButton onClick={() => void refresh()} size="sm" type="button" variant="ghost">
+          <OctantButton
+            disabled={refreshing}
+            onClick={() => void refresh()}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
             Refresh status
           </OctantButton>
         </div>
@@ -409,7 +433,16 @@ export function HostSettingsSection({
         </div>
       </SettingsPanel>
 
-      <DataMapPanel state={dataMapState} />
+      <SettingsDisclosure
+        title="Stored data"
+        description={
+          dataMapState.kind === "error"
+            ? "Data inventory unavailable. Open for details."
+            : "Inspect what this host stores and where it lives."
+        }
+      >
+        <DataMapPanel state={dataMapState} />
+      </SettingsDisclosure>
 
       <ThreadRetentionPanel client={client} />
 

@@ -31,12 +31,10 @@
   --oct-surface-warm: var(--octant-control);
 
   /* ─── text ──────────────────────────────────────────────────────────
-     Four steps to the app's three. fg-2 is Octant's 90% weight, which
-     has no role of its own in the app, so it is derived rather than
-     collapsed into fg — losing it would flatten every secondary line in
-     a card to the same weight as its heading. */
+     Labels use the same secondary role as settings and shared controls.
+     The legacy fg-2 name remains an alias, not a fourth text strength. */
   --oct-fg: var(--octant-text-primary);
-  --oct-fg-2: color-mix(in oklab, var(--octant-text-primary) 90%, transparent);
+  --oct-fg-2: var(--octant-text-secondary);
   --oct-muted: var(--octant-text-secondary);
   --oct-meta: var(--octant-text-muted);
 

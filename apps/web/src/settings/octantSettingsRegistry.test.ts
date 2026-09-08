@@ -112,7 +112,7 @@ describe("octantSettingsRegistry", () => {
 
   it("registers execution profiles as their own Settings destination", () => {
     const profiles = octantSettingsRegistry.sections.find((s) => s.id === "profiles");
-    expect(profiles?.label).toBe("Profiles");
+    expect(profiles?.label).toBe("Execution profiles");
     expect(profiles?.settings).toEqual([]);
   });
 

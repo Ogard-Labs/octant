@@ -77,13 +77,13 @@ here than additional decoration or page animation.
 | Chat                  | Saved revisions update untouched values while retaining active drafts and focus. Manual textarea resizing remains available.                                              |
 | Code                  | Saved defaults no longer remount the editor form; unfinished editor fields survive revisions.                                                                             |
 | Providers & Models    | Fixed metadata columns, bounded model catalog, reserved feedback, and presentation-only model facts during checks. Authoritative eligibility still clears during probing. |
-| Profiles              | Bounded catalog with deliberate expansion; direct pointer interaction preserves the page anchor.                                                                          |
+| Execution profiles    | Bounded catalog with deliberate expansion; direct pointer interaction preserves the page anchor.                                                                          |
 | Agents                | Sparse and consistent with the shared field recipe.                                                                                                                       |
 | Octant Harness        | Aligned slot rows; long but navigable with the same page structure.                                                                                                       |
 | Skills & Extensions   | Refresh retains installed controls; initial loading remains a distinct state. A failed refresh identifies the retained snapshot as the last loaded settings.              |
 | GitHub                | Existing ready content remains mounted during refresh.                                                                                                                    |
 | Usage                 | Existing data and filters remain visible during refresh.                                                                                                                  |
-| Host                  | Largest information surface; approximately 6,480px in the audited state. Density is a future hierarchy improvement, not evidence of refresh bounce.                       |
+| Host                  | Data inventory is disclosed under Stored data; health stays visible. The follow-up document measures about 2,730px, down from about 6,700px.                              |
 | Advanced              | Consistent maintenance and diagnostics fields.                                                                                                                            |
 | Linear (plugin-gated) | Refresh retains the workspace and advanced draft; failure is shown inline. Verified by component regression, not a live authenticated integration.                        |
 
@@ -99,9 +99,10 @@ attempt state and uncontrolled configuration fields; this pass does not replace
 that lifecycle with a generic draft cache. Model visibility updates belong to
 the separate defaults revision and preserve the provider row and filter.
 
-Appearance, Skills & Extensions, and Host remain density outliers. Their
-capabilities are preserved; further grouping should be designed around real
-user workflows instead of mechanically collapsing every section. The audit
+The density follow-up keeps interface typography and host health visible,
+places specialist fonts and the host data inventory behind named disclosures,
+and bounds installed-skill and collision lists. Their capabilities and drafts
+remain available through the same controls. The audit
 found no brass default surface. Semantic warning colours and provider identity
 marks remain intentional.
 
@@ -142,7 +143,7 @@ strip. Native transparency remains outside this evidence.
   remain available, including explicitly selected tinted presets.
 
 - Pending Code provider approvals and questions sit immediately above the input,
-  below checkout context. Code, Chat, and Work request rows use a neutral surface
+  above the attached checkout context. Code, Chat, and Work request rows use a neutral surface
   and muted icon without the old warning stripe; approval actions retain their
   existing authority checks.
 
@@ -164,7 +165,7 @@ strip. Native transparency remains outside this evidence.
 | Pull requests             | The main list uses shared page and section headers, regular rows, and responsive metadata.                                                                                                                                                           | Empty/error/loading states and long titles in both the list and dock reader.                                |
 | Permission states         | Failed or interrupted turns clear unusable approvals. Browser grants are scoped to an isolated session and revoked on cancellation.                                                                                                                  | Complete an approved live browser turn and verify denial, stop, and expiry through the rendered UI.         |
 
-## Remaining findings
+## Findings and follow-up status
 
 ### Provider identity uses a shared asset catalogue
 
@@ -176,31 +177,62 @@ image-provider placeholders.
 
 ### Feature styles still duplicate shared control appearance
 
-The stylesheet baseline currently records 387 control-repaint exceptions
+The stylesheet baseline currently records 384 control-repaint exceptions
 across 22 files, 12 off-scale font-size exceptions, 12 literal-motion
 exceptions, nine `!important` exceptions, and 12 heavier-weight exceptions.
-These are tracked migration debt, not 432 independently verified visual bugs.
+These are tracked migration debt, not 429 independently verified visual bugs.
 The checks prevent growth but do not mean every existing surface conforms.
 
 Consolidate these when a surface is next changed: move appearance into the
 existing recipe, retain feature layout rules, and lower the baseline. Avoid a
 large stylesheet move during a functional fix.
 
-### Secondary text has an extra implementation tier
+### Secondary text now follows the theme role
 
-The written language describes three text strengths, while
-`octant-bridge.css` also derives `--oct-fg-2` from primary text at 90%.
-This makes some secondary labels stronger than labels using the actual
-secondary token. A later, visually verified pass should choose one consistent
-secondary role and check light/dark contrast before changing all consumers.
+`--oct-fg-2` now aliases `--octant-text-secondary` directly, removing the
+primary-at-90% implementation tier. Neutral light/dark secondary text measures
+8.19:1 and 7.41:1 against the workspace; the retained tinted preset measures
+5.58:1 and 6.12:1. These meet the normal-text contrast floor.
 
-### Profiles need a product decision, not an accidental removal
+### Execution profiles remain a distinct capability
 
-Personal profile and execution profiles describe different concepts. The
-execution-profile workflow still has saved data, editing, and resolution
-behavior. This pass reduces its visual weight without deleting it. Decide
-whether to retain and clearly name that capability or deliberately retire it
-with a data-preservation plan.
+Settings now calls this destination Execution profiles and describes it as
+saved provider, model, and behavior defaults for agent runs. Personal identity
+remains in General. Saved profile data, editing, and resolution behavior are
+preserved; no retirement or migration is implied.
+
+### Density and refresh follow-up
+
+- Shared Settings disclosures retain mounted fields and drafts, and deep links
+  reveal their enclosing details before focusing a control.
+- Appearance shows interface typography first; code and terminal fonts remain
+  available through named disclosures. The obsolete Focus ring color control
+  is removed; imported theme compatibility values are preserved.
+- Host keeps identity, health, lifecycle, and backup controls visible. The data
+  inventory is under Stored data. A failed status refresh retains the page and
+  an unfinished backup label while showing the failure.
+- Installed skills and name collisions use bounded lists. Search, counts, and
+  Show all stay reachable, and the collision summary remains visible.
+- Redundant Settings input and navigation radii have been removed in favour of
+  the shared controls, lowering the stylesheet repaint baseline.
+
+### Follow-up verification
+
+At 1280 × 720, the local browser measured total content height of 2,491px for
+Appearance, 2,732px for Host, and 1,033px for Skills & Extensions. The previous
+Host and Skills measurements were about 6,700px and 2,900px. The 480px Skills
+layout had no horizontal overflow. Opening Code typography left the scroll
+position at 411px before and after the pointer action.
+
+Theme comparisons used temporary renderer token previews without saving user
+preferences. The secondary text role passed the normal-text threshold on the
+workspace in neutral light/dark and the retained tinted preset. This does not
+establish native material contrast with every custom background. Native checks
+remain unavailable while the Mac is locked.
+
+The premium static audit reported two matches, both in test fixtures (an
+intentionally inert mock button and a mock composer textarea), and no production
+violations. Repository-owned UI checks remain the enforcement source.
 
 ## Acceptance checklist for the unlocked app
 

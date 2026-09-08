@@ -25,6 +25,17 @@ function controller(): ThemeController {
 }
 
 describe("ThemeAppearanceEditor", () => {
+  it("keeps specialist fonts behind named disclosures and omits the obsolete ring control", async () => {
+    const user = userEvent.setup();
+    render(<ThemeAppearanceEditor controller={controller()} />);
+    expect(screen.getByLabelText("Interface font")).toBeVisible();
+    expect(screen.getByLabelText("Code font")).not.toBeVisible();
+    expect(screen.getByLabelText("Terminal font family")).not.toBeVisible();
+    await user.click(screen.getByText("Code typography", { selector: "summary span" }));
+    expect(screen.getByLabelText("Code font")).toBeVisible();
+    expect(screen.queryByLabelText("Focus ring color")).not.toBeInTheDocument();
+  });
+
   it("saves appearance changes immediately without an Apply or Cancel bar", async () => {
     const user = userEvent.setup();
     const applyPatch = vi.fn(async () => true);

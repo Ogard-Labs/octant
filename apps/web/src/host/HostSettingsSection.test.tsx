@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type {
@@ -117,6 +117,35 @@ function makeClient(overrides: ClientOverrides = {}): HostControlClient {
 }
 
 describe("HostSettingsSection", () => {
+  it("keeps host controls and a backup draft when refreshing status fails", async () => {
+    const pending = Promise.withResolvers<HostControlStatus>();
+    const status = vi
+      .fn()
+      .mockResolvedValueOnce(serviceStatus)
+      .mockReturnValueOnce(pending.promise);
+    render(<HostSettingsSection client={makeClient({ status })} />);
+    const input = await screen.findByLabelText("Backup label");
+    fireEvent.change(input, { target: { value: "before-upgrade" } });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
+    expect(screen.getByLabelText("Backup label")).toBe(input);
+    await act(async () => pending.reject(new Error("Host status could not be refreshed.")));
+    expect(screen.getByLabelText("Backup label")).toBe(input);
+    expect(input).toHaveValue("before-upgrade");
+    expect(await screen.findByText("Host status could not be refreshed.")).toBeVisible();
+  });
+
+  it("keeps host health visible while the data inventory is disclosed on demand", async () => {
+    const user = userEvent.setup();
+    render(<HostSettingsSection client={makeClient()} />);
+    await screen.findByText("host-1");
+    expect(screen.getByRole("region", { name: "Readiness" })).toBeVisible();
+    const inventory = screen.getByText("Stored data").closest("details");
+    expect(inventory).not.toHaveAttribute("open");
+    await user.click(screen.getByText("Stored data"));
+    expect(inventory).toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: "Create backup" })).toBeVisible();
+  });
+
   it("renders identity, owner mode, policy, versions, readiness, and capabilities", async () => {
     render(<HostSettingsSection client={makeClient()} />);
 

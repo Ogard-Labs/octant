@@ -212,7 +212,6 @@ html[data-theme="dark"] .settings-view {
 
 .settings-view__field--search .settings-view__text-input {
   min-height: 32px;
-  border-radius: var(--oct-radius-sm);
   background: var(--octant-control);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
@@ -370,7 +369,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-navigation .setnav-item,
 .settings-view__back {
   min-height: 32px;
-  border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
   line-height: 1.2;
@@ -984,6 +982,34 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   transform: rotate(90deg);
 }
 
+.settings-disclosure--section > summary {
+  width: 100%;
+  justify-content: space-between;
+  min-height: 52px;
+  padding-block: 12px;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.settings-disclosure__label {
+  display: grid;
+  gap: 4px;
+}
+
+.settings-disclosure__description {
+  color: var(--oct-meta);
+}
+
+.settings-disclosure__body {
+  padding-block: 8px 16px;
+}
+
+.settings-collection-scroll {
+  max-height: 360px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
 .settings-profile-disclosure > summary {
   min-height: 52px;
   padding: 12px 0;
@@ -1212,7 +1238,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-view__select,
 .settings-view__text-input,
 .settings-view__textarea {
-  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
 }
 
@@ -1599,6 +1624,11 @@ textarea.settings-view__text-input {
   font-size: var(--oct-text-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.settings-font-picker__positioner {
+  width: 300px;
+  max-width: min(var(--available-width), calc(100vw - 24px));
 }
 
 .settings-font-picker__sample {

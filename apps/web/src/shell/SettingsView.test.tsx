@@ -145,7 +145,7 @@ describe("SettingsView", () => {
       initialDeepLink: { section: "profiles" },
     });
     expect(await screen.findByTestId("execution-profile-settings")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Profiles" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Execution profiles" })).toHaveAttribute(
       "aria-current",
       "page",
     );

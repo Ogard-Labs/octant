@@ -19,6 +19,7 @@ import type {
 } from "@octant/contracts/extensions";
 import type { ExtensionPackagePreview } from "@octant/contracts/extension-rpc";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
+import { SettingsDisclosure } from "../settings/primitives";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
@@ -811,7 +812,11 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                       No installed skills match this filter.
                     </p>
                   ) : (
-                    <ul aria-label="Standalone skills" className="extensions-settings__cards">
+                    <ul
+                      aria-label="Standalone skills"
+                      className="extensions-settings__cards settings-collection-scroll"
+                      tabIndex={0}
+                    >
                       {visibleStandaloneSkills.map((skill) => (
                         <StandaloneSkillCard key={String(skill.skill.qualifiedId)} skill={skill} />
                       ))}
@@ -837,15 +842,16 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
           </section>
 
           {snapshot.collisions.length > 0 ? (
-            <section
-              aria-labelledby="standalone-skill-collisions-heading"
-              className="extensions-settings__section extensions-settings__section--attention"
+            <SettingsDisclosure
+              title="Name collisions"
+              description={`${snapshot.collisions.length} ${snapshot.collisions.length === 1 ? "name has" : "names have"} multiple sources. Choose an exact source before use.`}
             >
-              <h3 className="setgroup-head" id="standalone-skill-collisions-heading">
-                Name collisions
-              </h3>
               <div className="extensions-settings__body">
-                <ul className="extensions-settings__diagnostics">
+                <ul
+                  aria-label="Skill name collisions"
+                  className="extensions-settings__diagnostics settings-collection-scroll"
+                  tabIndex={0}
+                >
                   {snapshot.collisions.map((collision) => (
                     <li
                       aria-label={`Skill name collision: ${collision.name}`}
@@ -858,7 +864,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                   ))}
                 </ul>
               </div>
-            </section>
+            </SettingsDisclosure>
           ) : null}
         </>
       ) : (
