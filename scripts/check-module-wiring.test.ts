@@ -58,6 +58,23 @@ describe("findUnregisteredRouteModules", () => {
   });
 });
 
+describe("bundled process entry points", () => {
+  it("recognizes a declared isolated preload without exempting undeclared preloads", () => {
+    const files = [
+      {
+        path: "apps/desktop/tsdown.config.ts",
+        content: 'export default [{ entry: ["src/approvalPreload.ts"], format: ["cjs"] }];',
+      },
+      { path: "apps/desktop/src/approvalPreload.ts", content: 'console.log("loaded");' },
+      { path: "apps/desktop/src/unusedPreload.ts", content: 'console.log("unused");' },
+    ];
+    expect(collectReferencedPaths(files).has("apps/desktop/src/approvalPreload.ts")).toBe(true);
+    expect(findUnreachableModules(files).map((item) => item.path)).toEqual([
+      "apps/desktop/src/unusedPreload.ts",
+    ]);
+  });
+});
+
 describe("extractSpecifiers", () => {
   it("captures side-effect imports alongside named, dynamic, and require forms", () => {
     const specifiers = extractSpecifiers(

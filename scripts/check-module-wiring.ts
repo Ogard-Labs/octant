@@ -359,6 +359,19 @@ function collectReferences(
     // references originating in tests never count toward reachability.
     if (isTestPath(file.path)) continue;
 
+    // Electron loads dedicated preloads from bundled output, so there is no
+    // TypeScript import edge. Count only literal entries declared by tsdown.
+    if (file.path.endsWith("/tsdown.config.ts")) {
+      for (const entry of file.content.matchAll(/\bentry\s*:\s*\[([^\]]*)\]/g)) {
+        for (const literal of (entry[1] ?? "").matchAll(/["']([^"']+\.(?:ts|tsx))["']/g)) {
+          const source = literal[1];
+          if (source === undefined) continue;
+          const target = normalizeJoin(dirname(file.path), source);
+          if (known.has(target)) referenced.add(target);
+        }
+      }
+    }
+
     for (const specifier of extract(file.content)) {
       if (specifier.startsWith(".")) {
         const resolved = resolveRelative(file.path, specifier, known);
