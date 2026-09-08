@@ -97,7 +97,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const [pendingPoint, setPendingPoint] = useState<BrowserViewportPoint>();
   const feedback = useProductFeedback({
     threadId: props.tab.threadId === undefined ? undefined : String(props.tab.threadId),
-    mode: "code",
+    mode: props.tab.mode,
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });

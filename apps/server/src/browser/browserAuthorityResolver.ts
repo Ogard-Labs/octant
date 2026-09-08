@@ -8,6 +8,8 @@ import {
   type CodeThreadId,
   type WorkThreadId,
   type ToolActionAuthority,
+  type WindowId,
+  type WorkspaceLayoutNode,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { WorkThreadProjection } from "../work/workThreadProjection";
@@ -23,7 +25,8 @@ export interface BrowserAuthorityResolverOptions {
   readonly persistence: Pick<
     PersistenceService,
     "readProject" | "readCodeThread" | "readChatThread" | "readProviderInstance"
-  >;
+  > &
+    Partial<Pick<PersistenceService, "readWindowWorkspace">>;
   readonly workThreads: Pick<WorkThreadProjection, "read">;
 }
 
@@ -64,7 +67,11 @@ export class ServerBrowserAuthorityResolver implements BrowserAuthorityResolver 
         return undefined;
       }
       const revision = project.bindingHistory.at(-1);
-      if (revision === undefined) return undefined;
+      // Work threads carry the binding they were created against. A missing or
+      // stale revision cannot borrow the Project's current root.
+      if (revision === undefined || revision.revisionId !== thread.bindingRevisionId) {
+        return undefined;
+      }
       return {
         hostId: this.#options.hostId,
         mode,
@@ -94,6 +101,45 @@ export class ServerBrowserAuthorityResolver implements BrowserAuthorityResolver 
       extension: { kind: "core" },
     };
   }
+
+  canAccessWindow(
+    windowId: WindowId,
+    threadId: BrowserThreadId,
+    mode: ToolActionAuthority["mode"],
+  ): boolean {
+    const authority = this.resolve(threadId, mode);
+    const readWindowWorkspace = this.#options.persistence.readWindowWorkspace;
+    if (authority === undefined || readWindowWorkspace === undefined) return false;
+    const projected = readWindowWorkspace(windowId);
+    if (projected === undefined) return false;
+    const workspace = projected.workspace;
+    const context = workspace.contextByMode[mode];
+    if (context.mode !== mode || String(context.host) !== String(authority.hostId)) return false;
+    if (String(context.projectId) !== String(authority.projectId ?? null)) return false;
+    return layoutContainsThread(
+      workspace.layouts[mode],
+      String(threadId),
+      String(authority.hostId),
+    );
+  }
+}
+
+function layoutContainsThread(
+  layout: WorkspaceLayoutNode,
+  threadId: string,
+  hostId: string,
+): boolean {
+  if (layout.kind === "split") {
+    return (
+      layoutContainsThread(layout.first, threadId, hostId) ||
+      layoutContainsThread(layout.second, threadId, hostId)
+    );
+  }
+  const surface = layout.surface;
+  if (!("threadId" in surface) || String(surface.threadId) !== threadId) return false;
+  return (
+    !("hostId" in surface) || surface.hostId === undefined || String(surface.hostId) === hostId
+  );
 }
 
 export function deriveToolHostId(seed: string): typeof ToolHostId.Type {

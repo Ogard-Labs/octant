@@ -66,6 +66,7 @@ function request(overrides: Partial<BrowserActionRequest> = {}): BrowserActionRe
 
 function harness(
   options: {
+    readonly access?: boolean;
     readonly recordExternalContentIngestion?: ConstructorParameters<
       typeof BrowserAutomationService
     >[0]["recordExternalContentIngestion"];
@@ -109,6 +110,7 @@ function harness(
   const service = new BrowserAutomationService({
     runtime,
     authority: {
+      canAccessWindow: () => options.access ?? true,
       resolve: (threadId) =>
         revokedThreads.has(threadId)
           ? undefined
@@ -145,9 +147,24 @@ function harness(
 }
 
 describe("BrowserAutomationService", () => {
+  it("refuses to create a context when the window is not scoped to the thread", async () => {
+    const fixture = harness({ access: false });
+    const result = await fixture.service.create({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      policy,
+    });
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { category: "unauthorized" },
+    });
+    expect(fixture.runtime.createContext).not.toHaveBeenCalled();
+  });
+
   it("fails closed when the default authority cannot read thread taint", () => {
     const authorityService = createBrowserToolCallAuthorityService(
-      { resolve: () => authorityOne },
+      { canAccessWindow: () => true, resolve: () => authorityOne },
       () => "2026-08-24T00:00:00.000Z",
     );
     const request = decodeToolActionRequest({

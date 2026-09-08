@@ -3197,9 +3197,14 @@ export function startOctantServer(
     browserToolApprovalService = new BrowserToolApprovalService({
       uuid: randomUUID,
       now: Date.now,
-      authorityIsCurrent: (threadId, authority) => {
-        const current = browserAuthority.resolve(decodeBrowserThreadId(threadId), authority.mode);
-        return current !== undefined && sameToolActionAuthority(current, authority);
+      authorityIsCurrent: (threadId, authority, windowId) => {
+        const decodedThreadId = decodeBrowserThreadId(threadId);
+        const current = browserAuthority.resolve(decodedThreadId, authority.mode);
+        return (
+          current !== undefined &&
+          sameToolActionAuthority(current, authority) &&
+          browserAuthority.canAccessWindow(windowId, decodedThreadId, authority.mode)
+        );
       },
     });
     const headlessBrowserRuntime = createPlaywrightBrowserRuntime({

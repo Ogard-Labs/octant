@@ -129,6 +129,13 @@ export function createBrowserAutomationRouteHandler(
       }
       if (url.pathname === "/api/browser/scope") {
         const input = decodeBrowserThreadScopeRequest(decoded.value);
+        if (!dependencies.authority.canAccessWindow(windowId, input.threadId, input.mode)) {
+          return failure(
+            { category: "unauthorized", message: "Browser thread is not owned by this window." },
+            403,
+            origin,
+          );
+        }
         const authority = dependencies.authority.resolve(input.threadId, input.mode);
         if (authority === undefined) {
           return failure(
@@ -141,6 +148,19 @@ export function createBrowserAutomationRouteHandler(
       }
       if (url.pathname === "/api/browser/contexts") {
         const input = decodeBrowserContextCreateCommand(decoded.value);
+        if (
+          !dependencies.authority.canAccessWindow(
+            windowId,
+            input.threadId,
+            input.action.authority.mode,
+          )
+        ) {
+          return failure(
+            { category: "unauthorized", message: "Browser thread is not owned by this window." },
+            403,
+            origin,
+          );
+        }
         return success(
           decodeBrowserAutomationSnapshot(
             await dependencies.service.create({ windowId, ...input }),

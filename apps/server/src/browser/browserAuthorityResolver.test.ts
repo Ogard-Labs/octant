@@ -7,6 +7,8 @@ const revisionId = "30000000-0000-4000-8000-000000000001";
 const checkoutId = "40000000-0000-4000-8000-000000000001";
 const providerId = "50000000-0000-4000-8000-000000000001";
 const hostId = deriveToolHostId("/octant-data");
+const windowId = "70000000-0000-4000-8000-000000000001";
+const otherWindowId = "70000000-0000-4000-8000-000000000002";
 const baseProject = {
   id: projectId,
   name: "Project",
@@ -96,6 +98,7 @@ describe("ServerBrowserAuthorityResolver", () => {
             lifecycle: "active",
             providerInstanceId: providerId,
             modelId: "model",
+            bindingRevisionId: revisionId,
             version: 1,
             createdAt: "2026-07-27T20:00:00.000Z",
             updatedAt: "2026-07-27T20:00:00.000Z",
@@ -144,6 +147,132 @@ describe("ServerBrowserAuthorityResolver", () => {
       worktreeId: checkoutId,
       providerInstanceId: providerId,
     });
+  });
+
+  it("binds Browser scope to the authenticated window's exact thread layout", () => {
+    const workspace = {
+      contextByMode: {
+        chat: { host: hostId, mode: "chat", projectId: null, boundRoot: null },
+        work: { host: hostId, mode: "work", projectId, boundRoot: "/project" },
+        code: { host: hostId, mode: "code", projectId, boundRoot: "/project" },
+      },
+      layouts: {
+        chat: {
+          kind: "pane",
+          surface: {
+            kind: "chat-thread",
+            id: "80000000-0000-4000-8000-000000000001",
+            threadId,
+            mode: "chat",
+            title: "Chat",
+          },
+        },
+        work: {
+          kind: "pane",
+          surface: {
+            kind: "work-thread",
+            id: "80000000-0000-4000-8000-000000000002",
+            threadId,
+            mode: "work",
+            title: "Work",
+            hostId,
+          },
+        },
+        code: {
+          kind: "pane",
+          surface: {
+            kind: "code-overview",
+            id: "80000000-0000-4000-8000-000000000003",
+            threadId,
+            mode: "code",
+            title: "Code",
+            hostId,
+          },
+        },
+      },
+    };
+    const resolver = new ServerBrowserAuthorityResolver({
+      hostId,
+      persistence: {
+        readProject: () => ({ ...baseProject, type: "work" }) as any,
+        readCodeThread: () => undefined,
+        readChatThread: () => undefined,
+        readProviderInstance: () => provider as any,
+        readWindowWorkspace: (candidate) =>
+          candidate === windowId ? ({ workspace } as any) : undefined,
+      },
+      workThreads: {
+        read: () =>
+          ({
+            id: threadId,
+            projectId,
+            title: "Thread",
+            lifecycle: "active",
+            providerInstanceId: providerId,
+            modelId: "model",
+            bindingRevisionId: revisionId,
+            version: 1,
+            createdAt: "2026-07-27T20:00:00.000Z",
+            updatedAt: "2026-07-27T20:00:00.000Z",
+          }) as any,
+      },
+    });
+
+    expect(resolver.canAccessWindow(windowId as any, threadId as any, "work")).toBe(true);
+    expect(resolver.canAccessWindow(otherWindowId as any, threadId as any, "work")).toBe(false);
+  });
+
+  it("refuses a Work Browser scope when its binding revision is missing or stale", () => {
+    const resolver = new ServerBrowserAuthorityResolver({
+      hostId,
+      persistence: {
+        readProject: () => ({ ...baseProject, type: "work" }) as any,
+        readCodeThread: () => undefined,
+        readChatThread: () => undefined,
+        readProviderInstance: () => provider as any,
+      },
+      workThreads: {
+        read: () =>
+          ({
+            id: threadId,
+            projectId,
+            title: "Thread",
+            lifecycle: "active",
+            providerInstanceId: providerId,
+            modelId: "model",
+            version: 1,
+            createdAt: "2026-07-27T20:00:00.000Z",
+            updatedAt: "2026-07-27T20:00:00.000Z",
+          }) as any,
+      },
+    });
+    expect(resolver.resolve(threadId as any, "work")).toBeUndefined();
+
+    const staleResolver = new ServerBrowserAuthorityResolver({
+      hostId,
+      persistence: {
+        readProject: () => ({ ...baseProject, type: "work" }) as any,
+        readCodeThread: () => undefined,
+        readChatThread: () => undefined,
+        readProviderInstance: () => provider as any,
+      },
+      workThreads: {
+        read: () =>
+          ({
+            id: threadId,
+            projectId,
+            title: "Thread",
+            lifecycle: "active",
+            providerInstanceId: providerId,
+            modelId: "model",
+            bindingRevisionId: "90000000-0000-4000-8000-000000000001",
+            version: 1,
+            createdAt: "2026-07-27T20:00:00.000Z",
+            updatedAt: "2026-07-27T20:00:00.000Z",
+          }) as any,
+      },
+    });
+    expect(staleResolver.resolve(threadId as any, "work")).toBeUndefined();
   });
 
   it("fails closed when the provider is disabled", () => {

@@ -34,7 +34,11 @@ export class BrowserToolApprovalService {
       readonly uuid: () => string;
       readonly now: () => number;
       readonly ttlMs?: number;
-      readonly authorityIsCurrent: (threadId: string, authority: ToolActionAuthority) => boolean;
+      readonly authorityIsCurrent: (
+        threadId: string,
+        authority: ToolActionAuthority,
+        windowId: WindowId,
+      ) => boolean;
     },
   ) {
     this.#ttlMs = Math.max(1_000, Math.min(options.ttlMs ?? DEFAULT_TTL_MS, 10 * 60_000));
@@ -100,7 +104,7 @@ export class BrowserToolApprovalService {
     this.#expire();
     const pending = this.#pending.get(String(decision.approvalId));
     if (pending === undefined || pending.windowId !== windowId) return false;
-    if (!this.options.authorityIsCurrent(pending.threadId, pending.authority)) {
+    if (!this.options.authorityIsCurrent(pending.threadId, pending.authority, pending.windowId)) {
       pending.resolve("denied");
       return false;
     }

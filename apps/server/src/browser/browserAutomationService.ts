@@ -38,6 +38,11 @@ export interface BrowserAuthorityResolver {
     threadId: BrowserThreadId,
     mode: ToolActionAuthority["mode"],
   ): ToolActionAuthority | undefined;
+  canAccessWindow(
+    windowId: WindowId,
+    threadId: BrowserThreadId,
+    mode: ToolActionAuthority["mode"],
+  ): boolean;
 }
 
 export interface BrowserAutomationServiceOptions {
@@ -146,8 +151,18 @@ export class BrowserAutomationService {
     readonly dedicated?: boolean | undefined;
   }): Promise<BrowserAutomationSnapshot> {
     const dedicated = input.dedicated === true;
-    const denied = this.#authorizeCreate(input.action, input.policy, input.threadId);
     const current = this.#current(input.windowId, input.threadId);
+    if (
+      !this.#authority.canAccessWindow(input.windowId, input.threadId, input.action.authority.mode)
+    ) {
+      if (current !== undefined) this.#revokeAuthority(current);
+      return failedSnapshot(
+        input.threadId,
+        { category: "unauthorized", message: "Browser thread is not owned by this window." },
+        "failed",
+      );
+    }
+    const denied = this.#authorizeCreate(input.action, input.policy, input.threadId);
     if (denied !== undefined) {
       if (current !== undefined && !this.#authorityIsActive(current)) {
         this.#revokeAuthority(current);
@@ -302,7 +317,15 @@ export class BrowserAutomationService {
       );
     }
     const granted = this.#authority.resolve(owned.threadId, modeOf(owned.action.authority));
-    if (granted === undefined || authorizeToolAction(owned.action, granted).kind !== "allowed") {
+    if (
+      !this.#authority.canAccessWindow(
+        owned.windowId,
+        owned.threadId,
+        modeOf(owned.action.authority),
+      ) ||
+      granted === undefined ||
+      authorizeToolAction(owned.action, granted).kind !== "allowed"
+    ) {
       owned.abort.abort();
       await this.#destroy(owned, "authority-revoked", "interrupted");
       return failedSnapshot(
@@ -574,7 +597,15 @@ export class BrowserAutomationService {
       return { status: "unavailable" };
     }
     const granted = this.#authority.resolve(owned.threadId, modeOf(owned.action.authority));
-    if (granted === undefined || authorizeToolAction(owned.action, granted).kind !== "allowed") {
+    if (
+      !this.#authority.canAccessWindow(
+        owned.windowId,
+        owned.threadId,
+        modeOf(owned.action.authority),
+      ) ||
+      granted === undefined ||
+      authorizeToolAction(owned.action, granted).kind !== "allowed"
+    ) {
       return { status: "unavailable" };
     }
     const describe = this.#runtime.describePoint;
@@ -786,6 +817,15 @@ export class BrowserAutomationService {
   }
 
   #authorityIsActive(owned: OwnedContext): boolean {
+    if (
+      !this.#authority.canAccessWindow(
+        owned.windowId,
+        owned.threadId,
+        modeOf(owned.action.authority),
+      )
+    ) {
+      return false;
+    }
     const granted = this.#authority.resolve(owned.threadId, modeOf(owned.action.authority));
     return granted !== undefined && authorizeToolAction(owned.action, granted).kind === "allowed";
   }

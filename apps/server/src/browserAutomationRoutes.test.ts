@@ -71,7 +71,7 @@ describe("browser automation routes", () => {
     };
     handler = createBrowserAutomationRouteHandler({
       service: service as any,
-      authority: { resolve: () => authority },
+      authority: { canAccessWindow: () => true, resolve: () => authority },
       windowAuthorityStore: store,
       maxRequestBodySize: 64_000,
     });
@@ -85,6 +85,37 @@ describe("browser automation routes", () => {
       }),
     );
     expect(response?.status).toBe(401);
+  });
+
+  it("rejects a scope and context create from a window without that thread Project", async () => {
+    const isolatedHandler = createBrowserAutomationRouteHandler({
+      service: service as any,
+      authority: { canAccessWindow: () => false, resolve: () => authority },
+      windowAuthorityStore: store,
+      maxRequestBodySize: 64_000,
+    });
+    const headers = {
+      "content-type": "application/json",
+      "x-octant-window-capability": capability,
+    };
+    const scope = await isolatedHandler(
+      new Request("http://127.0.0.1/api/browser/scope", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ threadId, mode: "work" }),
+      }),
+    );
+    expect(scope?.status).toBe(403);
+
+    const created = await isolatedHandler(
+      new Request("http://127.0.0.1/api/browser/contexts", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body()),
+      }),
+    );
+    expect(created?.status).toBe(403);
+    expect(service.create).not.toHaveBeenCalled();
   });
 
   it("returns only the server-resolved authority for an authenticated thread", async () => {
@@ -120,7 +151,7 @@ describe("browser automation routes", () => {
     };
     const approvalHandler = createBrowserAutomationRouteHandler({
       service: service as any,
-      authority: { resolve: () => authority },
+      authority: { canAccessWindow: () => true, resolve: () => authority },
       approvals,
       windowAuthorityStore: store,
       maxRequestBodySize: 64_000,

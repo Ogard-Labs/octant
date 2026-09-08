@@ -72,6 +72,30 @@ describe("BrowserToolApprovalService", () => {
     await expect(revoked).resolves.toBe("cancelled");
   });
 
+  it("denies a pending approval when its window loses Project scope", async () => {
+    let scopeAvailable = true;
+    const service = new BrowserToolApprovalService({
+      uuid: () => "40000000-0000-4000-8000-000000000004",
+      now: () => Date.parse("2026-09-09T10:00:00.000Z"),
+      authorityIsCurrent: (_threadId, _authority, candidateWindowId) =>
+        scopeAvailable && candidateWindowId === windowId,
+    });
+    const pending = service.request({
+      windowId,
+      threadId: "50000000-0000-4000-8000-000000000001",
+      authority,
+      origin: "https://example.com",
+    });
+    scopeAvailable = false;
+    expect(
+      service.decide(windowId, {
+        approvalId: "40000000-0000-4000-8000-000000000004" as never,
+        decision: "approved",
+      }),
+    ).toBe(false);
+    await expect(pending).resolves.toBe("denied");
+  });
+
   it("expires an approval at decision time even when its timer has not fired", async () => {
     let now = Date.parse("2026-09-09T10:00:00.000Z");
     const service = new BrowserToolApprovalService({
