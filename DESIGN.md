@@ -123,7 +123,7 @@ Surface (reading measure 880px, or wide for boards)
 ```
 
 Leaving a reader route is always the ghost "Back to workspace" control in the
-header. Settings is the same shell with a 680px measure and its own
+header. Settings is the same shell with an 800px measure and its own
 navigation rail; the rail names each group of pages with a quiet label and
 draws no hairline between groups. Rows in Settings are `SettingRow`; rows everywhere else are
 `surface-row`. Both draw the same hairline.
@@ -509,17 +509,22 @@ decorative shortcuts.
 Primary sidebar destinations are New thread, Board, and Pull requests
 when valid for the active mode. The bottom-left identity menu owns Settings,
 Navigator, Agents, Providers, Usage, Plugins, Automations, Artifacts, and Zen
-entry points. Search is a compact in-place filter for the current mode's visible
+entry points. The account menu opens above its identity row, aligned to the
+row’s leading edge. Search is a compact in-place filter for the current mode's visible
 threads, with a command-style overlay available for broader actions.
 
-Settings is a grouped form page rather than a dashboard wall. A compact 248px
-navigation rail and search remain fixed while one 680px reading column scrolls,
-anchored to the navigation edge by a 32–56px workspace gutter instead of
-floating in the middle of wide windows. Navigation groups use quiet separators
+Settings is a grouped form page. The shared resizable navigation rail and
+search remain fixed while one centred, bounded 800px reading column scrolls.
+A 32–56px workspace gutter protects the content at narrower widths. The page
+title, quiet section captions, and primary field labels have distinct roles;
+sections follow a consistent 32px rhythm. Navigation groups use quiet separators
 rather than competing labels. Routine related rows stay open on the application
 ground with hairline separators. Keybindings have their own destination and raw
 JSON stays behind an advanced disclosure. Inline profile and provider editors
-share the flat page ground and aligned row edges (0096). Install reviews, visual
+share the flat page ground and aligned row edges (0096). Ready providers open
+onto a bounded model list with search, shown counts, and shared visibility
+switches. Routine connection diagnostics and capabilities use a separate
+disclosure; setup and authentication guidance remains visible. Install reviews, visual
 theme previews, and confirmation dialogs retain their discrete boundaries. A destructive group is an open section at the end of
 its page, marked by that placement and by its confirm control, not by heading
 colour or a card. Labels and descriptions align left, controls align

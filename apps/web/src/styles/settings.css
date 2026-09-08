@@ -15,7 +15,7 @@
      invisible against the same app ground. */
   --octant-settings-card: var(--octant-card);
   --oct-settings-gutter: clamp(32px, 4vw, 56px);
-  --oct-settings-reading-width: 680px;
+  --oct-settings-reading-width: 800px;
 }
 
 html[data-octant-theme-mode="dark"] .settings-view,
@@ -136,7 +136,7 @@ html[data-theme="dark"] .settings-view {
 .settings-view__workspace-titlebar {
   display: flex;
   align-items: center;
-  padding: 0 var(--oct-settings-gutter);
+  padding: 0 var(--oct-space-5);
   border-bottom: 1px solid var(--octant-border-soft);
 }
 
@@ -160,7 +160,7 @@ html[data-theme="dark"] .settings-view {
 /* The shared title/subtitle roles carry the type; this header only spaces the
    sections below it, and the subtitle's own end margin must not stack on top. */
 .settings-view__header {
-  margin-bottom: 18px;
+  margin-bottom: 32px;
 }
 
 .settings-view__header h1 {
@@ -371,7 +371,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-view__back {
   min-height: 32px;
   border-radius: var(--oct-radius-sm);
-  color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
   line-height: 1.2;
@@ -381,13 +380,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-navigation .setnav-item > .icon,
 .settings-view__back > .icon {
   color: var(--octant-text-muted);
-}
-
-.settings-navigation .setnav-item:hover,
-.settings-navigation .setnav-item[aria-current="page"],
-.settings-view__back:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-surface-hover);
 }
 
 .settings-navigation .setnav-item[aria-current="page"] {
@@ -411,7 +403,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-panel__header {
   display: grid;
   gap: 4px;
-  padding: 10px 0 8px;
+  padding: 0 0 12px;
   border-bottom: 1px solid var(--oct-hairline);
 }
 
@@ -422,8 +414,8 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .settings-panel__header h2 {
   color: var(--octant-text-secondary);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-regular);
   letter-spacing: -0.01em;
   text-transform: none;
 }
@@ -684,15 +676,14 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   --oct-settings-control-height: 32px;
 }
 
-/* One reading column. A 1080px edge-aligned pane stretched every row into
-   an ops console; form-layout cards need a measure a person can scan. */
+/* One centered reading column keeps long Settings pages balanced at wide widths. */
 .settings-view__content-inner {
   width: 100%;
   max-width: calc(
     var(--oct-settings-reading-width) + var(--oct-settings-gutter) + var(--oct-settings-gutter)
   );
-  padding: 28px var(--oct-settings-gutter) 64px;
-  margin: 0;
+  padding: 40px var(--oct-settings-gutter) 64px;
+  margin: 0 auto;
 }
 
 .settings-view__content-inner > section,
@@ -702,12 +693,12 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .settings-view__content-inner > section {
   padding: 0;
-  margin: 0 0 24px;
+  margin: 0 0 32px;
 }
 
 .settings-section-stack {
   display: grid;
-  gap: 16px;
+  gap: 32px;
 }
 
 /* All preference sections share an open layout, including expanded editors. */
@@ -839,8 +830,8 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   padding: 10px 0 8px;
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-regular);
   letter-spacing: -0.01em;
   line-height: 1.3;
   text-transform: none;
@@ -1032,12 +1023,12 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 }
 
 .setgroup-head {
-  min-height: 48px;
-  padding: 10px 0 8px;
+  min-height: 0;
+  padding: 0 0 12px;
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-regular);
 }
 
 .settings-view__field,
@@ -1657,7 +1648,6 @@ textarea.settings-view__text-input {
 
 @media (max-width: 720px) {
   .settings-view:not(.settings-view--narrow) {
-    grid-template-columns: 216px minmax(0, 1fr);
     --oct-settings-gutter: 28px;
   }
 
@@ -1672,10 +1662,6 @@ textarea.settings-view__text-input {
 }
 
 @media (max-width: 560px) {
-  .settings-view {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .settings-view__sidebar-titlebar,
   .settings-view__workspace-titlebar {
     height: 40px;

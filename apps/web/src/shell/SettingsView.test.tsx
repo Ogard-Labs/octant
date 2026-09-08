@@ -649,19 +649,18 @@ describe("SettingsView", () => {
     expect(styles).toContain("min-height: 28px");
   });
 
-  it("keeps Settings on the shared interface type scale in a navigation-anchored column", () => {
+  it("keeps Settings on the shared interface type scale in a centered reading column", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 
     expect(styles).toMatch(/\.settings-view\s*\{[\s\S]*font-family:\s*var\(--oct-font-display\);/);
     expect(styles).toMatch(
       /\.settings-view\s*\{[\s\S]*grid-template-columns:\s*var\(--octant-sidebar-width, 248px\) minmax\(0, 1fr\);/,
     );
-    // The readable column stays bounded, but its left edge follows the
-    // navigator instead of floating in the middle of wide windows.
-    expect(styles).toMatch(/--oct-settings-reading-width:\s*680px;/);
-    expect(styles).toMatch(/\.settings-view__content-inner\s*\{[\s\S]*margin:\s*0;/);
+    // A bounded reading column centers in the workspace while keeping the saved sidebar width.
+    expect(styles).toMatch(/--oct-settings-reading-width:\s*800px;/);
+    expect(styles).toMatch(/\.settings-view__content-inner\s*\{[\s\S]*margin:\s*0 auto;/);
     expect(styles).toMatch(
-      /\.settings-view__content-inner\s*\{[\s\S]*padding:\s*28px var\(--oct-settings-gutter\) 64px;/,
+      /\.settings-view__content-inner\s*\{[\s\S]*padding:\s*40px var\(--oct-settings-gutter\) 64px;/,
     );
     expect(styles).toContain("font-family: var(--oct-font-display)");
     expect(styles).toContain("font-size: var(--octant-ui-font-size)");
@@ -717,11 +716,11 @@ describe("SettingsView", () => {
     );
   });
 
-  it("does not let the legacy 720px rail squeeze narrow Settings into a phantom column", () => {
+  it("keeps the saved sidebar width until the narrow navigation takes over", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
-
-    expect(styles).toMatch(
-      /@media \(max-width: 720px\)[\s\S]*?\.settings-view:not\(\.settings-view--narrow\)\s*\{\s*grid-template-columns:\s*216px minmax\(0, 1fr\)/,
+    expect(styles).not.toContain("grid-template-columns: 216px minmax(0, 1fr)");
+    expect(styles).not.toMatch(
+      /@media \(max-width: 560px\)\s*\{\s*\.settings-view\s*\{\s*grid-template-columns/,
     );
   });
 

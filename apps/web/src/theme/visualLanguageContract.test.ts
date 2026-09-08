@@ -342,7 +342,7 @@ describe("the public-block visual language", () => {
     expect(settings).toMatch(
       /\.settings-view\s*\{[^}]*background:\s*var\(--octant-app-background\)/,
     );
-    expect(settings).toMatch(/--oct-settings-reading-width:\s*680px/);
+    expect(settings).toMatch(/--oct-settings-reading-width:\s*800px/);
     expect(settings).toMatch(/\.settings-view__content-inner\s*\{[^}]*margin:\s*0/);
     expect(settings).toMatch(/\.settings-card-section\s*\{[^}]*box-shadow:\s*none/);
     expect(settings).toMatch(

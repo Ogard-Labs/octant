@@ -2392,14 +2392,51 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   box-shadow: none;
 }
 
+/* Details are a small sequence of named decisions rather than one technical
+   dump. Each section owns a quiet rule; the section head provides the label
+   and the body keeps values on the same reading edge as the provider row. */
+.provider-details__section {
+  display: grid;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+.provider-details__section--configuration,
+.provider-details__section--catalog,
+.provider-details__section--capabilities {
+  padding-top: var(--oct-space-3);
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.provider-details__connection-disclosure {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.provider-details__connection-trigger {
+  justify-self: start;
+  min-height: 28px;
+  padding-inline: 0;
+  font-size: var(--oct-text-xs);
+}
+
+.provider-details__connection-trigger svg {
+  transition: transform var(--oct-motion-fast) ease;
+}
+
+.provider-details__connection-trigger[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+.provider-details__connection-body {
+  display: grid;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
 @media (max-width: 560px) {
   .prov-details {
     padding-inline-start: 0;
-  }
-
-  .provrow > .prov-actions {
-    grid-area: 1 / 3;
-    justify-self: end;
   }
 }
 
@@ -2418,10 +2455,31 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   overflow-wrap: anywhere;
 }
 
-.provider-card__facts span:not(:last-child)::after {
-  margin-left: 8px;
-  color: var(--octant-divider-strong);
-  content: "·";
+.provider-details__connection-body > .provider-card__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--oct-space-2) var(--oct-space-4);
+  margin-top: 0;
+}
+
+.provider-details__connection-body > .provider-card__facts span {
+  min-width: 0;
+}
+
+.provider-details__section--connection > .provider-card__guidance,
+.provider-details__section--connection > .provider-card__authority-note {
+  max-width: 68ch;
+}
+
+.provider-card__credential-status {
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}
+
+.provider-card__credential-status strong {
+  color: var(--octant-text-primary);
+  font-weight: 500;
 }
 
 .provider-card__edit {
@@ -2435,7 +2493,13 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   display: grid;
   gap: var(--oct-space-4);
   padding-top: var(--oct-space-3);
-  border-top: 1px solid var(--oct-hairline);
+}
+
+.provider-details__section--configuration > h3 {
+  margin: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
 }
 
 .provider-card__configuration[data-expanded="false"] {
@@ -2459,12 +2523,11 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .provider-card__discovery {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 18px;
-  padding-top: 4px;
-  border-top: 1px solid var(--octant-border);
+  gap: var(--oct-space-4);
 }
 
-.provider-card__discovery h4 {
+.provider-card__discovery h4,
+.provider-details__section--capabilities h4 {
   margin: 0 0 var(--oct-space-2);
 }
 
@@ -2475,7 +2538,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   font-size: calc(12 * var(--oct-text-step));
 }
 
-.provider-card__discovery dl {
+.provider-details__section--capabilities dl {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px 14px;
@@ -2488,11 +2551,42 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   min-width: 0;
 }
 
+.provider-model-visibility__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+}
+
+.provider-model-visibility__head > div {
+  min-width: 0;
+}
+
+.provider-model-visibility__head .oct-section-label {
+  margin-bottom: 2px;
+}
+
+.provider-model-visibility__count {
+  flex: 0 0 auto;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.provider-model-visibility__search {
+  min-width: 0;
+}
+
+.provider-model-visibility__search input {
+  width: 100%;
+}
+
 .provider-model-visibility > ul {
-  max-height: 320px;
+  max-height: min(320px, 36vh);
   overflow-y: auto;
   padding: 0;
   list-style: none;
+  scrollbar-gutter: stable;
 }
 
 .provider-model-visibility li {
@@ -2502,30 +2596,41 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   gap: var(--oct-space-3);
   min-height: 36px;
   padding-block: var(--oct-space-2);
-  border-bottom: 1px solid var(--octant-border);
+  border-bottom: 1px solid var(--oct-hairline);
 }
 
-.provider-model-visibility li > span {
+.provider-model-visibility li:first-child {
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.provider-model-visibility li > .provider-model-visibility__name {
   min-width: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
   overflow-wrap: anywhere;
 }
 
-.provider-model-visibility li > label {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  gap: var(--oct-space-2);
+.provider-model-visibility li > .octant-switch {
+  flex: 0 0 auto;
 }
 
-.provider-card__discovery dl div {
+.provider-details__section--capabilities dl div {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  color: var(--octant-text-muted);
-  font-size: calc(11 * var(--oct-text-step));
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
 }
 
-.provider-card__discovery dd {
+.provider-details__section--capabilities {
+  gap: var(--oct-space-2);
+}
+
+.provider-details__section--capabilities > .oct-row-detail {
+  margin: 0;
+}
+
+.provider-details__section--capabilities dd {
   color: var(--octant-text-secondary);
 }
 
@@ -5511,7 +5616,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
     grid-template-columns: 1fr;
   }
 
-  .provider-card__discovery dl {
+  .provider-details__section--capabilities dl {
     grid-template-columns: 1fr;
   }
 }
@@ -5556,7 +5661,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
     grid-column: 1;
   }
 
-  .provider-card__discovery dl {
+  .provider-details__section--capabilities dl {
     grid-template-columns: 1fr;
   }
 

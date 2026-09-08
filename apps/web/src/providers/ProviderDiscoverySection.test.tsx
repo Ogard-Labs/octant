@@ -79,7 +79,7 @@ describe("ProviderDiscoverySection", () => {
   it("shows empty state when no new candidates", () => {
     const emptySnapshot = { ...baseSnapshot, candidates: [] };
     render(<ProviderDiscoverySection {...defaultProps} snapshot={emptySnapshot} />);
-    expect(screen.getByText(/Installed providers are already listed below/)).toBeDefined();
+    expect(screen.getByText(/No new providers found/)).toBeDefined();
     expect(screen.getByText(/Add provider manually/)).toBeDefined();
     expect(screen.queryByText(/under Advanced/)).toBeNull();
   });
@@ -127,7 +127,7 @@ describe("ProviderDiscoverySection", () => {
     );
 
     expect(screen.queryByText("Ollama")).toBeNull();
-    expect(screen.getByText(/Installed providers are already listed below/)).toBeDefined();
+    expect(screen.getByText(/No new providers found/)).toBeDefined();
   });
 
   it("calls onScan when Check again is clicked", () => {

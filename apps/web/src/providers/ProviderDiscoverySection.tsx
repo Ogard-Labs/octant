@@ -47,8 +47,9 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
       </div>
 
       <p className="settings-section-note">
-        Octant scans installed runtimes and checks every enabled provider. Enable only the providers
-        you want available.
+        {!scanning && detected.length === 0 && snapshot?.status === "completed"
+          ? "No new providers found. Use “Add provider manually” for a custom endpoint or binary."
+          : "Find installed providers and check their connections."}
       </p>
 
       {scanning && snapshot === undefined ? (
@@ -93,13 +94,6 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
           <OctantButton size="sm" variant="ghost" onClick={() => void props.onScan()} type="button">
             Retry
           </OctantButton>
-        </p>
-      ) : null}
-
-      {!scanning && detected.length === 0 && snapshot !== undefined ? (
-        <p className="settings-section-line">
-          Installed providers are already listed below. Use “Add provider manually” only for a
-          custom endpoint or unusual binary path.
         </p>
       ) : null}
 

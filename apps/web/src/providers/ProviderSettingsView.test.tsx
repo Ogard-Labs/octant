@@ -146,11 +146,11 @@ describe("ProviderSettingsView", () => {
     const props = fixture({ observed: observation() });
     const view = renderProviderSettings(<ProviderSettingsView {...props} />);
     await user.click(screen.getByRole("button", { name: "Details for Existing CLI" }));
-    const filter = screen.getByRole("textbox", { name: "Filter Existing CLI models" });
+    const filter = screen.getByRole("textbox", { name: "Search models for Existing CLI" });
     await user.type(filter, "Model");
 
     view.rerender(<ProviderSettingsView {...props} status="loading" />);
-    expect(screen.getByRole("textbox", { name: "Filter Existing CLI models" })).toBe(filter);
+    expect(screen.getByRole("textbox", { name: "Search models for Existing CLI" })).toBe(filter);
     expect(filter).toHaveValue("Model");
     expect(filter).toHaveFocus();
     expect(
@@ -572,7 +572,8 @@ describe("ProviderSettingsView", () => {
     expect(card.textContent).not.toMatch(/account|team|oauth token|credentials\.toml|raw acp/i);
   });
 
-  it("renders Pi RPC identity, provider-owned authentication guidance, and strict configuration", () => {
+  it("renders Pi RPC identity, provider-owned authentication guidance, and strict configuration", async () => {
+    const user = userEvent.setup();
     renderExpanded(
       <ProviderSettingsView
         {...fixture({ instance: piProvider(), observed: observation({ readiness: "ready" }) })}
@@ -581,6 +582,7 @@ describe("ProviderSettingsView", () => {
 
     const card = screen.getByRole("article", { name: "Pi local" });
     expect(within(card).getByText("Pi RPC")).toBeVisible();
+    await user.click(within(card).getByRole("button", { name: "Connection details" }));
     expect(within(card).getByText(/provider-owned/i)).toBeVisible();
     expect(within(card).getByLabelText("Binary path for Pi local")).toHaveValue(
       "/opt/homebrew/bin/pi",
@@ -589,7 +591,8 @@ describe("ProviderSettingsView", () => {
     expect(card.textContent).not.toMatch(/auth\.json|oauth token|raw rpc/i);
   });
 
-  it("renders Oh My Pi identity as distinct from Pi with pinned version and no secrets", () => {
+  it("renders Oh My Pi identity as distinct from Pi with pinned version and no secrets", async () => {
+    const user = userEvent.setup();
     renderExpanded(
       <ProviderSettingsView
         {...fixture({
@@ -601,6 +604,7 @@ describe("ProviderSettingsView", () => {
 
     const card = screen.getByRole("article", { name: "Oh My Pi local" });
     expect(within(card).getByText("Oh My Pi RPC")).toBeVisible();
+    await user.click(within(card).getByRole("button", { name: "Connection details" }));
     expect(within(card).getByText(/provider-owned Oh My Pi credentials/i)).toBeVisible();
     expect(within(card).getByText(/Supported version: 17.2.1/)).toBeVisible();
     expect(within(card).getByLabelText("Binary path for Oh My Pi local")).toHaveValue(
@@ -777,10 +781,13 @@ describe("ProviderSettingsView", () => {
     expect(within(card).getByText(/Manage credentials in the Octant host app/)).toBeVisible();
   });
 
-  it("shows semantic provider state and never renders runtime secrets or addresses", () => {
+  it("shows semantic provider state and never renders runtime secrets or addresses", async () => {
+    const user = userEvent.setup();
     renderExpanded(<ProviderSettingsView {...fixture({ observed: observation() })} />);
     const card = screen.getByRole("article", { name: "Existing CLI" });
     expect(within(card).getByText("Ready")).toBeVisible();
+    expect(within(card).queryByText(/Process: Running/)).not.toBeInTheDocument();
+    await user.click(within(card).getByRole("button", { name: "Connection details" }));
     expect(within(card).getByText(/Process: Running/)).toBeVisible();
     expect(within(card).getByText("Model One")).toBeVisible();
     expect(within(card).getAllByText("Supported").length).toBeGreaterThan(0);
@@ -789,7 +796,31 @@ describe("ProviderSettingsView", () => {
     expect(document.body.textContent).not.toMatch(/password|authorization|127\.0\.0\.1:\d+/i);
   });
 
-  it("renders OpenAI-compatible providers as read-only HTTP summaries", () => {
+  it("keeps routine diagnostics collapsed while model visibility stays one expansion away", async () => {
+    const user = userEvent.setup();
+    renderProviderSettings(<ProviderSettingsView {...fixture({ observed: observation() })} />);
+    const card = screen.getByRole("article", { name: "Existing CLI" });
+
+    expect(within(card).queryByText(/Process: Running/)).not.toBeInTheDocument();
+    expect(
+      within(card).queryByRole("textbox", { name: "Search models for Existing CLI" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(within(card).getByRole("button", { name: "Details for Existing CLI" }));
+    expect(within(card).queryByText(/Process: Running/)).not.toBeInTheDocument();
+    expect(
+      within(card).getByRole("textbox", { name: "Search models for Existing CLI" }),
+    ).toBeVisible();
+
+    const search = within(card).getByRole("textbox", { name: "Search models for Existing CLI" });
+    const details = within(card).getByRole("button", { name: "Connection details" });
+    expect(search.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+
+    await user.click(within(card).getByRole("button", { name: "Connection details" }));
+    expect(within(card).getByText(/Process: Running/)).toBeVisible();
+  });
+
+  it("renders OpenAI-compatible providers as read-only HTTP summaries", async () => {
     renderExpanded(<ProviderSettingsView {...fixture({ instance: httpProvider() })} />);
     const card = screen.getByRole("article", { name: "Private gateway" });
 
@@ -1582,11 +1613,13 @@ describe("ProviderSettingsView", () => {
     ).toBeVisible();
   });
 
-  it("does not infer an observed protocol from a successful connection check", () => {
+  it("does not infer an observed protocol from a successful connection check", async () => {
+    const user = userEvent.setup();
     renderExpanded(
       <ProviderSettingsView {...fixture({ instance: httpProvider(), observed: observation() })} />,
     );
     const card = screen.getByRole("article", { name: "Private gateway" });
+    await user.click(within(card).getByRole("button", { name: "Connection details" }));
     expect(within(card).getByText("Observed protocol: Not observed by a real turn")).toBeVisible();
   });
 
@@ -1639,6 +1672,7 @@ describe("ProviderSettingsView", () => {
       dateStyle: "medium",
       timeStyle: "short",
     }).format(new Date(timestamp));
+    fireEvent.click(screen.getByText("Connection details"));
     const rendered = screen.getByText(expected, { selector: "time" });
     expect(rendered).toBeVisible();
     expect(rendered.closest("span")).toHaveTextContent(`Last check: ${expected}`);
@@ -1748,12 +1782,14 @@ describe("ProviderSettingsView", () => {
       "false",
     );
 
-    const filter = screen.getByRole("textbox", { name: /Filter .* models/ });
+    const filter = screen.getByRole("textbox", { name: /Search models for .*/ });
+    expect(screen.getByText("1 model · 1 shown")).toBeVisible();
     await user.type(filter, "missing model");
-    expect(screen.queryByRole("checkbox", { name: "Hide Model One in model pickers" })).toBeNull();
+    expect(screen.queryByRole("switch", { name: "Hide Model One in model pickers" })).toBeNull();
     expect(screen.getByText("No models match this filter.")).toBeVisible();
+    expect(screen.getByText("0 matches · 1 shown")).toBeVisible();
     await user.clear(filter);
-    const hide = screen.getByRole("checkbox", { name: "Hide Model One in model pickers" });
+    const hide = screen.getByRole("switch", { name: "Hide Model One in model pickers" });
     expect(hide).toBeChecked();
     await user.click(hide);
     expect(props.onHiddenModelsChange).toHaveBeenCalledWith([
@@ -1770,7 +1806,8 @@ describe("ProviderSettingsView", () => {
         }}
       />,
     );
-    const show = screen.getByRole("checkbox", { name: "Show Model One in model pickers" });
+    const show = screen.getByRole("switch", { name: "Show Model One in model pickers" });
+    expect(screen.getByText("1 model · 0 shown")).toBeVisible();
     expect(show).not.toBeChecked();
     await user.click(show);
     expect(hiddenProps.onHiddenModelsChange).toHaveBeenCalledWith([]);

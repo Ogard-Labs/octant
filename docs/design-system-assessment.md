@@ -33,6 +33,15 @@ this Settings pass does not establish those results.
 
 ## Settings follow-up
 
+- Settings uses a centred 800px reading measure, quiet section captions, and
+  consistent section spacing. The saved sidebar width remains shared with the
+  main window until the narrow navigation drawer takes over.
+- Ready providers open onto model visibility controls. Search, shown counts,
+  and shared switches form a bounded list; routine connection diagnostics and
+  capabilities remain available through a separate disclosure. Setup guidance
+  and authentication problems remain visible.
+- The account menu aligns with the leading edge of the identity row. Settings
+  navigation distinguishes soft hover/focus from the selected destination.
 - Shared preference sections and inline provider editors now use the flat page
   ground, a common reading edge, and hairline rows. Compact Save buttons retain
   provider-specific accessible names. Theme previews and actual review dialogs
@@ -111,10 +120,10 @@ image-provider placeholders.
 
 ### Feature styles still duplicate shared control appearance
 
-The stylesheet baseline currently records 390 control-repaint exceptions
+The stylesheet baseline currently records 387 control-repaint exceptions
 across 22 files, 12 off-scale font-size exceptions, 12 literal-motion
 exceptions, nine `!important` exceptions, and 12 heavier-weight exceptions.
-These are tracked migration debt, not 435 independently verified visual bugs.
+These are tracked migration debt, not 432 independently verified visual bugs.
 The checks prevent growth but do not mean every existing surface conforms.
 
 Consolidate these when a surface is next changed: move appearance into the
