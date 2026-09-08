@@ -32,6 +32,20 @@ New-task defaults use visible models. If every model is hidden, show a model
 in Provider Settings before starting a new task. Visibility is a selection
 preference; it does not grant or change provider permissions.
 
+### App-managed browser tools
+
+The Browser view and an agent's browser access are separate capabilities.
+A tool-capable model can still lack an adapter for Octant's app-managed tools;
+check the provider's capability details before relying on agent browser control.
+Manual browser controls remain governed by the thread's normal policy.
+
+Supported app-tool adapters can request an isolated browser session under
+**Ask for approvals** without changing the task to Full access. The request
+names the origin. Cancelling the task revokes its browser grant, and Plan mode
+refuses browser effects. The native OpenCode CLI adapter currently reports
+app-managed tools as unsupported; its text and native-tool support do not imply
+an app-browser bridge.
+
 ### Discovery and auto-registration
 
 Octant scans a sanitized `PATH` plus approved install locations to find
