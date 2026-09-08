@@ -16,12 +16,14 @@ import {
   type WorkTurnStreamFrame,
 } from "@octant/contracts";
 import type { ProjectId } from "@octant/contracts/projects";
+import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
 import type { PickerGroup } from "@octant/domain";
 import type { ChatComposerThreadMentionChip } from "../chat/ChatComposer";
 import { composerPlaceholder, FILE_HINT, THREAD_HINT } from "../composer/composerPlaceholder";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
+import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import {
   WorkTurnClientFailure,
   type WorkTurnClient,
@@ -192,6 +194,7 @@ export interface WorkThreadWorkspaceProps {
   readonly threadClient: WorkThreadClient;
   readonly turnClient?: WorkTurnClient;
   readonly requestClient?: WorkRequestClient;
+  readonly browserAutomationClient?: BrowserAutomationClient;
   readonly mutationClient?: WorkMutationClient;
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   readonly threadMentionClient?: ThreadMentionClient;
@@ -316,6 +319,8 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const [thread, setThread] = useState<WorkThread | undefined>(props.initialThread);
   const [turns, setTurns] = useState<ReadonlyArray<WorkTurnState>>([]);
   const [pendingRequests, setPendingRequests] = useState<ReadonlyArray<WorkRequest>>([]);
+  const [browserApprovals, setBrowserApprovals] = useState<ReadonlyArray<BrowserToolApproval>>([]);
+  const [browserApprovalBusy, setBrowserApprovalBusy] = useState(false);
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
   const [creating, setCreating] = useState(false);
@@ -617,6 +622,63 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       refreshAbort.abort();
     };
   }, [projectId, props.changeRevision, props.requestClient, props.threadId]);
+
+  useEffect(() => {
+    const client = props.browserAutomationClient;
+    const listApprovals = client?.listApprovals;
+    if (listApprovals === undefined) {
+      setBrowserApprovals([]);
+      return;
+    }
+    const controller = new AbortController();
+    let inFlight = false;
+    const refresh = async () => {
+      if (!documentIsVisible() || inFlight) return;
+      inFlight = true;
+      try {
+        const approvals = await listApprovals(controller.signal);
+        if (!controller.signal.aborted) {
+          setBrowserApprovals(
+            approvals.filter((approval) => String(approval.threadId) === String(props.threadId)),
+          );
+        }
+      } catch {
+        if (!controller.signal.aborted) setBrowserApprovals([]);
+      } finally {
+        inFlight = false;
+      }
+    };
+    const stop = scheduleVisibleInterval(() => void refresh(), turnRunning ? 500 : 5_000, {
+      runImmediately: true,
+    });
+    return () => {
+      controller.abort();
+      stop();
+    };
+  }, [props.browserAutomationClient, props.threadId, turnRunning]);
+
+  const pendingBrowserApproval = browserApprovals[0];
+  const decideBrowserApproval = async (decision: "approved" | "denied") => {
+    if (
+      pendingBrowserApproval === undefined ||
+      props.browserAutomationClient?.decideApproval === undefined ||
+      browserApprovalBusy
+    ) {
+      return;
+    }
+    setBrowserApprovalBusy(true);
+    try {
+      await props.browserAutomationClient.decideApproval({
+        approvalId: pendingBrowserApproval.approvalId,
+        decision,
+      });
+      setBrowserApprovals((current) =>
+        current.filter((approval) => approval.approvalId !== pendingBrowserApproval.approvalId),
+      );
+    } finally {
+      setBrowserApprovalBusy(false);
+    }
+  };
 
   const changeProvider = useCallback(
     async (selection: {
@@ -1128,6 +1190,38 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         }
       />
 
+      {pendingBrowserApproval === undefined ? null : (
+        <section
+          aria-label="Browser origin approval"
+          className="approval-row approval-row--request thread-column"
+          role="group"
+        >
+          <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
+          <span className="approval-row__text">
+            Allow Browser to open {pendingBrowserApproval.origin}?
+            <span className="approval-row__detail">Shell and file access stay unchanged</span>
+          </span>
+          <div className="approval-row__actions">
+            <OctantButton
+              disabled={browserApprovalBusy}
+              onClick={() => void decideBrowserApproval("approved")}
+              size="sm"
+              type="button"
+            >
+              Approve once
+            </OctantButton>
+            <OctantButton
+              disabled={browserApprovalBusy}
+              onClick={() => void decideBrowserApproval("denied")}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Deny
+            </OctantButton>
+          </div>
+        </section>
+      )}
       <ThreadComposer
         presentation="follow-up"
         className="thread-composer thread-column"

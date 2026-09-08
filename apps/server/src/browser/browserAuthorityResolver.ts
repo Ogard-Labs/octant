@@ -4,6 +4,7 @@ import {
   ToolRootId,
   ToolWorktreeId,
   type BrowserThreadId,
+  type ChatThreadId,
   type CodeThreadId,
   type WorkThreadId,
   type ToolActionAuthority,
@@ -21,7 +22,7 @@ export interface BrowserAuthorityResolverOptions {
   readonly hostId: typeof ToolHostId.Type;
   readonly persistence: Pick<
     PersistenceService,
-    "readProject" | "readCodeThread" | "readProviderInstance"
+    "readProject" | "readCodeThread" | "readChatThread" | "readProviderInstance"
   >;
   readonly workThreads: Pick<WorkThreadProjection, "read">;
 }
@@ -33,7 +34,23 @@ export class ServerBrowserAuthorityResolver implements BrowserAuthorityResolver 
     this.#options = options;
   }
 
-  resolve(threadId: BrowserThreadId, mode: "work" | "code"): ToolActionAuthority | undefined {
+  resolve(
+    threadId: BrowserThreadId,
+    mode: ToolActionAuthority["mode"],
+  ): ToolActionAuthority | undefined {
+    if (mode === "chat") {
+      const thread = this.#options.persistence.readChatThread(threadId as unknown as ChatThreadId);
+      if (thread === undefined || thread.lifecycle !== "active") return undefined;
+      const provider = this.#options.persistence.readProviderInstance(thread.providerInstanceId);
+      if (provider?.enabled !== true) return undefined;
+      return {
+        hostId: this.#options.hostId,
+        mode,
+        ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+        providerInstanceId: thread.providerInstanceId,
+        extension: { kind: "core" },
+      };
+    }
     if (mode === "work") {
       const thread = this.#options.workThreads.read(threadId as unknown as WorkThreadId);
       if (thread === undefined || thread.lifecycle !== "active") return undefined;

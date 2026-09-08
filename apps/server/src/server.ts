@@ -79,6 +79,7 @@ import {
   decodeBrowserContextId,
   decodeBrowserThreadId,
 } from "@octant/contracts/browser-automation";
+import { sameToolActionAuthority } from "@octant/contracts";
 import { decodeCodeEvidenceReference } from "@octant/contracts/code-operations";
 import { ProductFeedbackService } from "./browser/productFeedbackService";
 import { createProductFeedbackTurnPort } from "./browser/productFeedbackTurnPort";
@@ -541,6 +542,8 @@ import {
   BrowserAutomationService,
   createBrowserToolCallAuthorityService,
 } from "./browser/browserAutomationService";
+import { createBrowserAppManagedTools } from "./browser/browserAppManagedTools";
+import { BrowserToolApprovalService } from "./browser/browserToolApprovalService";
 import { ExternalContentIngestionStore } from "./context/externalContentIngestionStore";
 import { readThreadExternalContentTaint } from "./context/externalContentTaintProjection";
 import { createNativeHarnessAuthority } from "./harness/nativeHarnessAuthority";
@@ -1509,6 +1512,7 @@ export function startOctantServer(
       uuid: randomUUID,
       now: Date.now,
     });
+    let browserToolApprovalService: BrowserToolApprovalService | undefined;
     const codeSessionAuthority = new CodeSessionAuthorityStore();
     let activeCodeService: CodeRouteService | undefined;
     let browserAutomationService: BrowserAutomationService | undefined;
@@ -1516,6 +1520,13 @@ export function startOctantServer(
       const service = browserAutomationService;
       if (service === undefined) {
         throw new Error("Browser automation service is unavailable during server composition.");
+      }
+      return service;
+    };
+    const requireBrowserToolApprovalService = (): BrowserToolApprovalService => {
+      const service = browserToolApprovalService;
+      if (service === undefined) {
+        throw new Error("Browser approval service is unavailable during server composition.");
       }
       return service;
     };
@@ -1528,6 +1539,7 @@ export function startOctantServer(
         revokeShellWindow?.(windowId);
         codeApprovalStore.revokeWindow(windowId);
         extensionToolApprovalService.revokeWindow(windowId);
+        browserToolApprovalService?.revokeWindow(windowId);
         codeSessionAuthority.revokeWindow(windowId);
         activeCodeService?.revokeWindow?.(windowId);
         void browserAutomationService?.revokeWindow(windowId);
@@ -3182,6 +3194,14 @@ export function startOctantServer(
       persistence,
       workThreads: workThreadProjection,
     });
+    browserToolApprovalService = new BrowserToolApprovalService({
+      uuid: randomUUID,
+      now: Date.now,
+      authorityIsCurrent: (threadId, authority) => {
+        const current = browserAuthority.resolve(decodeBrowserThreadId(threadId), authority.mode);
+        return current !== undefined && sameToolActionAuthority(current, authority);
+      },
+    });
     const headlessBrowserRuntime = createPlaywrightBrowserRuntime({
       receiptDirectory: join(providerDataDirectory, "browser", "runtime-receipts"),
     });
@@ -4202,6 +4222,22 @@ export function startOctantServer(
         taintAppManagedToolResults({
           tools: combineAppManagedToolSets(
             nativeHarnessComposition?.forChat({ thread, windowId }),
+            createBrowserAppManagedTools({
+              windowId,
+              threadId: thread.id as never,
+              mode: "chat",
+              resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
+              browser: {
+                inspectThread: (ownerWindowId, threadId) =>
+                  requireBrowserAutomationService().inspectThread(ownerWindowId, threadId),
+                create: (input) => requireBrowserAutomationService().create(input),
+                act: (input) => requireBrowserAutomationService().act(input),
+                releaseThread: (ownerWindowId, threadId) =>
+                  requireBrowserAutomationService().releaseThread(ownerWindowId, threadId),
+              },
+              approvals: requireBrowserToolApprovalService(),
+              uuid: randomUUID,
+            }),
             zenAssistantTools?.forThread(windowId, thread),
             threadDialogueService?.forThread({
               windowId,
@@ -4528,7 +4564,35 @@ export function startOctantServer(
     const workTurnService = new WorkTurnService({
       onTurnRequested: (threadId) => workThreadService.noteTurnRequested(threadId),
       persistence,
-      resolveAppManagedTools: (input) => nativeHarnessComposition?.forWork(input),
+      resolveAppManagedTools: (input) => {
+        const observed = providerRuntimeRegistry.observedState(input.thread.providerInstanceId);
+        const browserSupported =
+          observed?.capabilities.appManagedTools === "supported" ||
+          observed?.verifiedToolModelIds?.some(
+            (candidate) => String(candidate) === String(input.thread.modelId),
+          ) === true;
+        const native = nativeHarnessComposition?.forWork(input);
+        const browser = !browserSupported
+          ? undefined
+          : createBrowserAppManagedTools({
+              windowId: input.windowId,
+              threadId: input.thread.id as never,
+              mode: "work",
+              resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
+              browser: {
+                inspectThread: (ownerWindowId, threadId) =>
+                  requireBrowserAutomationService().inspectThread(ownerWindowId, threadId),
+                create: (command) => requireBrowserAutomationService().create(command),
+                act: (command) => requireBrowserAutomationService().act(command),
+                releaseThread: (ownerWindowId, threadId) =>
+                  requireBrowserAutomationService().releaseThread(ownerWindowId, threadId),
+              },
+              approvals: requireBrowserToolApprovalService(),
+              uuid: randomUUID,
+            });
+        if (native === undefined && browser === undefined) return undefined;
+        return combineAppManagedToolSets(native, browser);
+      },
       nativeHarness: nativeHarnessHooks,
       turnFileObserver: new WorkTurnFileObserver(),
       threads: workThreadService,
@@ -5108,6 +5172,7 @@ export function startOctantServer(
     const browserAutomationRoutes = createBrowserAutomationRouteHandler({
       service: browserAutomationService,
       authority: browserAuthority,
+      approvals: requireBrowserToolApprovalService(),
       windowAuthorityStore,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
@@ -7085,6 +7150,7 @@ export function startOctantServer(
           } catch (error) {
             shutdownFailure ??= error;
           }
+          browserToolApprovalService?.close();
           try {
             await computerUseRuntime.close();
           } catch (error) {

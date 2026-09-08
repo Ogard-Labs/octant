@@ -102,6 +102,60 @@ describe("browser automation routes", () => {
     expect(await response?.json()).toEqual({ threadId, authority });
   });
 
+  it("lists and decides a browser origin approval under the authenticated window", async () => {
+    const approvals = {
+      list: vi.fn(
+        () =>
+          [
+            {
+              approvalId: "90000000-0000-4000-8000-000000000001",
+              threadId,
+              mode: "chat",
+              origin: "https://example.com",
+              requestedAt: "2026-09-09T10:00:00.000Z",
+            },
+          ] as never,
+      ),
+      decide: vi.fn(() => true),
+    };
+    const approvalHandler = createBrowserAutomationRouteHandler({
+      service: service as any,
+      authority: { resolve: () => authority },
+      approvals,
+      windowAuthorityStore: store,
+      maxRequestBodySize: 64_000,
+    });
+    const headers = {
+      "content-type": "application/json",
+      "x-octant-window-capability": capability,
+    };
+    const listed = await approvalHandler(
+      new Request("http://127.0.0.1/api/browser/approvals", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ kind: "list" }),
+      }),
+    );
+    expect(listed?.status).toBe(200);
+    expect(await listed?.json()).toHaveLength(1);
+    const decided = await approvalHandler(
+      new Request("http://127.0.0.1/api/browser/approvals", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          kind: "decide",
+          approvalId: "90000000-0000-4000-8000-000000000001",
+          decision: "approved",
+        }),
+      }),
+    );
+    expect(decided?.status).toBe(200);
+    expect(approvals.decide).toHaveBeenCalledWith(windowId, {
+      approvalId: "90000000-0000-4000-8000-000000000001",
+      decision: "approved",
+    });
+  });
+
   it("dispatches a strict create command under the authenticated window", async () => {
     const response = await handler(
       new Request("http://127.0.0.1/api/browser/contexts", {

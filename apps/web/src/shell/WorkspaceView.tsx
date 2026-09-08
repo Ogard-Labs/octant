@@ -1114,6 +1114,9 @@ function renderNonCodeTab(
         {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
         {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+        {...(props.browserAutomationClient === undefined
+          ? {}
+          : { browserAutomationClient: props.browserAutomationClient })}
         {...(openProviderSettings === undefined ? {} : { onOpenSettings: openProviderSettings })}
         active={paneIsActive(props, paneId)}
         {...(props.environmentDockOpen === undefined
@@ -1220,6 +1223,9 @@ function renderNonCodeTab(
               threadId={tab.threadId as never}
             >
               <WorkThreadWorkspace
+                {...(props.browserAutomationClient === undefined
+                  ? {}
+                  : { browserAutomationClient: props.browserAutomationClient })}
                 {...(props.workChangeRevision === undefined
                   ? {}
                   : { changeRevision: props.workChangeRevision })}
@@ -1831,6 +1837,7 @@ function ChatThreadWorkspace(props: {
   readonly chatReadCursorStore: ChatReadCursorStore;
   readonly active?: boolean;
   readonly extensionClient?: ExtensionClient;
+  readonly browserAutomationClient?: BrowserAutomationClient;
   readonly onOpenSettings?: () => void;
   readonly onClearCanvasSelections: () => void;
   readonly onRemoveCanvasSelection: (selectionId: CanvasContextSelectionId) => void;
@@ -1903,6 +1910,9 @@ function ChatThreadWorkspace(props: {
         onRemoveCanvasSelection={props.onRemoveCanvasSelection}
         pendingCanvasSelections={props.pendingCanvasSelections}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+        {...(props.browserAutomationClient === undefined
+          ? {}
+          : { browserAutomationClient: props.browserAutomationClient })}
         {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
         {...(props.projectWindowCapability === undefined
           ? {}

@@ -44,8 +44,12 @@ export function authorizeToolAction(
   if (requested.projectId !== granted.projectId) {
     return { kind: "unauthorized", reason: "project-mismatch" };
   }
-  if (requested.rootId !== granted.rootId) return { kind: "unauthorized", reason: "root-mismatch" };
-  if (requested.worktreeId !== granted.worktreeId) {
+  const requestedRootId = "rootId" in requested ? requested.rootId : undefined;
+  const grantedRootId = "rootId" in granted ? granted.rootId : undefined;
+  if (requestedRootId !== grantedRootId) return { kind: "unauthorized", reason: "root-mismatch" };
+  const requestedWorktreeId = "worktreeId" in requested ? requested.worktreeId : undefined;
+  const grantedWorktreeId = "worktreeId" in granted ? granted.worktreeId : undefined;
+  if (requestedWorktreeId !== grantedWorktreeId) {
     return { kind: "unauthorized", reason: "worktree-mismatch" };
   }
   if (requested.providerInstanceId !== granted.providerInstanceId) {

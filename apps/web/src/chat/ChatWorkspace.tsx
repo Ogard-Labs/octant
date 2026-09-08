@@ -45,8 +45,10 @@ import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ThreadWorkShelf } from "./ThreadWorkShelf";
 import type { ChatController } from "./useChatController";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
+import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { ExtensionProviderFamily } from "@octant/contracts/extensions";
 import type { ExtensionToolApproval } from "@octant/contracts/extension-rpc";
+import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
 import { useExtensionDraftSelections } from "./useExtensionDraftSelections";
 import { LinkedThreadParallelReviewFlow } from "../linkedThread/LinkedThreadParallelReviewFlow";
 import { useLinkedThreadParallelReview } from "../linkedThread/useLinkedThreadParallelReview";
@@ -70,6 +72,7 @@ import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentV
 export interface ChatWorkspaceProps {
   readonly controller: ChatController;
   readonly extensionClient?: ExtensionClient;
+  readonly browserAutomationClient?: BrowserAutomationClient;
   readonly narrow?: boolean;
   readonly onAttachCanvasContext?: (selection: CanvasContextSelection) => void;
   readonly onClearCanvasSelections?: () => void;
@@ -198,6 +201,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         }).length;
   const [canvasPanelOpen, setCanvasPanelOpen] = useState(false);
   const [toolApprovals, setToolApprovals] = useState<ReadonlyArray<ExtensionToolApproval>>([]);
+  const [browserApprovals, setBrowserApprovals] = useState<ReadonlyArray<BrowserToolApproval>>([]);
   const [toolApprovalBusy, setToolApprovalBusy] = useState(false);
   // One branch dispatch at a time: a second click while the server is still
   // creating the first branch would mint a second thread, not retry the first.
@@ -397,6 +401,41 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       stop();
     };
   }, [activeThreadId, props.extensionClient, turnActive]);
+  useEffect(() => {
+    const client = props.browserAutomationClient;
+    const listApprovals = client?.listApprovals;
+    if (listApprovals === undefined || activeThreadId === undefined) {
+      setBrowserApprovals([]);
+      return;
+    }
+    const controller = new AbortController();
+    let inFlight = false;
+    const refresh = async () => {
+      if (!documentIsVisible() || inFlight) return;
+      inFlight = true;
+      try {
+        const approvals = await listApprovals(controller.signal);
+        if (!controller.signal.aborted) {
+          setBrowserApprovals(
+            approvals.filter((approval) => String(approval.threadId) === String(activeThreadId)),
+          );
+        }
+      } catch {
+        if (!controller.signal.aborted) setBrowserApprovals([]);
+      } finally {
+        inFlight = false;
+      }
+    };
+    const stop = scheduleVisibleInterval(
+      () => void refresh(),
+      turnActive ? ACTIVE_TOOL_APPROVAL_POLL_MS : IDLE_TOOL_APPROVAL_POLL_MS,
+      { runImmediately: true },
+    );
+    return () => {
+      controller.abort();
+      stop();
+    };
+  }, [activeThreadId, props.browserAutomationClient, turnActive]);
   const threadMentions = useThreadMentions({
     ...(props.threadMentionClient === undefined ? {} : { client: props.threadMentionClient }),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
@@ -449,6 +488,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const pendingExtensionSelections = props.pendingExtensionSelections ?? extensionDraft.receipts;
   const removeExtensionSelection = props.onRemoveExtensionSelection ?? extensionDraft.remove;
   const pendingToolApproval = toolApprovals[0];
+  const pendingBrowserApproval = browserApprovals[0];
 
   async function decideToolApproval(decision: "approved" | "denied") {
     if (
@@ -466,6 +506,28 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       });
       setToolApprovals((current) =>
         current.filter((approval) => approval.approvalId !== pendingToolApproval.approvalId),
+      );
+    } finally {
+      setToolApprovalBusy(false);
+    }
+  }
+
+  async function decideBrowserApproval(decision: "approved" | "denied") {
+    if (
+      pendingBrowserApproval === undefined ||
+      props.browserAutomationClient?.decideApproval === undefined ||
+      toolApprovalBusy
+    ) {
+      return;
+    }
+    setToolApprovalBusy(true);
+    try {
+      await props.browserAutomationClient.decideApproval({
+        approvalId: pendingBrowserApproval.approvalId,
+        decision,
+      });
+      setBrowserApprovals((current) =>
+        current.filter((approval) => approval.approvalId !== pendingBrowserApproval.approvalId),
       );
     } finally {
       setToolApprovalBusy(false);
@@ -1103,6 +1165,38 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           <code className="approval-row__code">
             {pendingToolApproval.inputJson === "" ? "(empty input)" : pendingToolApproval.inputJson}
           </code>
+        </section>
+      )}
+      {pendingBrowserApproval === undefined ? null : (
+        <section
+          aria-label="Browser origin approval"
+          className="approval-row approval-row--request chat-workspace__tool-approval thread-column"
+          role="group"
+        >
+          <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
+          <span className="approval-row__text">
+            Allow Browser to open {pendingBrowserApproval.origin}?
+            <span className="approval-row__detail">Shell and file access stay unchanged</span>
+          </span>
+          <div className="approval-row__actions">
+            <OctantButton
+              disabled={toolApprovalBusy}
+              onClick={() => void decideBrowserApproval("approved")}
+              size="sm"
+              type="button"
+            >
+              Approve once
+            </OctantButton>
+            <OctantButton
+              disabled={toolApprovalBusy}
+              onClick={() => void decideBrowserApproval("denied")}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Deny
+            </OctantButton>
+          </div>
         </section>
       )}
       <ChatComposer

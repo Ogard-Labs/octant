@@ -256,7 +256,7 @@ export const CLOSED_TOOL_CATALOG: ReadonlyArray<ClosedToolCatalogEntry> = [
     capabilityId: "browser-automation",
     version: 1,
     owner: "core",
-    modes: ["work", "code"],
+    modes: ["chat", "work", "code"],
     requiredCapabilityClass: "browser",
     approvalClass: "network-access",
     irreversibleUnderTaint: false,

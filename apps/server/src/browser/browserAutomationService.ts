@@ -34,7 +34,10 @@ import {
 } from "./browserRuntimePort";
 
 export interface BrowserAuthorityResolver {
-  resolve(threadId: BrowserThreadId, mode: "work" | "code"): ToolActionAuthority | undefined;
+  resolve(
+    threadId: BrowserThreadId,
+    mode: ToolActionAuthority["mode"],
+  ): ToolActionAuthority | undefined;
 }
 
 export interface BrowserAutomationServiceOptions {
@@ -839,8 +842,8 @@ export class BrowserAutomationService {
   }
 }
 
-function modeOf(authority: ToolActionAuthority): "work" | "code" {
-  return authority.mode === "code" ? "code" : "work";
+function modeOf(authority: ToolActionAuthority): ToolActionAuthority["mode"] {
+  return authority.mode;
 }
 
 /**
@@ -878,7 +881,6 @@ export function createBrowserToolCallAuthorityService(
 ): ToolCallAuthorityService {
   return new ToolCallAuthorityService({
     resolveGrantedAuthority: (threadId, mode) => {
-      if (mode !== "work" && mode !== "code") return undefined;
       return authority.resolve(threadId as BrowserThreadId, mode);
     },
     resolveLiveFacts: ({ threadId, request }) => {
@@ -914,7 +916,10 @@ function mapToolCallDenial(reason: string, request: ToolActionRequest): BrowserA
     return { category: "invalid", message: "Browser capability request is invalid." };
   }
   if (reason === "mode-capability-denied") {
-    return { category: "policy-denied", message: "Browser automation requires Work or Code." };
+    return {
+      category: "policy-denied",
+      message: "Browser automation is unavailable in this mode.",
+    };
   }
   if (
     reason === "granted-authority-missing" ||

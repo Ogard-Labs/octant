@@ -46,12 +46,45 @@ const provider = {
 };
 
 describe("ServerBrowserAuthorityResolver", () => {
+  it("derives unfiled Chat authority without inventing a Project or root", () => {
+    const resolver = new ServerBrowserAuthorityResolver({
+      hostId,
+      persistence: {
+        readProject: () => undefined,
+        readCodeThread: () => undefined,
+        readChatThread: () =>
+          ({
+            id: threadId,
+            title: "Chat",
+            lifecycle: "active",
+            providerInstanceId: providerId,
+            modelId: "model",
+            researchEnabled: false,
+            researchRouting: "none",
+            personalityInstructions: "",
+            version: 1,
+            createdAt: "2026-07-27T20:00:00.000Z",
+            updatedAt: "2026-07-27T20:00:00.000Z",
+          }) as any,
+        readProviderInstance: () => provider as any,
+      },
+      workThreads: { read: () => undefined },
+    });
+    expect(resolver.resolve(threadId as any, "chat")).toEqual({
+      hostId,
+      mode: "chat",
+      providerInstanceId: providerId,
+      extension: { kind: "core" },
+    });
+  });
+
   it("derives Work authority from the current thread, Project binding, and provider", () => {
     const resolver = new ServerBrowserAuthorityResolver({
       hostId,
       persistence: {
         readProject: () => ({ ...baseProject, type: "work" }) as any,
         readCodeThread: () => undefined,
+        readChatThread: () => undefined,
         readProviderInstance: () => provider as any,
       },
       workThreads: {
@@ -98,6 +131,7 @@ describe("ServerBrowserAuthorityResolver", () => {
             providerInstanceId: providerId,
             lifecycle: "active",
           }) as any,
+        readChatThread: () => undefined,
         readProviderInstance: () => provider as any,
       },
       workThreads: { read: () => undefined },
@@ -118,6 +152,7 @@ describe("ServerBrowserAuthorityResolver", () => {
       persistence: {
         readProject: () => ({ ...baseProject, type: "work" }) as any,
         readCodeThread: () => undefined,
+        readChatThread: () => undefined,
         readProviderInstance: () => ({ ...provider, enabled: false }) as any,
       },
       workThreads: {

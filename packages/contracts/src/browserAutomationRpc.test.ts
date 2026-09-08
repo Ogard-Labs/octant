@@ -5,6 +5,9 @@ import {
   decodeBrowserContextInspectCommand,
   decodeBrowserContextStopCommand,
   decodeBrowserThreadScope,
+  decodeBrowserThreadScopeRequest,
+  decodeBrowserToolApproval,
+  decodeBrowserToolApprovalDecision,
 } from "./browserAutomationRpc";
 
 const authority = {
@@ -24,6 +27,42 @@ describe("browser automation RPC", () => {
         authority,
       }).authority,
     ).toEqual(authority);
+  });
+
+  it("decodes a Chat scope and one-shot origin approval without filesystem scope", () => {
+    const chat = {
+      hostId: authority.hostId,
+      mode: "chat",
+      providerInstanceId: authority.providerInstanceId,
+      extension: { kind: "core" },
+    } as const;
+    expect(
+      decodeBrowserThreadScopeRequest({
+        threadId: "50000000-0000-4000-8000-000000000001",
+        mode: "chat",
+      }).mode,
+    ).toBe("chat");
+    expect(
+      decodeBrowserToolApproval({
+        approvalId: "80000000-0000-4000-8000-000000000001",
+        threadId: "50000000-0000-4000-8000-000000000001",
+        mode: "chat",
+        origin: "https://example.com",
+        requestedAt: "2026-09-09T10:00:00.000Z",
+      }),
+    ).toMatchObject({ mode: "chat", origin: "https://example.com" });
+    expect(
+      decodeBrowserToolApprovalDecision({
+        approvalId: "80000000-0000-4000-8000-000000000001",
+        decision: "denied",
+      }).decision,
+    ).toBe("denied");
+    expect(
+      decodeBrowserThreadScope({
+        threadId: "50000000-0000-4000-8000-000000000001",
+        authority: chat,
+      }).authority,
+    ).toEqual(chat);
   });
 
   it("decodes a normalized create command", () => {

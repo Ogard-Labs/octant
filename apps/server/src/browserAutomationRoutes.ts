@@ -8,6 +8,9 @@ import {
   decodeBrowserThreadScope,
   decodeBrowserThreadContextCommand,
   decodeBrowserThreadScopeRequest,
+  decodeBrowserToolApprovalDecision,
+  type BrowserToolApproval,
+  type BrowserToolApprovalDecision,
 } from "@octant/contracts/browser-automation-rpc";
 import {
   decodeBrowserAutomationFailure,
@@ -33,6 +36,15 @@ export interface BrowserAutomationRouteDependencies {
   > &
     Partial<Pick<BrowserAutomationService, "peekThread">>;
   readonly authority: BrowserAuthorityResolver;
+  readonly approvals?: {
+    list(
+      windowId: ReturnType<typeof authenticateRouteWindowId>,
+    ): ReadonlyArray<BrowserToolApproval>;
+    decide(
+      windowId: ReturnType<typeof authenticateRouteWindowId>,
+      decision: BrowserToolApprovalDecision,
+    ): boolean;
+  };
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxRequestBodySize: number;
 }
@@ -88,6 +100,33 @@ export function createBrowserAutomationRouteHandler(
     }
 
     try {
+      if (url.pathname === "/api/browser/approvals") {
+        if (dependencies.approvals === undefined) {
+          return failure(
+            { category: "unavailable", message: "Browser approval is unavailable." },
+            503,
+            origin,
+          );
+        }
+        if (
+          typeof decoded.value === "object" &&
+          decoded.value !== null &&
+          (decoded.value as { kind?: unknown }).kind === "list"
+        ) {
+          return success(dependencies.approvals.list(windowId), origin);
+        }
+        if ((decoded.value as { kind?: unknown }).kind !== "decide") {
+          return failure(
+            { category: "invalid", message: "Browser approval decision is invalid." },
+            400,
+            origin,
+          );
+        }
+        const { kind: _kind, ...rawDecision } = decoded.value as Record<string, unknown>;
+        const decision = decodeBrowserToolApprovalDecision(rawDecision);
+        const accepted = dependencies.approvals.decide(windowId, decision);
+        return success({ accepted }, origin, accepted ? 200 : 409);
+      }
       if (url.pathname === "/api/browser/scope") {
         const input = decodeBrowserThreadScopeRequest(decoded.value);
         const authority = dependencies.authority.resolve(input.threadId, input.mode);
@@ -199,9 +238,9 @@ export function createBrowserAutomationRouteHandler(
   };
 }
 
-function success(value: unknown, origin: string | null): Response {
+function success(value: unknown, origin: string | null, status = 200): Response {
   return new Response(JSON.stringify(value), {
-    status: 200,
+    status,
     headers: { "content-type": "application/json", ...corsHeaders(origin) },
   });
 }

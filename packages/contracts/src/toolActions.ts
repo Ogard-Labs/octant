@@ -40,27 +40,58 @@ export type ToolApprovalId = typeof ToolApprovalId.Type;
 export const ToolEvidenceId = brandedUuid("ToolEvidenceId");
 export type ToolEvidenceId = typeof ToolEvidenceId.Type;
 
-export const ToolActionAuthority = Schema.Struct({
+const ToolActionExtension = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("core") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("trusted-extension"),
+    extensionId: ToolExtensionId,
+  }).annotations(strict),
+);
+
+const toolActionAuthorityFields = {
   hostId: ToolHostId,
-  mode: Schema.Literal("chat", "work", "code"),
-  projectId: ProjectId,
-  rootId: Schema.optional(ToolRootId),
-  worktreeId: Schema.optional(ToolWorktreeId),
   providerInstanceId: ProviderInstanceId,
-  extension: Schema.Union(
-    Schema.Struct({ kind: Schema.Literal("core") }).annotations(strict),
-    Schema.Struct({
-      kind: Schema.Literal("trusted-extension"),
-      extensionId: ToolExtensionId,
-    }).annotations(strict),
-  ),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (authority) => authority.worktreeId === undefined || authority.rootId !== undefined,
+  extension: ToolActionExtension,
+};
+
+/**
+ * Chat has a real thread and provider authority but no implicit filesystem
+ * scope. Work and Code retain their required Project identity; Code may also
+ * carry its current root and checkout binding.
+ */
+export const ToolActionAuthority = Schema.Union(
+  Schema.Struct({
+    ...toolActionAuthorityFields,
+    mode: Schema.Literal("chat"),
+    projectId: Schema.optional(ProjectId),
+  }).annotations(strict),
+  Schema.Struct({
+    ...toolActionAuthorityFields,
+    mode: Schema.Literal("work"),
+    projectId: ProjectId,
+    rootId: Schema.optional(ToolRootId),
+    worktreeId: Schema.optional(ToolWorktreeId),
+  })
+    .annotations(strict)
+    .pipe(
+      Schema.filter(
+        (authority) => authority.worktreeId === undefined || authority.rootId !== undefined,
+      ),
     ),
-  );
+  Schema.Struct({
+    ...toolActionAuthorityFields,
+    mode: Schema.Literal("code"),
+    projectId: ProjectId,
+    rootId: Schema.optional(ToolRootId),
+    worktreeId: Schema.optional(ToolWorktreeId),
+  })
+    .annotations(strict)
+    .pipe(
+      Schema.filter(
+        (authority) => authority.worktreeId === undefined || authority.rootId !== undefined,
+      ),
+    ),
+);
 export type ToolActionAuthority = typeof ToolActionAuthority.Type;
 
 export const ToolActionCapability = Schema.Struct({
@@ -121,8 +152,10 @@ export function sameToolActionAuthority(
     left.hostId === right.hostId &&
     left.mode === right.mode &&
     left.projectId === right.projectId &&
-    left.rootId === right.rootId &&
-    left.worktreeId === right.worktreeId &&
+    ("rootId" in left ? left.rootId : undefined) ===
+      ("rootId" in right ? right.rootId : undefined) &&
+    ("worktreeId" in left ? left.worktreeId : undefined) ===
+      ("worktreeId" in right ? right.worktreeId : undefined) &&
     left.providerInstanceId === right.providerInstanceId &&
     left.extension.kind === right.extension.kind &&
     (left.extension.kind === "core" ||

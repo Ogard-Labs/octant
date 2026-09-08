@@ -53,6 +53,34 @@ describe("ToolActionRequest", () => {
       }),
     ).toThrow();
   });
+
+  it("allows unfiled Chat authority while rejecting filesystem fields", () => {
+    const chatAuthority = {
+      hostId: ids.host,
+      mode: "chat",
+      providerInstanceId: authority.providerInstanceId,
+      extension: { kind: "core" },
+    } as const;
+    expect(
+      decodeToolActionRequest({
+        ...request,
+        authority: chatAuthority,
+        approval: { kind: "not-required" },
+      }),
+    ).toMatchObject({ authority: chatAuthority });
+    expect(() =>
+      decodeToolActionRequest({
+        ...request,
+        authority: { ...chatAuthority, rootId: ids.root },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeToolActionRequest({
+        ...request,
+        authority: { ...authority, mode: "work", projectId: undefined },
+      }),
+    ).toThrow();
+  });
 });
 
 describe("Tool action outcomes", () => {
