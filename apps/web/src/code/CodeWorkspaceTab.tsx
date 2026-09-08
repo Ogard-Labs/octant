@@ -61,8 +61,11 @@ export default function CodeWorkspaceTab(props: {
   const preloadDeferredAdapter = () => {
     if (deferredAdapter !== undefined) void deferredAdapter.load().catch(() => undefined);
   };
-  const approvals = nativeCodeWorkspaceApprovals(props.hostBridge, props.controller.activeView);
   const view = props.controller.activeView;
+  const approvals = useMemo(
+    () => nativeCodeWorkspaceApprovals(props.hostBridge, view),
+    [props.hostBridge, view?.thread.id, view?.thread.projectId],
+  );
   const definitions = useCodeTestDefinitions({
     client: props.controller.client,
     enabled: props.tab.kind === "code-test" && view?.thread.id === props.tab.threadId,

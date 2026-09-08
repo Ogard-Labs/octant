@@ -1,5 +1,5 @@
 import type { CodeThreadView } from "@octant/contracts/code";
-import type { OctantHostBridge } from "../shell/hostBridge";
+import type { CodeOperationApprovalAnchor, OctantHostBridge } from "../shell/hostBridge";
 import type { CodeWorkspaceApprovals } from "./CodeWorkspace";
 
 export function nativeCodeWorkspaceApprovals(
@@ -7,7 +7,7 @@ export function nativeCodeWorkspaceApprovals(
   view: CodeThreadView | undefined,
 ): CodeWorkspaceApprovals | undefined {
   const request = hostBridge?.requestCodeOperationApproval;
-  if (request === undefined || view === undefined) return undefined;
+  if (hostBridge === undefined || request === undefined || view === undefined) return undefined;
   const approve = async (command: Parameters<NonNullable<CodeWorkspaceApprovals["git"]>>[0]) =>
     await request({ effect: { kind: "operation", command } as never });
   const request0 = async (
@@ -25,5 +25,18 @@ export function nativeCodeWorkspaceApprovals(
     // An Apple action is confirmed by the action it would run, not by the pane
     // that asked, so the host prompt names the same effect it will authorize.
     apple: async (request) => await request0(request),
+    ...(hostBridge.updateCodeOperationApprovalAnchor === undefined
+      ? {}
+      : {
+          updateAnchor: async (bounds: CodeOperationApprovalAnchor["bounds"]) =>
+            await hostBridge.updateCodeOperationApprovalAnchor?.({
+              projectId: String(view.thread.projectId),
+              threadId: String(view.thread.id),
+              bounds,
+            }),
+        }),
+    ...(hostBridge.cancelCodeOperationApproval === undefined
+      ? {}
+      : { cancel: hostBridge.cancelCodeOperationApproval }),
   };
 }

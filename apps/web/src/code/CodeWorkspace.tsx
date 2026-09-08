@@ -89,6 +89,14 @@ export interface CodeWorkspaceApprovals {
    * refusal rather than sending an action the host would deny.
    */
   readonly apple?: (request: AppleActionRequest) => Promise<string | undefined>;
+  /** Keeps the desktop-owned approval view anchored to the active composer. */
+  readonly updateAnchor?: (bounds: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  }) => Promise<void>;
+  readonly cancel?: () => Promise<void>;
 }
 
 export interface CodeWorkspaceProps {
@@ -189,6 +197,12 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.approvals?.access === undefined
           ? {}
           : { requestFullAccessApproval: props.approvals.access })}
+        {...(props.approvals?.updateAnchor === undefined
+          ? {}
+          : { updateApprovalAnchor: props.approvals.updateAnchor })}
+        {...(props.approvals?.cancel === undefined
+          ? {}
+          : { cancelApproval: props.approvals.cancel })}
         {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
         {...(props.windowCapability === undefined
           ? {}

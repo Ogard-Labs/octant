@@ -33,6 +33,8 @@ export const IPC_CHANNELS = {
   openSettings: "octant:menu:open-settings",
   previewHandoff: "octant:preview:handoff",
   requestCodeOperationApproval: "octant:code:request-operation-approval",
+  updateCodeOperationApprovalAnchor: "octant:code:update-operation-approval-anchor",
+  cancelCodeOperationApproval: "octant:code:cancel-operation-approval",
   startNewAgent: "octant:menu:start-new-agent",
   providerCredentialStatus: "octant:provider-credential:status",
   resetBounds: "octant:window:reset-bounds",
@@ -68,6 +70,17 @@ export interface HostCapabilities {
   readonly sidebarVibrancySupported: boolean;
   readonly liveBrowserSupported: boolean;
   readonly liveSimulatorFrameSupported: boolean;
+}
+
+export interface CodeOperationApprovalAnchor {
+  readonly projectId: string;
+  readonly threadId: string;
+  readonly bounds: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  };
 }
 
 export interface AppUpdateRelease {
@@ -350,6 +363,10 @@ export interface OctantHostBridge {
   readonly requestCodeOperationApproval: (
     request: CodeOperationApprovalRequest,
   ) => Promise<CodeApprovalId | undefined>;
+  readonly updateCodeOperationApprovalAnchor: (
+    anchor: CodeOperationApprovalAnchor,
+  ) => Promise<void>;
+  readonly cancelCodeOperationApproval: () => Promise<void>;
   readonly projectWindowCapability: string;
   readonly subscribeProjectWindowCapability: (listener: (capability: string) => void) => () => void;
   readonly windowId?: string;
@@ -586,6 +603,11 @@ export function createHostBridge(
       }
       return value as CodeApprovalId;
     },
+    updateCodeOperationApprovalAnchor: (anchor: CodeOperationApprovalAnchor) => {
+      validateCodeOperationApprovalAnchor(anchor);
+      return invoke(IPC_CHANNELS.updateCodeOperationApprovalAnchor, anchor);
+    },
+    cancelCodeOperationApproval: () => invoke(IPC_CHANNELS.cancelCodeOperationApproval),
     projectWindowCapability,
     subscribeProjectWindowCapability: (listener: (capability: string) => void) => {
       let active = true;
@@ -1272,6 +1294,36 @@ function validateBrowserSurfaceRequest(value: BrowserSurfaceRequest): void {
     bounds.height < 1
   ) {
     throw new TypeError("Invalid Browser surface bounds.");
+  }
+}
+
+function validateCodeOperationApprovalAnchor(value: CodeOperationApprovalAnchor): void {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).sort().join("\0") !== ["bounds", "projectId", "threadId"].join("\0") ||
+    typeof value.projectId !== "string" ||
+    !PROVIDER_INSTANCE_ID_PATTERN.test(value.projectId) ||
+    typeof value.threadId !== "string" ||
+    !PROVIDER_INSTANCE_ID_PATTERN.test(value.threadId) ||
+    !isRecord(value.bounds) ||
+    Object.keys(value.bounds).sort().join("\0") !== ["height", "width", "x", "y"].join("\0") ||
+    ![value.bounds.x, value.bounds.y, value.bounds.width, value.bounds.height].every(
+      (entry): entry is number => typeof entry === "number" && Number.isFinite(entry),
+    )
+  ) {
+    throw new TypeError("Invalid Code operation approval anchor.");
+  }
+  if (
+    value.bounds.x < 0 ||
+    value.bounds.y < 0 ||
+    value.bounds.width < 1 ||
+    value.bounds.height < 1 ||
+    value.bounds.x > 32_768 ||
+    value.bounds.y > 32_768 ||
+    value.bounds.width > 32_768 ||
+    value.bounds.height > 32_768
+  ) {
+    throw new TypeError("Invalid Code operation approval anchor.");
   }
 }
 

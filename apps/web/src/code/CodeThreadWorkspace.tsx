@@ -68,6 +68,7 @@ import { TurnHeader, TurnTime, type TurnHeaderOutcome } from "../transcript/Turn
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
+import { boundsInsideViewport } from "../browser/useNativeBrowserSurface";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ScaffoldPicker } from "../scaffolds/ScaffoldPicker";
 import { useScaffoldCatalog } from "../scaffolds/useScaffoldCatalog";
@@ -156,6 +157,14 @@ export interface CodeThreadWorkspaceProps {
     readonly expectedVersion: number;
     readonly permissionPersistence: "current-session" | "project-default";
   }) => Promise<CodeApprovalId | undefined>;
+  /** Positions the desktop-owned approval view beside this thread's composer. */
+  readonly updateApprovalAnchor?: (bounds: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  }) => Promise<void>;
+  readonly cancelApproval?: () => Promise<void>;
   /**
    * Runs the checkpoint restore. Absent on a host that serves no operation
    * route, which keeps the control off the transcript rather than offering an
@@ -221,6 +230,36 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const [accessMessage, setAccessMessage] = useState<string>();
   const [turnAccessOverride, setTurnAccessOverride] = useState<ProviderExecutionPolicy>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const update = props.updateApprovalAnchor;
+    const activeView = view;
+    if (update === undefined || activeView === undefined) return;
+    let disposed = false;
+    const sync = () => {
+      if (disposed) return;
+      const composer = textareaRef.current?.closest<HTMLElement>(".thread-composer");
+      if (composer === undefined || composer === null) return;
+      const rect = composer.getBoundingClientRect();
+      void update(boundsInsideViewport(rect, window.innerWidth, window.innerHeight)).catch(
+        () => undefined,
+      );
+    };
+    const resize = new ResizeObserver(sync);
+    const scroll = () => sync();
+    const composer = textareaRef.current?.closest<HTMLElement>(".thread-composer");
+    if (composer !== undefined && composer !== null) resize.observe(composer);
+    window.addEventListener("resize", sync);
+    window.addEventListener("scroll", scroll, true);
+    sync();
+    return () => {
+      disposed = true;
+      resize.disconnect();
+      window.removeEventListener("resize", sync);
+      window.removeEventListener("scroll", scroll, true);
+      const cancel = props.cancelApproval;
+      if (cancel !== undefined) void cancel().catch(() => undefined);
+    };
+  }, [props.cancelApproval, props.updateApprovalAnchor, view?.thread.id, view?.thread.projectId]);
   const [confirmingRestore, setConfirmingRestore] = useState<string>();
   const [checkpointDraft, setCheckpointDraft] = useState<
     { readonly messageId: string; readonly kind: "mark" | "restore" } | undefined

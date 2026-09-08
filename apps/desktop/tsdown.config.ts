@@ -24,4 +24,10 @@ export default defineConfig([
     entry: ["src/preload.ts"],
     format: [DESKTOP_PRELOAD_FORMAT],
   },
+  {
+    ...shared,
+    clean: false,
+    entry: ["src/codeOperationApprovalViewPreload.ts"],
+    format: [DESKTOP_PRELOAD_FORMAT],
+  },
 ]);
