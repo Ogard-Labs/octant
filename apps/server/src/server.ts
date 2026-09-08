@@ -3818,6 +3818,8 @@ export function startOctantServer(
         await codeOperationRuntime?.prepareApproval(windowId, request),
       confirm: async (windowId, confirmation) =>
         await codeOperationRuntime?.confirmApproval(windowId, confirmation),
+      cancel: (windowId, confirmation) =>
+        codeOperationRuntime?.cancelApproval?.(windowId, confirmation),
     });
     const codeExternalEditorRoutes = createCodeExternalEditorRouteHandler({
       desktopBridgeSecret: options.desktopBridgeSecret,

@@ -8,6 +8,7 @@ import {
   CODE_OPERATION_APPROVAL_VIEW_CHANNELS,
   createCodeOperationApprovalViewController,
   type CodeOperationApprovalAnchor,
+  type CodeOperationApprovalBounds,
   type CodeOperationApprovalViewPort,
 } from "./codeOperationApprovalView";
 
@@ -68,19 +69,22 @@ function makeFixture() {
     attach: vi.fn(),
     detach: vi.fn(),
     boundsForAnchor: vi.fn((_window: object, value: CodeOperationApprovalAnchor) => value.bounds),
+    fallbackBounds: vi.fn<() => CodeOperationApprovalBounds | undefined>(() => undefined),
     isWindowDestroyed: vi.fn(() => false),
   };
   const prepare = vi.fn(async () => challenge);
   const confirm = vi.fn(async () => ids.approval as CodeApprovalId);
+  const cancel = vi.fn(async () => undefined);
   const controller = createCodeOperationApprovalViewController({
     host,
     prepare,
     confirm,
+    cancel,
     token: () => "approval-view-token",
     anchorWaitMs: 25,
     expiryMs: 100,
   });
-  return { controller, confirm, host, prepare, sent, view, window: {} };
+  return { cancel, controller, confirm, host, prepare, sent, view, window: {} };
 }
 
 describe("Code operation approval view controller", () => {
@@ -97,7 +101,7 @@ describe("Code operation approval view controller", () => {
       windowCapability: "window-capability",
       request,
     });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 40));
     expect(fixture.sent[0]).toEqual([CODE_OPERATION_APPROVAL_VIEW_CHANNELS.challenge, challenge]);
     await expect(
       fixture.controller.decision({
@@ -154,6 +158,11 @@ describe("Code operation approval view controller", () => {
     ).resolves.toBeUndefined();
     await expect(result).resolves.toBeUndefined();
     expect(fixture.confirm).not.toHaveBeenCalled();
+    expect(fixture.cancel).toHaveBeenCalledWith({
+      challengeId: ids.challenge,
+      windowId: "window-1",
+      windowCapability: "window-capability",
+    });
   });
 
   it("expires a request that has no matching live composer anchor", async () => {
@@ -167,6 +176,28 @@ describe("Code operation approval view controller", () => {
     await expect(result).resolves.toBeUndefined();
     expect(fixture.prepare).not.toHaveBeenCalled();
     expect(fixture.host.createView).not.toHaveBeenCalled();
+  });
+
+  it("uses an owner-window fallback for dock operations when the composer is unmounted", async () => {
+    const fixture = makeFixture();
+    fixture.host.fallbackBounds.mockReturnValue({ x: 300, y: 500, width: 500, height: 200 });
+    const result = fixture.controller.request({
+      window: fixture.window,
+      windowId: "window-1",
+      windowCapability: "window-capability",
+      request,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(
+      fixture.controller.decision({
+        senderId: 41,
+        token: "approval-view-token",
+        challengeId: ids.challenge,
+        decision: "approve",
+      }),
+    ).resolves.toBe(ids.approval);
+    await expect(result).resolves.toBe(ids.approval);
+    expect(fixture.host.createView).toHaveBeenCalledOnce();
   });
 
   it("cancels a pending challenge when its owning window closes", async () => {

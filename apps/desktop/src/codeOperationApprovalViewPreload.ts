@@ -30,9 +30,25 @@ function render(next: CodeOperationApprovalChallenge): void {
   challenge = next;
   const message = element("message");
   const detail = element("detail");
+  const identity = element("identity");
   const digests = element("digests");
   if (message !== undefined) message.textContent = next.message;
   if (detail !== undefined) detail.textContent = next.detail;
+  if (identity !== undefined) {
+    identity.textContent = [
+      `Challenge: ${String(next.challengeId)}`,
+      `Project: ${String(next.projectId)}`,
+      `Thread: ${String(next.threadId)}`,
+      `Checkout: ${String(next.checkoutId)}`,
+      `Repository: ${String(next.repositoryId)}`,
+      `Checkout head: ${next.checkoutHead.kind === "branch" ? `${next.checkoutHead.name} @ ${next.checkoutHead.oid}` : next.checkoutHead.oid}`,
+      ...(next.pullRequestTarget === undefined
+        ? []
+        : [
+            `Pull request: ${next.pullRequestTarget.baseRepository} ${next.pullRequestTarget.baseBranch} ← ${next.pullRequestTarget.head}`,
+          ]),
+    ].join("\n");
+  }
   if (digests !== undefined) {
     digests.textContent = `Effect digest: ${next.effectDigest}\nContext digest: ${next.contextDigest}`;
   }

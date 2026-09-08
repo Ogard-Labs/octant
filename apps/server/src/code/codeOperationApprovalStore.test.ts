@@ -102,6 +102,60 @@ describe("CodeOperationApprovalStore", () => {
     ).resolves.toBe(true);
   });
 
+  it("revokes a pending challenge before it can issue a usable receipt", async () => {
+    let next = 0;
+    const store = new CodeOperationApprovalStore({
+      uuid: () => `30000000-0000-4000-8000-${(++next).toString().padStart(12, "0")}`,
+      now: () => 1_000,
+    });
+    const effect = terminalEffect();
+    const challenge = store.prepare({
+      windowId,
+      effect,
+      contextDigest,
+      projectId: "60000000-0000-4000-8000-000000000001" as never,
+      threadId,
+      threadTitle: "Fix login",
+      checkoutId,
+      repositoryId: `repo_${"a".repeat(64)}` as never,
+      checkoutHead: { kind: "detached", oid: "b".repeat(40) as never },
+      message: "Allow terminal access?",
+      detail: "Authoritative scope",
+    });
+    expect(challenge).toBeDefined();
+    store.cancel({ windowId, challengeId: challenge!.challengeId });
+    expect(store.confirm({ windowId, challengeId: challenge!.challengeId })).toBeUndefined();
+    await expect(store.validate({ windowId, effect, contextDigest })).resolves.toBe(false);
+  });
+
+  it("revokes a receipt that races with cancellation of its challenge", async () => {
+    let next = 0;
+    const store = new CodeOperationApprovalStore({
+      uuid: () => `30000000-0000-4000-8000-${(++next).toString().padStart(12, "0")}`,
+      now: () => 1_000,
+    });
+    const effect = terminalEffect();
+    const challenge = store.prepare({
+      windowId,
+      effect,
+      contextDigest,
+      projectId: "60000000-0000-4000-8000-000000000001" as never,
+      threadId,
+      threadTitle: "Fix login",
+      checkoutId,
+      repositoryId: `repo_${"a".repeat(64)}` as never,
+      checkoutHead: { kind: "detached", oid: "b".repeat(40) as never },
+      message: "Allow terminal access?",
+      detail: "Authoritative scope",
+    });
+    const receipt = store.confirm({ windowId, challengeId: challenge!.challengeId });
+    expect(receipt).toBeDefined();
+    store.cancel({ windowId, challengeId: challenge!.challengeId });
+    await expect(
+      store.validate({ windowId, effect, contextDigest, approvalId: receipt!.approvalId }),
+    ).resolves.toBe(false);
+  });
+
   it("rejects expired grants and revokes every grant owned by a rotated window", async () => {
     let now = 1_000;
     const store = new CodeOperationApprovalStore({ uuid: () => approvalId, now: () => now });

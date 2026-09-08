@@ -28,6 +28,7 @@ export function createCodeOperationApprovalRouteHandler(options: {
     windowId: WindowId,
     confirmation: CodeOperationApprovalConfirmation,
   ) => Promise<CodeOperationApprovalReceipt | undefined>;
+  readonly cancel?: (windowId: WindowId, confirmation: CodeOperationApprovalConfirmation) => void;
   readonly now?: () => number;
 }) {
   const now = options.now ?? Date.now;
@@ -35,7 +36,8 @@ export function createCodeOperationApprovalRouteHandler(options: {
     const url = new URL(request.url);
     const isPrepare = url.pathname === "/api/desktop/code-operation-approval-challenges";
     const isConfirm = url.pathname === "/api/desktop/code-operation-approval-confirmations";
-    if (!isPrepare && !isConfirm) return undefined;
+    const isCancel = url.pathname === "/api/desktop/code-operation-approval-cancellations";
+    if (!isPrepare && !isConfirm && !isCancel) return undefined;
     if (
       options.desktopBridgeSecret === undefined ||
       !isLoopbackHostname(url.hostname) ||
@@ -70,6 +72,12 @@ export function createCodeOperationApprovalRouteHandler(options: {
         return challenge === undefined
           ? failure("unauthorized", 403)
           : Response.json(decodeCodeOperationApprovalChallenge(challenge), { status: 201 });
+      }
+      if (isCancel) {
+        if (options.cancel === undefined) return failure("unauthorized", 403);
+        const confirmation = decodeCodeOperationApprovalConfirmation(body);
+        options.cancel(windowId, confirmation);
+        return new Response(null, { status: 204 });
       }
       const receipt = await options.confirm(
         windowId,

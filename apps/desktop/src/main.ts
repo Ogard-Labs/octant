@@ -67,6 +67,7 @@ import {
   type RendererNavigationWebContentsPort,
 } from "./rendererNavigationPolicy";
 import {
+  cancelCodeOperationApprovalFromServer,
   confirmCodeOperationApprovalFromServer,
   prepareCodeOperationApprovalChallengeFromServer,
 } from "./codeOperationApproval";
@@ -1018,6 +1019,22 @@ function codeApprovalBoundsForAnchor(
   return { x, y, width, height };
 }
 
+function codeApprovalFallbackBounds(
+  window: BrowserWindow,
+): CodeOperationApprovalBounds | undefined {
+  if (window.isDestroyed()) return undefined;
+  const content = window.getContentBounds();
+  const width = Math.min(560, content.width - 24);
+  const height = Math.min(280, content.height - 44);
+  if (width < 320 || height < 180) return undefined;
+  return {
+    x: content.width - width - 12,
+    y: Math.max(36, content.height - height - 12),
+    width,
+    height,
+  };
+}
+
 function createCodeApprovalView(token: string): CodeOperationApprovalViewPort {
   const view = new WebContentsView({
     webPreferences: {
@@ -1058,6 +1075,7 @@ function installCodeOperationApprovalViews(): void {
       detach: (window, view) =>
         window.contentView.removeChildView(view as unknown as WebContentsView),
       boundsForAnchor: codeApprovalBoundsForAnchor,
+      fallbackBounds: codeApprovalFallbackBounds,
       isWindowDestroyed: (window) => window.isDestroyed(),
     },
     prepare: ({ request, windowCapability }) => {
@@ -1073,6 +1091,16 @@ function installCodeOperationApprovalViews(): void {
     confirm: ({ challengeId, windowCapability }) => {
       if (activeServerUrl === undefined) throw new Error("Octant Code approval is unavailable.");
       return confirmCodeOperationApprovalFromServer({
+        serverUrl: activeServerUrl,
+        desktopBridgeSecret,
+        windowCapability,
+        challengeId,
+        fetch: globalThis.fetch,
+      });
+    },
+    cancel: ({ challengeId, windowCapability }) => {
+      if (activeServerUrl === undefined) return Promise.resolve();
+      return cancelCodeOperationApprovalFromServer({
         serverUrl: activeServerUrl,
         desktopBridgeSecret,
         windowCapability,

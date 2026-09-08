@@ -295,6 +295,7 @@ export interface CodeOperationRuntime {
     windowId: WindowId,
     confirmation: CodeOperationApprovalConfirmation,
   ): Promise<CodeOperationApprovalReceipt | undefined>;
+  cancelApproval?(windowId: WindowId, confirmation: CodeOperationApprovalConfirmation): void;
   validateAppleApproval(windowId: WindowId, request: AppleActionRequest): Promise<boolean>;
   revokeApprovals(windowId: WindowId): void;
   /**
@@ -645,6 +646,11 @@ export function createCodeOperationRuntime(
       if (approvalStore === undefined) return undefined;
       const confirmation = decodeCodeOperationApprovalConfirmation(rawConfirmation);
       return approvalStore.confirm({ windowId, challengeId: confirmation.challengeId });
+    },
+    cancelApproval: (windowId, rawConfirmation) => {
+      if (approvalStore === undefined) return;
+      const confirmation = decodeCodeOperationApprovalConfirmation(rawConfirmation);
+      approvalStore.cancel({ windowId, challengeId: confirmation.challengeId });
     },
     validateAppleApproval: async (windowId, request) => {
       if (approvalValidator === undefined || request.approval.kind !== "approved") return false;

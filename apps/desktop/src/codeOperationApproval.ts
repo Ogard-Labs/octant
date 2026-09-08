@@ -116,6 +116,24 @@ export async function confirmCodeOperationApprovalFromServer(options: {
   return decodeCodeOperationApprovalReceipt(await receiptResponse.json()).approvalId;
 }
 
+export async function cancelCodeOperationApprovalFromServer(options: {
+  readonly serverUrl: string;
+  readonly desktopBridgeSecret: string;
+  readonly windowCapability: string;
+  readonly challengeId: string;
+  readonly fetch: typeof globalThis.fetch;
+}): Promise<void> {
+  const response = await options.fetch(
+    new URL("/api/desktop/code-operation-approval-cancellations", options.serverUrl),
+    {
+      method: "POST",
+      headers: approvalHeaders(options),
+      body: JSON.stringify({ challengeId: options.challengeId }),
+    },
+  );
+  if (!response.ok) throwApprovalResponseFailure(response);
+}
+
 function throwApprovalResponseFailure(response: Response): never {
   if (response.status === 503) throw new CodeOperationApprovalUnavailableError();
   throw new Error("Code operation approval request was rejected.");

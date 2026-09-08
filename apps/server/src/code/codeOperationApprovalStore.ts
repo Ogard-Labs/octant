@@ -16,6 +16,7 @@ interface ApprovalGrant {
   readonly effectDigest: string;
   readonly contextDigest: string;
   readonly expiresAt: number;
+  readonly challengeId?: string;
 }
 
 interface ApprovalChallenge {
@@ -94,6 +95,7 @@ export class CodeOperationApprovalStore implements CodeApprovalValidationPort {
       readonly windowId: WindowId;
       readonly effect: CodeApprovalEffect;
       readonly contextDigest: string;
+      readonly challengeId?: string;
     },
     now: number,
   ): CodeOperationApprovalReceipt {
@@ -104,6 +106,7 @@ export class CodeOperationApprovalStore implements CodeApprovalValidationPort {
       effectDigest: approvalEffectDigest(input.effect),
       contextDigest: input.contextDigest,
       expiresAt: now + APPROVAL_TTL_MS,
+      ...(input.challengeId === undefined ? {} : { challengeId: input.challengeId }),
     });
     return decodeCodeOperationApprovalReceipt({ approvalId });
   }
@@ -159,9 +162,22 @@ export class CodeOperationApprovalStore implements CodeApprovalValidationPort {
         windowId: input.windowId,
         effect: pending.effect,
         contextDigest: pending.contextDigest,
+        challengeId: input.challengeId,
       },
       now,
     );
+  }
+
+  cancel(input: { readonly windowId: WindowId; readonly challengeId: string }): void {
+    const pending = this.#challenges.get(input.challengeId);
+    if (pending !== undefined && pending.windowId === input.windowId) {
+      this.#challenges.delete(input.challengeId);
+    }
+    for (const [approvalId, grant] of this.#grants) {
+      if (grant.windowId === input.windowId && grant.challengeId === input.challengeId) {
+        this.#grants.delete(approvalId);
+      }
+    }
   }
 
   async validate(input: Parameters<CodeApprovalValidationPort["validate"]>[0]): Promise<boolean> {
