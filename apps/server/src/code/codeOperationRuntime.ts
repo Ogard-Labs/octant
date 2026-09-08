@@ -7,9 +7,7 @@ import {
   decodeCodeOperationApprovalRequest,
   decodeCodeOperationApprovalConfirmation,
   decodeCodeCheckoutId,
-  decodeCodeCheckoutIdentity,
   decodeCodeCheckoutHead,
-  decodeCodeThread,
   decodeCodeOperationCommand,
   decodeCodeEvidenceBatchResponse,
   decodeCodeRelativePath,
@@ -576,6 +574,9 @@ export function createCodeOperationRuntime(
       let approvalEffect = request.effect;
       let thread: CodeThread | undefined;
       let checkout: CodeCheckoutIdentity | undefined;
+      let directContext: ApprovalContext | undefined;
+      let directPrompt: { readonly message: string; readonly detail: string } | undefined;
+      let directThreadTitle: string | undefined;
       if (request.effect.kind === "operation") {
         const { command } = request.effect;
         thread = options.persistence.readCodeThread(command.threadId);
@@ -611,7 +612,13 @@ export function createCodeOperationRuntime(
       } else if (request.effect.kind === "create-managed-code-thread-full-access") {
         const creation = options.managedThreadCreation;
         const command = request.effect.command;
-        if (creation === undefined || command.approvalId !== undefined) return undefined;
+        if (
+          creation === undefined ||
+          command.approvalId !== undefined ||
+          !(await options.windowAccess.canAccessProject(windowId, command.projectId))
+        ) {
+          return undefined;
+        }
         const prepared = await creation.prepare(
           {
             authenticatedWindowId: windowId,
@@ -646,31 +653,18 @@ export function createCodeOperationRuntime(
           return undefined;
         }
         approvalEffect = { ...request.effect, source };
-        thread = decodeCodeThread({
-          id: command.threadId,
+        directThreadTitle = command.title;
+        directContext = {
           projectId: command.projectId,
-          bindingRevisionId: command.bindingRevisionId,
-          repositoryId: prepared.preparation.repositoryId,
+          threadId: command.threadId,
           checkoutId: prepared.preparation.checkoutId,
-          title: command.title,
-          lifecycle: "active",
-          providerInstanceId: command.providerInstanceId,
-          modelId: command.modelId,
-          executionPolicy: command.executionPolicy,
-          permissionPersistence: command.permissionPersistence,
-          deliveryTarget: command.deliveryTarget,
-          version: 1,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        });
-        checkout = decodeCodeCheckoutIdentity({
-          id: prepared.preparation.checkoutId,
           repositoryId: prepared.preparation.repositoryId,
-          kind: "existing-worktree",
-          availability: "available",
-          head: source.checkoutHead,
-          observedAt: new Date().toISOString(),
-        });
+          checkoutHead: source.checkoutHead,
+        };
+        directPrompt = {
+          message: "Allow full access for this new Code thread?",
+          detail: `Create managed worktree from ${source.checkoutHead.kind === "branch" ? `${source.checkoutHead.name} @ ${source.checkoutHead.oid}` : source.checkoutHead.oid} · ${persistenceLabel(command.permissionPersistence)}`,
+        };
       } else {
         thread = options.persistence.readCodeThread(request.effect.threadId);
         checkout =
@@ -688,6 +682,20 @@ export function createCodeOperationRuntime(
         ) {
           return undefined;
         }
+      }
+      if (directContext !== undefined && directPrompt !== undefined) {
+        return approvalStore.prepare({
+          windowId,
+          effect: approvalEffect,
+          contextDigest: approvalContextDigest(directContext),
+          projectId: directContext.projectId,
+          threadId: directContext.threadId,
+          threadTitle: directThreadTitle ?? "Code thread",
+          checkoutId: directContext.checkoutId,
+          repositoryId: directContext.repositoryId,
+          checkoutHead: directContext.checkoutHead,
+          ...directPrompt,
+        });
       }
       if (thread === undefined || checkout === undefined) return undefined;
       const command = approvalEffect.kind === "operation" ? approvalEffect.command : undefined;

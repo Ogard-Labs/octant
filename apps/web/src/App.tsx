@@ -50,7 +50,11 @@ import {
   decodeCodeThreadId,
   type CodeDeliveryOutcomeKind,
 } from "@octant/contracts/code";
-import { decodeCodeOperationId } from "@octant/contracts/code-operations";
+import {
+  decodeCodeApprovalId,
+  decodeCodeOperationId,
+  type CodeOperationApprovalRequest,
+} from "@octant/contracts/code-operations";
 import type { CodeComposerSubmitInput } from "./code/composer/CodeComposerAdapter";
 import { decodeContextSubjectRef, type ContextHealth } from "@octant/contracts/context";
 import {
@@ -3949,17 +3953,17 @@ function LaunchedShell(
           );
           return false;
         }
-        const effect =
+        const approvalRequest: CodeOperationApprovalRequest | undefined =
           command.kind === "create-managed-code-thread"
-            ? { kind: "create-managed-code-thread-full-access", command }
+            ? { effect: { kind: "create-managed-code-thread-full-access", command } }
             : command.kind === "create-code-thread"
-              ? { kind: "create-thread-full-access", thread: command.thread }
+              ? { effect: { kind: "create-thread-full-access", thread: command.thread } }
               : undefined;
-        if (effect === undefined) {
+        if (approvalRequest === undefined) {
           setDraftError("Full access could not be prepared for this Code thread.");
           return false;
         }
-        const approvalId = await requestApproval(effect as never, {
+        const approvalId = await requestApproval(approvalRequest, {
           projectId: String(project.id),
           composerId: presentation.composerId,
         });
@@ -3969,7 +3973,7 @@ function LaunchedShell(
         }
         command =
           command.kind === "create-managed-code-thread" || command.kind === "create-code-thread"
-            ? { ...command, approvalId: approvalId as never }
+            ? { ...command, approvalId: decodeCodeApprovalId(approvalId) }
             : command;
       }
       const created = await codeController.execute(command);

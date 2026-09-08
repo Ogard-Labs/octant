@@ -1484,6 +1484,27 @@ describe("managed Code creation approval", () => {
     remoteName: "origin",
   };
 
+  it("refuses a managed Full access challenge when the window cannot access the Project", async () => {
+    const managedThreadCreation = {
+      prepare: vi.fn(),
+      commit: vi.fn(),
+      cleanup: vi.fn(),
+    };
+    const fixture = runtimeFixture({
+      approvalValidator: false,
+      projectAccess: false,
+      managedThreadCreation: managedThreadCreation as never,
+    });
+
+    await expect(
+      fixture.runtime.prepareApproval(windowId, {
+        effect: { kind: "create-managed-code-thread-full-access", command: managedCommand },
+      }),
+    ).resolves.toBeUndefined();
+    expect(managedThreadCreation.prepare).not.toHaveBeenCalled();
+    fixture.close();
+  });
+
   it("prepares a server-derived source challenge and refuses a stale source", async () => {
     const preparation = {
       repositoryId: thread().repositoryId,
@@ -1570,6 +1591,7 @@ function runtimeFixture(options: {
     input: Parameters<GitObservationPort["readDiff"]>[0],
   ) => Promise<GitScopedDiffResult>;
   approvalValidator?: boolean | (() => boolean);
+  projectAccess?: boolean;
   managedThreadCreation?: Parameters<typeof createCodeOperationRuntime>[0]["managedThreadCreation"];
   failRuntimeWorkJournal?: boolean;
   throwRuntimeWorkReporter?: boolean;
@@ -1619,7 +1641,7 @@ function runtimeFixture(options: {
     head: { kind: "branch", name: "feature/runtime", oid: "a".repeat(40) },
     observedAt: now,
   });
-  const access = vi.fn(async () => true);
+  const access = vi.fn(async () => options.projectAccess ?? true);
   const prompt = evidence(40);
   const response = evidence(41);
   const evidenceValues = new Map([

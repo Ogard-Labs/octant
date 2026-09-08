@@ -6,6 +6,7 @@ import {
 } from "@octant/contracts";
 import {
   CODE_OPERATION_APPROVAL_VIEW_CHANNELS,
+  approvalViewHtml,
   createCodeOperationApprovalViewController,
   type CodeOperationApprovalAnchor,
   type CodeOperationApprovalBounds,
@@ -89,6 +90,17 @@ function makeFixture() {
 }
 
 describe("Code operation approval view controller", () => {
+  it("keeps the approval surface static, neutral, bounded, and explicit", () => {
+    const html = approvalViewHtml();
+    expect(html).toContain("default-src 'none'");
+    expect(html).toContain('id="cancel"');
+    expect(html).toContain('id="approve"');
+    expect(html).toContain("Show authority details");
+    expect(html).toContain("prefers-reduced-motion");
+    expect(html).not.toContain("http://");
+    expect(html).not.toContain("https://");
+  });
+
   it("accepts a decision only from the exact approval WebContentsView", async () => {
     const fixture = makeFixture();
     fixture.controller.updateAnchor({

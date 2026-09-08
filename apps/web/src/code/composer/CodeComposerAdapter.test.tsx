@@ -5,6 +5,18 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CodeComposerAdapter } from "./CodeComposerAdapter";
 import type { ProjectId } from "@octant/contracts/projects";
 
+type DraftAnchor = {
+  readonly kind: "draft";
+  readonly projectId: string;
+  readonly composerId: string;
+  readonly bounds: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  };
+};
+
 const defaultProps = {
   projectId: "00000000-0000-0000-0000-000000000001" as ProjectId,
   projectName: "My Repo",
@@ -24,6 +36,89 @@ describe("CodeComposerAdapter", () => {
     expect(html).toContain("What should we build");
     expect(html).toContain("My Repo");
     expect(html).toContain("development");
+  });
+
+  it("keeps a draft and its native anchor identity when the Project changes", async () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    const updateCodeOperationApprovalAnchor = vi.fn(
+      async (_value: DraftAnchor): Promise<void> => undefined,
+    );
+    const cancelCodeOperationApproval = vi.fn(async () => undefined);
+    const hostBridge = { updateCodeOperationApprovalAnchor, cancelCodeOperationApproval };
+    const firstProject = defaultProps.projectId;
+    const secondProject = "00000000-0000-0000-0000-000000000002" as ProjectId;
+    const { rerender } = render(
+      <div className="thread-composer">
+        <CodeComposerAdapter
+          {...defaultProps}
+          hostBridge={hostBridge as never}
+          onCreateThread={onCreateThread}
+        />
+      </div>,
+    );
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Keep this draft");
+    rerender(
+      <div className="thread-composer">
+        <CodeComposerAdapter
+          {...defaultProps}
+          projectId={secondProject}
+          hostBridge={hostBridge as never}
+          onCreateThread={onCreateThread}
+        />
+      </div>,
+    );
+
+    expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue("Keep this draft");
+    await waitFor(() => expect(updateCodeOperationApprovalAnchor).toHaveBeenCalledTimes(2));
+    const anchors = updateCodeOperationApprovalAnchor.mock.calls.map(([value]) => value);
+    expect(anchors[0]).toMatchObject({ kind: "draft", projectId: String(firstProject) });
+    expect(anchors[1]).toMatchObject({ kind: "draft", projectId: String(secondProject) });
+    expect(anchors[0]?.composerId).toBe(anchors[1]?.composerId);
+
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+    expect(onCreateThread.mock.calls[0]?.[0]).toMatchObject({
+      prompt: "Keep this draft",
+      presentation: { composerId: anchors[1]?.composerId },
+    });
+  });
+
+  it("gives multiple draft panes distinct native anchor identities", async () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    const updateCodeOperationApprovalAnchor = vi.fn(
+      async (_value: DraftAnchor): Promise<void> => undefined,
+    );
+    const hostBridge = { updateCodeOperationApprovalAnchor };
+    render(
+      <>
+        <div className="thread-composer">
+          <CodeComposerAdapter {...defaultProps} hostBridge={hostBridge as never} />
+        </div>
+        <div className="thread-composer">
+          <CodeComposerAdapter {...defaultProps} hostBridge={hostBridge as never} />
+        </div>
+      </>,
+    );
+
+    await waitFor(() => expect(updateCodeOperationApprovalAnchor).toHaveBeenCalledTimes(2));
+    const composerIds = updateCodeOperationApprovalAnchor.mock.calls.map(
+      ([value]) => value.composerId,
+    );
+    expect(new Set(composerIds).size).toBe(2);
   });
 
   it("keeps the welcome prompt on the shared composer frame", () => {
