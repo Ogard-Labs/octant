@@ -172,7 +172,7 @@ describe("ServerBrowserAuthorityResolver", () => {
           surface: {
             kind: "work-thread",
             id: "80000000-0000-4000-8000-000000000002",
-            threadId,
+            threadId: "90000000-0000-4000-8000-000000000099",
             mode: "work",
             title: "Work",
             hostId,

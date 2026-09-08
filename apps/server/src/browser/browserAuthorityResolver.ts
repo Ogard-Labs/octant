@@ -9,7 +9,6 @@ import {
   type WorkThreadId,
   type ToolActionAuthority,
   type WindowId,
-  type WorkspaceLayoutNode,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { WorkThreadProjection } from "../work/workThreadProjection";
@@ -115,31 +114,11 @@ export class ServerBrowserAuthorityResolver implements BrowserAuthorityResolver 
     const workspace = projected.workspace;
     const context = workspace.contextByMode[mode];
     if (context.mode !== mode || String(context.host) !== String(authority.hostId)) return false;
-    if (String(context.projectId) !== String(authority.projectId ?? null)) return false;
-    return layoutContainsThread(
-      workspace.layouts[mode],
-      String(threadId),
-      String(authority.hostId),
-    );
+    // The persisted mode Project is the window boundary. A thread may keep
+    // running after the user selects another thread in the same Project; pane
+    // selection is presentation state, not a new authority grant.
+    return String(context.projectId) === String(authority.projectId ?? null);
   }
-}
-
-function layoutContainsThread(
-  layout: WorkspaceLayoutNode,
-  threadId: string,
-  hostId: string,
-): boolean {
-  if (layout.kind === "split") {
-    return (
-      layoutContainsThread(layout.first, threadId, hostId) ||
-      layoutContainsThread(layout.second, threadId, hostId)
-    );
-  }
-  const surface = layout.surface;
-  if (!("threadId" in surface) || String(surface.threadId) !== threadId) return false;
-  return (
-    !("hostId" in surface) || surface.hostId === undefined || String(surface.hostId) === hostId
-  );
 }
 
 export function deriveToolHostId(seed: string): typeof ToolHostId.Type {
