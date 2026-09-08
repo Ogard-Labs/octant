@@ -1,3 +1,4 @@
+import { ComposerNoticeProvider } from "../composer/ComposerNotice";
 import type {
   LayoutNodeId,
   PaneId,
@@ -454,6 +455,21 @@ export function WorkspaceView(props: WorkspaceViewProps) {
 
   const activePaneId = props.workspace.activePaneIds[props.mode];
   const activeSurface = findPaneInLayout(props.layout, activePaneId)?.surface;
+  const inlineNotice = activeSurface !== undefined;
+  const contextNotice =
+    props.crossContextOffer === undefined ? null : (
+      <CrossContextBanner
+        inline={inlineNotice}
+        message={props.crossContextOffer.message}
+        {...(props.onDismissCrossContextOffer === undefined
+          ? {}
+          : { onDismiss: props.onDismissCrossContextOffer })}
+        {...(props.onOpenCrossContextInNewWindow === undefined ||
+        !props.crossContextOffer.canOpenInNewWindow
+          ? {}
+          : { onOpenInNewWindow: props.onOpenCrossContextInNewWindow })}
+      />
+    );
   const contextProjectId = props.workspace.contextByMode[props.mode].projectId ?? undefined;
   const contextProject = props.projects.find(
     (project) => String(project.id) === String(contextProjectId),
@@ -506,18 +522,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
       {...(props.tabActivation === undefined ? {} : { registry: props.tabActivation })}
     >
       <main className="workspace" hidden={props.hidden}>
-        {props.crossContextOffer === undefined ? null : (
-          <CrossContextBanner
-            message={props.crossContextOffer.message}
-            {...(props.onDismissCrossContextOffer === undefined
-              ? {}
-              : { onDismiss: props.onDismissCrossContextOffer })}
-            {...(props.onOpenCrossContextInNewWindow === undefined ||
-            !props.crossContextOffer.canOpenInNewWindow
-              ? {}
-              : { onOpenInNewWindow: props.onOpenCrossContextInNewWindow })}
-          />
-        )}
+        {inlineNotice ? null : contextNotice}
         <SplitWorkspace
           {...(contextProject === undefined ? {} : { contextLabel: contextProject.name })}
           paneFactsByThreadId={paneFactsByThreadId}
@@ -534,18 +539,22 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           activePaneId={props.workspace.activePaneIds[props.mode]}
           {...(props.focusedPaneId === undefined ? {} : { focusedPaneId: props.focusedPaneId })}
           renderSurface={(surface, paneId) => (
-            <ComposerContextMeterGate
-              enabled={
-                paneId === props.workspace.activePaneIds[props.mode] &&
-                offersThreadComposer(surface)
-              }
+            <ComposerNoticeProvider
+              value={paneId === activePaneId && inlineNotice ? contextNotice : null}
             >
-              {onWelcomeGround(
-                surface,
-                props.welcomeBackdrop,
-                renderTab(surface, props, paneId, canvasContext),
-              )}
-            </ComposerContextMeterGate>
+              <ComposerContextMeterGate
+                enabled={
+                  paneId === props.workspace.activePaneIds[props.mode] &&
+                  offersThreadComposer(surface)
+                }
+              >
+                {onWelcomeGround(
+                  surface,
+                  props.welcomeBackdrop,
+                  renderTab(surface, props, paneId, canvasContext),
+                )}
+              </ComposerContextMeterGate>
+            </ComposerNoticeProvider>
           )}
           {...(props.providerByThreadId === undefined
             ? {}
@@ -590,19 +599,19 @@ function offersThreadComposer(surface: WorkspaceTab): boolean {
 }
 
 function CrossContextBanner(props: {
+  readonly inline?: boolean;
   readonly message: string;
   readonly onDismiss?: () => void;
   readonly onOpenInNewWindow?: () => void;
 }) {
   return (
-    <div className="workspace-cross-context-banner" role="alert">
+    <div
+      className={`workspace-cross-context-banner${props.inline ? " workspace-cross-context-banner--inline" : ""}`}
+      role="alert"
+    >
       <span className="workspace-cross-context-banner__message">{props.message}</span>
       <span className="workspace-cross-context-banner__actions">
-        {props.onOpenInNewWindow === undefined ? (
-          <span className="workspace-cross-context-banner__hint">
-            Open it in a new window to keep its authority.
-          </span>
-        ) : (
+        {props.onOpenInNewWindow === undefined ? null : (
           <OctantButton
             className="workspace-cross-context-banner__new-window"
             onClick={props.onOpenInNewWindow}
@@ -983,7 +992,7 @@ function renderNonCodeTab(
     return (
       <DraftThreadWorkspace
         greetingName={props.greetingName}
-        key={`${String(tab.id)}:${String(tab.projectId ?? "unbound")}:${String(props.draftResetRevision ?? 0)}`}
+        key={`${String(paneId)}:${tab.mode}:${String(props.draftResetRevision ?? 0)}`}
         {...(recentThreads.length === 0 ? {} : { recentThreads })}
         mode={tab.mode}
         {...(props.hosts === undefined ? {} : { hosts: props.hosts })}

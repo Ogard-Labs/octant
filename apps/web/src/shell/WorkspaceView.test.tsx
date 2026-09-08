@@ -1,5 +1,9 @@
-import type { ProjectAvailability, ProjectSummary } from "@octant/contracts/projects";
-import type { WorkspaceTab } from "@octant/contracts/shell";
+import {
+  decodeProjectId,
+  type ProjectAvailability,
+  type ProjectSummary,
+} from "@octant/contracts/projects";
+import { decodeWorkspaceTabId, type WorkspaceTab } from "@octant/contracts/shell";
 import { decodeChatBootstrap, decodeChatThreadView } from "@octant/contracts/chat";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -89,6 +93,65 @@ describe("WorkspaceView welcome", () => {
 
     expect(await screen.findByRole("heading", { name: "What should we build?" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Start a Code thread" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a new task's message when its Project binding changes and clears only for an explicit new draft", async () => {
+    const first = codeProject("active");
+    const second = {
+      ...first,
+      id: decodeProjectId("10000000-0000-4000-8000-000000000008"),
+      name: "Second Project",
+    };
+    const makeProps = (project: ProjectSummary, id: WorkspaceTab["id"]) =>
+      propsFor({
+        kind: "draft-thread",
+        id,
+        mode: "code",
+        title: "New Code thread",
+        projectId: project.id,
+      });
+    const projects = [first, second];
+    const { rerender } = render(
+      <WorkspaceView {...makeProps(first, decodeWorkspaceTabId(ids.tab))} projects={projects} />,
+    );
+    await userEvent.type(
+      await screen.findByRole("textbox", { name: "First message" }),
+      "Keep this message while choosing a Project",
+    );
+    rerender(
+      <WorkspaceView
+        {...makeProps(second, decodeWorkspaceTabId(codeIds.thread))}
+        projects={projects}
+      />,
+    );
+    expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue(
+      "Keep this message while choosing a Project",
+    );
+    rerender(
+      <WorkspaceView
+        {...makeProps(first, decodeWorkspaceTabId(ids.tab))}
+        projects={projects}
+        crossContextOffer={{
+          message: "This Project needs another window.",
+          canOpenInNewWindow: false,
+        }}
+      />,
+    );
+    expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
+      "Keep this message while choosing a Project",
+    );
+    expect(screen.getByRole("alert").closest(".composer")).not.toBeNull();
+    expect(
+      screen.queryByText("Open it in a new window to keep its authority."),
+    ).not.toBeInTheDocument();
+    rerender(
+      <WorkspaceView
+        {...makeProps(first, decodeWorkspaceTabId(ids.tab))}
+        projects={projects}
+        draftResetRevision={1}
+      />,
+    );
+    expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue("");
   });
 
   it("keeps the selected Code Project context in the shared composer", async () => {
@@ -961,7 +1024,7 @@ describe("WorkspaceView child-run status chrome", () => {
 });
 
 describe("WorkspaceView cross-context banner", () => {
-  it("renders the cross-context banner with a dismiss control", () => {
+  it("renders the cross-context notice inside an existing thread composer with a dismiss control", async () => {
     const base = propsFor(codeTab("code-overview", "Overview"));
     const onDismiss = vi.fn();
     render(
@@ -974,9 +1037,10 @@ describe("WorkspaceView cross-context banner", () => {
         onDismissCrossContextOffer={onDismiss}
       />,
     );
+    await waitFor(() => expect(document.querySelector(".composer")).not.toBeNull());
     expect(
-      screen.getByText("That Project belongs to a different window.").closest('[role="alert"]'),
-    ).toBeVisible();
+      screen.getByText("That Project belongs to a different window.").closest(".composer"),
+    ).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(onDismiss).toHaveBeenCalledOnce();
   });

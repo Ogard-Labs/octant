@@ -1536,6 +1536,58 @@ h6 {
   backdrop-filter: blur(10px) saturate(110%);
 }
 
+.composer--has-notice {
+  position: relative;
+  isolation: isolate;
+}
+
+.workspace-cross-context-banner--inline {
+  position: absolute;
+  top: auto;
+  bottom: calc(100% - 8px);
+  left: 0;
+  z-index: -1;
+  width: 100%;
+  transform: none;
+  margin: 0;
+  padding-bottom: 14px;
+  animation: composer-notice-reveal var(--oct-motion-fast) ease-out;
+}
+
+.composer-notice-fallback {
+  position: absolute;
+  inset-inline: 16px;
+  bottom: 16px;
+  z-index: 20;
+}
+
+.composer-notice-fallback > .workspace-cross-context-banner--inline {
+  position: relative;
+  bottom: auto;
+  z-index: 0;
+}
+
+@keyframes composer-notice-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-cross-context-banner--inline {
+    animation: none;
+  }
+}
+
+html[data-octant-reduced-motion="true"] .workspace-cross-context-banner--inline {
+  animation: none;
+}
+
 .workspace-cross-context-banner__message {
   min-width: 0;
   font-size: calc(12 * var(--oct-text-step));

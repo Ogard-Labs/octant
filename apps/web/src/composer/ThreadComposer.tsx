@@ -1,3 +1,4 @@
+import { useComposerNotice } from "./ComposerNotice";
 import type { ReactNode } from "react";
 import { ArrowUp, Square } from "lucide-react";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
@@ -98,9 +99,10 @@ export interface ThreadComposerProps {
 }
 
 export function ThreadComposer(props: ThreadComposerProps) {
+  const notice = useComposerNotice();
   const baseClassName = props.className === undefined ? "composer" : `composer ${props.className}`;
   const followUp = props.presentation === "follow-up";
-  const frameClassName = followUp ? `${baseClassName} composer--follow-up` : baseClassName;
+  const frameClassName = `${followUp ? `${baseClassName} composer--follow-up` : baseClassName}${notice == null ? "" : " composer--has-notice"}`;
   const message = (
     <>
       {props.chips}
@@ -148,13 +150,19 @@ export function ThreadComposer(props: ThreadComposerProps) {
       {props.footer}
     </>
   );
-  return props.ariaLabel === undefined ? (
-    <div className={frameClassName}>{body}</div>
-  ) : (
-    <section aria-label={props.ariaLabel} className={frameClassName}>
-      {body}
-    </section>
-  );
+  const frame =
+    props.ariaLabel === undefined ? (
+      <div className={frameClassName}>
+        {notice}
+        {body}
+      </div>
+    ) : (
+      <section aria-label={props.ariaLabel} className={frameClassName}>
+        {notice}
+        {body}
+      </section>
+    );
+  return frame;
 }
 
 function sendRefused(send: ThreadComposerSend): boolean {

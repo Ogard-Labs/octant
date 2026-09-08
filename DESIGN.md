@@ -909,3 +909,13 @@ occupies a fixed viewport while content and navigation scroll independently.
 A terminal turn cannot present an unresolved tool call as still running; it
 shows Unfinished unless the tool has its own recorded outcome. Usage resolves
 known provider and task names locally, with original identifiers in tooltips.
+
+### Draft continuity and composer notices
+
+A new-task composer keeps its identity while its Project binding changes.
+Message text and local input state reset only for an explicit New task action.
+A refused binding keeps the prior authorized Project and draft. Cross-Project
+notices appear once beside the active draft composer, with a separate-window
+action when available, and reveal upward behind the message surface.
+Authority confirmations follow the trusted inline-surface direction in 0100;
+ordinary notice content cannot issue an approval receipt.

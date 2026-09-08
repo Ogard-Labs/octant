@@ -3576,6 +3576,7 @@ function LaunchedShell(
     // overview on screen for a frame before the draft replaced it, which read
     // as an old page flashing past every time a task was started from a row.
     closeWorkspaceReaders();
+    setDraftResetRevision((revision) => revision + 1);
     await controller.openDraftThread(mode, projectId);
   }
 
@@ -3594,6 +3595,7 @@ function LaunchedShell(
   function createChat(prompt?: string) {
     if (prompt === undefined || prompt.trim() === "") {
       closeWorkspaceReaders();
+      setDraftResetRevision((revision) => revision + 1);
       setDraftProjectSelection(({ chat: _previous, ...rest }) => rest);
       void controller.openDraftThread("chat");
       return;
@@ -5271,14 +5273,21 @@ function LaunchedShell(
                     draftResetRevision={draftResetRevision}
                     draftProjectSelection={draftProjectSelection}
                     onDraftSelectProject={(mode, projectId) => {
-                      setDraftProjectSelection((current) => ({ ...current, [mode]: projectId }));
                       // Choosing a folder in the composer is the authority
                       // transition, not a renderer preference: the window is
                       // refused every Code command about a Project its
                       // persisted workspace does not name. Re-opening the draft
                       // with the Project records it on the surface the server
                       // reads.
-                      const binding = controller.openDraftThread(mode, projectId);
+                      const binding = controller
+                        .openDraftThread(mode, projectId)
+                        .then((accepted) => {
+                          if (accepted)
+                            setDraftProjectSelection((current) => ({
+                              ...current,
+                              [mode]: projectId,
+                            }));
+                        });
                       draftProjectBinding.current = binding;
                       void binding.catch(() => undefined);
                     }}

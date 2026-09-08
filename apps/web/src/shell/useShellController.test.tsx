@@ -650,6 +650,34 @@ describe("useShellController", () => {
     expect(result.current.crossContextOffer).toBeUndefined();
   });
 
+  it("reports a refused draft binding and offers its Project in another window", async () => {
+    const projectId = decodeProjectId("00000000-0000-4000-8000-000000000897");
+    const bootstrap = codeBootstrap();
+    const client: ShellClient = {
+      bootstrap: vi.fn(async () => bootstrap),
+      execute: vi.fn(async () => {
+        throw { category: "cross-context", message: "This Project needs another window." };
+      }),
+    };
+    const openInNewWindow = vi.fn(async () => undefined);
+    const { result } = renderHook(() =>
+      useShellController({
+        client,
+        nativeHost: { resetBounds: vi.fn(), openInNewWindow },
+        serverUrl: "http://127.0.0.1:13773",
+        windowId,
+      }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await act(async () => {
+      expect(await result.current.openDraftThread("code", projectId)).toBe(false);
+    });
+    expect(result.current.workspace).toEqual(bootstrap.workspace);
+    expect(result.current.canOpenCrossContextInNewWindow).toBe(true);
+    await act(async () => result.current.openCrossContextInNewWindow());
+    expect(openInNewWindow).toHaveBeenCalledWith({ kind: "project", projectId });
+  });
+
   it("lets a Project-scoped draft take over the pane the generic draft occupied", async () => {
     // Open replaces: drafts for different Projects are different surfaces, and
     // the newer one lands in the pane the person is working in rather than

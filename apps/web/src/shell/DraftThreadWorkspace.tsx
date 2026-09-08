@@ -231,13 +231,15 @@ const CODE_SUGGESTIONS: ReadonlyArray<CodeComposerSuggestion> = [
 ];
 
 export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
-  const [selectedProjectId, setSelectedProjectId] = useState<ProjectId | undefined>(
-    props.projectId,
-  );
+  const [localProjectId, setLocalProjectId] = useState<ProjectId | undefined>(props.projectId);
+  // The shell owns a persisted selection when supplied; refused transitions
+  // must keep its former Project without replacing the composer's draft.
+  const selectedProjectId = props.onSelectProject === undefined ? localProjectId : props.projectId;
   const selectProject = (projectId: ProjectId) => {
-    setSelectedProjectId(projectId);
-    props.onSelectProject?.(projectId);
+    if (props.onSelectProject === undefined) setLocalProjectId(projectId);
+    else props.onSelectProject(projectId);
   };
+  useEffect(() => setLocalProjectId(props.projectId), [props.projectId]);
   type CreateFromSelection =
     | {
         readonly kind: "github";
