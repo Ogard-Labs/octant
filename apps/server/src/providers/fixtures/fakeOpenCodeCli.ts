@@ -45,7 +45,9 @@ if (process.argv.slice(2).join(" ") === "--version") {
       ? "OpenCode build 1.17.19"
       : selectedMode === "probe-v2" || selectedMode === "v2-ready"
         ? "opencode2 v0.0.0-beta-18721"
-        : "1.17.19",
+        : selectedMode === "isolation-supported"
+          ? "1.18.21"
+          : "1.17.19",
   );
   process.exit(0);
 }

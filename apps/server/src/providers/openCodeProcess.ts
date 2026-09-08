@@ -4,6 +4,7 @@ import {
   constants,
   accessSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -67,6 +68,7 @@ const DEFAULT_STARTUP_TIMEOUT_MS = 10_000;
 const VERSION_TIMEOUT_MS = 5_000;
 const PROJECTED_CONFIG_LIMIT = 2 * 1024 * 1024;
 const PROJECTED_CONFIG_DEPTH_LIMIT = 8;
+const MINIMUM_ISOLATED_OPEN_CODE_VERSION = [1, 18, 0] as const;
 const LEGACY_VERSION_PATTERN = /^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
 const BETA_VERSION_PATTERN = /^opencode2 (v\d+\.\d+\.\d+-[0-9A-Za-z.-]+)$/;
 const READINESS_PATTERN = /^(?:opencode )?server listening on (http:\/\/[^\s]+)$/;
@@ -104,9 +106,13 @@ export interface PrivateOpenCodeProfile {
 export interface OpenCodeConfigResolverInput {
   readonly binaryPath: string;
   readonly cwd: string;
+  /** Explicit environment used to locate routing config without touching auth data. */
+  readonly environment?: NodeJS.ProcessEnv;
 }
 
-export type OpenCodeConfigResolver = (input: OpenCodeConfigResolverInput) => Promise<unknown>;
+export type OpenCodeConfigResolver = (
+  input: OpenCodeConfigResolverInput,
+) => Promise<unknown | undefined>;
 
 type JsonRecord = { readonly [key: string]: unknown };
 const SAFE_SECRET_REFERENCE = /^\{(?:env|file):[^{}\r\n]+\}$/;
@@ -203,6 +209,120 @@ export async function captureOpenCodeRuntimeConfig(
 ): Promise<PrivateRuntimeConfig | undefined> {
   const resolved = await resolver(input);
   return resolved === undefined ? undefined : projectOpenCodeRuntimeConfig(resolved);
+}
+
+function stripJsoncComments(content: string): string {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+  for (let index = 0; index < content.length; index += 1) {
+    const character = content[index];
+    const next = content[index + 1];
+    if (lineComment) {
+      if (character === "\n") {
+        lineComment = false;
+        output += character;
+      }
+      continue;
+    }
+    if (blockComment) {
+      if (character === "*" && next === "/") {
+        blockComment = false;
+        index += 1;
+      } else if (character === "\n") {
+        output += character;
+      }
+      continue;
+    }
+    if (inString) {
+      output += character;
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      output += character;
+    } else if (character === "/" && next === "/") {
+      lineComment = true;
+      index += 1;
+    } else if (character === "/" && next === "*") {
+      blockComment = true;
+      index += 1;
+    } else {
+      output += character;
+    }
+  }
+  return output.replace(/,\s*([}\]])/g, "$1");
+}
+
+function parseRoutingConfig(content: string): unknown {
+  if (Buffer.byteLength(content, "utf8") > PROJECTED_CONFIG_LIMIT) {
+    throw new Error("OpenCode resolved configuration exceeds the private routing limit.");
+  }
+  try {
+    return JSON.parse(content.replace(/^\uFEFF/, ""));
+  } catch {
+    try {
+      return JSON.parse(stripJsoncComments(content.replace(/^\uFEFF/, "")));
+    } catch {
+      throw new Error("OpenCode routing configuration is not valid JSON.");
+    }
+  }
+}
+
+function routingConfigCandidates(environment: NodeJS.ProcessEnv): ReadonlyArray<string> {
+  const candidates: string[] = [];
+  const explicit = environment.OPENCODE_CONFIG;
+  if (explicit !== undefined && isAbsolute(explicit)) candidates.push(explicit);
+  const configHome = environment.XDG_CONFIG_HOME;
+  if (configHome !== undefined && isAbsolute(configHome)) {
+    candidates.push(join(configHome, "opencode", "opencode.json"));
+    candidates.push(join(configHome, "opencode", "opencode.jsonc"));
+  }
+  const home = environment.HOME;
+  if (home !== undefined && isAbsolute(home)) {
+    candidates.push(join(home, ".config", "opencode", "opencode.json"));
+    candidates.push(join(home, ".config", "opencode", "opencode.jsonc"));
+  }
+  return [...new Set(candidates)];
+}
+
+/** Reads only the configured OpenCode routing files; auth data is never read. */
+export async function resolveOpenCodeRuntimeConfig(
+  input: OpenCodeConfigResolverInput,
+): Promise<unknown | undefined> {
+  for (const path of routingConfigCandidates(input.environment ?? process.env)) {
+    let content: string;
+    try {
+      content = readFileSync(path, "utf8");
+    } catch {
+      continue;
+    }
+    return JSON.parse(projectOpenCodeRuntimeConfig(parseRoutingConfig(content)).content);
+  }
+  return undefined;
+}
+
+function versionNumbers(version: string): readonly [number, number, number] | undefined {
+  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
+  if (match === null) return undefined;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+/** Isolation guards are attested only for the runtime version verified by the hostile fixture. */
+export function supportsOpenCodeIsolation(version: string): boolean {
+  const numbers = versionNumbers(version);
+  if (numbers === undefined) return false;
+  // The hostile fixture proves the 1.18 line. Future minor releases must
+  // repeat that evidence before they can expose app-managed tools.
+  return (
+    numbers[0] === MINIMUM_ISOLATED_OPEN_CODE_VERSION[0] &&
+    numbers[1] === MINIMUM_ISOLATED_OPEN_CODE_VERSION[1]
+  );
 }
 
 function scrubOpenCodeConfigEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -513,6 +633,7 @@ function acquireOpenCodeServer(
   options: ResolvedOpenCodeProcessOptions,
   runtime: OpenCodeRuntime,
   version: string,
+  isolationAttested: boolean,
   onProcessStarted?: ProviderProcessStartedListener,
 ): Effect.Effect<ManagedOpenCodeServer, ProviderFailure> {
   const invalid = validateBinaryPath(input.binaryPath);
@@ -644,7 +765,7 @@ function acquireOpenCodeServer(
               connection: {
                 authorization,
                 pid: child.pid!,
-                isolatedConfiguration: true,
+                ...(isolationAttested ? { isolatedConfiguration: true as const } : {}),
                 runtime,
                 version,
                 url,
@@ -728,14 +849,19 @@ export function makeOpenCodeProcessLive(
         // label as a legacy semantic version.
         const probe = yield* probeOpenCodeBinary(input.binaryPath);
         const runtime = runtimeForVersion(probe.version);
+        const resolver =
+          options.runtimeConfigResolver ??
+          ((resolverInput: OpenCodeConfigResolverInput) =>
+            resolveOpenCodeRuntimeConfig({
+              ...resolverInput,
+              environment: options.inheritedEnvironment ?? process.env,
+            }));
         const runtimeConfig = yield* Effect.tryPromise({
           try: async () =>
-            options.runtimeConfigResolver === undefined
-              ? projectOpenCodeRuntimeConfig({})
-              : ((await captureOpenCodeRuntimeConfig(
-                  { binaryPath: input.binaryPath, cwd: input.cwd },
-                  options.runtimeConfigResolver,
-                )) ?? projectOpenCodeRuntimeConfig({})),
+            (await captureOpenCodeRuntimeConfig(
+              { binaryPath: input.binaryPath, cwd: input.cwd },
+              resolver,
+            )) ?? projectOpenCodeRuntimeConfig({}),
           catch: () =>
             failure("invalid-configuration", "OpenCode runtime routing could not be prepared."),
         });
@@ -746,6 +872,7 @@ export function makeOpenCodeProcessLive(
             { ...resolvedOptions, runtimeConfig },
             runtime,
             probe.version,
+            supportsOpenCodeIsolation(probe.version),
             input.onProcessStarted,
           ).pipe(
             Effect.tap((managed) =>

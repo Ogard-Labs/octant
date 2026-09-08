@@ -2,6 +2,7 @@ import {
   accessSync,
   chmodSync,
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -19,6 +20,8 @@ import {
   makeOpenCodeProcessLive,
   projectOpenCodeRuntimeConfig,
   probeOpenCodeBinary,
+  resolveOpenCodeRuntimeConfig,
+  supportsOpenCodeIsolation,
   type OpenCodeProcessDependencies,
   type OpenCodeProcessOptions,
   type OpenCodeProcessPort,
@@ -61,17 +64,17 @@ function environmentRecordingWrapper(): {
   return { binaryPath, environmentPath, root };
 }
 
-function profileRecordingWrapper(): {
+function profileRecordingWrapper(mode = "ready"): {
   readonly binaryPath: string;
   readonly environmentPath: string;
   readonly root: string;
 } {
-  const root = fixtureRoot();
+  const root = fixtureRoot(mode);
   const binaryPath = join(root, "opencode-profile-fixture");
   const environmentPath = join(root, ".fake-opencode-profile");
   writeFileSync(
     binaryPath,
-    `#!/bin/sh\nprintf 'config=%s\\nconfig-content=%s\\nconfig-dir=%s\\ndata=%s\\n' "\${OPENCODE_CONFIG-<unset>}" "\${OPENCODE_CONFIG_CONTENT-<unset>}" "\${XDG_CONFIG_HOME-<unset>}" "\${XDG_DATA_HOME-<unset>}" > '${environmentPath}'\nexec '${fakeCliPath}' "$@"\n`,
+    `#!/bin/sh\ncd '${root}'\nprintf 'config=%s\\nconfig-content=%s\\nconfig-dir=%s\\ndata=%s\\n' "\${OPENCODE_CONFIG-<unset>}" "\${OPENCODE_CONFIG_CONTENT-<unset>}" "\${XDG_CONFIG_HOME-<unset>}" "\${XDG_DATA_HOME-<unset>}" > '${environmentPath}'\nexec '${fakeCliPath}' "$@"\n`,
   );
   chmodSync(binaryPath, 0o755);
   return { binaryPath, environmentPath, root };
@@ -138,6 +141,79 @@ afterEach(() => {
 });
 
 describe("probeOpenCodeBinary", () => {
+  it("resolves only global OpenCode routing config and never project extension config", async () => {
+    const root = fixtureRoot();
+    const configHome = join(root, "xdg-config");
+    mkdirSync(join(configHome, "opencode"), { recursive: true });
+    writeFileSync(
+      join(configHome, "opencode", "opencode.jsonc"),
+      '{\n  // routing only\n  "model": "synthetic/model",\n  "plugin": ["global-hostile"],\n  "provider": { "synthetic": { "options": { "baseURL": "https://provider.invalid" }, }, },\n}\n',
+    );
+    writeFileSync(join(root, "opencode.json"), '{"model":"project-hostile"}');
+    const resolved = await resolveOpenCodeRuntimeConfig({
+      binaryPath: "/synthetic/opencode",
+      cwd: root,
+      environment: { HOME: join(root, "home"), XDG_CONFIG_HOME: configHome },
+    });
+    expect(resolved).toMatchObject({ model: "synthetic/model" });
+    expect(resolved).not.toHaveProperty("plugin");
+  });
+
+  it("only attests isolation for the verified OpenCode runtime version", () => {
+    expect(supportsOpenCodeIsolation("1.18.21")).toBe(true);
+    expect(supportsOpenCodeIsolation("1.17.19")).toBe(false);
+    expect(supportsOpenCodeIsolation("1.19.0")).toBe(false);
+    expect(supportsOpenCodeIsolation("opencode2 v0.0.0-beta-18721")).toBe(false);
+  });
+
+  it.skipIf(process.env.OCTANT_OPENCODE_PROFILE_SMOKE !== "1")(
+    "keeps hostile project and global plugin fixtures out of the installed runtime",
+    async () => {
+      const binaryPath = "/opt/homebrew/bin/opencode";
+      expect(() => accessSync(binaryPath)).not.toThrow();
+      const root = mkdtempSync(join(tmpdir(), "octant-opencode-isolation-smoke-"));
+      const markerPath = join(root, "hostile-plugin-loaded");
+      const configHome = join(root, "config");
+      const dataHome = join(root, "data");
+      mkdirSync(join(root, ".opencode", "plugins"), { recursive: true });
+      mkdirSync(join(configHome, "opencode", "plugins"), { recursive: true });
+      mkdirSync(join(dataHome, "opencode", "plugins"), { recursive: true });
+      const hostile = `import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(markerPath)}, "loaded");\nexport const Hostile = async () => ({});\n`;
+      writeFileSync(join(root, ".opencode", "plugins", "hostile.js"), hostile);
+      writeFileSync(join(configHome, "opencode", "plugins", "hostile.js"), hostile);
+      writeFileSync(join(dataHome, "opencode", "plugins", "hostile.js"), hostile);
+      writeFileSync(
+        join(configHome, "opencode", "opencode.jsonc"),
+        '{ "plugin": ["hostile-plugin"], "provider": {}, }',
+      );
+      const environment = {
+        PATH: process.env.PATH,
+        HOME: root,
+        XDG_CONFIG_HOME: configHome,
+        XDG_DATA_HOME: dataHome,
+        XDG_STATE_HOME: join(root, "state"),
+        XDG_CACHE_HOME: join(root, "cache"),
+        OPENCODE_DISABLE_AUTOUPDATE: "1",
+        OPENCODE_DISABLE_MODELS_FETCH: "1",
+      };
+      try {
+        const server = await Effect.runPromise(
+          Effect.scoped(
+            makeOpenCodeProcessLive({
+              inheritedEnvironment: environment,
+              startupTimeoutMs: 20_000,
+            }).start({ binaryPath, cwd: root }),
+          ),
+        );
+        expect(server.isolatedConfiguration).toBe(true);
+        expect(() => readFileSync(markerPath)).toThrow();
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    60_000,
+  );
+
   it("projects provider routing while excluding executable extension surfaces", () => {
     const projected = projectOpenCodeRuntimeConfig({
       $schema: "https://example.invalid/config.json",
@@ -374,13 +450,14 @@ describe("OpenCodeProcessPort", () => {
       {
         startupTimeoutMs: 2_000,
         shutdownTimeoutMs: 150,
+        runtimeConfigResolver: async () => undefined,
         ...overrides,
       },
       dependencies,
     );
 
   it("starts with a private config profile, preserves provider data ownership, and attests isolation", async () => {
-    const fixture = profileRecordingWrapper();
+    const fixture = profileRecordingWrapper("isolation-supported");
     const inheritedEnvironment = {
       ...process.env,
       HOME: "/synthetic/home",
@@ -413,7 +490,7 @@ describe("OpenCodeProcessPort", () => {
   });
 
   it("imports resolver routing into the private profile without forwarding extension settings", async () => {
-    const fixture = profileRecordingWrapper();
+    const fixture = profileRecordingWrapper("isolation-supported");
     const resolver = vi.fn(async () => ({
       model: "synthetic/model",
       provider: {
