@@ -577,7 +577,6 @@ function ActiveSectionContent({
       return props.nativeHarnessClient !== undefined ? (
         <div id="settings-harness">
           <section className="settings-card-section settings-card-section--open">
-            <h2>Octant Harness</h2>
             <p className="native-harness-panel__lead">
               Octant runs API-key and local endpoint models with its own tools, authority checks,
               and journal. Those endpoints appear together as <strong>Octant</strong> in the model

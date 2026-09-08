@@ -1,5 +1,6 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { PickerGroup } from "@octant/domain";
 import type { ProviderInstance } from "@octant/contracts";
 import type { DiscoveryController } from "./useDiscoveryController";
 import type { ProviderController } from "./useProviderController";
