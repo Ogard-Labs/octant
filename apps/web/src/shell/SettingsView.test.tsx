@@ -213,6 +213,17 @@ describe("SettingsView", () => {
     );
   });
 
+  it("resets the Settings content scroll when navigating between sections", () => {
+    renderSettings();
+    const content = document.querySelector<HTMLElement>(".settings-view__content");
+    if (content === null) throw new Error("Expected Settings content scroller");
+
+    content.scrollTop = 480;
+    navigateTo("Appearance");
+
+    expect(content.scrollTop).toBe(0);
+  });
+
   it("returns to the app from the dedicated Settings sidebar", async () => {
     const user = userEvent.setup();
     const onBack = vi.fn();

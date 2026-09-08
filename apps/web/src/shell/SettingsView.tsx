@@ -209,9 +209,21 @@ export function SettingsView(props: SettingsViewProps) {
     ...(props.initialDeepLink === undefined ? {} : { initialDeepLink: props.initialDeepLink }),
   });
   const narrow = props.isNarrow === true;
+  const contentRef = useRef<HTMLDivElement>(null);
+  const previousSection = useRef(route.activeSection);
   const [navigationOpen, setNavigationOpen] = useState(false);
   const navigationTrigger = useRef<HTMLButtonElement>(null);
   const navigationClose = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const sectionChanged = previousSection.current !== route.activeSection;
+    previousSection.current = route.activeSection;
+    // A focused deep link lets SettingRow scroll the requested control into
+    // view. Reset only ordinary section changes, so a user never lands halfway
+    // down a newly selected Settings page while deep links keep their target.
+    if (!sectionChanged || route.focusedSetting !== undefined) return;
+    if (contentRef.current !== null) contentRef.current.scrollTop = 0;
+  }, [route.activeSection, route.focusedSetting]);
 
   // Apply a pending deep link requested from another app surface (e.g. an
   // empty state or provider error) once, then report it consumed.
@@ -337,7 +349,7 @@ export function SettingsView(props: SettingsViewProps) {
             </nav>
           </div>
         )}
-        <main className="settings-view__content">
+        <main className="settings-view__content" ref={contentRef}>
           <div className="settings-view__content-inner">
             <header className="settings-view__header">
               <h1 className="oct-title" id="settings-heading">
