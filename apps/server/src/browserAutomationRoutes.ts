@@ -28,6 +28,7 @@ import type { WindowAuthorityStore } from "./windowAuthorityStore";
 const PREFIX = "/api/browser/";
 const METHODS = "POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
+const BROWSER_MODES = ["chat", "work", "code"] as const;
 
 export interface BrowserAutomationRouteDependencies {
   readonly service: Pick<
@@ -179,6 +180,17 @@ export function createBrowserAutomationRouteHandler(
       }
       if (url.pathname === "/api/browser/contexts/current") {
         const input = decodeBrowserThreadContextCommand(decoded.value);
+        if (
+          !BROWSER_MODES.some((mode) =>
+            dependencies.authority.canAccessWindow(windowId, input.threadId, mode),
+          )
+        ) {
+          return failure(
+            { category: "unauthorized", message: "Browser thread is not owned by this window." },
+            403,
+            origin,
+          );
+        }
         // The preview polls this route, so it is where a page the person
         // drives gets its picture refreshed.
         const snapshot =

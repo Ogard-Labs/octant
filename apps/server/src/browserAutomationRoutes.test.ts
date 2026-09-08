@@ -116,6 +116,16 @@ describe("browser automation routes", () => {
     );
     expect(created?.status).toBe(403);
     expect(service.create).not.toHaveBeenCalled();
+
+    const current = await isolatedHandler(
+      new Request("http://127.0.0.1/api/browser/contexts/current", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ threadId }),
+      }),
+    );
+    expect(current?.status).toBe(403);
+    expect(service.inspectThread).not.toHaveBeenCalled();
   });
 
   it("returns only the server-resolved authority for an authenticated thread", async () => {
