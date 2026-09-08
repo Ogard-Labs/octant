@@ -12,7 +12,9 @@ const MAX_BODY_BYTES = 16 * 1024;
 
 export interface LocalUsageHistoryRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
-  readonly sources: ReadonlyArray<ProviderLocalUsageHistorySource>;
+  readonly sources:
+    | ReadonlyArray<ProviderLocalUsageHistorySource>
+    | (() => ReadonlyArray<ProviderLocalUsageHistorySource>);
   readonly now?: () => number;
   readonly clock?: () => string;
 }
@@ -55,13 +57,18 @@ export function createLocalUsageHistoryRouteHandler(
     }
     try {
       const decoded = decodeLocalUsageHistoryRequest(body);
+      const sources =
+        typeof dependencies.sources === "function" ? dependencies.sources() : dependencies.sources;
       const response: LocalUsageHistoryResponse = await readLocalUsageHistoryDashboard({
-        sources: dependencies.sources,
+        sources,
         request: decoded,
         queryAt: clock(),
+        signal: request.signal,
       });
       return json(response, 200, origin);
-    } catch {
+    } catch (error) {
+      if (request.signal.aborted)
+        return new Response(null, { status: 499, headers: corsHeaders(origin) });
       return failure("Usage history is unavailable.", 503, origin);
     }
   };

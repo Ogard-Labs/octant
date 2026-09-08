@@ -6,9 +6,11 @@ import type {
   UtcTimestamp,
 } from "@octant/contracts";
 import type { ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
+import { resolveLocalUsageCost, type PricingUsageRecord } from "./localUsagePricing";
 import {
   readLocalUsageHistory,
   stableUsageId,
+  type LocalUsageHistoryLineParser,
   type LocalUsageHistoryReaderOptions,
 } from "./localUsageHistoryReader";
 
@@ -18,13 +20,14 @@ export function createCodexLocalUsageHistorySource(
 ): ProviderLocalUsageHistorySource {
   return {
     sourceKind: "codex",
-    read: (request: LocalUsageHistoryRequest) =>
+    read: (request: LocalUsageHistoryRequest, signal) =>
       Effect.tryPromise({
-        try: async () => ({
+        try: async (effectSignal) => ({
           ...(await readLocalUsageHistory(
             { ...options, sourceKind: "codex", providerKey: "codex" },
             request,
             createCodexLineParser(),
+            signal ?? effectSignal,
           )),
         }),
         catch: (): ProviderFailure => ({
@@ -37,7 +40,8 @@ export function createCodexLocalUsageHistorySource(
 
 function createCodexLineParser(): LocalUsageHistoryLineParser {
   const models = new Map<string, string>();
-  return (input) => parseCodexLine(input, models);
+  const seenUsageIds = new Set<string>();
+  return (input) => parseCodexLine(input, models, seenUsageIds);
 }
 
 function parseCodexLine(
@@ -49,6 +53,7 @@ function parseCodexLine(
     readonly lineNumber: number;
   },
   models: Map<string, string>,
+  seenUsageIds: Set<string>,
 ): LocalUsageHistoryRecord | undefined {
   const value = parseRecord(input.line);
   if (value?.type === "session_meta") {
@@ -56,6 +61,18 @@ function parseCodexLine(
     const sessionId = text(payload?.id) ?? sessionIdFromPath(input.sourceSessionIdHint);
     const provenance = record(record(payload?.base_instructions)?.provenance);
     const model = text(payload?.model) ?? text(provenance?.model);
+    if (model !== undefined) models.set(sessionId, model);
+    return undefined;
+  }
+  if (value?.type === "turn_context") {
+    const payload = record(value.payload);
+    const sessionId =
+      text(payload?.thread_id) ??
+      text(payload?.threadId) ??
+      text(payload?.session_id) ??
+      text(payload?.sessionId) ??
+      sessionIdFromPath(input.sourceSessionIdHint);
+    const model = text(payload?.model);
     if (model !== undefined) models.set(sessionId, model);
     return undefined;
   }
@@ -72,37 +89,44 @@ function parseCodexLine(
   if (observedAt === undefined) return undefined;
   const sourceSessionId =
     text(payload.thread_id) ??
+    text(payload.threadId) ??
     text(payload.session_id) ??
+    text(payload.sessionId) ??
     sessionIdFromPath(input.sourceSessionIdHint);
   const modelId =
-    text(payload.model) ??
-    text(info?.model) ??
-    text(record(value.turn_context)?.model) ??
-    models.get(sourceSessionId) ??
-    "unknown";
+    text(payload.model) ?? text(info?.model) ?? models.get(sourceSessionId) ?? "unknown";
   const cacheReadInputTokens = nonNegativeInt(last.cached_input_tokens);
   const cacheWriteInputTokens = nonNegativeInt(last.cache_write_input_tokens);
   const reasoningTokens = nonNegativeInt(last.reasoning_output_tokens);
   const costUsd = nonNegativeNumber(last.cost_usd) ?? nonNegativeNumber(info?.cost_usd);
-  const cost =
-    costUsd === undefined
-      ? codexApiEstimate({
-          modelId,
-          inputTokens,
-          cacheReadInputTokens,
-          cacheWriteInputTokens,
-          outputTokens,
-        })
+  const pricingRecord: PricingUsageRecord = {
+    modelId,
+    inputTokens,
+    ...(cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens }),
+    ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens }),
+    outputTokens,
+    ...(costUsd === undefined
+      ? {}
       : {
-          amount: costUsd,
-          currency: "USD" as const,
-          kind: "provider-recorded" as const,
-        };
+          cost: { amount: costUsd, currency: "USD" as const, kind: "provider-recorded" as const },
+        }),
+  };
+  const cost = localCost("openai", pricingRecord);
+  const cumulative = record(info?.total_token_usage);
+  const turnIdentity =
+    text(payload.turn_id) ?? text(payload.turnId) ?? text(info?.turn_id) ?? text(info?.turnId);
+  const eventIdentity =
+    cumulative === undefined
+      ? (turnIdentity ?? JSON.stringify(last))
+      : `${turnIdentity ?? ""}\0${JSON.stringify(cumulative)}`;
+  const sourceEventId = stableUsageId("codex", sourceSessionId, eventIdentity);
+  if (seenUsageIds.has(sourceEventId)) return undefined;
+  seenUsageIds.add(sourceEventId);
   return {
     sourceKind: "codex",
     sourceInstallationId: input.sourceInstallationId,
     sourceSessionId,
-    sourceEventId: stableUsageId("codex", sourceSessionId, observedAt, JSON.stringify(last)),
+    sourceEventId,
     providerKey: "codex",
     modelId,
     observedAt,
@@ -115,34 +139,20 @@ function parseCodexLine(
   };
 }
 
-function codexApiEstimate(input: {
-  readonly modelId: string;
-  readonly inputTokens: number;
-  readonly cacheReadInputTokens: number | undefined;
-  readonly cacheWriteInputTokens: number | undefined;
-  readonly outputTokens: number;
-}): LocalUsageHistoryRecord["cost"] {
-  const pricing = [
-    { prefix: "gpt-5.6-luna", input: 0.2, read: 0.02, write: 0.25, output: 1.2 },
-    { prefix: "gpt-5.6-terra", input: 2, read: 0.2, write: 2.5, output: 12 },
-    { prefix: "gpt-5.6-sol", input: 4, read: 0.4, write: 5, output: 20 },
-  ].find((candidate) => input.modelId.startsWith(candidate.prefix));
-  if (pricing === undefined) return undefined;
-  if (input.cacheReadInputTokens !== undefined && input.cacheReadInputTokens > input.inputTokens)
-    return undefined;
-  if ((input.cacheWriteInputTokens ?? 0) > 0) return undefined;
-  const uncached = input.inputTokens - (input.cacheReadInputTokens ?? 0);
-  const amount =
-    (uncached * pricing.input +
-      (input.cacheReadInputTokens ?? 0) * pricing.read +
-      input.outputTokens * pricing.output) /
-    1_000_000;
+function localCost(
+  provider: "openai",
+  record: PricingUsageRecord,
+): LocalUsageHistoryRecord["cost"] {
+  const resolved = resolveLocalUsageCost(provider, record);
+  if (resolved.kind === "unpriced") return undefined;
   return {
-    amount,
-    currency: "USD",
-    kind: "api-estimate",
-    pricingRevision: "openai-api-2026-09-09",
-    pricingSource: "https://developers.openai.com/api/docs/pricing",
+    ...resolved.cost,
+    ...(resolved.kind === "api-estimate" && resolved.estimate !== undefined
+      ? {
+          pricingRevision: resolved.estimate.pricingRevision,
+          pricingSource: resolved.estimate.source.url,
+        }
+      : {}),
   };
 }
 

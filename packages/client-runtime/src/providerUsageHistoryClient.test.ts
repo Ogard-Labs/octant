@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import type { LocalUsageHistoryRequest } from "@octant/contracts";
 import {
   createLocalUsageHistoryClient,
   LocalUsageHistoryClientFailure,
 } from "./providerUsageHistoryClient";
 
-const request = {
+const request: LocalUsageHistoryRequest = {
   from: "2026-09-01T00:00:00.000Z",
   to: "2026-09-30T23:59:59.999Z",
   timeZone: "UTC",

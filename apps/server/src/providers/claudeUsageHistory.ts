@@ -6,6 +6,7 @@ import type {
   UtcTimestamp,
 } from "@octant/contracts";
 import type { ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
+import { resolveLocalUsageCost, type PricingUsageRecord } from "./localUsagePricing";
 import {
   readLocalUsageHistory,
   stableUsageId,
@@ -18,13 +19,14 @@ export function createClaudeLocalUsageHistorySource(
 ): ProviderLocalUsageHistorySource {
   return {
     sourceKind: "claude-code",
-    read: (request: LocalUsageHistoryRequest) =>
+    read: (request: LocalUsageHistoryRequest, signal) =>
       Effect.tryPromise({
-        try: () =>
+        try: (effectSignal) =>
           readLocalUsageHistory(
             { ...options, sourceKind: "claude-code", providerKey: "claude-code" },
             request,
             parseClaudeLine,
+            signal ?? effectSignal,
           ),
         catch: (): ProviderFailure => ({
           category: "provider-failed",
@@ -80,23 +82,21 @@ function parseClaudeLine(input: {
     stableUsageId("claude-code", sourceSessionId, observedAt, JSON.stringify(usage));
   const modelId = text(message?.model) ?? text(value.model) ?? "unknown";
   const costUsd = nonNegativeNumber(value.cost_usd) ?? nonNegativeNumber(value.costUsd);
-  const cost =
-    costUsd === undefined
-      ? claudeApiEstimate({
-          modelId,
-          uncachedInputTokens,
-          cacheReadInputTokens,
-          cacheWriteInputTokens,
-          cacheWriteDuration,
-          outputTokens,
-        })
-      : {
-          amount: costUsd,
-          currency: "USD" as const,
-          kind: "api-estimate" as const,
-          pricingRevision: "claude-log-2026-09-09",
-          pricingSource: "https://code.claude.com/docs/en/monitoring-usage",
-        };
+  const pricingRecord: PricingUsageRecord = {
+    modelId,
+    inputTokens,
+    uncachedInputTokens,
+    ...(cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens }),
+    ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens }),
+    ...(cacheWriteDuration === undefined || cacheWriteDuration === "unknown"
+      ? {}
+      : { cacheWriteDuration }),
+    outputTokens,
+    ...(costUsd === undefined
+      ? {}
+      : { cost: { amount: costUsd, currency: "USD" as const, kind: "api-estimate" as const } }),
+  };
+  const cost = localCost("anthropic", pricingRecord);
   return {
     sourceKind: "claude-code",
     sourceInstallationId: input.sourceInstallationId,
@@ -115,43 +115,20 @@ function parseClaudeLine(input: {
   };
 }
 
-function claudeApiEstimate(input: {
-  readonly modelId: string;
-  readonly uncachedInputTokens: number;
-  readonly cacheReadInputTokens: number | undefined;
-  readonly cacheWriteInputTokens: number | undefined;
-  readonly cacheWriteDuration: "5-minute" | "1-hour" | "unknown" | undefined;
-  readonly outputTokens: number;
-}): LocalUsageHistoryRecord["cost"] {
-  const pricing = [
-    { prefix: "claude-opus-5", input: 5, read: 0.5, write5m: 6.25, write1h: 10, output: 25 },
-    { prefix: "claude-opus-4.8", input: 5, read: 0.5, write5m: 6.25, write1h: 10, output: 25 },
-    { prefix: "claude-opus-4.7", input: 5, read: 0.5, write5m: 6.25, write1h: 10, output: 25 },
-    { prefix: "claude-opus-4.6", input: 5, read: 0.5, write5m: 6.25, write1h: 10, output: 25 },
-    { prefix: "claude-opus-4.5", input: 5, read: 0.5, write5m: 6.25, write1h: 10, output: 25 },
-    { prefix: "claude-sonnet-5", input: 2, read: 0.2, write5m: 2.5, write1h: 4, output: 10 },
-    { prefix: "claude-sonnet-4.6", input: 3, read: 0.3, write5m: 3.75, write1h: 6, output: 15 },
-    { prefix: "claude-sonnet-4.5", input: 3, read: 0.3, write5m: 3.75, write1h: 6, output: 15 },
-    { prefix: "claude-haiku-4.5", input: 1, read: 0.1, write5m: 1.25, write1h: 2, output: 5 },
-  ].find((candidate) => input.modelId.startsWith(candidate.prefix));
-  if (pricing === undefined) return undefined;
-  if ((input.cacheWriteInputTokens ?? 0) > 0 && input.cacheWriteDuration === undefined)
-    return undefined;
-  if ((input.cacheWriteInputTokens ?? 0) > 0 && input.cacheWriteDuration === "unknown")
-    return undefined;
-  const writeRate = input.cacheWriteDuration === "1-hour" ? pricing.write1h : pricing.write5m;
-  const amount =
-    (input.uncachedInputTokens * pricing.input +
-      (input.cacheReadInputTokens ?? 0) * pricing.read +
-      (input.cacheWriteInputTokens ?? 0) * writeRate +
-      input.outputTokens * pricing.output) /
-    1_000_000;
+function localCost(
+  provider: "anthropic",
+  record: PricingUsageRecord,
+): LocalUsageHistoryRecord["cost"] {
+  const resolved = resolveLocalUsageCost(provider, record);
+  if (resolved.kind === "unpriced") return undefined;
   return {
-    amount,
-    currency: "USD",
-    kind: "api-estimate",
-    pricingRevision: "anthropic-api-2026-09-09",
-    pricingSource: "https://platform.claude.com/docs/en/about-claude/pricing",
+    ...resolved.cost,
+    ...(resolved.kind === "api-estimate" && resolved.estimate !== undefined
+      ? {
+          pricingRevision: resolved.estimate.pricingRevision,
+          pricingSource: resolved.estimate.source.url,
+        }
+      : {}),
   };
 }
 

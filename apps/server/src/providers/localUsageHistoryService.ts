@@ -29,6 +29,7 @@ interface TotalsAccumulator {
   cacheWriteMeasured: number;
   reasoningMeasured: number;
   costs: CostAccumulator;
+  overflowed: boolean;
 }
 
 interface CostAccumulator {
@@ -53,6 +54,7 @@ function accumulator(): TotalsAccumulator {
     cacheReadMeasured: 0,
     cacheWriteMeasured: 0,
     reasoningMeasured: 0,
+    overflowed: false,
     costs: {
       providerRecordedUsd: 0,
       apiEstimateUsd: 0,
@@ -67,16 +69,25 @@ export async function readLocalUsageHistoryDashboard(input: {
   readonly sources: ReadonlyArray<ProviderLocalUsageHistorySource>;
   readonly request: LocalUsageHistoryRequest;
   readonly queryAt: string;
+  readonly signal?: AbortSignal;
 }): Promise<LocalUsageHistoryResponse> {
   const results = await Promise.all(
     input.sources.map((source) =>
-      Effect.runPromise(source.read(input.request)).catch(() => ({
-        records: [],
-        coverage: failedCoverage(source.sourceKind),
-      })),
+      Effect.runPromise(
+        source.read(input.request, input.signal),
+        input.signal === undefined ? {} : { signal: input.signal },
+      ).catch((error) => {
+        if (input.signal?.aborted) throw error;
+        return {
+          records: [],
+          coverage: failedCoverage(source.sourceKind),
+        };
+      }),
     ),
   );
-  const records = deduplicate(results.flatMap((result) => result.records)).slice(0, MAX_RECORDS);
+  const deduplicated = deduplicate(results.flatMap((result) => result.records));
+  const truncatedByRecordLimit = deduplicated.length > MAX_RECORDS;
+  const records = deduplicated.slice(0, MAX_RECORDS);
   const coverage = results.map((result) => result.coverage);
   const totals = accumulator();
   const providers = new Map<string, TotalsAccumulator>();
@@ -118,23 +129,33 @@ export async function readLocalUsageHistoryDashboard(input: {
       add(created.totals, record);
     } else add(dayGroup.totals, record);
   }
-  const sourceCoverage = coverage.map((entry) =>
-    records.length >= MAX_RECORDS
-      ? {
+  const aggregateTotals = tokenTotals(totals);
+  const truncationDetails = [
+    ...(truncatedByRecordLimit ? ["The bounded local history scan reached its record limit."] : []),
+    ...(providers.size > MAX_GROUPS || models.size > MAX_GROUPS
+      ? ["The bounded local history response reached its group limit."]
+      : []),
+    ...(days.size > MAX_DAYS || dailyTotals.size > MAX_DAYS
+      ? ["The bounded local history response reached its day limit."]
+      : []),
+    ...(totals.overflowed ? ["A local history total exceeded safe integer arithmetic."] : []),
+  ];
+  const sourceCoverage =
+    truncationDetails.length === 0
+      ? coverage
+      : coverage.map((entry) => ({
           ...entry,
           truncated: true,
           status: "partial" as const,
-          detail: "The bounded local history scan reached its record limit.",
-        }
-      : entry,
-  );
+          detail: truncationDetails.join(" "),
+        }));
   return decodeLocalUsageHistoryResponse({
     source: "local-provider-history",
     from: input.request.from,
     to: input.request.to,
     timeZone: input.request.timeZone,
     queryAt: input.queryAt,
-    totals: tokenTotals(totals),
+    totals: aggregateTotals,
     cost: costTotals(totals.costs),
     providers: [...providers.entries()]
       .slice(0, MAX_GROUPS)
@@ -179,45 +200,75 @@ function addTo(
 }
 
 function add(target: TotalsAccumulator, record: LocalUsageHistoryRecord): void {
-  target.inputTokens = safeAdd(target.inputTokens, record.inputTokens);
-  target.outputTokens = safeAdd(target.outputTokens, record.outputTokens);
-  target.requestCount = safeAdd(target.requestCount, 1);
+  target.inputTokens = addNumber(target, target.inputTokens, record.inputTokens);
+  target.outputTokens = addNumber(target, target.outputTokens, record.outputTokens);
+  target.requestCount = addNumber(target, target.requestCount, 1);
   target.sessions.add(record.sourceSessionId);
   if (record.uncachedInputTokens !== undefined) {
-    target.uncachedInputTokens = safeAdd(target.uncachedInputTokens, record.uncachedInputTokens);
-    target.uncachedMeasured = safeAdd(target.uncachedMeasured, 1);
+    target.uncachedInputTokens = addNumber(
+      target,
+      target.uncachedInputTokens,
+      record.uncachedInputTokens,
+    );
+    target.uncachedMeasured = addNumber(target, target.uncachedMeasured, 1);
   }
   if (record.cacheReadInputTokens !== undefined) {
-    target.cacheReadInputTokens = safeAdd(target.cacheReadInputTokens, record.cacheReadInputTokens);
-    target.cacheReadMeasured = safeAdd(target.cacheReadMeasured, 1);
+    target.cacheReadInputTokens = addNumber(
+      target,
+      target.cacheReadInputTokens,
+      record.cacheReadInputTokens,
+    );
+    target.cacheReadMeasured = addNumber(target, target.cacheReadMeasured, 1);
   }
   if (record.cacheWriteInputTokens !== undefined) {
-    target.cacheWriteInputTokens = safeAdd(
+    target.cacheWriteInputTokens = addNumber(
+      target,
       target.cacheWriteInputTokens,
       record.cacheWriteInputTokens,
     );
-    target.cacheWriteMeasured = safeAdd(target.cacheWriteMeasured, 1);
+    target.cacheWriteMeasured = addNumber(target, target.cacheWriteMeasured, 1);
   }
   if (record.reasoningTokens !== undefined) {
-    target.reasoningTokens = safeAdd(target.reasoningTokens, record.reasoningTokens);
-    target.reasoningMeasured = safeAdd(target.reasoningMeasured, 1);
+    target.reasoningTokens = addNumber(target, target.reasoningTokens, record.reasoningTokens);
+    target.reasoningMeasured = addNumber(target, target.reasoningMeasured, 1);
   }
   const cost = record.cost;
   if (cost === undefined)
-    target.costs.unpricedRecordCount = safeAdd(target.costs.unpricedRecordCount, 1);
+    target.costs.unpricedRecordCount = addNumber(target, target.costs.unpricedRecordCount, 1);
   else if (cost.kind === "provider-recorded") {
-    target.costs.providerRecordedUsd = safeAdd(target.costs.providerRecordedUsd, cost.amount);
-    target.costs.providerRecordedMeasured = safeAdd(target.costs.providerRecordedMeasured, 1);
+    target.costs.providerRecordedUsd = addNumber(
+      target,
+      target.costs.providerRecordedUsd,
+      cost.amount,
+    );
+    target.costs.providerRecordedMeasured = addNumber(
+      target,
+      target.costs.providerRecordedMeasured,
+      1,
+    );
   } else {
-    target.costs.apiEstimateUsd = safeAdd(target.costs.apiEstimateUsd, cost.amount);
-    target.costs.apiEstimateMeasured = safeAdd(target.costs.apiEstimateMeasured, 1);
+    target.costs.apiEstimateUsd = addNumber(target, target.costs.apiEstimateUsd, cost.amount);
+    target.costs.apiEstimateMeasured = addNumber(target, target.costs.apiEstimateMeasured, 1);
   }
 }
 
+function addNumber(target: TotalsAccumulator, left: number, right: number): number {
+  const next = left + right;
+  if (!Number.isFinite(next) || next < 0 || next > Number.MAX_SAFE_INTEGER) {
+    target.overflowed = true;
+    return Number.MAX_SAFE_INTEGER;
+  }
+  return next;
+}
+
 function tokenTotals(value: TotalsAccumulator): LocalUsageHistoryTokenTotals {
+  const totalTokens =
+    value.inputTokens > Number.MAX_SAFE_INTEGER - value.outputTokens
+      ? ((value.overflowed = true), Number.MAX_SAFE_INTEGER)
+      : value.inputTokens + value.outputTokens;
   return {
     inputTokens: value.inputTokens,
-    totalTokens: safeAdd(value.inputTokens, value.outputTokens),
+    totalTokens,
     outputTokens: value.outputTokens,
     ...(value.uncachedMeasured === value.requestCount
       ? { uncachedInputTokens: value.uncachedInputTokens }

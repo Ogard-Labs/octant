@@ -4,6 +4,10 @@ import {
   type ContextConfidence,
   type ContextMetadataSource,
   type ContextTokenizer,
+  type LocalUsageHistoryCoverage,
+  type LocalUsageHistoryRecord,
+  type LocalUsageHistoryRequest,
+  type LocalUsageHistorySourceKind,
   type ExtendedContextMode,
   type ModelContextLimits,
   type ProviderFailure,
@@ -12,10 +16,6 @@ import {
   type ProviderServiceLimits,
   type ProviderSessionId,
   type UtcTimestamp,
-  type LocalUsageHistoryCoverage,
-  type LocalUsageHistoryRecord,
-  type LocalUsageHistoryRequest,
-  type LocalUsageHistorySourceKind,
 } from "@octant/contracts";
 import type { Effect, Scope } from "effect";
 
@@ -61,13 +61,16 @@ export interface ProviderUsageObservation {
 }
 
 /**
- * Optional read-only local history capability. The host supplies the range and
- * the adapter reads only its own documented accounting files; no provider
- * process, credentials, or network request is implied by this interface.
+ * Optional read-only local history capability owned by a provider driver.
+ * The host supplies the range and the adapter reads only its documented
+ * accounting files; no provider process, credentials, or network request is implied.
  */
 export interface ProviderLocalUsageHistorySource {
   readonly sourceKind: LocalUsageHistorySourceKind;
-  readonly read: (input: LocalUsageHistoryRequest) => Effect.Effect<
+  readonly read: (
+    input: LocalUsageHistoryRequest,
+    signal?: AbortSignal,
+  ) => Effect.Effect<
     {
       readonly records: ReadonlyArray<LocalUsageHistoryRecord>;
       readonly coverage: LocalUsageHistoryCoverage;
@@ -83,7 +86,6 @@ export interface ProviderContextFactsSource {
   readonly observeServiceLimits: (
     input: ProviderContextFactsInput,
   ) => Effect.Effect<ProviderServiceLimits, ProviderFailure, Scope.Scope>;
-  readonly localUsageHistory?: ProviderLocalUsageHistorySource;
 }
 
 export class ProviderContextFactsRejected extends Error {

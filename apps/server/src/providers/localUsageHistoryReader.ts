@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { lstat, readdir, realpath, stat } from "node:fs/promises";
-import { basename, join, relative } from "node:path";
+import { constants, createReadStream } from "node:fs";
+import { lstat, open, readdir, realpath } from "node:fs/promises";
+import { basename, join, relative, sep } from "node:path";
 import { createInterface } from "node:readline";
 import {
   decodeLocalUsageHistoryRecord,
@@ -47,6 +47,7 @@ export async function readLocalUsageHistory(
   options: LocalUsageHistoryReaderOptions,
   request: LocalUsageHistoryRequest,
   parse: LocalUsageHistoryLineParser,
+  signal?: AbortSignal,
 ): Promise<{
   readonly records: ReadonlyArray<LocalUsageHistoryRecord>;
   readonly coverage: LocalUsageHistoryCoverage;
@@ -99,73 +100,94 @@ export async function readLocalUsageHistory(
   let scannedBytes = 0;
   let failed = false;
   for (const filePath of selected) {
-    let fileSize: number;
+    throwIfAborted(signal);
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
     try {
-      fileSize = (await stat(filePath)).size;
-    } catch {
-      omittedRecordCount += 1;
-      failed = true;
-      continue;
-    }
-    if (
-      !Number.isSafeInteger(fileSize) ||
-      fileSize > maxFileBytes ||
-      scannedBytes + fileSize > maxTotalBytes
-    ) {
-      omittedRecordCount += 1;
-      failed = true;
-      continue;
-    }
-    scannedBytes += fileSize;
-    scannedFileCount += 1;
-    const relativePath = relative(root, filePath);
-    const sessionHint = sessionHintForPath(relativePath);
-    let lineNumber = 0;
-    try {
-      const stream = createReadStream(filePath, { encoding: "utf8" });
+      const resolvedFilePath = await realpath(filePath);
+      if (!isWithinRoot(root, resolvedFilePath)) {
+        throw new Error("history file escaped its configured root");
+      }
+      if (typeof constants.O_NOFOLLOW !== "number") {
+        throw new Error("platform cannot enforce no-follow file opens");
+      }
+      handle = await open(resolvedFilePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const fileStat = await handle.stat();
+      if (!fileStat.isFile()) throw new Error("history path is not a regular file");
+      const fileSize = fileStat.size;
+      if (
+        !Number.isSafeInteger(fileSize) ||
+        fileSize > maxFileBytes ||
+        scannedBytes + fileSize > maxTotalBytes
+      ) {
+        omittedRecordCount += 1;
+        failed = true;
+        continue;
+      }
+      scannedBytes += fileSize;
+      scannedFileCount += 1;
+      const relativePath = relative(root, resolvedFilePath);
+      const sessionHint = sessionHintForPath(relativePath);
+      let lineNumber = 0;
+      if (fileSize === 0) continue;
+      const stream = createReadStream(resolvedFilePath, {
+        encoding: "utf8",
+        fd: handle.fd,
+        autoClose: false,
+        start: 0,
+        end: fileSize - 1,
+        ...(signal === undefined ? {} : { signal }),
+      });
       const lines = createInterface({ input: stream, crlfDelay: Infinity });
-      for await (const line of lines) {
-        lineNumber += 1;
-        if (Buffer.byteLength(line, "utf8") > maxRecordBytes) {
-          omittedRecordCount += 1;
-          continue;
-        }
-        try {
-          JSON.parse(line);
-        } catch {
-          omittedRecordCount += 1;
-          continue;
-        }
-        if (records.length >= maxRecords) {
-          omittedRecordCount += 1;
-          break;
-        }
-        try {
-          const record = parse({
-            line,
-            sourceInstallationId,
-            sourceSessionIdHint: sessionHint,
-            relativePath,
-            lineNumber,
-          });
-          if (record === undefined) continue;
-          const observedAt = Date.parse(String(record.observedAt));
-          if (!Number.isFinite(observedAt)) {
+      try {
+        for await (const line of lines) {
+          throwIfAborted(signal);
+          lineNumber += 1;
+          if (Buffer.byteLength(line, "utf8") > maxRecordBytes) {
             omittedRecordCount += 1;
             continue;
           }
-          const from = Date.parse(String(request.from));
-          const to = Date.parse(String(request.to));
-          if (observedAt < from || observedAt > to) continue;
-          records.push(decodeLocalUsageHistoryRecord(record));
-        } catch {
-          omittedRecordCount += 1;
+          try {
+            JSON.parse(line);
+          } catch {
+            omittedRecordCount += 1;
+            continue;
+          }
+          if (records.length >= maxRecords) {
+            omittedRecordCount += 1;
+            break;
+          }
+          try {
+            const record = parse({
+              line,
+              sourceInstallationId,
+              sourceSessionIdHint: sessionHint,
+              relativePath,
+              lineNumber,
+            });
+            if (record === undefined) continue;
+            const observedAt = Date.parse(String(record.observedAt));
+            if (!Number.isFinite(observedAt)) {
+              omittedRecordCount += 1;
+              continue;
+            }
+            const from = Date.parse(String(request.from));
+            const to = Date.parse(String(request.to));
+            if (observedAt < from || observedAt > to) continue;
+            records.push(decodeLocalUsageHistoryRecord(record));
+          } catch {
+            omittedRecordCount += 1;
+          }
         }
+      } finally {
+        lines.close();
+        stream.destroy();
       }
-      lines.close();
-    } catch {
+    } catch (error) {
+      if (signal?.aborted) throw error;
       omittedRecordCount += 1;
       failed = true;
+    } finally {
+      if (handle !== undefined) await handle.close().catch(() => undefined);
     }
   }
   const status = failed ? "failed" : omittedRecordCount > 0 ? "partial" : "ready";
@@ -196,6 +218,21 @@ export async function readLocalUsageHistory(
       range,
     ),
   };
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new Error("Local usage history scan aborted.");
+}
+
+function isWithinRoot(root: string, candidate: string): boolean {
+  const relativePath = relative(root, candidate);
+  return (
+    relativePath === "" ||
+    (relativePath !== ".." && !relativePath.startsWith(`..${sep}`) && !relativePath.startsWith(sep))
+  );
 }
 
 async function collectFiles(root: string, limit: number): Promise<ReadonlyArray<string>> {

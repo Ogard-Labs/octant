@@ -17,7 +17,7 @@ import type {
   ProviderTurnInput,
 } from "@octant/contracts";
 import type { Effect, Scope, Stream } from "effect";
-import type { ProviderContextFactsSource } from "./contextFacts";
+import type { ProviderContextFactsSource, ProviderLocalUsageHistorySource } from "./contextFacts";
 
 export type {
   ProviderAttachmentInput,
@@ -83,6 +83,8 @@ export interface ProviderUserInputAnswer {
 export interface ProviderDriver {
   readonly kind: ProviderDriverKind;
   readonly contextFacts?: ProviderContextFactsSource;
+  /** Optional read-only local history reader owned by the configured driver. */
+  readonly localUsageHistory?: ProviderLocalUsageHistorySource;
   readonly probe: (
     input: ProviderProbeInput,
   ) => Effect.Effect<ProviderProbeResult, ProviderFailure, Scope.Scope>;

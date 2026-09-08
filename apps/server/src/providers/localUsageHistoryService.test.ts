@@ -105,6 +105,31 @@ describe("local usage history aggregation", () => {
     });
   });
 
+  it("marks coverage partial when host totals reach the safe arithmetic bound", async () => {
+    const response = await readLocalUsageHistoryDashboard({
+      sources: [
+        source([
+          {
+            sourceKind: "codex",
+            sourceInstallationId: "install-overflow",
+            sourceSessionId: "session-overflow",
+            sourceEventId: "event-overflow",
+            providerKey: "codex",
+            modelId: "gpt-5.6-sol",
+            observedAt: "2026-09-11T00:00:00.000Z" as never,
+            inputTokens: Number.MAX_SAFE_INTEGER,
+            outputTokens: 1,
+          },
+        ]),
+      ],
+      request,
+      queryAt: "2026-09-11T00:00:00.000Z",
+    });
+    expect(response.totals.totalTokens).toBe(Number.MAX_SAFE_INTEGER);
+    expect(response.coverage[0]?.status).toBe("partial");
+    expect(response.coverage[0]?.detail).toContain("safe integer");
+  });
+
   it("omits partial optional component sums while exposing measured coverage", async () => {
     const response = await readLocalUsageHistoryDashboard({
       sources: [source(records)],
