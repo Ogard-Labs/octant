@@ -33,6 +33,7 @@ export type CodeFileExplorerEntry =
 
 export interface CodeFileExplorerProps {
   readonly entries: ReadonlyArray<CodeFileExplorerEntry>;
+  readonly loading?: boolean;
   readonly onOpenFile: (entry: Extract<CodeFileExplorerEntry, { readonly kind: "file" }>) => void;
   readonly selectedPath?: CodeRelativePath;
 }
@@ -112,7 +113,7 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
         </p>
       ) : null}
 
-      {visible.length === 0 ? (
+      {visible.length === 0 && props.loading ? null : visible.length === 0 ? (
         <p className="code-file-explorer__empty">No matching repository files.</p>
       ) : (
         <div aria-label="Repository files" className="code-file-explorer__tree" role="tree">

@@ -7187,11 +7187,11 @@ input.switch:checked::after {
   /* width:100% is right for a column and nonsense in a row — it made
      every item as wide as the whole strip, so eight of them measured
      1990px and the current one could never be scrolled fully into view */
-  .setnav-item {
+  .setnav .setnav-item {
     flex: 0 0 auto;
     width: auto;
   }
-  .setnav-section {
+  .setnav .setnav-section {
     display: none;
   }
   .setpane {

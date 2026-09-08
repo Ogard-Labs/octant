@@ -1162,7 +1162,7 @@ function ApprovalUnavailable(props: { readonly surface: string }) {
   return (
     <ShellState
       eyebrow="Ask for approvals"
-      message="This window has no active approval bridge. Octant will not bypass or simulate approval authority."
+      message="Approvals are unavailable in this window. Reopen the task in the desktop app to continue."
       state="warning"
       title={`${props.surface} approval unavailable`}
     />

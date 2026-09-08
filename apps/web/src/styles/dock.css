@@ -113,6 +113,16 @@
   border-radius: var(--oct-radius-sm);
 }
 
+.dock-tool-strip:has(.dock-tool-strip__overflow) > .dock-tool-strip__tab {
+  max-width: min(12rem, calc(100% - 34px));
+}
+
+.dock-tool-strip__select > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .dock-tool-strip__tab:hover {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);

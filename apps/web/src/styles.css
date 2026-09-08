@@ -8775,6 +8775,7 @@ ul.board-col-body {
    language; this sheet keeps the search field, the PR row anatomy, and the
    status line the dock review tools share. */
 .code-project-pull-requests {
+  container: pull-requests / inline-size;
   display: grid;
   min-width: 0;
   gap: var(--oct-space-3);
@@ -8976,7 +8977,7 @@ ul.board-col-body {
   white-space: nowrap;
 }
 
-@media (max-width: 900px) {
+@container pull-requests (max-width: 700px) {
   .code-project-pull-requests__row-content {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -8984,6 +8985,9 @@ ul.board-col-body {
     grid-column: 1;
     grid-row: auto;
     justify-content: flex-start;
+  }
+  .code-project-pull-requests__details {
+    flex-wrap: wrap;
   }
 }
 

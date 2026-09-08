@@ -16,7 +16,7 @@ const query: CodeProjectPullRequestDetailQuery = {
   number: 12,
 };
 
-function detailView() {
+function detailView(description = "Adds manual refresh.") {
   return decodeCodeProjectPullRequestDetailView({
     version: 1,
     query,
@@ -35,7 +35,7 @@ function detailView() {
       headBranch: "feature/manual-refresh",
       author: "octocat",
       matchesDeliveryBranch: false,
-      description: "Adds manual refresh.",
+      description,
       diff: "diff --git a/README.md b/README.md",
       diffTruncated: false,
       commits: [],
@@ -51,6 +51,26 @@ function detailView() {
 }
 
 describe("DockProjectPullRequestReviewTool", () => {
+  it("formats a PR description while refusing embedded HTML and remote image loads", async () => {
+    const view = detailView(
+      "A **clear change** with [documentation](https://example.com/docs).\n\n<img src='https://example.com/tracker' onerror='alert(1)' />\n\n![Badge](https://example.com/badge.png)",
+    );
+    const { container } = render(
+      <DockProjectPullRequestReviewTool
+        query={query}
+        load={async () => view}
+        refresh={async () => view}
+      />,
+    );
+    expect(await screen.findByRole("link", { name: "documentation" })).toHaveAttribute(
+      "href",
+      "https://example.com/docs",
+    );
+    expect(screen.getByText("clear change").tagName).toBe("STRONG");
+    expect(container.querySelector("img")).toBeNull();
+    expect(screen.getByText("Original description").closest("details")).not.toHaveAttribute("open");
+  });
+
   it("refreshes detail once when a pull request is selected and renders read-only sections", async () => {
     const refresh = vi.fn(async (_command: CodeProjectPullRequestDetailRefreshCommand) =>
       detailView(),
@@ -59,7 +79,7 @@ describe("DockProjectPullRequestReviewTool", () => {
     render(<DockProjectPullRequestReviewTool load={load} query={query} refresh={refresh} />);
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
     expect(load).not.toHaveBeenCalled();
-    expect(await screen.findByText("Adds manual refresh.")).toBeVisible();
+    expect(await screen.findByText("Adds manual refresh.", { selector: "p" })).toBeVisible();
     expect(screen.getByText(/Read-only review/)).toBeVisible();
     expect(screen.queryByRole("button", { name: /merge/i })).toBeNull();
   });

@@ -360,7 +360,9 @@ function ProjectGroup(props: {
                       />
                       <div className="code-project-pull-requests__row-content">
                         <div className="code-project-pull-requests__title-line">
-                          <span className="code-project-pull-requests__title">{row.title}</span>
+                          <span className="code-project-pull-requests__title" title={row.title}>
+                            {row.title}
+                          </span>
                           <span className="code-project-pull-requests__number">#{row.number}</span>
                         </div>
                         <div className="code-project-pull-requests__details">

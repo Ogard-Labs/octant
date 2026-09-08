@@ -13,6 +13,8 @@ export type MarkdownTextTransform = (text: string) => ReactNode;
 export interface MarkdownProps {
   readonly body: string;
   readonly className?: string;
+  /** Hide unsupported GitHub HTML instead of showing its source in a review. */
+  readonly skipHtml?: boolean;
   readonly transformText?: MarkdownTextTransform;
 }
 
@@ -42,6 +44,7 @@ export function Markdown(props: MarkdownProps) {
       <TextTransform value={props.transformText}>
         <ReactMarkdown
           components={components}
+          skipHtml={props.skipHtml}
           remarkPlugins={[remarkGfm]}
           urlTransform={onlyHttpUrls}
         >

@@ -36,6 +36,18 @@ html[data-octant-native-host="true"] .shell.shell-frame.shell--app-backdrop {
   background: var(--octant-app-background);
 }
 
+/* Keep native sidebar glass clear while backing the reading area with an
+   opaque ground. A solid root behind both columns hid vibrancy in the main
+   window even though standalone Settings used the same translucent sidebar. */
+html[data-octant-native-host="true"]
+  .shell.shell-frame.shell--app-backdrop.shell--material-translucent {
+  background: linear-gradient(
+    to right,
+    transparent var(--octant-rendered-sidebar-width),
+    var(--octant-app-background) var(--octant-rendered-sidebar-width)
+  );
+}
+
 .shell.shell-frame.shell--wide-context-open {
   --octant-rendered-sidebar-width: min(
     var(--octant-sidebar-width, 232px),
@@ -1596,10 +1608,6 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
 .draft-thread__context-item svg {
   flex-shrink: 0;
   opacity: 0.7;
-}
-
-.draft-thread__context-picker {
-  margin-inline-start: auto;
 }
 
 .work-composer-adapter__visually-hidden {

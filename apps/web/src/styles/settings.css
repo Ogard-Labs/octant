@@ -713,6 +713,18 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   padding: 5px 8px;
 }
 
+/* Header feedback uses the heading's existing separation instead of adding
+   a blank section before Appearance and Host. Errors keep the same footprint. */
+.settings-theme-editor > .settings-feedback-slot:first-child {
+  height: 32px;
+  margin-block: -32px -16px;
+}
+
+.host-settings > .settings-feedback-slot:first-child {
+  height: 32px;
+  margin-block: -32px -20px;
+}
+
 .provider-settings__message-slot:empty {
   visibility: hidden;
 }
@@ -1203,6 +1215,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow-control > .settings-view__range,
 .setrow-control > .octant-number-stepper,
 .setrow-control > .settings-view__select,
+.setrow-control > [data-slot="select-trigger"],
 .setrow-control > .settings-font-picker {
   width: var(--oct-settings-control);
 }

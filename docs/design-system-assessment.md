@@ -234,6 +234,45 @@ The premium static audit reported two matches, both in test fixtures (an
 intentionally inert mock button and a mock composer textarea), and no production
 violations. Repository-owned UI checks remain the enforcement source.
 
+## Full rendered audit follow-up
+
+A fresh audit covered the native split Code window, Chat/Work/Code entry and
+existing-thread surfaces, Inbox, both boards, PR list/detail, the utility dock,
+all 17 available Settings destinations, Agents, Automations, Artifacts, Images,
+Archive, theme switching, and narrow layouts.
+
+It found and repaired issues that source-only assessment had missed:
+
+- Dock overflow could sit under the window's bottom-panel control and trigger
+  the wrong action. Actual hit tests now resolve More tools and Add tool to
+  their own buttons; wider docks show additional tabs.
+- PR selection opened Review invisibly behind the reader rule. The related
+  detail now opens beside the list, and the list adapts to its pane width.
+- PR detail inherited a compressed Delivery toolbar and oversized headings.
+  It now has a dedicated compact layout and shared safe Markdown/code rendering.
+- Image generator could retain an unrelated dock or remain layered over Archive.
+  Global destinations now share one closing path.
+- A Chat list reset erased the shared transcript gutter. New Chat also used a
+  different context/control arrangement. Both now use the shared composition.
+- Files briefly claimed no matches during loading. Settings drawer rows, select
+  widths, early feedback spacing, and narrow surface headers also needed fixes.
+
+Actual Light mode was checked and the original Dark/Obsidian selection restored.
+No messages, generations, approvals, authentication changes, or destructive
+settings actions were submitted. Temporary terminal views were opened for visual
+inspection, no commands were entered, and their displayed sessions were stopped.
+
+Initial native evidence confirmed matching sidebar widths and populated checkout
+strips under both inputs. It also reproduced the main/Settings material mismatch.
+The opaque backing is corrected in source, but the Mac locked before final native
+material and physical-control verification; that remains an explicit gate.
+
+Remaining refinements include familiar labels in Usage instead of raw ids,
+less repetitive setup wording, the image-source/profile distinction, and
+reconciling historical tool rows that still say running after a failed turn.
+These are not hidden by this visual pass. Active agent/Picture in Picture,
+image-generation result, and authenticated Linear states were unavailable.
+
 ## Acceptance checklist for the unlocked app
 
 1. Compare main and Settings sidebar widths after resizing, reopening, and

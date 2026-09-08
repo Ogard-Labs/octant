@@ -110,6 +110,7 @@
 
 .surface-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--oct-space-4);
@@ -118,12 +119,17 @@
 
 .surface-header__copy {
   display: grid;
+  /* Actions wrap before the title and subtitle shrink to a word per line. */
+  flex: 1 1 320px;
   min-width: 0;
   gap: var(--oct-space-1);
 }
 
 .surface-header__actions {
   display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
+  margin-inline-start: auto;
   flex: 0 0 auto;
   align-items: center;
   gap: var(--oct-space-2);

@@ -875,3 +875,19 @@ legacy `--oct-fg-2` alias maps directly to `--octant-text-secondary`; primary,
 secondary, and metadata remain the only text strengths. The theme schema keeps
 its focus compatibility role for imports, but Appearance does not expose a
 Focus ring color control because the product does not draw focus rings.
+
+### Visual-audit corrections
+
+- Native sidebar glass keeps a transparent backing beneath the sidebar. The
+  opaque application ground starts at the reading area's edge and covers the
+  whole window when the sidebar is collapsed.
+- Dock tab fitting subtracts window-control padding and measures actual tab
+  widths. Overflow and Add tool controls must never sit under window controls.
+- A selected Project pull request may keep Review open beside its list. Other
+  global destinations hide unrelated dock content and are mutually exclusive.
+- PR readers own a compact, scrollable hierarchy. Descriptions and discussion
+  use shared Markdown without executing HTML or fetching remote images. The
+  original description remains available when unsupported HTML is omitted;
+  diffs use the shared code block.
+- Surface actions wrap before titles are squeezed into narrow columns. Settings
+  navigation remains a vertical, full-width list inside its narrow drawer.

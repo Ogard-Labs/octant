@@ -89,6 +89,7 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
       ) : null}
 
       <CodeFileExplorer
+        loading={controller.status === "loading"}
         entries={controller.entries}
         onOpenFile={props.onOpenFile}
         {...(props.selectedPath === undefined ? {} : { selectedPath: props.selectedPath })}

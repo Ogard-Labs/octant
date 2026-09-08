@@ -14,6 +14,8 @@ import type {
 } from "@octant/contracts/code-operations";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { decidesCodeEffectsByApproval } from "@octant/domain";
+import { Markdown } from "../markdown/Markdown";
+import "./project-pull-request-review.css";
 import { useState } from "react";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -74,7 +76,9 @@ export function PullRequestConversation(props: PullRequestConversationProps) {
                 <OctantBadge variant={REVIEW_STATE_VARIANTS[review.state]}>
                   {REVIEW_STATE_LABELS[review.state]}
                 </OctantBadge>
-                {review.body.length === 0 ? null : <p>{review.body}</p>}
+                {review.body.length === 0 ? null : (
+                  <Markdown body={review.body} className="code-pr-review__prose" />
+                )}
               </li>
             ))}
           </ul>
@@ -92,7 +96,9 @@ export function PullRequestConversation(props: PullRequestConversationProps) {
             {props.comments.map((comment, index) => (
               <li key={`${comment.author}-${index}`}>
                 <strong>{comment.author.length === 0 ? "Unknown author" : comment.author}</strong>
-                {comment.body.length === 0 ? null : <p>{comment.body}</p>}
+                {comment.body.length === 0 ? null : (
+                  <Markdown body={comment.body} className="code-pr-review__prose" />
+                )}
               </li>
             ))}
           </ul>

@@ -1,5 +1,6 @@
 import {
   decodeWorkThread,
+  decodeCodeProjectPullRequestView,
   type NavigatorAssistantSnapshot,
   type ShellBootstrap,
   type ProjectBootstrap,
@@ -3775,6 +3776,87 @@ describe("App", () => {
       screen.getByRole("region", { name: "Workspace pane: Controller foundation" }),
     ).toBeVisible();
     expect(screen.getByRole("region", { name: "Workspace pane: Second thread" })).toBeVisible();
+  });
+
+  it("opens a selected pull request beside the list without hiding its Review pane", async () => {
+    const user = userEvent.setup();
+    const codeApi = codes();
+    vi.mocked(codeApi.queryProjectPullRequests).mockResolvedValue(
+      decodeCodeProjectPullRequestView({
+        version: 1,
+        query: { version: 1 },
+        projects: [
+          {
+            kind: "connected",
+            projectId,
+            projectName: "Octant",
+            repositoryOwner: "octant",
+            repositoryName: "octant",
+          },
+        ],
+        rows: [
+          {
+            projectId,
+            projectName: "Octant",
+            repositoryOwner: "octant",
+            repositoryName: "octant",
+            number: 12,
+            title: "Inspect selected pull request",
+            draft: false,
+            state: "open",
+            mergeability: "mergeable",
+            author: "octocat",
+            baseBranch: "main",
+            headBranch: "feature/preview",
+            updatedAt: "2026-09-08T00:00:00.000Z",
+            checks: "passing",
+            review: "pending",
+            linkedThreads: [],
+          },
+        ],
+        repositoriesTruncated: false,
+        pullRequestsTruncated: false,
+        freshness: { status: "empty" },
+        generatedAt: "2026-09-08T00:00:00.000Z",
+      }),
+    );
+    render(
+      <App
+        codeClient={codeApi}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    await user.click(screen.getByRole("button", { name: "Pull requests" }));
+    await user.click(await screen.findByRole("button", { name: /Inspect selected pull request/ }));
+    expect(await screen.findByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Pull requests" })).toBeVisible();
+    await waitFor(() =>
+      expect(codeApi.refreshProjectPullRequestDetail).toHaveBeenCalledWith({
+        projectId,
+        repositoryOwner: "octant",
+        repositoryName: "octant",
+        number: 12,
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Image generator" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("complementary", { name: "Right Utility Dock" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(await screen.findByRole("region", { name: "Image generator" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Archive" }));
+    expect(await screen.findByRole("region", { name: "Archive" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Image generator" })).not.toBeInTheDocument();
   });
 
   it("hands the pane to the Board and gives the dock back afterwards, toggle included", async () => {

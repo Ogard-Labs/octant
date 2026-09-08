@@ -1247,6 +1247,21 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         row={{
           leading: (
             <>
+              {props.turnClient === undefined ? null : (
+                <>
+                  <ComposerAttachButton
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    busy={creating || completionLocked}
+                    refusedReason={
+                      imageSupport === false
+                        ? "The selected model does not accept images. Choose an image-capable model."
+                        : undefined
+                    }
+                    onRefused={images.refuse}
+                    onFileSelected={(file) => images.attach([file])}
+                  />
+                </>
+              )}
               {/* Model sits beside send, not on a strip above the composer:
                       the bar holds how the task runs (0073). */}
               {thread === undefined ? null : (
@@ -1266,21 +1281,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                     selectedProviderInstanceId={thread.providerInstanceId}
                   />
                 </span>
-              )}
-              {props.turnClient === undefined ? null : (
-                <>
-                  <ComposerAttachButton
-                    accept="image/png,image/jpeg,image/webp,image/gif"
-                    busy={creating || completionLocked}
-                    refusedReason={
-                      imageSupport === false
-                        ? "The selected model does not accept images. Choose an image-capable model."
-                        : undefined
-                    }
-                    onRefused={images.refuse}
-                    onFileSelected={(file) => images.attach([file])}
-                  />
-                </>
               )}
               <ComposerVoiceButton
                 disabled={creating || completionLocked}

@@ -3538,16 +3538,20 @@ function LaunchedShell(
     archiveOpen ||
     automationCenterOpen ||
     agentsCenterOpen ||
-    artifactLibraryOpen;
-  // What the shell shows for the dock right now: open, unless a reader has
-  // it step aside. The remembered `dockOpen` is what comes back afterwards.
-  const dockPresentedOpen = dockOpen && !readerOpen;
+    artifactLibraryOpen ||
+    imageLibraryOpen;
+  // Readers hide unrelated thread tools. Selecting a pull request explicitly
+  // opens its Review beside that list, so the detail must remain visible.
+  const dockPresentedOpen =
+    dockOpen && (!readerOpen || (codePullRequestsOpen && projectPullRequestReviewOpen));
 
   function closeWorkspaceReaders() {
     setRailPlaceholder(undefined);
     setAutomationCenterOpen(false);
     setAgentsCenterOpen(false);
     setArtifactLibraryOpen(false);
+    setImageLibraryOpen(false);
+    setSelectedProjectPullRequest(undefined);
     setWorkBoardOpen(false);
     setCodeBoardOpen(false);
     setCodePullRequestsOpen(false);
@@ -3602,26 +3606,12 @@ function LaunchedShell(
   }
 
   function openAutomationCenter() {
-    setRailPlaceholder(undefined);
-    setCodeBoardOpen(false);
-    setCodePullRequestsOpen(false);
-    setGithubIssuesOpen(false);
-    setWorkBoardOpen(false);
-    setArchiveOpen(false);
-    setArtifactLibraryOpen(false);
-    setAgentsCenterOpen(false);
+    closeWorkspaceReaders();
     setAutomationCenterOpen(true);
   }
 
   function openAgentsCenter() {
-    setRailPlaceholder(undefined);
-    setCodeBoardOpen(false);
-    setCodePullRequestsOpen(false);
-    setGithubIssuesOpen(false);
-    setWorkBoardOpen(false);
-    setArchiveOpen(false);
-    setArtifactLibraryOpen(false);
-    setAutomationCenterOpen(false);
+    closeWorkspaceReaders();
     setAgentsCenterOpen(true);
   }
 
@@ -3629,40 +3619,17 @@ function LaunchedShell(
   // Center it is not dismissed when the mode changes: a person who opened it
   // in Work is looking for the same artifacts in Code.
   function openArtifactLibrary() {
-    setRailPlaceholder(undefined);
-    setCodeBoardOpen(false);
-    setCodePullRequestsOpen(false);
-    setGithubIssuesOpen(false);
-    setWorkBoardOpen(false);
-    setArchiveOpen(false);
-    setAutomationCenterOpen(false);
-    setAgentsCenterOpen(false);
-    setImageLibraryOpen(false);
+    closeWorkspaceReaders();
     setArtifactLibraryOpen(true);
   }
 
   function openImageLibrary() {
-    setRailPlaceholder(undefined);
-    setCodeBoardOpen(false);
-    setCodePullRequestsOpen(false);
-    setGithubIssuesOpen(false);
-    setWorkBoardOpen(false);
-    setArchiveOpen(false);
-    setAutomationCenterOpen(false);
-    setAgentsCenterOpen(false);
-    setArtifactLibraryOpen(false);
+    closeWorkspaceReaders();
     setImageLibraryOpen(true);
   }
 
   function openArchive() {
-    setRailPlaceholder(undefined);
-    setCodeBoardOpen(false);
-    setCodePullRequestsOpen(false);
-    setGithubIssuesOpen(false);
-    setWorkBoardOpen(false);
-    setAutomationCenterOpen(false);
-    setAgentsCenterOpen(false);
-    setArtifactLibraryOpen(false);
+    closeWorkspaceReaders();
     setArchiveOpen(true);
   }
 
@@ -5037,7 +5004,7 @@ function LaunchedShell(
         }
         sidebarResizable={!isNarrow}
         sidebarWidth={sidebarWidth}
-        wideContextOpen={!isNarrow && dockOpen && !readerOpen}
+        wideContextOpen={!isNarrow && dockPresentedOpen}
         workspace={
           <>
             <div className="primary-workspace-layer">

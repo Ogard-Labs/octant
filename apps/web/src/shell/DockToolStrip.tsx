@@ -1,5 +1,15 @@
 import { MoreHorizontal, X } from "lucide-react";
-import { memo, useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import { useDismissOnOutsidePointer } from "../lib/useDismissOnOutsidePointer";
 import { DockToolIcon } from "./dockToolIcons";
 import { partitionDockTools } from "./dockToolStripModel";
@@ -11,8 +21,8 @@ import type {
   RightUtilityDockTabDescriptor,
 } from "./rightUtilityDockModel";
 
-const TOOL_SLOT_WIDTH = 92;
-const OVERFLOW_SLOT_WIDTH = 30;
+const UNMEASURED_TOOL_WIDTH = 192;
+const OVERFLOW_SLOT_WIDTH = 32;
 
 export interface DockToolStripProps {
   readonly active?: string;
@@ -26,45 +36,79 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
   const [measuredCapacity, setMeasuredCapacity] = useState(props.tabs.length);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const strip = useRef<HTMLDivElement>(null);
+  const tabWidths = useRef(new Map<string, number>());
   const overflowId = useId();
   const overflowTrigger = useRef<HTMLButtonElement>(null);
   const overflowRegion = useRef<HTMLSpanElement>(null);
   const capacity = props.capacity ?? measuredCapacity;
-  const { visible, overflow } = partitionDockTools(props.tabs, props.active, capacity);
+  const { visible, overflow } = useMemo(
+    () => partitionDockTools(props.tabs, props.active, capacity),
+    [props.tabs, props.active, capacity],
+  );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (props.capacity !== undefined) return;
     const node = strip.current;
     if (node === null) return;
-    // The strip shrinks to its content, so its own width says how many tabs
-    // it currently shows, not how many would fit: measured that way it folded
-    // tabs into the overflow menu one by one until a wide dock showed a
-    // single tab. The room available is the cluster's width minus the
-    // siblings that share it (the Add tool trigger).
     const cluster = node.parentElement;
     const measure = () => {
       const width = cluster === null ? node.clientWidth : cluster.clientWidth;
-      // jsdom reports 0; treat that as unknown width and keep every tool.
       if (width === 0) {
-        setMeasuredCapacity(props.tabs.length);
+        // Without layout, retain every tab until there is a measurable cluster.
+        if (measuredCapacity !== props.tabs.length) setMeasuredCapacity(props.tabs.length);
         return;
       }
+      const style = getComputedStyle(cluster ?? node);
+      const padding =
+        (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
+      const gap = Number.parseFloat(style.columnGap) || Number.parseFloat(style.gap) || 0;
       let siblings = 0;
       if (cluster !== null) {
         for (const child of cluster.children) {
-          if (child !== node && child instanceof HTMLElement) siblings += child.offsetWidth + 2;
+          if (
+            child !== node &&
+            child instanceof HTMLElement &&
+            getComputedStyle(child).display !== "none"
+          )
+            siblings += child.offsetWidth + gap;
         }
       }
-      setMeasuredCapacity(
-        Math.max(1, Math.floor((width - siblings - OVERFLOW_SLOT_WIDTH) / TOOL_SLOT_WIDTH)),
-      );
+      const mountedTabs = node.querySelectorAll<HTMLElement>(".dock-tool-strip__tab");
+      mountedTabs.forEach((element, index) => {
+        const tool = visible[index];
+        if (tool !== undefined)
+          tabWidths.current.set(tool.id, element.getBoundingClientRect().width);
+      });
+      const currentIds = new Set(props.tabs.map((tab) => tab.id));
+      for (const id of tabWidths.current.keys())
+        if (!currentIds.has(id)) tabWidths.current.delete(id);
+      const available = Math.max(0, width - padding - siblings);
+      const tabGap = Number.parseFloat(getComputedStyle(node).gap) || 0;
+      let next = props.tabs.length;
+      while (next > 1) {
+        const partition = partitionDockTools(props.tabs, props.active, next);
+        const used =
+          partition.visible.reduce(
+            (sum, tab) => sum + (tabWidths.current.get(tab.id) ?? UNMEASURED_TOOL_WIDTH),
+            0,
+          ) +
+          Math.max(0, partition.visible.length - 1) * tabGap +
+          (partition.overflow.length > 0 ? OVERFLOW_SLOT_WIDTH + tabGap : 0);
+        if (used <= available) break;
+        next -= 1;
+      }
+      if (next !== measuredCapacity) setMeasuredCapacity(next);
     };
+    // Measure the actual labels and exclude the padding reserved for native
+    // window controls. Counting that padding as tab space caused real click
+    // targets to sit underneath the bottom-panel and sidebar controls.
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(cluster ?? node);
+    for (const element of node.querySelectorAll(".dock-tool-strip__tab")) observer.observe(element);
     return () => observer.disconnect();
-  }, [props.capacity, props.tabs.length]);
+  }, [props.capacity, props.tabs, props.active, measuredCapacity, visible]);
 
   useEffect(() => {
     if (overflow.length === 0) setOverflowOpen(false);
@@ -117,6 +161,7 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
             className="dock-tool-strip__select window-no-drag"
             onClick={() => props.onSelect(tool.id)}
             role="tab"
+            title={tool.label}
             size="sm"
             tabIndex={tool.id === props.active ? 0 : -1}
             type="button"

@@ -130,9 +130,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const addressSecurityLabel =
     committedAddress === undefined ? "Address" : secureAddress ? "Secure HTTPS" : "Not secure HTTP";
   const controlLabel = !nativeContext
-    ? snapshot?.observation?.revision === undefined
-      ? "Headless preview"
-      : "Interactive preview"
+    ? "Preview"
     : nativeSurface.failed
       ? "Live page unavailable"
       : nativeState?.control === "agent"

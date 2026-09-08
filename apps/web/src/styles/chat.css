@@ -249,12 +249,19 @@
   text-align: end;
 }
 
-.chat-transcript__turns,
 .chat-transcript__attachments,
 .chat-transcript__citations,
 .thread-work-shelf ol {
   padding: 0;
   margin: 0;
+  list-style: none;
+}
+
+/* Keep the shared thread column's inline margins; a list reset previously
+   pulled assistant replies against the pane divider while the composer stayed inset. */
+.chat-transcript__turns {
+  padding: 0;
+  margin-block: 0;
   list-style: none;
 }
 

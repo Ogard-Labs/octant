@@ -94,6 +94,16 @@ function makeLinearClient(
 }
 
 describe("DraftThreadWorkspace", () => {
+  it("keeps new Chat context below the prompt with model controls inside the composer", () => {
+    const { container } = render(<DraftThreadWorkspace {...baseProps} />);
+    const composer = container.querySelector(".composer");
+    expect(
+      screen.getByRole("button", { name: "Provider and model" }).closest(".composer-row"),
+    ).not.toBeNull();
+    expect(container.querySelector(".composer-tray")).not.toBeNull();
+    expect(composer?.contains(container.querySelector(".composer-tray"))).toBe(true);
+  });
+
   it("renders mode-specific welcome copy for chat", () => {
     render(<DraftThreadWorkspace {...baseProps} />);
     expect(screen.getByRole("heading", { name: "What are you working on?" })).toBeVisible();
