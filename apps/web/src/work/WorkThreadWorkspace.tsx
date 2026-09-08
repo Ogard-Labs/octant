@@ -321,6 +321,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const [pendingRequests, setPendingRequests] = useState<ReadonlyArray<WorkRequest>>([]);
   const [browserApprovals, setBrowserApprovals] = useState<ReadonlyArray<BrowserToolApproval>>([]);
   const [browserApprovalBusy, setBrowserApprovalBusy] = useState(false);
+  const [browserApprovalMessage, setBrowserApprovalMessage] = useState<string | undefined>(
+    undefined,
+  );
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
   const [creating, setCreating] = useState(false);
@@ -667,6 +670,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       return;
     }
     setBrowserApprovalBusy(true);
+    setBrowserApprovalMessage(undefined);
     try {
       await props.browserAutomationClient.decideApproval({
         approvalId: pendingBrowserApproval.approvalId,
@@ -674,6 +678,10 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       });
       setBrowserApprovals((current) =>
         current.filter((approval) => approval.approvalId !== pendingBrowserApproval.approvalId),
+      );
+    } catch {
+      setBrowserApprovalMessage(
+        "Browser approval could not be sent. Keep this request open and retry.",
       );
     } finally {
       setBrowserApprovalBusy(false);
@@ -1220,6 +1228,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               Deny
             </OctantButton>
           </div>
+          {browserApprovalMessage === undefined ? null : (
+            <p className="approval-row__detail" role="alert">
+              {browserApprovalMessage}
+            </p>
+          )}
         </section>
       )}
       <ThreadComposer

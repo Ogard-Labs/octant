@@ -1069,6 +1069,9 @@ function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = 
         ? {}
         : {
             page: {
+              ...(snapshot.observation.revision === undefined
+                ? {}
+                : { observationRevision: snapshot.observation.revision }),
               ...(snapshot.observation.url === undefined ? {} : { url: snapshot.observation.url }),
               ...(snapshot.observation.title === undefined
                 ? {}

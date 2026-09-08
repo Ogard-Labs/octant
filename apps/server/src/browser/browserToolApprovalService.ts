@@ -8,6 +8,17 @@ import { decodeToolApprovalId, type ToolActionAuthority, type WindowId } from "@
 const DEFAULT_TTL_MS = 5 * 60_000;
 const MAX_PENDING_APPROVALS = 32;
 
+interface BrowserToolApprovalServiceOptions {
+  readonly uuid: () => string;
+  readonly now: () => number;
+  readonly ttlMs?: number;
+  readonly authorityIsCurrent: (
+    threadId: string,
+    authority: ToolActionAuthority,
+    windowId: WindowId,
+  ) => boolean;
+}
+
 interface PendingApproval {
   readonly view: BrowserToolApproval;
   readonly windowId: WindowId;
@@ -28,19 +39,10 @@ interface PendingApproval {
 export class BrowserToolApprovalService {
   readonly #pending = new Map<string, PendingApproval>();
   readonly #ttlMs: number;
+  readonly #options: BrowserToolApprovalServiceOptions;
 
-  constructor(
-    private readonly options: {
-      readonly uuid: () => string;
-      readonly now: () => number;
-      readonly ttlMs?: number;
-      readonly authorityIsCurrent: (
-        threadId: string,
-        authority: ToolActionAuthority,
-        windowId: WindowId,
-      ) => boolean;
-    },
-  ) {
+  constructor(options: BrowserToolApprovalServiceOptions) {
+    this.#options = options;
     this.#ttlMs = Math.max(1_000, Math.min(options.ttlMs ?? DEFAULT_TTL_MS, 10 * 60_000));
   }
 
@@ -53,13 +55,13 @@ export class BrowserToolApprovalService {
   }): Promise<"approved" | "denied" | "cancelled" | "expired"> {
     if (input.signal?.aborted) return Promise.resolve("cancelled");
     if (this.#pending.size >= MAX_PENDING_APPROVALS) return Promise.resolve("denied");
-    const approvalId = decodeToolApprovalId(this.options.uuid());
+    const approvalId = decodeToolApprovalId(this.#options.uuid());
     const view = decodeBrowserToolApproval({
       approvalId,
       threadId: input.threadId,
       mode: input.authority.mode,
       origin: input.origin,
-      requestedAt: new Date(this.options.now()).toISOString(),
+      requestedAt: new Date(this.#options.now()).toISOString(),
     });
     return new Promise((resolve) => {
       const settle = (decision: "approved" | "denied" | "cancelled" | "expired") => {
@@ -104,7 +106,7 @@ export class BrowserToolApprovalService {
     this.#expire();
     const pending = this.#pending.get(String(decision.approvalId));
     if (pending === undefined || pending.windowId !== windowId) return false;
-    if (!this.options.authorityIsCurrent(pending.threadId, pending.authority, pending.windowId)) {
+    if (!this.#options.authorityIsCurrent(pending.threadId, pending.authority, pending.windowId)) {
       pending.resolve("denied");
       return false;
     }
@@ -123,7 +125,7 @@ export class BrowserToolApprovalService {
   }
 
   #expire(): void {
-    const now = this.options.now();
+    const now = this.#options.now();
     for (const pending of this.#pending.values()) {
       if (Date.parse(String(pending.view.requestedAt)) + this.#ttlMs <= now) {
         pending.resolve("expired");

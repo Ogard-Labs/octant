@@ -203,6 +203,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const [toolApprovals, setToolApprovals] = useState<ReadonlyArray<ExtensionToolApproval>>([]);
   const [browserApprovals, setBrowserApprovals] = useState<ReadonlyArray<BrowserToolApproval>>([]);
   const [toolApprovalBusy, setToolApprovalBusy] = useState(false);
+  const [browserApprovalMessage, setBrowserApprovalMessage] = useState<string | undefined>(
+    undefined,
+  );
   // One branch dispatch at a time: a second click while the server is still
   // creating the first branch would mint a second thread, not retry the first.
   const [branchPending, setBranchPending] = useState(false);
@@ -521,6 +524,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       return;
     }
     setToolApprovalBusy(true);
+    setBrowserApprovalMessage(undefined);
     try {
       await props.browserAutomationClient.decideApproval({
         approvalId: pendingBrowserApproval.approvalId,
@@ -528,6 +532,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       });
       setBrowserApprovals((current) =>
         current.filter((approval) => approval.approvalId !== pendingBrowserApproval.approvalId),
+      );
+    } catch {
+      setBrowserApprovalMessage(
+        "Browser approval could not be sent. Keep this request open and retry.",
       );
     } finally {
       setToolApprovalBusy(false);
@@ -1197,6 +1205,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               Deny
             </OctantButton>
           </div>
+          {browserApprovalMessage === undefined ? null : (
+            <p className="approval-row__detail" role="alert">
+              {browserApprovalMessage}
+            </p>
+          )}
         </section>
       )}
       <ChatComposer

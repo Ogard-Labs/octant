@@ -7,7 +7,7 @@ import type { SideChatSidecar } from "@octant/contracts";
 import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import type { ThreadMentionClient } from "@octant/client-runtime";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Profiler, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -507,6 +507,37 @@ function extensionClient(): ExtensionClient {
 }
 
 describe("ChatWorkspace", () => {
+  it("keeps a Browser approval visible and explains a failed decision", async () => {
+    const user = userEvent.setup();
+    const approval = {
+      approvalId: "90000000-0000-4000-8000-000000000001",
+      threadId,
+      mode: "chat",
+      origin: "https://example.com",
+      requestedAt: now,
+    };
+    const browserAutomationClient = {
+      listApprovals: vi.fn(async () => [approval]),
+      decideApproval: vi.fn(async () => {
+        throw new Error("offline");
+      }),
+    };
+    render(
+      <ChatWorkspace
+        browserAutomationClient={browserAutomationClient as never}
+        controller={controllerFixture({ activeView: viewWithAttempt("streaming") })}
+        providerSnapshot={providerSnapshot()}
+      />,
+    );
+
+    const row = await screen.findByRole("group", { name: "Browser origin approval" });
+    await user.click(within(row).getByRole("button", { name: "Approve once" }));
+    expect(await within(row).findByRole("alert")).toHaveTextContent(
+      "Browser approval could not be sent. Keep this request open and retry.",
+    );
+    expect(screen.getByRole("group", { name: "Browser origin approval" })).toBeInTheDocument();
+  });
+
   it("sends a message written while a turn is running once that turn completes", async () => {
     const user = userEvent.setup();
     const sendTurn = vi.fn(async () => true);

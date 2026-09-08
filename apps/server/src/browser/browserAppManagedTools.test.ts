@@ -38,12 +38,15 @@ describe("createBrowserAppManagedTools", () => {
         },
       }),
     );
-    const act = vi.fn(async () => snapshot({ status: "running" }));
+    const act = vi.fn(async () =>
+      snapshot({ status: "running", observation: { revision: 7 } as never }),
+    );
     const approval = vi.fn(async () => "approved" as const);
     const tools = createBrowserAppManagedTools({
       windowId,
       threadId,
       mode: "chat",
+      executionPolicy: "approval-gated",
       resolveAuthority: () => authority,
       browser: {
         inspectThread: () => snapshot(),
@@ -59,7 +62,10 @@ describe("createBrowserAppManagedTools", () => {
       name: "octant_browser",
       inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com/path" }),
     });
-    expect(result.isError).toBe(false);
+    expect(result).toMatchObject({
+      isError: false,
+      result: { page: { observationRevision: 7 } },
+    });
     expect(approval).toHaveBeenCalledWith(
       expect.objectContaining({ origin: "https://example.com" }),
     );
@@ -68,13 +74,13 @@ describe("createBrowserAppManagedTools", () => {
 
   it("does not start a context when approval is unavailable or Chat is in Plan", async () => {
     const create = vi.fn(async () => snapshot());
-    const make = (executionPolicy?: "plan") =>
+    const make = (executionPolicy: "approval-gated" | "plan" = "approval-gated") =>
       createBrowserAppManagedTools({
         windowId,
         threadId,
         mode: "chat",
+        executionPolicy,
         resolveAuthority: () => authority,
-        ...(executionPolicy === undefined ? {} : { executionPolicy }),
         browser: {
           inspectThread: () => snapshot(),
           create,
@@ -93,6 +99,30 @@ describe("createBrowserAppManagedTools", () => {
       inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com" }),
     });
     expect(planned.result).toEqual({ error: "plan-mode-read-only" });
+    expect(create).not.toHaveBeenCalled();
+
+    const restricted = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "chat",
+      executionPolicy: "approval-gated",
+      toolConstraints: ["web-search"],
+      resolveAuthority: () => authority,
+      browser: {
+        inspectThread: () => snapshot(),
+        create,
+        act: vi.fn(async () => snapshot()),
+        releaseThread: vi.fn(async () => snapshot()),
+      },
+      uuid: crypto.randomUUID,
+    });
+    expect(restricted.definitions).toEqual([]);
+    await expect(
+      restricted.execute({
+        name: "octant_browser",
+        inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com" }),
+      }),
+    ).resolves.toEqual({ result: { error: "tool-unavailable" }, isError: true });
     expect(create).not.toHaveBeenCalled();
   });
 });

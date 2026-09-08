@@ -62,7 +62,7 @@ export interface BrowserAppManagedToolsOptions {
     threadId: BrowserThreadId,
     mode: ToolActionAuthority["mode"],
   ) => ToolActionAuthority | undefined;
-  readonly executionPolicy?: ProviderExecutionPolicy;
+  readonly executionPolicy: ProviderExecutionPolicy;
   readonly toolConstraints?: ReadonlyArray<string>;
   readonly browser: {
     readonly inspectThread: (
@@ -360,6 +360,9 @@ function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = 
         ? {}
         : {
             page: {
+              ...(observation.revision === undefined
+                ? {}
+                : { observationRevision: observation.revision }),
               ...(observation.url === undefined ? {} : { url: observation.url }),
               ...(observation.title === undefined ? {} : { title: observation.title }),
               ...(bounded === undefined

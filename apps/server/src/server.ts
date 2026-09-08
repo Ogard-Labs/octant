@@ -4231,6 +4231,7 @@ export function startOctantServer(
               windowId,
               threadId: thread.id as never,
               mode: "chat",
+              executionPolicy: "approval-gated",
               resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
               browser: {
                 inspectThread: (ownerWindowId, threadId) =>
@@ -4583,6 +4584,7 @@ export function startOctantServer(
               windowId: input.windowId,
               threadId: input.thread.id as never,
               mode: "work",
+              executionPolicy: "approval-gated",
               resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
               browser: {
                 inspectThread: (ownerWindowId, threadId) =>

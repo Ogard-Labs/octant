@@ -481,6 +481,7 @@ describe("Code app-managed tools", () => {
         extractedText: "Readable page text",
         contentHash: "a".repeat(64),
         observedAt: "2026-08-06T08:00:00.000Z",
+        revision: 7,
         stale: false,
       },
     })) as never;
@@ -528,7 +529,10 @@ describe("Code app-managed tools", () => {
     );
     expect(result).toMatchObject({
       isError: false,
-      result: { status: "running", page: { title: "Example", text: "Readable page text" } },
+      result: {
+        status: "running",
+        page: { title: "Example", text: "Readable page text", observationRevision: 7 },
+      },
     });
   });
 
