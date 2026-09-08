@@ -9,6 +9,13 @@ const InitializeResult = Schema.Struct({
   protocolVersion: Schema.Int,
   agentCapabilities: Schema.Struct({
     loadSession: Schema.optional(Schema.Boolean),
+    mcpCapabilities: Schema.optional(
+      Schema.Struct({
+        http: Schema.optional(Schema.Boolean),
+        sse: Schema.optional(Schema.Boolean),
+        acp: Schema.optional(Schema.Boolean),
+      }),
+    ),
     promptCapabilities: Schema.optional(
       Schema.Struct({
         image: Schema.optional(Schema.Boolean),
@@ -41,6 +48,14 @@ const InitializeResult = Schema.Struct({
   _meta: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
 });
 export type AcpInitializeResult = typeof InitializeResult.Type;
+
+/** The only MCP transport Octant currently offers to an ACP agent. */
+export interface AcpMcpHttpServer {
+  readonly type: "http";
+  readonly name: string;
+  readonly url: string;
+  readonly headers: ReadonlyArray<{ readonly name: string; readonly value: string }>;
+}
 
 const SessionConfigSelectOption = Schema.Struct({
   value: Schema.NonEmptyTrimmedString,
@@ -220,9 +235,20 @@ export interface AcpClient {
   /** ACP `browser-auth-delegated` extension: the host opens the sign-in URL. */
   startBrowserAuthentication(): Promise<AcpBrowserAuthenticationAttempt>;
   completeBrowserAuthentication(attemptId: string): Promise<void>;
-  newSession(cwd: string): Promise<AcpNewSessionResult>;
-  loadSession(sessionId: string, cwd: string): Promise<AcpNewSessionResult>;
-  resumeSession(sessionId: string, cwd: string): Promise<AcpNewSessionResult>;
+  newSession(
+    cwd: string,
+    mcpServers?: ReadonlyArray<AcpMcpHttpServer>,
+  ): Promise<AcpNewSessionResult>;
+  loadSession(
+    sessionId: string,
+    cwd: string,
+    mcpServers?: ReadonlyArray<AcpMcpHttpServer>,
+  ): Promise<AcpNewSessionResult>;
+  resumeSession(
+    sessionId: string,
+    cwd: string,
+    mcpServers?: ReadonlyArray<AcpMcpHttpServer>,
+  ): Promise<AcpNewSessionResult>;
   prompt(sessionId: string, prompt: string): Promise<AcpPromptResult>;
   setConfigOption(
     sessionId: string,
@@ -603,11 +629,12 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
         { methodId: "browser-auth-delegated", action: "complete", attemptId },
         decode(DelegatedBrowserComplete),
       ).then(() => undefined),
-    newSession: (cwd) => request("session/new", { cwd, mcpServers: [] }, decode(NewSessionResult)),
-    loadSession: (sessionId, cwd) =>
-      request("session/load", { sessionId, cwd, mcpServers: [] }, decode(NewSessionResult)),
-    resumeSession: (sessionId, cwd) =>
-      request("session/resume", { sessionId, cwd, mcpServers: [] }, decode(NewSessionResult)),
+    newSession: (cwd, mcpServers = []) =>
+      request("session/new", { cwd, mcpServers }, decode(NewSessionResult)),
+    loadSession: (sessionId, cwd, mcpServers = []) =>
+      request("session/load", { sessionId, cwd, mcpServers }, decode(NewSessionResult)),
+    resumeSession: (sessionId, cwd, mcpServers = []) =>
+      request("session/resume", { sessionId, cwd, mcpServers }, decode(NewSessionResult)),
     prompt: (sessionId, prompt) =>
       request(
         "session/prompt",

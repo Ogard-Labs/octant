@@ -53,6 +53,8 @@ export interface AcpConfinementInput {
   readonly mode: AcpSessionMode;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly environment: NodeJS.ProcessEnv;
+  /** Exact loopback ports owned by app-managed ACP tool bridges for this process. */
+  readonly loopbackPorts?: ReadonlyArray<number>;
 }
 
 export interface AcpConfinementPort {
@@ -76,6 +78,8 @@ export interface AcpProcessStartInput {
   readonly mode: AcpSessionMode;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly apiKey?: string;
+  /** Exact loopback ports owned by app-managed ACP tool bridges for this process. */
+  readonly loopbackPorts?: ReadonlyArray<number>;
   readonly onProcessStarted?: ProviderProcessStartedListener;
 }
 
@@ -340,6 +344,12 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           input.managedHome,
           `${name} managed home`,
         );
+        const loopbackPorts = input.loopbackPorts ?? [];
+        if (loopbackPorts.some((port) => !Number.isInteger(port) || port < 1 || port > 65_535)) {
+          return yield* Effect.fail(
+            failure("invalid-configuration", `${name} app-managed tool bridge port is invalid.`),
+          );
+        }
         const strategy = profile.process.confinement;
         if (strategy.kind === "immutable-managed-profile") {
           if (platform !== "darwin") {
@@ -425,6 +435,9 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 "(allow signal (target self))",
                 "(allow sysctl-read)",
                 ...(networkEgress === "allow" ? ["(allow network*)"] : []),
+                ...loopbackPorts.map(
+                  (port) => `(allow network-outbound (remote ip "localhost:${port}"))`,
+                ),
                 `(allow process-exec (literal "${escapeSeatbeltPath(binaryPath)}"))`,
                 ...(sideEffects ? ["(allow process-exec)", "(allow process-fork)"] : []),
                 ...runtimeReadPaths.map((path) => seatbeltAllowRule("file-read*", path)),
@@ -516,6 +529,13 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 binaryRuntimeDirectory,
                 configuredBinaryDirectory,
               ],
+              ...(input.loopbackPorts === undefined || input.loopbackPorts.length === 0
+                ? {}
+                : {
+                    extraRules: input.loopbackPorts.map(
+                      (port) => `(allow network-outbound (remote ip "localhost:${port}"))`,
+                    ),
+                  }),
             }),
           catch: (error) =>
             failure(
@@ -1009,6 +1029,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           mode: input.mode,
           executionPolicy: input.executionPolicy,
           environment,
+          ...(input.loopbackPorts === undefined ? {} : { loopbackPorts: input.loopbackPorts }),
         });
         const managed = yield* Effect.acquireRelease(
           acquireConnection(

@@ -6,6 +6,7 @@ import {
   type AcpClientOptions,
   type AcpServerNotification,
   type AcpServerRequest,
+  type AcpMcpHttpServer,
 } from "./acpProtocol";
 
 function transport(overrides: Partial<AcpClientOptions> = {}) {
@@ -48,6 +49,7 @@ const initializeResult = {
   protocolVersion: 1,
   agentCapabilities: {
     loadSession: true,
+    mcpCapabilities: { http: true, sse: false },
     promptCapabilities: { image: true, audio: false, embeddedContext: true },
     sessionCapabilities: { list: {}, resume: {} },
   },
@@ -184,6 +186,53 @@ describe("ACP protocol boundary", () => {
       "local",
     ]);
     expect("modes" in opened).toBe(false);
+    written.dispose();
+    await client.close();
+  });
+
+  it("preserves a per-session HTTP MCP server in the ACP lifecycle requests", async () => {
+    const { client, stdin, stdout } = transport();
+    const written = lines(stdin);
+    const server: AcpMcpHttpServer = {
+      type: "http",
+      name: "octant-browser",
+      url: "http://127.0.0.1:43123/mcp/session-token",
+      headers: [{ name: "Authorization", value: "Bearer session-token" }],
+    };
+    const initialized = client.initialize();
+    const created = client.newSession("/tmp/octant-acp", [server]);
+    const loaded = client.loadSession("agent-session", "/tmp/octant-acp", [server]);
+    const resumed = client.resumeSession("agent-session", "/tmp/octant-acp", [server]);
+    await tick();
+    expect(written.values).toEqual([
+      expect.objectContaining({ method: "initialize" }),
+      expect.objectContaining({
+        method: "session/new",
+        params: { cwd: "/tmp/octant-acp", mcpServers: [server] },
+      }),
+      expect.objectContaining({
+        method: "session/load",
+        params: { sessionId: "agent-session", cwd: "/tmp/octant-acp", mcpServers: [server] },
+      }),
+      expect.objectContaining({
+        method: "session/resume",
+        params: { sessionId: "agent-session", cwd: "/tmp/octant-acp", mcpServers: [server] },
+      }),
+    ]);
+    stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, result: initializeResult })}\n`);
+    stdout.write(
+      `${JSON.stringify({ jsonrpc: "2.0", id: 2, result: { sessionId: "new", configOptions: [] } })}\n`,
+    );
+    stdout.write(
+      `${JSON.stringify({ jsonrpc: "2.0", id: 3, result: { sessionId: "loaded", configOptions: [] } })}\n`,
+    );
+    stdout.write(
+      `${JSON.stringify({ jsonrpc: "2.0", id: 4, result: { sessionId: "resumed", configOptions: [] } })}\n`,
+    );
+    await expect(initialized).resolves.toEqual(initializeResult);
+    await expect(created).resolves.toMatchObject({ sessionId: "new" });
+    await expect(loaded).resolves.toMatchObject({ sessionId: "loaded" });
+    await expect(resumed).resolves.toMatchObject({ sessionId: "resumed" });
     written.dispose();
     await client.close();
   });

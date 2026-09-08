@@ -880,6 +880,41 @@ describe("Kimi Code immutable managed profile", () => {
     }
   });
 
+  it("allows only the owned ACP tool bridge port without opening generic network egress", async () => {
+    const target = fixture(kimi);
+    const root = target.canonicalRoot;
+    const launch = await Effect.runPromise(
+      confinement(target, join(root, "sandbox-tmp")).prepare({
+        profile: kimi,
+        binaryPath: target.binaryPath,
+        root,
+        managedHome: join(root, "managed-kimi-loopback"),
+        mode: "work",
+        executionPolicy: "approval-gated",
+        environment: {},
+        loopbackPorts: [43_123],
+      }),
+    );
+    expect(launch.args[1]).toContain('(allow network-outbound (remote ip "localhost:43123"))');
+    expect(launch.args[1]).not.toContain("(allow network*)");
+    const invalid = await failureOf(
+      confinement(target).prepare({
+        profile: kimi,
+        binaryPath: target.binaryPath,
+        root,
+        managedHome: join(root, "managed-kimi-loopback-invalid"),
+        mode: "work",
+        executionPolicy: "approval-gated",
+        environment: {},
+        loopbackPorts: [65_536],
+      }),
+    );
+    expect(invalid).toEqual({
+      category: "invalid-configuration",
+      message: "Kimi Code app-managed tool bridge port is invalid.",
+    });
+  });
+
   it("keeps immutable managed-profile confinement and fails closed on Linux even with Bubblewrap", async () => {
     expect(kimi.process.confinement.kind).toBe("immutable-managed-profile");
 
