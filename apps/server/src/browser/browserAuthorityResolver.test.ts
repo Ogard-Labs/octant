@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { decodeHostId, LOCAL_HOST_ID } from "@octant/contracts";
 import { ServerBrowserAuthorityResolver, deriveToolHostId } from "./browserAuthorityResolver";
 
 const projectId = "10000000-0000-4000-8000-000000000001";
@@ -51,6 +52,7 @@ describe("ServerBrowserAuthorityResolver", () => {
   it("derives unfiled Chat authority without inventing a Project or root", () => {
     const resolver = new ServerBrowserAuthorityResolver({
       hostId,
+      workspaceHostId: LOCAL_HOST_ID,
       persistence: {
         readProject: () => undefined,
         readCodeThread: () => undefined,
@@ -83,6 +85,7 @@ describe("ServerBrowserAuthorityResolver", () => {
   it("derives Work authority from the current thread, Project binding, and provider", () => {
     const resolver = new ServerBrowserAuthorityResolver({
       hostId,
+      workspaceHostId: LOCAL_HOST_ID,
       persistence: {
         readProject: () => ({ ...baseProject, type: "work" }) as any,
         readCodeThread: () => undefined,
@@ -118,6 +121,7 @@ describe("ServerBrowserAuthorityResolver", () => {
   it("derives Code authority with the exact checkout identity", () => {
     const resolver = new ServerBrowserAuthorityResolver({
       hostId,
+      workspaceHostId: LOCAL_HOST_ID,
       persistence: {
         readProject: () =>
           ({
@@ -149,12 +153,12 @@ describe("ServerBrowserAuthorityResolver", () => {
     });
   });
 
-  it("binds Browser scope to the authenticated window's exact thread layout", () => {
+  it("binds Browser scope to the authenticated window's Project while a background thread runs", () => {
     const workspace = {
       contextByMode: {
-        chat: { host: hostId, mode: "chat", projectId: null, boundRoot: null },
-        work: { host: hostId, mode: "work", projectId, boundRoot: "/project" },
-        code: { host: hostId, mode: "code", projectId, boundRoot: "/project" },
+        chat: { host: LOCAL_HOST_ID, mode: "chat", projectId: null, boundRoot: null },
+        work: { host: LOCAL_HOST_ID, mode: "work", projectId, boundRoot: "/project" },
+        code: { host: LOCAL_HOST_ID, mode: "code", projectId, boundRoot: "/project" },
       },
       layouts: {
         chat: {
@@ -175,7 +179,7 @@ describe("ServerBrowserAuthorityResolver", () => {
             threadId: "90000000-0000-4000-8000-000000000099",
             mode: "work",
             title: "Work",
-            hostId,
+            hostId: LOCAL_HOST_ID,
           },
         },
         code: {
@@ -186,20 +190,36 @@ describe("ServerBrowserAuthorityResolver", () => {
             threadId,
             mode: "code",
             title: "Code",
-            hostId,
+            hostId: LOCAL_HOST_ID,
           },
         },
       },
     };
     const resolver = new ServerBrowserAuthorityResolver({
       hostId,
+      workspaceHostId: LOCAL_HOST_ID,
       persistence: {
         readProject: () => ({ ...baseProject, type: "work" }) as any,
         readCodeThread: () => undefined,
         readChatThread: () => undefined,
         readProviderInstance: () => provider as any,
         readWindowWorkspace: (candidate) =>
-          candidate === windowId ? ({ workspace } as any) : undefined,
+          candidate === windowId
+            ? ({ workspace } as any)
+            : candidate === otherWindowId
+              ? ({
+                  workspace: {
+                    ...workspace,
+                    contextByMode: {
+                      ...workspace.contextByMode,
+                      work: {
+                        ...workspace.contextByMode.work,
+                        host: decodeHostId("remote-host"),
+                      },
+                    },
+                  },
+                } as any)
+              : undefined,
       },
       workThreads: {
         read: () =>
@@ -225,6 +245,7 @@ describe("ServerBrowserAuthorityResolver", () => {
   it("refuses a Work Browser scope when its binding revision is missing or stale", () => {
     const resolver = new ServerBrowserAuthorityResolver({
       hostId,
+      workspaceHostId: LOCAL_HOST_ID,
       persistence: {
         readProject: () => ({ ...baseProject, type: "work" }) as any,
         readCodeThread: () => undefined,
@@ -250,6 +271,7 @@ describe("ServerBrowserAuthorityResolver", () => {
 
     const staleResolver = new ServerBrowserAuthorityResolver({
       hostId,
+      workspaceHostId: LOCAL_HOST_ID,
       persistence: {
         readProject: () => ({ ...baseProject, type: "work" }) as any,
         readCodeThread: () => undefined,
@@ -278,6 +300,7 @@ describe("ServerBrowserAuthorityResolver", () => {
   it("fails closed when the provider is disabled", () => {
     const resolver = new ServerBrowserAuthorityResolver({
       hostId,
+      workspaceHostId: LOCAL_HOST_ID,
       persistence: {
         readProject: () => ({ ...baseProject, type: "work" }) as any,
         readCodeThread: () => undefined,

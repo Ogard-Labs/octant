@@ -4,6 +4,7 @@ import {
   ToolRootId,
   ToolWorktreeId,
   type BrowserThreadId,
+  type HostId,
   type ChatThreadId,
   type CodeThreadId,
   type WorkThreadId,
@@ -21,6 +22,8 @@ const decodeToolWorktreeId = Schema.decodeUnknownSync(ToolWorktreeId);
 
 export interface BrowserAuthorityResolverOptions {
   readonly hostId: typeof ToolHostId.Type;
+  /** Workspace shell identity; distinct from the ToolHostId authority namespace. */
+  readonly workspaceHostId: HostId;
   readonly persistence: Pick<
     PersistenceService,
     "readProject" | "readCodeThread" | "readChatThread" | "readProviderInstance"
@@ -113,7 +116,9 @@ export class ServerBrowserAuthorityResolver implements BrowserAuthorityResolver 
     if (projected === undefined) return false;
     const workspace = projected.workspace;
     const context = workspace.contextByMode[mode];
-    if (context.mode !== mode || String(context.host) !== String(authority.hostId)) return false;
+    if (context.mode !== mode || String(context.host) !== String(this.#options.workspaceHostId)) {
+      return false;
+    }
     // The persisted mode Project is the window boundary. A thread may keep
     // running after the user selects another thread in the same Project; pane
     // selection is presentation state, not a new authority grant.

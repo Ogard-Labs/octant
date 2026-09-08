@@ -3191,6 +3191,7 @@ export function startOctantServer(
     });
     const browserAuthority = new ServerBrowserAuthorityResolver({
       hostId: deriveToolHostId(providerDataDirectory),
+      workspaceHostId: LOCAL_HOST_ID,
       persistence,
       workThreads: workThreadProjection,
     });
