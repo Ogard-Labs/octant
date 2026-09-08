@@ -556,8 +556,13 @@ filesystem paths, qualified identifiers, hashes, requested/effective
 breakdowns, and content size live behind Details. Usage opens on requests,
 input, output, and measurement quality. Reasoning, cache, execution time, and
 latency live in one Operational details disclosure; technical filters stay
-collapsed and provider-capacity diagnostics follow the locally recorded
-dashboard.
+collapsed in Settings. The standalone Usage destination also exposes provider
+capacity independently of ledger loading. Each provider window leads with its
+remaining percentage and an accessible meter, followed by its reset countdown.
+Account, model, and provider-instance scopes remain distinct. An elapsed reset
+shows Awaiting updated limits until a fresh reading arrives; it never implies
+refilled capacity. Provider cards use the shared surface typography and tokens
+and stack at narrow widths.
 
 First run is a five-step wizard with a progress rail. Each step is pending,
 current, or completed: the current step is a filled card, completed steps show

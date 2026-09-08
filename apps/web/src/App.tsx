@@ -4537,6 +4537,10 @@ function LaunchedShell(
     >
       <UsageWorkspace
         client={usageDashboardClient}
+        providers={providerController.instances}
+        {...(providerUsageLimitsClient === undefined
+          ? {}
+          : { providerLimitsClient: providerUsageLimitsClient })}
         isNarrow={isNarrow}
         onBack={() => setUsageOpen(false)}
         {...(pendingUsageFilter === undefined ? {} : { initialFilter: pendingUsageFilter })}

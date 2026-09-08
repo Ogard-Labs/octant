@@ -74,6 +74,14 @@ Inspect context opens the composition list so you can pin, exclude, or
 rebuild the next-turn plan. Switching the active pane closes a popover or
 inspector that belonged to the previous thread and retargets every value.
 
+The Usage destination and Settings also show provider-reported capacity.
+Rolling windows show the percentage left and time until reset. Absolute limits
+also show the remaining count. Account-scoped limits can include activity from
+other apps; model and provider-instance limits are labeled separately. After a
+reset time passes, Octant waits for an updated reading instead of assuming the
+quota has refilled. Missing windows are not counted as zero, and a failed refresh
+keeps the last successful reading visibly stale.
+
 The planner, manifest, and limits on this page do not change with that
 placement. Sensitive values are redacted in previews.
 

@@ -9,6 +9,7 @@ import type {
 } from "@octant/contracts";
 import { UsageDashboardClientFailure, type UsageDashboardClient } from "@octant/client-runtime";
 import { UsageWorkspace } from "./UsageWorkspace";
+import { decodeProviderUsageLimitsSnapshot } from "@octant/contracts";
 
 const provider = "66000000-0000-4000-8000-000000000001";
 const queryAt = "2026-07-24T12:00:00.000Z";
@@ -185,6 +186,20 @@ function emptyDashboard(): UsageDashboardResponse {
 }
 
 describe("UsageWorkspace", () => {
+  it("keeps provider capacity available when local usage history is unavailable", async () => {
+    const list = vi.fn(async () =>
+      decodeProviderUsageLimitsSnapshot({ version: 1, refreshedAt: queryAt, entries: [] }),
+    );
+    render(
+      <UsageWorkspace
+        client={undefined}
+        providerLimitsClient={{ list, refresh: list }}
+        providers={[]}
+      />,
+    );
+    expect(await screen.findByText("No configured providers have reported limits.")).toBeVisible();
+    expect(list).toHaveBeenCalledOnce();
+  });
   it("offers a labeled way back to the app when mounted as the standalone surface", async () => {
     const user = userEvent.setup();
     const onBack = vi.fn();

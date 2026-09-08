@@ -10,8 +10,11 @@ import type {
   UsageHostCoverage,
   UsageQuality,
   UsageQueryFilter,
+  ProviderInstance,
 } from "@octant/contracts";
 import type { UsageDashboardClient } from "@octant/client-runtime";
+import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
+import { ProviderUsageLimitsPanel } from "./ProviderUsageLimitsPanel";
 import { AlertTriangle, ArrowLeft, BarChart3, RefreshCw } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -23,6 +26,8 @@ import "./usageWorkspace.css";
 
 export interface UsageWorkspaceProps {
   readonly client: UsageDashboardClient | undefined;
+  readonly providerLimitsClient?: ProviderUsageLimitsClient;
+  readonly providers?: ReadonlyArray<ProviderInstance>;
   /** Pre-applied filter, used when the surface is opened from a thread. */
   readonly initialFilter?: UsageQueryFilter;
   readonly isNarrow?: boolean;
@@ -140,6 +145,13 @@ export function UsageWorkspace(props: UsageWorkspaceProps) {
           <RefreshCw aria-hidden="true" size={14} />
         </OctantButton>
       </header>
+
+      {props.providerLimitsClient === undefined ? null : (
+        <ProviderUsageLimitsPanel
+          client={props.providerLimitsClient}
+          instances={props.providers ?? []}
+        />
+      )}
 
       <UsageWorkspaceFilters
         filter={filter}

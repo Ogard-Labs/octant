@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   decodeProviderUsageLimitsSnapshot,
   type ProviderInstance,
@@ -99,13 +99,35 @@ function snapshot(
 }
 
 describe("ProviderUsageLimitsPanel", () => {
+  beforeEach(() => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-23T12:00:00.000Z"));
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("shows remaining quota and reset time without treating a reset as a refill", async () => {
+    const client = { list: async () => snapshot(), refresh: async () => snapshot() };
+    const { unmount } = render(<ProviderUsageLimitsPanel client={client} instances={[provider]} />);
+    const meter = await screen.findByRole("meter", { name: "5-hour window remaining" });
+    expect(meter).toHaveAttribute("value", "25");
+    expect(screen.getAllByText("25% left")).toHaveLength(2);
+    expect(screen.getAllByText("Resets in 1h")).toHaveLength(2);
+    unmount();
+    vi.mocked(Date.now).mockReturnValue(Date.parse("2026-08-23T13:01:00.000Z"));
+    render(<ProviderUsageLimitsPanel client={client} instances={[provider]} />);
+    expect(await screen.findAllByText("Awaiting updated limits")).toHaveLength(2);
+    expect(screen.queryByRole("meter")).not.toBeInTheDocument();
+    expect(screen.queryByText("100% left")).not.toBeInTheDocument();
+  });
   it("renders remaining capacity and refreshes only on explicit action", async () => {
     const list = vi.fn(async () => snapshot());
     const refresh = vi.fn(async () => snapshot());
     render(<ProviderUsageLimitsPanel client={{ list, refresh }} instances={[provider]} />);
 
     expect(await screen.findByText(/25 remaining of 100 requests/)).toBeVisible();
-    expect(screen.getByText(/5-hour window · Warning · 75% used/)).toBeVisible();
+    expect(screen.getByRole("meter", { name: "5-hour window remaining" })).toHaveAttribute(
+      "value",
+      "25",
+    );
     expect(refresh).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Refresh provider limits" }));
     expect(refresh).toHaveBeenCalledOnce();
@@ -230,7 +252,11 @@ describe("ProviderUsageLimitsPanel", () => {
       />,
     );
 
-    expect(await screen.findByText(/5-hour window \(primary\) · Allowed · 40% used/)).toBeVisible();
-    expect(screen.getByText(/7-day window \(secondary\) · Warning · 85% used/)).toBeVisible();
+    expect(
+      await screen.findByRole("meter", { name: "5-hour window (primary) remaining" }),
+    ).toHaveAttribute("value", "60");
+    expect(
+      screen.getByRole("meter", { name: "7-day window (secondary) remaining" }),
+    ).toHaveAttribute("value", "15");
   });
 });
