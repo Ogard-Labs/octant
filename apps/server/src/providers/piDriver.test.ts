@@ -9,7 +9,7 @@ import {
 import { Effect, Exit, Scope, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { makePiDriver, type PiClientPort } from "./piDriver";
-import type { PiProcessPort, PiRpcConnection } from "./piProcess";
+import { piToolCatalogAttestation, type PiProcessPort, type PiRpcConnection } from "./piProcess";
 import type { PiRpcEvent } from "./piRpcClient";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
@@ -21,6 +21,8 @@ const root = "/tmp/octant-pi-driver";
 class FakeClient implements PiClientPort {
   readonly events = new Set<(event: PiRpcEvent) => void>();
   readonly responses: Array<{ id: string; response: Record<string, unknown> }> = [];
+  attestedTools: ReadonlyArray<ProviderToolDefinition> = [];
+  attestation = true;
   readonly request = vi.fn(async (type: string, fields: Record<string, unknown> = {}) => {
     if (type === "get_available_models") {
       return {
@@ -48,6 +50,24 @@ class FakeClient implements PiClientPort {
         data: { sessionId: "pi-source-1", sessionFile: "/managed/sessions/pi-source-1.jsonl" },
       };
     }
+    if (type === "get_commands") {
+      return {
+        type: "response" as const,
+        command: type,
+        success: true,
+        data: {
+          commands: this.attestation
+            ? [
+                {
+                  name: "octant-tool-attestation",
+                  source: "extension",
+                  description: `Octant managed tool catalog ${piToolCatalogAttestation(this.attestedTools)}`,
+                },
+              ]
+            : [],
+        },
+      };
+    }
     if (type === "set_model") {
       expect(fields).toEqual({ provider: "anthropic", modelId: "claude-sonnet" });
     }
@@ -67,13 +87,13 @@ class FakeClient implements PiClientPort {
   }
 }
 
-function fixture() {
+function fixture(version = "0.80.10") {
   const client = new FakeClient();
   const starts: Array<Record<string, unknown>> = [];
   let active = 0;
   let released = 0;
   const connection = {
-    version: "0.80.10",
+    version,
     pid: 701,
     root,
     rpc: {} as PiRpcConnection["rpc"],
@@ -83,6 +103,7 @@ function fixture() {
     start: (input) =>
       Effect.acquireRelease(
         Effect.sync(() => {
+          client.attestedTools = input.tools ?? [];
           starts.push(input);
           active += 1;
           return connection;
@@ -136,11 +157,11 @@ async function terminal(events: Stream.Stream<ProviderRuntimeEvent, ProviderFail
 
 describe("Pi provider driver", () => {
   it("probes model readiness without sending a prompt", async () => {
-    const { driver, client, registry, starts, active, released } = fixture();
+    const { driver, client, registry, starts, active, released } = fixture("0.85.1");
     const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
     expect(result).toMatchObject({
       readiness: "ready",
-      detectedVersion: "0.80.10",
+      detectedVersion: "0.85.1",
       models: [
         {
           id: "anthropic/claude-sonnet",
@@ -162,6 +183,7 @@ describe("Pi provider driver", () => {
     expect(client.request.mock.calls.map(([type]) => type)).toEqual([
       "get_available_models",
       "get_state",
+      "get_commands",
     ]);
     expect(starts[0]).toMatchObject({
       root: "/managed/pi",
@@ -171,6 +193,45 @@ describe("Pi provider driver", () => {
     expect(registry.observedState(instanceId)).toEqual(result);
     expect(active()).toBe(0);
     expect(released()).toBe(1);
+  });
+
+  it("keeps app-managed tools unsupported when the trusted extension does not attest", async () => {
+    const { driver, client } = fixture("0.85.1");
+    client.attestation = false;
+    const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    expect(result.capabilities.appManagedTools).toBe("unsupported");
+  });
+
+  it("keeps app-managed tools unsupported for an older Pi runtime", async () => {
+    const { driver } = fixture("0.80.10");
+    const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    expect(result.capabilities.appManagedTools).toBe("unsupported");
+  });
+
+  it("refuses an app-managed session on an unverified Pi runtime", async () => {
+    const { driver } = fixture();
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      driver
+        .acquire({ instanceId, projectRoot: root, mode: "code" })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    await expect(
+      Effect.runPromise(
+        connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          tools: [
+            {
+              name: "octant_browser",
+              inputSchema: { type: "object", properties: {} },
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow(/not verified/);
+    await Effect.runPromise(Scope.close(scope, Exit.void));
   });
 
   it("reads a Pi 0.84.1 model list served by a custom OpenAI-compatible provider", async () => {
@@ -216,7 +277,7 @@ describe("Pi provider driver", () => {
   });
 
   it("streams ordered events and correlates approval answers", async () => {
-    const { driver, client, starts } = fixture();
+    const { driver, client, starts } = fixture("0.85.1");
     const scope = await Effect.runPromise(Scope.make());
     const connection = await Effect.runPromise(
       driver
@@ -280,7 +341,7 @@ describe("Pi provider driver", () => {
   });
 
   it("round-trips an app-managed tool and carries its catalogue across resume", async () => {
-    const { driver, client, starts } = fixture();
+    const { driver, client, starts } = fixture("0.85.1");
     const tool: ProviderToolDefinition = {
       name: "octant_browser",
       description: "Use the Octant Browser session.",
@@ -335,6 +396,23 @@ describe("Pi provider driver", () => {
     await expect(response).resolves.toMatchObject({ status: 200 });
     const body = await (await response).json();
     expect(body).toEqual({ resultJson: JSON.stringify({ ok: true }), isError: false });
+    const duplicate = await fetch(bridge!.url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-pi-token": bridge!.token,
+      },
+      body: JSON.stringify({
+        toolCallId: "browser-call",
+        name: tool.name,
+        input: { action: "navigate" },
+      }),
+    });
+    expect(duplicate.status).toBe(200);
+    await expect(duplicate.json()).resolves.toEqual({
+      resultJson: JSON.stringify({ error: "tool-unavailable" }),
+      isError: true,
+    });
     client.emit({
       type: "tool_execution_end",
       toolCallId: "browser-call",
@@ -371,7 +449,7 @@ describe("Pi provider driver", () => {
   });
 
   it("cancels a pending app-managed tool when the Pi turn is interrupted", async () => {
-    const { driver, client, starts } = fixture();
+    const { driver, client, starts } = fixture("0.85.1");
     const tool: ProviderToolDefinition = {
       name: "octant_browser",
       inputSchema: { type: "object", properties: {} },

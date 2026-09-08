@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import {
   accessSync,
@@ -157,11 +158,13 @@ function javascriptLiteral(value: unknown): string {
 
 export function piExtensionSource(tools: ReadonlyArray<ProviderToolDefinition>): string {
   if (tools.length === 0) return APPROVAL_BRIDGE;
+  const catalogAttestation = piToolCatalogAttestation(tools);
   return `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const definitions = ${javascriptLiteral(tools)};
 const bridgeUrl = process.env.OCTANT_PI_TOOL_BRIDGE_URL;
 const bridgeToken = process.env.OCTANT_PI_TOOL_BRIDGE_TOKEN;
+const catalogAttestation = "${catalogAttestation}";
 const sideEffects = new Set(${javascriptLiteral(SIDE_EFFECT_TOOLS)});
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -170,6 +173,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export default function octantManagedTools(pi: ExtensionAPI) {
   if (bridgeUrl !== undefined && bridgeToken !== undefined) {
+    pi.registerCommand("octant-tool-attestation", {
+      description: \`Octant managed tool catalog \${catalogAttestation}\`,
+      handler: async () => undefined,
+    });
     for (const definition of definitions) {
       pi.registerTool({
         name: definition.name,
@@ -213,6 +220,10 @@ export default function octantManagedTools(pi: ExtensionAPI) {
   });
 }
 `;
+}
+
+export function piToolCatalogAttestation(tools: ReadonlyArray<ProviderToolDefinition>): string {
+  return createHash("sha256").update(JSON.stringify(tools)).digest("hex").slice(0, 32);
 }
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
@@ -338,6 +349,23 @@ function temporaryDirectory(path: string): Effect.Effect<string, ProviderFailure
   });
 }
 
+function loopbackBridgeRule(
+  bridge: PiManagedToolBridgeConfig | undefined,
+  platform: NodeJS.Platform,
+): string | undefined {
+  if (bridge === undefined || platform !== "darwin") return undefined;
+  let url: URL;
+  try {
+    url = new URL(bridge.url);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "http:" || url.hostname !== "127.0.0.1") return undefined;
+  const port = Number(url.port);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) return undefined;
+  return `(allow network-outbound (remote ip "localhost:${port}"))`;
+}
+
 function prepareProviderOwnedLink(piHome: string, sourcePath: string, fileName: string): void {
   const target = join(piHome, fileName);
   if (!existsSync(sourcePath)) return;
@@ -432,6 +460,12 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
                 OCTANT_PI_TOOL_BRIDGE_TOKEN: input.toolBridge.token,
               }),
         };
+        const bridgeRule = loopbackBridgeRule(input.toolBridge, platform);
+        if (input.toolBridge !== undefined && platform === "darwin" && bridgeRule === undefined) {
+          return yield* Effect.fail(
+            failure("invalid-configuration", "Pi app-managed tool bridge must be loopback HTTP."),
+          );
+        }
         const args = piArguments(
           bridgePath,
           sessionDirectory,
@@ -454,6 +488,14 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
             executionPolicy: input.executionPolicy,
           }),
         );
+        if (input.toolBridge !== undefined && platform === "linux" && networkEgress !== "allow") {
+          return yield* Effect.fail(
+            failure(
+              "incompatible",
+              "Pi app-managed tools require a shared Linux network namespace.",
+            ),
+          );
+        }
         const credentialPaths = [
           ...(existsSync(credentialPath) ? [credentialPath] : []),
           ...(existsSync(modelsPath) ? [modelsPath] : []),
@@ -490,6 +532,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
                 runtimeDirectory,
                 ...credentialPaths,
               ],
+              ...(bridgeRule === undefined ? {} : { extraRules: [bridgeRule] }),
             }),
           catch: (error) =>
             failure(

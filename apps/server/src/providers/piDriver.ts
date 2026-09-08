@@ -22,7 +22,12 @@ import {
   unsupportedChatCapabilities,
 } from "@octant/provider-sdk/chat-conformance";
 import { Effect, Exit, Queue, Scope, Stream } from "effect";
-import type { PiProcessPort, PiRpcConnection, PiSessionMode } from "./piProcess";
+import {
+  piToolCatalogAttestation,
+  type PiProcessPort,
+  type PiRpcConnection,
+  type PiSessionMode,
+} from "./piProcess";
 import { PiRpcFailure, type PiRpcEvent, type PiRpcResponse } from "./piRpcClient";
 import {
   createPiManagedToolsBridge,
@@ -80,7 +85,7 @@ interface SessionState {
   readonly client: PiClientPort;
   readonly removeEvent: () => void;
   readonly approvals: Map<string, PendingApproval>;
-  readonly tools: Map<string, { terminal: boolean; name: string }>;
+  readonly tools: Map<string, { terminal: boolean; answered: boolean; name: string }>;
   readonly toolNames: ReadonlySet<string>;
   readonly pendingTools: Map<string, PendingPiTool>;
   readonly managedTools?: PiManagedToolsBridge;
@@ -116,8 +121,17 @@ const capabilities = {
   taskProgress: "unavailable",
   nativeChildAgents: "unsupported",
   ...unsupportedChatCapabilities,
-  appManagedTools: "supported",
 } as const;
+
+const PROBE_TOOL_BRIDGE = {
+  url: "http://127.0.0.1:1/octant/probe",
+  token: "octant-probe",
+} as const;
+const PI_APP_MANAGED_TOOLS_VERSION = "0.85.1";
+
+function capabilitiesFor(appManagedTools: "supported" | "unsupported") {
+  return { ...capabilities, appManagedTools } as const;
+}
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
   return { category, message };
@@ -186,6 +200,23 @@ function modelSelection(modelId: string): { provider: string; modelId: string } 
   return { provider: modelId.slice(0, separator), modelId: modelId.slice(separator + 1) };
 }
 
+function hasToolAttestation(
+  response: PiRpcResponse,
+  tools: ReadonlyArray<ProviderToolDefinition>,
+): boolean {
+  const commands = record(response.data)?.commands;
+  if (!Array.isArray(commands)) return false;
+  const expected = `Octant managed tool catalog ${piToolCatalogAttestation(tools)}`;
+  return commands.some((candidate) => {
+    const command = record(candidate);
+    return (
+      command?.name === "octant-tool-attestation" &&
+      command.source === "extension" &&
+      command.description === expected
+    );
+  });
+}
+
 function client(connection: PiRpcConnection): PiClientPort {
   return connection.rpc;
 }
@@ -196,6 +227,7 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
   const makeCorrelation = options.correlationId ?? (() => crypto.randomUUID());
   const makeRequestId = options.requestId ?? (() => crypto.randomUUID());
   const resumeIdentities = new Map<string, ResumeIdentity>();
+  let appManagedToolsVerified = false;
 
   return {
     kind: "pi",
@@ -205,8 +237,14 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
           failure("invalid-configuration", "Provider instance does not match driver."),
         );
       }
+      appManagedToolsVerified = false;
       return Effect.gen(function* () {
         const sourceSessionId = `probe-${crypto.randomUUID()}`;
+        const probeTool = {
+          name: "octant_probe_tool",
+          description: "Octant provider capability probe.",
+          inputSchema: { type: "object", properties: {} },
+        } satisfies ProviderToolDefinition;
         let receipt: Awaited<ReturnType<ProviderRuntimeRegistry["trackProcess"]>> | undefined;
         const connection = yield* options.process.start({
           binaryPath: options.binaryPath,
@@ -216,6 +254,8 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
           sessionId: sourceSessionId,
           mode: "chat",
           executionPolicy: "approval-gated",
+          tools: [probeTool],
+          toolBridge: PROBE_TOOL_BRIDGE,
           onProcessStarted: async (process) => {
             receipt = await options.runtimeRegistry.trackProcess(instanceId, process);
             return receipt;
@@ -227,6 +267,12 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
         const rpc = clientFactory(connection);
         const modelResponse = yield* request(() => rpc.request("get_available_models"));
         yield* request(() => rpc.request("get_state"));
+        const attestation = yield* request(() =>
+          rpc.request("get_commands", { expected: "octant-tool-attestation" }),
+        );
+        appManagedToolsVerified =
+          connection.version === PI_APP_MANAGED_TOOLS_VERSION &&
+          hasToolAttestation(attestation, [probeTool]);
         const models = normalizeModels(modelResponse);
         const observedAt = clock();
         const result = decodeProviderProbeResult({
@@ -235,7 +281,7 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
           processState: "stopped",
           detectedVersion: connection.version,
           models,
-          capabilities,
+          capabilities: capabilitiesFor(appManagedToolsVerified ? "supported" : "unsupported"),
           ...(models.length === 0
             ? { message: "Pi did not report an authenticated selectable model." }
             : {}),
@@ -270,6 +316,12 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
         clock,
         makeCorrelation,
         makeRequestId,
+        appManagedTools: {
+          get: () => appManagedToolsVerified,
+          set: (verified) => {
+            appManagedToolsVerified = verified;
+          },
+        },
       });
     },
   };
@@ -285,6 +337,10 @@ function makeConnection(
     readonly clock: () => string;
     readonly makeCorrelation: () => string;
     readonly makeRequestId: () => string;
+    readonly appManagedTools: {
+      readonly get: () => boolean;
+      readonly set: (verified: boolean) => void;
+    };
   },
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
@@ -362,11 +418,19 @@ function makeConnection(
         state.closed ||
         state.terminal ||
         !state.toolNames.has(call.name) ||
-        state.tools.get(call.toolCallId)?.name !== call.name
+        state.tools.get(call.toolCallId)?.name !== call.name ||
+        state.tools.get(call.toolCallId)?.answered !== false ||
+        state.tools.get(call.toolCallId)?.terminal === true
       ) {
         return { resultJson: JSON.stringify({ error: "tool-unavailable" }), isError: true };
       }
+      const tool = state.tools.get(call.toolCallId);
+      if (tool === undefined) {
+        return { resultJson: JSON.stringify({ error: "tool-unavailable" }), isError: true };
+      }
+      tool.answered = true;
       if (call.signal.aborted) {
+        tool.terminal = true;
         return { resultJson: JSON.stringify({ error: "tool-interrupted" }), isError: true };
       }
       const requestId = factories.makeRequestId();
@@ -417,7 +481,7 @@ function makeConnection(
         if (toolCallId === undefined || toolName === undefined || state.tools.has(toolCallId)) {
           return protocolFailure(state, "Pi tool start was invalid.");
         }
-        state.tools.set(toolCallId, { terminal: false, name: toolName });
+        state.tools.set(toolCallId, { terminal: false, answered: false, name: toolName });
         emit(state, { kind: "tool-start", toolCallId, toolName });
         return;
       }
@@ -551,6 +615,12 @@ function makeConnection(
               })
               .pipe(Effect.provideService(Scope.Scope, scope)),
           );
+          if (tools.length > 0 && processConnection.version !== PI_APP_MANAGED_TOOLS_VERSION) {
+            throw failure(
+              "unsupported",
+              `Pi ${processConnection.version} is not verified for app-managed tools.`,
+            );
+          }
           if (receipt === undefined) {
             await options.runtimeRegistry.trackProcess(options.instanceId, processConnection);
           }
@@ -560,6 +630,18 @@ function makeConnection(
           const sourceSessionId = bounded(record(stateResponse.data)?.sessionId, 256);
           if (sourceSessionId === undefined)
             throw new PiRpcFailure("protocol", "Pi session identity missing.");
+          if (tools.length > 0) {
+            const attestation = await rpc.request("get_commands", {
+              expected: "octant-tool-attestation",
+            });
+            if (!hasToolAttestation(attestation, tools)) {
+              throw failure(
+                "unsupported",
+                "Pi runtime did not attest the app-managed tool catalog.",
+              );
+            }
+            factories.appManagedTools.set(true);
+          }
           const previous = sessions.get(input.sessionId);
           if (previous !== undefined) await closeState(previous);
           let state!: SessionState;
@@ -655,7 +737,10 @@ function makeConnection(
       send: (input) =>
         stateFor(input.sessionId).pipe(
           Effect.flatMap((state) =>
-            rejectUnsupportedChatTurn(input, capabilities).pipe(
+            rejectUnsupportedChatTurn(
+              input,
+              capabilitiesFor(factories.appManagedTools.get() ? "supported" : "unsupported"),
+            ).pipe(
               Effect.flatMap(() => {
                 if (state.terminal)
                   return Effect.fail(failure("protocol", "Pi session is terminal."));

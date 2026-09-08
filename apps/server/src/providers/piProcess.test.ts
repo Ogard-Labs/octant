@@ -62,7 +62,7 @@ describe("Pi process boundary", () => {
     expect(extension).toContain("name: definition.name");
     expect(extension).toContain("OCTANT_PI_TOOL_BRIDGE_URL");
     expect(extension).toContain("x-octant-pi-token");
-    expect(extension).not.toContain("registerCommand");
+    expect(extension).toContain("octant-tool-attestation");
     expect(
       piArguments("/bridge.ts", "/sessions", "code-1", "code", "approval-gated", [tool.name]),
     ).toEqual(
@@ -150,6 +150,9 @@ describe("Pi process boundary", () => {
       }),
     );
     expect(managedLaunch.args).toContain("bash,edit,write,read,grep,find,ls,octant_browser");
+    expect(managedLaunch.args[1]).toContain(
+      '(allow network-outbound (remote ip "localhost:43210"))',
+    );
     expect(managedLaunch.environment.OCTANT_PI_TOOL_BRIDGE_URL).toBe(
       "http://127.0.0.1:43210/octant/test",
     );
@@ -157,6 +160,30 @@ describe("Pi process boundary", () => {
     const managedBridge = readFileSync(join(managed.home, "octant-approval-bridge.ts"), "utf8");
     expect(managedBridge).toContain('"name":"octant_browser"');
     expect(managedBridge).toContain("pi.registerTool");
+
+    const noEgress = fixture();
+    const noEgressLaunch = await Effect.runPromise(
+      makePiConfinementLive({
+        platform: "darwin",
+        sandboxPath: noEgress.sandbox,
+        temporaryDirectory: noEgress.base,
+      }).prepare({
+        binaryPath: noEgress.binary,
+        root: noEgress.root,
+        piHome: noEgress.home,
+        sessionDirectory: join(noEgress.home, "sessions"),
+        sessionId: "no-egress-1",
+        mode: "chat",
+        executionPolicy: "approval-gated",
+        environment: sanitizePiEnvironment({ PATH: "/usr/bin" }, noEgress.home),
+        tools: [managedTool],
+        toolBridge: { url: "http://127.0.0.1:43211/octant/test", token: "test-token" },
+      }),
+    );
+    expect(noEgressLaunch.args[1]).toContain(
+      '(allow network-outbound (remote ip "localhost:43211"))',
+    );
+    expect(noEgressLaunch.args[1]).not.toContain("(allow network*)");
   });
 
   it("maps modes to the minimum Pi tools and keeps full access genuine", async () => {
