@@ -54,7 +54,12 @@ describe("local provider usage history", () => {
             type: "token_count",
             thread_id: "session-1",
             info: {
-              total_token_usage: { input_tokens: 50, output_tokens: 8 },
+              total_token_usage: {
+                inputTokens: 50,
+                cachedInputTokens: 15,
+                cacheWriteInputTokens: 0,
+                outputTokens: 8,
+              },
               last_token_usage: {
                 inputTokens: 20,
                 cachedInputTokens: 15,
@@ -71,7 +76,12 @@ describe("local provider usage history", () => {
             type: "token_count",
             thread_id: "session-1",
             info: {
-              total_token_usage: { input_tokens: 50, output_tokens: 8 },
+              total_token_usage: {
+                inputTokens: 50,
+                cachedInputTokens: 15,
+                cacheWriteInputTokens: 0,
+                outputTokens: 8,
+              },
               last_token_usage: { input_tokens: 20, cached_input_tokens: 15, output_tokens: 3 },
             },
           },

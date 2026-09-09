@@ -11,7 +11,7 @@ import {
 } from "@octant/contracts";
 import type { ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
 
-const MAX_RECORDS = 20_000;
+const MAX_RECORDS = 100_000;
 const MAX_GROUPS = 256;
 const MAX_DAYS = 512;
 

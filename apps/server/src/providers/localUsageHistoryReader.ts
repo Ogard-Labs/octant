@@ -16,7 +16,7 @@ const DEFAULT_MAX_FILES = 512;
 const DEFAULT_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 const DEFAULT_MAX_FILE_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_RECORD_BYTES = 256 * 1024;
-const DEFAULT_MAX_RECORDS = 20_000;
+const DEFAULT_MAX_RECORDS = 100_000;
 const MAX_DISCOVERED_FILES = 100_000;
 const MAX_CACHED_RECORDS = 100_000;
 
@@ -259,8 +259,8 @@ export async function readLocalUsageHistory(
     const observedAt = Date.parse(String(record.observedAt));
     return observedAt >= from && observedAt <= to;
   });
-  const responseRecords = cachedRecords.slice(0, maxRecords);
-  if (cachedRecords.length > maxRecords || recordCacheTruncated.has(sourceInstallationId)) {
+  const responseRecords = cachedRecords;
+  if (recordCacheTruncated.has(sourceInstallationId)) {
     truncated = true;
   }
   const status =

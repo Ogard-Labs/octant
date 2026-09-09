@@ -8,7 +8,21 @@ import type {
 import type { ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
 import { resolveLocalUsageCost, type PricingUsageRecord } from "./localUsagePricing";
 
-const modelCaches = new Map<string, Map<string, string>>();
+interface CodexUsageSnapshot {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadInputTokens?: number;
+  readonly cacheWriteInputTokens?: number;
+  readonly reasoningTokens?: number;
+  readonly totalTokens?: number;
+}
+
+interface CodexParserState {
+  readonly models: Map<string, string>;
+  readonly cumulative: Map<string, CodexUsageSnapshot>;
+}
+
+const parserCaches = new Map<string, CodexParserState>();
 import {
   readLocalUsageHistory,
   stableUsageId,
@@ -20,8 +34,13 @@ import {
 export function createCodexLocalUsageHistorySource(
   options: Omit<LocalUsageHistoryReaderOptions, "sourceKind" | "providerKey">,
 ): ProviderLocalUsageHistorySource {
-  const models = modelCaches.get(options.root) ?? new Map<string, string>();
-  modelCaches.set(options.root, models);
+  const state =
+    parserCaches.get(options.root) ??
+    ({
+      models: new Map<string, string>(),
+      cumulative: new Map<string, CodexUsageSnapshot>(),
+    } satisfies CodexParserState);
+  parserCaches.set(options.root, state);
   return {
     sourceKind: "codex",
     read: (request: LocalUsageHistoryRequest, signal) =>
@@ -30,7 +49,7 @@ export function createCodexLocalUsageHistorySource(
           ...(await readLocalUsageHistory(
             { ...options, sourceKind: "codex", providerKey: "codex" },
             request,
-            createCodexLineParser(models),
+            createCodexLineParser(state),
             signal ?? effectSignal,
           )),
         }),
@@ -42,9 +61,9 @@ export function createCodexLocalUsageHistorySource(
   };
 }
 
-function createCodexLineParser(models: Map<string, string>): LocalUsageHistoryLineParser {
+function createCodexLineParser(state: CodexParserState): LocalUsageHistoryLineParser {
   const seenUsageIds = new Set<string>();
-  return (input) => parseCodexLine(input, models, seenUsageIds);
+  return (input) => parseCodexLine(input, state, seenUsageIds);
 }
 
 function parseCodexLine(
@@ -55,7 +74,7 @@ function parseCodexLine(
     readonly relativePath: string;
     readonly lineNumber: number;
   },
-  models: Map<string, string>,
+  state: CodexParserState,
   seenUsageIds: Set<string>,
 ): LocalUsageHistoryRecord | undefined {
   const value = parseRecord(input.line);
@@ -64,7 +83,7 @@ function parseCodexLine(
     const sessionId = text(payload?.id) ?? sessionIdFromPath(input.sourceSessionIdHint);
     const provenance = record(record(payload?.base_instructions)?.provenance);
     const model = text(payload?.model) ?? text(provenance?.model);
-    if (model !== undefined) models.set(sessionId, model);
+    if (model !== undefined) state.models.set(sessionId, model);
     return undefined;
   }
   if (value?.type === "turn_context") {
@@ -76,20 +95,16 @@ function parseCodexLine(
       text(payload?.sessionId) ??
       sessionIdFromPath(input.sourceSessionIdHint);
     const model = text(payload?.model);
-    if (model !== undefined) models.set(sessionId, model);
+    if (model !== undefined) state.models.set(sessionId, model);
     return undefined;
   }
   if (value?.type !== "event_msg") return undefined;
   const payload = record(value.payload);
   if (payload?.type !== "token_count") return undefined;
   const info = record(payload.info);
-  const last = record(info?.last_token_usage);
+  const lastValue = record(info?.last_token_usage);
+  const last = usageSnapshot(lastValue);
   if (last === undefined) return undefined;
-  const inputTokens = nonNegativeInt(last.input_tokens) ?? nonNegativeInt(last.inputTokens);
-  const outputTokens = nonNegativeInt(last.output_tokens) ?? nonNegativeInt(last.outputTokens);
-  if (inputTokens === undefined || outputTokens === undefined) return undefined;
-  const observedAt = timestamp(value.timestamp);
-  if (observedAt === undefined) return undefined;
   const sourceSessionId =
     text(payload.thread_id) ??
     text(payload.threadId) ??
@@ -97,20 +112,33 @@ function parseCodexLine(
     text(payload.sessionId) ??
     sessionIdFromPath(input.sourceSessionIdHint);
   const modelId =
-    text(payload.model) ?? text(info?.model) ?? models.get(sourceSessionId) ?? "unknown";
-  const cacheReadInputTokens =
-    nonNegativeInt(last.cached_input_tokens) ?? nonNegativeInt(last.cachedInputTokens);
-  const cacheWriteInputTokens =
-    nonNegativeInt(last.cache_write_input_tokens) ?? nonNegativeInt(last.cacheWriteInputTokens);
-  const reasoningTokens =
-    nonNegativeInt(last.reasoning_output_tokens) ?? nonNegativeInt(last.reasoningOutputTokens);
-  const costUsd = nonNegativeNumber(last.cost_usd) ?? nonNegativeNumber(info?.cost_usd);
+    text(payload.model) ?? text(info?.model) ?? state.models.get(sourceSessionId) ?? "unknown";
+  const cumulativeValue = record(info?.total_token_usage);
+  const cumulative = usageSnapshot(cumulativeValue);
+  let usage = last;
+  if (cumulative !== undefined) {
+    const previous = state.cumulative.get(sourceSessionId);
+    if (previous !== undefined) {
+      const delta = subtractUsage(cumulative, previous);
+      if (delta === undefined) usage = last;
+      else if (delta === "unchanged") return undefined;
+      else usage = delta;
+    }
+    state.cumulative.set(sourceSessionId, cumulative);
+  }
+  const observedAt = timestamp(value.timestamp);
+  if (observedAt === undefined) return undefined;
+  const costUsd = nonNegativeNumber(lastValue?.cost_usd) ?? nonNegativeNumber(info?.cost_usd);
   const pricingRecord: PricingUsageRecord = {
     modelId,
-    inputTokens,
-    ...(cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens }),
-    ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens }),
-    outputTokens,
+    inputTokens: usage.inputTokens,
+    ...(usage.cacheReadInputTokens === undefined
+      ? {}
+      : { cacheReadInputTokens: usage.cacheReadInputTokens }),
+    ...(usage.cacheWriteInputTokens === undefined
+      ? {}
+      : { cacheWriteInputTokens: usage.cacheWriteInputTokens }),
+    outputTokens: usage.outputTokens,
     ...(costUsd === undefined
       ? {}
       : {
@@ -118,12 +146,11 @@ function parseCodexLine(
         }),
   };
   const cost = localCost("openai", pricingRecord);
-  const cumulative = record(info?.total_token_usage);
   const turnIdentity =
     text(payload.turn_id) ?? text(payload.turnId) ?? text(info?.turn_id) ?? text(info?.turnId);
   const eventIdentity =
     cumulative === undefined
-      ? (turnIdentity ?? JSON.stringify(last))
+      ? (turnIdentity ?? JSON.stringify(lastValue))
       : `${turnIdentity ?? ""}\0${JSON.stringify(cumulative)}`;
   const sourceEventId = stableUsageId("codex", sourceSessionId, eventIdentity);
   if (seenUsageIds.has(sourceEventId)) return undefined;
@@ -136,13 +163,92 @@ function parseCodexLine(
     providerKey: "codex",
     modelId,
     observedAt,
-    inputTokens,
-    ...(cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens }),
-    ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens }),
-    outputTokens,
-    ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+    inputTokens: usage.inputTokens,
+    ...(usage.cacheReadInputTokens === undefined
+      ? {}
+      : { cacheReadInputTokens: usage.cacheReadInputTokens }),
+    ...(usage.cacheWriteInputTokens === undefined
+      ? {}
+      : { cacheWriteInputTokens: usage.cacheWriteInputTokens }),
+    outputTokens: usage.outputTokens,
+    ...(usage.reasoningTokens === undefined ? {} : { reasoningTokens: usage.reasoningTokens }),
     ...(cost === undefined ? {} : { cost }),
   };
+}
+
+function usageSnapshot(value: Record<string, unknown> | undefined): CodexUsageSnapshot | undefined {
+  if (value === undefined) return undefined;
+  const inputTokens = nonNegativeInt(value.input_tokens) ?? nonNegativeInt(value.inputTokens);
+  const outputTokens = nonNegativeInt(value.output_tokens) ?? nonNegativeInt(value.outputTokens);
+  if (inputTokens === undefined || outputTokens === undefined) return undefined;
+  const cacheReadInputTokens =
+    nonNegativeInt(value.cached_input_tokens) ?? nonNegativeInt(value.cachedInputTokens);
+  const cacheWriteInputTokens =
+    nonNegativeInt(value.cache_write_input_tokens) ?? nonNegativeInt(value.cacheWriteInputTokens);
+  const reasoningTokens =
+    nonNegativeInt(value.reasoning_output_tokens) ?? nonNegativeInt(value.reasoningOutputTokens);
+  const totalTokens = nonNegativeInt(value.total_tokens) ?? nonNegativeInt(value.totalTokens);
+  return {
+    inputTokens,
+    outputTokens,
+    ...(cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens }),
+    ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens }),
+    ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+    ...(totalTokens === undefined ? {} : { totalTokens }),
+  };
+}
+
+type UsageDelta = CodexUsageSnapshot | "unchanged";
+
+function subtractUsage(
+  current: CodexUsageSnapshot,
+  previous: CodexUsageSnapshot,
+): UsageDelta | undefined {
+  const inputTokens = current.inputTokens - previous.inputTokens;
+  const outputTokens = current.outputTokens - previous.outputTokens;
+  if (inputTokens < 0 || outputTokens < 0) return undefined;
+  const cacheReadInputTokens = subtractOptional(
+    current.cacheReadInputTokens,
+    previous.cacheReadInputTokens,
+  );
+  const cacheWriteInputTokens = subtractOptional(
+    current.cacheWriteInputTokens,
+    previous.cacheWriteInputTokens,
+  );
+  const reasoningTokens = subtractOptional(current.reasoningTokens, previous.reasoningTokens);
+  if (
+    cacheReadInputTokens === undefined ||
+    cacheWriteInputTokens === undefined ||
+    reasoningTokens === undefined
+  )
+    return undefined;
+  const cacheReadValue = cacheReadInputTokens ?? 0;
+  const cacheWriteValue = cacheWriteInputTokens ?? 0;
+  const reasoningValue = reasoningTokens ?? 0;
+  const changed =
+    inputTokens > 0 ||
+    outputTokens > 0 ||
+    cacheReadValue > 0 ||
+    cacheWriteValue > 0 ||
+    reasoningValue > 0;
+  if (!changed) return "unchanged";
+  return {
+    inputTokens,
+    outputTokens,
+    ...(cacheReadInputTokens === null ? {} : { cacheReadInputTokens: cacheReadInputTokens }),
+    ...(cacheWriteInputTokens === null ? {} : { cacheWriteInputTokens: cacheWriteInputTokens }),
+    ...(reasoningTokens === null ? {} : { reasoningTokens: reasoningTokens }),
+  };
+}
+
+function subtractOptional(
+  current: number | undefined,
+  previous: number | undefined,
+): number | null | undefined {
+  if (current === undefined) return null;
+  if (previous === undefined) return current;
+  const delta = current - previous;
+  return delta < 0 ? undefined : delta;
 }
 
 function localCost(

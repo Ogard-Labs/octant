@@ -120,6 +120,20 @@ describe("local usage history aggregation", () => {
     });
   });
 
+  it("aggregates more than one bounded pass of retained records", async () => {
+    const many = Array.from({ length: 20_001 }, (_, index) => ({
+      ...records[0]!,
+      sourceEventId: `event-many-${index}`,
+    }));
+    const response = await readLocalUsageHistoryDashboard({
+      sources: [source(many)],
+      request,
+      queryAt: "2026-09-11T00:00:00.000Z",
+    });
+    expect(response.totals.requestCount).toBe(20_001);
+    expect(response.totals.inputTokens).toBe(30 * 20_001);
+  });
+
   it("keeps identical provider sequence IDs from independent installations separate", async () => {
     const first = records[0]!;
     const second = { ...first, sourceInstallationId: "install-2" };
