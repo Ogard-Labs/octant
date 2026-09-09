@@ -1,4 +1,4 @@
-# 0092. A window capability travels only over TLS or loopback
+# 0103. A window capability travels only over TLS or loopback
 
 **Status:** Accepted
 

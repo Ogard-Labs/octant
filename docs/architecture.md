@@ -126,7 +126,7 @@ renderer ports share the local-user trust class; the listener never reflects a
 non-loopback web origin into local authority. The renderer holds the matching
 line before its first request: a launch address that is plain HTTP to a
 non-loopback host is refused with an explanation and never used
-(`docs/decisions/0092`). Requests that send the window capability set
+(`docs/decisions/0103`). Requests that send the window capability set
 `redirect: "error"` so a later hop cannot carry the header to an address the
 parser never judged.
 

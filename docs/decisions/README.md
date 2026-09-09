@@ -114,6 +114,7 @@ distilled successor of the earlier long-form design specifications.
 
 | [0101](0101-browser-authority-across-modes.md) | Browser authority follows the thread across modes | Accepted |
 | [0102](0102-local-provider-usage-history.md) | Local provider usage history | Accepted |
+| [0103](0103-a-window-capability-travels-only-over-tls-or-loopback.md) | A window capability travels only over TLS or loopback | Accepted |
 
 ## Adding an ADR
 
