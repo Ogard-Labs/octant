@@ -3532,6 +3532,10 @@ export function startOctantServer(
             githubReadToolService.createToolSet({ windowId, thread, readThread }),
           ),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+        readThreadExternalContentTaint: (threadId) =>
+          readThreadExternalContentTaint(persistence.connection, String(threadId)),
+        resolveProviderCapabilities: (thread) =>
+          providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities,
         // Planner tools resolve their designation on every call through the
         // services declared after this runtime; the closures run only once a
         // turn is live, well after startup finishes wiring them.

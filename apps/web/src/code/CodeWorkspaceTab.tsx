@@ -38,6 +38,7 @@ export default function CodeWorkspaceTab(props: {
     options?: { readonly terminalId?: import("@octant/contracts/code").CodeTerminalId },
   ) => void;
   readonly providerGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
+  readonly harnessAutoReviewSupported?: boolean;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
@@ -130,6 +131,9 @@ export default function CodeWorkspaceTab(props: {
         {...(props.onOpenReview === undefined ? {} : { onOpenReview: props.onOpenReview })}
         {...(props.onOpenSurface === undefined ? {} : { onOpenSurface: props.onOpenSurface })}
         {...(props.providerGroups === undefined ? {} : { providerGroups: props.providerGroups })}
+        {...(props.harnessAutoReviewSupported === undefined
+          ? {}
+          : { harnessAutoReviewSupported: props.harnessAutoReviewSupported })}
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
         {...(props.imageGenerationClient === undefined
           ? {}

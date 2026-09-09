@@ -168,6 +168,31 @@ export function decidesCodeEffectsByApproval(posture: ProviderExecutionPolicy): 
 }
 
 /**
+ * Whether the harness's native reviewer answers approval prompts for this
+ * thread, instead of the user.
+ *
+ * The flag is orthogonal to the posture: it changes who answers a prompt, not
+ * what the sandbox permits. It is effective only when the posture produces
+ * prompts (`approval-gated` or `auto-accept-edits`), the provider reports the
+ * capability, and the thread has not ingested untrusted content. Taint still
+ * wins: a tainted thread cannot delegate, so irreversible classes come back
+ * to the user (0104).
+ */
+export function harnessAutoReviewEffective(input: {
+  readonly autoApprove: boolean;
+  readonly posture: ProviderExecutionPolicy;
+  readonly externalContentIngested: boolean;
+  readonly capabilitySupported: boolean;
+}): boolean {
+  return (
+    input.autoApprove &&
+    input.capabilitySupported &&
+    decidesCodeEffectsByApproval(input.posture) &&
+    !input.externalContentIngested
+  );
+}
+
+/**
  * Whether a turn under this posture may leave the repository different than it
  * found it.
  *

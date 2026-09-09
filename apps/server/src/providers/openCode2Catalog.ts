@@ -63,6 +63,7 @@ function catalogCapabilities(models: ReadonlyArray<ModelV2Info>): ProviderCapabi
     diffs: "unavailable",
     taskProgress: "supported",
     nativeChildAgents: "unavailable",
+    harnessAutoReview: "unsupported",
     nativeAttachments: models.some((model) => inputModalities(model).length > 1)
       ? "supported"
       : "unsupported",

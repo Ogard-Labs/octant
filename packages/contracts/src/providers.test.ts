@@ -2100,6 +2100,7 @@ describe("provider registry contracts", () => {
         diffs: "supported",
         taskProgress: "supported",
         nativeChildAgents: "unavailable",
+        harnessAutoReview: "unsupported",
         nativeAttachments: "supported",
         nativeWebResearch: "unsupported",
         appManagedTools: "supported",

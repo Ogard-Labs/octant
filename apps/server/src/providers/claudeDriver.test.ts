@@ -44,6 +44,7 @@ const readyCapabilities = {
   diffs: "supported",
   taskProgress: "supported",
   nativeChildAgents: "unsupported",
+  harnessAutoReview: "supported",
   nativeAttachments: "unsupported",
   nativeWebResearch: "unsupported",
   appManagedTools: "supported",
@@ -2413,6 +2414,7 @@ describe("Claude driver probe", () => {
       capabilities: {
         streaming: "supported",
         nativeChildAgents: "unsupported",
+        harnessAutoReview: "supported",
         nativeAttachments: "unsupported",
         nativeWebResearch: "unsupported",
         appManagedTools: "supported",

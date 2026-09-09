@@ -708,6 +708,21 @@ function renderCodeTab(
   const project = resolveCodeTabProject(tab, props);
   const browserAutomationClient = props.browserAutomationClient;
   const onOpenSurface = props.onOpenSurface;
+  const activeThread =
+    codeController.activeView !== undefined &&
+    String(codeController.activeView.thread.id) === String(tab.threadId)
+      ? codeController.activeView.thread
+      : codeController.bootstrap?.threads.find(
+          (thread) => String(thread.id) === String(tab.threadId),
+        );
+  const providerInstanceId = activeThread?.providerInstanceId;
+  const harnessAutoReviewSupported =
+    providerInstanceId === undefined
+      ? undefined
+      : props.providerController.observedByInstance.get(providerInstanceId)?.capabilities
+            .harnessAutoReview === "supported"
+        ? true
+        : undefined;
   const pullRequestRepository =
     codeController.activeView !== undefined &&
     String(codeController.activeView.thread.id) === String(tab.threadId)
@@ -765,6 +780,7 @@ function renderCodeTab(
         {...(props.codeProviderGroups === undefined && props.draftProviderGroups === undefined
           ? {}
           : { providerGroups: props.codeProviderGroups ?? props.draftProviderGroups })}
+        {...(harnessAutoReviewSupported === undefined ? {} : { harnessAutoReviewSupported })}
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
         {...(props.imageGenerationClient === undefined
           ? {}

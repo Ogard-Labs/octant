@@ -47,7 +47,7 @@ Read the record that owns your change before editing, not all of them:
 | Context limits, capacity, scheduling                           | `docs/decisions/0008`                                                                      |
 | Usage spend ceilings (Project / thread)                        | `docs/decisions/0060`                                                                      |
 | Pull-request snapshot persistence and refresh cadence          | `docs/decisions/0064`, `docs/decisions/0076`                                               |
-| Sandbox, approvals, Plan mode, access postures                 | `docs/decisions/0009`, `docs/decisions/0018`, `docs/decisions/0057`, `docs/decisions/0068` |
+| Sandbox, approvals, Plan mode, access postures                 | `docs/decisions/0009`, `docs/decisions/0018`, `docs/decisions/0057`, `docs/decisions/0068`, `docs/decisions/0104` |
 | File preview and canvas artifacts                              | `docs/decisions/0010`                                                                      |
 | Canvas boards, comments, and layout revisions                  | `docs/decisions/0052`                                                                      |
 | Extensions, skills, plugin host                                | `docs/decisions/0011`, `docs/decisions/0001`                                               |

@@ -279,6 +279,7 @@ describe("provider federation references", () => {
             diffs: "unavailable",
             taskProgress: "unavailable",
             nativeChildAgents: "unavailable",
+            harnessAutoReview: "unsupported",
             nativeAttachments: "unavailable",
             nativeWebResearch: "unavailable",
             appManagedTools: "unavailable",

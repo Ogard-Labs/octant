@@ -196,6 +196,7 @@ function observation(
       diffs: "unsupported" as const,
       taskProgress: capability,
       nativeChildAgents: "unsupported" as const,
+      harnessAutoReview: "unsupported" as const,
       nativeAttachments: capability,
       nativeWebResearch: capability,
       appManagedTools: capability,

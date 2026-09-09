@@ -286,6 +286,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         usage: "unavailable",
         fileChanges: "unavailable",
         nativeChildAgents: "unavailable",
+        harnessAutoReview: "unsupported",
       },
     });
     expect(client.newSession).toHaveBeenCalledOnce();

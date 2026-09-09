@@ -47,6 +47,13 @@ export interface ProviderSessionStart {
   readonly modelId: ProviderModelId;
   readonly executionPolicy: ProviderExecutionPolicy;
   /**
+   * Whether the harness may answer approval prompts via its native reviewer
+   * (Codex `auto_review`, Claude `permissionMode: "auto"`). The driver decides
+   * whether the provider supports it and whether taint or posture make it
+   * inert; absent means the driver falls back to its default permission mode.
+   */
+  readonly autoApprove?: boolean;
+  /**
    * User-chosen values for options the model declares (`ProviderModel.options`),
    * keyed by option id. Drivers apply the ids they understand and ignore the
    * rest; absent means provider defaults.
@@ -65,6 +72,7 @@ export interface ProviderSessionResume {
   readonly sessionId: ProviderSessionId;
   readonly resumeCursor: ProviderResumeCursor;
   readonly executionPolicy: ProviderExecutionPolicy;
+  readonly autoApprove?: boolean;
   readonly modelOptionValues?: ProviderModelOptionValues;
 }
 

@@ -5,6 +5,7 @@ import {
   accessPosturesAtOrBelow,
   authorizeCodeOperation,
   clampTurnAccessPosture,
+  harnessAutoReviewEffective,
   type CodeActor,
   type CodeOperation,
   type CodePolicyDecision,
@@ -265,5 +266,72 @@ describe("Code authority policy", () => {
       "request-local-confirmation",
     );
     expect(decision("remote-client", "full-access", "pr-mutation")).toBe("deny");
+  });
+});
+
+describe("harnessAutoReviewEffective", () => {
+  it("enables delegation only when the flag, capability, and an approval-gated posture all agree", () => {
+    expect(
+      harnessAutoReviewEffective({
+        autoApprove: true,
+        posture: "approval-gated",
+        externalContentIngested: false,
+        capabilitySupported: true,
+      }),
+    ).toBe(true);
+    expect(
+      harnessAutoReviewEffective({
+        autoApprove: true,
+        posture: "auto-accept-edits",
+        externalContentIngested: false,
+        capabilitySupported: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("refuses delegation when the flag is off, the capability is missing, or the posture produces no prompts", () => {
+    expect(
+      harnessAutoReviewEffective({
+        autoApprove: false,
+        posture: "approval-gated",
+        externalContentIngested: false,
+        capabilitySupported: true,
+      }),
+    ).toBe(false);
+    expect(
+      harnessAutoReviewEffective({
+        autoApprove: true,
+        posture: "approval-gated",
+        externalContentIngested: false,
+        capabilitySupported: false,
+      }),
+    ).toBe(false);
+    expect(
+      harnessAutoReviewEffective({
+        autoApprove: true,
+        posture: "plan",
+        externalContentIngested: false,
+        capabilitySupported: true,
+      }),
+    ).toBe(false);
+    expect(
+      harnessAutoReviewEffective({
+        autoApprove: true,
+        posture: "full-access",
+        externalContentIngested: false,
+        capabilitySupported: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("clamps delegation back to user-answered prompts when the thread has ingested untrusted content", () => {
+    expect(
+      harnessAutoReviewEffective({
+        autoApprove: true,
+        posture: "approval-gated",
+        externalContentIngested: true,
+        capabilitySupported: true,
+      }),
+    ).toBe(false);
   });
 });

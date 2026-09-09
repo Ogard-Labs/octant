@@ -201,6 +201,7 @@ describe("Pi provider driver", () => {
         appManagedTools: "supported",
         userQuestions: "unsupported",
         nativeChildAgents: "unsupported",
+        harnessAutoReview: "unsupported",
       },
     });
     expect(client.request.mock.calls.map(([type]) => type)).toEqual([

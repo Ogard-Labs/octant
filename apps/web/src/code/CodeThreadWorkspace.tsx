@@ -123,6 +123,12 @@ export interface CodeThreadWorkspaceProps {
   readonly onAddAgent?: () => void;
   readonly controller: CodeController;
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
+  /**
+   * Whether the thread's provider advertises native harness-delegated
+   * approvals (Codex `auto_review`, Claude `permissionMode: "auto"`). When
+   * false or absent the "Approve for me" toggle is hidden (0104).
+   */
+  readonly harnessAutoReviewSupported?: boolean;
   readonly threadId: CodeThreadId;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
@@ -799,6 +805,24 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   }
 
+  async function changeAutoApprove(next: boolean) {
+    if (thread.autoApprove === next) return;
+    setAccessMessage(undefined);
+    setAccessChanging(true);
+    try {
+      await props.controller.execute({
+        kind: "change-code-thread-access",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+        executionPolicy: thread.executionPolicy,
+        permissionPersistence: thread.permissionPersistence,
+        ...(next ? { autoApprove: true } : {}),
+      });
+    } finally {
+      setAccessChanging(false);
+    }
+  }
+
   async function changeProvider(selection: {
     readonly providerInstanceId: typeof thread.providerInstanceId;
     readonly modelId: typeof thread.modelId;
@@ -1454,6 +1478,18 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 onSelect={setTurnAccessOverride}
                 value={nextTurnAccess}
               />
+              {props.harnessAutoReviewSupported === true &&
+              (nextTurnAccess === "approval-gated" || nextTurnAccess === "auto-accept-edits") ? (
+                <label className="code-thread-workspace__auto-approve">
+                  <input
+                    type="checkbox"
+                    checked={thread.autoApprove === true}
+                    disabled={accessChanging}
+                    onChange={(event) => void changeAutoApprove(event.currentTarget.checked)}
+                  />
+                  <span>Approve for me</span>
+                </label>
+              ) : null}
               {/*
               Provenance, not a control: the profile narrowed this thread once,
               when it started, and is never consulted again. Editing the profile

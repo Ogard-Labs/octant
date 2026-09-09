@@ -627,9 +627,13 @@ export function decodeInitialization(value: unknown): ClaudeInitialization {
   };
 }
 
-export function permissionMode(policy: ProviderExecutionPolicy): ClaudePermissionMode {
+export function permissionMode(
+  policy: ProviderExecutionPolicy,
+  autoApprove?: boolean,
+): ClaudePermissionMode {
   if (policy === "full-access") return "bypassPermissions";
   if (policy === "plan") return "plan";
+  if (autoApprove === true) return "auto";
   return "default";
 }
 
@@ -649,7 +653,7 @@ function decodeInitializedMessage(
   const mcpServers = Array.isArray(message.mcp_servers) ? message.mcp_servers : undefined;
   const tools = stringArray(message.tools);
   const capabilities = message.capabilities === undefined ? [] : stringArray(message.capabilities);
-  const expectedPermissionMode = permissionMode(input.executionPolicy);
+  const expectedPermissionMode = permissionMode(input.executionPolicy, input.autoApprove);
   if (
     mcpServers === undefined ||
     tools === undefined ||
@@ -1018,8 +1022,11 @@ export function decodeMessage(
         message.status !== "compacting" &&
         message.status !== "requesting") ||
       (mode !== undefined &&
-        ((mode !== "default" && mode !== "bypassPermissions" && mode !== "plan") ||
-          mode !== permissionMode(input.executionPolicy))) ||
+        ((mode !== "default" &&
+          mode !== "bypassPermissions" &&
+          mode !== "plan" &&
+          mode !== "auto") ||
+          mode !== permissionMode(input.executionPolicy, input.autoApprove))) ||
       (message.compact_result !== undefined &&
         message.compact_result !== "success" &&
         message.compact_result !== "failed") ||
@@ -1030,7 +1037,10 @@ export function decodeMessage(
       kind: "status",
       sessionId: message.session_id,
       status: message.status,
-      ...(mode === "default" || mode === "bypassPermissions" || mode === "plan"
+      ...(mode === "default" ||
+      mode === "bypassPermissions" ||
+      mode === "plan" ||
+      mode === "auto"
         ? { permissionMode: mode }
         : {}),
     };

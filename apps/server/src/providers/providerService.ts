@@ -119,6 +119,7 @@ const unavailableCapabilities = {
   diffs: "unavailable",
   taskProgress: "unavailable",
   nativeChildAgents: "unavailable",
+  harnessAutoReview: "unavailable",
   nativeAttachments: "unavailable",
   nativeWebResearch: "unavailable",
   appManagedTools: "unavailable",

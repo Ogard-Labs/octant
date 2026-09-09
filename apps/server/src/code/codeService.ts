@@ -1690,6 +1690,9 @@ export class CodeService {
                           ...current,
                           executionPolicy: command.executionPolicy,
                           permissionPersistence: command.permissionPersistence,
+                          // Store `true` when enabled; drop the field when disabled so
+                          // a journal written before the flag existed replays as false.
+                          ...(command.autoApprove === true ? { autoApprove: true } : {}),
                           version: command.expectedVersion + 1,
                           updatedAt,
                         }

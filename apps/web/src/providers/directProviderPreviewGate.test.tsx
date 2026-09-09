@@ -173,6 +173,7 @@ function observed(
       diffs: "unavailable",
       taskProgress: "unsupported",
       nativeChildAgents: "unavailable",
+      harnessAutoReview: "unsupported",
       nativeAttachments: "unavailable",
       nativeWebResearch: "unavailable",
       appManagedTools: "unsupported",

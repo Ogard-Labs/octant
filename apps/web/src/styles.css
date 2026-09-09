@@ -6718,6 +6718,20 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   align-items: center;
 }
 
+.code-thread-workspace__auto-approve {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--oct-text-xs);
+  color: var(--oct-fg-2);
+  cursor: pointer;
+}
+
+.code-thread-workspace__auto-approve input {
+  margin: 0;
+  cursor: pointer;
+}
+
 .code-thread-workspace__profile {
   display: inline-flex;
   align-items: center;
