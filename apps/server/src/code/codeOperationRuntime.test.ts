@@ -271,6 +271,64 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("releases the spend reservation when a Code turn is cancelled", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const settle = vi.fn();
+    const admit = vi.fn().mockReturnValue({
+      status: "admitted",
+      reservedTokens: 100,
+      reservations: [{ scopeKind: "thread", scopeId: String(threadId), reservedTokens: 100 }],
+    });
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+      spendCeiling: { admit, settle },
+    });
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(21),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    expect(admit).toHaveBeenCalledOnce();
+    await fixture.runtime.execute(windowId, {
+      kind: "cancel-provider-turn",
+      operationId: operationId(22),
+      threadId,
+      checkoutId,
+    });
+    expect(settle).toHaveBeenCalledOnce();
+    fixture.close();
+  });
+
+  it("releases the spend reservation when a Code turn fails to start", async () => {
+    const settle = vi.fn();
+    const admit = vi.fn().mockReturnValue({
+      status: "admitted",
+      reservedTokens: 100,
+      reservations: [{ scopeKind: "thread", scopeId: String(threadId), reservedTokens: 100 }],
+    });
+    const fixture = runtimeFixture({
+      provider: undefined,
+      approvalValidator: false,
+      spendCeiling: { admit, settle },
+    });
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(23),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    expect(admit).toHaveBeenCalledOnce();
+    expect(settle).toHaveBeenCalledOnce();
+    fixture.close();
+  });
+
   it("tells the host once that a person asked the thread for a turn, and not again on replay", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -1598,6 +1656,7 @@ function runtimeFixture(options: {
   failRuntimeWorkJournal?: boolean;
   throwRuntimeWorkReporter?: boolean;
   onProviderTurnRequested?: (threadId: CodeThreadId) => void;
+  spendCeiling?: Parameters<typeof createCodeOperationRuntime>[0]["spendCeiling"];
   evidencePut?: (
     content: string,
     metadata?: { readonly truncated?: boolean },
@@ -1710,6 +1769,7 @@ function runtimeFixture(options: {
     ...(options.onProviderTurnRequested === undefined
       ? {}
       : { onProviderTurnRequested: options.onProviderTurnRequested }),
+    ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
     reportRuntimeWorkFailure: (failure) => {
       runtimeWorkFailures.push(failure.kind);
       if (options.throwRuntimeWorkReporter === true) throw new Error("diagnostic reporter failed");

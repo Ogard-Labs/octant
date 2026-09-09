@@ -318,6 +318,42 @@ describe("spendCeilingWindowStart", () => {
       ),
     ).toBe("2026-09-01T00:00:00.000Z");
   });
+
+  it("starts a calendar day at local midnight in a non-UTC zone", () => {
+    expect(
+      spendCeilingWindowStart(
+        { kind: "calendar", period: "day", timeZone: "America/New_York" },
+        "2026-09-09T18:30:00.000Z",
+      ),
+    ).toBe("2026-09-09T04:00:00.000Z");
+    expect(
+      spendCeilingWindowStart(
+        { kind: "calendar", period: "day", timeZone: "America/New_York" },
+        "2026-09-09T03:00:00.000Z",
+      ),
+    ).toBe("2026-09-08T04:00:00.000Z");
+    expect(
+      spendCeilingWindowStart(
+        { kind: "calendar", period: "week", timeZone: "America/New_York" },
+        "2026-09-09T18:30:00.000Z",
+      ),
+    ).toBe("2026-09-07T04:00:00.000Z");
+  });
+
+  it("keeps DST spring-forward and fall-back midnights in the configured zone", () => {
+    expect(
+      spendCeilingWindowStart(
+        { kind: "calendar", period: "day", timeZone: "America/New_York" },
+        "2026-03-08T12:00:00.000Z",
+      ),
+    ).toBe("2026-03-08T05:00:00.000Z");
+    expect(
+      spendCeilingWindowStart(
+        { kind: "calendar", period: "day", timeZone: "America/New_York" },
+        "2026-11-01T12:00:00.000Z",
+      ),
+    ).toBe("2026-11-01T04:00:00.000Z");
+  });
 });
 
 describe("remainingSpendCeilingTokens", () => {

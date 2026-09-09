@@ -115,6 +115,16 @@ function isThreadType(value: string): value is SpendCeilingThreadType {
   return value === "chat-thread" || value === "work-thread" || value === "code-thread";
 }
 
+function displayedSpendRemaining(
+  snapshot: SpendCeilingSnapshot | undefined,
+): SpendCeilingSnapshot["threadRemaining"] {
+  const thread = snapshot?.threadRemaining;
+  const project = snapshot?.projectRemaining;
+  if (thread === undefined) return project;
+  if (project === undefined) return thread;
+  return thread.remainingTokens <= project.remainingTokens ? thread : project;
+}
+
 function SpendCeilingControls(props: {
   readonly client: SpendCeilingClient;
   readonly subjectType: string;
@@ -146,9 +156,10 @@ function SpendCeilingControls(props: {
     };
   }, [props.client, props.projectId, props.subjectId, threadType]);
 
-  const remaining = snapshot?.threadRemaining ?? snapshot?.projectRemaining;
+  const remaining = displayedSpendRemaining(snapshot);
   const refusal = snapshot?.refusal;
-  const version = snapshot?.thread?.version ?? snapshot?.project?.version ?? 0;
+  const threadCeilingSet = snapshot?.thread !== undefined;
+  const version = snapshot?.thread?.version ?? 0;
   const scope =
     threadType === undefined
       ? undefined
@@ -218,9 +229,10 @@ function SpendCeilingControls(props: {
       )}
       {scope === undefined ? null : (
         <form
+          noValidate
           onSubmit={(event) => {
             event.preventDefault();
-            void submit(remaining === undefined ? "set" : "raise");
+            void submit(threadCeilingSet ? "raise" : "set");
           }}
         >
           <OctantInput
@@ -230,13 +242,13 @@ function SpendCeilingControls(props: {
             value={budget}
           />
           <OctantButton type="submit" variant="outline">
-            {remaining === undefined ? "Set token ceiling" : "Raise token ceiling"}
+            {threadCeilingSet ? "Raise token ceiling" : "Set token ceiling"}
           </OctantButton>
-          {remaining === undefined ? null : (
+          {threadCeilingSet ? (
             <OctantButton onClick={() => void submit("clear")} type="button" variant="ghost">
               Clear ceiling
             </OctantButton>
-          )}
+          ) : null}
         </form>
       )}
       {message === undefined ? null : (

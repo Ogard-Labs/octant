@@ -2,9 +2,12 @@ import {
   decodeSpendCeilingCommand,
   decodeSpendCeilingSnapshot,
   decodeSpendCeilingThreadType,
+  type SpendCeilingCommand,
+  type SpendCeilingCommandResult,
   type WindowId,
 } from "@octant/contracts";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
+import { ConcurrencyConflict } from "./persistence/journalErrors";
 import { isLoopbackHostname } from "./shellRoutes";
 import type { SpendCeilingService } from "./spendCeilingService";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -106,17 +109,26 @@ export function createSpendCeilingRouteHandler(dependencies: SpendCeilingRouteDe
       } catch {
         return failure("Spend ceiling command is invalid.", 400, origin);
       }
+      let command: SpendCeilingCommand;
       try {
-        const command = decodeSpendCeilingCommand(body);
-        const result = dependencies.service.execute(principal.kind, command);
-        const status = result.kind === "refused" ? 409 : 200;
-        return new Response(JSON.stringify(result), {
-          status,
-          headers: { "content-type": "application/json", ...corsHeaders(origin) },
-        });
+        command = decodeSpendCeilingCommand(body);
       } catch {
         return failure("Spend ceiling command is invalid.", 400, origin);
       }
+      let result: SpendCeilingCommandResult;
+      try {
+        result = dependencies.service.execute(principal.kind, command);
+      } catch (error) {
+        if (error instanceof ConcurrencyConflict) {
+          return failure("Spend ceiling changed; reload and retry.", 409, origin);
+        }
+        return failure("Spend ceiling command could not be applied.", 503, origin);
+      }
+      const status = result.kind === "refused" ? 409 : 200;
+      return new Response(JSON.stringify(result), {
+        status,
+        headers: { "content-type": "application/json", ...corsHeaders(origin) },
+      });
     }
 
     return failure("Spend ceiling route is not found.", 404, origin);

@@ -58,6 +58,7 @@ function insertUsage(
     readonly tokens: { readonly input: number; readonly output: number };
     readonly quality?: string;
     readonly sequence: number;
+    readonly observedAt?: string;
   },
 ): void {
   connection
@@ -88,7 +89,7 @@ function insertUsage(
       0,
       2,
       "[]",
-      now,
+      input.observedAt ?? now,
       input.sequence,
       "local",
     );
@@ -299,6 +300,77 @@ describe("SpendCeilingService", () => {
     });
     expect(admission.status).toBe("admitted");
     connection.close();
+  });
+
+  it("advances the projected ceiling version when an overrun is recorded", () => {
+    const { service } = openService();
+    expect(
+      service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "thread", threadType: "chat-thread", threadId: ids.thread },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { tokenBudget: 1_000 },
+        window: { kind: "lifetime" },
+      }).kind,
+    ).toBe("set");
+    expect(
+      service.admit({
+        reservationId: ids.reservationA,
+        threadId: ids.thread,
+        threadType: "chat-thread",
+        turnUpperBoundTokens: 100,
+      }).status,
+    ).toBe("admitted");
+    service.settle({ reservationId: ids.reservationA, observedTokens: 250 });
+    const snapshot = service.snapshot({
+      principalKind: "local-window",
+      threadId: ids.thread,
+      threadType: "chat-thread",
+    });
+    expect("thread" in snapshot && snapshot.thread?.version).toBe(2);
+    const raise = service.execute("local-window", {
+      kind: "raise-spend-ceiling",
+      scope: { kind: "thread", threadType: "chat-thread", threadId: ids.thread },
+      expectedVersion: decodeAggregateVersion(2),
+      tokenBudget: 5_000,
+    });
+    expect(raise.kind).toBe("raised");
+  });
+
+  it("counts only scoped usage inside the calendar window", () => {
+    const { connection, service } = openService();
+    expect(
+      service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "thread", threadType: "chat-thread", threadId: ids.thread },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { tokenBudget: 1_000 },
+        window: { kind: "calendar", period: "day", timeZone: "UTC" },
+      }).kind,
+    ).toBe("set");
+    insertUsage(connection, {
+      id: "73000000-0000-4000-8000-000000000201",
+      subjectType: "chat-thread",
+      subjectId: ids.thread,
+      tokens: { input: 800, output: 0 },
+      sequence: 1,
+      observedAt: "2026-09-08T12:00:00.000Z",
+    });
+    insertUsage(connection, {
+      id: "73000000-0000-4000-8000-000000000202",
+      subjectType: "chat-thread",
+      subjectId: "73000000-0000-4000-8000-000000000099",
+      tokens: { input: 900, output: 0 },
+      sequence: 2,
+      observedAt: now,
+    });
+    const admission = service.admit({
+      reservationId: ids.reservationA,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      turnUpperBoundTokens: 200,
+    });
+    expect(admission).toMatchObject({ status: "admitted", reservedTokens: 200 });
   });
 
   it("journals raise and clear so a person can recover", () => {
