@@ -89,6 +89,26 @@ describe("CodeFileExplorerPanel", () => {
     expect(screen.getByRole("searchbox", { name: "Filter files" })).toBeVisible();
   });
 
+  it("says the files are unavailable once, not three ways at once", async () => {
+    render(
+      <CodeFileExplorerPanel
+        threadId={threadId}
+        checkoutId={checkoutId}
+        client={client(async () => {
+          throw new Error("Code checkout is unavailable.");
+        })}
+        onOpenFile={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Code checkout is unavailable.");
+    // A live filter field and "No matching repository files" under an
+    // explanation that there are no files to match is the same absence said
+    // three times.
+    expect(screen.queryByRole("searchbox", { name: "Filter files" })).not.toBeInTheDocument();
+    expect(screen.queryByText("No matching repository files.")).not.toBeInTheDocument();
+  });
+
   it("relists the repository when the host reports that files changed", async () => {
     render(
       <CodeFileExplorerPanel
