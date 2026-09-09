@@ -84,6 +84,7 @@ export default defineConfig({
             { text: "Overview", link: "/advanced/" },
             { text: "Providers and Models", link: "/advanced/providers" },
             { text: "Context Budgets", link: "/advanced/context-budgets" },
+            { text: "Usage and Limits", link: "/advanced/usage-and-limits" },
             { text: "Subagents", link: "/advanced/subagents" },
             { text: "Native Harness", link: "/advanced/native-harness" },
             { text: "Plugins and Skills", link: "/advanced/plugins-and-skills" },

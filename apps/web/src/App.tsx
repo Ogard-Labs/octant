@@ -1126,6 +1126,7 @@ function LaunchedShell(
     shipClient,
     usageClient,
     usageDashboardClient,
+    localUsageHistoryClient,
     workMutationClient,
     workOverviewClient,
     workRequestClient,
@@ -4537,6 +4538,13 @@ function LaunchedShell(
     >
       <UsageWorkspace
         client={usageDashboardClient}
+        {...(localUsageHistoryClient === undefined
+          ? {}
+          : { historyClient: localUsageHistoryClient })}
+        providers={providerController.instances}
+        {...(providerUsageLimitsClient === undefined
+          ? {}
+          : { providerLimitsClient: providerUsageLimitsClient })}
         isNarrow={isNarrow}
         onBack={() => setUsageOpen(false)}
         {...(pendingUsageFilter === undefined ? {} : { initialFilter: pendingUsageFilter })}

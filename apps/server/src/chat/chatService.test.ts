@@ -4710,6 +4710,46 @@ describe("ChatService", () => {
     ).resolves.toMatchObject({ kind: "turn-created" });
   });
 
+  it("keeps probed model capacity when a quota-only context hook has no model evidence", async () => {
+    const probe = probeFixture();
+    const { service } = openFixture({
+      probe,
+      contextFacts: {
+        observeModelLimits: () => Effect.succeed([]),
+        observeServiceLimits: () =>
+          Effect.succeed(
+            decodeProviderServiceLimits({
+              providerInstanceId: probe.instanceId,
+              scope: "account",
+              requests: { status: "unavailable" },
+              tokens: { status: "unavailable" },
+              concurrency: { status: "unavailable" },
+              retry: { status: "inactive" },
+              quota: "unknown",
+              source: "runtime-reported",
+              confidence: "unknown",
+              updatedAt: probe.observedAt,
+            }),
+          ),
+      },
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Quota-only model facts",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "keep the probed model capacity",
+      }),
+    ).resolves.toMatchObject({ kind: "turn-created" });
+  });
+
   it("compacts the conversation a send drops to fit and sends the summary in its place", async () => {
     const probe = probeFixture();
     const sent: Array<SentTurn> = [];

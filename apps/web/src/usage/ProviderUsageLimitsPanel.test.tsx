@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   decodeProviderUsageLimitsSnapshot,
   type ProviderInstance,
@@ -99,13 +99,133 @@ function snapshot(
 }
 
 describe("ProviderUsageLimitsPanel", () => {
+  it("expires a quota at its reset boundary instead of waiting another minute", async () => {
+    vi.useFakeTimers({ now: new Date("2026-08-23T12:00:00.000Z") });
+    try {
+      const original = snapshot();
+      const data = decodeProviderUsageLimitsSnapshot({
+        ...original,
+        entries: original.entries.map((entry) =>
+          entry.status !== "available"
+            ? entry
+            : {
+                ...entry,
+                limits: {
+                  ...entry.limits,
+                  rateLimitWindows: [
+                    {
+                      window: "five_hour",
+                      status: "allowed",
+                      utilization: 0.5,
+                      resetsAt: "2026-08-23T12:00:05.000Z",
+                      observedAt: "2026-08-23T12:00:00.000Z",
+                    },
+                  ],
+                },
+              },
+        ),
+      });
+      await act(async () => {
+        render(
+          <ProviderUsageLimitsPanel
+            client={{ list: async () => data, refresh: async () => data }}
+            instances={[provider]}
+          />,
+        );
+      });
+      expect(screen.getByRole("meter", { name: "5-hour window remaining" })).toBeVisible();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(
+        screen.queryByRole("meter", { name: "5-hour window remaining" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText("Awaiting updated limits")).toBeVisible();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("states an exhausted window without inventing a percentage", async () => {
+    const original = snapshot();
+    const data = decodeProviderUsageLimitsSnapshot({
+      ...original,
+      entries: original.entries.map((entry) =>
+        entry.status !== "available"
+          ? entry
+          : {
+              ...entry,
+              limits: {
+                ...entry.limits,
+                rateLimitWindows: [
+                  {
+                    window: "five_hour",
+                    status: "exhausted",
+                    observedAt: "2026-08-23T12:00:00.000Z",
+                  },
+                ],
+              },
+            },
+      ),
+    });
+    render(
+      <ProviderUsageLimitsPanel
+        client={{ list: async () => data, refresh: async () => data }}
+        instances={[provider]}
+      />,
+    );
+    expect(await screen.findByText("Limit reached")).toBeVisible();
+    expect(
+      screen.queryByRole("meter", { name: "5-hour window remaining" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not show another host's quota when a new client fails", async () => {
+    const first = { list: async () => snapshot(), refresh: async () => snapshot() };
+    const { rerender } = render(<ProviderUsageLimitsPanel client={first} instances={[provider]} />);
+    await screen.findByRole("meter", { name: "5-hour window remaining" });
+    const second = {
+      list: async () => {
+        throw new Error("offline");
+      },
+      refresh: async () => snapshot(),
+    };
+    rerender(<ProviderUsageLimitsPanel client={second} instances={[provider]} />);
+    expect(await screen.findByText("Provider limits are unavailable.")).toBeVisible();
+    expect(screen.queryByRole("meter")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Refresh provider limits" }));
+    expect(await screen.findByRole("meter", { name: "5-hour window remaining" })).toBeVisible();
+    expect(screen.queryByText("Provider limits are unavailable.")).not.toBeInTheDocument();
+  });
+  beforeEach(() => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-23T12:00:00.000Z"));
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("shows remaining quota and reset time without treating a reset as a refill", async () => {
+    const client = { list: async () => snapshot(), refresh: async () => snapshot() };
+    const { unmount } = render(<ProviderUsageLimitsPanel client={client} instances={[provider]} />);
+    const meter = await screen.findByRole("meter", { name: "5-hour window remaining" });
+    expect(meter).toHaveAttribute("value", "25");
+    expect(screen.getAllByText("25% left")).toHaveLength(2);
+    expect(screen.getAllByText("Resets in 1h")).toHaveLength(2);
+    unmount();
+    vi.mocked(Date.now).mockReturnValue(Date.parse("2026-08-23T13:01:00.000Z"));
+    render(<ProviderUsageLimitsPanel client={client} instances={[provider]} />);
+    expect(await screen.findAllByText("Awaiting updated limits")).toHaveLength(2);
+    expect(screen.queryByRole("meter")).not.toBeInTheDocument();
+    expect(screen.queryByText("100% left")).not.toBeInTheDocument();
+  });
   it("renders remaining capacity and refreshes only on explicit action", async () => {
     const list = vi.fn(async () => snapshot());
     const refresh = vi.fn(async () => snapshot());
     render(<ProviderUsageLimitsPanel client={{ list, refresh }} instances={[provider]} />);
 
     expect(await screen.findByText(/25 remaining of 100 requests/)).toBeVisible();
-    expect(screen.getByText(/5-hour window · Warning · 75% used/)).toBeVisible();
+    expect(screen.getByRole("meter", { name: "5-hour window remaining" })).toHaveAttribute(
+      "value",
+      "25",
+    );
     expect(refresh).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Refresh provider limits" }));
     expect(refresh).toHaveBeenCalledOnce();
@@ -230,7 +350,11 @@ describe("ProviderUsageLimitsPanel", () => {
       />,
     );
 
-    expect(await screen.findByText(/5-hour window \(primary\) · Allowed · 40% used/)).toBeVisible();
-    expect(screen.getByText(/7-day window \(secondary\) · Warning · 85% used/)).toBeVisible();
+    expect(
+      await screen.findByRole("meter", { name: "5-hour window (primary) remaining" }),
+    ).toHaveAttribute("value", "60");
+    expect(
+      screen.getByRole("meter", { name: "7-day window (secondary) remaining" }),
+    ).toHaveAttribute("value", "15");
   });
 });

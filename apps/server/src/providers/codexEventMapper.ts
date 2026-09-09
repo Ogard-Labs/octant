@@ -16,6 +16,7 @@ import {
   type RateLimitSnapshot,
   type UnmodeledThreadItem,
 } from "./codexProtocol";
+import { rateLimitWindowId } from "./rateLimitWindowIdentity";
 
 const STREAM_CHUNK_CHARACTERS = 65_536;
 const DIFF_MAX_CHARACTERS = 65_536;
@@ -705,33 +706,28 @@ function rateLimitWindowEvents(
   context: CodexEventContext,
   snapshot: RateLimitSnapshot,
 ): ReadonlyArray<CodexMappedMessage> {
-  const reached =
-    snapshot.rateLimitReachedType !== undefined && snapshot.rateLimitReachedType !== null;
   const results: CodexMappedMessage[] = [];
   for (const slot of ["primary", "secondary"] as const) {
     const window = snapshot[slot];
     if (window === undefined || window === null || !Number.isFinite(window.usedPercent)) continue;
     const utilization = window.usedPercent / 100;
+    if (window.usedPercent < 0 || window.usedPercent > 100) continue;
     const resetsAt = resetTimestamp(window.resetsAt ?? undefined);
     results.push(
       event(context, {
         kind: "rate-limit-window",
-        window: windowName(slot, window.windowDurationMins ?? undefined),
-        status:
-          reached || utilization >= 1 ? "exhausted" : utilization >= 0.8 ? "warning" : "allowed",
+        window: rateLimitWindowId(
+          snapshot.limitId ?? snapshot.normalModelSlug ?? snapshot.limitName ?? undefined,
+          slot,
+          window.windowDurationMins ?? undefined,
+        ),
+        status: utilization >= 1 ? "exhausted" : utilization >= 0.8 ? "warning" : "allowed",
         ...(utilization < 0 || utilization > 1 ? {} : { utilization }),
         ...(resetsAt === undefined ? {} : { resetsAt }),
       }),
     );
   }
   return results.length === 0 ? [{ kind: "ignored" }] : results;
-}
-
-function windowName(slot: "primary" | "secondary", durationMinutes: number | undefined): string {
-  if (durationMinutes === undefined || durationMinutes <= 0) return slot;
-  if (durationMinutes % 1_440 === 0) return `${slot}_${durationMinutes / 1_440}d`;
-  if (durationMinutes % 60 === 0) return `${slot}_${durationMinutes / 60}h`;
-  return `${slot}_${durationMinutes}m`;
 }
 
 /** Codex reports a reset instant in Unix seconds; milliseconds are accepted too. */

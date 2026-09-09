@@ -4,6 +4,10 @@ import {
   type ContextConfidence,
   type ContextMetadataSource,
   type ContextTokenizer,
+  type LocalUsageHistoryCoverage,
+  type LocalUsageHistoryRecord,
+  type LocalUsageHistoryRequest,
+  type LocalUsageHistorySourceKind,
   type ExtendedContextMode,
   type ModelContextLimits,
   type ProviderFailure,
@@ -54,6 +58,25 @@ export interface ProviderUsageObservation {
   readonly providerExecutionDurationMs?: number;
   readonly accuracy: "provider-reported";
   readonly observedAt: UtcTimestamp;
+}
+
+/**
+ * Optional read-only local history capability owned by a provider driver.
+ * The host supplies the range and the adapter reads only its documented
+ * accounting files; no provider process, credentials, or network request is implied.
+ */
+export interface ProviderLocalUsageHistorySource {
+  readonly sourceKind: LocalUsageHistorySourceKind;
+  readonly read: (
+    input: LocalUsageHistoryRequest,
+    signal?: AbortSignal,
+  ) => Effect.Effect<
+    {
+      readonly records: ReadonlyArray<LocalUsageHistoryRecord>;
+      readonly coverage: LocalUsageHistoryCoverage;
+    },
+    ProviderFailure
+  >;
 }
 
 export interface ProviderContextFactsSource {

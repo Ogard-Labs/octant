@@ -7,6 +7,7 @@ import {
   type ServiceLimitBucket,
   type UtcTimestamp,
 } from "@octant/contracts";
+import { canonicalRateLimitWindowId } from "./rateLimitWindowIdentity";
 
 const DEFAULT_MAX_WINDOWS_PER_PROVIDER = 32;
 const DEFAULT_MAX_PROVIDERS = 128;
@@ -150,17 +151,18 @@ export class ProviderRuntimeUsageLimitsStore {
     event: Extract<ProviderRuntimeEvent, { readonly kind: "rate-limit-window" }>,
   ): void {
     const key = String(event.instanceId);
+    const windowId = canonicalRateLimitWindowId(event.window);
     const windows = this.#windows.get(key) ?? new Map<string, ProviderRateLimitWindow>();
     const resetHighWater = this.#resetHighWater.get(key) ?? new Map<string, number>();
     const occurredAt = Date.parse(event.occurredAt);
     this.#prune(windows, event.occurredAt, resetHighWater);
     const resetsAt = event.resetsAt === undefined ? undefined : Date.parse(event.resetsAt);
     if (resetsAt !== undefined && resetsAt <= occurredAt) {
-      this.#rememberReset(resetHighWater, event.window, resetsAt);
+      this.#rememberReset(resetHighWater, windowId, resetsAt);
       this.#save(key, windows, resetHighWater);
       return;
     }
-    const previousReset = resetHighWater.get(event.window);
+    const previousReset = resetHighWater.get(windowId);
     if (
       previousReset !== undefined &&
       (resetsAt === undefined ? occurredAt <= previousReset : resetsAt <= previousReset)
@@ -168,12 +170,12 @@ export class ProviderRuntimeUsageLimitsStore {
       this.#save(key, windows, resetHighWater);
       return;
     }
-    const previous = windows.get(event.window);
+    const previous = windows.get(windowId);
     if (previous !== undefined && Date.parse(previous.observedAt) > occurredAt) {
       return;
     }
-    windows.set(event.window, {
-      window: event.window,
+    windows.set(windowId, {
+      window: windowId,
       status: event.status,
       ...(event.utilization === undefined ? {} : { utilization: event.utilization }),
       ...(event.resetsAt === undefined && previous?.resetsAt === undefined

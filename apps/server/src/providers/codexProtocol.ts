@@ -322,11 +322,23 @@ const NullableRateLimitWindow = Schema.NullOr(RateLimitWindow);
 export const RateLimitSnapshot = Schema.Struct({
   limitId: Schema.optional(NullableString),
   limitName: Schema.optional(NullableString),
+  normalModelSlug: Schema.optional(NullableString),
   primary: Schema.optional(NullableRateLimitWindow),
   secondary: Schema.optional(NullableRateLimitWindow),
   rateLimitReachedType: Schema.optional(NullableString),
 });
 export type RateLimitSnapshot = typeof RateLimitSnapshot.Type;
+
+/** Result of the account-scoped, non-generating rate-limit refresh request. */
+const AccountRateLimitsReadResult = Schema.Struct({
+  rateLimits: RateLimitSnapshot,
+  ordinaryUsageAllowed: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  rateLimitsByLimitId: Schema.optional(
+    Schema.NullOr(Schema.Record({ key: Schema.String, value: RateLimitSnapshot })),
+  ),
+});
+export type CodexRateLimitsReadResult = typeof AccountRateLimitsReadResult.Type;
+export const decodeAccountRateLimitsReadResult = decode(AccountRateLimitsReadResult);
 
 /**
  * Account-scoped and therefore carrying no thread or turn: the app-server

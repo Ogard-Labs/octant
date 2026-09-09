@@ -556,8 +556,13 @@ filesystem paths, qualified identifiers, hashes, requested/effective
 breakdowns, and content size live behind Details. Usage opens on requests,
 input, output, and measurement quality. Reasoning, cache, execution time, and
 latency live in one Operational details disclosure; technical filters stay
-collapsed and provider-capacity diagnostics follow the locally recorded
-dashboard.
+collapsed in Settings. The standalone Usage destination also exposes provider
+capacity independently of ledger loading. Each provider window leads with its
+remaining percentage and an accessible meter, followed by its reset countdown.
+Account, model, and provider-instance scopes remain distinct. An elapsed reset
+shows Awaiting updated limits until a fresh reading arrives; it never implies
+refilled capacity. Provider cards use the shared surface typography and tokens
+and stack at narrow widths.
 
 First run is a five-step wizard with a progress rail. Each step is pending,
 current, or completed: the current step is a filled card, completed steps show
@@ -919,3 +924,32 @@ notices appear once beside the active draft composer, with a separate-window
 action when available, and reveal upward behind the message surface.
 Authority confirmations follow the trusted inline-surface direction in 0100;
 ordinary notice content cannot issue an approval receipt.
+
+## Usage surface ownership
+
+The Usage destination opens local provider history by default when that host
+supports it. Octant records remain a separate source; the two totals are never
+added. A period change replaces the query, cancels the previous read, and cannot
+render a late result under the new period. A refresh keeps the previous reading
+visible. Resumable imports continue in bounded batches; read errors and hard
+limits remain visibly partial.
+
+History leads with the total and provider list beside a daily chart, followed
+by processed, cached, uncached, output, and estimated cache-savings totals.
+Cost and Tokens share the same geometry. Model and Day breakdowns are compact
+read-only tables. Individual chart readings also have a disclosed table.
+Unknown prices and missing quota measurements are unavailable, never zero.
+API estimates, provider-recorded costs, pricing revisions, and measured-record
+coverage remain distinguishable.
+
+The following canonical map applies to the Usage flow and its Settings entry:
+
+| Capability      | Canonical owner                                   | Source of truth                                 | Allowed variants                                                                | Verification                                 |
+| --------------- | ------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------- |
+| Table Selection | UsageWorkspace and ProviderUsageHistoryWorkspace  | Usage contracts and this document               | Read-only model/day/detail tables; no bulk selection                            | Usage component tests and narrow rendered QA |
+| Select/Listbox  | OctantSelectField and OctantToggleGroup           | Shared UI adapters                              | Select fields for filters; toggle groups for source, metric, and period         | Shared-control and Usage interaction tests   |
+| Date            | ProviderUsageHistoryWorkspace period controls     | LocalUsageHistoryRequest                        | Past 24h, 7, 30, and 90 days; explicit viewing timezone                         | Range and stale-response tests               |
+| Form            | UsageDashboard filters and shared field adapters  | UsageQueryFilter                                | App-owned validation; retained filter values                                    | UsageDashboard tests                         |
+| Scrollbar       | Usage workspace viewport and table scroll regions | usageWorkspace.css and providerUsageHistory.css | One page scroller; horizontal table overflow and disclosed chart-data scrolling | Narrow viewport and keyboard QA              |
+| Toast           | Inline usage status and error regions             | Query and provider-limit state                  | Retained stale readings and inline recovery; no critical toast-only feedback    | Failure, refresh, and client-switch tests    |
+| CRUD            | UsageDashboard in Settings                        | Usage client and retention/export contracts     | Main Usage is read-only; retention and export stay in Settings                  | Existing usage action tests                  |

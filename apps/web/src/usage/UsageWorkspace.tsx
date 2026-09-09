@@ -1,5 +1,5 @@
 import { UsageName } from "./UsageName";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type {
   UsageAttributionDimension,
   UsageBreakdownGroup,
@@ -10,8 +10,14 @@ import type {
   UsageHostCoverage,
   UsageQuality,
   UsageQueryFilter,
+  ProviderInstance,
 } from "@octant/contracts";
 import type { UsageDashboardClient } from "@octant/client-runtime";
+import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
+import type { LocalUsageHistoryClient } from "@octant/client-runtime/provider-usage-history-client";
+import { ProviderUsageHistoryWorkspace } from "./ProviderUsageHistoryWorkspace";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
+import { ProviderUsageLimitsPanel } from "./ProviderUsageLimitsPanel";
 import { AlertTriangle, ArrowLeft, BarChart3, RefreshCw } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -23,6 +29,9 @@ import "./usageWorkspace.css";
 
 export interface UsageWorkspaceProps {
   readonly client: UsageDashboardClient | undefined;
+  readonly providerLimitsClient?: ProviderUsageLimitsClient;
+  readonly historyClient?: LocalUsageHistoryClient;
+  readonly providers?: ReadonlyArray<ProviderInstance>;
   /** Pre-applied filter, used when the surface is opened from a thread. */
   readonly initialFilter?: UsageQueryFilter;
   readonly isNarrow?: boolean;
@@ -85,6 +94,48 @@ const SOURCE_STATUS_WORDS = {
  * as unavailable rather than shown as zero.
  */
 export function UsageWorkspace(props: UsageWorkspaceProps) {
+  const [source, setSource] = useState<"provider" | "octant">(
+    props.initialFilter === undefined ? "provider" : "octant",
+  );
+  const sourceControl =
+    props.historyClient === undefined ? undefined : (
+      <OctantToggleGroup<"provider" | "octant">
+        aria-label="Usage source"
+        value={[source]}
+        onValueChange={(values) => {
+          const next = values[0];
+          if (next !== undefined) setSource(next);
+        }}
+      >
+        <OctantToggleGroupItem value="provider">Local provider history</OctantToggleGroupItem>
+        <OctantToggleGroupItem value="octant">Octant records</OctantToggleGroupItem>
+      </OctantToggleGroup>
+    );
+  if (source === "provider" && props.historyClient !== undefined) {
+    return (
+      <ProviderUsageHistoryWorkspace
+        client={props.historyClient}
+        sourceControl={sourceControl}
+        {...(props.onBack === undefined ? {} : { onBack: props.onBack })}
+        {...(props.providerLimitsClient === undefined
+          ? {}
+          : {
+              limits: (
+                <ProviderUsageLimitsPanel
+                  client={props.providerLimitsClient}
+                  instances={props.providers ?? []}
+                />
+              ),
+            })}
+      />
+    );
+  }
+  return <RecordedUsageWorkspace {...props} sourceControl={sourceControl} />;
+}
+
+function RecordedUsageWorkspace(
+  props: UsageWorkspaceProps & { readonly sourceControl: ReactNode },
+) {
   const [preset, setPreset] = useState<RangePreset>("30d");
   const [filter, setFilter] = useState<UsageQueryFilter>(props.initialFilter ?? {});
 
@@ -127,6 +178,7 @@ export function UsageWorkspace(props: UsageWorkspaceProps) {
         <h2 className="usage-workspace__title">
           <BarChart3 aria-hidden="true" size={16} /> Usage
         </h2>
+        {props.sourceControl}
         <p className="usage-workspace__subtitle">
           Operational token attribution for this host, in {VIEWING_TIME_ZONE}.
         </p>
@@ -140,6 +192,13 @@ export function UsageWorkspace(props: UsageWorkspaceProps) {
           <RefreshCw aria-hidden="true" size={14} />
         </OctantButton>
       </header>
+
+      {props.providerLimitsClient === undefined ? null : (
+        <ProviderUsageLimitsPanel
+          client={props.providerLimitsClient}
+          instances={props.providers ?? []}
+        />
+      )}
 
       <UsageWorkspaceFilters
         filter={filter}

@@ -2,6 +2,7 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import {
   decodeProviderFailure,
   decodeProviderProbeResult,
+  decodeProviderServiceLimits,
   type CorrelationId,
   type PermissionPersistence,
   type ProviderExecutionPolicy,
@@ -12,12 +13,15 @@ import {
   type ProviderModelOptionValues,
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
+  type ProviderRateLimitWindow,
+  type ProviderServiceLimits,
   type ProviderSessionId,
   type ProviderToolDefinition,
   type ProviderTurnInput,
   type UtcTimestamp,
 } from "@octant/contracts";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
+import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
   attachmentMediaTypeToModality,
   renderProviderTurnPrompt,
@@ -32,6 +36,7 @@ import {
 } from "./codexEventMapper";
 import type { CodexAppServerConnection, CodexProcessPort } from "./codexProcess";
 import {
+  decodeAccountRateLimitsReadResult,
   decodeAccountReadResult,
   decodeModelListResult,
   decodeThreadResumeResult,
@@ -42,12 +47,15 @@ import {
   type CodexDynamicToolSpec,
   type CodexModelListResult,
   type CodexRpcId,
+  type CodexRateLimitsReadResult,
   type CodexServerMessage,
   type CodexThreadResult,
   type CodexTurnResult,
 } from "./codexProtocol";
 import { CodexRpcClientFailure } from "./codexRpcClient";
+import { modelEvidenceFromObservedState } from "./providerContextFacts";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import { rateLimitWindowId } from "./rateLimitWindowIdentity";
 
 export interface CodexThreadStartInput {
   readonly cwd: string;
@@ -81,6 +89,7 @@ export interface CodexApprovalResponse {
 
 export interface CodexClientPort {
   accountRead(): Promise<CodexAccountReadResult>;
+  rateLimitsRead(): Promise<CodexRateLimitsReadResult>;
   modelList(cursor?: string): Promise<CodexModelListResult>;
   threadStart(input: CodexThreadStartInput): Promise<CodexThreadResult>;
   threadResume(input: CodexThreadResumeInput): Promise<CodexThreadResult>;
@@ -201,6 +210,9 @@ function providerFailure(error: unknown): ProviderFailure {
     }
   }
   if (error instanceof CodexRpcClientFailure) {
+    if (error.kind === "timeout") {
+      return failure("unavailable", "Codex request timed out.");
+    }
     if (error.kind === "protocol") {
       return failure("protocol", "Codex returned an invalid protocol response.");
     }
@@ -257,11 +269,146 @@ export function codexModelOptionSettings(
   };
 }
 
+function codexResetTimestamp(resetsAt: number | null | undefined): UtcTimestamp | undefined {
+  if (resetsAt === undefined || resetsAt === null || !Number.isFinite(resetsAt) || resetsAt <= 0) {
+    return undefined;
+  }
+  const absolute = resetsAt < 10_000_000_000 ? resetsAt * 1_000 : resetsAt;
+  const date = new Date(absolute);
+  return Number.isNaN(date.getTime()) ? undefined : (date.toISOString() as UtcTimestamp);
+}
+
+function codexRateLimitSnapshots(result: CodexRateLimitsReadResult): ReadonlyArray<{
+  readonly scope: string | undefined;
+  readonly snapshot: CodexRateLimitsReadResult["rateLimits"];
+}> {
+  const byLimitId = result.rateLimitsByLimitId;
+  if (byLimitId !== undefined && byLimitId !== null) {
+    const entries = Object.entries(byLimitId);
+    if (entries.length > 0) {
+      return entries.map(([key, snapshot]) => ({
+        scope: snapshot.limitId ?? key,
+        snapshot,
+      }));
+    }
+  }
+  return [
+    {
+      scope:
+        result.rateLimits.limitId ??
+        result.rateLimits.normalModelSlug ??
+        result.rateLimits.limitName ??
+        undefined,
+      snapshot: result.rateLimits,
+    },
+  ];
+}
+
+function normalizeCodexServiceLimits(
+  providerInstanceId: ProviderInstanceId,
+  result: CodexRateLimitsReadResult,
+  updatedAt: UtcTimestamp,
+): ProviderServiceLimits {
+  const windows: ProviderRateLimitWindow[] = [];
+  let reached = false;
+  for (const { scope, snapshot } of codexRateLimitSnapshots(result)) {
+    reached ||=
+      snapshot.rateLimitReachedType !== undefined && snapshot.rateLimitReachedType !== null;
+    for (const slot of ["primary", "secondary"] as const) {
+      const window = snapshot[slot];
+      if (window === undefined || window === null) continue;
+      if (
+        !Number.isFinite(window.usedPercent) ||
+        window.usedPercent < 0 ||
+        window.usedPercent > 100
+      ) {
+        continue;
+      }
+      const utilization = window.usedPercent / 100;
+      const resetsAt = codexResetTimestamp(window.resetsAt);
+      windows.push({
+        window: rateLimitWindowId(scope, slot, window.windowDurationMins),
+        status:
+          snapshot.rateLimitReachedType !== undefined && snapshot.rateLimitReachedType !== null
+            ? "exhausted"
+            : utilization >= 1
+              ? "exhausted"
+              : utilization >= 0.8
+                ? "warning"
+                : "allowed",
+        utilization,
+        ...(resetsAt === undefined ? {} : { resetsAt }),
+        observedAt: updatedAt,
+      });
+    }
+  }
+  if (windows.length > 32) {
+    throw new Error("Codex returned more rate-limit windows than Octant can retain.");
+  }
+  const confidence =
+    windows.length > 0 || result.ordinaryUsageAllowed !== undefined
+      ? ("high" as const)
+      : ("unknown" as const);
+  const quota =
+    result.ordinaryUsageAllowed === false
+      ? "exhausted"
+      : result.ordinaryUsageAllowed === true
+        ? "available"
+        : reached
+          ? "exhausted"
+          : windows.length === 0
+            ? "unknown"
+            : "available";
+  return decodeProviderServiceLimits({
+    providerInstanceId,
+    scope: "account",
+    requests: { status: "unavailable" },
+    tokens: { status: "unavailable" },
+    concurrency: { status: "unavailable" },
+    retry: { status: "inactive" },
+    quota,
+    source: "runtime-reported",
+    confidence,
+    updatedAt,
+    ...(windows.length === 0 ? {} : { rateLimitWindows: windows }),
+  });
+}
+
+function makeCodexContextFacts(
+  options: CodexDriverOptions,
+  clientFactory: (connection: CodexAppServerConnection) => CodexClientPort,
+  clock: () => string,
+): ProviderContextFactsSource {
+  return {
+    // Codex's model/list payload does not carry context bounds. Reuse any
+    // probe-derived evidence already published by this driver; an empty result
+    // before the first probe remains honest and lets the host's reviewed
+    // catalog fallback decide whether a model can be admitted.
+    observeModelLimits: ({ instanceId }) =>
+      Effect.sync(() => {
+        const observed = options.runtimeRegistry.observedState(instanceId);
+        return observed === undefined ? [] : modelEvidenceFromObservedState(observed);
+      }),
+    observeServiceLimits: ({ instanceId }) =>
+      Effect.gen(function* () {
+        const runtime = yield* acquireRuntime(options, clientFactory);
+        const result = yield* request(runtime.client.rateLimitsRead);
+        const observedAt = clock() as UtcTimestamp;
+        return yield* Effect.try({
+          try: () => normalizeCodexServiceLimits(instanceId, result, observedAt),
+          catch: () => failure("protocol", "Codex account rate-limit data was invalid."),
+        });
+      }),
+  };
+}
+
 export function makeCodexClient(connection: CodexAppServerConnection): CodexClientPort {
   const { rpc } = connection;
   return {
     accountRead: () =>
       rpc.request("account/read", { refreshToken: false }, decodeAccountReadResult),
+    rateLimitsRead: () =>
+      rpc.request("account/rateLimits/read", undefined, decodeAccountRateLimitsReadResult),
     modelList: (cursor) =>
       rpc.request(
         "model/list",
@@ -295,12 +442,14 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
   const clientFactory = options.clientFactory ?? makeCodexClient;
   const clock = options.clock ?? (() => new Date().toISOString());
   const makeCorrelation = options.correlationId ?? (() => crypto.randomUUID());
+  const contextFacts = makeCodexContextFacts(options, clientFactory, clock);
   const makeRequestId = options.requestId ?? (() => crypto.randomUUID());
   const makeTaskId = options.taskId ?? (() => crypto.randomUUID());
   const makeToolCallId = options.toolCallId ?? (() => crypto.randomUUID());
 
   return {
     kind: "codex",
+    contextFacts,
     probe: ({ instanceId }) =>
       instanceId !== options.instanceId
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))

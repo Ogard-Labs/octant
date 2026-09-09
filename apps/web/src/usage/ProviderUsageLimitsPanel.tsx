@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import type {
@@ -12,41 +12,92 @@ import { SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { driverLabel } from "../providers/providerSettingsPresentation";
+import "../styles/usage.css";
 
 export function ProviderUsageLimitsPanel(props: {
   readonly client: ProviderUsageLimitsClient;
   readonly instances: ReadonlyArray<ProviderInstance>;
 }) {
-  const [snapshot, setSnapshot] = useState<ProviderUsageLimitsSnapshot>();
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string>();
+  const [reading, setReading] = useState<{
+    readonly client: ProviderUsageLimitsClient;
+    readonly snapshot?: ProviderUsageLimitsSnapshot;
+    readonly message?: string;
+    readonly busy: boolean;
+  }>();
+  const sequence = useRef(0);
+  const current = reading?.client === props.client ? reading : undefined;
+  const snapshot = current?.snapshot;
+  const message = current?.message;
+  const busy = current?.busy ?? true;
+  const [now, setNow] = useState(Date.now);
   const names = useMemo(
     () => new Map(props.instances.map((instance) => [String(instance.id), instance])),
     [props.instances],
   );
-
+  const load = useCallback(
+    async (refresh: boolean): Promise<void> => {
+      const request = ++sequence.current;
+      setReading((previous) => ({
+        client: props.client,
+        busy: true,
+        ...(refresh && previous?.client === props.client && previous.snapshot !== undefined
+          ? { snapshot: previous.snapshot }
+          : {}),
+      }));
+      try {
+        const next = await (refresh ? props.client.refresh() : props.client.list());
+        if (request !== sequence.current) return;
+        setNow(Date.now());
+        setReading({ client: props.client, snapshot: next, busy: false });
+      } catch {
+        if (request !== sequence.current) return;
+        setReading((previous) => ({
+          client: props.client,
+          busy: false,
+          ...(refresh && previous?.client === props.client && previous.snapshot !== undefined
+            ? { snapshot: previous.snapshot }
+            : {}),
+          message: refresh
+            ? "Provider limits could not be refreshed. Last successful values remain visible."
+            : "Provider limits are unavailable.",
+        }));
+      }
+    },
+    [props.client],
+  );
   useEffect(() => {
-    let active = true;
-    void props.client.list().then(
-      (value) => active && setSnapshot(value),
-      () => active && setMessage("Provider limits are unavailable."),
-    );
+    void load(false);
     return () => {
-      active = false;
+      sequence.current += 1;
     };
-  }, [props.client]);
-
-  async function refresh(): Promise<void> {
-    setBusy(true);
-    setMessage(undefined);
-    try {
-      setSnapshot(await props.client.refresh());
-    } catch {
-      setMessage("Provider limits could not be refreshed. Last successful values remain visible.");
-    } finally {
-      setBusy(false);
-    }
-  }
+  }, [load]);
+  useEffect(() => {
+    const resets =
+      snapshot?.entries
+        .flatMap((entry) => {
+          const limits =
+            entry.status === "available"
+              ? entry.limits
+              : entry.status === "failed"
+                ? entry.staleLimits
+                : undefined;
+          if (limits === undefined) return [];
+          return [
+            limits.requests,
+            limits.tokens,
+            limits.concurrency,
+            ...(limits.rateLimitWindows ?? []),
+          ].flatMap((bucket) =>
+            "resetsAt" in bucket && bucket.resetsAt !== undefined
+              ? [Date.parse(bucket.resetsAt)]
+              : [],
+          );
+        })
+        .filter((reset) => reset > now) ?? [];
+    const delay = Math.max(1, Math.min(60_000, ...resets.map((reset) => reset - Date.now())));
+    const timer = setTimeout(() => setNow(Date.now()), delay);
+    return () => clearTimeout(timer);
+  }, [snapshot, now]);
 
   return (
     <SurfaceSection
@@ -54,7 +105,7 @@ export function ProviderUsageLimitsPanel(props: {
         <OctantButton
           aria-label="Refresh provider limits"
           disabled={busy}
-          onClick={() => void refresh()}
+          onClick={() => void load(true)}
           size="sm"
           type="button"
           variant="ghost"
@@ -65,7 +116,7 @@ export function ProviderUsageLimitsPanel(props: {
       }
       className="provider-limits"
       label="Provider limits"
-      note="Live provider capacity is separate from Octant's local recorded usage. Most runtimes report their windows only while a session runs, so an idle provider shows nothing yet."
+      note="Provider-reported limits can include usage from other apps. An unreported window stays unknown; a reset requires a fresh reading."
     >
       {message === undefined ? null : (
         <p className="surface-section__note" role="status">
@@ -83,7 +134,7 @@ export function ProviderUsageLimitsPanel(props: {
         </p>
       ) : null}
       {snapshot === undefined || snapshot.entries.length === 0 ? null : (
-        <ul className="surface-list">
+        <ul className="surface-list provider-limits__list">
           {snapshot.entries.map((entry) => {
             const instance = names.get(String(entry.providerInstanceId));
             return (
@@ -102,13 +153,12 @@ export function ProviderUsageLimitsPanel(props: {
                     )}
                     <span className="oct-row-label">{instance?.displayName ?? "Provider"}</span>
                   </span>
-                  <span className="oct-row-detail">
-                    {entry.source === "provider-runtime" ? "Provider runtime" : "Local observer"}
-                  </span>
+                  <span className="oct-row-detail">{limitScope(entry)}</span>
                 </div>
                 <div className="surface-row__control">
                   <EntryDetails
                     entry={entry}
+                    now={now}
                     runtime={
                       instance === undefined ? "This runtime" : driverLabel(instance.driverKind)
                     }
@@ -149,6 +199,25 @@ function unavailableCopy(
   }
 }
 
+function limitScope(entry: ProviderUsageLimitsEntry): string {
+  const limits =
+    entry.status === "available"
+      ? entry.limits
+      : entry.status === "failed"
+        ? entry.staleLimits
+        : undefined;
+  switch (limits?.scope) {
+    case "account":
+      return "Account limits · includes other apps";
+    case "model":
+      return "Model limits";
+    case "provider-instance":
+      return "Provider instance limits";
+    default:
+      return "Scope not reported";
+  }
+}
+
 const WINDOW_LABELS: Readonly<Record<string, string>> = {
   five_hour: "5-hour window",
   seven_day: "7-day window",
@@ -163,6 +232,14 @@ const DURATION_UNITS: Readonly<Record<string, string>> = { m: "minute", h: "hour
  * the length is what a reader recognizes, so it leads the label.
  */
 function windowLabel(window: string): string {
+  const separator = window.lastIndexOf(":");
+  if (separator >= 0) {
+    const scope = window.slice(0, separator);
+    const label = windowLabel(window.slice(separator + 1));
+    return scope === "account" || scope === "codex"
+      ? label
+      : `${scope.replaceAll("_", " ")} · ${label}`;
+  }
   const known = WINDOW_LABELS[window];
   if (known !== undefined) return known;
   const codex = /^(primary|secondary)(?:_(\d+)([mhd]))?$/.exec(window);
@@ -176,9 +253,11 @@ function windowLabel(window: string): string {
 function EntryDetails({
   entry,
   runtime,
+  now,
 }: {
   readonly entry: ProviderUsageLimitsEntry;
   readonly runtime: string;
+  readonly now: number;
 }) {
   if (entry.status === "unavailable") {
     return <p className="provider-limits__state">{unavailableCopy(entry.reason, runtime)}</p>;
@@ -197,39 +276,48 @@ function EntryDetails({
           )}
         </div>
       ) : null}
-      {limits === undefined ? <p>Unavailable</p> : <LimitBuckets limits={limits} />}
+      {limits === undefined ? <p>Unavailable</p> : <LimitBuckets limits={limits} now={now} />}
     </div>
   );
 }
 
-function LimitBuckets({ limits }: { readonly limits: ProviderServiceLimits }) {
+function LimitBuckets({
+  limits,
+  now,
+}: {
+  readonly limits: ProviderServiceLimits;
+  readonly now: number;
+}) {
   const buckets = [
     ["requests", limits.requests],
     ["tokens", limits.tokens],
     ["concurrent", limits.concurrency],
   ] as const;
+  const hasBuckets = buckets.some(([, bucket]) => bucket.status === "available");
   return (
     <div className="provider-limits__buckets">
+      {limits.quota === "exhausted" ? (
+        <p className="provider-limits__warning">
+          {limits.scope === "account" ? "Account limit reached" : "Provider limit reached"}
+        </p>
+      ) : null}
+      {!hasBuckets && (limits.rateLimitWindows?.length ?? 0) === 0 ? (
+        <p>No quota windows reported</p>
+      ) : null}
       {buckets.map(([label, bucket]) => (
-        <LimitBucket bucket={bucket} key={label} label={label} />
+        <LimitBucket bucket={bucket} key={label} label={label} now={now} />
       ))}
       {limits.rateLimitWindows?.map((window) => (
-        <div className="provider-limits__window" key={window.window}>
-          <p>
-            {windowLabel(window.window)} · {capitalize(window.status)}
-            {window.utilization === undefined
-              ? ""
-              : ` · ${Math.round(window.utilization * 100)}% used`}
-            {window.resetsAt === undefined ? "" : ` · resets ${formatTime(window.resetsAt)}`}
-          </p>
-          {window.utilization === undefined ? null : (
-            <progress
-              aria-label={`${windowLabel(window.window)} used`}
-              max={100}
-              value={Math.round(window.utilization * 100)}
-            />
-          )}
-        </div>
+        <QuotaWindow
+          key={window.window}
+          label={windowLabel(window.window)}
+          now={now}
+          status={capitalize(window.status)}
+          {...(window.utilization === undefined
+            ? {}
+            : { remainingPercent: Math.floor((1 - window.utilization) * 100 + 1e-9) })}
+          {...(window.resetsAt === undefined ? {} : { resetsAt: window.resetsAt })}
+        />
       ))}
       {limits.retry.status === "active" ? (
         <p className="provider-limits__warning">
@@ -240,23 +328,71 @@ function LimitBuckets({ limits }: { readonly limits: ProviderServiceLimits }) {
   );
 }
 
-function LimitBucket(props: { readonly bucket: ServiceLimitBucket; readonly label: string }) {
-  if (props.bucket.status === "unavailable") {
-    return <p>{capitalize(props.label)} · Unavailable</p>;
-  }
-  const used = props.bucket.limit - props.bucket.remaining;
-  const usedPercent = Math.round((used / props.bucket.limit) * 100);
+function LimitBucket(props: {
+  readonly bucket: ServiceLimitBucket;
+  readonly label: string;
+  readonly now: number;
+}) {
+  if (props.bucket.status === "unavailable") return null;
   return (
-    <div className="provider-limits__bucket">
-      <p>
-        {props.bucket.remaining} remaining of {props.bucket.limit} {props.label}
-        {props.bucket.resetsAt === undefined
-          ? ""
-          : ` · resets ${formatTime(props.bucket.resetsAt)}`}
-      </p>
-      <progress aria-label={`${capitalize(props.label)} used`} max={100} value={usedPercent} />
+    <QuotaWindow
+      label={capitalize(props.label)}
+      now={props.now}
+      remainingPercent={Math.floor((props.bucket.remaining / props.bucket.limit) * 100)}
+      detail={`${props.bucket.remaining.toLocaleString()} remaining of ${props.bucket.limit.toLocaleString()} ${props.label}`}
+      {...(props.bucket.resetsAt === undefined ? {} : { resetsAt: props.bucket.resetsAt })}
+    />
+  );
+}
+
+function QuotaWindow(props: {
+  readonly label: string;
+  readonly now: number;
+  readonly status?: string;
+  readonly remainingPercent?: number;
+  readonly resetsAt?: string;
+  readonly detail?: string;
+}) {
+  const expired = props.resetsAt !== undefined && Date.parse(props.resetsAt) <= props.now;
+  const remaining = expired ? undefined : props.remainingPercent;
+  return (
+    <div className="provider-limits__window">
+      <div className="provider-limits__window-heading">
+        <span>{props.label}</span>
+        {expired || props.status === undefined ? null : <span>{props.status}</span>}
+      </div>
+      {remaining === undefined ? null : (
+        <meter aria-label={`${props.label} remaining`} min={0} max={100} value={remaining} />
+      )}
+      <div className="provider-limits__window-reading">
+        <span>
+          {expired
+            ? "Awaiting updated limits"
+            : remaining === undefined
+              ? props.status === "Exhausted"
+                ? "Limit reached"
+                : "Remaining capacity not reported"
+              : `${remaining}% left`}
+        </span>
+        {props.resetsAt === undefined || expired ? null : (
+          <time dateTime={props.resetsAt} title={formatTime(props.resetsAt)}>
+            {resetCountdown(props.resetsAt, props.now)}
+          </time>
+        )}
+      </div>
+      {props.detail === undefined || expired ? null : <p>{props.detail}</p>}
     </div>
   );
+}
+
+function resetCountdown(resetsAt: string, now: number): string {
+  const minutes = Math.max(1, Math.ceil((Date.parse(resetsAt) - now) / 60_000));
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const remainder = minutes % 60;
+  if (days > 0) return `Resets in ${days}d${hours > 0 ? ` ${hours}h` : ""}`;
+  if (hours > 0) return `Resets in ${hours}h${remainder > 0 ? ` ${remainder}m` : ""}`;
+  return `Resets in ${minutes}m`;
 }
 
 function capitalize(value: string): string {

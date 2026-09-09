@@ -30,6 +30,7 @@ describe("Codex provider conformance", () => {
     let startedThread = 0;
     const client: CodexClientPort = {
       accountRead: async () => ({ account: { type: "chatgpt" }, requiresOpenaiAuth: true }),
+      rateLimitsRead: async () => ({ rateLimits: { rateLimitReachedType: null } }),
       modelList: async () => ({ data: [model()], nextCursor: null }),
       threadStart: async (input: CodexThreadStartInput) =>
         thread(`thread-${++startedThread}`, input.cwd),
@@ -210,6 +211,7 @@ function createCodexConformanceFixture(input: { readonly appTool?: boolean } = {
   let released = false;
   const client: CodexClientPort = {
     accountRead: async () => ({ account: { type: "chatgpt" }, requiresOpenaiAuth: true }),
+    rateLimitsRead: async () => ({ rateLimits: { rateLimitReachedType: null } }),
     modelList: async () => ({ data: [model()], nextCursor: null }),
     threadStart: async (input: CodexThreadStartInput) => thread(`thread-1`, input.cwd),
     threadResume: async ({ threadId }) => {

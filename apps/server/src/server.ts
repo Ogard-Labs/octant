@@ -45,7 +45,7 @@ import {
 } from "@octant/contracts";
 import type { ExtensionProviderFamily, StandaloneSkillScope } from "@octant/contracts/extensions";
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
-import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import type { ProviderDriver, ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
 import {
   authorizeAgentRunCreation,
   layoutContainsAgentRunThread,
@@ -448,6 +448,8 @@ import { createZenBackgroundRouteHandler } from "./zenBackgroundRoutes";
 import { createUsageRouteHandler } from "./usageRoutes";
 import { CacheStatsProjection } from "./cacheStatsProjection";
 import { createUsageDashboardRouteHandler } from "./usageDashboardRoutes";
+import { createLocalUsageHistoryRouteHandler } from "./localUsageHistoryRoutes";
+import { createLocalUsageHistorySourceForDriver } from "./providers/providerUsageHistorySources";
 import { resolveWindowProjectScope, type UsageProjectScope } from "./usageProjectScope";
 import { SideChatSidecarStore } from "./chat/sideChatSidecarStore";
 import {
@@ -763,6 +765,9 @@ interface ConfiguredProviderDriverOptions {
   readonly ollamaHistoryStore?: OllamaHistoryStore;
   readonly onRuntimeEvent?: (event: ProviderRuntimeEvent) => void;
   readonly admittedDriverKinds?: ReadonlySet<ProviderDriverKind>;
+  readonly localUsageHistorySourceForInstance?: (
+    instance: ProviderInstance,
+  ) => ProviderLocalUsageHistorySource | undefined;
 }
 
 export function makeConfiguredProviderDriver(
@@ -837,6 +842,10 @@ export function makeConfiguredProviderDriver(
         ? {}
         : { ollamaHistoryStore: options.ollamaHistoryStore }),
     });
+  }
+  const localUsageHistory = options.localUsageHistorySourceForInstance?.(instance);
+  if (localUsageHistory !== undefined) {
+    driver = { ...driver, localUsageHistory };
   }
   return options.onRuntimeEvent === undefined
     ? driver
@@ -3152,7 +3161,37 @@ export function startOctantServer(
       permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
       onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
+      localUsageHistorySourceForInstance: (instance) =>
+        createLocalUsageHistorySourceForDriver({
+          driverKind: instance.driverKind,
+          home: homedir(),
+        }),
     };
+    const localUsageHistoryRoutes = createLocalUsageHistoryRouteHandler({
+      windowAuthorityStore,
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
+      sources: () => {
+        const seen = new Set<string>();
+        const sources: ProviderLocalUsageHistorySource[] = [];
+        for (const instance of persistence.readProviderInstances()) {
+          if (!instance.enabled) continue;
+          let driver: ProviderDriver;
+          try {
+            driver = makeConfiguredProviderDriver(instance, configuredDriverOptions);
+          } catch {
+            continue;
+          }
+          const source = driver.localUsageHistory;
+          if (source === undefined || seen.has(source.sourceKind)) continue;
+          seen.add(source.sourceKind);
+          sources.push(source);
+        }
+        return sources;
+      },
+      clock: () => new Date().toISOString(),
+    });
     const providerUsageLimitsService = new ProviderUsageLimitsService({
       // Image profiles are jobs against a generation endpoint, not runtimes
       // with an account to meter; listing them would promise a report that
@@ -6750,6 +6789,7 @@ export function startOctantServer(
       (await threadMentionRoutes(request)) ??
       (await fileMentionRoutes(request)) ??
       (await usageDashboardRoutes(request)) ??
+      (await localUsageHistoryRoutes(request)) ??
       (await usageRoutes(request)) ??
       (await diagnosticsExportRoutes(request)) ??
       (await threadExportRoutes(request)) ??
