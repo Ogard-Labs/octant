@@ -58,6 +58,15 @@ export interface BrowserAppManagedToolsOptions {
   readonly windowId: WindowId;
   readonly threadId: BrowserThreadId;
   readonly mode: "chat" | "work" | "code";
+  /** Model selected when this tool set was composed. */
+  readonly modelId: string;
+  /** Resolves the current persisted model before each approval/effect. */
+  readonly resolveModelId: (
+    threadId: BrowserThreadId,
+    mode: ToolActionAuthority["mode"],
+  ) => string | undefined;
+  /** Host-owned in-memory bindings that survive per-turn tool-set factories. */
+  readonly modelBindings: Map<string, string>;
   readonly resolveAuthority: (
     threadId: BrowserThreadId,
     mode: ToolActionAuthority["mode"],
@@ -149,12 +158,15 @@ export function createBrowserAppManagedTools(
       if (authority === undefined) return failure("browser-authority-unavailable");
       if (input.operation === "stop") {
         const snapshot = options.browser.inspectThread(options.windowId, options.threadId);
-        if (snapshot.context !== undefined)
+        if (snapshot.context !== undefined) {
           rememberedContexts.delete(String(snapshot.context.contextId));
+          options.modelBindings.delete(String(snapshot.context.contextId));
+        }
         return browserResult(
           await options.browser.releaseThread(options.windowId, options.threadId),
         );
       }
+      if (!modelIsCurrent(options)) return failure("browser-model-stale");
       if (options.executionPolicy === "plan") return failure("plan-mode-read-only");
       let snapshot = options.browser.inspectThread(options.windowId, options.threadId);
       const existing = snapshot.context?.state === "active" ? snapshot.context : undefined;
@@ -187,6 +199,7 @@ export function createBrowserAppManagedTools(
         if (refreshed === undefined || !sameToolActionAuthority(authority, refreshed)) {
           return failure("browser-authority-stale");
         }
+        if (!modelIsCurrent(options)) return failure("browser-model-stale");
       }
       if (existing === undefined) {
         const created = await options.browser.create({
@@ -196,11 +209,17 @@ export function createBrowserAppManagedTools(
           policy: { ...hostPolicy, allowedOrigins: [origin] },
         });
         snapshot = created;
-        if (created.context?.state === "active")
+        if (created.context?.state === "active") {
           rememberedContexts.add(String(created.context.contextId));
+          options.modelBindings.set(String(created.context.contextId), options.modelId);
+        }
       }
       const context = snapshot.context;
       if (context === undefined || context.state !== "active") return browserResult(snapshot);
+      const boundModel = options.modelBindings.get(String(context.contextId));
+      if (boundModel === undefined || String(boundModel) !== String(options.modelId)) {
+        return failure("browser-model-stale");
+      }
       if (!rememberedContexts.has(String(context.contextId)))
         rememberedContexts.add(String(context.contextId));
       const request = browserAction(input, context);
@@ -208,12 +227,18 @@ export function createBrowserAppManagedTools(
       if (signal?.aborted) return failure("tool-interrupted");
       const acted = await options.browser.act({ windowId: options.windowId, request });
       if (signal?.aborted) return failure("tool-interrupted");
+      if (!modelIsCurrent(options)) return failure("browser-model-stale");
       if (input.operation === "screenshot" && acted.observation?.screenshotDataUrl === undefined) {
         return failure("browser-screenshot-unavailable");
       }
       return browserResult(acted, input.operation === "screenshot");
     },
   };
+}
+
+function modelIsCurrent(options: BrowserAppManagedToolsOptions): boolean {
+  const current = options.resolveModelId(options.threadId, options.mode);
+  return current !== undefined && String(current) === String(options.modelId);
 }
 
 function actionRequest(

@@ -4,6 +4,7 @@ import { createBrowserAppManagedTools } from "./browserAppManagedTools";
 
 const windowId = "10000000-0000-4000-8000-000000000001" as never;
 const threadId = "20000000-0000-4000-8000-000000000001" as never;
+const modelId = "model-a";
 const authority = {
   hostId: "30000000-0000-4000-8000-000000000001",
   mode: "chat",
@@ -46,6 +47,9 @@ describe("createBrowserAppManagedTools", () => {
       windowId,
       threadId,
       mode: "chat",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: new Map(),
       executionPolicy: "approval-gated",
       resolveAuthority: () => authority,
       browser: {
@@ -79,6 +83,9 @@ describe("createBrowserAppManagedTools", () => {
         windowId,
         threadId,
         mode: "chat",
+        modelId,
+        resolveModelId: () => modelId,
+        modelBindings: new Map(),
         executionPolicy,
         resolveAuthority: () => authority,
         browser: {
@@ -105,6 +112,9 @@ describe("createBrowserAppManagedTools", () => {
       windowId,
       threadId,
       mode: "chat",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: new Map(),
       executionPolicy: "approval-gated",
       toolConstraints: ["web-search"],
       resolveAuthority: () => authority,
@@ -114,7 +124,7 @@ describe("createBrowserAppManagedTools", () => {
         act: vi.fn(async () => snapshot()),
         releaseThread: vi.fn(async () => snapshot()),
       },
-      uuid: crypto.randomUUID,
+      uuid: () => crypto.randomUUID(),
     });
     expect(restricted.definitions).toEqual([]);
     await expect(
@@ -124,5 +134,115 @@ describe("createBrowserAppManagedTools", () => {
       }),
     ).resolves.toEqual({ result: { error: "tool-unavailable" }, isError: true });
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it("cancels a queued browser approval when the selected model changes", async () => {
+    let currentModel = modelId;
+    let resolveApproval: ((decision: "approved") => void) | undefined;
+    const approval = vi.fn(
+      () =>
+        new Promise<"approved">((resolve) => {
+          resolveApproval = resolve;
+        }),
+    );
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "chat",
+      modelId,
+      resolveModelId: () => currentModel,
+      modelBindings: new Map(),
+      executionPolicy: "approval-gated",
+      resolveAuthority: () => authority,
+      browser: {
+        inspectThread: () => snapshot(),
+        create: vi.fn(async () => snapshot()),
+        act: vi.fn(async () => snapshot()),
+        releaseThread: vi.fn(async () => snapshot()),
+      },
+      approvals: { request: approval } as never,
+      uuid: () => crypto.randomUUID(),
+    });
+
+    const pending = tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com" }),
+    });
+    await vi.waitFor(() => expect(approval).toHaveBeenCalledOnce());
+    currentModel = "model-b";
+    resolveApproval?.("approved");
+
+    await expect(pending).resolves.toEqual({
+      result: { error: "browser-model-stale" },
+      isError: true,
+    });
+  });
+
+  it("refuses an existing browser context after a provider model switch", async () => {
+    let currentModel = modelId;
+    let observed = snapshot();
+    const create = vi.fn(async () => {
+      observed = snapshot({
+        status: "running",
+        context: {
+          contextId: "50000000-0000-4000-8000-000000000002" as never,
+          threadId,
+          actionId: "60000000-0000-4000-8000-000000000002" as never,
+          correlationId: "70000000-0000-4000-8000-000000000002" as never,
+          authority,
+          policy: {
+            profileMode: "isolated",
+            allowedOrigins: ["https://example.com"],
+            credentialFieldProtection: true,
+            maxConcurrentTabs: 8,
+            sessionTimeoutMs: 600_000,
+          },
+          state: "active",
+          createdAt: "2026-09-09T10:00:00.000Z" as never,
+        },
+      });
+      return observed;
+    });
+    const act = vi.fn(async () => observed);
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "chat",
+      modelId,
+      resolveModelId: () => currentModel,
+      modelBindings: new Map(),
+      executionPolicy: "approval-gated",
+      resolveAuthority: () => authority,
+      browser: {
+        inspectThread: () => observed,
+        create,
+        act,
+        releaseThread: vi.fn(async () => snapshot()),
+      },
+      approvals: { request: vi.fn(async () => "approved" as const) } as never,
+      uuid: () => crypto.randomUUID(),
+    });
+
+    await expect(
+      tools.execute({
+        name: "octant_browser",
+        inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com" }),
+      }),
+    ).resolves.toMatchObject({ isError: false });
+    currentModel = "model-b";
+
+    await expect(
+      tools.execute({
+        name: "octant_browser",
+        inputJson: JSON.stringify({ operation: "read-page" }),
+      }),
+    ).resolves.toEqual({ result: { error: "browser-model-stale" }, isError: true });
+    expect(act).toHaveBeenCalledOnce();
+    await expect(
+      tools.execute({
+        name: "octant_browser",
+        inputJson: JSON.stringify({ operation: "stop" }),
+      }),
+    ).resolves.toMatchObject({ isError: false });
   });
 });

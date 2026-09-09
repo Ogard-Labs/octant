@@ -1516,6 +1516,7 @@ export function startOctantServer(
     const codeSessionAuthority = new CodeSessionAuthorityStore();
     let activeCodeService: CodeRouteService | undefined;
     let browserAutomationService: BrowserAutomationService | undefined;
+    const browserModelBindings = new Map<string, string>();
     const requireBrowserAutomationService = (): BrowserAutomationService => {
       const service = browserAutomationService;
       if (service === undefined) {
@@ -4232,6 +4233,12 @@ export function startOctantServer(
               windowId,
               threadId: thread.id as never,
               mode: "chat",
+              modelId: String(thread.modelId),
+              resolveModelId: (threadId) => {
+                const current = persistence.readChatThread(threadId as never);
+                return current === undefined ? undefined : String(current.modelId);
+              },
+              modelBindings: browserModelBindings,
               executionPolicy: "approval-gated",
               resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
               browser: {
@@ -4585,6 +4592,12 @@ export function startOctantServer(
               windowId: input.windowId,
               threadId: input.thread.id as never,
               mode: "work",
+              modelId: String(input.thread.modelId),
+              resolveModelId: (threadId) => {
+                const current = workThreadProjection.read(threadId as never);
+                return current === undefined ? undefined : String(current.modelId);
+              },
+              modelBindings: browserModelBindings,
               executionPolicy: "approval-gated",
               resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
               browser: {
