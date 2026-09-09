@@ -365,6 +365,21 @@ describe("WindowChrome", () => {
     expect(sections).toContain("border-top: 1px solid var(--oct-hairline);");
   });
 
+  it("keeps the ground behind the start screen rather than over its cards", () => {
+    const surface = readFileSync(resolve(process.cwd(), "src/styles/surface.css"), "utf8");
+    const ground =
+      surface.match(/\.app-backdrop\[data-placement="welcome"\]\s*\{[^}]+\}/)?.[0] ?? "";
+    const canvas = cssRule(".draft-thread__canvas");
+
+    // The ground paints at the shared level, so the start screen takes one of
+    // its own. Without it the dither's dots landed over the greeting and over
+    // the suggestion cards, which reads as the cards being see-through; at
+    // -1 the ground disappeared behind the workspace fill instead.
+    expect(ground).not.toContain("z-index");
+    expect(canvas).toContain("position: relative;");
+    expect(canvas).toContain("z-index: 1;");
+  });
+
   it("keeps semantic shell borders and controls restrained", () => {
     expect(cssRule(":root")).toContain("--octant-border: #303030;");
     expect(cssRule(":root")).toContain("--octant-border-strong: #4d4d4d;");

@@ -1340,8 +1340,15 @@ html[data-octant-native-host="true"]
 /* Dead-centring the start screen in a tall window left the prompt floating in
    the middle of an empty pane with several hundred pixels of nothing above and
    below it. It is anchored in the upper third instead, which is where the eye
-   already is, and the pane stops reading as an empty page. */
+   already is, and the pane stops reading as an empty page.
+
+   It also takes a level above the ground, which paints at z-index 0 under this
+   same start screen. Without one the ground's dots landed over the greeting
+   and over the suggestion cards, which reads as the cards being
+   see-through. */
 .draft-thread__canvas {
+  position: relative;
+  z-index: 1;
   box-sizing: border-box;
   display: flex;
   width: min(100% - 48px, 768px);
@@ -2608,10 +2615,11 @@ form > .work-composer-adapter__attachments {
    status dot and its word, the title on one line, the facts beneath it, and
    the age at the end. The row is the ghost button recipe as it comes; the
    hairlines belong to the list items and the dot to the badge. */
+/* No top rule: the section head above already draws one, and the two together
+   read as a doubled line under every section heading. */
 .code-home__grid--rows {
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
-  border-top: 1px solid var(--oct-border);
 }
 
 .code-home__grid--rows > li {
