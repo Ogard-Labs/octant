@@ -600,7 +600,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
       tabIndex={0}
     >
       {resolvedBackground.systemGround ? <div aria-hidden="true" className="zen-ground" /> : null}
-      <div className="zen-surface__traffic-light-safe window-drag-region" aria-hidden="true" />
+      <div className="zen-surface__titlebar window-drag-region" aria-hidden="true" />
       {props.focusZone === null || props.focusZone === undefined ? null : (
         <div className="zen-surface__spaces-anchor window-no-drag">
           <ZenSpaceSwitcher

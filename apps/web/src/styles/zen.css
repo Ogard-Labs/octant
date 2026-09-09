@@ -35,13 +35,26 @@
   outline: none;
 }
 
-.zen-surface__traffic-light-safe {
+/* Zen fills the window edge to edge, so the frameless host has no title bar
+   of its own to grab. Reserve the whole top edge as one: it carries no
+   content, and the floating chrome that overlaps it (the space switcher, the
+   orbit bar, the panels) each declares `window-no-drag`, which punches its
+   own rectangle back out of this one. */
+.zen-surface__titlebar {
   position: absolute;
   top: 0;
+  right: 0;
   left: 0;
-  width: 88px;
   height: 44px;
   z-index: 3;
+}
+
+/* Draggable regions are hit-tested by rectangle, not by stacking order, so an
+   arranged card sitting under the top edge would hand its own head to the
+   window without this. */
+.zen-el {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 .zen-surface__canvas {
