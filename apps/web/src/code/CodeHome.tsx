@@ -2,8 +2,6 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type {
   CodeBoardCard,
-  CodeBoardQuery,
-  CodeBoardView,
   CodeThreadId,
   GithubAssignedWorkItem,
   LinearIssueRow,
@@ -27,10 +25,10 @@ import {
 import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
 import { OctantButton } from "../ui/base/OctantButton";
 import { PullRequestChip } from "./PullRequestChip";
+import type { ContinueCards } from "./useContinueCards";
 
 const UP_NEXT_LIMIT = 6;
 const FRESH_ISSUE_LIMIT = 4;
-const CONTINUE_LIMIT = 6;
 
 /**
  * Up next names why each item is there, so a card here never reads as the
@@ -57,7 +55,12 @@ export interface CodeHomeProps {
   readonly loadOpenLinearIssues?: () => Promise<{
     readonly rows: ReadonlyArray<LinearIssueRow>;
   }>;
-  readonly loadBoard?: (query: CodeBoardQuery) => Promise<CodeBoardView>;
+  /**
+   * The threads to continue, read by the owner above this screen. The draft
+   * subtree is remounted to clear the composer, so a read held here would
+   * start over every time a new task begins.
+   */
+  readonly continueCards?: ContinueCards;
   readonly projectNames?: ReadonlyMap<string, string>;
   readonly providerLabels?: ReadonlyMap<string, string>;
   readonly onPickGithub: (item: GithubAssignedWorkItem) => void;
@@ -87,10 +90,6 @@ type FreshState =
       readonly linear: ReadonlyArray<LinearIssueRow>;
     };
 
-type ContinueState =
-  | { readonly kind: "idle" }
-  | { readonly kind: "ready"; readonly cards: ReadonlyArray<CodeBoardCard> };
-
 /**
  * What the Code start screen offers under the composer: what is waiting on
  * the person (assigned GitHub work and Linear issues), open issues nobody has
@@ -98,10 +97,10 @@ type ContinueState =
  * section hides rather than apologises when its source is not connected.
  */
 export function CodeHome(props: CodeHomeProps) {
-  const { githubClient, loadAssignedLinearIssues, loadOpenLinearIssues, loadBoard } = props;
+  const { githubClient, loadAssignedLinearIssues, loadOpenLinearIssues } = props;
   const [upNext, setUpNext] = useState<UpNextState>({ kind: "loading" });
   const [fresh, setFresh] = useState<FreshState>({ kind: "idle" });
-  const [next, setNext] = useState<ContinueState>({ kind: "idle" });
+  const next: ContinueCards = props.continueCards ?? { kind: "idle" };
 
   useEffect(() => {
     let cancelled = false;
@@ -148,31 +147,6 @@ export function CodeHome(props: CodeHomeProps) {
       cancelled = true;
     };
   }, [githubClient, loadOpenLinearIssues]);
-
-  useEffect(() => {
-    if (loadBoard === undefined) {
-      setNext({ kind: "idle" });
-      return;
-    }
-    let cancelled = false;
-    loadBoard({ version: 1 }).then(
-      (view) => {
-        if (cancelled) return;
-        const cards = [...view.cards]
-          .sort((a, b) =>
-            (b.lastMeaningfulActivityAt ?? "").localeCompare(a.lastMeaningfulActivityAt ?? ""),
-          )
-          .slice(0, CONTINUE_LIMIT);
-        setNext({ kind: "ready", cards });
-      },
-      () => {
-        if (!cancelled) setNext({ kind: "idle" });
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [loadBoard]);
 
   const assigned = new Set(
     upNext.kind === "ready"
