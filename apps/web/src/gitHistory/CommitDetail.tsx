@@ -103,7 +103,8 @@ export function CommitDetail(props: {
               </details>
             )}
             <p>
-              {detail.files.toLocaleString()} changed files{" "}
+              {detail.files.toLocaleString()}{" "}
+              {detail.files === 1 ? "changed file" : "changed files"}{" "}
               <span className="git-history__additions">+{detail.insertions.toLocaleString()}</span>{" "}
               <span className="git-history__deletions">−{detail.deletions.toLocaleString()}</span>
             </p>

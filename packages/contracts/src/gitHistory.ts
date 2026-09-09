@@ -7,8 +7,18 @@ export const MAX_GIT_HISTORY_DIFF_BYTES = 1024 * 1024;
 export const GitHistoryOid = Schema.String.pipe(Schema.pattern(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/));
 const text = (limit: number) => Schema.String.pipe(Schema.maxLength(limit));
 const revision = text(512).pipe(
-  Schema.pattern(/^(?:HEAD|refs\/(?:heads|remotes|tags)\/[A-Za-z0-9_./-]+)$/),
-  Schema.filter((value) => !value.includes("..")),
+  Schema.pattern(/^(?:HEAD|refs\/(?:heads|remotes|tags)\/.+)$/u),
+  Schema.filter(
+    (value) =>
+      !value.includes("..") &&
+      !value.includes("@{") &&
+      !Array.from(value).some(
+        (character) =>
+          character.charCodeAt(0) <= 32 ||
+          character.charCodeAt(0) === 127 ||
+          "~^:?*[\\".includes(character),
+      ),
+  ),
 );
 const scope = { threadId: CodeThreadId, checkoutId: CodeCheckoutId };
 
