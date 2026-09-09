@@ -4772,6 +4772,7 @@ function LaunchedShell(
               onSetChecklistItemCompleted={zen.setChecklistItemCompleted}
               onUpdateAppearance={(appearance) => void zen.updateAppearance(appearance)}
               onUpdateElement={(element) => zen.updateElement(element)}
+              onSetLayout={(layout) => zen.setLayout(layout)}
               onUpdateViewport={(viewport) => void zen.updateViewport(viewport)}
               space={zen.space}
             />

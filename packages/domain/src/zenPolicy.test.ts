@@ -52,6 +52,7 @@ function makeSpace(version: number = 0, elements: ZenElementPayload[] = []): Zen
     version: version as AggregateVersion,
     elements,
     viewport: DEFAULT_ZEN_VIEWPORT,
+    layout: "arrange",
     appearance: DEFAULT_ZEN_APPEARANCE,
     active: false,
     barCollapsed: false,
