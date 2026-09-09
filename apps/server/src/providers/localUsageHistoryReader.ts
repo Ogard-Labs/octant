@@ -50,6 +50,10 @@ const fileIdentities = new Map<
 >();
 const fileCursors = new Map<string, string>();
 const fileSeen = new Map<string, Set<string>>();
+const fileQualities = new Map<
+  string,
+  Map<string, { readonly omittedRecordCount: number; readonly failed: boolean }>
+>();
 /** Bounded records let a later refresh aggregate chunks already scanned this process. */
 const recordCaches = new Map<string, Map<string, LocalUsageHistoryRecord>>();
 const recordOwners = new Map<string, Map<string, Set<string>>>();
@@ -288,6 +292,8 @@ async function readLocalUsageHistoryImpl(
   const scanOrder = pendingFiles.concat(rotatedFiles.filter((file) => !pendingSet.has(file)));
   const selected = scanOrder.slice(0, maxFiles);
   const seen = fileSeen.get(sourceInstallationId) ?? new Set<string>();
+  const qualities = fileQualities.get(sourceInstallationId) ?? new Map();
+  fileQualities.set(sourceInstallationId, qualities);
   const deletedFiles = [...seen].filter((file) => !files.includes(file));
   let cacheInvalidated = deletedFiles.length > 0;
   if (cacheInvalidated) {
@@ -295,6 +301,7 @@ async function readLocalUsageHistoryImpl(
       seen.delete(file);
       options.onSourceInvalidated?.(relative(root, file));
       removeFileRecords(sourceInstallationId, file);
+      qualities.delete(file);
       clearScanOffsetForFile(sourceInstallationId, file);
     }
     const cursorFile = fileCursors.get(sourceInstallationId);
@@ -314,6 +321,9 @@ async function readLocalUsageHistoryImpl(
   let failed = collected.failed;
   for (const filePath of selected) {
     throwIfAborted(signal);
+    const fileOmittedStart = omittedRecordCount;
+    let fileFailed = false;
+    let pendingTrailingRecord = false;
     let processedFile = false;
     let handle: Awaited<ReturnType<typeof open>> | undefined;
     try {
@@ -348,6 +358,7 @@ async function readLocalUsageHistoryImpl(
         cacheInvalidated = true;
         options.onSourceInvalidated?.(relative(root, resolvedFilePath));
         scanOffsets.delete(cursorKey);
+        qualities.delete(resolvedFilePath);
         removeFileRecords(sourceInstallationId, resolvedFilePath);
       }
       if (previous !== undefined && !replaced && previous.offset >= fileSize) {
@@ -478,6 +489,7 @@ async function readLocalUsageHistoryImpl(
           !lastLineValid &&
           lastLineBytes <= maxRecordBytes;
         const cursorOffset = hasPendingTrailingLine ? lastLineOffset : nextOffset;
+        pendingTrailingRecord = hasPendingTrailingLine;
         const identity = {
           offset: cursorOffset,
           size: fileSize,
@@ -498,10 +510,20 @@ async function readLocalUsageHistoryImpl(
     } catch (error) {
       if (signal?.aborted) throw error;
       processedFile = true;
+      fileFailed = true;
       omittedRecordCount += 1;
       failed = true;
     } finally {
       if (processedFile) {
+        const previousQuality = qualities.get(filePath);
+        const omitted = Math.max(
+          0,
+          omittedRecordCount - fileOmittedStart - (pendingTrailingRecord ? 1 : 0),
+        );
+        qualities.set(filePath, {
+          omittedRecordCount: (previousQuality?.omittedRecordCount ?? 0) + omitted,
+          failed: fileFailed,
+        });
         processedPaths.add(filePath);
         seen.add(filePath);
         fileCursors.set(sourceInstallationId, filePath);
@@ -559,14 +581,21 @@ async function readLocalUsageHistoryImpl(
   if (recordCacheTruncated.has(sourceInstallationId)) {
     truncated = true;
   }
+  const persistedOmittedRecordCount = [...qualities.values()].reduce(
+    (total, quality) => total + quality.omittedRecordCount,
+    0,
+  );
+  const persistedFailed = [...qualities.values()].some((quality) => quality.failed);
+  const coverageOmittedRecordCount = (collected.truncated ? 1 : 0) + persistedOmittedRecordCount;
+  const sourceFailed = failed || persistedFailed;
   const hasMore =
     !collected.truncated &&
     !recordCacheTruncated.has(sourceInstallationId) &&
     (hasPendingFiles || hasPendingChunks);
   const status =
-    failed && responseRecords.length === 0
+    sourceFailed && responseRecords.length === 0
       ? "failed"
-      : omittedRecordCount > 0 || truncated || failed
+      : coverageOmittedRecordCount > 0 || truncated || sourceFailed
         ? "partial"
         : "ready";
   const range = responseRecords.reduce<{ from?: string; to?: string }>(
@@ -588,10 +617,10 @@ async function readLocalUsageHistoryImpl(
       status,
       scannedFileCount,
       responseRecords.length,
-      omittedRecordCount,
+      coverageOmittedRecordCount,
       truncated,
       hasMore,
-      failed
+      sourceFailed
         ? "Some provider history files could not be read."
         : truncated
           ? "Bounded provider history scan is partial; the next refresh resumes its cursor."
@@ -651,6 +680,7 @@ function trackSource(sourceInstallationId: string): void {
     const oldest = fileSeen.keys().next().value;
     if (oldest !== undefined) {
       fileSeen.delete(oldest);
+      fileQualities.delete(oldest);
       fileCursors.delete(oldest);
       recordCaches.delete(oldest);
       recordOwners.delete(oldest);
