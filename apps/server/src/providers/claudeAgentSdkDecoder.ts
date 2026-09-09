@@ -1037,10 +1037,7 @@ export function decodeMessage(
       kind: "status",
       sessionId: message.session_id,
       status: message.status,
-      ...(mode === "default" ||
-      mode === "bypassPermissions" ||
-      mode === "plan" ||
-      mode === "auto"
+      ...(mode === "default" || mode === "bypassPermissions" || mode === "plan" || mode === "auto"
         ? { permissionMode: mode }
         : {}),
     };
