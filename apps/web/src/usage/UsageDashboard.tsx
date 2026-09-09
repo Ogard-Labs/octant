@@ -911,7 +911,9 @@ function UsageControls(props: UsageControlsProps) {
               </span>
             </div>
             <div className="surface-row__control">
-              <OctantButton onClick={props.onRetain} size="sm" type="button" variant="ghost">
+              {/* These two delete records; they were styled exactly like the
+                  Export buttons above them. */}
+              <OctantButton onClick={props.onRetain} size="sm" type="button" variant="destructive">
                 <Eraser aria-hidden="true" size={14} /> Purge older than 30 days
               </OctantButton>
             </div>
@@ -924,7 +926,7 @@ function UsageControls(props: UsageControlsProps) {
               </span>
             </div>
             <div className="surface-row__control">
-              <OctantButton onClick={props.onReset} size="sm" type="button" variant="ghost">
+              <OctantButton onClick={props.onReset} size="sm" type="button" variant="destructive">
                 <Trash2 aria-hidden="true" size={14} /> Reset all usage
               </OctantButton>
             </div>
