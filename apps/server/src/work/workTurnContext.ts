@@ -18,6 +18,9 @@ import { reduceContextToBudget } from "@octant/domain/context-policy";
  */
 export const WORK_TURN_SAFE_INPUT_TOKENS = 24_000;
 
+const WORK_ARTIFACT_INSTRUCTIONS =
+  "You are working in an Octant Work task. When the user requests a document or artifact, use your available file tools to create it inside the bound task folder and report its real relative paths. Octant's Files tool lets the user open those files; observed Markdown and plain-text documents can also appear in Document beside the conversation. Creating a file does not prove a preview opened. Use appropriate format-specific tooling for binary documents. Never invent download URLs or host artifact ids. Use only tools actually offered to this task; these instructions grant no additional access.";
+
 export type WorkTurnContextPlan =
   | { readonly kind: "ok"; readonly context: ReadonlyArray<ProviderContextBlock> }
   | { readonly kind: "blocked"; readonly message: string };
@@ -49,7 +52,18 @@ export function planWorkTurnContext(input: {
   const modelId = decodeProviderModelId(input.modelId);
   const budget = input.safeInputBudget ?? WORK_TURN_SAFE_INPUT_TOKENS;
   const blocksByEntryId = new Map<string, ProviderContextBlock>();
-  const entries = input.contributions.map((contribution) => {
+  const contributions = [
+    {
+      text: WORK_ARTIFACT_INSTRUCTIONS,
+      sourceKind: "instruction",
+      referenceId: "octant-work-artifacts",
+      category: "octant-policy",
+      posture: "required",
+      block: { kind: "instructions", text: WORK_ARTIFACT_INSTRUCTIONS },
+    } as const,
+    ...input.contributions,
+  ];
+  const entries = contributions.map((contribution) => {
     const tokens = Math.max(16, Math.ceil(contribution.text.length / 4));
     const entry = decodeContextEntry({
       id: input.uuid(),
@@ -92,7 +106,7 @@ export function planWorkTurnContext(input: {
     return {
       kind: "blocked",
       message:
-        "Mentioned files and prior Work context exceed the model's input budget. Remove a file mention or start a new thread.",
+        "Work instructions, mentioned files, and prior context exceed the model's input budget. Remove a file mention or start a new thread.",
     };
   }
   const included = new Set(reduction.includedEntryIds.map((id) => String(id)));

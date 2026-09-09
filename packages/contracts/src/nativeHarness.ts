@@ -432,7 +432,8 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
   },
   {
     name: "write",
-    description: "Create or overwrite a whole file. Prefer edit for changes to an existing file.",
+    description:
+      "Create or overwrite a whole UTF-8 text file inside this task's bound root. Prefer edit for changes to an existing file. For a readable document artifact, write Markdown or plain text and report the real relative path. Octant can offer observed document changes in Document and Files for preview. A file write does not prove a preview opened; never invent a download URL. Use format-specific tooling for binary documents rather than writing text under a binary extension.",
     inputSchema: {
       type: "object",
       properties: { path: pathProperty, content: { type: "string" } },
@@ -518,7 +519,7 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
   {
     name: "delegate",
     description:
-      "Hand a bounded task to a child agent (start), list your children (status), or read a finished child's reply (collect). Children run on the model configured for their role.",
+      "Hand an independent, bounded task to a child agent with start, then use status to inspect your children and collect with the returned runId to read a finished reply. Supply a standalone brief with the objective, expected output, and boundaries. Children run on the model configured for their role and cannot exceed the parent's authority. An accepted start is not completion; collect and assess the result before relying on it. Use second-opinion, when offered, for advisor feedback that does not need a separate child task.",
     inputSchema: {
       type: "object",
       properties: {

@@ -78,7 +78,7 @@ export function createImageAgentTools(options: {
       {
         name: IMAGE_TOOL_NAME,
         description:
-          "Generate or edit an image only when the user explicitly asked to create, generate, draw, or edit an image. Do not call this tool for ambiguous, decorative, or implied visuals. This call spends money. Use only Settings image profiles; never pass credentials, endpoints, headers, or filesystem paths.",
+          "Generate or edit an image only when the user explicitly asked to create, generate, draw, or edit an image. Do not call this tool for ambiguous, decorative, or implied visuals. This call spends money. Describe the image in prompt; omit profileInstanceId and modelId to use the first eligible Settings profile and its default model. To edit, pass parentAttachmentId from a completed image on this thread. Use only Settings image profiles; never pass credentials, endpoints, headers, or filesystem paths. The result is a jobId and status, not the finished image. Octant shows the job and completed artifacts in this thread, where the user can open or attach them. Report queued or running work honestly; do not invent an image URL, say an unfinished image is ready, or enqueue a duplicate just to check progress.",
         inputSchema: imageToolInputSchema,
       },
     ],
