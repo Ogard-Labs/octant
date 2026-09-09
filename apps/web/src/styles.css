@@ -2311,18 +2311,46 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 /* The form is rows in the open section, not a raised card inside it. */
+/* One row of fields and the action that submits them.
+
+   The type column was 120px against option labels like "GitHub Copilot ACP",
+   so the select overflowed its cell: its chevron was pushed outside the box it
+   belongs to and the next field started against it, which read as one broken
+   control rather than two fields. Each cell may now shrink to nothing inside
+   itself while the row keeps a measure the longest option fits, and the row
+   wraps rather than squeezing when the page is narrow. */
 .provider-settings__create {
   display: grid;
   grid-template-columns:
-    minmax(120px, 0.55fr) minmax(140px, 0.8fr) minmax(220px, 1.4fr)
+    minmax(190px, 0.6fr) minmax(150px, 0.8fr) minmax(220px, 1.4fr)
     auto;
   align-items: end;
-  gap: 10px;
+  gap: var(--oct-space-3);
   padding: 0;
   background: transparent;
   border: 0;
   border-radius: 0;
   box-shadow: none;
+}
+
+.provider-settings__create > label,
+.provider-settings__create > label > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* The action sits on the field baseline rather than floating above it: at the
+   button's own 26px against a 40px field, `align-items: end` left it hanging. */
+.provider-settings__create > [data-slot="button"] {
+  height: auto;
+  min-height: var(--oct-control-height-sm);
+  align-self: end;
+}
+
+@media (max-width: 900px) {
+  .provider-settings__create {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .provider-settings__disclosure-icon,
