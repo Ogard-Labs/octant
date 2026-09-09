@@ -17,6 +17,7 @@ const DEFAULT_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 const DEFAULT_MAX_FILE_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_RECORD_BYTES = 256 * 1024;
 const DEFAULT_MAX_RECORDS = 20_000;
+const MAX_DISCOVERED_FILES = 100_000;
 const MAX_CACHED_RECORDS = 100_000;
 
 /** In-process resumable cursors keep bounded refreshes progressing through long files. */
@@ -101,7 +102,7 @@ export async function readLocalUsageHistory(
   }
 
   const sourceInstallationId = installationId(options.sourceKind, root);
-  const collected = await collectFiles(root, maxFiles + 1);
+  const collected = await collectFiles(root, MAX_DISCOVERED_FILES);
   const files = collected.files;
   const previousFile = fileCursors.get(sourceInstallationId);
   const previousIndex = previousFile === undefined ? -1 : files.indexOf(previousFile);
@@ -113,7 +114,7 @@ export async function readLocalUsageHistory(
   fileSeen.set(sourceInstallationId, seen);
   for (const file of selected) seen.add(file);
   if (selected.length > 0) fileCursors.set(sourceInstallationId, selected[selected.length - 1]!);
-  let truncated = files.some((file) => !seen.has(file));
+  let truncated = collected.truncated || files.some((file) => !seen.has(file));
   const records: LocalUsageHistoryRecord[] = [];
   let scannedFileCount = 0;
   let omittedRecordCount = truncated ? 1 : 0;
@@ -340,11 +341,19 @@ function isWithinRoot(root: string, candidate: string): boolean {
 async function collectFiles(
   root: string,
   limit: number,
-): Promise<{ readonly files: ReadonlyArray<string>; readonly failed: boolean }> {
+): Promise<{
+  readonly files: ReadonlyArray<string>;
+  readonly failed: boolean;
+  readonly truncated: boolean;
+}> {
   const files: Array<{ readonly path: string; readonly mtimeMs: number }> = [];
   let failed = false;
+  let truncated = false;
   const visit = async (directory: string): Promise<void> => {
-    if (files.length >= limit) return;
+    if (files.length >= limit) {
+      truncated = true;
+      return;
+    }
     let entries;
     try {
       entries = await readdir(directory, { withFileTypes: true });
@@ -353,7 +362,10 @@ async function collectFiles(
       return;
     }
     for (const entry of entries) {
-      if (files.length >= limit) return;
+      if (files.length >= limit) {
+        truncated = true;
+        return;
+      }
       const candidate = join(directory, entry.name);
       let entryStat;
       try {
@@ -376,6 +388,7 @@ async function collectFiles(
       .sort((left, right) => right.mtimeMs - left.mtimeMs || left.path.localeCompare(right.path))
       .map((entry) => entry.path),
     failed,
+    truncated,
   };
 }
 
