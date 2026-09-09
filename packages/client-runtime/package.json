@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./git-history-client": "./src/gitHistoryClient.ts",
     ".": "./src/index.ts",
     "./agent-run-client": "./src/agentRunClient.ts",
     "./agent-run-settings-client": "./src/agentRunSettingsClient.ts",

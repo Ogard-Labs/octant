@@ -1,3 +1,4 @@
+import { DockModuleBoundary } from "../shell/DockModuleBoundary";
 import type { EnvironmentCompactIdentity } from "@octant/contracts";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
@@ -69,7 +70,8 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
       <div className="thread-environment-dock__body">{props.children}</div>
     </section>
   );
-  return dockHost === null ? content : createPortal(content, dockHost);
+  const isolated = <DockModuleBoundary>{content}</DockModuleBoundary>;
+  return dockHost === null ? isolated : createPortal(isolated, dockHost);
 }
 
 function summaryFacts(summary: ThreadEnvironmentSummaryFacts): ReadonlyArray<string> {

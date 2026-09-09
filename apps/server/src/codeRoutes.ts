@@ -1,4 +1,10 @@
 import {
+  decodeGitHistoryQuery,
+  decodeGitHistoryResult,
+  type GitHistoryQuery,
+  type GitHistoryResult,
+} from "@octant/contracts/git-history";
+import {
   CodeCheckoutId,
   CodeDigest,
   CodeEvidenceContentId,
@@ -181,6 +187,11 @@ export interface CodeTestListingInput {
 }
 
 export interface CodeRouteService {
+  readonly readGitHistory?: (
+    windowId: WindowId,
+    query: GitHistoryQuery,
+    signal?: AbortSignal,
+  ) => Promise<GitHistoryResult>;
   readonly bootstrap: (authenticatedWindowId: WindowId) => Promise<CodeBootstrap> | CodeBootstrap;
   readonly navigation: (
     authenticatedWindowId: WindowId,
@@ -1035,6 +1046,35 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             origin,
           );
         }
+        case "git-history": {
+          if (
+            request.method !== "GET" ||
+            url.searchParams.size !== 1 ||
+            !url.searchParams.has("query")
+          )
+            throw new CodeRouteRejected("Git history request is invalid.", 400);
+          const raw = url.searchParams.get("query") ?? "";
+          if (raw.length > 32768)
+            throw new CodeRouteRejected("Git history query is too large.", 400);
+          let query: GitHistoryQuery;
+          try {
+            query = decodeGitHistoryQuery(JSON.parse(raw));
+          } catch {
+            throw new CodeRouteRejected("Git history request is invalid.", 400);
+          }
+          if (dependencies.service.readGitHistory === undefined)
+            return jsonResponse(
+              { status: "unavailable", message: "Git history is unavailable." },
+              503,
+              origin,
+            );
+          const result = await dependencies.service.readGitHistory(
+            authenticatedWindowId,
+            query,
+            request.signal,
+          );
+          return jsonResponse(decodeGitHistoryResult(result), 200, origin);
+        }
         case "file-listing": {
           if (request.method !== "GET") {
             throw new CodeRouteRejected("Code request is invalid.", 400);
@@ -1277,6 +1317,7 @@ type MatchedRoute =
         | "terminal-inspection"
         | "file-save"
         | "file-open"
+        | "git-history"
         | "file-listing"
         | "file-search"
         | "file-watch"
@@ -1418,6 +1459,7 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
   }
   if (pathname === "/api/code/files/content") return { kind: "file-save" };
   if (pathname === "/api/code/files/open") return { kind: "file-open" };
+  if (pathname === "/api/code/git/history") return { kind: "git-history" };
   if (pathname === "/api/code/files/listing") return { kind: "file-listing" };
   if (pathname === "/api/code/files/search") return { kind: "file-search" };
   if (pathname === "/api/code/files/watch") return { kind: "file-watch" };

@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./git-history": "./src/gitHistory.ts",
     ".": "./src/index.ts",
     "./manifest": "./src/manifest.ts",
     "./contributions": "./src/contributions.ts",

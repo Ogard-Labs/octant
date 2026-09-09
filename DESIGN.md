@@ -1001,3 +1001,19 @@ The following canonical map applies to the Usage flow and its Settings entry:
 | Scrollbar       | Usage workspace viewport and table scroll regions | usageWorkspace.css and providerUsageHistory.css | One page scroller; horizontal table overflow and disclosed chart-data scrolling | Narrow viewport and keyboard QA              |
 | Toast           | Inline usage status and error regions             | Query and provider-limit state                  | Retained stale readings and inline recovery; no critical toast-only feedback    | Failure, refresh, and client-switch tests    |
 | CRUD            | UsageDashboard in Settings                        | Usage client and retention/export contracts     | Main Usage is read-only; retention and export stay in Settings                  | Existing usage action tests                  |
+
+## Git history in Review
+
+History uses the existing Inter interface and monospace identifiers, semantic
+text/status tokens, and shared `OctantInput`, `OctantSelectField`,
+`OctantToggleGroup`, and `OctantButton` controls. A semantic commit table owns
+its vertical scroller and virtualizes fixed-height rows. Author, date, and SHA
+columns progressively give space to the commit message in narrow docks.
+
+A row opens an immutable commit comparison inside Review. Back restores the
+history list and keyboard focus; search, branch choice, and loaded pages stay
+within that thread/checkout presentation, not the URL or journal. Search results
+show individual nodes rather than inventing graph edges across omitted commits.
+Loading, unavailable, no-result, shallow, and truncated states remain explicit.
+Historical file inspection is read-only. Existing unified diffs and Monaco own
+diff presentation; file disclosures mount only their open preview.

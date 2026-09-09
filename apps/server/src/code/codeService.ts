@@ -1,3 +1,9 @@
+import {
+  decodeGitHistoryQuery,
+  type GitHistoryQuery,
+  type GitHistoryResult,
+} from "@octant/contracts/git-history";
+import type { GitHistoryPort } from "./gitHistoryPort";
 import { createHash } from "node:crypto";
 import {
   ActorId,
@@ -474,6 +480,7 @@ export interface CodeRepositoryTestDiscoveryPort {
 }
 
 export interface CodeServiceOptions {
+  readonly gitHistory?: Pick<GitHistoryPort, "read">;
   readonly persistence: CodePersistencePort;
   readonly access: CodeWindowAccessPort;
   readonly checkouts: CodeCheckoutObservationPort;
@@ -670,6 +677,7 @@ export class CodeService {
   readonly #access: CodeWindowAccessPort;
   readonly #checkouts: CodeCheckoutObservationPort;
   readonly #roots: CodeFileRootAuthorityPort;
+  readonly #gitHistory: CodeServiceOptions["gitHistory"];
   readonly #files: Pick<CodeFileService, "open" | "save"> & Partial<Pick<CodeFileService, "list">>;
   readonly #tests: CodeRepositoryTestDiscoveryPort | undefined;
   readonly #watcher: Pick<CodeFileWatchService, "watch"> | undefined;
@@ -718,6 +726,7 @@ export class CodeService {
     this.#access = options.access;
     this.#checkouts = options.checkouts;
     this.#roots = options.roots;
+    this.#gitHistory = options.gitHistory;
     this.#files = options.files;
     this.#tests = options.tests;
     this.#watcher = options.watcher;
@@ -2077,6 +2086,46 @@ export class CodeService {
     if (thread === undefined) return undefined;
     const allowed = await this.#access.canAccessProject(authenticatedWindowId, thread.projectId);
     return allowed ? record.content : undefined;
+  }
+
+  /** Reads local Git history under the same checkout authority as files. */
+  async readGitHistory(
+    windowId: WindowId,
+    input: GitHistoryQuery,
+    signal?: AbortSignal,
+  ): Promise<GitHistoryResult> {
+    const query = decodeGitHistoryQuery(input);
+    const authorized = await this.#authorizeCheckoutRead(
+      windowId,
+      query.threadId,
+      query.checkoutId,
+      "Git history is unauthorized.",
+    );
+    const root = await this.#roots.resolve(
+      windowId,
+      authorized.effectiveThread,
+      authorized.checkout,
+      CODE_LISTING_ROOT_PROBE_PATH,
+    );
+    if (root === undefined || this.#gitHistory === undefined)
+      return { status: "unavailable", message: "Git history is unavailable for this checkout." };
+    const result = await this.#gitHistory.read(root.rootPath, query, signal);
+    // A read may outlive a checkout rebind or Project revocation. Recheck before releasing repository data.
+    const current = await this.#authorizeCheckoutRead(
+      windowId,
+      query.threadId,
+      query.checkoutId,
+      "Git history is unauthorized.",
+    );
+    const currentRoot = await this.#roots.resolve(
+      windowId,
+      current.effectiveThread,
+      current.checkout,
+      CODE_LISTING_ROOT_PROBE_PATH,
+    );
+    if (currentRoot?.rootPath !== root.rootPath)
+      return { status: "unavailable", message: "Checkout access changed. Refresh Git history." };
+    return result;
   }
 
   /**

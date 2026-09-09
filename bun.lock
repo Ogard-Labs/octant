@@ -111,6 +111,7 @@
         "@octant/client-runtime": "workspace:*",
         "@octant/contracts": "workspace:*",
         "@octant/domain": "workspace:*",
+        "@octant/plugin-api": "workspace:*",
         "@octant/plugin-host": "workspace:*",
         "@octant/theme": "workspace:*",
         "@tanstack/react-virtual": "3.14.10",

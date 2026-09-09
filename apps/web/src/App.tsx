@@ -270,7 +270,7 @@ import {
   useRepositoryPullRequests,
 } from "./environment/useRepositoryPullRequests";
 import { RightUtilityDock } from "./shell/RightUtilityDock";
-import { DockProjectPullRequestReviewTool } from "./shell/DockProjectPullRequestReviewTool";
+import { ProjectReviewModule as DockProjectPullRequestReviewTool } from "./dockModules/ProjectReviewModule";
 import { composerThreadDrafts } from "./composer/composerThreadDraftStore";
 import { ThreadUtilityDockContent } from "./shell/ThreadUtilityDockContent";
 import {
@@ -5825,9 +5825,7 @@ function LaunchedShell(
                 const utilityTab = displayedDockState.tabs.find((tab) => tab.id === descriptor.id);
                 if (utilityTab === undefined) return null;
                 if (utilityTab.surface === "environment") {
-                  return (
-                    <div className="thread-environment-dock-host" data-octant-environment-dock />
-                  );
+                  return threadUtility("environment", utilityTab);
                 }
                 if (
                   utilityTab.surface === "review" &&
