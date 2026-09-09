@@ -312,11 +312,13 @@ describe("ShellFrame", () => {
     expect(chrome).toContain("background: transparent;");
     expect(chrome).toContain("border-bottom: 0;");
     expect(chrome).toContain("pointer-events: none;");
-    expect(
-      cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome'),
-    ).not.toContain("top: calc(var(--oct-space-2) + 4px);");
-    expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
-      "z-index: 7;",
+    expect(chrome).not.toContain("top: calc(var(--oct-space-2) + 4px);");
+    // One rank for both hosts: the workspace column spans this row, so the
+    // chrome has to outrank whatever it paints there rather than only the
+    // native pane header.
+    expect(chrome).toContain("z-index: 7;");
+    expect(shellStyles).not.toContain(
+      'html[data-octant-native-host="true"] .shell-frame > .window-chrome',
     );
     expect(workspace).toContain("grid-row: 1 / -1;");
     expect(trailing).toContain("pointer-events: auto;");

@@ -95,10 +95,10 @@ describe("native titlebar hit-test boundary", () => {
   });
 
   it("keeps window chrome above the pane header so stacking cannot cover controls", () => {
-    const chrome = cssRule(
-      shellStyles,
-      'html[data-octant-native-host="true"] .shell-frame > .window-chrome',
-    );
+    // One rank serves both hosts: the workspace column spans this row under
+    // every host, so a native-only rank left the browser chrome losing the
+    // band to whatever the column painted there.
+    const chrome = cssRule(shellStyles, ".shell-frame > .window-chrome");
     const header = cssRule(
       workspaceStyles,
       'html[data-octant-native-host="true"] .workspace-pane__header',
@@ -106,7 +106,9 @@ describe("native titlebar hit-test boundary", () => {
     const chromeLayer = Number(/z-index:\s*(\d+)/.exec(chrome)?.[1] ?? "0");
     const headerLayer = Number(/z-index:\s*(\d+)/.exec(header)?.[1] ?? "0");
     expect(chromeLayer).toBeGreaterThan(headerLayer);
-    expect(chrome).not.toContain("top:");
+    // The compact row lines up with AppKit's default hiddenInset lights, so
+    // the chrome takes no downward shift of its own.
+    expect(chrome).toContain("top: 0;");
   });
 
   it("uses one traffic-light reserve so collapsed recovery lines up with Hide sidebar", () => {
