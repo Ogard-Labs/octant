@@ -551,7 +551,8 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="code-editor-arguments"],
 .setrow[data-setting-id="execution-context"],
 .setrow[data-setting-id="transcription"],
-.setrow[data-setting-id="synthesis"] {
+.setrow[data-setting-id="synthesis"],
+.setrow[data-setting-id="custom-image-sources"] {
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -584,6 +585,36 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .voice-settings__form > label {
   display: grid;
   gap: var(--oct-space-1);
+}
+
+/* Custom image sources adds a second block above the form the other compound
+   rows don't have: the list of what's already configured. Both blocks share
+   the row's control column, so the column itself needs the gap that a
+   single-block row like Voice's gets for free from .voice-settings__form. */
+.setrow[data-setting-id="custom-image-sources"] > .setrow-control {
+  grid-column: 1;
+  grid-row: auto;
+  justify-self: stretch;
+  margin-top: var(--oct-space-3);
+  display: grid;
+  gap: var(--oct-space-3);
+}
+
+.image-generation-settings__sources {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.image-generation-settings__sources > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  min-height: 40px;
+  padding: 8px 0;
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .setrow-control > .settings-view__setting {

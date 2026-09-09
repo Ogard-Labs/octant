@@ -12,6 +12,7 @@ import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { SettingRow } from "./primitives";
 
 // Matches ImageGenerationCustomSource.label's Schema.maxLength(120): reject
 // here so a too-long label never reaches the replace-settings command that
@@ -50,11 +51,6 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
 
   return (
     <section aria-label="Image Generation" id="settings-image-generation">
-      <p className="provider-settings__field-guidance">
-        Sources connect a provider and image model. Saved profiles in Image generator choose
-        defaults for a generation, such as the model, size, and quality. Custom sources require an
-        OpenAI-compatible image API.
-      </p>
       {eligible.length === 0 ? (
         <p className="provider-settings__hint" role="status">
           Image generation needs an enabled OpenAI-compatible HTTP provider. Add one in Providers
@@ -62,25 +58,33 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
         </p>
       ) : null}
       <div className="settings-card-section settings-card-section--open">
-        <h2>Custom image sources</h2>
         <div className="setgroup">
-          {resolved.length === 0 ? (
-            <p className="provider-settings__field-guidance" role="status">
-              No custom image sources are configured.
+          <SettingRow
+            description="Connect an OpenAI-compatible image API's provider and model, such as Recraft, to use as a custom image source."
+            label="Custom image sources"
+            scope="app"
+            settingId="custom-image-sources"
+          >
+            <p className="provider-settings__field-guidance">
+              Saved profiles in Image generator choose defaults for a generation, such as the model,
+              size, and quality.
             </p>
-          ) : (
-            <ul>
-              {resolved.map((resolution, index) => {
-                const source = props.settings.customSources[index];
-                if (source === undefined) return null;
-                return (
-                  <li key={sourceKey(source)}>
-                    <p className="provider-settings__field-guidance" role="status">
-                      {resolution.status === "ready"
-                        ? `"${resolution.label}" runs ${resolution.instance.displayName} with ${String(resolution.modelId)}.`
-                        : `"${resolution.label}" is unavailable: ${resolution.reason}`}
-                    </p>
-                    <div className="settings-view__actions">
+            {resolved.length === 0 ? (
+              <p className="provider-settings__field-guidance" role="status">
+                No custom image sources are configured.
+              </p>
+            ) : (
+              <ul className="image-generation-settings__sources">
+                {resolved.map((resolution, index) => {
+                  const source = props.settings.customSources[index];
+                  if (source === undefined) return null;
+                  return (
+                    <li key={sourceKey(source)}>
+                      <p className="provider-settings__field-guidance" role="status">
+                        {resolution.status === "ready"
+                          ? `"${resolution.label}" runs ${resolution.instance.displayName} with ${String(resolution.modelId)}.`
+                          : `"${resolution.label}" is unavailable: ${resolution.reason}`}
+                      </p>
                       <OctantButton
                         onClick={() =>
                           apply(
@@ -95,24 +99,24 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
                       >
                         Remove
                       </OctantButton>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {atLimit ? (
-            <p className="provider-settings__field-guidance" role="status">
-              Up to {IMAGE_GENERATION_MAX_CUSTOM_SOURCES} custom image sources are supported. Remove
-              one to add another.
-            </p>
-          ) : (
-            <CustomImageSourceForm
-              eligible={eligible}
-              existing={props.settings.customSources}
-              onAdd={(source) => apply([...props.settings.customSources, source])}
-            />
-          )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {atLimit ? (
+              <p className="provider-settings__field-guidance" role="status">
+                Up to {IMAGE_GENERATION_MAX_CUSTOM_SOURCES} custom image sources are supported.
+                Remove one to add another.
+              </p>
+            ) : (
+              <CustomImageSourceForm
+                eligible={eligible}
+                existing={props.settings.customSources}
+                onAdd={(source) => apply([...props.settings.customSources, source])}
+              />
+            )}
+          </SettingRow>
         </div>
       </div>
     </section>
