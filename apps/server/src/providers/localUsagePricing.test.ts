@@ -18,6 +18,23 @@ function record(overrides: Partial<PricingUsageRecord> = {}): PricingUsageRecord
 }
 
 describe("local usage API-equivalent pricing", () => {
+  it("measures cache savings against the same tier with all input uncached", () => {
+    const result = estimateApiEquivalentCost("openai", record());
+    expect(result.kind).toBe("api-estimate");
+    if (result.kind !== "api-estimate") return;
+    expect(result.cacheSavingsUsd).toBeCloseTo(0.02 - (0.012 + 0.0006 + 0.0025), 10);
+    const writes = estimateApiEquivalentCost(
+      "openai",
+      record({
+        uncachedInputTokens: 0,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 100000,
+        outputTokens: 0,
+      }),
+    );
+    if (writes.kind !== "api-estimate") throw new Error("Expected a priced fixture");
+    expect(writes.cacheSavingsUsd).toBeCloseTo(-0.005, 10);
+  });
   it("prices GPT-5.6 input partitions and output without adding reasoning twice", () => {
     const result = estimateApiEquivalentCost("openai", record({ reasoningTokens: 4_000 }));
     expect(result.kind).toBe("api-estimate");

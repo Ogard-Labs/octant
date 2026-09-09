@@ -56,6 +56,8 @@ export interface ApiEquivalentEstimate {
   readonly currency: "USD";
   readonly pricingRevision: string;
   readonly source: PricingSource;
+  /** Input cost avoided at this tier; negative means cache-write overhead. */
+  readonly cacheSavingsUsd: number;
 }
 
 export interface UnpricedEstimate {
@@ -304,7 +306,7 @@ function unpriced(provider: PricingProvider, reason: UnpricedReason): UnpricedEs
   };
 }
 
-function safeTokenCount(value: number | undefined): value is number {
+function safeTokenCount(value: number | undefined): boolean {
   return value === undefined || (Number.isSafeInteger(value) && value >= 0);
 }
 
@@ -406,16 +408,18 @@ export function estimateApiEquivalentCost(
   if (resolvedWrite > 0 && writeRate === undefined) {
     return unpriced(provider, "unsupported-cache-write");
   }
-  const amount =
+  const inputAmount =
     tokenCharge(resolvedUncached, tier.inputPerMillion) +
     tokenCharge(resolvedRead, tier.cachedInputPerMillion ?? tier.inputPerMillion) +
-    tokenCharge(resolvedWrite, writeRate ?? 0) +
-    tokenCharge(record.outputTokens, tier.outputPerMillion);
+    tokenCharge(resolvedWrite, writeRate ?? 0);
+  const amount = inputAmount + tokenCharge(record.outputTokens, tier.outputPerMillion);
+  const cacheSavingsUsd = tokenCharge(record.inputTokens, tier.inputPerMillion) - inputAmount;
   if (!Number.isFinite(amount) || amount < 0) return unpriced(provider, "overflow");
   return {
     kind: "api-estimate",
     amount,
     currency: "USD",
+    cacheSavingsUsd,
     pricingRevision: LOCAL_PRICING_REVISION,
     source: LOCAL_PRICING_SOURCES[provider],
   };
