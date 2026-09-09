@@ -141,6 +141,17 @@ describe("local usage history aggregation", () => {
             providerKey: "codex",
             modelId: "gpt-5.6-sol",
             observedAt: "2026-09-11T00:00:00.000Z" as never,
+            inputTokens: 5,
+            outputTokens: 1,
+          },
+          {
+            sourceKind: "codex",
+            sourceInstallationId: "install-overflow",
+            sourceSessionId: "session-overflow",
+            sourceEventId: "event-overflow-2",
+            providerKey: "codex",
+            modelId: "gpt-5.6-sol",
+            observedAt: "2026-09-11T00:00:00.000Z" as never,
             inputTokens: Number.MAX_SAFE_INTEGER,
             outputTokens: 1,
           },
@@ -149,7 +160,14 @@ describe("local usage history aggregation", () => {
       request,
       queryAt: "2026-09-11T00:00:00.000Z",
     });
-    expect(response.totals.totalTokens).toBe(Number.MAX_SAFE_INTEGER);
+    expect(response.totals).toMatchObject({
+      inputTokens: 5,
+      totalTokens: 6,
+      outputTokens: 1,
+      requestCount: 1,
+      excludedRecordCount: 1,
+    });
+    expect(response.cost.excludedRecordCount).toBe(1);
     expect(response.coverage[0]?.status).toBe("partial");
     expect(response.coverage[0]?.detail).toContain("safe integer");
   });

@@ -18,6 +18,7 @@ export const LocalUsageHistoryCost = Schema.Struct({
   kind: Schema.Literal("api-estimate", "provider-recorded"),
   pricingRevision: Schema.optional(BoundedKey),
   pricingSource: Schema.optional(BoundedKey),
+  cacheSavingsUsd: Schema.optional(Schema.Number.pipe(Schema.finite())),
 }).annotations(strict);
 export type LocalUsageHistoryCost = typeof LocalUsageHistoryCost.Type;
 
@@ -69,6 +70,7 @@ export const LocalUsageHistoryCostTotals = Schema.Struct({
   unpricedRecordCount: NonNegativeInt,
   providerRecordedRecordCount: Schema.optional(NonNegativeInt),
   apiEstimateRecordCount: Schema.optional(NonNegativeInt),
+  excludedRecordCount: Schema.optional(NonNegativeInt),
   pricingReferences: Schema.optional(
     Schema.Array(LocalUsageHistoryPricingReference).pipe(Schema.maxItems(8)),
   ),
@@ -85,6 +87,7 @@ export const LocalUsageHistoryTokenTotals = Schema.Struct({
   reasoningTokens: Schema.optional(NonNegativeInt),
   requestCount: NonNegativeInt,
   sessionCount: NonNegativeInt,
+  excludedRecordCount: Schema.optional(NonNegativeInt),
   componentCoverage: Schema.Struct({
     uncachedInput: Schema.Struct({ measured: NonNegativeInt, total: NonNegativeInt }).annotations(
       strict,

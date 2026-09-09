@@ -29,6 +29,7 @@ interface TotalsAccumulator {
   cacheWriteMeasured: number;
   reasoningMeasured: number;
   costs: CostAccumulator;
+  excludedRecordCount: number;
   overflowed: boolean;
 }
 
@@ -38,6 +39,9 @@ interface CostAccumulator {
   providerRecordedMeasured: number;
   apiEstimateMeasured: number;
   unpricedRecordCount: number;
+  excludedRecordCount: number;
+  cacheSavingsUsd: number;
+  cacheSavingsMeasured: number;
   pricingReferences: Map<string, { readonly revision: string; readonly source: string }>;
 }
 
@@ -55,6 +59,7 @@ function accumulator(): TotalsAccumulator {
     cacheReadMeasured: 0,
     cacheWriteMeasured: 0,
     reasoningMeasured: 0,
+    excludedRecordCount: 0,
     overflowed: false,
     costs: {
       providerRecordedUsd: 0,
@@ -62,6 +67,9 @@ function accumulator(): TotalsAccumulator {
       providerRecordedMeasured: 0,
       apiEstimateMeasured: 0,
       unpricedRecordCount: 0,
+      excludedRecordCount: 0,
+      cacheSavingsUsd: 0,
+      cacheSavingsMeasured: 0,
       pricingReferences: new Map(),
     },
   };
@@ -103,7 +111,7 @@ export async function readLocalUsageHistoryDashboard(input: {
   >();
   const dailyTotals = new Map<string, TotalsAccumulator>();
   for (const record of records) {
-    add(totals, record);
+    if (!add(totals, record)) continue;
     addTo(providers, record.providerKey, record);
     const modelKey = `${record.providerKey}\0${record.modelId}`;
     const model = models.get(modelKey);
@@ -201,56 +209,48 @@ function addTo(
   } else add(current, record);
 }
 
-function add(target: TotalsAccumulator, record: LocalUsageHistoryRecord): void {
-  target.inputTokens = addNumber(target, target.inputTokens, record.inputTokens);
-  target.outputTokens = addNumber(target, target.outputTokens, record.outputTokens);
-  target.requestCount = addNumber(target, target.requestCount, 1);
-  target.sessions.add(record.sourceSessionId);
+function add(target: TotalsAccumulator, record: LocalUsageHistoryRecord): boolean {
+  if (!recordFits(target, record)) {
+    target.overflowed = true;
+    target.excludedRecordCount += 1;
+    target.costs.excludedRecordCount += 1;
+    return false;
+  }
+  target.inputTokens += record.inputTokens;
+  target.outputTokens += record.outputTokens;
+  target.requestCount += 1;
+  target.sessions.add(
+    `${record.sourceKind}\0${record.sourceInstallationId}\0${record.sourceSessionId}`,
+  );
   if (record.uncachedInputTokens !== undefined) {
-    target.uncachedInputTokens = addNumber(
-      target,
-      target.uncachedInputTokens,
-      record.uncachedInputTokens,
-    );
-    target.uncachedMeasured = addNumber(target, target.uncachedMeasured, 1);
+    target.uncachedInputTokens += record.uncachedInputTokens;
+    target.uncachedMeasured += 1;
   }
   if (record.cacheReadInputTokens !== undefined) {
-    target.cacheReadInputTokens = addNumber(
-      target,
-      target.cacheReadInputTokens,
-      record.cacheReadInputTokens,
-    );
-    target.cacheReadMeasured = addNumber(target, target.cacheReadMeasured, 1);
+    target.cacheReadInputTokens += record.cacheReadInputTokens;
+    target.cacheReadMeasured += 1;
   }
   if (record.cacheWriteInputTokens !== undefined) {
-    target.cacheWriteInputTokens = addNumber(
-      target,
-      target.cacheWriteInputTokens,
-      record.cacheWriteInputTokens,
-    );
-    target.cacheWriteMeasured = addNumber(target, target.cacheWriteMeasured, 1);
+    target.cacheWriteInputTokens += record.cacheWriteInputTokens;
+    target.cacheWriteMeasured += 1;
   }
   if (record.reasoningTokens !== undefined) {
-    target.reasoningTokens = addNumber(target, target.reasoningTokens, record.reasoningTokens);
-    target.reasoningMeasured = addNumber(target, target.reasoningMeasured, 1);
+    target.reasoningTokens += record.reasoningTokens;
+    target.reasoningMeasured += 1;
   }
   const cost = record.cost;
-  if (cost === undefined)
-    target.costs.unpricedRecordCount = addNumber(target, target.costs.unpricedRecordCount, 1);
+  if (cost === undefined) target.costs.unpricedRecordCount += 1;
   else if (cost.kind === "provider-recorded") {
-    target.costs.providerRecordedUsd = addNumber(
-      target,
-      target.costs.providerRecordedUsd,
-      cost.amount,
-    );
-    target.costs.providerRecordedMeasured = addNumber(
-      target,
-      target.costs.providerRecordedMeasured,
-      1,
-    );
+    target.costs.providerRecordedUsd += cost.amount;
+    target.costs.providerRecordedMeasured += 1;
   } else {
-    target.costs.apiEstimateUsd = addNumber(target, target.costs.apiEstimateUsd, cost.amount);
-    target.costs.apiEstimateMeasured = addNumber(target, target.costs.apiEstimateMeasured, 1);
+    target.costs.apiEstimateUsd += cost.amount;
+    target.costs.apiEstimateMeasured += 1;
+    const cacheSavingsUsd = cost.cacheSavingsUsd;
+    if (cacheSavingsUsd !== undefined && Number.isFinite(cacheSavingsUsd)) {
+      target.costs.cacheSavingsUsd += cacheSavingsUsd;
+      target.costs.cacheSavingsMeasured += 1;
+    }
     if (cost.pricingRevision !== undefined && cost.pricingSource !== undefined) {
       const key = `${cost.pricingRevision}\0${cost.pricingSource}`;
       if (target.costs.pricingReferences.size < 8 || target.costs.pricingReferences.has(key)) {
@@ -261,15 +261,51 @@ function add(target: TotalsAccumulator, record: LocalUsageHistoryRecord): void {
       }
     }
   }
+  return true;
 }
 
-function addNumber(target: TotalsAccumulator, left: number, right: number): number {
-  const next = left + right;
-  if (!Number.isFinite(next) || next < 0 || next > Number.MAX_SAFE_INTEGER) {
-    target.overflowed = true;
-    return Number.MAX_SAFE_INTEGER;
+function recordFits(target: TotalsAccumulator, record: LocalUsageHistoryRecord): boolean {
+  const nextInput = target.inputTokens + record.inputTokens;
+  const nextOutput = target.outputTokens + record.outputTokens;
+  if (
+    !safeSum(target.inputTokens, record.inputTokens) ||
+    !safeSum(target.outputTokens, record.outputTokens)
+  )
+    return false;
+  if (!safeSum(nextInput, nextOutput) || !safeSum(target.requestCount, 1)) return false;
+  if (
+    record.uncachedInputTokens !== undefined &&
+    !safeSum(target.uncachedInputTokens, record.uncachedInputTokens)
+  )
+    return false;
+  if (
+    record.cacheReadInputTokens !== undefined &&
+    !safeSum(target.cacheReadInputTokens, record.cacheReadInputTokens)
+  )
+    return false;
+  if (
+    record.cacheWriteInputTokens !== undefined &&
+    !safeSum(target.cacheWriteInputTokens, record.cacheWriteInputTokens)
+  )
+    return false;
+  if (
+    record.reasoningTokens !== undefined &&
+    !safeSum(target.reasoningTokens, record.reasoningTokens)
+  )
+    return false;
+  if (record.cost !== undefined) {
+    const current =
+      record.cost.kind === "provider-recorded"
+        ? target.costs.providerRecordedUsd
+        : target.costs.apiEstimateUsd;
+    if (!safeSum(current, record.cost.amount)) return false;
   }
-  return next;
+  return true;
+}
+
+function safeSum(left: number, right: number): boolean {
+  const next = left + right;
+  return Number.isFinite(next) && next >= 0 && next <= Number.MAX_SAFE_INTEGER;
 }
 
 function tokenTotals(value: TotalsAccumulator): LocalUsageHistoryTokenTotals {
@@ -295,6 +331,7 @@ function tokenTotals(value: TotalsAccumulator): LocalUsageHistoryTokenTotals {
       : {}),
     requestCount: value.requestCount,
     sessionCount: value.sessions.size,
+    ...(value.excludedRecordCount === 0 ? {} : { excludedRecordCount: value.excludedRecordCount }),
     componentCoverage: {
       uncachedInput: { measured: value.uncachedMeasured, total: value.requestCount },
       cacheRead: { measured: value.cacheReadMeasured, total: value.requestCount },
@@ -314,6 +351,13 @@ function costTotals(value: CostAccumulator): LocalUsageHistoryCostTotals {
     unpricedRecordCount: value.unpricedRecordCount,
     providerRecordedRecordCount: value.providerRecordedMeasured,
     apiEstimateRecordCount: value.apiEstimateMeasured,
+    ...(value.excludedRecordCount === 0 ? {} : { excludedRecordCount: value.excludedRecordCount }),
+    ...(value.cacheSavingsMeasured === 0
+      ? {}
+      : {
+          cacheSavingsUsd: value.cacheSavingsUsd,
+          cacheSavingsRecordCount: value.cacheSavingsMeasured,
+        }),
     ...(value.pricingReferences.size === 0
       ? {}
       : { pricingReferences: [...value.pricingReferences.values()] }),
