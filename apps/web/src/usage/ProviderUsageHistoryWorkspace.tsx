@@ -34,9 +34,17 @@ export function ProviderUsageHistoryWorkspace(props: {
   readonly onBack?: () => void;
   readonly sourceControl?: ReactNode;
   readonly limits?: ReactNode;
+  /**
+   * Rendered inside a page that already has a title, so this view contributes
+   * its controls and its readings but not a second "Usage" heading.
+   */
+  readonly embedded?: boolean;
 }) {
   const [range, setRange] = useState<Range>("30d");
-  const [metric, setMetric] = useState<HistoryMetric>("tokens");
+  // Cost first: it is the question a person opens this page with, and it is
+  // the one the Octant ledger structurally cannot answer, which is why that
+  // view led for so long. Tokens stay one control away.
+  const [metric, setMetric] = useState<HistoryMetric>("cost");
   const [basis, setBasis] = useState<HistoryCostBasis>("apiEstimateUsd");
   const [breakdown, setBreakdown] = useState<"model" | "day">("model");
   const [revision, setRevision] = useState(0);
@@ -139,7 +147,7 @@ export function ProviderUsageHistoryWorkspace(props: {
     <section className="provider-history" aria-label="Local provider usage history">
       <header className="provider-history__header">
         <div className="provider-history__heading">
-          {props.onBack === undefined ? null : (
+          {props.embedded === true ? null : props.onBack === undefined ? null : (
             <OctantButton
               onClick={props.onBack}
               variant="ghost"
@@ -149,7 +157,7 @@ export function ProviderUsageHistoryWorkspace(props: {
               <ArrowLeft size={16} />
             </OctantButton>
           )}
-          <h2>Usage</h2>
+          {props.embedded === true ? null : <h2>Usage</h2>}
           {props.sourceControl}
         </div>
         <div className="provider-history__controls">
