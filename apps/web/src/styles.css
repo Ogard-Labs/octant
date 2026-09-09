@@ -708,11 +708,6 @@ h6 {
   background: var(--octant-control-hover);
 }
 
-.octant-menu__trigger:focus-visible,
-.octant-menu__item:focus-visible {
-  outline: none;
-}
-
 .octant-menu__positioner {
   z-index: 80;
   max-width: calc(100vw - 16px);
@@ -2908,7 +2903,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .project-dialog textarea:focus-visible,
 .project-overview__name:focus-visible {
   border-color: var(--oct-accent-fg);
-  outline: none;
 }
 
 /* The caption above the folder chooser. It is a paragraph rather than a label
@@ -2949,7 +2943,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .project-dialog__folder:focus-visible {
   border-color: var(--oct-accent-fg);
-  outline: none;
 }
 
 .project-dialog__folder:disabled {
@@ -7647,7 +7640,6 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-detail);
   padding: 0 0.45rem;
-  outline: none;
 }
 
 /* ── Federated host lifecycle (Post-preview B6) ────────────────────────── */
