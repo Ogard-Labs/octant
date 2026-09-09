@@ -25,7 +25,7 @@ import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { OctantSlider } from "../ui/base/OctantSlider";
+import { SliderField } from "../settings/SliderField";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
@@ -983,9 +983,10 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               scope="app"
               settingId="sidebar-width"
             >
-              <OctantSlider
+              <SliderField
                 aria-label="Sidebar width"
                 className="settings-view__range"
+                format={(value) => `${String(value)}px`}
                 max={420}
                 min={220}
                 onChange={(event) =>
@@ -1245,9 +1246,12 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
         <div className="settings-card-section settings-card-section--open">
           <h2>Reset</h2>
           <div className="setgroup">
+            {/* The section says Reset and the description says what returns
+                to its default, so the row and its button each said "Reset
+                appearance" a second and third time. */}
             <SettingRow
               description="Return every appearance setting to its default."
-              label="Reset appearance"
+              label="Appearance"
               scope="app"
               settingId="reset-appearance"
             >
@@ -1257,7 +1261,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
                 type="button"
                 variant="secondary"
               >
-                Reset appearance
+                Reset
               </OctantButton>
             </SettingRow>
           </div>
@@ -1459,9 +1463,10 @@ function SidebarBackgroundSettings({
       </label>
       <label className="settings-view__field">
         <span>Overlay opacity</span>
-        <OctantSlider
+        <SliderField
           aria-label="Sidebar overlay opacity"
           className="settings-view__range"
+          format={(value) => `${String(value)}%`}
           max={100}
           min={0}
           onChange={(event) =>

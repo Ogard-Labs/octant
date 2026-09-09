@@ -13,8 +13,7 @@
   },
   "important": {
     "apps/web/src/styles.css": 4,
-    "apps/web/src/styles/octant.css": 1,
-    "apps/web/src/styles/settings.css": 4
+    "apps/web/src/styles/octant.css": 1
   },
   "heavy-weight": {
     "apps/web/src/styles.css": 6,
