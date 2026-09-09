@@ -338,6 +338,13 @@ describe("local provider usage history", () => {
     );
     expect(result.records[0]?.sourceEventId).toBe("newer");
     expect(result.coverage.truncated).toBe(true);
+    const next = await readLocalUsageHistory(
+      { sourceKind: "fixture" as never, providerKey: "fixture", root, maxFiles: 1 },
+      request,
+      parser as never,
+    );
+    expect(next.records.map((record) => record.sourceEventId)).toEqual(["newer", "older"]);
+    expect(next.coverage.status).toBe("ready");
   });
 
   it("reports partial coverage for malformed input and does not follow symlinks", async () => {

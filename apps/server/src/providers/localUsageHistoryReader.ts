@@ -21,6 +21,8 @@ const MAX_CACHED_RECORDS = 100_000;
 
 /** In-process resumable cursors keep bounded refreshes progressing through long files. */
 const scanOffsets = new Map<string, { readonly offset: number; readonly size: number }>();
+const fileCursors = new Map<string, string>();
+const fileSeen = new Map<string, Set<string>>();
 /** Bounded records let a later refresh aggregate chunks already scanned this process. */
 const recordCaches = new Map<string, Map<string, LocalUsageHistoryRecord>>();
 const recordCacheTruncated = new Set<string>();
@@ -101,8 +103,17 @@ export async function readLocalUsageHistory(
   const sourceInstallationId = installationId(options.sourceKind, root);
   const collected = await collectFiles(root, maxFiles + 1);
   const files = collected.files;
-  let truncated = files.length > maxFiles;
-  const selected = files.slice(0, maxFiles);
+  const previousFile = fileCursors.get(sourceInstallationId);
+  const previousIndex = previousFile === undefined ? -1 : files.indexOf(previousFile);
+  const startIndex =
+    previousIndex < 0 || files.length === 0 ? 0 : (previousIndex + 1) % files.length;
+  const rotatedFiles = files.slice(startIndex).concat(files.slice(0, startIndex));
+  const selected = rotatedFiles.slice(0, maxFiles);
+  const seen = fileSeen.get(sourceInstallationId) ?? new Set<string>();
+  fileSeen.set(sourceInstallationId, seen);
+  for (const file of selected) seen.add(file);
+  if (selected.length > 0) fileCursors.set(sourceInstallationId, selected[selected.length - 1]!);
+  let truncated = files.some((file) => !seen.has(file));
   const records: LocalUsageHistoryRecord[] = [];
   let scannedFileCount = 0;
   let omittedRecordCount = truncated ? 1 : 0;
@@ -140,7 +151,9 @@ export async function readLocalUsageHistory(
         truncated = true;
         break;
       }
-      const chunkLength = Math.min(fileSize - startOffset, maxFileBytes, availableBytes);
+      const reservedTrailerBytes = Math.min(maxRecordBytes, Math.max(0, availableBytes - 1));
+      const chunkBudget = Math.max(1, availableBytes - reservedTrailerBytes);
+      const chunkLength = Math.min(fileSize - startOffset, maxFileBytes, chunkBudget);
       if (chunkLength <= 0) {
         truncated = true;
         break;
@@ -150,7 +163,7 @@ export async function readLocalUsageHistory(
         handle,
         endOffset,
         fileSize,
-        maxRecordBytes,
+        Math.min(maxRecordBytes, Math.max(0, availableBytes - chunkLength)),
       );
       const startsMidLine = startOffset > 0 && !(await byteIsLineBreak(handle, startOffset - 1));
       scannedBytes += streamEndOffset - startOffset + 1;
@@ -290,10 +303,10 @@ async function extendToLineBoundary(
   handle: Awaited<ReturnType<typeof open>>,
   endOffset: number,
   fileSize: number,
-  maxRecordBytes: number,
+  maxExtensionBytes: number,
 ): Promise<number> {
-  if (await byteIsLineBreak(handle, endOffset)) return endOffset;
-  const limit = Math.min(fileSize - 1, endOffset + maxRecordBytes);
+  if (maxExtensionBytes <= 0 || (await byteIsLineBreak(handle, endOffset))) return endOffset;
+  const limit = Math.min(fileSize - 1, endOffset + maxExtensionBytes);
   for (let offset = endOffset + 1; offset <= limit; offset += 1) {
     if (await byteIsLineBreak(handle, offset)) return offset;
   }
