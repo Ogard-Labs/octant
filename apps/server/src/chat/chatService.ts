@@ -3279,7 +3279,14 @@ export class ChatService {
         const observed = await Effect.runPromise(
           Effect.scoped(driver.contextFacts.observeModelLimits({ instanceId: probe.instanceId })),
         );
-        return observed
+        const matching = observed
+          .filter((evidence) => String(evidence.modelId) === String(modelId))
+          .map((evidence) => this.#withConservativeMaxOutput(evidence));
+        if (matching.length > 0) return matching;
+        // A provider may expose service/quota facts without model bounds. An
+        // empty or unmatched model observation must not hide the model limits
+        // already established by this probe.
+        return modelEvidenceFromObservedState(probe)
           .filter((evidence) => String(evidence.modelId) === String(modelId))
           .map((evidence) => this.#withConservativeMaxOutput(evidence));
       } catch {
