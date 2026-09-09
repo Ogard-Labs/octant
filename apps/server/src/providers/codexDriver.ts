@@ -279,7 +279,7 @@ function codexResetTimestamp(resetsAt: number | null | undefined): UtcTimestamp 
 }
 
 function codexRateLimitSnapshots(result: CodexRateLimitsReadResult): ReadonlyArray<{
-  readonly scope: string;
+  readonly scope: string | undefined;
   readonly snapshot: CodexRateLimitsReadResult["rateLimits"];
 }> {
   const byLimitId = result.rateLimitsByLimitId;

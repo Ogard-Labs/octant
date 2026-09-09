@@ -474,6 +474,23 @@ describe("Codex driver probe and runtime lifecycle", () => {
     ]);
   });
 
+  it("uses the slot and duration as the identity for a legacy unnamed window", async () => {
+    const f = fixture({
+      rateLimits: {
+        primary: { usedPercent: 42, windowDurationMins: 300, resetsAt: 1_800_000_000 },
+        rateLimitReachedType: null,
+      },
+    });
+    const facts = makeCodexDriver(f.options({ idleLeaseMs: 0 })).contextFacts;
+    if (facts === undefined) throw new Error("Expected Codex context facts.");
+    const limits = await Effect.runPromise(
+      Effect.scoped(facts.observeServiceLimits({ instanceId })),
+    );
+    expect(limits.rateLimitWindows).toMatchObject([
+      { window: "primary_5h", status: "allowed", utilization: 0.42 },
+    ]);
+  });
+
   it("leaves account capacity unknown when the sanctioned read fails", async () => {
     const f = fixture({
       rateLimitsRead: async () => {
