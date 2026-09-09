@@ -355,7 +355,7 @@ function costTotals(value: CostAccumulator): LocalUsageHistoryCostTotals {
       ? {}
       : { providerRecordedUsd: value.providerRecordedUsd }),
     ...(value.apiEstimateMeasured === 0 ? {} : { apiEstimateUsd: value.apiEstimateUsd }),
-    pricedRecordCount: safeAdd(value.providerRecordedMeasured, value.apiEstimateMeasured),
+    pricedRecordCount: value.providerRecordedMeasured + value.apiEstimateMeasured,
     unpricedRecordCount: value.unpricedRecordCount,
     providerRecordedRecordCount: value.providerRecordedMeasured,
     apiEstimateRecordCount: value.apiEstimateMeasured,
@@ -406,13 +406,6 @@ function dayKey(timestamp: string, timeZone: string): string {
   } catch {
     return timestamp.slice(0, 10);
   }
-}
-
-function safeAdd(left: number, right: number): number {
-  const next = left + right;
-  return Number.isFinite(next) && next >= 0 && next <= Number.MAX_SAFE_INTEGER
-    ? next
-    : Number.MAX_SAFE_INTEGER;
 }
 
 function failedCoverage(sourceKind: string): LocalUsageHistoryCoverage {
