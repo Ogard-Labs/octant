@@ -231,6 +231,24 @@ means Octant does not contact the update service at all, rather than checking
 quietly; you can still check by hand whenever you want. The same disclosure
 sits next to that switch.
 
+### What's new
+
+After an update you chose to install finishes applying on relaunch, the
+desktop shows what that version changed. **Settings → General → Updates**
+keeps a **What's new** control for the build on disk, so you can re-read
+those notes without waiting for another prompt.
+
+Notes for the running build are a file inside the app. Opening them does not
+contact the update service. If that file is missing, Octant shows an empty
+state rather than fetching a substitute. A short summary for an offered
+update, when present, is already inside the signed feed from a check you
+asked for or allowed — not a second request, and not HTML from an unsigned
+host. Turning automatic checking off stays off for that summary the same way
+it is off for versions.
+
+A remote browser or phone client does not own this surface: it does not
+update the desktop app, and it does not fetch notes.
+
 ### What an update check sends
 
 A check is a plain HTTPS GET for a small JSON file listing the latest

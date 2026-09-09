@@ -14,6 +14,7 @@ const FirstRunOnboarding = lazy(() =>
 );
 import { CommandPalette } from "../palette/CommandPalette";
 import { ProjectCreateDialog } from "../projects/ProjectCreateDialog";
+import { WhatsNewAfterUpdate } from "../settings/WhatsNewAfterUpdate";
 import type { OctantHostBridge } from "./hostBridge";
 import { visuallyHiddenStyle } from "./shellCommandWiring";
 import { ThreadSearchOverlay, type ThreadSearchListingStatus } from "./ThreadSearchOverlay";
@@ -143,6 +144,10 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
           <FirstRunOnboarding {...props.firstRun} />
         </Suspense>
       ) : null}
+      <WhatsNewAfterUpdate
+        firstRunVisible={props.firstRun.controller.visible}
+        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+      />
       <p
         aria-atomic="true"
         aria-live="polite"

@@ -2259,6 +2259,15 @@ textarea.settings-view__text-input {
   padding-left: 18px;
 }
 
+.app-update__offer-notes {
+  margin: 0 0 8px;
+  max-width: 64ch;
+  color: var(--octant-text-secondary);
+  font-size: calc(12 * var(--oct-text-step));
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
 .marketplace-fetch-settings__details {
   padding: 0 0 10px;
 }

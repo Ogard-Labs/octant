@@ -2926,3 +2926,30 @@ form > .work-composer-adapter__attachments {
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
 }
+
+.whats-new__dialog {
+  --octant-dialog-width: 520px;
+  display: grid;
+  gap: 12px;
+}
+
+.whats-new__version {
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: calc(12 * var(--oct-text-step));
+}
+
+.whats-new__body {
+  margin: 0;
+  max-height: min(50vh, 28rem);
+  overflow: auto;
+  font-family: inherit;
+  font-size: calc(13 * var(--oct-text-step));
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.whats-new__empty {
+  margin: 0;
+  color: var(--octant-text-secondary);
+}
