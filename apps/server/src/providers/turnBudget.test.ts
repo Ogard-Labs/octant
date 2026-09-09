@@ -3,6 +3,24 @@ import { describe, expect, it } from "vitest";
 import { countsTowardTurnEventBudget, makeIdleTimeout } from "./turnBudget";
 
 describe("turn budget", () => {
+  it("does not count an app-owned action as provider inactivity", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const idle = yield* makeIdleTimeout(1_000);
+        const watcher = yield* Effect.fork(idle.expired);
+        const action = yield* Effect.fork(idle.during(Effect.sleep(3_000)));
+        yield* TestClock.adjust(2_000);
+        expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+        yield* TestClock.adjust(1_000);
+        yield* Fiber.join(action);
+        yield* TestClock.adjust(999);
+        expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+        yield* TestClock.adjust(1);
+        yield* Fiber.join(watcher);
+      }).pipe(Effect.provide(TestContext.TestContext)),
+    );
+  });
+
   it("excludes streaming deltas and progress ticks from the event budget", () => {
     expect(countsTowardTurnEventBudget({ kind: "text-delta" })).toBe(false);
     expect(countsTowardTurnEventBudget({ kind: "reasoning-delta" })).toBe(false);

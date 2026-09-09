@@ -50,6 +50,7 @@ describe("Codex provider conformance", () => {
         );
       },
       respondApproval: async () => undefined,
+      respondTool: async () => undefined,
       subscribe: (listener) => {
         listeners.add(listener);
         return () => listeners.delete(listener);
@@ -171,9 +172,39 @@ describe("Codex provider conformance", () => {
     recordProviderChatConformanceEvidence("codex", evidence);
     expect(evidence).toMatchObject({ nativeAttachmentHonest: true, released: true });
   });
+
+  it("passes chat conformance for the dynamic app-tool round trip", async () => {
+    const fixture = createCodexConformanceFixture({ appTool: true });
+    const evidence = await runProviderChatConformance({
+      driver: fixture.driver,
+      probeInput: { instanceId },
+      acquireInput: { instanceId, projectRoot },
+      sessionStart: {
+        sessionId,
+        modelId,
+        executionPolicy: "approval-gated",
+        tools: [
+          {
+            name: "octant_browser",
+            description: "Inspect the active browser context.",
+            inputSchema: { type: "object" },
+          },
+        ],
+      },
+      turn: {
+        sessionId,
+        prompt: "Inspect the page.",
+        attachments: [],
+        tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+      },
+      isReleased: fixture.isReleased,
+    });
+
+    expect(evidence).toMatchObject({ appManagedToolRoundTrip: true, released: true });
+  });
 });
 
-function createCodexConformanceFixture() {
+function createCodexConformanceFixture(input: { readonly appTool?: boolean } = {}) {
   const listeners = new Set<(message: CodexServerMessage) => void>();
   const emit = (message: CodexServerMessage) => listeners.forEach((listener) => listener(message));
   let released = false;
@@ -187,10 +218,34 @@ function createCodexConformanceFixture() {
     },
     turnStart: async ({ threadId }) => {
       for (const message of runtimeMessages(threadId)) emit(message);
+      if (input.appTool === true) {
+        emit({
+          kind: "request",
+          id: "provider-tool-request",
+          method: "item/tool/call",
+          params: {
+            threadId,
+            turnId: "turn-1",
+            callId: "call-1",
+            namespace: null,
+            tool: "octant_browser",
+            arguments: { operation: "screenshot" },
+          },
+        });
+      }
       return { turn: { id: "turn-1", status: "inProgress" } };
     },
     turnInterrupt: async () => undefined,
     respondApproval: async () => undefined,
+    respondTool: async () => {
+      if (input.appTool !== true) return;
+      emit(
+        notification("turn/completed", {
+          threadId: "thread-1",
+          turn: { id: "turn-1", status: "completed" },
+        }),
+      );
+    },
     subscribe: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -220,7 +275,10 @@ function createCodexConformanceFixture() {
       idleLeaseMs: 0,
       clock: () => "2026-07-15T00:00:00.000Z",
       correlationId: () => "80000000-0000-4000-8000-000000000213",
-      requestId: () => "request-1",
+      requestId: (() => {
+        let id = 0;
+        return () => `request-${++id}`;
+      })(),
       taskId: () => "task-1",
       toolCallId: (() => {
         let id = 0;

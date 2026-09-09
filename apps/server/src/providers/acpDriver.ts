@@ -7,11 +7,14 @@ import {
   decodeProviderModelId,
   decodeProviderProbeResult,
   type ProviderExecutionPolicy,
+  type ProviderCapabilitySupport,
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
+  type ProviderToolAnswer,
+  type ProviderToolDefinition,
 } from "@octant/contracts";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import {
@@ -30,10 +33,12 @@ import {
 } from "./acpEventMapper";
 import type { AcpConnection, AcpProcessPort, AcpSessionMode } from "./acpProcess";
 import type { AcpProviderProfile } from "./acpProfiles";
+import { createAcpManagedToolsBridge, type AcpManagedToolsBridge } from "./acpManagedTools";
 import {
   AcpFailure,
   type AcpBrowserAuthenticationAttempt,
   type AcpConfigOptionsResult,
+  type AcpMcpHttpServer,
   type AcpNewSessionResult,
   type AcpPromptResult,
   type AcpServerNotification,
@@ -41,6 +46,7 @@ import {
   type AcpSessionConfigOption,
   type AcpSessionModelState,
 } from "./acpProtocol";
+import type { ManagedToolAnswer, ManagedToolCallContext } from "./managedMcpTools";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { type ProviderRuntimeRegistry, trackProviderProcess } from "./providerRuntimeRegistry";
 
@@ -49,9 +55,20 @@ export interface AcpClientPort {
   readonly authenticate: () => Promise<void>;
   readonly startBrowserAuthentication: () => Promise<AcpBrowserAuthenticationAttempt>;
   readonly completeBrowserAuthentication: (attemptId: string) => Promise<void>;
-  readonly newSession: (cwd: string) => Promise<AcpNewSessionResult>;
-  readonly loadSession: (sessionId: string, cwd: string) => Promise<AcpNewSessionResult>;
-  readonly resumeSession: (sessionId: string, cwd: string) => Promise<AcpNewSessionResult>;
+  readonly newSession: (
+    cwd: string,
+    mcpServers?: ReadonlyArray<AcpMcpHttpServer>,
+  ) => Promise<AcpNewSessionResult>;
+  readonly loadSession: (
+    sessionId: string,
+    cwd: string,
+    mcpServers?: ReadonlyArray<AcpMcpHttpServer>,
+  ) => Promise<AcpNewSessionResult>;
+  readonly resumeSession: (
+    sessionId: string,
+    cwd: string,
+    mcpServers?: ReadonlyArray<AcpMcpHttpServer>,
+  ) => Promise<AcpNewSessionResult>;
   readonly closeSession: (sessionId: string) => Promise<void>;
   readonly prompt: (sessionId: string, prompt: string) => Promise<AcpPromptResult>;
   readonly setConfigOption: (
@@ -80,6 +97,7 @@ export interface AcpDriverOptions {
   readonly authentication?: "subscription" | "api-key";
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly clientFactory?: (connection: AcpConnection) => AcpClientPort;
+  readonly managedToolsBridgeFactory?: typeof createAcpManagedToolsBridge;
   readonly clock?: () => string;
   readonly correlationId?: () => string;
   readonly requestId?: () => string;
@@ -89,6 +107,7 @@ interface ResumeIdentity {
   readonly root: string;
   readonly mode: AcpSessionMode;
   readonly modelId: string;
+  readonly tools: ReadonlyArray<ProviderToolDefinition>;
 }
 
 interface PendingApproval {
@@ -117,8 +136,22 @@ interface SessionState {
   readonly removeRequest: () => void;
   readonly approvals: Map<string, PendingApproval>;
   readonly questions: Map<string, PendingQuestion>;
+  readonly toolNames: Set<string>;
+  readonly pendingToolAnswers: Map<string, PendingToolAnswer>;
+  readonly appManagedTools: ProviderCapabilitySupport;
+  managedTools: AcpManagedToolsLease | undefined;
   promptActive: boolean;
   closed: boolean;
+}
+
+interface PendingToolAnswer {
+  readonly controller: AbortController;
+  readonly resolve: (answer: ManagedToolAnswer) => void;
+}
+
+interface AcpManagedToolsLease {
+  readonly bridge: AcpManagedToolsBridge;
+  readonly catalogKey: string;
 }
 
 interface Factories {
@@ -128,7 +161,10 @@ interface Factories {
   readonly makeRequestId: () => string;
 }
 
-function baseCapabilities(profile: AcpProviderProfile) {
+function baseCapabilities(
+  profile: AcpProviderProfile,
+  appManagedTools: ProviderCapabilitySupport = "unsupported",
+) {
   return {
     streaming: "supported",
     resume: "supported",
@@ -143,7 +179,20 @@ function baseCapabilities(profile: AcpProviderProfile) {
     taskProgress: "supported",
     nativeChildAgents: "unavailable",
     ...unsupportedChatCapabilities,
+    appManagedTools,
   } as const;
+}
+
+function negotiatedAppManagedTools(
+  initialized: AcpConnection["initialized"],
+): ProviderCapabilitySupport {
+  // The managed bridge is a loopback HTTP endpoint. The current Linux
+  // Bubblewrap launch has no narrow host-loopback rule; sharing its network
+  // namespace would grant wider egress, so Linux stays fail-closed here.
+  return process.platform === "darwin" &&
+    initialized.agentCapabilities.mcpCapabilities?.http === true
+    ? "supported"
+    : "unsupported";
 }
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
@@ -225,7 +274,11 @@ function normalizeProbe(
     detectedVersion: version,
     ...(credentialStatus === undefined ? {} : { credentialStatus }),
     models,
-    capabilities: { ...baseCapabilities(profile), resume, reasoning },
+    capabilities: {
+      ...baseCapabilities(profile, negotiatedAppManagedTools(initialized)),
+      resume,
+      reasoning,
+    },
     ...(models.length === 0
       ? { message: `${profile.displayName} did not report a selectable model.` }
       : {}),
@@ -509,8 +562,13 @@ function makeConnection(
           .respondPermission(pending.providerRequestId, pending.skipOptionId)
           .catch(() => undefined);
       }
+      cancelPendingTools(state);
       state.approvals.clear();
       state.questions.clear();
+      state.toolNames.clear();
+      const managedTools = state.managedTools;
+      state.managedTools = undefined;
+      await managedTools?.bridge.close().catch(() => undefined);
       if (profile.closesSessions) {
         await state.client.closeSession(state.sourceSessionId).catch(() => undefined);
       }
@@ -530,6 +588,60 @@ function makeConnection(
     const offer = (event: ProviderRuntimeEvent) => {
       Effect.runFork(Queue.offer(queue, event));
     };
+
+    const requestManagedTool = async (
+      state: SessionState | undefined,
+      name: string,
+      inputJson: string,
+      signal: AbortSignal,
+      _context?: ManagedToolCallContext,
+    ): Promise<ManagedToolAnswer> => {
+      if (
+        state === undefined ||
+        !state.toolNames.has(name) ||
+        state.closed ||
+        state.context.terminal ||
+        signal.aborted
+      ) {
+        return {
+          resultJson: signal.aborted
+            ? '{"error":"tool-interrupted"}'
+            : '{"error":"tool-unavailable"}',
+          isError: true,
+        };
+      }
+      const requestId = `acp-tool-${crypto.randomUUID()}`;
+      return new Promise<ManagedToolAnswer>((resolve) => {
+        const controller = new AbortController();
+        const finish = (answer: ManagedToolAnswer) => {
+          signal.removeEventListener("abort", cancel);
+          resolve(answer);
+        };
+        const cancel = () => {
+          if (!state.pendingToolAnswers.delete(requestId)) return;
+          controller.abort();
+          finish({ resultJson: '{"error":"tool-interrupted"}', isError: true });
+        };
+        state.pendingToolAnswers.set(requestId, { controller, resolve: finish });
+        signal.addEventListener("abort", cancel, { once: true });
+        offer(
+          eventFor(state, factories.clock, {
+            kind: "tool-request",
+            requestId,
+            toolName: name,
+            inputJson,
+          }),
+        );
+      });
+    };
+
+    function cancelPendingTools(state: SessionState): void {
+      for (const [requestId, pending] of state.pendingToolAnswers) {
+        state.pendingToolAnswers.delete(requestId);
+        pending.controller.abort();
+        pending.resolve({ resultJson: '{"error":"tool-interrupted"}', isError: true });
+      }
+    }
 
     const stateFor = (
       sessionId: ProviderSessionId,
@@ -595,10 +707,13 @@ function makeConnection(
         readonly sessionId: ProviderSessionId;
         readonly modelId: string;
         readonly executionPolicy: ProviderExecutionPolicy;
+        readonly tools: ReadonlyArray<ProviderToolDefinition>;
       },
       source: AcpNewSessionResult,
       scope: Scope.CloseableScope,
       client: AcpClientPort,
+      managedTools: AcpManagedToolsLease | undefined,
+      appManagedTools: ProviderCapabilitySupport,
     ): Promise<SessionState> => {
       const previous = sessions.get(input.sessionId);
       if (previous !== undefined) await closeState(previous);
@@ -632,6 +747,10 @@ function makeConnection(
         removeRequest,
         approvals: new Map(),
         questions: new Map(),
+        toolNames: new Set(input.tools.map((tool) => tool.name)),
+        pendingToolAnswers: new Map(),
+        appManagedTools,
+        managedTools,
         promptActive: false,
         closed: false,
       };
@@ -640,11 +759,19 @@ function makeConnection(
         options.instanceId,
         options.runtimeRegistry.activeSessionCount(options.instanceId) + 1,
       );
-      resumeIdentities.set(source.sessionId, { root: projectRoot, mode, modelId: input.modelId });
+      resumeIdentities.set(source.sessionId, {
+        root: projectRoot,
+        mode,
+        modelId: input.modelId,
+        tools: input.tools,
+      });
       return state;
     };
 
-    const startProcess = async (executionPolicy: ProviderExecutionPolicy) => {
+    const startProcess = async (
+      executionPolicy: ProviderExecutionPolicy,
+      loopbackPorts: ReadonlyArray<number> = [],
+    ) => {
       const scope = await Effect.runPromise(Scope.make());
       try {
         const apiKey = await Effect.runPromise(resolveApiKey(options));
@@ -659,6 +786,7 @@ function makeConnection(
               mode,
               executionPolicy,
               ...(apiKey === undefined ? {} : { apiKey }),
+              ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
               onProcessStarted: async (process) => {
                 receipt = await options.runtimeRegistry.trackProcess(options.instanceId, process);
                 return receipt;
@@ -669,11 +797,29 @@ function makeConnection(
         if (receipt === undefined) {
           await options.runtimeRegistry.trackProcess(options.instanceId, processConnection);
         }
-        return { scope, client: factories.clientFactory(processConnection) };
+        return {
+          scope,
+          client: factories.clientFactory(processConnection),
+          connection: processConnection,
+        };
       } catch (error) {
         await Effect.runPromise(Scope.close(scope, Exit.void));
         throw error;
       }
+    };
+
+    const prepareManagedTools = async (
+      definitions: ReadonlyArray<ProviderToolDefinition>,
+      stateRef: { state?: SessionState },
+    ): Promise<AcpManagedToolsLease | undefined> => {
+      if (definitions.length === 0) return undefined;
+      const catalogKey = JSON.stringify(definitions);
+      const bridge = await (options.managedToolsBridgeFactory ?? createAcpManagedToolsBridge)(
+        definitions,
+        (toolName, inputJson, signal, context) =>
+          requestManagedTool(stateRef.state, toolName, inputJson, signal, context),
+      );
+      return { bridge, catalogKey };
     };
 
     const createState = (input: {
@@ -681,16 +827,47 @@ function makeConnection(
       readonly modelId: string;
       readonly executionPolicy: ProviderExecutionPolicy;
       readonly sourceSessionId?: string;
+      readonly tools: ReadonlyArray<ProviderToolDefinition>;
     }) =>
       request(async () => {
-        const { scope, client } = await startProcess(input.executionPolicy);
+        let scope: Scope.CloseableScope | undefined;
+        let managedTools: AcpManagedToolsLease | undefined;
         try {
+          if (input.tools.length > 0 && process.platform !== "darwin") {
+            throw failure(
+              "unsupported",
+              "App-managed tools are unsupported by this ACP runtime on this platform.",
+            );
+          }
+          const stateRef: { state?: SessionState } = {};
+          managedTools = await prepareManagedTools(input.tools, stateRef);
+          const started = await startProcess(
+            input.executionPolicy,
+            managedTools?.bridge.port === undefined ? [] : [managedTools.bridge.port],
+          );
+          scope = started.scope;
+          const { client, connection } = started;
+          const appManagedTools = negotiatedAppManagedTools(connection.initialized);
+          if (input.tools.length > 0 && appManagedTools !== "supported") {
+            throw failure(
+              appManagedTools,
+              "App-managed tools are unsupported by this ACP runtime.",
+            );
+          }
+          const mcpServers = managedTools === undefined ? [] : [managedTools.bridge.server];
           const source =
             input.sourceSessionId === undefined
-              ? await client.newSession(runtimeRoot)
+              ? mcpServers.length === 0
+                ? await client.newSession(runtimeRoot)
+                : await client.newSession(runtimeRoot, mcpServers)
               : profile.resumeMethod === "session/resume"
-                ? await client.resumeSession(input.sourceSessionId, runtimeRoot)
-                : await client.loadSession(input.sourceSessionId, runtimeRoot);
+                ? mcpServers.length === 0
+                  ? await client.resumeSession(input.sourceSessionId, runtimeRoot)
+                  : await client.resumeSession(input.sourceSessionId, runtimeRoot, mcpServers)
+                : mcpServers.length === 0
+                  ? await client.loadSession(input.sourceSessionId, runtimeRoot)
+                  : await client.loadSession(input.sourceSessionId, runtimeRoot, mcpServers);
+          if (managedTools !== undefined) await managedTools.bridge.attested;
           // A profile that supplies its own request shape is describing an agent
           // whose reply the standard result schema does not fit, so that reply is
           // taken as-is. Everything else is standard ACP and stays validated: a
@@ -709,17 +886,25 @@ function makeConnection(
           } else {
             await client.call(setModeCall.method, setModeCall.params);
           }
-          return await register(input, source, scope, client);
+          const state = await register(input, source, scope, client, managedTools, appManagedTools);
+          stateRef.state = state;
+          return state;
         } catch (error) {
-          await Effect.runPromise(Scope.close(scope, Exit.void));
+          // The bridge is opened before session/new so the agent can connect to
+          // it during setup. Close it if setup or model selection fails.
+          await managedTools?.bridge.close().catch(() => undefined);
+          if (scope !== undefined) await Effect.runPromise(Scope.close(scope, Exit.void));
           throw error;
         }
       });
 
     return {
+      toolRequestSignal: ({ sessionId, requestId }) =>
+        sessions.get(sessionId)?.pendingToolAnswers.get(requestId)?.controller.signal ??
+        AbortSignal.abort(),
       subscribe: Effect.succeed(Stream.fromQueue(queue)),
       start: (input) =>
-        createState(input).pipe(
+        createState({ ...input, tools: input.tools ?? [] }).pipe(
           Effect.map((state) => ({
             sessionId: input.sessionId,
             resumeCursor: { driverKind: profile.kind, value: state.sourceSessionId },
@@ -740,6 +925,7 @@ function makeConnection(
           modelId: identity.modelId,
           executionPolicy: input.executionPolicy,
           sourceSessionId: input.resumeCursor.value,
+          tools: identity.tools,
         }).pipe(
           Effect.map(() => ({ sessionId: input.sessionId, resumeCursor: input.resumeCursor })),
           Effect.mapError(() => failure("stale-resume", `${name} session could not be resumed.`)),
@@ -748,7 +934,10 @@ function makeConnection(
       send: (input) =>
         stateFor(input.sessionId).pipe(
           Effect.flatMap((state) =>
-            rejectUnsupportedChatTurn(input, capabilities).pipe(
+            rejectUnsupportedChatTurn(input, {
+              ...capabilities,
+              appManagedTools: state.appManagedTools,
+            }).pipe(
               Effect.flatMap(() => {
                 const prompt = renderProviderTurnPrompt(input);
                 if (profile.reviewedCommands !== undefined && prompt.trimStart().startsWith("/")) {
@@ -764,6 +953,18 @@ function makeConnection(
                 }
                 if (state.promptActive) {
                   return Effect.fail(failure("protocol", `${name} already has an active turn.`));
+                }
+                const catalogKey = JSON.stringify(input.tools);
+                if (
+                  (state.managedTools === undefined) !== (input.tools.length === 0) ||
+                  (state.managedTools !== undefined && state.managedTools.catalogKey !== catalogKey)
+                ) {
+                  return Effect.fail(
+                    failure(
+                      "invalid-configuration",
+                      `${name} cannot change app-managed tools while its session is active.`,
+                    ),
+                  );
                 }
                 state.promptActive = true;
                 void state.client
@@ -880,7 +1081,22 @@ function makeConnection(
             );
           }),
         ),
-      answerTool: () => unsupportedAnswerTool(capabilities.appManagedTools),
+      answerTool: (input: ProviderToolAnswer) =>
+        stateFor(input.sessionId).pipe(
+          Effect.flatMap((state) => {
+            if (state.appManagedTools !== "supported") {
+              return unsupportedAnswerTool(state.appManagedTools);
+            }
+            const pending = state.pendingToolAnswers.get(input.requestId);
+            if (pending === undefined) {
+              return Effect.fail(failure("protocol", `${name} tool request is not pending.`));
+            }
+            state.pendingToolAnswers.delete(input.requestId);
+            pending.controller.abort();
+            pending.resolve({ resultJson: input.resultJson, isError: input.isError });
+            return Effect.void;
+          }),
+        ),
     };
   });
 }

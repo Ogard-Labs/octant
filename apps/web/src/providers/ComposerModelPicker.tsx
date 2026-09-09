@@ -18,8 +18,9 @@ import { ProviderGlyph } from "./ProviderGlyph";
 
 export interface ComposerModelPickerProps {
   readonly groups: ReadonlyArray<PickerGroup>;
-  readonly selectedProviderInstanceId?: ProviderInstanceId;
-  readonly selectedModelId?: ProviderModelId;
+  readonly selectedProviderInstanceId?: ProviderInstanceId | undefined;
+  readonly selectedModelId?: ProviderModelId | undefined;
+  readonly unselectedLabel?: string;
   readonly onSelect: (selection: ModelPickerSelection) => void;
   readonly onOpenSettings?: () => void;
   /** Opens Settings → Octant Harness, shown from the Octant entry. */
@@ -81,10 +82,19 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
 
   useEffect(() => {
     if (!open) return;
-    setActiveRailId(railIdFor(selectedGroup) ?? railIdFor(props.groups[0]));
-    setCatalogFilter(undefined);
-    setFavorites(readModelFavorites());
-  }, [open, props.groups, selectedGroup?.instance.id]);
+    // Provider discovery is live and can replace the groups array while the
+    // menu is open. Keep the rail the user chose as long as that entry still
+    // exists; resetting to the selected model on every refresh made the pane
+    // appear to bounce between providers under the pointer. Reconcile only
+    // when the active entry was actually removed.
+    setActiveRailId((current) => {
+      const stillAvailable =
+        current === FAVORITES_RAIL_ID ||
+        (current === OCTANT_RAIL_ID && harnessGroups.length > 0) ||
+        (current !== undefined && props.groups.some((group) => group.instance.id === current));
+      return stillAvailable ? current : (railIdFor(selectedGroup) ?? railIdFor(props.groups[0]));
+    });
+  }, [open, props.groups, selectedGroup, harnessGroups.length]);
 
   if (props.groups.length === 0) {
     return (
@@ -119,6 +129,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     props.groups[0]!;
   const selectedLabel =
     selectedModelLabel(props.groups, props.selectedProviderInstanceId, props.selectedModelId) ??
+    props.unselectedLabel ??
     activeGroup.sections[0]?.models[0]?.model.displayName ??
     activeGroup.instance.displayName;
   const favoritesActive = !searching && activeRailId === FAVORITES_RAIL_ID;
@@ -328,9 +339,16 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
   return (
     <div className="composer-model-picker">
       <OctantPopover
+        align="end"
         className="composer-model-picker__menu"
+        collisionAvoidance={{ side: "flip", align: "shift", fallbackAxisSide: "none" }}
         onOpenChange={(next) => {
-          if (next) setQuery("");
+          if (next) {
+            setQuery("");
+            setCatalogFilter(undefined);
+            setFavorites(readModelFavorites());
+            setActiveRailId(railIdFor(selectedGroup) ?? railIdFor(props.groups[0]));
+          }
           setOpen(next);
         }}
         open={open}
@@ -531,7 +549,7 @@ function selectedModelLabel(
     const match = section.models.find((picker) => picker.model.id === modelId);
     if (match !== undefined) return match.model.displayName;
   }
-  return group.unavailableCurrent?.model.displayName;
+  return group.hiddenCurrent?.model.displayName ?? group.unavailableCurrent?.model.displayName;
 }
 
 function readinessStatus(readiness: PickerGroup["readiness"]): string | undefined {

@@ -1,5 +1,6 @@
 import {
   Bot,
+  CircleDashed,
   FileStack,
   FileText,
   Files,
@@ -33,6 +34,6 @@ const ICONS: Readonly<Record<RightUtilityDockSurfaceId, LucideIcon>> = {
 };
 
 export function DockToolIcon(props: { readonly surface: RightUtilityDockSurfaceId }) {
-  const Icon = ICONS[props.surface];
+  const Icon = ICONS[props.surface] ?? CircleDashed;
   return <Icon aria-hidden="true" size={14} strokeWidth={1.5} />;
 }

@@ -39,6 +39,20 @@ function disclosure(name: string): HTMLDetailsElement {
 }
 
 describe("CodeTranscriptRow", () => {
+  it("stops presenting unfinished tools as running after the turn settles", () => {
+    render(
+      <CodeTranscriptRow
+        activity={{
+          rows: [{ kind: "tool", id: "open", toolName: "Browser", state: "running" }],
+          reasoning: "",
+        }}
+        running={false}
+        settled
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Browser, running" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Browser, unfinished" })).toBeInTheDocument();
+  });
   it("renders each tool as its own collapsed row naming the tool and outcome", () => {
     render(<CodeTranscriptRow activity={mixed} running={false} />);
 

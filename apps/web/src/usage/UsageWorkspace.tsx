@@ -1,3 +1,4 @@
+import { UsageName } from "./UsageName";
 import { useMemo, useState } from "react";
 import type {
   UsageAttributionDimension,
@@ -367,9 +368,15 @@ function SummarySection({ dashboard }: { readonly dashboard: UsageDashboardRespo
         </li>
         <li>
           Highest-usage model:{" "}
-          {summary.peakModel === undefined
-            ? "Unavailable"
-            : `${summary.peakModel.modelId} on ${summary.peakModel.providerInstanceId} · ${summary.peakModel.totalTokens.toLocaleString()} tokens`}
+          {summary.peakModel === undefined ? (
+            "Unavailable"
+          ) : (
+            <>
+              {summary.peakModel.modelId} on{" "}
+              <UsageName kind="provider" id={summary.peakModel.providerInstanceId} /> ·{" "}
+              {summary.peakModel.totalTokens.toLocaleString()} tokens
+            </>
+          )}
         </li>
         <li>Monetary cost: Unavailable — no reviewed or user-supplied pricing is configured.</li>
       </ul>
@@ -462,7 +469,9 @@ function CacheSection({ stats }: { readonly stats: UsageCacheStats }) {
               <tbody>
                 {stats.providerTokenCaches.map((provider) => (
                   <tr key={provider.providerInstanceId}>
-                    <th scope="row">{provider.providerInstanceId}</th>
+                    <th scope="row">
+                      <UsageName kind="provider" id={provider.providerInstanceId} />
+                    </th>
                     <td>{provider.requestCount.toLocaleString()}</td>
                     <td>{provider.cacheReadInputTokens.toLocaleString()}</td>
                     <td>{provider.cacheWriteInputTokens.toLocaleString()}</td>
@@ -589,7 +598,14 @@ function BreakdownSection(props: {
               <tbody>
                 {group.rows.map((row) => (
                   <tr data-availability={row.availability} key={`${group.dimension}-${row.key}`}>
-                    <th scope="row">{row.label}</th>
+                    <th scope="row">
+                      {row.availability === "recorded" &&
+                      ["provider", "project", "thread"].includes(group.dimension) ? (
+                        <UsageName kind={group.dimension} id={row.key} />
+                      ) : (
+                        row.label
+                      )}
+                    </th>
                     <td>{row.requestCount}</td>
                     <td>{row.inputTokens.toLocaleString()}</td>
                     <td>{row.outputTokens.toLocaleString()}</td>
@@ -651,20 +667,28 @@ function DetailSection(props: {
               <tr key={row.reconciliationId}>
                 <th scope="row">{row.observedAt}</th>
                 <td>{row.hostId}</td>
-                <td>{row.providerInstanceId}</td>
+                <td>
+                  <UsageName kind="provider" id={row.providerInstanceId} />
+                </td>
                 <td>{row.modelId}</td>
                 <td>{row.mode ?? "Unavailable"}</td>
-                <td>{row.projectId ?? "Unavailable"}</td>
+                <td>
+                  {row.projectId === undefined ? (
+                    "Unavailable"
+                  ) : (
+                    <UsageName kind="project" id={row.projectId} />
+                  )}
+                </td>
                 <td>
                   {props.onOpenSubject === undefined ? (
-                    `${row.subjectType}/${row.subjectId}`
+                    <UsageName kind={row.subjectType} id={row.subjectId} />
                   ) : (
                     <OctantButton
                       onClick={() => props.onOpenSubject?.(row.subjectType, row.subjectId)}
                       type="button"
                       variant="ghost"
                     >
-                      {row.subjectType}/{row.subjectId}
+                      <UsageName kind={row.subjectType} id={row.subjectId} />
                     </OctantButton>
                   )}
                 </td>

@@ -21,11 +21,9 @@
    can never drift apart the way two duplicated palette blocks do. The
    light value comes first.
 
-   Light is NOT an inversion of dark. Brass reads 8.3:1 on ink but only
-   2.0:1 on cream, and every semantic hue fails on white, so text-bearing
-   colours have a separate light value. Fills keep the brand brass in both
-   themes; only text darkens. That is what --oct-accent (fill) versus
-   --oct-accent-fg (text) is for.
+   Text and semantic colours carry separate light and dark values for
+   contrast. The default action accent is monochrome; the runtime bridge
+   applies the selected preset and any explicit colour overrides.
 
    Theme resolution: follows the OS by default, and [data-theme] on <html>
    overrides it in either direction. --oct-* colours track color-scheme,
@@ -34,27 +32,24 @@
   color-scheme: light dark;
 
   /* ── ground and type ── */
-  --oct-bg: light-dark(#f2f1ed, #14130f);
-  --oct-surface: light-dark(#e6e5e0, #1c1b16);
-  --oct-surface-warm: light-dark(#ebeae5, #232219);
-  --oct-fg: light-dark(#26251e, #f2f1ed);
-  --oct-fg-2: light-dark(rgba(38, 37, 30, 0.9), rgba(242, 241, 237, 0.9));
-  --oct-muted: light-dark(rgba(38, 37, 30, 0.68), rgba(242, 241, 237, 0.58));
-  --oct-meta: light-dark(rgba(38, 37, 30, 0.62), rgba(242, 241, 237, 0.45));
-  --oct-border: light-dark(rgba(38, 37, 30, 0.14), rgba(242, 241, 237, 0.13));
-  --oct-border-soft: light-dark(rgba(38, 37, 30, 0.07), rgba(242, 241, 237, 0.07));
+  --oct-bg: light-dark(#ffffff, #1a1a1a);
+  --oct-surface: light-dark(#fdfdfc, #232323);
+  --oct-surface-warm: light-dark(#f0f0ef, #2b2b2b);
+  --oct-fg: light-dark(#1b1b1b, #f0f0f0);
+  --oct-fg-2: color-mix(in oklab, var(--oct-fg) 90%, transparent);
+  --oct-muted: light-dark(#4f4f4f, #a9a9a9);
+  --oct-meta: light-dark(#6b6b6b, #8a8a8a);
+  --oct-border: light-dark(#e0e0de, #303030);
+  --oct-border-soft: color-mix(in oklab, var(--oct-fg) 7%, transparent);
   /* the chosen row: an opaque ground a step past hover, because active
      rows in palettes and pickers scroll under sticky chrome and a
      translucent tint would shift as content passes beneath it */
-  --oct-selection: light-dark(#d9d8d4, #353430);
+  --oct-selection: light-dark(#ebebea, #2c2c2c);
 
-  /* ── brand ──
-     accent is the fill and stays brass in both themes so the brand does
-     not change colour. accent-fg is the same brand as *text*, darkened
-     for light where brass on cream is unreadable. */
-  --oct-accent: #d9a441;
-  --oct-accent-fg: light-dark(#8a6218, #d9a441);
-  --oct-accent-on: #14130f;
+  /* Monochrome actions. The runtime theme owns optional tinted accents. */
+  --oct-accent: light-dark(#1b1b1b, #f0f0f0);
+  --oct-accent-fg: light-dark(#1b1b1b, #f0f0f0);
+  --oct-accent-on: light-dark(#ffffff, #171717);
   --oct-accent-hover: light-dark(
     color-mix(in oklab, var(--oct-accent), black 10%),
     color-mix(in oklab, var(--oct-accent), white 12%)
@@ -100,18 +95,18 @@
 
   /* the hero canvas draws lines in this colour; JS resolves it rather
      than reading raw channel triplets */
-  --oct-grid-line: light-dark(#26251e, #f2f1ed);
+  --oct-grid-line: light-dark(#1b1b1b, #f0f0f0);
 
   /* ── elevation and focus ── */
   --oct-elev-flat: none;
   --oct-elev-ring: 0 0 0 1px var(--oct-border);
   --oct-elev-subtle:
-    0 1px 4px light-dark(rgba(38, 37, 30, 0.1), rgba(0, 0, 0, 0.28)), 0 0 0 1px var(--oct-border);
+    0 1px 4px light-dark(rgba(27, 27, 27, 0.1), rgba(0, 0, 0, 0.28)), 0 0 0 1px var(--oct-border);
   --oct-elev-raised:
-    0 28px 70px light-dark(rgba(38, 37, 30, 0.13), rgba(0, 0, 0, 0.5)),
-    0 14px 32px light-dark(rgba(38, 37, 30, 0.1), rgba(0, 0, 0, 0.36)), 0 0 0 1px var(--oct-border);
-  /* Keyboard focus is a neutral hairline ring, not a coloured highlight: the
-     accent ring read as a selection mark on every focused control. */
+    0 28px 70px light-dark(rgba(27, 27, 27, 0.13), rgba(0, 0, 0, 0.5)),
+    0 14px 32px light-dark(rgba(27, 27, 27, 0.1), rgba(0, 0, 0, 0.36)), 0 0 0 1px var(--oct-border);
+  /* Retained for theme and bridge compatibility; controls use selection and
+     expanded fills for state instead of painting a focus halo. */
   --oct-focus-ring: 0 0 0 1px var(--oct-bg), 0 0 0 3px var(--oct-muted);
 
   /* ── type ── */
@@ -176,6 +171,9 @@
   --oct-space-1: 4px;
   --oct-space-2: 8px;
   --oct-space-3: 12px;
+  /* The typed text's left edge; every row of the composer frame starts there.
+     Measured before: 16 text, 12 chips and tray, 14 + 8 row controls. */
+  --oct-composer-gutter: 16px;
   --oct-space-4: 16px;
   --oct-space-5: 20px;
   --oct-space-6: 24px;
@@ -232,16 +230,15 @@
 
   /* the wash behind a modal. Dark needs more of it because the ground is
      already dark and a weak scrim leaves the page competing with the dialog. */
-  --oct-scrim: light-dark(rgba(38, 37, 30, 0.38), rgba(0, 0, 0, 0.64));
+  --oct-scrim: light-dark(rgba(27, 27, 27, 0.38), rgba(0, 0, 0, 0.64));
   /* the travelling highlight in a skeleton */
-  --oct-sheen: light-dark(rgba(38, 37, 30, 0.07), rgba(242, 241, 237, 0.08));
+  --oct-sheen: light-dark(rgba(27, 27, 27, 0.07), rgba(240, 240, 240, 0.08));
   /* one indent step in a file tree */
   --oct-tree-indent: 14px;
 
   /* ── chart series ──────────────────────────────────────────────────
-     Six hues, each picked twice so it holds against both grounds. Series
-     one is the brass, so a single-series chart reads as part of the
-     product rather than as a foreign widget.
+     Six categorical hues, each picked twice so it holds against both
+     grounds. Data-series colours do not define the interface accent.
 
      Every one clears 3:1 against its own background, which is the bar
      for a graphical object under WCAG 1.4.11. That is enough for a mark
@@ -268,8 +265,8 @@
   /* chart chrome. The grid is deliberately fainter than --oct-border-soft:
      it repeats a dozen times inside one small frame, and at border weight
      it reads as a table rather than as a backdrop. */
-  --oct-chart-grid: light-dark(rgba(38, 37, 30, 0.1), rgba(242, 241, 237, 0.09));
-  --oct-chart-axis: light-dark(rgba(38, 37, 30, 0.22), rgba(242, 241, 237, 0.2));
+  --oct-chart-grid: light-dark(rgba(27, 27, 27, 0.1), rgba(240, 240, 240, 0.09));
+  --oct-chart-axis: light-dark(rgba(27, 27, 27, 0.22), rgba(240, 240, 240, 0.2));
   --oct-chart-h: 180px;
 
   /* canvas document. The measure is narrower than the prose measure —
@@ -331,21 +328,21 @@
      fill opacity move together — a thicker glass is both more opaque and
      more diffuse, which is what keeps text on it readable as the panel
      carries more weight. */
-  --oct-glass-thin: light-dark(rgba(255, 255, 255, 0.28), rgba(38, 37, 30, 0.28));
-  --oct-glass-regular: light-dark(rgba(255, 255, 255, 0.42), rgba(38, 37, 30, 0.4));
-  --oct-glass-thick: light-dark(rgba(255, 255, 255, 0.58), rgba(45, 43, 36, 0.55));
-  --oct-glass-chrome: light-dark(rgba(255, 255, 255, 0.5), rgba(45, 43, 36, 0.48));
+  --oct-glass-thin: light-dark(rgba(255, 255, 255, 0.28), rgba(27, 27, 27, 0.28));
+  --oct-glass-regular: light-dark(rgba(255, 255, 255, 0.42), rgba(27, 27, 27, 0.4));
+  --oct-glass-thick: light-dark(rgba(255, 255, 255, 0.58), rgba(45, 45, 45, 0.55));
+  --oct-glass-chrome: light-dark(rgba(255, 255, 255, 0.5), rgba(45, 45, 45, 0.48));
   --oct-glass-blur-thin: 32px;
   --oct-glass-blur-regular: 48px;
   --oct-glass-blur-thick: 62px;
   --oct-glass-blur-chrome: 40px;
-  --oct-glass-stroke: light-dark(rgba(38, 37, 30, 0.1), rgba(242, 241, 237, 0.14));
-  --oct-glass-stroke-strong: light-dark(rgba(38, 37, 30, 0.16), rgba(242, 241, 237, 0.22));
+  --oct-glass-stroke: light-dark(rgba(27, 27, 27, 0.1), rgba(240, 240, 240, 0.14));
+  --oct-glass-stroke-strong: light-dark(rgba(27, 27, 27, 0.16), rgba(240, 240, 240, 0.22));
   --oct-glass-highlight: light-dark(rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.1));
   /* Laid over the atmosphere so the backdrop has a known floor. 66% is
      the measured minimum that keeps every ink-weight text role legible
      over any image, on glass or bare; see .phone-atmos::after. */
-  --oct-glass-floor: light-dark(rgba(242, 241, 237, 0.66), rgba(20, 19, 15, 0.66));
+  --oct-glass-floor: light-dark(rgba(240, 240, 240, 0.66), rgba(20, 19, 15, 0.66));
 
   /* Phone radii are far larger than desktop's 8/10/12. A small radius on
      a 390px-wide panel reads as a hard corner; the phone's whole chrome
@@ -365,7 +362,7 @@
   --oct-stage-reading: light-dark(#b8e8d4, #1f4a3a);
   --oct-stage-editing: light-dark(#bfd9ff, #243b5c);
   --oct-stage-grepping: light-dark(#d9cff5, #3a2f55);
-  --oct-stage-done: light-dark(#f2dfa0, #4a4020);
+  --oct-stage-done: var(--oct-fg-soft);
 
   /* The device viewport this system draws into. iPhone logical points. */
   --oct-phone-w: 390px;
@@ -427,17 +424,12 @@ h3,
 h4 {
   text-wrap: balance;
 }
-/* One focus treatment for the whole app: a hairline gap then a muted ring, so
-   a focused control reads as an app control rather than a page element with a
-   soft web halo (0090).
-
-   It deliberately sets no radius. A box-shadow already follows the element's
-   own corner, so naming one here only reshaped a focused control to a corner
-   it does not otherwise have — which is the defect that made this rule look
-   like it needed replacing. */
+/* Focus remains keyboard-addressable without painting a halo around controls.
+   Selected and expanded states supply the visible cue where a control has a
+   state of its own. */
 :focus-visible {
   outline: none;
-  box-shadow: var(--oct-focus-ring);
+  box-shadow: none;
 }
 
 /* ─── layout primitives ─────────────────────────────────────────────── */
@@ -923,7 +915,6 @@ h4 {
 .textarea:focus-visible,
 .select:focus-visible {
   border-color: var(--oct-accent-fg);
-  box-shadow: var(--oct-focus-ring);
 }
 .input[aria-invalid="true"] {
   border-color: var(--oct-danger-fg);
@@ -1070,12 +1061,8 @@ input.switch:checked::after {
   box-shadow: none;
   transition: background var(--oct-motion-base) var(--oct-ease-standard);
 }
-/* The track's `box-shadow: none` drops the adapter's own drop shadow, but it
-   also outranks the global `:focus-visible` ring, which is a box-shadow over
-   `outline: none`. Keyboard focus has to put that ring back explicitly or the
-   switch takes focus with nothing to show for it. */
-.octant-switch[data-slot="switch"]:focus-visible {
-  box-shadow: var(--oct-focus-ring);
+.octant-switch[data-slot="switch"]:focus-visible:not([data-checked]) {
+  background: var(--octant-control-hover);
 }
 .octant-switch[data-slot="switch"][data-checked] {
   background: var(--oct-fg);
@@ -1957,22 +1944,6 @@ input.switch:checked::after {
   z-index: var(--oct-z-toast);
 }
 
-/* One focus treatment for every owned button.
-   The recipe drew a 3px ring, which is a filled glow rather than an edge: on a
-   tab it read as a highlighter circle drawn around the label, and inside the
-   composer's own frame it read as a second field. Keyboard focus is one
-   outline, at one width, drawn outside the control — the same mark the rest of
-   the system uses. */
-[data-slot="button"]:focus-visible {
-  outline: 2px solid var(--oct-accent-fg);
-  outline-offset: 1px;
-  /* One mark, not two. The shared rule above paints a halo on anything
-     focusable, so without this a button carried both an outline and a ring —
-     only the icon buttons escaped it, because the shell zeroes their shadow
-     for other reasons. */
-  box-shadow: none;
-}
-
 .octant-tooltip {
   max-width: min(280px, calc(100vw - 24px));
   padding: 7px 10px;
@@ -2227,9 +2198,6 @@ input.switch:checked::after {
   border-radius: var(--oct-radius-pill);
   background: var(--oct-accent);
   cursor: pointer;
-}
-.range:focus-visible {
-  outline: 2px solid var(--oct-accent-fg);
 }
 
 /* ─── accordion ───────────────────────────────────────────────────────
@@ -2547,6 +2515,20 @@ input.switch:checked::after {
   margin-inline-start: auto;
 }
 
+/* Provider and extension requests are waiting state, not a decorative brass
+   accent. Keep the actionable row in the same neutral surface language as the
+   composer; semantic warning colour remains available to real warnings. */
+.approval-row--request {
+  padding-left: 12px;
+  background: var(--octant-card);
+}
+.approval-row--request::before {
+  display: none;
+}
+.approval-row--request > svg {
+  color: var(--oct-muted);
+}
+
 @media (max-width: 680px) {
   .turn-user .bubble {
     max-width: 94%;
@@ -2774,43 +2756,6 @@ input.switch:checked::after {
   color: var(--oct-fg-2);
 }
 
-/* ─── composer context strip ──────────────────────────────────────────
-   What the next message will act on — repo, branch, pending diff — sat
-   above the input rather than described inside it. */
-.composer-context {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-3);
-  padding: var(--oct-space-2) var(--oct-space-2) var(--oct-space-2) var(--oct-space-3);
-  border: 1px solid var(--oct-border);
-  border-bottom: 0;
-  border-radius: var(--oct-radius-lg) var(--oct-radius-lg) 0 0;
-  background: var(--oct-surface-warm);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  color: var(--oct-muted);
-}
-.composer-context + .composer {
-  border-radius: 0 0 var(--oct-radius-lg) var(--oct-radius-lg);
-}
-.composer-context .composer-gap {
-  flex: 1;
-}
-/* a standing mode that changes what happens when you send */
-.mode-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--oct-space-1);
-  min-height: 22px;
-  padding-inline: var(--oct-space-2);
-  border-radius: var(--oct-radius-sm);
-  background: var(--oct-warn-soft);
-  color: var(--oct-warn-fg);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-}
-/* Send/stop is an OctantButton icon; the composer row sizes it to a circle. */
-
 /* ══════════════════════════════════════════════════════════════════════
    Thread board
 
@@ -2842,7 +2787,7 @@ input.switch:checked::after {
   background: currentColor;
 }
 .st-waiting {
-  color: var(--oct-warn-fg);
+  color: var(--oct-muted);
 }
 .st-done {
   color: var(--oct-success-fg);
@@ -2944,10 +2889,6 @@ input.switch:checked::after {
 }
 .board-card:hover {
   border-color: var(--octant-border-strong);
-}
-.board-card:focus-visible {
-  outline: 2px solid var(--oct-focus);
-  outline-offset: 1px;
 }
 .board-card-top {
   display: flex;
@@ -3078,10 +3019,6 @@ input.switch:checked::after {
 }
 .issuerow:hover {
   background: var(--oct-fg-soft);
-}
-.issuerow:focus-visible {
-  outline: 2px solid var(--oct-focus);
-  outline-offset: -1px;
 }
 .issuerow .issuerow-main {
   min-width: 0;
@@ -3607,7 +3544,9 @@ input.switch:checked::after {
   inset-block: 0;
   inset-inline: -12px;
 }
-.split-handle:hover,
+.split-handle:hover {
+  background: var(--oct-accent-fg);
+}
 .split-handle:focus-visible {
   background: var(--oct-accent-fg);
 }
@@ -3741,7 +3680,8 @@ input.switch:checked::after {
    strip draws them: a soft ink wash under the pointer, the selection fill
    with a hairline edge on the row the workspace is showing. Both used to
    share the selection fill, so the row under the pointer looked selected. */
-.sidebar-item:hover {
+.sidebar-item:hover,
+.sidebar-item:focus-visible {
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
 }
@@ -4196,9 +4136,7 @@ input.switch:checked::after {
    floating them over the text. */
 /* The composer is a raised object, not a field ruled onto the page: it sits a
    step above the surface behind it and carries its hairline as an inset ring
-   so the ring never joins layout or escapes the rounded corners. Focus
-   brightens that ring and deepens the lift instead of painting a hard border,
-   which previously flashed a full-strength line around the whole box. */
+   so the ring never joins layout or escapes the rounded corners. */
 .composer {
   border: 0;
   border-radius: var(--oct-radius-lg);
@@ -4211,25 +4149,21 @@ input.switch:checked::after {
 .composer:focus-within {
   box-shadow: var(--octant-shadow-lg);
 }
-/* Focus lifts the composer's shadow and shows the caret; it draws no
-   outline. A text field takes :focus-visible on click as well as on Tab,
-   so any edge rule framed the prompt on every click and read as a
-   highlighted field rather than the raised object it is. */
-.composer:focus-within:has(.composer-input:focus-visible) {
-  outline: none;
-}
 .composer-chips {
   display: flex;
   flex-wrap: wrap;
   gap: var(--oct-space-2);
-  padding: var(--oct-space-3) var(--oct-space-3) 0;
+  padding: var(--oct-space-3) var(--oct-composer-gutter) 0;
+}
+.composer-attachment-input[hidden] {
+  display: none;
 }
 .composer-input {
   display: block;
   width: 100%;
   min-height: 48px;
   max-height: 180px;
-  padding: 18px 16px 12px;
+  padding: 18px var(--oct-composer-gutter) 12px;
   border: 0;
   border-radius: 0;
   background: none;
@@ -4244,13 +4178,6 @@ input.switch:checked::after {
 .composer-input:focus {
   outline: none;
 }
-/* The frame's :focus-within accent border is the composer's focus
-   affordance; editable elements match :focus-visible on every focus, so
-   without this the global ring draws a second box inside the frame (same
-   treatment as .zen-notes textarea). */
-.composer-input:focus-visible {
-  box-shadow: none;
-}
 .composer-input::placeholder {
   color: var(--oct-meta);
 }
@@ -4262,7 +4189,9 @@ input.switch:checked::after {
   align-items: center;
   min-height: 36px;
   gap: 6px;
-  padding: 0 12px 12px 14px;
+  /* A text trigger carries 8px of its own inset, so it lands on the gutter;
+     the send circle's right edge lands on it too. */
+  padding: 0 var(--oct-composer-gutter) 12px calc(var(--oct-composer-gutter) - 8px);
   border-top: 0;
 }
 .composer-row .composer-gap {
@@ -4286,15 +4215,15 @@ input.switch:checked::after {
 .composer-row button,
 .composer-row [role="button"],
 .composer-row [role="combobox"] {
-  min-height: 30px;
-  height: 30px;
+  min-height: 28px;
+  height: 28px;
   border-radius: var(--oct-radius-sm);
 }
 /* The composer is one raised object, so nothing riding its row draws a second
    box inside it. Reset control by control, the rule kept coming undone: the
    model picker was named and cleared while every control added after it — the
    access menu, the pool control, whatever arrives next — still carried its
-   recipe's own border and 3px focus ring, and each of those read as an
+   recipe's own border and halo, and each of those read as an
    outlined field nested in the prompt. State it once for the row instead. */
 .composer-row button,
 .composer-row [role="button"],
@@ -4303,18 +4232,10 @@ input.switch:checked::after {
   border-color: transparent;
   box-shadow: none;
 }
-/* Buttons take the system's focus outline wherever they are; these are the
-   row's controls that are not the button recipe and would otherwise be left
-   with no focus mark at all once the ring above is suppressed. */
-.composer-row [role="combobox"]:focus-visible,
-.composer-row input:focus-visible {
-  outline: 2px solid var(--oct-accent-fg);
-  outline-offset: 1px;
-}
 /* The send control is the row's one filled affordance, so it stays a circle. */
 .composer-row button[data-size="icon"] {
-  width: 30px;
-  min-width: 30px;
+  width: 28px;
+  min-width: 28px;
   padding: 0;
   border-radius: var(--oct-radius-pill);
 }
@@ -4325,13 +4246,23 @@ input.switch:checked::after {
 .composer-row [role="combobox"] {
   width: auto;
   max-width: 190px;
-  min-height: 30px;
+  min-height: 28px;
   padding-inline: 8px 22px;
   border-color: transparent;
   border-radius: var(--oct-radius-sm);
-  color: var(--oct-muted);
+  color: var(--oct-meta);
   background: transparent;
   font-size: var(--oct-text-xs);
+  font-weight: 500;
+}
+/* The select trigger wears the pane title's own recipe — meta ink at rest,
+   fg ink over the soft fill when pointed at — so the frame's controls and the
+   title band above them read as one system. The model picker is a button
+   recipe and keeps the recipe's own hover; a product class may not repaint
+   it (ui:check counts that as a repaint). */
+.composer-row [role="combobox"]:hover {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 /* A bordered box inside the composer's own box read as a form field nested in
    a form field. The trigger is a quiet pill that only gains a ground when
@@ -4339,13 +4270,14 @@ input.switch:checked::after {
 .composer-row .composer-model-picker__trigger {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  min-height: 30px;
+  gap: 5px;
+  min-height: 28px;
   padding-block: 0;
   padding-inline: 8px 6px;
-  color: var(--oct-muted);
+  color: var(--oct-meta);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
+  font-weight: 500;
   text-align: left;
 }
 
@@ -4353,7 +4285,7 @@ input.switch:checked::after {
    field inside the raised prompt. The disabled trigger keeps the truthful
    state and settings route while the row keeps one continuous surface. */
 .composer-row .composer-model-picker--empty {
-  min-height: 30px;
+  min-height: 28px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -4380,6 +4312,61 @@ input.switch:checked::after {
   flex: 0 0 auto;
   margin: 0 auto 12px;
 }
+
+/* Existing conversations keep the message surface distinct from its binding.
+   Feedback has a stable lane above the toolbar, including while it is empty. */
+.composer.composer--follow-up,
+.composer.composer--follow-up:focus-within {
+  background: var(--octant-tray);
+  border-radius: var(--oct-radius-md);
+  box-shadow: none;
+}
+.thread-composer__surface {
+  min-width: 0;
+  background: var(--octant-card);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+}
+.thread-composer__surface:focus-within {
+  border-color: var(--octant-border-strong);
+}
+.thread-composer__surface > label {
+  display: block;
+}
+.thread-composer__surface .composer-input {
+  min-height: 40px;
+  padding: 12px 12px 6px;
+}
+.thread-composer__surface > .composer-row {
+  min-height: 32px;
+  padding: 0 8px 4px;
+}
+.thread-composer__feedback {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 28px;
+  min-width: 0;
+  padding-inline: 12px;
+  overflow: auto;
+}
+.thread-composer__feedback > .composer-status {
+  flex: 1 0 auto;
+  flex-wrap: nowrap;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  white-space: nowrap;
+}
+.thread-composer__context {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  min-width: 0;
+  padding-inline: 12px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
 /* The quiet line under the composer's toolbar: the keyboard hint or a
    receipt on the left, spend and limits on the right. One recipe replaces
    the three footers Chat, Work, and Code drew under the same frame (and, in
@@ -4392,11 +4379,19 @@ input.switch:checked::after {
   gap: 2px 12px;
   min-height: 18px;
   margin: 0;
-  padding: 0 14px 10px;
+  padding: 0 var(--oct-composer-gutter) 10px;
   color: var(--oct-meta);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   line-height: 1.35;
+}
+/* Idle, the line holds nothing, so its box collapses and an idle Work or
+   Code frame is the height of Chat's. The live region stays mounted and
+   displayed: toggling `display` on a live region drops its first
+   announcement in some readers. */
+.composer-status:empty {
+  min-height: 0;
+  padding-bottom: 0;
 }
 .composer-status__hint {
   min-width: 0;
@@ -4442,6 +4437,10 @@ input.switch:checked::after {
   background: none;
   color: var(--oct-meta);
   padding: 0;
+}
+.chip .chip-x svg {
+  width: 12px;
+  height: 12px;
 }
 .chip .chip-x::before {
   content: "";
@@ -6931,12 +6930,13 @@ input.switch:checked::after {
 .setnav-item > .icon {
   flex: 0 0 auto;
 }
-.setnav-item:hover {
-  background: var(--sidebar-accent);
+.setnav-item:hover,
+.setnav-item:focus-visible {
+  background: var(--oct-fg-soft);
   color: var(--oct-fg);
 }
 .setnav-item[aria-current="page"] {
-  background: var(--sidebar-accent);
+  background: var(--oct-selection);
   color: var(--oct-fg);
 }
 
@@ -7129,13 +7129,16 @@ input.switch:checked::after {
 .prov-meta {
   display: block;
   margin-top: 1px;
-  font-family: var(--oct-font-mono);
+  font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   color: var(--oct-meta);
   overflow-wrap: anywhere;
 }
+.prov-observation {
+  display: contents;
+}
 .prov-models {
-  font-family: var(--oct-font-mono);
+  font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   color: var(--oct-meta);
   font-variant-numeric: tabular-nums;
@@ -7184,11 +7187,11 @@ input.switch:checked::after {
   /* width:100% is right for a column and nonsense in a row — it made
      every item as wide as the whole strip, so eight of them measured
      1990px and the current one could never be scrolled fully into view */
-  .setnav-item {
+  .setnav .setnav-item {
     flex: 0 0 auto;
     width: auto;
   }
-  .setnav-section {
+  .setnav .setnav-section {
     display: none;
   }
   .setpane {
@@ -7209,53 +7212,48 @@ input.switch:checked::after {
     margin-top: var(--oct-space-3);
   }
 
-  /* Two lines instead of six columns. The switch stays on the first line
-     beside the name, because it is the thing the row is for; the count
-     and the badge drop underneath, where they still read as a pair.
-
-     Six fields do not fit in 167px, so one has to go, and the choice is
-     the mark rather than the grip. At this width the NAME is the
-     identity — a 38px mark costs half the space the name needs to be
-     read at all — while dropping the grip would remove the only way to
-     change the fallback order. Decoration goes before function. */
+  /* Identity and controls share the first row; observation remains one line. */
   .provrow {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto 16px minmax(0, 1fr) auto;
     column-gap: var(--oct-space-2);
     row-gap: var(--oct-space-2);
   }
   .provrow[data-reordering="false"] {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: 16px minmax(0, 1fr) auto;
   }
   .provrow > .icon-mark {
-    display: none;
+    grid-area: 1 / 2;
+    width: 16px;
+    height: 16px;
   }
-  .prov-grip {
+  .provrow[data-reordering="false"] > .icon-mark {
+    grid-area: 1 / 1;
+  }
+  .prov-grip-slot {
     grid-area: 1 / 1;
   }
   .prov-main {
-    grid-area: 1 / 2;
+    grid-area: 1 / 3;
   }
   .provrow[data-reordering="false"] .prov-main {
-    grid-area: 1 / 1;
-  }
-  .provrow[data-reordering="false"] > .prov-actions {
     grid-area: 1 / 2;
   }
-  .provrow > input.switch {
-    grid-area: 1 / 3;
+  .provrow > .prov-actions {
+    grid-area: 1 / 4;
     justify-self: end;
   }
-  /* The badge gets its own line rather than a column. Sharing one with
-     the switch let it size that column, so "UNREACHABLE" — the longest
-     status and the one that matters most — squeezed the name it was
-     reporting on down to 29px. A status must never be able to crowd out
-     the thing whose status it is. */
-  .prov-models {
-    grid-area: 2 / 2 / 3 / -1;
+  .provrow[data-reordering="false"] > .prov-actions {
+    grid-area: 1 / 3;
   }
-  .prov-status {
-    grid-area: 3 / 2 / 4 / -1;
-    justify-self: start;
+  .prov-observation {
+    display: flex;
+    flex-wrap: wrap;
+    grid-area: 2 / 3 / 3 / -1;
+    gap: var(--oct-space-2);
+    align-items: center;
+  }
+  .provrow[data-reordering="false"] > .prov-observation {
+    grid-area: 2 / 2 / 3 / -1;
   }
 }
 
@@ -7657,8 +7655,8 @@ input.switch:checked::after {
      Losing a step of hierarchy is the honest cost of putting text on a
      photograph. The alternative is a fourth weight that is legible in the
      styleguide's own atmosphere and not in the user's. */
-  --oct-muted: light-dark(rgba(38, 37, 30, 0.9), rgba(242, 241, 237, 0.9));
-  --oct-meta: light-dark(rgba(38, 37, 30, 0.68), rgba(242, 241, 237, 0.68));
+  --oct-muted: color-mix(in oklab, var(--oct-fg) 90%, transparent);
+  --oct-meta: light-dark(rgba(27, 27, 27, 0.68), rgba(240, 240, 240, 0.68));
 }
 
 /* ─── atmosphere ──────────────────────────────────────────────────────

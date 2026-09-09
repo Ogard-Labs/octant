@@ -89,6 +89,14 @@ export interface CodeWorkspaceApprovals {
    * refusal rather than sending an action the host would deny.
    */
   readonly apple?: (request: AppleActionRequest) => Promise<string | undefined>;
+  /** Keeps the desktop-owned approval view anchored to the active composer. */
+  readonly updateAnchor?: (bounds: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  }) => Promise<void>;
+  readonly cancel?: () => Promise<void>;
 }
 
 export interface CodeWorkspaceProps {
@@ -189,6 +197,12 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.approvals?.access === undefined
           ? {}
           : { requestFullAccessApproval: props.approvals.access })}
+        {...(props.approvals?.updateAnchor === undefined
+          ? {}
+          : { updateApprovalAnchor: props.approvals.updateAnchor })}
+        {...(props.approvals?.cancel === undefined
+          ? {}
+          : { cancelApproval: props.approvals.cancel })}
         {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
         {...(props.windowCapability === undefined
           ? {}
@@ -929,6 +943,12 @@ function TerminalWorkspaceSurface(
     setReattaching(true);
     const reattach = async (initial: boolean) => {
       if (startInFlight.current) {
+        // The start already under way owns the wait: it shows its own
+        // connecting state and installs the terminal it gets. This attach
+        // used to leave "reattaching" raised while stepping aside, and no
+        // later poll lowered it, so the terminal that start delivered stayed
+        // hidden behind a connecting screen for the rest of the session.
+        if (initial) setReattaching(false);
         refreshTimer = setTimeout(() => void reattach(false), terminalRefreshIntervalMs);
         return;
       }
@@ -1155,8 +1175,8 @@ function terminalRecoveryFailureCategory(error: unknown): string | undefined {
 function ApprovalUnavailable(props: { readonly surface: string }) {
   return (
     <ShellState
-      eyebrow="Approval gated"
-      message="This window has no active approval bridge. Octant will not bypass or simulate approval authority."
+      eyebrow="Ask for approvals"
+      message="Approvals are unavailable in this window. Reopen the task in the desktop app to continue."
       state="warning"
       title={`${props.surface} approval unavailable`}
     />

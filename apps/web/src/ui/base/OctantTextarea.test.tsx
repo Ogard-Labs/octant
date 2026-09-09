@@ -18,10 +18,9 @@ describe("OctantTextarea", () => {
     expect(field.className).not.toContain("border-input");
   });
 
-  it("leaves keyboard focus to the one ring the app paints", () => {
-    // Focus is a single global treatment (0090). A recipe that painted its own
-    // would swap an app control's crisp ring for the style's wide soft halo,
-    // one control at a time.
+  it("keeps focus classes free of drawn ring utilities", () => {
+    // Focus stays keyboard-addressable while the app keeps the visual state
+    // quiet; a recipe must not add its own halo.
     render(<OctantTextarea aria-label="Notes" />);
     const field = screen.getByRole("textbox", { name: "Notes" });
     expect(field.className).not.toContain("focus-visible:ring");

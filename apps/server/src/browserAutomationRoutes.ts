@@ -8,6 +8,9 @@ import {
   decodeBrowserThreadScope,
   decodeBrowserThreadContextCommand,
   decodeBrowserThreadScopeRequest,
+  decodeBrowserToolApprovalDecision,
+  type BrowserToolApproval,
+  type BrowserToolApprovalDecision,
 } from "@octant/contracts/browser-automation-rpc";
 import {
   decodeBrowserAutomationFailure,
@@ -25,13 +28,24 @@ import type { WindowAuthorityStore } from "./windowAuthorityStore";
 const PREFIX = "/api/browser/";
 const METHODS = "POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
+const BROWSER_MODES = ["chat", "work", "code"] as const;
 
 export interface BrowserAutomationRouteDependencies {
   readonly service: Pick<
     BrowserAutomationService,
     "create" | "act" | "cancel" | "stop" | "inspect" | "inspectThread" | "releaseThread"
-  >;
+  > &
+    Partial<Pick<BrowserAutomationService, "peekThread">>;
   readonly authority: BrowserAuthorityResolver;
+  readonly approvals?: {
+    list(
+      windowId: ReturnType<typeof authenticateRouteWindowId>,
+    ): ReadonlyArray<BrowserToolApproval>;
+    decide(
+      windowId: ReturnType<typeof authenticateRouteWindowId>,
+      decision: BrowserToolApprovalDecision,
+    ): boolean;
+  };
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxRequestBodySize: number;
 }
@@ -87,8 +101,42 @@ export function createBrowserAutomationRouteHandler(
     }
 
     try {
+      if (url.pathname === "/api/browser/approvals") {
+        if (dependencies.approvals === undefined) {
+          return failure(
+            { category: "unavailable", message: "Browser approval is unavailable." },
+            503,
+            origin,
+          );
+        }
+        if (
+          typeof decoded.value === "object" &&
+          decoded.value !== null &&
+          (decoded.value as { kind?: unknown }).kind === "list"
+        ) {
+          return success(dependencies.approvals.list(windowId), origin);
+        }
+        if ((decoded.value as { kind?: unknown }).kind !== "decide") {
+          return failure(
+            { category: "invalid", message: "Browser approval decision is invalid." },
+            400,
+            origin,
+          );
+        }
+        const { kind: _kind, ...rawDecision } = decoded.value as Record<string, unknown>;
+        const decision = decodeBrowserToolApprovalDecision(rawDecision);
+        const accepted = dependencies.approvals.decide(windowId, decision);
+        return success({ accepted }, origin, accepted ? 200 : 409);
+      }
       if (url.pathname === "/api/browser/scope") {
         const input = decodeBrowserThreadScopeRequest(decoded.value);
+        if (!dependencies.authority.canAccessWindow(windowId, input.threadId, input.mode)) {
+          return failure(
+            { category: "unauthorized", message: "Browser thread is not owned by this window." },
+            403,
+            origin,
+          );
+        }
         const authority = dependencies.authority.resolve(input.threadId, input.mode);
         if (authority === undefined) {
           return failure(
@@ -101,6 +149,19 @@ export function createBrowserAutomationRouteHandler(
       }
       if (url.pathname === "/api/browser/contexts") {
         const input = decodeBrowserContextCreateCommand(decoded.value);
+        if (
+          !dependencies.authority.canAccessWindow(
+            windowId,
+            input.threadId,
+            input.action.authority.mode,
+          )
+        ) {
+          return failure(
+            { category: "unauthorized", message: "Browser thread is not owned by this window." },
+            403,
+            origin,
+          );
+        }
         return success(
           decodeBrowserAutomationSnapshot(
             await dependencies.service.create({ windowId, ...input }),
@@ -119,12 +180,24 @@ export function createBrowserAutomationRouteHandler(
       }
       if (url.pathname === "/api/browser/contexts/current") {
         const input = decodeBrowserThreadContextCommand(decoded.value);
-        return success(
-          decodeBrowserAutomationSnapshot(
-            dependencies.service.inspectThread(windowId, input.threadId),
-          ),
-          origin,
-        );
+        if (
+          !BROWSER_MODES.some((mode) =>
+            dependencies.authority.canAccessWindow(windowId, input.threadId, mode),
+          )
+        ) {
+          return failure(
+            { category: "unauthorized", message: "Browser thread is not owned by this window." },
+            403,
+            origin,
+          );
+        }
+        // The preview polls this route, so it is where a page the person
+        // drives gets its picture refreshed.
+        const snapshot =
+          dependencies.service.peekThread === undefined
+            ? dependencies.service.inspectThread(windowId, input.threadId)
+            : await dependencies.service.peekThread(windowId, input.threadId);
+        return success(decodeBrowserAutomationSnapshot(snapshot), origin);
       }
       if (url.pathname === "/api/browser/contexts/release") {
         const input = decodeBrowserThreadContextCommand(decoded.value);
@@ -197,9 +270,9 @@ export function createBrowserAutomationRouteHandler(
   };
 }
 
-function success(value: unknown, origin: string | null): Response {
+function success(value: unknown, origin: string | null, status = 200): Response {
   return new Response(JSON.stringify(value), {
-    status: 200,
+    status,
     headers: { "content-type": "application/json", ...corsHeaders(origin) },
   });
 }

@@ -16,6 +16,7 @@ import { acpProviderProfiles, type AcpProviderKind } from "./acpProfiles";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { makeOpenCodeDriver } from "./openCodeDriver";
 import type { OpenCodeProcessPort } from "./openCodeProcess";
+import { isOpenCode2Instance, makeOpenCode2Driver } from "./openCode2Driver";
 import { makeOllamaDriver } from "./ollamaDriver";
 import type { OllamaFetch } from "./ollamaEndpoint";
 import type { OllamaHistoryStore } from "./ollamaHistoryStore";
@@ -28,7 +29,7 @@ export interface ProviderDriverFactoryOptions {
   readonly runtimeRegistry: ProviderRuntimeRegistry;
   readonly openCodeProcess: OpenCodeProcessPort;
   readonly codexProcess: CodexProcessPort;
-  /** Shared runtime port for ACP-speaking agents (Kilo, Devin, Mistral Vibe, Kimi Code, Grok Build, Goose, GLM Agent). */
+  /** Shared runtime port for ACP-speaking agents, including the OpenCode 2 preview. */
   readonly acpProcess?: AcpProcessPort;
   readonly acpHome?: (kind: AcpProviderKind, instanceId: ProviderInstance["id"]) => string;
   readonly ohMyPiProcess?: import("./ohMyPiProcess").OhMyPiProcessPort;
@@ -66,6 +67,20 @@ export function makeProviderDriver(
   }
   switch (instance.driverKind) {
     case "opencode":
+      if (isOpenCode2Instance(instance)) {
+        if (options.acpProcess === undefined || options.acpHome === undefined) {
+          throw new ProviderDriverConfigurationError();
+        }
+        return makeOpenCode2Driver({
+          instanceId: instance.id,
+          binaryPath: instance.configuration.binaryPath,
+          catalogProcess: options.openCodeProcess,
+          acpProcess: options.acpProcess,
+          acpHome: options.acpHome("opencode", instance.id),
+          runtimeRegistry: options.runtimeRegistry,
+          permissionPersistence: options.permissionPersistence,
+        });
+      }
       return makeOpenCodeDriver({
         instanceId: instance.id,
         binaryPath: instance.configuration.binaryPath,

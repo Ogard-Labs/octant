@@ -66,6 +66,7 @@ function request(overrides: Partial<BrowserActionRequest> = {}): BrowserActionRe
 
 function harness(
   options: {
+    readonly access?: boolean;
     readonly recordExternalContentIngestion?: ConstructorParameters<
       typeof BrowserAutomationService
     >[0]["recordExternalContentIngestion"];
@@ -88,6 +89,14 @@ function harness(
         contentHash: String(contextId),
       };
     }),
+    peek: vi.fn(async (contextId) => {
+      if (!contexts.has(contextId)) throw new Error("missing context");
+      return {
+        url: "https://example.com/driven",
+        title: "Driven by hand",
+        screenshotDataUrl: "data:image/jpeg;base64,AAAA",
+      };
+    }),
     closeContext: vi.fn(async (contextId) => void contexts.delete(contextId)),
     closeAll: vi.fn(async () => void contexts.clear()),
     onProcessExit: (listener) => {
@@ -101,6 +110,7 @@ function harness(
   const service = new BrowserAutomationService({
     runtime,
     authority: {
+      canAccessWindow: () => options.access ?? true,
       resolve: (threadId) =>
         revokedThreads.has(threadId)
           ? undefined
@@ -114,7 +124,7 @@ function harness(
       ? {}
       : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
     uuid: () => ids.shift() ?? crypto.randomUUID(),
-    clock: () => "2026-07-27T20:00:00.000Z",
+    clock: () => new Date(now).toISOString(),
     now: () => now,
     schedule: (_delay, callback) => {
       expire = callback;
@@ -137,9 +147,24 @@ function harness(
 }
 
 describe("BrowserAutomationService", () => {
+  it("refuses to create a context when the window is not scoped to the thread", async () => {
+    const fixture = harness({ access: false });
+    const result = await fixture.service.create({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      policy,
+    });
+    expect(result).toMatchObject({
+      status: "failed",
+      failure: { category: "unauthorized" },
+    });
+    expect(fixture.runtime.createContext).not.toHaveBeenCalled();
+  });
+
   it("fails closed when the default authority cannot read thread taint", () => {
     const authorityService = createBrowserToolCallAuthorityService(
-      { resolve: () => authorityOne },
+      { canAccessWindow: () => true, resolve: () => authorityOne },
       () => "2026-08-24T00:00:00.000Z",
     );
     const request = decodeToolActionRequest({
@@ -180,6 +205,24 @@ describe("BrowserAutomationService", () => {
       policy,
     });
     expect(created.context?.presentation).toBe("headless");
+  });
+
+  it("shows a fresh picture of a page the person drives, without recording an action", async () => {
+    const { advance, runtime, service } = harness();
+    await service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const before = service.inspectThread(windowId, threadOne);
+    advance(2_000);
+
+    const peeked = await service.peekThread(windowId, threadOne);
+
+    expect(runtime.peek).toHaveBeenCalledTimes(1);
+    expect(peeked.observation?.screenshotDataUrl).toBe("data:image/jpeg;base64,AAAA");
+    expect(peeked.observation?.url).toBe("https://example.com/driven");
+    expect(peeked.observation?.stale).toBe(false);
+    expect(peeked.evidence).toEqual(before.evidence);
+    // Asked again at once, the picture stands and the runtime is left alone.
+    await service.peekThread(windowId, threadOne);
+    expect(runtime.peek).toHaveBeenCalledTimes(1);
   });
 
   it("reattaches one current context per window and thread and releases only that scope", async () => {

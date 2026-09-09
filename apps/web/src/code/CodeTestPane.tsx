@@ -103,7 +103,6 @@ export function CodeTestPane(props: CodeTestPaneProps) {
     <section aria-label="Repository tests" className="code-delivery-pane code-test-pane">
       <header className="code-delivery-pane__toolbar">
         <div>
-          <span>Tests</span>
           <h1>Repository tests</h1>
         </div>
         <p>{resultLabel(result)}</p>

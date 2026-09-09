@@ -11,7 +11,7 @@ import {
   navigatorAssistantImagePolicy,
 } from "@octant/domain";
 import { useMemo } from "react";
-import { ModelPicker } from "../providers/ModelPicker";
+import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { OctantButton } from "../ui/base/OctantButton";
 import { SettingRow } from "./primitives";
 import { settingId } from "./registry";
@@ -40,6 +40,7 @@ export function NavigatorAssistantSettingsView(props: NavigatorAssistantSettings
           ),
         ),
         providerOrder: props.providerSnapshot?.defaults.providerOrder,
+        hiddenModels: props.providerSnapshot?.defaults.hiddenModels,
         mode: "chat",
       }),
     [props.providerSnapshot],
@@ -83,7 +84,9 @@ export function NavigatorAssistantSettingsView(props: NavigatorAssistantSettings
             scope="app"
             settingId="default-model"
           >
-            <ModelPicker
+            <ComposerModelPicker
+              menuSide="bottom"
+              unselectedLabel="Choose model"
               ariaLabel="Navigator default model"
               groups={groups}
               onSelect={(selection) =>
@@ -119,7 +122,9 @@ export function NavigatorAssistantSettingsView(props: NavigatorAssistantSettings
             scope="app"
             settingId="vision-reviewer"
           >
-            <ModelPicker
+            <ComposerModelPicker
+              menuSide="bottom"
+              unselectedLabel="Choose model"
               ariaLabel="Navigator vision reviewer"
               groups={groups}
               onSelect={(selection) =>

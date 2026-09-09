@@ -88,26 +88,24 @@ Titles and the hero use `--oct-tracking-tight` (-0.025em); section labels use
 
 ### Colour
 
-Neutral graphite, a monochrome accent, a monochrome keyboard focus ring, four statuses. That is the default preset;
-the bundled colour presets lean every surface toward one hue and colour the accent and focus ring, and the same
-contrast bars gate them. Text is three greys (primary,
-secondary, muted) and never a fourth. Hairlines separate; fills select. The
-focus ring is painted once, by the global `:focus-visible` rule, as a
-hairline gap in the background then a muted ring tight to the control: a
-coloured ring reads as a website's link outline, and a wide soft halo reads
-as a web page, not an app. A recipe does not add a focus treatment of its
-own, and the shared rule imposes no radius — the ring follows whatever
-corner the control already has (0090). See
+Neutral graphite, a monochrome accent, semantic statuses, and quiet keyboard
+focus. That is the default preset; the bundled colour presets lean every
+surface toward one hue and keep the accent and focus role available for theme
+compatibility. Text is three greys (primary, secondary, muted) and never a
+fourth. Hairlines separate; fills select. Focus remains in the accessibility
+tree and follows the normal keyboard order, while the app suppresses drawn
+outlines and halos so selected and expanded fills carry the visible state cue
+(0094). See
 "Colour system" for the token table. On the marketing site the same three
 greys and the same hairline carry the hierarchy on a white or graphite ground.
 
 ### Shapes and depth
 
 Radius derives from one `--radius` root: a control is the `lg` step, a card or
-menu the `xl` step, and a compact control clamps below both. The composer and
-dialogs stay at 20px. A surface is flat by default. A discrete object is
+menu the `xl` step, and a compact control clamps below both. Welcome composers and
+dialogs stay at 20px; follow-up composers use the shared medium radius (0098). A surface is flat by default. A discrete object is
 bounded by a hairline ring, not lifted; shadow means something that genuinely
-floats — the composer (`--octant-shadow-md`) or an overlay
+floats — a welcome composer (`--octant-shadow-md`) or an overlay
 (`--octant-shadow-overlay`). Groups, lists, empty states, and headers are
 never cards.
 
@@ -125,7 +123,7 @@ Surface (reading measure 880px, or wide for boards)
 ```
 
 Leaving a reader route is always the ghost "Back to workspace" control in the
-header. Settings is the same shell with a 680px measure and its own
+header. Settings is the same shell with an 800px measure and its own
 navigation rail; the rail names each group of pages with a quiet label and
 draws no hairline between groups. Rows in Settings are `SettingRow`; rows everywhere else are
 `surface-row`. Both draw the same hairline.
@@ -238,13 +236,13 @@ transcript size with 1.5 leading; markdown headings inside it are labels
 then detail-size mono on the application ground. Tool rows are 28px each, the
 name at the body size and the state at the right as detail text with a 12px
 mark (spinner, check, cross), parted by hairlines and indented together; a
-settled turn folds them behind "N tool calls". A turn paused on the person is
-an `approval-row`: a card row with a 14px icon, one sentence, Approve as the
-small default button and Deny as the small ghost, and a 2px semantic tick
-inside the hairline rather than a bar. The composer at the foot of a thread is
-`thread-composer`: the same frame in every mode, 30px controls on its row, and
-one `composer-status` line under it (11px meta, hint left, spend and notices
-right).
+settled turn folds them behind "N tool calls". A turn paused on the person uses a neutral composer-adjacent request row with
+an icon and explicit answer controls. Follow-up composers use one compact
+hairline message surface across Chat, Work, and Code. A fixed 28px feedback
+lane above the toolbar keeps controls still when notices appear or disappear;
+long messages remain accessible and scrollable. The Code checkout strip is
+attached underneath, rather than floating above the input. Input growth from
+extra typed lines is intentional; status changes do not resize the frame (0098).
 
 ## Colour system
 
@@ -254,31 +252,31 @@ fallback; `Dark` and `Light` are the same values pinned to one mode.
 
 ### Semantic roles
 
-| Role                   | CSS variable                                        | Dark      | Light       | Use                                                    |
-| ---------------------- | --------------------------------------------------- | --------- | ----------- | ------------------------------------------------------ |
-| Application background | `--octant-app-background`                           | `#151515` | `#fafaf9`   | Page ground: welcome, lists, Settings                  |
-| Chrome                 | `--octant-chrome`                                   | `#151515` | `#fafaf9`   | Title bars and shell chrome                            |
-| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#fafaf9`   | Navigation surface, on the page ground                 |
-| Workspace              | `--octant-workspace`                                | `#1a1a1a` | `#ffffff`   | Reading surface: transcript, editor                    |
-| Floating               | `--octant-floating` / `--octant-surface-raised`     | `#232323` | `#fdfdfc`   | Menus, popovers, dialogs                               |
-| Card                   | `--octant-card` (derived)                           | floating  | workspace   | Raised objects: composer, setup, profiles              |
-| Tray                   | `--octant-tray` (derived)                           | workspace | control mix | The rear context card behind the composer              |
-| Control                | `--octant-control` / `--octant-surface-muted`       | `#2b2b2b` | `#f0f0ef`   | Quiet control fill, secondary buttons                  |
-| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#333333` | `#e8e8e6`   | Hover and highlighted rows                             |
-| Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#dfdfdd`   | Pressed state                                          |
-| Border                 | `--octant-border`                                   | `#303030` | `#e0e0de`   | Hairline separation                                    |
-| Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb`   | Input and outline-button edges                         |
-| Strong divider         | `--octant-divider-strong`                           | `#808080` | `#6f6f6d`   | Rare structural divider                                |
-| Primary text           | `--octant-text-primary`                             | `#f0f0f0` | `#1b1b1b`   | Body and control text                                  |
-| Secondary text         | `--octant-text-secondary`                           | `#a9a9a9` | `#4f4f4f`   | Supporting copy                                        |
-| Muted text             | `--octant-text-muted`                               | `#8a8a8a` | `#6b6b6b`   | Metadata and hints; not for essential text             |
-| Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff`   | Text on primary fill                                   |
-| Focus ring             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96`   | Theme token only; the shell paints focus in foreground |
-| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#ebebea`   | Selected rows and active controls                      |
-| Accent fill            | `--octant-accent`                                   | `#f0f0f0` | `#1b1b1b`   | One primary action or active mark                      |
-| Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff`   | Text on accent fill                                    |
-| Accent text            | `--octant-accent-text`                              | `#f0f0f0` | `#1b1b1b`   | Accent used as text; normal-text contrast              |
-| Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000`   | Opaque by contract; the bridge mixes it to a wash      |
+| Role                   | CSS variable                                        | Dark      | Light       | Use                                               |
+| ---------------------- | --------------------------------------------------- | --------- | ----------- | ------------------------------------------------- |
+| Application background | `--octant-app-background`                           | `#151515` | `#fafaf9`   | Page ground: welcome, lists, Settings             |
+| Chrome                 | `--octant-chrome`                                   | `#151515` | `#fafaf9`   | Title bars and shell chrome                       |
+| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#fafaf9`   | Navigation surface, on the page ground            |
+| Workspace              | `--octant-workspace`                                | `#1a1a1a` | `#ffffff`   | Reading surface: transcript, editor               |
+| Floating               | `--octant-floating` / `--octant-surface-raised`     | `#232323` | `#fdfdfc`   | Menus, popovers, dialogs                          |
+| Card                   | `--octant-card` (derived)                           | floating  | workspace   | Raised objects: composer, setup, profiles         |
+| Tray                   | `--octant-tray` (derived)                           | workspace | control mix | The rear context card behind the composer         |
+| Control                | `--octant-control` / `--octant-surface-muted`       | `#2b2b2b` | `#f0f0ef`   | Quiet control fill, secondary buttons             |
+| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#333333` | `#e8e8e6`   | Hover and highlighted rows                        |
+| Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#dfdfdd`   | Pressed state                                     |
+| Border                 | `--octant-border`                                   | `#303030` | `#e0e0de`   | Hairline separation                               |
+| Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb`   | Input and outline-button edges                    |
+| Strong divider         | `--octant-divider-strong`                           | `#808080` | `#6f6f6d`   | Rare structural divider                           |
+| Primary text           | `--octant-text-primary`                             | `#f0f0f0` | `#1b1b1b`   | Body and control text                             |
+| Secondary text         | `--octant-text-secondary`                           | `#a9a9a9` | `#4f4f4f`   | Supporting copy                                   |
+| Muted text             | `--octant-text-muted`                               | `#8a8a8a` | `#6b6b6b`   | Metadata and hints; not for essential text        |
+| Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff`   | Text on primary fill                              |
+| Focus role             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96`   | Theme compatibility and accent tints              |
+| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#ebebea`   | Selected rows and active controls                 |
+| Accent fill            | `--octant-accent`                                   | `#f0f0f0` | `#1b1b1b`   | One primary action or active mark                 |
+| Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff`   | Text on accent fill                               |
+| Accent text            | `--octant-accent-text`                              | `#f0f0f0` | `#1b1b1b`   | Accent used as text; normal-text contrast         |
+| Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000`   | Opaque by contract; the bridge mixes it to a wash |
 
 The ladder is deliberate: in dark the page is near-black, the sidebar a step
 darker, the reading surface a step lighter, and cards lift one more step. In light the sidebar and the page share one near-white ground and the
@@ -290,6 +288,12 @@ so an edge is never guessed. The renderer fallback in
 
 Status roles are paired to the surface where they render. Use the text role
 for labels and the surface role for a background; never rely on hue alone:
+
+Routine Waiting, idle, and unselected states use neutral text and marks.
+Pending approval requests use a neutral surface and muted icon, without a
+warning stripe. Warning colour is reserved for an actionable warning, not
+every thread that can be resumed. Success, failure, diffs, provider marks,
+and categorical data may retain semantic colour alongside a label or shape.
 
 | Meaning       | Surface                                                      | Text/border                                                                                 |
 | ------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
@@ -368,7 +372,7 @@ reading-width preference. Canvas documents use a 62ch measure.
 Spacing is a 4px base scale: 4, 8, 12, 16, 20, 24, 32, and 48px. Use `gap-*`
 for stacks and groups; do not reintroduce `space-x-*` or `space-y-*` utility
 chains. The desktop radius scale is 10px compact control, 16px panel and card, 20px
-composer and dialog, and 9999px only for compact chips, meters, or circular icon
+welcome composer and dialog, the shared medium follow-up radius, and 9999px only for compact chips, meters, or circular icon
 controls. Product
 chrome uses those tokens. Pixel radii of 1–4px remain only for chart bars,
 marks, and status dots. Leftover `.btn*` recipes are gone; adapters own
@@ -387,10 +391,11 @@ with every leading icon on a 12px inset and its section labels at 12px in the
 meta ink with a 12px gap above. Hover-only actions (add, more, pin, archive,
 and a tab's pin and close) take no width until their row is hovered or
 focused. Icon sizes are 16/19/22px for small/medium/large actions; touch
-surfaces keep 44px targets. The workspace sidebar defaults to 232px, supports
-resizing, and may collapse completely while leaving Show sidebar and New thread
-in the native title rail. Settings uses a separate compact 248px navigation
-rail. The right dock defaults to 320px when open. A fresh window starts with it
+surfaces keep 44px targets. The workspace and Settings share the saved sidebar
+width, defaulting to 232px; narrow Settings layouts retain their responsive
+rail clamp or drawer. The workspace sidebar supports resizing and may collapse
+completely while leaving Show sidebar and New thread in the native title rail.
+The right dock defaults to 320px when open. A fresh window starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The
 pane/title control rail is 38px in the native host and the status bar is 26px.
 While a route or tool is still loading, its state is one quiet line (spinner,
@@ -421,6 +426,12 @@ for the managed-clone flow in place, so there is no second repository control
 beside the Project. Access is
 a titled menu on the prompt card, next to the model picker, and carries the
 "Remember for this Project" switch.
+All six composers use `ComposerAttachButton` for their file chooser. The visible
+button is the only tab stop; an unsupported model keeps the button reachable
+and explains the refusal in the surface's status line. It never opens the file
+chooser or uploads while refused. Model, access, and destination controls keep
+one type scale and quiet keyboard focus. Access labels read "Plan · read-only"
+and "Ask for approvals" in both new and existing threads.
 Under the Code composer the start screen is an agent home rather than a
 blank prompt: suggested prompts as small cards (a label and the
 sentence they fill in), then three sections that share one card grid, two
@@ -443,9 +454,12 @@ its own surface. Attaching an image is a composer affordance and is available he
 The prompt itself is frameless:
 `OctantTextarea` drops the shadcn field recipe when it wears `.composer-input`.
 Composer-row selects drop the same field chrome. Feature CSS must not
-repaint those controls a third time. Opaque shadcn
-popovers, menus, dialogs, Environment, and forms use the floating surface and
-overlay shadow. Frosted material is limited to native/optional sidebar
+repaint those controls a third time. Select lists open beside their trigger
+without covering it with the selected item. The model picker anchors to the
+trigger's trailing edge, keeps its dimensions stable while filtering, and
+scrolls its model list internally. Popovers, menus, and dialogs use the floating
+surface and overlay shadow. Environment and inline Settings sections remain
+flat on their owning surface. Frosted material is limited to native/optional sidebar
 translucency and the floating activity picture-in-picture; reduced
 transparency and unsupported `backdrop-filter` resolve to opaque surfaces.
 
@@ -454,8 +468,8 @@ Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
 `--octant-shadow-overlay`, and `--octant-shadow-pop`. Use the smallest level
 that establishes a genuine layer: navigation panes and open form layouts stay
 unshadowed; the card recipe uses a hairline ring instead of a shadow (0090);
-compact state and grouped surfaces use `--octant-shadow-sm`; composers
-use the catalog-calibrated `--octant-shadow-md`; focused or promoted raised
+compact state and grouped surfaces use `--octant-shadow-sm`; welcome composers
+use `--octant-shadow-md`, while follow-up composers use a hairline boundary; focused or promoted raised
 objects may use `--octant-shadow-lg`; overlays use only their overlay or pop
 token. A shadow must explain depth, not decorate a flat row.
 
@@ -482,30 +496,36 @@ cards; provider marks are fixed-size inline and can be hidden without changing
 row height or indentation. A hovered row takes the soft ink wash and the row
 the workspace is showing takes the selection fill with a hairline edge, the
 same two states the thread tab strip draws, so pointing never looks like
-being there. A thread with unread activity ends its row with a
-small filled dot labelled "New activity", driven by the read cursors the
-window already keeps, never by a poll; working and attention states keep the
-leading status dot. A list longer than eight rows folds behind one quiet "Show
+being there. Provider identity remains at the leading edge. One fixed trailing
+status position shows a working spinner, an attention symbol, a clock when a
+snooze ends, or a neutral unread dot, in that priority order. Its accessible
+label and hover details retain overlapping states; a row never renders a
+second activity dot or a separate "Woke" label. A list longer than eight rows folds behind one quiet "Show
 more (n)" row that becomes "Show less"; the active thread stays visible while
-folded. Keyboard focus is the one neutral ring, and the Project row keeps its
-context menu. Project View and Project Overview are real features, not
+folded. Keyboard focus uses neutral fill and text emphasis, and the Project row keeps
+its context menu. Project View and Project Overview are real features, not
 decorative shortcuts.
 
 Primary sidebar destinations are New thread, Board, and Pull requests
 when valid for the active mode. The bottom-left identity menu owns Settings,
 Navigator, Agents, Providers, Usage, Plugins, Automations, Artifacts, and Zen
-entry points. Search is a compact in-place filter for the current mode's visible
+entry points. The account menu opens above its identity row, aligned to the
+row’s leading edge. Search is a compact in-place filter for the current mode's visible
 threads, with a command-style overlay available for broader actions.
 
-Settings is a grouped form page rather than a dashboard wall. A compact 248px
-navigation rail and search remain fixed while one 680px reading column scrolls,
-anchored to the navigation edge by a 32–56px workspace gutter instead of
-floating in the middle of wide windows. Navigation groups use quiet separators
+Settings is a grouped form page. The shared resizable navigation rail and
+search remain fixed while one centred, bounded 800px reading column scrolls.
+A 32–56px workspace gutter protects the content at narrower widths. The page
+title, quiet section captions, and primary field labels have distinct roles;
+sections follow a consistent 32px rhythm. Navigation groups use quiet separators
 rather than competing labels. Routine related rows stay open on the application
 ground with hairline separators. Keybindings have their own destination and raw
-JSON stays behind an advanced disclosure. Profiles, provider instances, install
-reviews, visual theme choices, and other discrete objects use raised cards
-(`--octant-shadow-sm`). A destructive group is an open section at the end of
+JSON stays behind an advanced disclosure. Inline profile and provider editors
+share the flat page ground and aligned row edges (0096). Ready providers open
+onto a bounded model list with search, shown counts, and shared visibility
+switches. Routine connection diagnostics and capabilities use a separate
+disclosure; setup and authentication guidance remains visible. Install reviews, visual
+theme previews, and confirmation dialogs retain their discrete boundaries. A destructive group is an open section at the end of
 its page, marked by that placement and by its confirm control, not by heading
 colour or a card. Labels and descriptions align left, controls align
 right, and compound editors may expand below. A section label may carry the
@@ -517,9 +537,16 @@ Loading and status lines are one quiet sentence; only an error keeps a box.
 Essential labels and explanatory
 text are at least 12px at the default interface scale. Every control uses the
 owned Octant/shadcn adapter, inherits the interface typography projection, and
-saves immediately.
+either saves immediately or uses a compact Save action for a compound form.
+Save controls retain a contextual accessible name. Model visibility changes keep
+the open editor, filter, focus, and drafts stable; hiding the last model does not
+trigger provider discovery.
 Scope metadata remains available to assistive technology but does not compete
 with the setting label.
+
+Chat and Navigator defaults use the same compact model chooser as composers,
+with the current selection in the row and the searchable catalog in a bounded
+popup. Unconfigured defaults say Choose model.
 
 Operational settings use progressive disclosure. Provider and skill lists lead
 with compact readiness counts. Provider rows show identity, one effective
@@ -576,8 +603,15 @@ folder, running servers), and its body is a definition list of git facts,
 row-styled actions, and collapsible groups on the dock's own ground. It summarizes Project, branch, clean/dirty state, working folder,
 changes, local servers, pull-request
 identity, sources, and compact active/completed subagent rows with lifecycle,
-model, and retained final response when authoritative. It is not a permanent
-stack of cards and does not duplicate the Agents dock. Missing checkout context
+model, and retained final response when authoritative. It stays flat on the dock's own background, with no surrounding card. Checkout
+facts and the existing Commit or push and Create pull request flows come first.
+Other servers stay behind a disclosure; none are stopped or removed by hiding
+them. Empty subagents keep a collapsed count and their Open Agents action.
+Sources list the current thread's journaled image attachments when present.
+Computer use offers Picture in Picture show/hide for the same live activity
+preview that floats over the main conversation. The preview never occupies
+Environment, and hiding it never stops its session. Browser stop and computer-use
+approval controls stay with the preview. It does not duplicate the Agents dock. Missing checkout context
 is neutral explanatory text rather than a warning callout.
 
 The Board is an operational reading surface with four fixed,
@@ -623,7 +657,9 @@ app has a separate design system under `apps/mobile/design-system`.
 True page tabs, segmented choices, and pane identity are intentionally
 different. `OctantTabs` owns a flat rail with selected fill and keyboard tab
 semantics. `OctantToggleGroup` owns the enclosed track used for mutually
-exclusive values. The split-pane grip alone owns active-pane paint. Feature
+exclusive values. Each split pane keeps its close action on the trailing edge of its header;
+only a pane underneath the window controls reserves space for that cluster.
+The split-pane grip alone owns active-pane paint. Feature
 styles may size or scroll these primitives but may not restore a local tab
 track, underline recipe, or persistent active border.
 
@@ -697,9 +733,17 @@ Lucide is the product icon library. Use 14–16px for compact controls and
 convention and let the recipe size them. Icons clarify labels and do not
 replace an essential label without an accessible name.
 
-Provider identity uses Octant-owned, bundled marks selected by `ProviderGlyph`.
-Never fetch a remote logo, copy a product asset into Octant, use emoji, or draw
-an approximate brand mark. Unknown providers use a compact truthful monogram.
+Provider identity uses locally bundled, licensed provider logos selected by
+`ProviderGlyph` (0095). This is the explicit identity-asset exception to the
+originality rule; it does not permit copying another application’s UI assets or
+implementation. Keep source and license provenance with each mark. Never fetch
+a logo at runtime, use emoji, or draw an approximate brand mark. Unknown or
+private providers keep a truthful fallback. The same marks appear in Settings,
+model pickers, and thread metadata.
+
+Message timestamps and direct Copy controls share one reserved row. They appear
+on message hover or keyboard focus and stay visible on touch and high-contrast
+interfaces. Revealing them must not move the transcript.
 
 ## Motion and interaction
 
@@ -714,8 +758,8 @@ animations without removing state information.
 
 Native Electron title-bar regions are a hard boundary. Interactive controls
 must carry `window-no-drag` and render above the native drag target. Test title-bar
-buttons in the packaged/native surface, not only with React/jsdom. Focus rings
-must be visible and must not move layout.
+buttons in the packaged/native surface, not only with React/jsdom. Keyboard
+focus uses the shared quiet fill cue without drawn outlines or halos (0094).
 
 On macOS the desktop window keeps Electron's native frame and uses
 `titleBarStyle: hiddenInset`; `frame: false` is not combined with that mode.
@@ -802,3 +846,76 @@ inventory, shell/settings/project/dock styles, the task visualizer, context
 meter, usage surfaces, and decisions 0016, 0027, 0038, 0044, 0045, and 0046.
 Values marked as defaults come directly from those files; layout guidance
 follows the rendered contracts encoded by their selectors and tests.
+
+### Settings stability
+
+Background refresh preserves already loaded controls and active drafts. Use the
+initial loading view only before a surface has data. Provider and theme feedback
+occupy bounded, scrollable status slots; a changed status must not push the form
+below it. Provider metadata uses fixed columns and shows Checking during probes.
+Last observed model facts are presentation only and never authorize selection
+or execution. Saved Chat/Code revisions reconcile untouched fields without
+remounting the form. Keep deliberate section expansion, text growth, and manual
+resizing distinct from unsolicited layout movement.
+
+### Optional Settings details
+
+Keep common preferences and host health visible. Use the shared
+`SettingsDisclosure` for optional inventories or specialist controls; it keeps
+its contents mounted so closing it does not discard an unfinished field.
+A deep-linked setting reveals its enclosing details before receiving focus.
+Appearance keeps interface typography visible, with editor and terminal fonts
+in named disclosures. Host data inventory lives under Stored data. Installed
+skills and collision diagnostics scroll within a bounded collection while
+search, counts, and Show all remain outside that scroller.
+
+Execution profiles are retained and named explicitly in Settings. They are
+saved agent defaults, distinct from the person's identity in General. The
+legacy `--oct-fg-2` alias maps directly to `--octant-text-secondary`; primary,
+secondary, and metadata remain the only text strengths. The theme schema keeps
+its focus compatibility role for imports, but Appearance does not expose a
+Focus ring color control because the product does not draw focus rings.
+
+### Visual-audit corrections
+
+- Native sidebar glass keeps a transparent backing beneath the sidebar. The
+  opaque application ground starts at the reading area's edge and covers the
+  whole window when the sidebar is collapsed.
+- Dock tab fitting subtracts window-control padding and measures actual tab
+  widths. Overflow and Add tool controls must never sit under window controls.
+- A selected Project pull request may keep Review open beside its list. Other
+  global destinations hide unrelated dock content and are mutually exclusive.
+- PR readers own a compact, scrollable hierarchy. Descriptions and discussion
+  use shared Markdown without executing HTML or fetching remote images. The
+  original description remains available when unsupported HTML is omitted;
+  diffs use the shared code block.
+- Surface actions wrap before titles are squeezed into narrow columns. Settings
+  navigation remains a vertical, full-width list inside its narrow drawer.
+
+### Mode-specific utility chrome
+
+Chat has no generic right or bottom utility panel. The conversation uses the
+available workspace width; existing central artifact routes remain available.
+Work shares Code's quiet transcript edge: Browser is a dock tool and completion
+lives in the composer's compact Task actions menu, preserving its confirmation
+flow. See decision 0099.
+
+### Readability and scroll containment
+
+Activity group labels align with their thread titles at the same content inset.
+Titles use primary text; project attribution uses secondary text and a separate
+line with comfortable leading. Native document scrolling is clipped: Settings
+occupies a fixed viewport while content and navigation scroll independently.
+A terminal turn cannot present an unresolved tool call as still running; it
+shows Unfinished unless the tool has its own recorded outcome. Usage resolves
+known provider and task names locally, with original identifiers in tooltips.
+
+### Draft continuity and composer notices
+
+A new-task composer keeps its identity while its Project binding changes.
+Message text and local input state reset only for an explicit New task action.
+A refused binding keeps the prior authorized Project and draft. Cross-Project
+notices appear once beside the active draft composer, with a separate-window
+action when available, and reveal upward behind the message surface.
+Authority confirmations follow the trusted inline-surface direction in 0100;
+ordinary notice content cannot issue an approval receipt.

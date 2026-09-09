@@ -32,7 +32,7 @@
 }
 
 /* The same feedback the system's .split-handle gives: the hairline takes the
-   accent ink while grabbed or focused. */
+   accent ink while grabbed. Keyboard focus remains visually quiet. */
 .right-utility-dock__resize:hover::before,
 .right-utility-dock__resize:focus-visible::before {
   background: var(--oct-accent-fg);
@@ -108,10 +108,19 @@
   height: var(--oct-rail-tab-h);
   max-width: 12rem;
   align-items: center;
-  overflow: hidden;
   padding-inline-end: 2px;
   color: var(--oct-muted);
   border-radius: var(--oct-radius-sm);
+}
+
+.dock-tool-strip:has(.dock-tool-strip__overflow) > .dock-tool-strip__tab {
+  max-width: min(12rem, calc(100% - 34px));
+}
+
+.dock-tool-strip__select > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .dock-tool-strip__tab:hover {
@@ -154,17 +163,17 @@
   height: var(--oct-icon-sm);
 }
 
-/* The close control is the same 22px mark the thread tabs carry, so the two
-   strips read as one grammar: a tab, then a quiet × that shows on hover, on
-   focus, and on the tab in front, and like theirs takes no width until then. */
+/* The close control is a quiet 22px × that shows on hover, on focus, and on
+   the tab in front. It keeps its width at all times: a close that took its
+   room only when wanted widened the tab under the pointer and shifted every
+   tab after it, so the strip moved whenever the pointer crossed it. */
 .dock-tool-strip__close {
-  width: 0;
-  min-width: 0;
-  height: 22px;
-  min-height: 22px;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
   padding: 0;
-  overflow: hidden;
-  border-radius: var(--oct-radius-xs, 3px);
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-muted);
   opacity: 0;
 }
@@ -172,18 +181,21 @@
 .dock-tool-strip__tab:hover .dock-tool-strip__close,
 .dock-tool-strip__tab:focus-within .dock-tool-strip__close,
 .dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"]) .dock-tool-strip__close {
-  width: 22px;
-  min-width: 22px;
   opacity: 1;
 }
 
 /* In the overflow menu there is no tab to hover, so the control that closes a
    tool has to be visible to be usable at all. */
 .dock-tool-strip__close--overflow {
-  width: 26px;
-  min-width: 26px;
-  min-height: 26px;
   opacity: 1;
+}
+
+/* The recipe's press translate and the icon button's press scale moved the
+   strip under the pointer — the very defect the fixed-width close exists to
+   prevent — so the strip's controls hold still when pressed. */
+.dock-tool-strip__select:active,
+.dock-tool-strip__close:active {
+  transform: none;
 }
 
 .dock-tool-strip__close:hover {
@@ -207,25 +219,6 @@
 .dock-tool-strip__overflow-row {
   display: flex;
   align-items: center;
-  gap: 2px;
-}
-
-.dock-tool-launcher {
-  display: grid;
-  align-content: start;
-  gap: 8px;
-}
-
-.dock-tool-launcher__hint {
-  margin: 0;
-  padding: 2px 4px 6px;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  line-height: 1.45;
-}
-
-.dock-tool-launcher__list {
-  display: grid;
   gap: 2px;
 }
 
@@ -376,14 +369,6 @@
   margin-left: 2px;
 }
 
-.dock-utility-launcher__trigger {
-  width: var(--oct-rail-button-h);
-  min-height: var(--oct-rail-button-h);
-  height: var(--oct-rail-button-h);
-  padding: 0;
-  font-size: var(--oct-text-xs);
-}
-
 .dock-utility-launcher__disclosure {
   top: calc(100% + 4px);
   right: auto;
@@ -415,10 +400,67 @@
   height: 100%;
 }
 
-/* A tool's own toolbar sits directly under the dock head, so it takes the
-   same rail height; two hairline bars four pixels apart read as two rails. */
-.right-utility-dock__tool .code-file-explorer-panel__toolbar {
+/* The strip names the tool, so a tool's own head is the dock head's rail:
+   one height, one ground, one hairline. Measured before this rule, seven
+   heads stood 34–59px tall on three tints, and two hairline bars a few
+   pixels apart read as two rails. */
+.right-utility-dock__tool
+  :is(
+    .code-file-explorer-panel__toolbar,
+    .code-delivery-pane__toolbar,
+    .code-diff-pane__toolbar,
+    .browser-workspace__chrome,
+    .side-chat__header,
+    .thread-environment-dock__header
+  ) {
+  display: flex;
   min-height: var(--oct-title-rail-h);
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: 4px var(--oct-space-3) 3px;
+  background: transparent;
+  border-bottom: 1px solid var(--oct-border);
+}
+
+/* A rail holds one line: the title yields before the count and the layout
+   control do, and the layout control keeps the rail's 28px button height so
+   the rail stays 38px instead of wrapping onto two lines. */
+.right-utility-dock__tool :is(.code-diff-pane__toolbar, .code-delivery-pane__toolbar) > div {
+  display: block;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.right-utility-dock__tool :is(.code-diff-pane__toolbar, .code-delivery-pane__toolbar) h1 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.right-utility-dock__tool :is(.code-diff-pane__toolbar, .code-delivery-pane__toolbar) p {
+  flex: none;
+  white-space: nowrap;
+}
+
+.right-utility-dock__tool .code-diff-pane__toolbar [data-slot="toggle-group"] {
+  flex: none;
+  padding: 0;
+}
+
+.right-utility-dock__tool .browser-workspace {
+  grid-template-rows: var(--oct-title-rail-h) minmax(0, 1fr);
+}
+
+.right-utility-dock__tool .browser-workspace--message {
+  grid-template-rows: var(--oct-title-rail-h) auto minmax(0, 1fr);
+}
+
+/* The notice is body copy about what the tool cannot do; a 38px rail holds
+   the title alone, so the notice reads under it at the body's inset. */
+.right-utility-dock__tool .side-chat__notice {
+  margin: 0;
+  padding: var(--oct-space-2) var(--oct-space-3) 0;
 }
 
 .bottom-utility-panel {
@@ -499,16 +541,20 @@
   height: 100%;
 }
 
-.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .browser-workspace),
-.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .side-chat),
-.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .code-file-explorer-panel),
-.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .canvas-workspace-tab),
-.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .dock-canvas-tool),
-.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .dock-document-tool),
-.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .code-diff-pane),
-.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) [data-code-tab-kind]) {
+/* Tools with their own headers and scrolling meet the dock rail directly.
+   Prose panels opt into an inset without shifting Files or Environment. */
+.right-utility-dock__content {
   padding: 0;
   overflow: hidden;
+}
+
+.right-utility-dock__tool[data-dock-inset="true"] {
+  padding: var(--oct-space-4);
+  overflow: auto;
+}
+
+.right-utility-dock__tool[data-dock-inset="true"] > .shell-state {
+  padding: 0;
 }
 
 .octant-dialog__backdrop {

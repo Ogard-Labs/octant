@@ -90,6 +90,50 @@ describe("PersistenceLive", () => {
     expect(existsSync(join(directory, "escape"))).toBe(false);
   });
 
+  it("answers readiness gates from one inspection and re-inspects only on request", async () => {
+    const directory = temporaryDirectory();
+    let integrityChecks = 0;
+    const counts = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const persistence = yield* Persistence;
+          const afterStartup = integrityChecks;
+          persistence.status();
+          persistence.status();
+          const afterGates = integrityChecks;
+          persistence.status({ fresh: true });
+          return { afterStartup, afterGates, afterFresh: integrityChecks };
+        }).pipe(
+          Effect.provide(
+            makePersistenceLive({
+              dataDirectory: directory,
+              clock: () => now,
+              openConnection: (path) => {
+                const connection = openSqlite(path);
+                return new Proxy(connection, {
+                  get(target, property, receiver) {
+                    if (property === "pragma") {
+                      return (...args: Parameters<SqliteConnection["pragma"]>) => {
+                        if (args[0] === "integrity_check") integrityChecks += 1;
+                        return target.pragma(...args);
+                      };
+                    }
+                    const value: unknown = Reflect.get(target, property, receiver);
+                    return typeof value === "function" ? value.bind(target) : value;
+                  },
+                });
+              },
+            }),
+          ),
+        ),
+      ),
+    );
+    // Every service gates its reads on this; a gate must not cost a full
+    // integrity check, while a diagnostic asking for a fresh answer gets one.
+    expect(counts.afterGates).toBe(counts.afterStartup);
+    expect(counts.afterFresh).toBe(counts.afterStartup + 1);
+  });
+
   it("migrates and catches up projections before reporting ready", async () => {
     const directory = temporaryDirectory();
     const seeded = openSqlite(join(directory, "octant.sqlite3"));

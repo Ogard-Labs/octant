@@ -8,6 +8,7 @@ import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { SettingsDisclosure } from "../settings/primitives";
 import { FontFamilyPicker } from "./FontFamilyPicker";
 import {
   FIRST_PARTY_PLUGINS_EFFECTIVE,
@@ -39,19 +40,15 @@ export function ThemeAppearanceEditor(props: {
       } as ThemeSettings["typography"],
     });
   };
-  const setOverride = (role: string, color: string) => {
-    const rest = draft.semanticOverrides.filter((entry) => entry.role !== role);
-    void theme.applyPatch({
-      semanticOverrides: [...rest, { role: role as never, color: color as never }],
-    });
-  };
   return (
     <div className="settings-theme-editor" aria-label="Appearance preview controls">
-      {theme.error !== undefined ? (
-        <p className="settings-view__error" role="alert">
-          {theme.error}
-        </p>
-      ) : null}
+      <div className="settings-feedback-slot" aria-live="polite">
+        {theme.error !== undefined ? (
+          <p className="settings-view__error" role="alert">
+            {theme.error}
+          </p>
+        ) : null}
+      </div>
       <section
         aria-label="Theme"
         className="settings-card-section settings-card-section--open settings-theme-editor__scheme-section"
@@ -163,22 +160,34 @@ export function ThemeAppearanceEditor(props: {
             value={draft.typography.ui}
             onChange={(patch) => setTypography("ui", patch)}
           />
-          <TypographyControl
-            label="Code typography"
-            familyLabel="Code font"
-            surface="editor"
-            value={draft.typography.editor}
-            onChange={(patch) => setTypography("editor", patch)}
-            extended
-          />
-          <TypographyControl
-            label="Terminal typography"
-            familyLabel="Terminal font family"
-            surface="terminal"
-            value={draft.typography.terminal}
-            onChange={(patch) => setTypography("terminal", patch)}
-            extended
-          />
+          <SettingsDisclosure
+            title="Code typography"
+            description="Font, size, and spacing inside code editors."
+          >
+            <TypographyControl
+              label="Code typography"
+              familyLabel="Code font"
+              surface="editor"
+              value={draft.typography.editor}
+              onChange={(patch) => setTypography("editor", patch)}
+              extended
+              hideLegend
+            />
+          </SettingsDisclosure>
+          <SettingsDisclosure
+            title="Terminal typography"
+            description="Font, size, and spacing inside terminals."
+          >
+            <TypographyControl
+              label="Terminal typography"
+              familyLabel="Terminal font family"
+              surface="terminal"
+              value={draft.typography.terminal}
+              onChange={(patch) => setTypography("terminal", patch)}
+              extended
+              hideLegend
+            />
+          </SettingsDisclosure>
         </div>
       </details>
       <fieldset className="settings-card-section settings-card-section--open settings-theme-editor__accessibility">
@@ -199,19 +208,6 @@ export function ThemeAppearanceEditor(props: {
             checked={draft.reducedTransparency}
             onChange={(value) => void theme.applyPatch({ reducedTransparency: value })}
           />
-          <label className="settings-view__field">
-            <span>Focus ring color</span>
-            <OctantInput
-              aria-label="Focus ring color"
-              className="settings-view__text-input"
-              type="color"
-              value={
-                draft.semanticOverrides.find((entry) => entry.role === "focus-ring")?.color ??
-                "#d8d8d4"
-              }
-              onChange={(event) => setOverride("focus-ring", event.currentTarget.value)}
-            />
-          </label>
         </div>
       </fieldset>
       <details className="settings-card-section settings-card-section--open settings-theme-editor__disclosure">
@@ -244,10 +240,11 @@ function TypographyControl(props: {
   };
   readonly onChange: (patch: Record<string, unknown>) => void;
   readonly extended?: boolean;
+  readonly hideLegend?: boolean;
 }) {
   return (
     <fieldset className="settings-view__theme-group">
-      <legend>{props.label}</legend>
+      <legend className={props.hideLegend ? "sr-only" : undefined}>{props.label}</legend>
       <label className="settings-view__field">
         <span>{props.familyLabel}</span>
         <FontFamilyPicker

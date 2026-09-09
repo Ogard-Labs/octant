@@ -21,7 +21,7 @@ describe("CodeOverview", () => {
 
     expect(screen.getByRole("heading", { name: "Controller foundation" })).toBeVisible();
     expect(screen.getAllByText("development").length).toBeGreaterThan(0);
-    expect(screen.getByText("Approval gated")).toBeVisible();
+    expect(screen.getByText("Ask for approvals")).toBeVisible();
     expect(screen.getByText("Active")).toBeVisible();
     expect(screen.getByText("feature/controller → development")).toBeVisible();
     expect(screen.getByRole("region", { name: "Code status summary" })).toBeVisible();
@@ -174,7 +174,9 @@ describe("CodeOverview", () => {
     expect(screen.getByText("#806 · open")).toBeVisible();
     expect(screen.getByText("1 active · 2 completed")).toBeVisible();
     expect(screen.getByText("In progress")).toBeVisible();
-    expect(screen.getByText("Approval gated")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Controller foundation" }).closest("article"),
+    ).toHaveTextContent("Ask for approvals");
     expect(screen.getByText("Follow-up")).toBeVisible();
     // Rarely-glanced facts stay reachable behind the per-thread disclosure.
     fireEvent.click(screen.getByText("Details"));
@@ -182,7 +184,9 @@ describe("CodeOverview", () => {
     expect(screen.getByText("Opened pull request · Pending")).toBeVisible();
     expect(screen.getByText("Reviewing the checkout")).toBeVisible();
     expect(screen.getByRole("region", { name: "Code quick start" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Approval");
+    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent(
+      "Ask for approvals",
+    );
     const message = screen.getByLabelText("First message");
     fireEvent.change(message, { target: { value: "Keep the draft" } });
     expect(message).toHaveValue("Keep the draft");

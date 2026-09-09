@@ -19,6 +19,9 @@ export function useProviderBootstrap(options: ProviderBootstrapOptions): void {
   const attemptedKey = useRef<string | undefined>(undefined);
   const inFlight = useRef(false);
   const hasSelectableModels = hasSelectableProviderModels(options.providerGroups);
+  const hasObservedModels = [...options.providerController.observedByInstance.values()].some(
+    (observed) => observed.models.length > 0,
+  );
   const unobservedProviderIds = listAutoProbeInstanceIds(
     options.providerController.instances,
     new Set(options.providerController.observedByInstance.keys()),
@@ -36,6 +39,7 @@ export function useProviderBootstrap(options: ProviderBootstrapOptions): void {
         scanning: options.discoveryController.scanning,
         attempted: attemptedKey.current === bootstrapKey,
         hasSelectableModels,
+        hasObservedModels,
         hasUnobservedProviders: unobservedProviderIds.length > 0,
       })
     ) {
@@ -61,6 +65,7 @@ export function useProviderBootstrap(options: ProviderBootstrapOptions): void {
     })();
   }, [
     hasSelectableModels,
+    hasObservedModels,
     bootstrapKey,
     unobservedProviderIds.length,
     options.enabled,

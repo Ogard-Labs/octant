@@ -1,5 +1,5 @@
 import type { WorkspaceTab, WorkspaceTabId } from "@octant/contracts/shell";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { appendTerminalSelection, CodeWorkspace } from "./CodeWorkspace";
@@ -154,6 +154,64 @@ describe("CodeWorkspace", () => {
       .map(([command]) => command)
       .find((command) => command.kind === "start-terminal");
     expect(start?.terminalId).not.toBe(ids.thread);
+  });
+
+  it("shows a replacement terminal whose start outlives the reattach that asked for it", async () => {
+    const client = codeClient();
+    (client.inspectTerminal as ReturnType<typeof vi.fn>).mockRejectedValue(terminalUnavailable());
+    let releaseStart = () => {};
+    const started = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    let running: string | undefined;
+    (client.executeOperation as ReturnType<typeof vi.fn>).mockImplementation(async (command) => {
+      if (command.kind === "attach-terminal" && command.terminalId === running) {
+        return { ...terminalResult, operationId: command.operationId, terminalId: running };
+      }
+      if (command.kind === "attach-terminal" && command.terminalId === ids.thread) {
+        return {
+          kind: "operation-failed",
+          operationId: command.operationId,
+          failure: {
+            category: "unauthorized",
+            message: "Terminal belongs to another code thread.",
+          },
+        };
+      }
+      if (command.kind === "start-terminal") {
+        // A real start spawns a process; the tab re-runs its attach for the
+        // replacement id while that is still under way.
+        await started;
+        running = command.terminalId;
+        return { ...terminalResult, operationId: command.operationId, terminalId: running };
+      }
+      return terminalUnavailableResult();
+    });
+
+    render(
+      activated(
+        <CodeWorkspace
+          client={client}
+          controller={controller("approval-gated")}
+          createUuid={uuidFactory()}
+          tab={tab("code-terminal", "Terminal")}
+        />,
+      ),
+    );
+
+    await waitFor(() =>
+      expect(
+        (client.executeOperation as ReturnType<typeof vi.fn>).mock.calls.some(
+          ([command]) => command.kind === "start-terminal",
+        ),
+      ).toBe(true),
+    );
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    releaseStart();
+
+    expect(
+      await screen.findByRole("region", { name: "Repository terminal" }, { timeout: 2_000 }),
+    ).toBeVisible();
   });
 
   it("opens a restored Terminal tab without asking the user to start it", async () => {

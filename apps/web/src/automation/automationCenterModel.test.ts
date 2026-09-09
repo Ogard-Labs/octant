@@ -112,7 +112,7 @@ describe("automationCenterModel labels", () => {
 
   it("summarizes effective authority as named text without secrets", () => {
     const summary = automationAuthoritySummary(definition.authorityProfile);
-    expect(summary).toBe("Approval-gated · filesystem, tools · this session only");
+    expect(summary).toBe("Ask for approvals · filesystem, tools · this session only");
     expect(summary).not.toContain("digest");
   });
 });

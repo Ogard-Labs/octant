@@ -321,7 +321,7 @@ function decodeOrWelcome(value: Record<string, unknown>, fallback: () => unknown
 const WELCOME_TITLES = {
   chat: "Welcome to Chat",
   work: "Welcome to Work",
-  code: "Welcome to Code",
+  code: "New task",
 } as const;
 
 function welcomePersistedSurface(mode: "chat" | "work" | "code", id: unknown): unknown {

@@ -88,10 +88,10 @@ export function SideChatPanel(props: SideChatPanelProps) {
             {props.sourceTitle === undefined ? "Side Chat" : `Side Chat about ${props.sourceTitle}`}
           </span>
         </p>
-        <p className="side-chat__notice">
-          Ordinary Chat. It reads this thread and cannot steer, approve, or change it.
-        </p>
       </header>
+      <p className="side-chat__notice">
+        Ordinary Chat. It reads this thread and cannot steer, approve, or change it.
+      </p>
       {renderBody(state, props, () => setRetryToken((current) => current + 1))}
     </section>
   );

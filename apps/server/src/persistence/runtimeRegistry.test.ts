@@ -882,7 +882,7 @@ describe("createPhase1RuntimeRegistries", () => {
       ).toMatchObject({
         workspace: {
           layouts: {
-            code: { kind: "pane", surface: { kind: "welcome", title: "Welcome to Code" } },
+            code: { kind: "pane", surface: { kind: "welcome", title: "New task" } },
           },
         },
       });

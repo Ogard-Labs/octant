@@ -2179,6 +2179,55 @@ describe("CodeService managed thread creation", () => {
     expect(port.commit).not.toHaveBeenCalled();
   });
 
+  it("consumes the server-derived managed creation approval before committing", async () => {
+    const port = mockCreationPort();
+    const fixture = serviceFixture({
+      threads: [],
+      managedThreadCreation: port as never,
+      approve: true,
+    });
+    const result = await fixture.service.execute(ids.window, {
+      ...managedCommand,
+      executionPolicy: "full-access",
+      permissionPersistence: "current-session",
+      approvalId: "00000000-0000-4000-8000-000000000088" as never,
+    });
+    expect(result).toMatchObject({ kind: "managed-thread-created" });
+    expect(port.commit).toHaveBeenCalledOnce();
+    expect(fixture.approvals.validate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        effect: expect.objectContaining({
+          kind: "create-managed-code-thread-full-access",
+          source: expect.objectContaining({
+            repositoryId,
+            checkoutId: managedCheckoutId,
+            checkoutHead: { kind: "branch", name: "feature/managed", oid: resolvedHead },
+          }),
+        }),
+        approvalId: "00000000-0000-4000-8000-000000000088",
+      }),
+    );
+  });
+
+  it("refuses managed Full access without a receipt and never commits", async () => {
+    const port = mockCreationPort();
+    const fixture = serviceFixture({
+      threads: [],
+      managedThreadCreation: port as never,
+      approve: false,
+    });
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...managedCommand,
+        executionPolicy: "full-access",
+        permissionPersistence: "current-session",
+        approvalId: "00000000-0000-4000-8000-000000000088" as never,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(port.prepare).toHaveBeenCalledOnce();
+    expect(port.commit).not.toHaveBeenCalled();
+  });
+
   it("maps a refused prepare to a typed actionable conflict failure", async () => {
     const port = mockCreationPort({
       prepare: async () => ({ status: "refused" as const, reason: "branch-collision" }),

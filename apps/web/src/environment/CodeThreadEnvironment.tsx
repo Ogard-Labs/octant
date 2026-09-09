@@ -1,3 +1,4 @@
+import { ThreadActivityEnvironment } from "../threadActivity/ThreadActivityEnvironment";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { LocalServerClient } from "@octant/client-runtime";
 import type { GithubClient } from "@octant/client-runtime/github-client";
@@ -13,11 +14,14 @@ import type {
 import type { OpenInApplicationId } from "@octant/contracts/shell";
 import { deriveCodeEnvironmentProjection } from "@octant/domain/shell-policy";
 import type { ReactNode } from "react";
+import { GitCommitHorizontal, GitPullRequest } from "lucide-react";
+import { CodeAttachmentGallery, type CodeAttachmentReader } from "../code/CodeAttachmentGallery";
+import type { CodeAttachmentReference } from "@octant/contracts";
 import { CodeCheckoutProvider } from "./CodeCheckoutContext";
 import { EnvironmentGitGroup } from "./EnvironmentGitGroup";
 import { EnvironmentGroup } from "./EnvironmentGroup";
 import { EnvironmentPullRequests } from "./EnvironmentPullRequests";
-import { countGroupedLocalServerListeners } from "./localServerGroups";
+import { countGroupedLocalServerListenersByScope } from "./localServerGroups";
 import { LocalServersGroup } from "./LocalServersGroup";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
 import { useCodeEnvironmentController } from "./useCodeEnvironmentController";
@@ -78,6 +82,10 @@ export interface CodeThreadEnvironmentProps {
   readonly deliveryOutcome?: CodeDeliveryOutcomeKind;
   readonly onOpenAgents?: () => void;
   readonly environmentOpen?: boolean;
+  readonly onOpenGit?: () => void;
+  readonly onCreatePullRequest?: () => void;
+  readonly sources?: ReadonlyArray<CodeAttachmentReference>;
+  readonly sourceClient?: CodeAttachmentReader;
 }
 
 /**
@@ -123,23 +131,12 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
-  const runningServerCount =
+  const runningServerCounts =
     localServers.snapshot === undefined
       ? undefined
-      : countGroupedLocalServerListeners(localServers.snapshot);
+      : countGroupedLocalServerListenersByScope(localServers.snapshot);
   const workingDirectory = readyObservation?.workingDirectory;
   const threadVersion = readyObservation?.threadVersion;
-  // The header answers "which checkout, and is it clean" without opening the
-  // section, which is the question a reader opens this panel with.
-  const checkoutSummary =
-    readyObservation === undefined
-      ? undefined
-      : [
-          readyObservation.branch.kind === "named"
-            ? readyObservation.branch.name
-            : `Detached ${readyObservation.branch.oid.slice(0, 7)}`,
-          readyObservation.changes === "dirty" ? "Uncommitted changes" : "Clean",
-        ].join(" · ");
 
   return (
     <div className="code-thread-environment">
@@ -164,34 +161,10 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                 changes: readyObservation.changes,
               }),
           ...(workingDirectory === undefined ? {} : { workingLocation: String(workingDirectory) }),
-          ...(runningServerCount === undefined ? {} : { runningServerCount }),
+          ...(runningServerCounts === undefined ? {} : { runningServerCounts }),
         }}
       >
-        {/* Every block in the panel is the same object: a titled section whose
-            header states what is true right now. The checkout used to be a
-            bare definition list above three disclosures, with its one action
-            floating loose between them, so the panel read as a fragment
-            followed by a menu rather than one list of sections. */}
-        <EnvironmentGroup
-          defaultOpen
-          summary={checkoutSummary}
-          title="Checkout"
-          {...(props.onOpenChanges === undefined || readyObservation === undefined
-            ? {}
-            : {
-                action: (
-                  <OctantButton
-                    className="window-no-drag"
-                    onClick={() => props.onOpenChanges?.()}
-                    size="sm"
-                    type="button"
-                    variant="ghost"
-                  >
-                    View changes
-                  </OctantButton>
-                ),
-              })}
-        >
+        <section className="environment-checkout" aria-label="Checkout">
           <EnvironmentGitGroup
             {...(freshThreadAction === undefined ? {} : { action: freshThreadAction })}
             {...(controller.errorMessage === undefined
@@ -200,17 +173,36 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
             {...(controller.observation === undefined
               ? {}
               : { observation: controller.observation })}
+            {...(props.onOpenChanges === undefined ? {} : { onOpenChanges: props.onOpenChanges })}
             status={controller.status}
           />
-        </EnvironmentGroup>
+          {props.onOpenGit === undefined ? null : (
+            <OctantButton
+              className="environment-quick-action"
+              onClick={props.onOpenGit}
+              variant="ghost"
+              type="button"
+            >
+              <GitCommitHorizontal aria-hidden="true" size={16} />
+              <span>Commit or push</span>
+            </OctantButton>
+          )}
+          {props.onCreatePullRequest === undefined ? null : (
+            <OctantButton
+              className="environment-quick-action"
+              onClick={props.onCreatePullRequest}
+              variant="ghost"
+              type="button"
+            >
+              <GitPullRequest aria-hidden="true" size={16} />
+              <span>Create pull request</span>
+            </OctantButton>
+          )}
+        </section>
         {props.deliveryOutcome === undefined ||
         threadVersion === undefined ||
         props.onExecute === undefined ? null : (
-          <EnvironmentGroup
-            defaultOpen
-            summary={deliveryOutcomeLabel(props.deliveryOutcome)}
-            title="Delivers"
-          >
+          <EnvironmentGroup summary={deliveryOutcomeLabel(props.deliveryOutcome)} title="Delivers">
             {/* Decision 0003 makes the outcome the reader's to confirm, and the
                 host has accepted a confirmation all along — nothing ever sent
                 one, so a thread carried whatever its first prompt read as. */}
@@ -223,8 +215,21 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                   outcomeKind,
                 });
               }}
-              suggested={false}
               value={props.deliveryOutcome}
+            />
+          </EnvironmentGroup>
+        )}
+        <ThreadActivityEnvironment />
+        {(props.sources?.length ?? 0) === 0 ? null : (
+          <EnvironmentGroup
+            title="Sources"
+            summary={String(props.sources?.length ?? 0)}
+            defaultOpen
+          >
+            <CodeAttachmentGallery
+              attachments={props.sources ?? []}
+              threadId={props.tab.threadId}
+              {...(props.sourceClient === undefined ? {} : { client: props.sourceClient })}
             />
           </EnvironmentGroup>
         )}
@@ -240,7 +245,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           {...(localServers.snapshot === undefined
             ? {}
             : {
-                summary: `${String(countGroupedLocalServerListeners(localServers.snapshot))} running`,
+                summary: `${String(runningServerCounts?.currentCheckout ?? 0)} in checkout · ${String(runningServerCounts?.other ?? 0)} elsewhere`,
               })}
           title="Local servers"
         >

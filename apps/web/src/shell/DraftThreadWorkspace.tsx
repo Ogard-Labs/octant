@@ -231,13 +231,15 @@ const CODE_SUGGESTIONS: ReadonlyArray<CodeComposerSuggestion> = [
 ];
 
 export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
-  const [selectedProjectId, setSelectedProjectId] = useState<ProjectId | undefined>(
-    props.projectId,
-  );
+  const [localProjectId, setLocalProjectId] = useState<ProjectId | undefined>(props.projectId);
+  // The shell owns a persisted selection when supplied; refused transitions
+  // must keep its former Project without replacing the composer's draft.
+  const selectedProjectId = props.onSelectProject === undefined ? localProjectId : props.projectId;
   const selectProject = (projectId: ProjectId) => {
-    setSelectedProjectId(projectId);
-    props.onSelectProject?.(projectId);
+    if (props.onSelectProject === undefined) setLocalProjectId(projectId);
+    else props.onSelectProject(projectId);
   };
+  useEffect(() => setLocalProjectId(props.projectId), [props.projectId]);
   type CreateFromSelection =
     | {
         readonly kind: "github";
@@ -597,6 +599,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(props.windowCapability === undefined
             ? {}
             : { windowCapability: props.windowCapability })}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
           onCreateThread={(input) => {
             const submitted = {
               ...input,
@@ -732,25 +735,23 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           <h1 className="oct-title oct-title--hero">{presentation.heading}</h1>
         </div>
 
-        <div className="draft-thread__composer">
-          <DraftContextStrip
-            mode={props.mode}
-            {...hostSelectorBinding}
-            providerGroups={props.providerGroups}
-            onSelectProvider={props.onSelectProvider}
-            {...(props.approvalLabel === undefined ? {} : { approvalLabel: props.approvalLabel })}
-            {...(props.branchName === undefined ? {} : { branchName: props.branchName })}
-            {...(props.projectName === undefined ? {} : { projectName: props.projectName })}
-            {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
-            {...(props.selectedModelId === undefined
-              ? {}
-              : { selectedModelId: props.selectedModelId })}
-            {...(props.selectedProviderInstanceId === undefined
-              ? {}
-              : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-          />
+        <div className="draft-thread__composer composer-stack">
           {createFromControl}
           <ThreadComposer
+            footer={
+              <div className="composer-tray">
+                <DraftContextStrip
+                  mode={props.mode}
+                  {...hostSelectorBinding}
+                  {...(props.approvalLabel === undefined
+                    ? {}
+                    : { approvalLabel: props.approvalLabel })}
+                  {...(props.branchName === undefined ? {} : { branchName: props.branchName })}
+                  {...(props.projectName === undefined ? {} : { projectName: props.projectName })}
+                  {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
+                />
+              </div>
+            }
             input={
               <OctantTextarea
                 aria-label="First message"
@@ -767,12 +768,27 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             }
             row={{
               leading: (
-                <ComposerVoiceButton
-                  disabled={props.creating}
-                  onTranscript={(transcript) =>
-                    setPrompt((current) => appendTranscript(current, transcript))
-                  }
-                />
+                <>
+                  <ComposerVoiceButton
+                    disabled={props.creating}
+                    onTranscript={(transcript) =>
+                      setPrompt((current) => appendTranscript(current, transcript))
+                    }
+                  />
+                  <span className="composer-gap" aria-hidden="true" />
+                  <ComposerModelPicker
+                    ariaLabel="Provider and model"
+                    menuSide="bottom"
+                    groups={props.providerGroups}
+                    onSelect={props.onSelectProvider}
+                    {...(props.selectedModelId === undefined
+                      ? {}
+                      : { selectedModelId: props.selectedModelId })}
+                    {...(props.selectedProviderInstanceId === undefined
+                      ? {}
+                      : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+                  />
+                </>
               ),
               actions: {
                 kind: "send",
@@ -945,13 +961,6 @@ function DraftContextStrip(props: {
   readonly onSelectHost?: (hostId: HostId) => void;
   readonly projectName?: string;
   readonly projectRoot?: string;
-  readonly providerGroups: ReadonlyArray<PickerGroup>;
-  readonly selectedModelId?: ProviderModelId;
-  readonly selectedProviderInstanceId?: ProviderInstanceId;
-  readonly onSelectProvider: (selection: {
-    readonly providerInstanceId: ProviderInstanceId;
-    readonly modelId: ProviderModelId;
-  }) => void;
 }) {
   return (
     <div className="draft-thread__context-strip" aria-label="Thread context">
@@ -985,19 +994,6 @@ function DraftContextStrip(props: {
           <span>{props.approvalLabel}</span>
         </span>
       ) : null}
-      <span className="draft-thread__context-picker">
-        <ComposerModelPicker
-          ariaLabel="Provider and model"
-          groups={props.providerGroups}
-          onSelect={props.onSelectProvider}
-          {...(props.selectedModelId === undefined
-            ? {}
-            : { selectedModelId: props.selectedModelId })}
-          {...(props.selectedProviderInstanceId === undefined
-            ? {}
-            : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-        />
-      </span>
     </div>
   );
 }

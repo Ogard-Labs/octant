@@ -10,10 +10,8 @@ action is re-authorized before any effect.
 
 ## Browser
 
-Browser surfaces open from a Work or Code thread via **Open surface →
-Browser**. The
-host requires exactly one owning thread before it can create an isolated
-context.
+Open **Browser** from a Work or Code thread's tool launcher. The host requires
+exactly one owning thread before it can create an isolated context.
 
 - Each context is an isolated incognito context scoped to exactly one owning
   thread (thread, host, mode, Project or root, provider, action, correlation,
@@ -31,13 +29,49 @@ content hash, and a correlated-evidence count. No launch token, window
 capability, provider credential, typed value, page body, screenshot, or raw
 browser diagnostic enters committed evidence.
 
-The browser pane exposes lifecycle controls — **Start browser**, **Go**,
-**Stop**, and **Cancel** — plus **Click** and **Type** actions against a
-**Selector**, and an optional **Value**. Statuses are `ready`, `waiting`,
-`running`, `stopped`, `unavailable`, `failed`, `interrupted`, and `stale`.
-There is no network start-control route; the renderer requests lifecycle
-through authenticated routes only, and denials produce no observation or
-evidence.
+The Browser pane provides an address bar, history controls, and the isolated
+page. Lifecycle and stop controls remain visible when a session needs them.
+The renderer requests lifecycle through authenticated routes; a denial creates
+no observation or evidence.
+
+### Agent control
+
+Agent control is separate from manual Browser availability. A provider needs a
+verified app-managed tool transport; an authenticated provider or a visible
+Browser tab alone does not prove that transport works.
+
+Where supported, Octant registers `octant_browser` when the provider session
+starts. The agent does not need a separate browser skill, a debugging URL, or
+a shell-launched browser. The tool can navigate, read page text, click and fill
+CSS-selected elements, press a browser key, scroll horizontally or vertically,
+wait for an element, take a screenshot, and stop its session. Page observations
+include a revision that subsequent actions may use to refuse stale targets.
+
+Chat, Work, and approval-gated Code tasks may request an isolated browser
+session for an origin through an inline approval. This does not change the task to Full
+access. Unsupported runtimes, expired grants, changed owners, and cancelled
+requests are refused explicitly. Chat keeps its virtual scope: Browser access
+adds no filesystem or shell authority. Background tasks retain their own
+browser when the visible pane changes within the same Project. Switching the
+selected model requires a fresh origin approval before that model can use the
+existing page.
+
+The host supplies the tool transport automatically for supported runtimes:
+
+| Runtime          | Transport and current boundary                                  |
+| ---------------- | --------------------------------------------------------------- |
+| Codex            | App-server dynamic tools                                        |
+| Claude Code      | Agent SDK managed tools                                         |
+| OpenCode         | Private MCP profile, verified on 1.18.21 with macOS confinement |
+| ACP runtimes     | HTTP MCP when the runtime advertises and accepts it             |
+| Pi               | Owned extension and verified CLI catalogue on 0.85.1            |
+| Direct endpoints | Only models with verified tool support                          |
+
+A supported transport is checked before it is advertised. It does not require
+editing a user's global MCP configuration or granting Full access. A runtime
+or platform that cannot carry the tool within its confinement policy stays
+unavailable; Linux OpenCode/ACP/Pi bridge support is not inferred from a macOS
+check. Oh My Pi remains unavailable where its driver is probe-only.
 
 ## Computer use
 
@@ -67,6 +101,19 @@ structured tool — with the next accessibility snapshot, screenshot, log, or
 assertion verifying a tap — is not yet built. Today that workbench offers
 Simulator screenshots, destination controls, and the `octant_apple` tool;
 see [Apple Development Workbench](/advanced/apple-workbench).
+
+## Picture in Picture
+
+Active Work and Code threads show a compact activity preview over the main
+conversation. The Code Environment panel has a **Picture in Picture** control
+for showing or hiding that preview. Hiding it changes presentation only; it
+does not stop the browser or computer-use session.
+
+Point at the preview or focus it with the keyboard to reveal its controls.
+A browser preview opens the same thread-owned Browser tab. Stop remains
+available, and computer-use approvals stay visible when they need a decision.
+The preview does not live inside Environment and does not open a separate OS
+window.
 
 ## Boundaries
 

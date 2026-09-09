@@ -26,6 +26,56 @@ const providerInstanceId = decodeProviderInstanceId("87000000-0000-4000-8000-000
 const sessionId = decodeProviderSessionId("87000000-0000-4000-8000-000000000002");
 
 describe("CodeTurnRunner", () => {
+  it("cancels a pending app tool when its transport request expires without answering a stale call", async () => {
+    const request = new AbortController();
+    const connection = fakeConnection({
+      toolRequestSignal: () => request.signal,
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "tool-request",
+            requestId: "browser-request",
+            toolName: "octant_browser",
+            inputJson: "{}",
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const execute = vi.fn(
+      ({ signal }: { readonly signal?: AbortSignal }) =>
+        new Promise<{ result: { error: string }; isError: boolean }>((resolve) => {
+          signal?.addEventListener(
+            "abort",
+            () => resolve({ result: { error: "cancelled" }, isError: true }),
+            { once: true },
+          );
+        }),
+    );
+    const observed: CodeTurnEvent[] = [];
+    const running = Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            appManagedTools: {
+              definitions: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+              execute,
+            },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+          }),
+        ),
+      ),
+    );
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    request.abort();
+    await running;
+    expect(connection.answerTool).not.toHaveBeenCalled();
+    expect(observed).toContainEqual(
+      expect.objectContaining({ category: "tool", status: "interrupted" }),
+    );
+  });
+
   it("subscribes before send and acquires Code in the exact checkout with thread authority", async () => {
     let subscribed = false;
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
@@ -69,6 +119,7 @@ describe("CodeTurnRunner", () => {
       sessionId,
       modelId: decodeProviderModelId("model-a"),
       executionPolicy: "approval-gated",
+      tools: [],
     });
     expect(events).toContainEqual(expect.objectContaining({ category: "message", text: "hello" }));
     expect(outcomes.at(-1)).toBe("completed");
@@ -531,6 +582,7 @@ describe("CodeTurnRunner", () => {
       ),
     );
 
+    expect(connection.start).toHaveBeenCalledWith(expect.objectContaining({ tools: [definition] }));
     expect(connection.send).toHaveBeenCalledWith(expect.objectContaining({ tools: [definition] }));
     expect(execute).toHaveBeenCalledOnce();
     expect(connection.answerTool).toHaveBeenCalledOnce();

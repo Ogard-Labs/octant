@@ -1,5 +1,9 @@
-import type { ProjectAvailability, ProjectSummary } from "@octant/contracts/projects";
-import type { WorkspaceTab } from "@octant/contracts/shell";
+import {
+  decodeProjectId,
+  type ProjectAvailability,
+  type ProjectSummary,
+} from "@octant/contracts/projects";
+import { decodeWorkspaceTabId, type WorkspaceTab } from "@octant/contracts/shell";
 import { decodeChatBootstrap, decodeChatThreadView } from "@octant/contracts/chat";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -84,31 +88,95 @@ describe("WorkspaceView welcome", () => {
       codeAccessPersistence: "current-session",
     }) as never;
 
-  it("asks for a folder, not a task, when the only Code Project is archived", async () => {
+  it("uses the shared Code composer when the only Code Project is archived", async () => {
     render(<WorkspaceView {...propsFor(welcome)} projects={[codeProject("archived")]} />);
 
-    // An archived Project is not somewhere a task can start, so the page
-    // reads as it does with no Project at all.
-    expect(await screen.findByRole("heading", { name: "Add a folder to start" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "What should we build?" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Start a Code thread" })).not.toBeInTheDocument();
   });
 
-  it("leads with a task once an active Code Project is bound", async () => {
-    render(<WorkspaceView {...propsFor(welcome)} projects={[codeProject("active")]} />);
+  it("keeps a new task's message when its Project binding changes and clears only for an explicit new draft", async () => {
+    const first = codeProject("active");
+    const second = {
+      ...first,
+      id: decodeProjectId("10000000-0000-4000-8000-000000000008"),
+      name: "Second Project",
+    };
+    const makeProps = (project: ProjectSummary, id: WorkspaceTab["id"]) =>
+      propsFor({
+        kind: "draft-thread",
+        id,
+        mode: "code",
+        title: "New Code thread",
+        projectId: project.id,
+      });
+    const projects = [first, second];
+    const { rerender } = render(
+      <WorkspaceView {...makeProps(first, decodeWorkspaceTabId(ids.tab))} projects={projects} />,
+    );
+    await userEvent.type(
+      await screen.findByRole("textbox", { name: "First message" }),
+      "Keep this message while choosing a Project",
+    );
+    rerender(
+      <WorkspaceView
+        {...makeProps(second, decodeWorkspaceTabId(codeIds.thread))}
+        projects={projects}
+      />,
+    );
+    expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue(
+      "Keep this message while choosing a Project",
+    );
+    rerender(
+      <WorkspaceView
+        {...makeProps(first, decodeWorkspaceTabId(ids.tab))}
+        projects={projects}
+        crossContextOffer={{
+          message: "This Project needs another window.",
+          canOpenInNewWindow: false,
+        }}
+      />,
+    );
+    expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
+      "Keep this message while choosing a Project",
+    );
+    expect(screen.getByRole("alert").closest(".composer")).not.toBeNull();
+    expect(
+      screen.queryByText("Open it in a new window to keep its authority."),
+    ).not.toBeInTheDocument();
+    rerender(
+      <WorkspaceView
+        {...makeProps(first, decodeWorkspaceTabId(ids.tab))}
+        projects={projects}
+        draftResetRevision={1}
+      />,
+    );
+    expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue("");
+  });
 
-    expect(await screen.findByRole("heading", { name: "Start a Code thread" })).toBeVisible();
+  it("keeps the selected Code Project context in the shared composer", async () => {
+    render(
+      <WorkspaceView
+        {...propsFor(welcome)}
+        draftProjectSelection={{ code: codeProject("active").id }}
+        projects={[codeProject("active")]}
+      />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "What should we build?" })).toBeVisible();
+    expect(screen.getByText("Octant")).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Start a Code thread" })).not.toBeInTheDocument();
   });
 });
 
 describe("WorkspaceView Code tab registration", () => {
-  it("uses the window thread strip instead of duplicating an unsplit pane header", async () => {
+  it("gives an unsplit conversation one title row of its own instead of a window strip", async () => {
     render(<WorkspaceView {...propsFor(codeTab("code-overview", "Planning"))} />);
 
-    expect(await screen.findByRole("tab", { name: "Planning" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(screen.queryByTitle("Drag to move or split")).not.toBeInTheDocument();
+    expect(await screen.findByTitle("Drag to move or split")).toHaveTextContent("Planning");
+    // Alone in the window there is nothing to close into.
+    expect(screen.queryByRole("button", { name: "Close Planning" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tablist", { name: "Open threads" })).not.toBeInTheDocument();
   });
 
   it.each(codeTabs)(
@@ -674,6 +742,75 @@ function localServersWiring(
   return { props, browserAutomationClient, create, act, stop };
 }
 
+describe("WorkspaceView pane title facts", () => {
+  it("names the thread's pull request and Project/branch beside the pane title", async () => {
+    const base = propsFor(codeTab("code-overview", "Faster issue validation"));
+    const project = {
+      id: ids.project,
+      type: "code",
+      name: "Octant",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      binding: { canonicalRoot: "/Users/example/code/octant" },
+      codeAccessPersistence: "current-session",
+    } as never;
+    const navigation = [
+      {
+        threadId: codeIds.thread,
+        projectId: ids.project,
+        pullRequestSummaries: {
+          items: [
+            {
+              identity: {
+                projectId: ids.project,
+                repositoryOwner: "acme",
+                repositoryName: "octant",
+                number: 917,
+              },
+              title: "Faster issue validation",
+              state: "open",
+              checks: "failing",
+              review: "pending",
+              mergeability: "mergeable",
+              freshness: "fresh",
+              readyToMerge: false,
+            },
+          ],
+          hiddenCount: 0,
+        },
+      },
+    ];
+    const bootstrap = {
+      threads: [{ id: codeIds.thread, checkoutId: codeIds.checkout }],
+      checkouts: [
+        {
+          id: codeIds.checkout,
+          head: { kind: "branch", name: "fix/validation", oid: "a".repeat(40) },
+        },
+      ],
+    };
+    render(
+      <WorkspaceView
+        {...base}
+        codeController={{ ...(base.codeController as object), navigation, bootstrap } as never}
+        projects={[project]}
+      />,
+    );
+
+    const header = (
+      await screen.findByRole("region", { name: "Workspace pane: Faster issue validation" })
+    ).querySelector<HTMLElement>(".workspace-pane__header")!;
+    const chip = within(header).getByText("#917");
+    expect(chip).toHaveAttribute("data-tone", "open");
+    expect(chip).toHaveAttribute("data-checks", "failing");
+    expect(within(header).getByText("Octant/fix/validation")).toBeVisible();
+  });
+});
+
 describe("WorkspaceView concurrent Code threads", () => {
   it("shows each open Code thread its own composition rather than the focused one's", async () => {
     const threadBId = "b0000000-0000-4000-8000-000000000002";
@@ -887,7 +1024,7 @@ describe("WorkspaceView child-run status chrome", () => {
 });
 
 describe("WorkspaceView cross-context banner", () => {
-  it("renders the cross-context banner with a dismiss control", () => {
+  it("renders the cross-context notice inside an existing thread composer with a dismiss control", async () => {
     const base = propsFor(codeTab("code-overview", "Overview"));
     const onDismiss = vi.fn();
     render(
@@ -900,9 +1037,10 @@ describe("WorkspaceView cross-context banner", () => {
         onDismissCrossContextOffer={onDismiss}
       />,
     );
+    await waitFor(() => expect(document.querySelector(".composer")).not.toBeNull());
     expect(
-      screen.getByText("That Project belongs to a different window.").closest('[role="alert"]'),
-    ).toBeVisible();
+      screen.getByText("That Project belongs to a different window.").closest(".composer"),
+    ).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(onDismiss).toHaveBeenCalledOnce();
   });

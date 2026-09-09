@@ -1,3 +1,4 @@
+import { ComposerNoticeProvider } from "../composer/ComposerNotice";
 import type {
   LayoutNodeId,
   PaneId,
@@ -26,7 +27,7 @@ import type {
 } from "@octant/contracts/canvasContext";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ComposerContextMeterGate } from "../context/composerContextMeterScope";
-import { SplitWorkspace } from "./SplitWorkspace";
+import { SplitWorkspace, type PaneFacts } from "./SplitWorkspace";
 import { ProjectOverview } from "../projects/ProjectOverview";
 import type { OctantHostBridge } from "./hostBridge";
 import type { ProviderController } from "../providers/useProviderController";
@@ -94,11 +95,6 @@ import { WorkThreadEnvironment } from "../environment/WorkThreadEnvironment";
 import { ChatThreadEnvironment } from "../environment/ChatThreadEnvironment";
 import { ThreadActivityPictureInPicture } from "../threadActivity/ThreadActivityPictureInPicture";
 import type { ThreadProviderIdentity } from "./navigationModel";
-import {
-  WorkspaceThreadTabs,
-  workspaceThreadTabFromSurface,
-  type WorkspaceThreadTab,
-} from "./WorkspaceThreadTabs";
 
 const CodeWorkspaceTab = lazy(() => import("../code/CodeWorkspaceTab"));
 const CanvasWorkspaceTab = lazy(() =>
@@ -203,8 +199,6 @@ export interface WorkspaceViewProps {
   readonly onCommitResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
   readonly onFocus: (paneId: PaneId) => void;
   readonly onOpenCodeThread: (threadId: CodeThreadId, title: string, projectId?: ProjectId) => void;
-  /** Reopens a window-local thread tab through the ordinary authoritative shell command. */
-  readonly onActivateThreadTab?: (tab: WorkspaceThreadTab) => void;
   readonly onOpenWorkThread?: (threadId: WorkThreadId, projectId: ProjectId) => void;
   /** Opens one repository file as a Code file tab, from the file explorer. */
   readonly onOpenCodeFile?: (input: {
@@ -461,95 +455,77 @@ export function WorkspaceView(props: WorkspaceViewProps) {
 
   const activePaneId = props.workspace.activePaneIds[props.mode];
   const activeSurface = findPaneInLayout(props.layout, activePaneId)?.surface;
+  const inlineNotice = activeSurface !== undefined;
+  const contextNotice =
+    props.crossContextOffer === undefined ? null : (
+      <CrossContextBanner
+        inline={inlineNotice}
+        message={props.crossContextOffer.message}
+        {...(props.onDismissCrossContextOffer === undefined
+          ? {}
+          : { onDismiss: props.onDismissCrossContextOffer })}
+        {...(props.onOpenCrossContextInNewWindow === undefined ||
+        !props.crossContextOffer.canOpenInNewWindow
+          ? {}
+          : { onOpenInNewWindow: props.onOpenCrossContextInNewWindow })}
+      />
+    );
   const contextProjectId = props.workspace.contextByMode[props.mode].projectId ?? undefined;
   const contextProject = props.projects.find(
     (project) => String(project.id) === String(contextProjectId),
   );
-  const activeCodeThreadTitle =
-    activeSurface !== undefined && "threadId" in activeSurface && activeSurface.mode === "code"
-      ? props.codeController.bootstrap?.threads.find(
-          (thread) => String(thread.id) === String(activeSurface.threadId),
-        )?.title
-      : undefined;
-  // The tab wears the thread's pull request the way the sidebar row and the
-  // board card do: the first linked request, from the cached snapshot.
-  const activeCodePullRequest = useMemo(() => {
-    if (
-      activeSurface === undefined ||
-      !("threadId" in activeSurface) ||
-      activeSurface.mode !== "code"
-    ) {
-      return undefined;
+  const codeBootstrap = props.codeController.bootstrap;
+  // Test doubles hand the view a controller with no navigation at all; the
+  // header then simply shows no facts rather than refusing to render.
+  const codeNavigation = props.codeController.navigation ?? [];
+  const paneFactsByThreadId = useMemo(() => {
+    const facts = new Map<string, PaneFacts>();
+    const checkouts = new Map(
+      (codeBootstrap?.checkouts ?? []).map((checkout) => [String(checkout.id), checkout]),
+    );
+    for (const item of codeNavigation) {
+      const thread = codeBootstrap?.threads.find(
+        (candidate) => String(candidate.id) === String(item.threadId),
+      );
+      const head =
+        thread === undefined ? undefined : checkouts.get(String(thread.checkoutId))?.head;
+      const branch = head?.kind === "branch" ? head.name : undefined;
+      const project = props.projects.find(
+        (candidate) => String(candidate.id) === String(item.projectId),
+      );
+      const summary = item.pullRequestSummaries?.items[0];
+      const path =
+        project === undefined
+          ? undefined
+          : branch === undefined
+            ? project.name
+            : `${project.name}/${branch}`;
+      if (summary === undefined && path === undefined) continue;
+      facts.set(String(item.threadId), {
+        ...(summary === undefined
+          ? {}
+          : {
+              pullRequest: {
+                number: summary.identity.number,
+                state: summary.state,
+                checks: summary.checks,
+              },
+            }),
+        ...(path === undefined ? {} : { path }),
+      });
     }
-    const summary = props.codeController.navigation?.find(
-      (item) => String(item.threadId) === String(activeSurface.threadId),
-    )?.pullRequestSummaries?.items[0];
-    return summary === undefined
-      ? undefined
-      : { number: summary.identity.number, state: summary.state };
-  }, [activeSurface, props.codeController.navigation]);
-  const activeThreadTab = useMemo(
-    () =>
-      activeSurface === undefined
-        ? undefined
-        : workspaceThreadTabFromSurface(
-            activeSurface,
-            contextProjectId,
-            activeCodeThreadTitle,
-            contextProject?.name,
-            activeCodePullRequest,
-          ),
-    [
-      activeCodePullRequest,
-      activeCodeThreadTitle,
-      activeSurface,
-      contextProjectId,
-      contextProject?.name,
-    ],
-  );
-
-  function activateThreadTab(tab: WorkspaceThreadTab) {
-    if (props.onActivateThreadTab !== undefined) {
-      props.onActivateThreadTab(tab);
-      return;
-    }
-    if (tab.mode === "chat") {
-      props.onOpenChatThread?.(tab.threadId, tab.title, tab.projectId);
-      return;
-    }
-    if (tab.mode === "work") {
-      if (tab.projectId !== undefined) props.onOpenWorkThread?.(tab.threadId, tab.projectId);
-      return;
-    }
-    props.onOpenCodeThread(tab.threadId, tab.title, tab.projectId);
-  }
+    return facts;
+  }, [codeBootstrap, codeNavigation, props.projects]);
 
   return (
     <TabActivationProvider
       {...(props.tabActivation === undefined ? {} : { registry: props.tabActivation })}
     >
       <main className="workspace" hidden={props.hidden}>
-        <WorkspaceThreadTabs
-          {...(activeThreadTab === undefined ? {} : { activeTab: activeThreadTab })}
-          {...(contextProject === undefined ? {} : { contextLabel: contextProject.name })}
-          fallbackTitle={activeSurface?.title ?? "Workspace"}
-          mode={props.mode}
-          onActivate={activateThreadTab}
-          onCloseActive={() => closePane(activePaneId)}
-        />
-        {props.crossContextOffer === undefined ? null : (
-          <CrossContextBanner
-            message={props.crossContextOffer.message}
-            {...(props.onDismissCrossContextOffer === undefined
-              ? {}
-              : { onDismiss: props.onDismissCrossContextOffer })}
-            {...(props.onOpenCrossContextInNewWindow === undefined ||
-            !props.crossContextOffer.canOpenInNewWindow
-              ? {}
-              : { onOpenInNewWindow: props.onOpenCrossContextInNewWindow })}
-          />
-        )}
+        {inlineNotice ? null : contextNotice}
         <SplitWorkspace
+          {...(contextProject === undefined ? {} : { contextLabel: contextProject.name })}
+          paneFactsByThreadId={paneFactsByThreadId}
           drag={props.drag}
           layout={props.layout}
           mode={props.mode}
@@ -563,18 +539,22 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           activePaneId={props.workspace.activePaneIds[props.mode]}
           {...(props.focusedPaneId === undefined ? {} : { focusedPaneId: props.focusedPaneId })}
           renderSurface={(surface, paneId) => (
-            <ComposerContextMeterGate
-              enabled={
-                paneId === props.workspace.activePaneIds[props.mode] &&
-                offersThreadComposer(surface)
-              }
+            <ComposerNoticeProvider
+              value={paneId === activePaneId && inlineNotice ? contextNotice : null}
             >
-              {onWelcomeGround(
-                surface,
-                props.welcomeBackdrop,
-                renderTab(surface, props, paneId, canvasContext),
-              )}
-            </ComposerContextMeterGate>
+              <ComposerContextMeterGate
+                enabled={
+                  paneId === props.workspace.activePaneIds[props.mode] &&
+                  offersThreadComposer(surface)
+                }
+              >
+                {onWelcomeGround(
+                  surface,
+                  props.welcomeBackdrop,
+                  renderTab(surface, props, paneId, canvasContext),
+                )}
+              </ComposerContextMeterGate>
+            </ComposerNoticeProvider>
           )}
           {...(props.providerByThreadId === undefined
             ? {}
@@ -619,19 +599,19 @@ function offersThreadComposer(surface: WorkspaceTab): boolean {
 }
 
 function CrossContextBanner(props: {
+  readonly inline?: boolean;
   readonly message: string;
   readonly onDismiss?: () => void;
   readonly onOpenInNewWindow?: () => void;
 }) {
   return (
-    <div className="workspace-cross-context-banner" role="alert">
+    <div
+      className={`workspace-cross-context-banner${props.inline ? " workspace-cross-context-banner--inline" : ""}`}
+      role="alert"
+    >
       <span className="workspace-cross-context-banner__message">{props.message}</span>
       <span className="workspace-cross-context-banner__actions">
-        {props.onOpenInNewWindow === undefined ? (
-          <span className="workspace-cross-context-banner__hint">
-            Open it in a new window to keep its authority.
-          </span>
-        ) : (
+        {props.onOpenInNewWindow === undefined ? null : (
           <OctantButton
             className="workspace-cross-context-banner__new-window"
             onClick={props.onOpenInNewWindow}
@@ -821,26 +801,6 @@ function renderCodeTab(
       </CodeWorkspaceErrorBoundary>
     );
   }
-  const surface = (
-    <ThreadActivityPictureInPicture
-      enabled={codeController.conversationHistory === "loaded"}
-      {...(props.browserAutomationClient === undefined
-        ? {}
-        : { browserClient: props.browserAutomationClient })}
-      {...(props.computerUseClient === undefined
-        ? {}
-        : { computerUseClient: props.computerUseClient })}
-      {...(props.onComputerUseSessionChange === undefined
-        ? {}
-        : { onComputerUseSessionChange: props.onComputerUseSessionChange })}
-      {...(props.onOpenSurface === undefined
-        ? {}
-        : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
-      threadId={tab.threadId as never}
-    >
-      {content}
-    </ThreadActivityPictureInPicture>
-  );
   return (
     <CodeWorkspaceErrorBoundary key={tab.id}>
       <ThreadPlanProvider
@@ -848,70 +808,109 @@ function renderCodeTab(
         enabled={codeController.conversationHistory === "loaded"}
         threadId={String(tab.threadId)}
       >
-        <CodeThreadEnvironment
-          active={paneIsActive(props, paneId)}
-          observe={codeController.conversationHistory === "loaded"}
-          {...(props.environmentDockOpen === undefined
+        <ThreadActivityPictureInPicture
+          enabled={codeController.conversationHistory === "loaded"}
+          {...(props.browserAutomationClient === undefined
             ? {}
-            : { environmentOpen: props.environmentDockOpen })}
-          {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
-          {...(codeController.activeView?.thread.deliveryTarget.outcomeKind === undefined
+            : { browserClient: props.browserAutomationClient })}
+          {...(props.computerUseClient === undefined
             ? {}
-            : { deliveryOutcome: codeController.activeView.thread.deliveryTarget.outcomeKind })}
-          {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
-          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-          {...(props.openInApplications === undefined
+            : { computerUseClient: props.computerUseClient })}
+          {...(props.onComputerUseSessionChange === undefined
             ? {}
-            : { openInApplications: props.openInApplications })}
-          {...(project === undefined ? {} : { project })}
-          {...(props.onNewThreadInProject === undefined
+            : { onComputerUseSessionChange: props.onComputerUseSessionChange })}
+          {...(props.onOpenSurface === undefined
             ? {}
-            : { onNewThreadInProject: props.onNewThreadInProject })}
-          {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
-          {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
-          {...(props.projectWindowCapability === undefined
-            ? {}
-            : { windowCapability: props.projectWindowCapability })}
-          {...(props.localServerClient === undefined
-            ? {}
-            : { localServerClient: props.localServerClient })}
-          {...(props.githubClient === undefined ? {} : { githubClient: props.githubClient })}
-          {...(pullRequestRepository === undefined ? {} : { pullRequestRepository })}
-          {...(browserAutomationClient === undefined || onOpenSurface === undefined
-            ? {}
-            : {
-                onOpenLocalServer: async (target: LocalServerOpenTarget) => {
-                  const browserThreadId = tab.threadId as unknown as BrowserThreadId;
-                  const contextId = await openLocalServerBrowserContext(
-                    browserAutomationClient,
-                    browserThreadId,
-                    target,
-                  );
-                  // Named by the context it just created, so this Open gets its
-                  // own tab instead of taking over the thread's Browser tab.
-                  // The shell recovers a rejected tab mutation rather than
-                  // throwing, so only its adoption answer proves the context
-                  // gained a close path; without one it is released here and
-                  // the Open is reported as the failure it was.
-                  const adopted = await onOpenSurface("browser", paneId, contextId);
-                  if (adopted) return;
-                  await releaseBrowserContext(browserAutomationClient, browserThreadId, contextId);
-                  throw new Error("No Browser tab adopted the context opened for this server.");
-                },
-              })}
-          {...(globalThis.navigator?.clipboard === undefined
-            ? {}
-            : {
-                onCopyLocalServerUrl: (url: string) => navigator.clipboard.writeText(url),
-              })}
-          tab={tab}
-          onExecute={codeController.execute}
-          {...(props.onOpenReview === undefined
-            ? {}
-            : { onOpenChanges: () => props.onOpenReview?.(tab.threadId) })}
+            : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
+          threadId={tab.threadId as never}
         >
-          {surface}
-        </CodeThreadEnvironment>
+          <CodeThreadEnvironment
+            active={paneIsActive(props, paneId)}
+            observe={codeController.conversationHistory === "loaded"}
+            {...(props.environmentDockOpen === undefined
+              ? {}
+              : { environmentOpen: props.environmentDockOpen })}
+            {...(props.agentRunClient === undefined
+              ? {}
+              : { agentRunClient: props.agentRunClient })}
+            {...(codeController.activeView?.thread.deliveryTarget.outcomeKind === undefined
+              ? {}
+              : { deliveryOutcome: codeController.activeView.thread.deliveryTarget.outcomeKind })}
+            {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
+            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+            {...(props.openInApplications === undefined
+              ? {}
+              : { openInApplications: props.openInApplications })}
+            {...(project === undefined ? {} : { project })}
+            {...(props.onNewThreadInProject === undefined
+              ? {}
+              : { onNewThreadInProject: props.onNewThreadInProject })}
+            {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
+            {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
+            {...(props.projectWindowCapability === undefined
+              ? {}
+              : { windowCapability: props.projectWindowCapability })}
+            {...(props.localServerClient === undefined
+              ? {}
+              : { localServerClient: props.localServerClient })}
+            {...(props.githubClient === undefined ? {} : { githubClient: props.githubClient })}
+            {...(pullRequestRepository === undefined ? {} : { pullRequestRepository })}
+            {...(browserAutomationClient === undefined || onOpenSurface === undefined
+              ? {}
+              : {
+                  onOpenLocalServer: async (target: LocalServerOpenTarget) => {
+                    const browserThreadId = tab.threadId as unknown as BrowserThreadId;
+                    const contextId = await openLocalServerBrowserContext(
+                      browserAutomationClient,
+                      browserThreadId,
+                      target,
+                    );
+                    // Named by the context it just created, so this Open gets its
+                    // own tab instead of taking over the thread's Browser tab.
+                    // The shell recovers a rejected tab mutation rather than
+                    // throwing, so only its adoption answer proves the context
+                    // gained a close path; without one it is released here and
+                    // the Open is reported as the failure it was.
+                    const adopted = await onOpenSurface("browser", paneId, contextId);
+                    if (adopted) return;
+                    await releaseBrowserContext(
+                      browserAutomationClient,
+                      browserThreadId,
+                      contextId,
+                    );
+                    throw new Error("No Browser tab adopted the context opened for this server.");
+                  },
+                })}
+            {...(globalThis.navigator?.clipboard === undefined
+              ? {}
+              : {
+                  onCopyLocalServerUrl: (url: string) => navigator.clipboard.writeText(url),
+                })}
+            tab={tab}
+            sources={
+              codeController.conversationHistory !== "loaded"
+                ? []
+                : [
+                    ...new Map(
+                      codeController.conversation
+                        .flatMap((message) => message.attachments ?? [])
+                        .map((attachment) => [String(attachment.attachmentId), attachment]),
+                    ).values(),
+                  ]
+            }
+            sourceClient={codeController.client}
+            onOpenGit={() => props.onOpenCodeSurface("code-git", tab.threadId, "Git")}
+            onCreatePullRequest={() =>
+              props.onOpenCodeSurface("code-pr", tab.threadId, "Pull request")
+            }
+            onExecute={codeController.execute}
+            {...(props.onOpenReview === undefined
+              ? {}
+              : { onOpenChanges: () => props.onOpenReview?.(tab.threadId) })}
+          >
+            {content}
+          </CodeThreadEnvironment>
+        </ThreadActivityPictureInPicture>
       </ThreadPlanProvider>
     </CodeWorkspaceErrorBoundary>
   );
@@ -965,13 +964,35 @@ function renderNonCodeTab(
   },
   openProviderSettings: (() => void) | undefined,
 ): React.ReactNode {
+  // Code's welcome tab is only a routing placeholder. Keep one start surface
+  // so a split or restored fallback never sends the reader through a second
+  // "Start a Code thread" screen before reaching the real composer.
+  if (tab.kind === "welcome" && tab.mode === "code") {
+    const projectId =
+      props.draftProjectSelection?.code ??
+      props.workspace.contextByMode.code.projectId ??
+      undefined;
+    return renderNonCodeTab(
+      {
+        kind: "draft-thread",
+        id: tab.id,
+        mode: "code",
+        title: "New Code thread",
+        ...(projectId === undefined ? {} : { projectId }),
+      },
+      props,
+      paneId,
+      canvasContext,
+      openProviderSettings,
+    );
+  }
   if (tab.kind === "draft-thread") {
     const recentThreads = draftRecentThreads(tab.mode, props);
     const draftProjectId = tab.projectId ?? props.draftProjectSelection?.[tab.mode];
     return (
       <DraftThreadWorkspace
         greetingName={props.greetingName}
-        key={`${String(tab.id)}:${String(tab.projectId ?? "unbound")}:${String(props.draftResetRevision ?? 0)}`}
+        key={`${String(paneId)}:${tab.mode}:${String(props.draftResetRevision ?? 0)}`}
         {...(recentThreads.length === 0 ? {} : { recentThreads })}
         mode={tab.mode}
         {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
@@ -1093,6 +1114,9 @@ function renderNonCodeTab(
         {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
         {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+        {...(props.browserAutomationClient === undefined
+          ? {}
+          : { browserAutomationClient: props.browserAutomationClient })}
         {...(openProviderSettings === undefined ? {} : { onOpenSettings: openProviderSettings })}
         active={paneIsActive(props, paneId)}
         {...(props.environmentDockOpen === undefined
@@ -1199,6 +1223,9 @@ function renderNonCodeTab(
               threadId={tab.threadId as never}
             >
               <WorkThreadWorkspace
+                {...(props.browserAutomationClient === undefined
+                  ? {}
+                  : { browserAutomationClient: props.browserAutomationClient })}
                 {...(props.workChangeRevision === undefined
                   ? {}
                   : { changeRevision: props.workChangeRevision })}
@@ -1214,9 +1241,6 @@ function renderNonCodeTab(
                   ? {}
                   : { requestClient: props.workRequestClient })}
                 threadClient={workThreadClient}
-                {...(props.onOpenSurface === undefined
-                  ? {}
-                  : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
                 threadId={tab.threadId}
                 {...(props.revealChatTurn !== undefined &&
                 String(props.revealChatTurn.threadId) === String(tab.threadId)
@@ -1813,6 +1837,7 @@ function ChatThreadWorkspace(props: {
   readonly chatReadCursorStore: ChatReadCursorStore;
   readonly active?: boolean;
   readonly extensionClient?: ExtensionClient;
+  readonly browserAutomationClient?: BrowserAutomationClient;
   readonly onOpenSettings?: () => void;
   readonly onClearCanvasSelections: () => void;
   readonly onRemoveCanvasSelection: (selectionId: CanvasContextSelectionId) => void;
@@ -1856,12 +1881,14 @@ function ChatThreadWorkspace(props: {
         instances: props.providerController.instances ?? [],
         observedByInstance: props.providerController.observedByInstance ?? new Map(),
         providerOrder,
+        hiddenModels: props.providerController.defaults?.hiddenModels ?? [],
         mode: "chat",
       }),
     [
       props.providerController.instances,
       props.providerController.observedByInstance,
       providerOrder,
+      props.providerController.defaults?.hiddenModels,
     ],
   );
   return (
@@ -1883,6 +1910,9 @@ function ChatThreadWorkspace(props: {
         onRemoveCanvasSelection={props.onRemoveCanvasSelection}
         pendingCanvasSelections={props.pendingCanvasSelections}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+        {...(props.browserAutomationClient === undefined
+          ? {}
+          : { browserAutomationClient: props.browserAutomationClient })}
         {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
         {...(props.projectWindowCapability === undefined
           ? {}
@@ -1935,6 +1965,11 @@ function findPaneInLayout(layout: WorkspaceLayoutNode, paneId: PaneId): Workspac
   return findPaneInLayout(layout.first, paneId) ?? findPaneInLayout(layout.second, paneId);
 }
 
+/**
+ * A pane's header is the one title row a surface gets: its name, its Project,
+ * and the way to close it. Start screens and readers carry their own heading
+ * or need none, so alone in the window they keep the band clear.
+ */
 function singlePaneSurfaceNeedsHeader(surface: WorkspaceTab | undefined): boolean {
   if (surface === undefined) return false;
   switch (surface.kind) {
@@ -1942,9 +1977,6 @@ function singlePaneSurfaceNeedsHeader(surface: WorkspaceTab | undefined): boolea
     case "draft-thread":
     case "settings":
     case "project":
-    case "chat-thread":
-    case "work-thread":
-    case "code-overview":
       return false;
     default:
       return true;

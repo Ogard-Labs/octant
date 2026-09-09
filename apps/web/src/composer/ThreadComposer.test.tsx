@@ -4,6 +4,36 @@ import { describe, expect, it, vi } from "vitest";
 import { ThreadComposer } from "./ThreadComposer";
 
 describe("ThreadComposer", () => {
+  it("keeps follow-up feedback and checkout context separate from the message toolbar", () => {
+    const row = {
+      actions: { kind: "send" as const, send: { ariaLabel: "Send", onSend: vi.fn() } },
+    };
+    const input = (
+      <textarea aria-label="Message" defaultValue="Keep my draft" className="composer-input" />
+    );
+    const context = <span>Project · branch</span>;
+    const { container, rerender } = render(
+      <ThreadComposer
+        presentation="follow-up"
+        context={context}
+        input={input}
+        row={row}
+        footer={<span role="status">Usage notice</span>}
+      />,
+    );
+    const field = screen.getByRole("textbox", { name: "Message" });
+    const surface = container.querySelector(".thread-composer__surface");
+    const feedback = container.querySelector(".thread-composer__feedback");
+    const toolbar = container.querySelector(".composer-row");
+    expect(surface).toContainElement(field);
+    expect(feedback?.nextElementSibling).toBe(toolbar);
+    expect(surface?.nextElementSibling).toHaveClass("thread-composer__context");
+    rerender(<ThreadComposer presentation="follow-up" context={context} input={input} row={row} />);
+    expect(container.querySelector(".thread-composer__feedback")).toBe(feedback);
+    expect(screen.getByRole("textbox", { name: "Message" })).toBe(field);
+    expect(field).toHaveValue("Keep my draft");
+  });
+
   it("renders only the capabilities the surface passes in", () => {
     const { container } = render(
       <ThreadComposer

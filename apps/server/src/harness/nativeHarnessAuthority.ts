@@ -1,3 +1,4 @@
+import { LOCAL_HOST_ID } from "@octant/contracts";
 import type {
   ChatThreadId,
   OctantMode,
@@ -40,6 +41,7 @@ export function createNativeHarnessAuthority(
 ): NativeHarnessAuthority {
   const resolver = new ServerBrowserAuthorityResolver({
     hostId: options.hostId,
+    workspaceHostId: LOCAL_HOST_ID,
     persistence: options.persistence,
     workThreads: options.workThreads,
   });

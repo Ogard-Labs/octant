@@ -213,15 +213,10 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
       );
     }
     if (props.subject.mode !== "code") {
-      return unavailable(
-        "Files",
-        "Files are not available for a Chat thread, which binds no folder.",
-      );
+      return unavailable("Files", "Files opens from a Code thread.");
     }
     return (
-      <Suspense
-        fallback={<ShellState message="Loading files." state="loading" title="Loading Files" />}
-      >
+      <Suspense fallback={<ShellState state="loading" title="Loading Files" />}>
         <CodeFileExplorerPanel
           {...(props.subject.checkoutId === undefined
             ? {}
@@ -239,7 +234,7 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
 
   if (props.surface === "document") {
     if (props.subject.mode !== "code" || props.codeController === undefined) {
-      return unavailable("Document", "Documents are not yet available for this thread type.");
+      return unavailable("Document", "Document opens from a Code thread.");
     }
     if (props.writtenDocumentPath === undefined) {
       return unavailable("Document", "This thread has not written a document yet.");
@@ -294,12 +289,10 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
 
   if (props.surface === "review") {
     if (props.subject.mode !== "code") {
-      return unavailable("Review", "Review is not yet available for this thread type.");
+      return unavailable("Review", "Review opens from a Code thread.");
     }
     return (
-      <Suspense
-        fallback={<ShellState message="Loading review." state="loading" title="Loading Review" />}
-      >
+      <Suspense fallback={<ShellState state="loading" title="Loading Review" />}>
         <DockReviewTool
           {...(props.codeController === undefined ? {} : { controller: props.codeController })}
           threadId={decodeCodeThreadId(props.subject.threadId)}
@@ -324,17 +317,16 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
   ) {
     return null;
   }
+  const label = surfaceLabel(props.surface);
+  if (props.subject.mode !== "code")
+    return unavailable(label, `${label} opens from a Code thread.`);
   const controller = props.codeController;
   const threadId = decodeCodeThreadId(props.subject.threadId);
   if (
-    props.subject.mode !== "code" ||
     controller?.activeView === undefined ||
     String(controller.activeView.thread.id) !== String(threadId)
   ) {
-    return unavailable(
-      surfaceLabel(props.surface),
-      "This Code thread is still loading its utility state.",
-    );
+    return loading(label);
   }
   if (
     props.surface === "ios-simulator" &&
@@ -348,13 +340,7 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
   const tab = codeUtilityTab(props.surface, threadId, props.appleProjectPath, props.utilityTabId);
   return (
     <Suspense
-      fallback={
-        <ShellState
-          message={`Loading ${surfaceLabel(props.surface).toLocaleLowerCase()}.`}
-          state="loading"
-          title={`Loading ${surfaceLabel(props.surface)}`}
-        />
-      }
+      fallback={<ShellState state="loading" title={`Loading ${surfaceLabel(props.surface)}`} />}
     >
       <CodeWorkspaceTab
         {...(props.appleToolchainClient === undefined
@@ -425,4 +411,8 @@ function surfaceLabel(surface: "terminal" | "tests" | "ios-simulator"): string {
 
 function unavailable(title: string, message: string) {
   return <ShellState message={message} state="neutral" title={`${title} is unavailable`} />;
+}
+
+function loading(title: string) {
+  return <ShellState state="loading" title={`Loading ${title}`} />;
 }

@@ -79,3 +79,33 @@ describe("Claude failure sanitizer", () => {
     });
   });
 });
+
+describe("Managed tool progress", () => {
+  it("accepts a parent-correlated heartbeat only for an offered app-owned tool", () => {
+    const toolName = "mcp__octant__octant_browser";
+    const message = {
+      type: "tool_progress",
+      session_id: "session-1",
+      tool_use_id: "heartbeat-1",
+      tool_name: toolName,
+      parent_tool_use_id: "tool-1",
+      elapsed_time_seconds: 30,
+      heartbeat: true,
+    };
+    expect(
+      decodeMessage(
+        message,
+        { ...openInput, tools: [...openInput.tools, toolName], managedToolServer: true },
+        { kind: "active", sessionId: "session-1" },
+      ),
+    ).toMatchObject({
+      kind: "tool-progress",
+      toolName,
+      elapsedSeconds: 30,
+      parentToolUseId: "tool-1",
+    });
+    expect(() =>
+      decodeMessage(message, openInput, { kind: "active", sessionId: "session-1" }),
+    ).toThrow();
+  });
+});

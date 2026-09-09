@@ -973,8 +973,14 @@ export function ClaudeConfigurationForm(props: ClaudeConfigurationFormProps) {
           Authenticate with the official Claude Code app or CLI, then check the connection.
         </p>
       )}
-      <OctantButton disabled={props.disabled} type="submit">
-        Save Claude settings for {props.instance.displayName}
+      <OctantButton
+        disabled={props.disabled}
+        type="submit"
+        variant="outline"
+        size="sm"
+        aria-label={`Save Claude settings for ${props.instance.displayName}`}
+      >
+        Save
       </OctantButton>
     </form>
   );
@@ -1009,8 +1015,14 @@ export function DevinConfigurationForm(props: {
           required
         />
       </label>
-      <OctantButton disabled={props.disabled} type="submit">
-        Save Devin settings for {props.instance.displayName}
+      <OctantButton
+        disabled={props.disabled}
+        type="submit"
+        variant="outline"
+        size="sm"
+        aria-label={`Save Devin settings for ${props.instance.displayName}`}
+      >
+        Save
       </OctantButton>
     </form>
   );
@@ -1044,8 +1056,14 @@ export function PiConfigurationForm(props: {
           required
         />
       </label>
-      <OctantButton disabled={props.disabled} type="submit">
-        Save Pi settings for {props.instance.displayName}
+      <OctantButton
+        disabled={props.disabled}
+        type="submit"
+        variant="outline"
+        size="sm"
+        aria-label={`Save Pi settings for ${props.instance.displayName}`}
+      >
+        Save
       </OctantButton>
     </form>
   );
@@ -1080,8 +1098,14 @@ export function OhMyPiConfigurationForm(props: {
           required
         />
       </label>
-      <OctantButton disabled={props.disabled} type="submit">
-        Save Oh My Pi settings for {props.instance.displayName}
+      <OctantButton
+        disabled={props.disabled}
+        type="submit"
+        variant="outline"
+        size="sm"
+        aria-label={`Save Oh My Pi settings for ${props.instance.displayName}`}
+      >
+        Save
       </OctantButton>
     </form>
   );
@@ -1115,8 +1139,14 @@ export function KiloConfigurationForm(props: {
           required
         />
       </label>
-      <OctantButton disabled={props.disabled} type="submit">
-        Save Kilo settings for {props.instance.displayName}
+      <OctantButton
+        disabled={props.disabled}
+        type="submit"
+        variant="outline"
+        size="sm"
+        aria-label={`Save Kilo settings for ${props.instance.displayName}`}
+      >
+        Save
       </OctantButton>
     </form>
   );
@@ -1150,8 +1180,14 @@ export function GooseConfigurationForm(props: {
           required
         />
       </label>
-      <OctantButton disabled={props.disabled} type="submit">
-        Save Goose settings for {props.instance.displayName}
+      <OctantButton
+        disabled={props.disabled}
+        type="submit"
+        variant="outline"
+        size="sm"
+        aria-label={`Save Goose settings for ${props.instance.displayName}`}
+      >
+        Save
       </OctantButton>
     </form>
   );
@@ -1241,8 +1277,14 @@ export function GlmConfigurationForm(props: {
           </OctantButton>
         </>
       )}
-      <OctantButton disabled={props.disabled} type="submit">
-        Save GLM settings for {props.instance.displayName}
+      <OctantButton
+        disabled={props.disabled}
+        type="submit"
+        variant="outline"
+        size="sm"
+        aria-label={`Save GLM settings for ${props.instance.displayName}`}
+      >
+        Save
       </OctantButton>
     </form>
   );
@@ -1276,8 +1318,14 @@ export function CopilotConfigurationForm(props: {
           required
         />
       </label>
-      <OctantButton disabled={props.disabled} type="submit">
-        Save GitHub Copilot settings for {props.instance.displayName}
+      <OctantButton
+        disabled={props.disabled}
+        type="submit"
+        variant="outline"
+        size="sm"
+        aria-label={`Save GitHub Copilot settings for ${props.instance.displayName}`}
+      >
+        Save
       </OctantButton>
     </form>
   );
@@ -1376,8 +1424,14 @@ function ApiKeyAcpConfigurationForm<
           </OctantButton>
         </>
       )}
-      <OctantButton disabled={props.disabled} type="submit">
-        Save {props.driverLabel} settings for {props.instance.displayName}
+      <OctantButton
+        disabled={props.disabled}
+        type="submit"
+        variant="outline"
+        size="sm"
+        aria-label={`Save ${props.driverLabel} settings for ${props.instance.displayName}`}
+      >
+        Save
       </OctantButton>
     </form>
   );
@@ -1490,8 +1544,14 @@ export function OllamaConfigurationForm(props: {
         Literal loopback native API only. Octant never manages the shared Ollama service or its
         models.
       </p>
-      <OctantButton disabled={props.disabled} type="submit">
-        Save Ollama settings for {props.instance.displayName}
+      <OctantButton
+        disabled={props.disabled}
+        type="submit"
+        variant="outline"
+        size="sm"
+        aria-label={`Save Ollama settings for ${props.instance.displayName}`}
+      >
+        Save
       </OctantButton>
     </form>
   );
@@ -1606,8 +1666,14 @@ export function VibeConfigurationForm(props: VibeConfigurationFormProps) {
           )}
         </div>
       )}
-      <OctantButton disabled={props.disabled} type="submit">
-        Save Mistral Vibe settings for {props.instance.displayName}
+      <OctantButton
+        disabled={props.disabled}
+        type="submit"
+        variant="outline"
+        size="sm"
+        aria-label={`Save Mistral Vibe settings for ${props.instance.displayName}`}
+      >
+        Save
       </OctantButton>
     </form>
   );
@@ -1722,8 +1788,14 @@ export function GrokConfigurationForm(props: GrokConfigurationFormProps) {
           )}
         </div>
       )}
-      <OctantButton disabled={props.disabled} type="submit">
-        Save Grok Build settings for {props.instance.displayName}
+      <OctantButton
+        disabled={props.disabled}
+        type="submit"
+        variant="outline"
+        size="sm"
+        aria-label={`Save Grok Build settings for ${props.instance.displayName}`}
+      >
+        Save
       </OctantButton>
     </form>
   );
@@ -1818,8 +1890,14 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
         Remote endpoints require HTTPS. HTTP is allowed only for loopback hosts.
       </p>
       <div className="provider-card__credential-actions">
-        <OctantButton disabled={props.disabled} type="submit">
-          Save HTTP settings for {props.instance.displayName}
+        <OctantButton
+          disabled={props.disabled}
+          type="submit"
+          variant="outline"
+          size="sm"
+          aria-label={`Save HTTP settings for ${props.instance.displayName}`}
+        >
+          Save
         </OctantButton>
         {props.credentialManagementAvailable ? (
           <OctantButton
@@ -1943,8 +2021,14 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
         Remote endpoints require HTTPS. HTTP is allowed only for loopback hosts.
       </p>
       <div className="provider-card__credential-actions">
-        <OctantButton disabled={props.disabled} type="submit">
-          Save Anthropic settings for {props.instance.displayName}
+        <OctantButton
+          disabled={props.disabled}
+          type="submit"
+          variant="outline"
+          size="sm"
+          aria-label={`Save Anthropic settings for ${props.instance.displayName}`}
+        >
+          Save
         </OctantButton>
         {props.credentialManagementAvailable ? (
           <OctantButton
@@ -2055,8 +2139,14 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
         as the api-key header. List deployments in the order you want them to appear.
       </p>
       <div className="provider-card__credential-actions">
-        <OctantButton disabled={props.disabled} type="submit">
-          Save Azure AI Foundry settings for {props.instance.displayName}
+        <OctantButton
+          disabled={props.disabled}
+          type="submit"
+          variant="outline"
+          size="sm"
+          aria-label={`Save Azure AI Foundry settings for ${props.instance.displayName}`}
+        >
+          Save
         </OctantButton>
         {props.credentialManagementAvailable ? (
           <OctantButton
@@ -2489,8 +2579,14 @@ export function OpenAiImageConfigurationForm(props: OpenAiImageConfigurationForm
         instance={props.instance}
       />
       <div className="provider-card__credential-actions">
-        <OctantButton disabled={props.disabled} type="submit">
-          Save OpenAI image settings for {props.instance.displayName}
+        <OctantButton
+          disabled={props.disabled}
+          type="submit"
+          variant="outline"
+          size="sm"
+          aria-label={`Save OpenAI image settings for ${props.instance.displayName}`}
+        >
+          Save
         </OctantButton>
         {props.credentialManagementAvailable ? (
           <OctantButton
@@ -2554,8 +2650,14 @@ export function GeminiImageConfigurationForm(props: GeminiImageConfigurationForm
         instance={props.instance}
       />
       <div className="provider-card__credential-actions">
-        <OctantButton disabled={props.disabled} type="submit">
-          Save Gemini image settings for {props.instance.displayName}
+        <OctantButton
+          disabled={props.disabled}
+          type="submit"
+          variant="outline"
+          size="sm"
+          aria-label={`Save Gemini image settings for ${props.instance.displayName}`}
+        >
+          Save
         </OctantButton>
         {props.credentialManagementAvailable ? (
           <OctantButton
@@ -2619,8 +2721,14 @@ export function BflImageConfigurationForm(props: BflImageConfigurationFormProps)
         instance={props.instance}
       />
       <div className="provider-card__credential-actions">
-        <OctantButton disabled={props.disabled} type="submit">
-          Save Black Forest Labs image settings for {props.instance.displayName}
+        <OctantButton
+          disabled={props.disabled}
+          type="submit"
+          variant="outline"
+          size="sm"
+          aria-label={`Save Black Forest Labs image settings for ${props.instance.displayName}`}
+        >
+          Save
         </OctantButton>
         {props.credentialManagementAvailable ? (
           <OctantButton
@@ -2684,8 +2792,14 @@ export function IdeogramImageConfigurationForm(props: IdeogramImageConfiguration
         instance={props.instance}
       />
       <div className="provider-card__credential-actions">
-        <OctantButton disabled={props.disabled} type="submit">
-          Save Ideogram image settings for {props.instance.displayName}
+        <OctantButton
+          disabled={props.disabled}
+          type="submit"
+          variant="outline"
+          size="sm"
+          aria-label={`Save Ideogram image settings for ${props.instance.displayName}`}
+        >
+          Save
         </OctantButton>
         {props.credentialManagementAvailable ? (
           <OctantButton

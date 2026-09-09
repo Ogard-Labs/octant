@@ -11,6 +11,7 @@ import type {
   ProviderResumeCursor,
   ProviderRuntimeEvent,
   ProviderSessionId,
+  ProviderToolDefinition,
   WorkThreadId,
   ProviderToolAnswer,
   ProviderTurnInput,
@@ -51,6 +52,8 @@ export interface ProviderSessionStart {
    * rest; absent means provider defaults.
    */
   readonly modelOptionValues?: ProviderModelOptionValues;
+  /** App-managed tools made available when the provider session starts. */
+  readonly tools?: ReadonlyArray<ProviderToolDefinition>;
 }
 
 export interface ProviderSessionHandle {
@@ -115,6 +118,11 @@ export interface ProviderToolVerificationResult {
 }
 
 export interface ProviderConnection {
+  /** A transport may cancel one app tool while its session remains alive. */
+  readonly toolRequestSignal?: (input: {
+    readonly sessionId: ProviderSessionId;
+    readonly requestId: string;
+  }) => AbortSignal;
   /**
    * Establishes a subscription to this connection's runtime events and returns
    * the stream reading from it. Each subscriber gets its own, and it lasts as

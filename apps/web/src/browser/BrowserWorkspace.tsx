@@ -97,7 +97,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const [pendingPoint, setPendingPoint] = useState<BrowserViewportPoint>();
   const feedback = useProductFeedback({
     threadId: props.tab.threadId === undefined ? undefined : String(props.tab.threadId),
-    mode: "code",
+    mode: props.tab.mode,
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
@@ -130,9 +130,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const addressSecurityLabel =
     committedAddress === undefined ? "Address" : secureAddress ? "Secure HTTPS" : "Not secure HTTP";
   const controlLabel = !nativeContext
-    ? snapshot?.observation?.revision === undefined
-      ? "Headless preview"
-      : "Interactive preview"
+    ? "Preview"
     : nativeSurface.failed
       ? "Live page unavailable"
       : nativeState?.control === "agent"

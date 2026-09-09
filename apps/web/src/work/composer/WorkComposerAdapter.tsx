@@ -1,8 +1,9 @@
+import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import type { CreateHostViewScope, PickerGroup } from "@octant/domain";
-import { FolderOpen, AlertTriangle, Paperclip } from "lucide-react";
+import { FolderOpen, AlertTriangle } from "lucide-react";
 import {
   useCallback,
   useRef,
@@ -12,6 +13,7 @@ import {
   type ReactNode,
 } from "react";
 import { ComposerModelPicker } from "../../providers/ComposerModelPicker";
+import { composerPlaceholder, THREAD_HINT } from "../../composer/composerPlaceholder";
 import { HostSelector } from "../../shell/HostSelector";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
@@ -225,7 +227,9 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 }}
                 onKeyDown={handleKeyDown}
                 onPaste={onDraftPaste}
-                placeholder="Describe the work…"
+                placeholder={composerPlaceholder("Describe the work", [
+                  threadMentions.composer === undefined ? undefined : THREAD_HINT,
+                ])}
                 rows={3}
                 value={prompt}
               />
@@ -248,44 +252,17 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
               className: "work-composer-adapter__composer-bar",
               leading: (
                 <>
-                  <label>
-                    <span className="work-composer-adapter__visually-hidden">Add attachment</span>
-                    {/* ui-boundary-exception: native-file-input */}
-                    <input
-                      aria-label="Choose attachment file"
-                      accept="image/png,image/jpeg,image/webp,image/gif"
-                      className="work-composer-adapter__file-input"
-                      disabled={props.creating === true || imageSupport === false}
-                      onChange={(event) => {
-                        const file = event.currentTarget.files?.item(0);
-                        if (file !== null && file !== undefined) {
-                          if (imageSupport === false) {
-                            images.refuse(
-                              "The selected model does not accept images. Choose an image-capable model.",
-                            );
-                          } else {
-                            images.attach([file]);
-                          }
-                        }
-                        event.currentTarget.value = "";
-                      }}
-                      type="file"
-                    />
-                  </label>
-                  <OctantButton
-                    aria-label="Add attachment"
-                    disabled={props.creating === true || imageSupport === false}
-                    onClick={(event) => {
-                      event.currentTarget.parentElement
-                        ?.querySelector<HTMLInputElement>('input[type="file"]')
-                        ?.click();
-                    }}
-                    size="icon"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
-                  </OctantButton>
+                  <ComposerAttachButton
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    busy={props.creating === true}
+                    refusedReason={
+                      imageSupport === false
+                        ? "The selected model does not accept images. Choose an image-capable model."
+                        : undefined
+                    }
+                    onRefused={images.refuse}
+                    onFileSelected={(file) => images.attach([file])}
+                  />
                   <ComposerVoiceButton
                     disabled={props.creating === true}
                     onTranscript={(transcript) =>

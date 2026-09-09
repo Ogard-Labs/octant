@@ -16,6 +16,10 @@ const settingsStyles = readFileSync(resolve(process.cwd(), "src/styles/settings.
 const appStyles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
 
 describe("ThemeTypographyProvider", () => {
+  it("uses the theme secondary text role for secondary interface ink", () => {
+    expect(typographyBridge).toContain("--oct-fg-2: var(--octant-text-secondary)");
+  });
+
   it("maps interface typography to sidebar, settings, and transcript text", () => {
     expect(typographyBridge).toMatch(/--oct-font-display:\s*var\(--octant-ui-font-family\);/);
     expect(typographyBridge).toMatch(/--oct-font-transcript:\s*var\(--octant-ui-font-family\);/);

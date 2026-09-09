@@ -25,6 +25,17 @@ function controller(): ThemeController {
 }
 
 describe("ThemeAppearanceEditor", () => {
+  it("keeps specialist fonts behind named disclosures and omits the obsolete ring control", async () => {
+    const user = userEvent.setup();
+    render(<ThemeAppearanceEditor controller={controller()} />);
+    expect(screen.getByLabelText("Interface font")).toBeVisible();
+    expect(screen.getByLabelText("Code font")).not.toBeVisible();
+    expect(screen.getByLabelText("Terminal font family")).not.toBeVisible();
+    await user.click(screen.getByText("Code typography", { selector: "summary span" }));
+    expect(screen.getByLabelText("Code font")).toBeVisible();
+    expect(screen.queryByLabelText("Focus ring color")).not.toBeInTheDocument();
+  });
+
   it("saves appearance changes immediately without an Apply or Cancel bar", async () => {
     const user = userEvent.setup();
     const applyPatch = vi.fn(async () => true);
@@ -118,7 +129,7 @@ describe("ThemeAppearanceEditor", () => {
     const light = screen.getByLabelText("Light preset");
     expect(light).toHaveTextContent("System");
     await user.click(light);
-    expect(await screen.findByRole("option", { name: "Octant" })).toBeVisible();
+    expect(await screen.findByRole("option", { name: "Brass" })).toBeVisible();
   });
 
   it("omits the Octant appearance pack when that plugin is not effective", async () => {
@@ -132,7 +143,7 @@ describe("ThemeAppearanceEditor", () => {
     const light = screen.getByLabelText("Light preset");
     expect(light).toHaveTextContent("System");
     await user.click(light);
-    expect(screen.queryByRole("option", { name: "Octant" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Brass" })).not.toBeInTheDocument();
   });
 });
 

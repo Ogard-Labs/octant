@@ -306,7 +306,10 @@ describe("PlaywrightBrowserRuntime", () => {
       await routeHandlers[0]!({
         abort: async () => undefined,
         continue: async () => undefined,
-        request: () => ({ isNavigationRequest: () => true, url: () => "https://www.example.com/" }),
+        request: () => ({
+          isNavigationRequest: () => true,
+          url: () => "https://login.example.net/",
+        }),
       });
       throw new Error("net::ERR_FAILED");
     });
@@ -318,7 +321,7 @@ describe("PlaywrightBrowserRuntime", () => {
       ),
     ).rejects.toMatchObject({
       name: "BrowserNavigationBlockedError",
-      url: "https://www.example.com/",
+      url: "https://login.example.net/",
     });
     // A later action starts clean: the old refusal must not relabel an
     // unrelated failure.
@@ -338,7 +341,7 @@ describe("PlaywrightBrowserRuntime", () => {
     // The route guard never sees a redirect Chromium follows inside the
     // routed request; the page simply reports the new URL after goto.
     vi.mocked(pages[0]!.goto).mockImplementationOnce(async () => {
-      vi.mocked(pages[0]!.url).mockReturnValue("https://www.example.com/");
+      vi.mocked(pages[0]!.url).mockReturnValue("https://login.example.net/");
     });
     await expect(
       runtime.act(
@@ -348,9 +351,25 @@ describe("PlaywrightBrowserRuntime", () => {
       ),
     ).rejects.toMatchObject({
       name: "BrowserNavigationBlockedError",
-      url: "https://www.example.com/",
+      url: "https://login.example.net/",
     });
     expect(pages[0]!.goto).toHaveBeenLastCalledWith("about:blank");
+  });
+
+  it("stays on a page that a followed redirect landed on the site's own www host", async () => {
+    const { pages, runtime } = harness();
+    await runtime.createContext(firstId, policy, new AbortController().signal);
+    // A site answering its bare host with its www host is the same place;
+    // leaving it left the page blank with a notice to open what was typed.
+    vi.mocked(pages[0]!.goto).mockImplementationOnce(async () => {
+      vi.mocked(pages[0]!.url).mockReturnValue("https://www.example.com/");
+    });
+    await runtime.act(
+      firstId,
+      action("navigate", "https://example.com/"),
+      new AbortController().signal,
+    );
+    expect(pages[0]!.goto).not.toHaveBeenCalledWith("about:blank");
   });
 
   it("aborts a subresource request to an origin outside the context allowlist", async () => {

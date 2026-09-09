@@ -269,14 +269,15 @@ describe("BrowserSurfaceHost", () => {
     // Chromium cancels the load when the guard refuses the redirect, so
     // loadURL rejects with an opaque ERR_ABORTED after the guard has run.
     vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
-      redirectGuard?.({ preventDefault: vi.fn() }, { url: "https://www.example.com/" });
+      // A site's own www host is the same place; a different site is not.
+      redirectGuard?.({ preventDefault: vi.fn() }, { url: "https://login.example.net/" });
       throw new Error("ERR_ABORTED (-3) loading 'https://example.com/'");
     });
     await expect(
       host.act(contextId, { kind: "navigate", target: "https://example.com/" }),
     ).rejects.toMatchObject({
       name: "BrowserNavigationBlockedError",
-      url: "https://www.example.com/",
+      url: "https://login.example.net/",
     });
     // The refusal is per action: an unrelated later failure keeps its own cause.
     vi.mocked(created.webContents.loadURL).mockRejectedValueOnce(new Error("ERR_TIMED_OUT"));

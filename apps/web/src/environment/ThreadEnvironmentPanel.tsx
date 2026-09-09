@@ -2,6 +2,7 @@ import type { EnvironmentCompactIdentity } from "@octant/contracts";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import type { LocalServerGroupCounts } from "./localServerGroups";
 
 export interface ThreadEnvironmentSummaryFacts {
   readonly identity: EnvironmentCompactIdentity;
@@ -9,6 +10,7 @@ export interface ThreadEnvironmentSummaryFacts {
   readonly changes?: "clean" | "dirty";
   readonly workingLocation?: string;
   readonly runningServerCount?: number;
+  readonly runningServerCounts?: LocalServerGroupCounts;
 }
 
 export interface ThreadEnvironmentPanelProps {
@@ -59,7 +61,9 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
       data-environment-status={props.summary.identity.status}
     >
       <header className="thread-environment-dock__header">
-        <h2>Environment</h2>
+        {/* The dock strip's tab already says Environment; the rail shows the
+            facts and the heading stays for readers who navigate by heading. */}
+        <h2 className="visually-hidden">Environment</h2>
         <span>{[props.summary.identity.label, ...facts].join(" · ")}</span>
       </header>
       <div className="thread-environment-dock__body">{props.children}</div>
@@ -79,11 +83,22 @@ function summaryFacts(summary: ThreadEnvironmentSummaryFacts): ReadonlyArray<str
   if (summary.workingLocation !== undefined && summary.workingLocation !== ".") {
     facts.push(summary.workingLocation);
   }
-  if (summary.runningServerCount !== undefined)
+  if (summary.runningServerCounts !== undefined) {
+    facts.push(runningServerSummaryLabel(summary.runningServerCounts));
+  } else if (summary.runningServerCount !== undefined) {
     facts.push(runningServerLabel(summary.runningServerCount));
+  }
   return facts;
 }
 
 export function runningServerLabel(count: number): string {
   return count === 1 ? "1 server" : `${String(count)} servers`;
+}
+
+export function runningServerSummaryLabel(counts: LocalServerGroupCounts): string {
+  const currentLabel = `${String(counts.currentCheckout)} ${
+    counts.currentCheckout === 1 ? "server" : "servers"
+  } in this checkout`;
+  const otherLabel = `${String(counts.other)} ${counts.other === 1 ? "server" : "servers"} elsewhere`;
+  return `${currentLabel} · ${otherLabel}`;
 }

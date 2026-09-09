@@ -724,7 +724,7 @@ describe("ChatTranscript", () => {
     vi.stubGlobal("navigator", { ...globalThis.navigator, clipboard: { writeText } });
     render(<ChatTranscript view={viewFixture()} />);
 
-    await chooseTurnAction("Copy references");
+    await chooseTurnAction("Copy turn with sources");
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith(expect.stringContaining("Please summarize this.")),
     );
@@ -786,7 +786,7 @@ describe("ChatTranscript", () => {
     expect(await screen.findByRole("menuitem", { name: "Branch from here" })).toBeVisible();
     expect(screen.getByRole("menuitem", { name: "Checkpoint" })).toBeVisible();
     expect(screen.getByRole("menuitem", { name: "Copy as Markdown" })).toBeVisible();
-    expect(screen.getByRole("menuitem", { name: "Copy references" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Copy turn with sources" })).toBeVisible();
   });
 
   it("windows a 1000-turn conversation so only a bounded number of rows mount", () => {

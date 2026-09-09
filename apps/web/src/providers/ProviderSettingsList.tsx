@@ -1,13 +1,14 @@
 import type {
   AgentEligibleModelRef,
   DiscoverySnapshot,
+  HiddenProviderModelRef,
   ProviderInstance,
   ProviderInstanceId,
   ProviderModelId,
   ProviderObservedState,
 } from "@octant/contracts";
 import { isImageProfileDriverKind } from "@octant/domain";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
@@ -91,13 +92,20 @@ export type ProviderSettingsListProps = Pick<
   | "onVerifyFoundryTools"
   | "onProviderOrderChange"
   | "onAgentEligibleModelsChange"
+  | "onHiddenModelsChange"
 > & {
   readonly discoverySnapshot: DiscoverySnapshot | undefined;
+  readonly presentationObservedByInstance?: ReadonlyMap<ProviderInstanceId, ProviderObservedState>;
   readonly createForm?: ReactNode;
 };
 
 export function ProviderSettingsList(props: ProviderSettingsListProps) {
   const [reordering, setReordering] = useState(false);
+  // The registry projection is authoritative and can be intentionally empty
+  // during a probe. Settings may use the last observed facts for geometry
+  // while the probe is pending; eligibility controls below still use the
+  // authoritative map and therefore fail closed.
+  const presentationObserved = props.presentationObservedByInstance ?? props.observedByInstance;
   // Row order is the order the model picker offers providers in, so the list
   // renders in that order and the row grips edit it directly.
   const ordered = useMemo(() => {
@@ -116,14 +124,14 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
     for (const instance of ordered) {
       if (!instance.enabled) {
         off += 1;
-      } else if (props.observedByInstance.get(instance.id)?.readiness === "ready") {
+      } else if (presentationObserved.get(instance.id)?.readiness === "ready") {
         ready += 1;
       } else {
         needsSetup += 1;
       }
     }
     return { ready, needsSetup, off };
-  }, [ordered, props.observedByInstance]);
+  }, [ordered, presentationObserved]);
 
   function move(index: number, direction: -1 | 1) {
     const next = index + direction;
@@ -134,7 +142,8 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
     void props.onProviderOrderChange(reordered.map((instance) => instance.id));
   }
 
-  return props.status !== "ready" ? null : (
+  const busy = props.busy || props.status !== "ready";
+  return props.status !== "ready" && ordered.length === 0 ? null : (
     <>
       <section
         aria-label="Providers"
@@ -177,7 +186,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
           <div className="provlist">
             {ordered.map((instance, index) => (
               <ProviderRow
-                busy={props.busy}
+                busy={busy}
                 count={ordered.length}
                 credentialManagementAvailable={props.credentialManagementAvailable}
                 index={index}
@@ -186,9 +195,9 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
                 {...(props.discoverySnapshot === undefined
                   ? {}
                   : { discoverySnapshot: props.discoverySnapshot })}
-                {...(props.observedByInstance.get(instance.id) === undefined
+                {...(presentationObserved.get(instance.id) === undefined
                   ? {}
-                  : { observed: props.observedByInstance.get(instance.id)! })}
+                  : { observed: presentationObserved.get(instance.id)! })}
                 onChangeBinary={props.onChangeBinary}
                 onChangeClaudeConfiguration={props.onChangeClaudeConfiguration}
                 onChangeMistralVibeConfiguration={props.onChangeMistralVibeConfiguration}
@@ -219,6 +228,8 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
                 onMove={move}
                 onProbe={props.onProbe}
                 onVerifyFoundryTools={props.onVerifyFoundryTools}
+                hiddenModels={props.defaults.hiddenModels ?? []}
+                onHiddenModelsChange={props.onHiddenModelsChange}
                 onProviderCredentialStatus={props.onProviderCredentialStatus}
                 onRemove={props.onRemove}
                 onRename={props.onRename}
@@ -236,7 +247,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
       {ordered.length === 0 ? null : (
         <AgentEligibleModelsControls
           agentEligibleModels={props.defaults.agentEligibleModels}
-          busy={props.busy}
+          busy={busy}
           instances={props.instances}
           observedByInstance={props.observedByInstance}
           onAgentEligibleModelsChange={props.onAgentEligibleModelsChange}
@@ -440,13 +451,33 @@ interface ProviderRowProps {
   readonly onRemove: ProviderSettingsViewProps["onRemove"];
   readonly onProbe: ProviderSettingsViewProps["onProbe"];
   readonly onVerifyFoundryTools: ProviderSettingsViewProps["onVerifyFoundryTools"];
+  readonly hiddenModels: ReadonlyArray<HiddenProviderModelRef>;
+  readonly onHiddenModelsChange: ProviderSettingsViewProps["onHiddenModelsChange"];
 }
 
 function ProviderRow(props: ProviderRowProps) {
   const [configurationOpen, setConfigurationOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [modelQuery, setModelQuery] = useState("");
+  const hiddenModelIds = useMemo(
+    () =>
+      new Set(
+        props.hiddenModels
+          .filter((ref) => ref.providerInstanceId === props.instance.id)
+          .map((ref) => ref.modelId),
+      ),
+    [props.hiddenModels, props.instance.id],
+  );
+  const shownModelCount =
+    props.observed?.models.filter((model) => !hiddenModelIds.has(model.id)).length ?? 0;
+  const modelSearch = modelQuery.trim().toLowerCase();
+  const visibleModelRows =
+    props.observed?.models.filter((model) =>
+      `${model.displayName} ${model.id}`.toLowerCase().includes(modelSearch),
+    ) ?? [];
   const disabled = props.busy || props.probing;
   const readiness = props.probing ? "checking" : props.observed?.readiness;
+  const [connectionDetailsOpen, setConnectionDetailsOpen] = useState(() => readiness !== "ready");
   const autoRegisteredDisabled = isDisabledDiscoveryInstance(
     props.instance,
     props.discoverySnapshot,
@@ -485,6 +516,11 @@ function ProviderRow(props: ProviderRowProps) {
     ((isClaude || isVibe || isGrok || isGlm || isGemini || isCline || isQwen) &&
       props.instance.configuration.authentication === "api-key");
   const credential = useCredentialStatus(props, !usesCredential);
+  const setupGuidance = guidance(props.instance, readiness, props.observed);
+  const hasSetupGuidance =
+    autoRegisteredDisabled ||
+    usesCredential ||
+    (setupGuidance !== null && setupGuidance !== undefined);
   const label = driverLabel(props.instance.driverKind);
   const runtimeLabel = isClaude
     ? "Agent SDK"
@@ -552,26 +588,28 @@ function ProviderRow(props: ProviderRowProps) {
       </span>
       <span className="prov-main">
         <span className="prov-name oct-row-label">{name}</span>
-        <span className="prov-meta oct-meta oct-meta--mono">
+        <span className="prov-meta oct-meta">
           {label} {runtimeLabel}
         </span>
       </span>
-      <span className="prov-models oct-meta oct-meta--mono">
-        {props.observed === undefined ||
-        (props.observed.models.length === 0 && props.observed.readiness !== "ready")
-          ? null
-          : `${props.observed.models.length} ${props.observed.models.length === 1 ? "model" : "models"}`}
-      </span>
-      <span className="prov-status">
-        <span
-          className="prov-state"
-          data-tone={readinessTone(props.instance.enabled ? readiness : undefined)}
-        >
-          {!props.instance.enabled
-            ? "Off"
-            : readiness === undefined
-              ? "Not checked"
-              : providerRowReadinessLabel(readiness, props.observed?.models.length ?? 0)}
+      <span className="prov-observation">
+        <span className="prov-models oct-meta">
+          {props.observed === undefined ||
+          (props.observed.models.length === 0 && props.observed.readiness !== "ready")
+            ? null
+            : `${props.observed.models.length} ${props.observed.models.length === 1 ? "model" : "models"}`}
+        </span>
+        <span className="prov-status">
+          <span
+            className="prov-state"
+            data-tone={readinessTone(props.instance.enabled ? readiness : undefined)}
+          >
+            {!props.instance.enabled
+              ? "Off"
+              : readiness === undefined
+                ? "Not checked"
+                : providerRowReadinessLabel(readiness, props.observed?.models.length ?? 0)}
+          </span>
         </span>
       </span>
       <span className="prov-actions">
@@ -596,307 +634,39 @@ function ProviderRow(props: ProviderRowProps) {
       </span>
       {detailsOpen ? (
         <div className="prov-details" id={`provider-details-${props.instance.id}`}>
-          {props.observed === undefined ? null : (
-            <div className="provider-card__facts">
-              <span>Process: {titleCase(props.observed.processState)}</span>
-              <span>Version: {props.observed.detectedVersion ?? "Unavailable"}</span>
-              <span>Models: {props.observed.models.length}</span>
-              <span>
-                Last check:{" "}
-                {props.observed.lastSuccessfulProbeAt === undefined ? (
-                  "No successful check"
-                ) : (
-                  <time dateTime={props.observed.lastSuccessfulProbeAt}>
-                    {formatProbeTimestamp(props.observed.lastSuccessfulProbeAt)}
-                  </time>
-                )}
-              </span>
-            </div>
-          )}
-          {!isHttp ? null : (
-            <div className="provider-card__facts provider-card__facts--http">
-              <span>{props.instance.configuration.baseUrl}</span>
-              <span>
-                Configured protocol: {protocolLabel(props.instance.configuration.protocol)}
-              </span>
-              <span>
-                Observed protocol:{" "}
-                {props.observed?.observedProtocol === undefined
-                  ? "Not observed by a real turn"
-                  : protocolLabel(props.observed.observedProtocol)}
-              </span>
-              <span>Authentication: {titleCase(props.instance.configuration.authentication)}</span>
-              <span>
-                Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
-              </span>
-            </div>
-          )}
-          {!isAnthropicHttp ? null : (
-            <div className="provider-card__facts provider-card__facts--http">
-              <span>{props.instance.configuration.baseUrl}</span>
-              <span>Protocol version: {props.instance.configuration.protocolVersion}</span>
-              <span>
-                Configured protocol: {protocolLabel(props.instance.configuration.protocol)}
-              </span>
-              <span>Authentication: {titleCase(props.instance.configuration.authentication)}</span>
-              <span>
-                Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
-              </span>
-            </div>
-          )}
-          {!isFoundry ? null : (
-            <div className="provider-card__facts provider-card__facts--http">
-              <span>{props.instance.configuration.baseUrl}</span>
-              <span>
-                Configured protocol: {protocolLabel(props.instance.configuration.protocol)}
-              </span>
-              <span>
-                Observed protocol:{" "}
-                {props.observed?.observedProtocol === undefined
-                  ? "Not observed by a real turn"
-                  : protocolLabel(props.observed.observedProtocol)}
-              </span>
-              <span>Authentication: API key</span>
-              <span>
-                Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
-              </span>
-              <span>
-                Tool support:{" "}
-                <strong>
-                  {(props.observed?.verifiedToolModelIds?.length ?? 0) > 0
-                    ? `Verified (${props.observed?.verifiedToolModelIds?.length} deployment${(props.observed?.verifiedToolModelIds?.length ?? 0) > 1 ? "s" : ""})`
-                    : "Unverified (non-generating Connection Check)"}
-                </strong>
-              </span>
-              <span>Deployments:</span>
-              {props.instance.configuration.manualModelIds.map((modelId) => {
-                const isVerified = props.observed?.verifiedToolModelIds?.some(
-                  (id) => String(id) === String(modelId),
-                );
-                return (
-                  <span key={String(modelId)}>
-                    <OctantButton
-                      disabled={disabled || !props.instance.enabled}
-                      onClick={() => void props.onVerifyFoundryTools(props.instance.id, modelId)}
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                    >
-                      {props.probing
-                        ? "Verifying…"
-                        : `Verify tools for ${modelId}${isVerified ? " (verified)" : ""}`}
-                    </OctantButton>
-                  </span>
-                );
-              })}
-            </div>
-          )}
-          {!isClaude ? null : (
-            <div className="provider-card__facts provider-card__facts--claude">
-              <span>
-                Authentication:{" "}
-                {props.instance.configuration.authentication === "api-key"
-                  ? "Anthropic API key"
-                  : "Claude subscription"}
-              </span>
-              {props.instance.configuration.authentication === "api-key" ? (
-                <span>
-                  Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
-                </span>
+          {hasSetupGuidance ? (
+            <section
+              aria-label={`Setup for ${name}`}
+              className="provider-details__section provider-details__section--connection"
+            >
+              {autoRegisteredDisabled ? (
+                <p className="provider-card__guidance">Detected on this host — enable to use</p>
               ) : null}
-            </div>
-          )}
-          {!isVibe ? null : (
-            <div className="provider-card__facts provider-card__facts--vibe">
-              <span>
-                Authentication:{" "}
-                {props.instance.configuration.authentication === "api-key"
-                  ? "Mistral API key"
-                  : "Mistral subscription"}
-              </span>
-              {props.instance.configuration.authentication === "api-key" ? (
-                <span>
-                  Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
-                </span>
+              {setupGuidance}
+              {usesCredential && !props.credentialManagementAvailable ? (
+                <p className="provider-card__guidance">
+                  Manage credentials in the Octant host app. Credential replacement, clearing, and
+                  provider removal are unavailable in this browser.
+                </p>
               ) : null}
-            </div>
-          )}
-          {!isGrok ? null : (
-            <div className="provider-card__facts provider-card__facts--grok">
-              <span>
-                Authentication:{" "}
-                {props.instance.configuration.authentication === "api-key"
-                  ? "xAI API key"
-                  : "xAI subscription"}
-              </span>
-              {props.instance.configuration.authentication === "api-key" ? (
-                <span>
+              {usesCredential ? (
+                <p className="provider-card__credential-status">
                   Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
-                </span>
+                </p>
               ) : null}
-            </div>
-          )}
-          {!isGoose ? null : (
-            <div className="provider-card__facts provider-card__facts--goose">
-              <span>Authentication: provider-owned Goose credentials</span>
-            </div>
-          )}
-          {!isGlm ? null : (
-            <div className="provider-card__facts provider-card__facts--glm">
-              <span>Authentication: Z.AI API key</span>
-              <span>
-                Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
-              </span>
-            </div>
-          )}
-          {!isGemini ? null : (
-            <div className="provider-card__facts provider-card__facts--gemini">
-              <span>Authentication: Gemini API key</span>
-              <span>
-                Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
-              </span>
-            </div>
-          )}
-          {!isCopilot ? null : (
-            <div className="provider-card__facts provider-card__facts--copilot">
-              <span>Authentication: provider-owned GitHub Copilot credentials</span>
-            </div>
-          )}
-          {!isCline ? null : (
-            <div className="provider-card__facts provider-card__facts--cline">
-              <span>Authentication: Cline API key</span>
-              <span>
-                Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
-              </span>
-            </div>
-          )}
-          {!isQwen ? null : (
-            <div className="provider-card__facts provider-card__facts--qwen">
-              <span>Authentication: OpenAI-compatible API key</span>
-              <span>
-                Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
-              </span>
-            </div>
-          )}
-          {!isDevin ? null : (
-            <div className="provider-card__facts provider-card__facts--devin">
-              <span>Authentication: Devin subscription</span>
-            </div>
-          )}
-          {!isPi ? null : (
-            <div className="provider-card__facts provider-card__facts--pi">
-              <span>Authentication: provider-owned Pi credentials</span>
-            </div>
-          )}
-          {!isOhMyPi ? null : (
-            <div className="provider-card__facts provider-card__facts--oh-my-pi">
-              <span>Authentication: provider-owned Oh My Pi credentials</span>
-              <span>Supported version: {props.instance.configuration.supportedVersion}</span>
-            </div>
-          )}
-          {!isKilo ? null : (
-            <div className="provider-card__facts provider-card__facts--kilo">
-              <span>Authentication: provider-owned Kilo credentials</span>
-            </div>
-          )}
-          {!isOllama ? null : (
-            <div className="provider-card__facts provider-card__facts--ollama">
-              <span>{props.instance.configuration.baseUrl}</span>
-              <span>Authentication: none (loopback only)</span>
-              <span>Service lifecycle: user-managed</span>
-            </div>
-          )}
-          {!isOpenAiImage ? null : (
-            <div className="provider-card__facts provider-card__facts--image">
-              <span>Default model: {props.instance.configuration.defaultModel}</span>
-              <span>Allowlist: {props.instance.configuration.modelAllowlist.join(", ")}</span>
-              {props.instance.configuration.quality === undefined ? null : (
-                <span>Quality: {props.instance.configuration.quality}</span>
-              )}
-              {props.instance.configuration.size === undefined ? null : (
-                <span>Size: {props.instance.configuration.size}</span>
-              )}
-              <span>
-                Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
-              </span>
-            </div>
-          )}
-          {!isGeminiImage ? null : (
-            <div className="provider-card__facts provider-card__facts--image">
-              <span>Default model: {props.instance.configuration.defaultModel}</span>
-              <span>Allowlist: {props.instance.configuration.modelAllowlist.join(", ")}</span>
-              {props.instance.configuration.aspectRatio === undefined ? null : (
-                <span>Aspect ratio: {props.instance.configuration.aspectRatio}</span>
-              )}
-              {props.instance.configuration.resolution === undefined ? null : (
-                <span>Resolution: {props.instance.configuration.resolution}</span>
-              )}
-              <span>
-                Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
-              </span>
-            </div>
-          )}
-          {!isBflImage ? null : (
-            <div className="provider-card__facts provider-card__facts--image">
-              <span>Default model: {props.instance.configuration.defaultModel}</span>
-              <span>Allowlist: {props.instance.configuration.modelAllowlist.join(", ")}</span>
-              <span>
-                Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
-              </span>
-            </div>
-          )}
-          {!isIdeogramImage ? null : (
-            <div className="provider-card__facts provider-card__facts--image">
-              <span>Default model: {props.instance.configuration.defaultModel}</span>
-              <span>Allowlist: {props.instance.configuration.modelAllowlist.join(", ")}</span>
-              <span>
-                Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
-              </span>
-            </div>
-          )}
-          {autoRegisteredDisabled ? (
-            <p className="provider-card__guidance">Detected on this host — enable to use</p>
-          ) : null}
-          {guidance(props.instance, readiness, props.observed)}
-          {usesCredential && !props.credentialManagementAvailable ? (
-            <p className="provider-card__guidance">
-              Manage credentials in the Octant host app. Credential replacement, clearing, and
-              provider removal are unavailable in this browser.
-            </p>
-          ) : null}
-          {props.instance.driverKind === "codex" ||
-          props.instance.driverKind === "kimi-code" ||
-          isClaude ||
-          isVibe ||
-          isGrok ||
-          isGoose ||
-          isGlm ||
-          isGemini ||
-          isCopilot ||
-          isCline ||
-          isQwen ||
-          isDevin ||
-          isKilo ||
-          isPi ||
-          isOhMyPi ? (
-            <p className="provider-card__authority-note">
-              “Remember for this Project” cannot create persistent provider authority, so approvals
-              stay one-shot. Select “Current session only” to allow a supported approval for the
-              current session.
-            </p>
+            </section>
           ) : null}
           <div className="provider-card__actions">
             {isImageProfile ? null : (
               <OctantButton
+                aria-label={`Check connection for ${props.instance.displayName}`}
                 disabled={disabled || !props.instance.enabled}
                 onClick={() => void props.onProbe(props.instance.id)}
                 size="sm"
                 type="button"
                 variant="outline"
               >
-                {props.probing
-                  ? "Checking connection…"
-                  : `Check connection for ${props.instance.displayName}`}
+                {props.probing ? "Checking…" : "Check connection"}
               </OctantButton>
             )}
             <OctantButton
@@ -915,21 +685,24 @@ function ProviderRow(props: ProviderRowProps) {
               />
             </OctantButton>
             <OctantButton
+              aria-label={`Remove ${props.instance.displayName}`}
               disabled={disabled || (usesCredential && !props.credentialManagementAvailable)}
               onClick={() => void props.onRemove(props.instance.id)}
               size="sm"
               type="button"
               variant="destructive"
             >
-              Remove {props.instance.displayName}
+              Remove
             </OctantButton>
           </div>
           {configurationOpen ? (
-            <div
-              className="provider-card__configuration"
+            <section
+              aria-labelledby={`configuration-${props.instance.id}`}
+              className="provider-card__configuration provider-details__section provider-details__section--configuration"
               data-expanded="true"
               id={`provider-configuration-${props.instance.id}`}
             >
+              <h3 id={`configuration-${props.instance.id}`}>Configuration</h3>
               <form
                 className="provider-card__edit"
                 key={`name:${props.instance.version}`}
@@ -950,8 +723,14 @@ function ProviderRow(props: ProviderRowProps) {
                     required
                   />
                 </label>
-                <OctantButton disabled={disabled} type="submit">
-                  Save name for {props.instance.displayName}
+                <OctantButton
+                  disabled={disabled}
+                  type="submit"
+                  variant="outline"
+                  size="sm"
+                  aria-label={`Save name for ${props.instance.displayName}`}
+                >
+                  Save
                 </OctantButton>
               </form>
               {isCli ? (
@@ -978,8 +757,14 @@ function ProviderRow(props: ProviderRowProps) {
                       required
                     />
                   </label>
-                  <OctantButton disabled={disabled} type="submit">
-                    Save binary path for {props.instance.displayName}
+                  <OctantButton
+                    disabled={disabled}
+                    type="submit"
+                    variant="outline"
+                    size="sm"
+                    aria-label={`Save binary path for ${props.instance.displayName}`}
+                  >
+                    Save
                   </OctantButton>
                 </form>
               ) : isClaude ? (
@@ -1174,26 +959,355 @@ function ProviderRow(props: ProviderRowProps) {
                   onClearCredential={props.onClearProviderCredential}
                 />
               ) : null}
-              {props.observed === undefined ? null : (
-                <div className="provider-card__discovery">
-                  <section aria-labelledby={`models-${props.instance.id}`}>
-                    <h4 id={`models-${props.instance.id}`}>Models</h4>
-                    {props.observed.models.length === 0 ? (
-                      <p>No models reported.</p>
-                    ) : (
-                      <ul>
-                        {props.observed.models.map((model) => (
-                          <li key={model.id}>
-                            {!isHttp && !isAnthropicHttp && !isFoundry
-                              ? model.displayName
-                              : `${model.displayName} · ${titleCase(model.source)} · ${titleCase(model.verification)}`}
-                          </li>
-                        ))}
-                      </ul>
+            </section>
+          ) : null}
+          {props.observed === undefined ? null : (
+            <div className="provider-card__discovery provider-details__section provider-details__section--catalog">
+              <section
+                className="provider-model-visibility"
+                aria-labelledby={`models-${props.instance.id}`}
+              >
+                <div className="provider-model-visibility__head">
+                  <div>
+                    <h4 className="oct-section-label" id={`models-${props.instance.id}`}>
+                      Models
+                    </h4>
+                    <p className="oct-row-detail">Choose which models appear in new selections.</p>
+                  </div>
+                  <span className="provider-model-visibility__count" aria-live="polite">
+                    {props.observed.models.length === 0
+                      ? "No models"
+                      : modelSearch === ""
+                        ? `${props.observed.models.length} model${props.observed.models.length === 1 ? "" : "s"} · ${shownModelCount} shown`
+                        : `${visibleModelRows.length} match${visibleModelRows.length === 1 ? "" : "es"} · ${shownModelCount} shown`}
+                  </span>
+                </div>
+                {props.observed.models.length === 0 ? null : (
+                  <div className="provider-model-visibility__search">
+                    <OctantInput
+                      aria-label={`Search models for ${props.instance.displayName}`}
+                      onChange={(event) => setModelQuery(event.currentTarget.value)}
+                      placeholder="Search models"
+                      value={modelQuery}
+                    />
+                  </div>
+                )}
+                {props.observed.models.length === 0 ? (
+                  <p>No models reported.</p>
+                ) : (
+                  <ul
+                    aria-label={`${props.instance.displayName} models`}
+                    className="provider-model-visibility__list"
+                    id={`model-list-${props.instance.id}`}
+                  >
+                    {visibleModelRows.map((model) => {
+                      const hidden = hiddenModelIds.has(model.id);
+                      const modelLabel =
+                        !isHttp && !isAnthropicHttp && !isFoundry
+                          ? model.displayName
+                          : `${model.displayName} · ${titleCase(model.source)} · ${titleCase(model.verification)}`;
+                      return (
+                        <li key={model.id}>
+                          <span className="provider-model-visibility__name" title={modelLabel}>
+                            {modelLabel}
+                          </span>
+                          <OctantSwitch
+                            checked={!hidden}
+                            disabled={disabled}
+                            label={`${hidden ? "Show" : "Hide"} ${model.displayName} in model pickers`}
+                            onCheckedChange={(checked) => {
+                              const next = props.hiddenModels.filter(
+                                (ref) =>
+                                  !(
+                                    ref.providerInstanceId === props.instance.id &&
+                                    ref.modelId === model.id
+                                  ),
+                              );
+                              if (!checked) {
+                                next.push({
+                                  providerInstanceId: props.instance.id,
+                                  modelId: model.id,
+                                });
+                              }
+                              void props.onHiddenModelsChange(next);
+                            }}
+                          />
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                {props.observed.models.length > 0 && visibleModelRows.length === 0 ? (
+                  <p className="oct-row-detail">No models match this filter.</p>
+                ) : null}
+              </section>
+            </div>
+          )}
+          <div className="provider-details__connection-disclosure">
+            <OctantButton
+              aria-controls={`connection-body-${props.instance.id}`}
+              aria-expanded={connectionDetailsOpen}
+              className="provider-details__connection-trigger"
+              onClick={() => {
+                setConnectionDetailsOpen((current) => !current);
+              }}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Connection details
+              <ChevronRight aria-hidden="true" size={14} />
+            </OctantButton>
+            {connectionDetailsOpen ? (
+              <div
+                className="provider-details__connection-body"
+                id={`connection-body-${props.instance.id}`}
+              >
+                {props.observed === undefined ? null : (
+                  <div className="provider-card__facts">
+                    <span>Process: {titleCase(props.observed.processState)}</span>
+                    <span>Version: {props.observed.detectedVersion ?? "Unavailable"}</span>
+                    <span>Models: {props.observed.models.length}</span>
+                    <span>
+                      Last check:{" "}
+                      {props.observed.lastSuccessfulProbeAt === undefined ? (
+                        "No successful check"
+                      ) : (
+                        <time dateTime={props.observed.lastSuccessfulProbeAt}>
+                          {formatProbeTimestamp(props.observed.lastSuccessfulProbeAt)}
+                        </time>
+                      )}
+                    </span>
+                  </div>
+                )}
+                {!isHttp ? null : (
+                  <div className="provider-card__facts provider-card__facts--http">
+                    <span>{props.instance.configuration.baseUrl}</span>
+                    <span>
+                      Configured protocol: {protocolLabel(props.instance.configuration.protocol)}
+                    </span>
+                    <span>
+                      Observed protocol:{" "}
+                      {props.observed?.observedProtocol === undefined
+                        ? "Not observed by a real turn"
+                        : protocolLabel(props.observed.observedProtocol)}
+                    </span>
+                    <span>
+                      Authentication: {titleCase(props.instance.configuration.authentication)}
+                    </span>
+                  </div>
+                )}
+                {!isAnthropicHttp ? null : (
+                  <div className="provider-card__facts provider-card__facts--http">
+                    <span>{props.instance.configuration.baseUrl}</span>
+                    <span>Protocol version: {props.instance.configuration.protocolVersion}</span>
+                    <span>
+                      Configured protocol: {protocolLabel(props.instance.configuration.protocol)}
+                    </span>
+                    <span>
+                      Authentication: {titleCase(props.instance.configuration.authentication)}
+                    </span>
+                  </div>
+                )}
+                {!isFoundry ? null : (
+                  <div className="provider-card__facts provider-card__facts--http">
+                    <span>{props.instance.configuration.baseUrl}</span>
+                    <span>
+                      Configured protocol: {protocolLabel(props.instance.configuration.protocol)}
+                    </span>
+                    <span>
+                      Observed protocol:{" "}
+                      {props.observed?.observedProtocol === undefined
+                        ? "Not observed by a real turn"
+                        : protocolLabel(props.observed.observedProtocol)}
+                    </span>
+                    <span>Authentication: API key</span>
+                    <span>
+                      Tool support:{" "}
+                      <strong>
+                        {(props.observed?.verifiedToolModelIds?.length ?? 0) > 0
+                          ? `Verified (${props.observed?.verifiedToolModelIds?.length} deployment${(props.observed?.verifiedToolModelIds?.length ?? 0) > 1 ? "s" : ""})`
+                          : "Unverified (non-generating Connection Check)"}
+                      </strong>
+                    </span>
+                    <span>Deployments:</span>
+                    {props.instance.configuration.manualModelIds.map((modelId) => {
+                      const isVerified = props.observed?.verifiedToolModelIds?.some(
+                        (id) => String(id) === String(modelId),
+                      );
+                      return (
+                        <span key={String(modelId)}>
+                          <OctantButton
+                            disabled={disabled || !props.instance.enabled}
+                            onClick={() =>
+                              void props.onVerifyFoundryTools(props.instance.id, modelId)
+                            }
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                          >
+                            {props.probing
+                              ? "Verifying…"
+                              : `Verify tools for ${modelId}${isVerified ? " (verified)" : ""}`}
+                          </OctantButton>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+                {!isClaude ? null : (
+                  <div className="provider-card__facts provider-card__facts--claude">
+                    <span>
+                      Authentication:{" "}
+                      {props.instance.configuration.authentication === "api-key"
+                        ? "Anthropic API key"
+                        : "Claude subscription"}
+                    </span>
+                  </div>
+                )}
+                {!isVibe ? null : (
+                  <div className="provider-card__facts provider-card__facts--vibe">
+                    <span>
+                      Authentication:{" "}
+                      {props.instance.configuration.authentication === "api-key"
+                        ? "Mistral API key"
+                        : "Mistral subscription"}
+                    </span>
+                  </div>
+                )}
+                {!isGrok ? null : (
+                  <div className="provider-card__facts provider-card__facts--grok">
+                    <span>
+                      Authentication:{" "}
+                      {props.instance.configuration.authentication === "api-key"
+                        ? "xAI API key"
+                        : "xAI subscription"}
+                    </span>
+                  </div>
+                )}
+                {!isGoose ? null : (
+                  <div className="provider-card__facts provider-card__facts--goose">
+                    <span>Authentication: provider-owned Goose credentials</span>
+                  </div>
+                )}
+                {!isGlm ? null : (
+                  <div className="provider-card__facts provider-card__facts--glm">
+                    <span>Authentication: Z.AI API key</span>
+                  </div>
+                )}
+                {!isGemini ? null : (
+                  <div className="provider-card__facts provider-card__facts--gemini">
+                    <span>Authentication: Gemini API key</span>
+                  </div>
+                )}
+                {!isCopilot ? null : (
+                  <div className="provider-card__facts provider-card__facts--copilot">
+                    <span>Authentication: provider-owned GitHub Copilot credentials</span>
+                  </div>
+                )}
+                {!isCline ? null : (
+                  <div className="provider-card__facts provider-card__facts--cline">
+                    <span>Authentication: Cline API key</span>
+                  </div>
+                )}
+                {!isQwen ? null : (
+                  <div className="provider-card__facts provider-card__facts--qwen">
+                    <span>Authentication: OpenAI-compatible API key</span>
+                  </div>
+                )}
+                {!isDevin ? null : (
+                  <div className="provider-card__facts provider-card__facts--devin">
+                    <span>Authentication: Devin subscription</span>
+                  </div>
+                )}
+                {!isPi ? null : (
+                  <div className="provider-card__facts provider-card__facts--pi">
+                    <span>Authentication: provider-owned Pi credentials</span>
+                  </div>
+                )}
+                {!isOhMyPi ? null : (
+                  <div className="provider-card__facts provider-card__facts--oh-my-pi">
+                    <span>Authentication: provider-owned Oh My Pi credentials</span>
+                    <span>Supported version: {props.instance.configuration.supportedVersion}</span>
+                  </div>
+                )}
+                {!isKilo ? null : (
+                  <div className="provider-card__facts provider-card__facts--kilo">
+                    <span>Authentication: provider-owned Kilo credentials</span>
+                  </div>
+                )}
+                {!isOllama ? null : (
+                  <div className="provider-card__facts provider-card__facts--ollama">
+                    <span>{props.instance.configuration.baseUrl}</span>
+                    <span>Authentication: none (loopback only)</span>
+                    <span>Service lifecycle: user-managed</span>
+                  </div>
+                )}
+                {!isOpenAiImage ? null : (
+                  <div className="provider-card__facts provider-card__facts--image">
+                    <span>Default model: {props.instance.configuration.defaultModel}</span>
+                    <span>Allowlist: {props.instance.configuration.modelAllowlist.join(", ")}</span>
+                    {props.instance.configuration.quality === undefined ? null : (
+                      <span>Quality: {props.instance.configuration.quality}</span>
                     )}
-                  </section>
-                  <section aria-labelledby={`capabilities-${props.instance.id}`}>
-                    <h4 id={`capabilities-${props.instance.id}`}>Capabilities</h4>
+                    {props.instance.configuration.size === undefined ? null : (
+                      <span>Size: {props.instance.configuration.size}</span>
+                    )}
+                  </div>
+                )}
+                {!isGeminiImage ? null : (
+                  <div className="provider-card__facts provider-card__facts--image">
+                    <span>Default model: {props.instance.configuration.defaultModel}</span>
+                    <span>Allowlist: {props.instance.configuration.modelAllowlist.join(", ")}</span>
+                    {props.instance.configuration.aspectRatio === undefined ? null : (
+                      <span>Aspect ratio: {props.instance.configuration.aspectRatio}</span>
+                    )}
+                    {props.instance.configuration.resolution === undefined ? null : (
+                      <span>Resolution: {props.instance.configuration.resolution}</span>
+                    )}
+                  </div>
+                )}
+                {!isBflImage ? null : (
+                  <div className="provider-card__facts provider-card__facts--image">
+                    <span>Default model: {props.instance.configuration.defaultModel}</span>
+                    <span>Allowlist: {props.instance.configuration.modelAllowlist.join(", ")}</span>
+                  </div>
+                )}
+                {!isIdeogramImage ? null : (
+                  <div className="provider-card__facts provider-card__facts--image">
+                    <span>Default model: {props.instance.configuration.defaultModel}</span>
+                    <span>Allowlist: {props.instance.configuration.modelAllowlist.join(", ")}</span>
+                  </div>
+                )}
+                {props.instance.driverKind === "codex" ||
+                props.instance.driverKind === "kimi-code" ||
+                isClaude ||
+                isVibe ||
+                isGrok ||
+                isGoose ||
+                isGlm ||
+                isGemini ||
+                isCopilot ||
+                isCline ||
+                isQwen ||
+                isDevin ||
+                isKilo ||
+                isPi ||
+                isOhMyPi ? (
+                  <p className="provider-card__authority-note">
+                    Provider approvals stay one-shot. Use “Current session only”; “Remember for this
+                    Project” does not extend provider authority.
+                  </p>
+                ) : null}
+                {props.observed === undefined ? null : (
+                  <section
+                    aria-labelledby={`capabilities-${props.instance.id}`}
+                    className="provider-details__section provider-details__section--capabilities"
+                  >
+                    <h4 className="oct-section-label" id={`capabilities-${props.instance.id}`}>
+                      Capabilities
+                    </h4>
+                    <p className="oct-row-detail">Reported by the last connection check.</p>
                     <dl>
                       {capabilityLabels.map(([key, label]) => (
                         <div key={key}>
@@ -1203,10 +1317,10 @@ function ProviderRow(props: ProviderRowProps) {
                       ))}
                     </dl>
                   </section>
-                </div>
-              )}
-            </div>
-          ) : null}
+                )}
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </article>

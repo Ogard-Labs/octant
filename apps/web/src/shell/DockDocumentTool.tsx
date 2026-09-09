@@ -108,7 +108,7 @@ export function DockDocumentTool(props: DockDocumentToolProps) {
   }, [client, threadId, checkoutId, path, revision]);
 
   if (load.kind === "loading") {
-    return <ShellState message="Reading the document." state="loading" title="Loading Document" />;
+    return <ShellState state="loading" title="Loading Document" />;
   }
   if (load.kind === "unavailable") {
     return <ShellState message={load.message} state="neutral" title="Document is unavailable" />;

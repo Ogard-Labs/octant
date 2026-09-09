@@ -110,6 +110,7 @@
 
 .surface-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--oct-space-4);
@@ -118,12 +119,17 @@
 
 .surface-header__copy {
   display: grid;
+  /* Actions wrap before the title and subtitle shrink to a word per line. */
+  flex: 1 1 320px;
   min-width: 0;
   gap: var(--oct-space-1);
 }
 
 .surface-header__actions {
   display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
+  margin-inline-start: auto;
   flex: 0 0 auto;
   align-items: center;
   gap: var(--oct-space-2);
@@ -333,7 +339,9 @@
   justify-content: space-between;
   gap: 6px 12px;
   margin: 0;
-  padding: 8px 12px;
+  /* Tray items carry 7px of their own inset, so their icons land on the
+     frame's gutter. */
+  padding: 6px calc(var(--oct-composer-gutter) - 7px);
   color: var(--oct-meta);
   background: var(--octant-tray);
   border-top: 1px solid var(--oct-border);
@@ -373,14 +381,23 @@
   align-items: center;
   gap: 5px;
   min-height: 24px;
+  height: 24px;
   padding: 0 7px;
-  color: var(--octant-text-secondary);
-  border-radius: var(--oct-radius-sm);
-  font-size: var(--oct-text-detail);
-  font-weight: var(--oct-weight-display);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
   white-space: nowrap;
 }
 
+.composer-tray [role="combobox"] {
+  min-height: 24px;
+  height: 24px;
+  padding: 0 7px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
 /* The shared row already carries a gap before send. A surface that places
    its own gap ahead of the model and access controls makes that first gap
    the only stretch, so the pickers sit beside send instead of centred. */
@@ -509,15 +526,35 @@
 
 .shell--app-backdrop.shell-frame .workspace,
 .shell--app-backdrop.shell-frame .workspace-pane,
-.shell--app-backdrop.shell-frame .workspace-thread-tabs,
 .shell--app-backdrop.shell-frame .draft-thread,
 .shell--app-backdrop.shell-frame .chat-welcome,
-.shell--app-backdrop.shell-frame .chat-workspace,
 .shell--app-backdrop.shell-frame .work-composer-adapter,
-.shell--app-backdrop.shell-frame .work-thread-workspace {
+.shell--app-backdrop.shell-frame .code-composer-adapter,
+.shell--app-backdrop.shell-frame .code-delivery-pane,
+.shell--app-backdrop.shell-frame .code-diff-pane {
   background: transparent;
 }
 
-.shell--app-backdrop-sidebar.shell-frame .sidebar {
+/* Where a conversation reads, the whole pane is the plate: the ground shows
+   through it faintly and stays full strength around the pane. A plate the
+   width of the text column alone left the cloud at full strength in the
+   gutters beside every line, which read as the page bleeding through. */
+.shell--app-backdrop.shell-frame .chat-workspace,
+.shell--app-backdrop.shell-frame .work-thread-workspace,
+.shell--app-backdrop.shell-frame .code-thread-workspace {
+  background: var(--octant-workspace-translucent);
+}
+
+/* A terminal is a plate of its own: the engine paints the workspace ground
+   behind its cells, so a cloud showing through the padding around them framed
+   every session in a different colour than the one its text sat on. */
+.shell--app-backdrop.shell-frame .code-terminal-pane {
+  background: var(--octant-workspace);
+}
+
+/* Opaque sidebars need a wash to reveal the application ground. Translucent
+   sidebars already have one: overriding it here replaced Strong vibrancy with
+   Subtle in the main window while Settings retained the selected material. */
+.shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-opaque.shell-frame > .sidebar {
   background: var(--octant-sidebar-translucent-subtle);
 }

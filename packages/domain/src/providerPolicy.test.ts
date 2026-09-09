@@ -11,7 +11,6 @@ import {
   type OpenAiCompatibleProviderInstance,
   type OpenAiImageProviderInstance,
   type OpenCodeProviderInstance,
-  type ProviderDefaults,
   type ProviderInstance,
 } from "@octant/contracts/providers";
 import { describe, expect, it } from "vitest";
@@ -2024,6 +2023,40 @@ describe("provider defaults and authority", () => {
           version: version(1),
         },
         "current-session",
+        undefined,
+        [],
+      ),
+    ).toEqual({ permissionPersistence: "current-session", version: 2 });
+  });
+
+  it("persists hidden model defaults and preserves them when omitted", () => {
+    const hiddenModels = [
+      { providerInstanceId: ids.local, modelId: decodeProviderModelId("gpt-5.2") },
+    ];
+    const updated = updateProviderDefaults(
+      { permissionPersistence: "current-session", version: version(0) },
+      "current-session",
+      undefined,
+      undefined,
+      hiddenModels,
+    );
+    expect(updated).toEqual({ permissionPersistence: "current-session", hiddenModels, version: 1 });
+    expect(updateProviderDefaults(updated, "project-default")).toEqual({
+      permissionPersistence: "project-default",
+      hiddenModels,
+      version: 2,
+    });
+  });
+
+  it("clears hidden model defaults with an explicit empty list", () => {
+    const hiddenModels = [
+      { providerInstanceId: ids.local, modelId: decodeProviderModelId("gpt-5.2") },
+    ];
+    expect(
+      updateProviderDefaults(
+        { permissionPersistence: "current-session", hiddenModels, version: version(1) },
+        "current-session",
+        undefined,
         undefined,
         [],
       ),

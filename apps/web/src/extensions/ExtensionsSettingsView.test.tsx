@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type {
@@ -276,6 +276,23 @@ async function findViewButton(name: RegExp) {
 }
 
 describe("ExtensionsSettingsView", () => {
+  it("keeps installed controls mounted while a lifecycle change refreshes the snapshot", async () => {
+    const c = client();
+    const pending = Promise.withResolvers<ExtensionSnapshot>();
+    const snapshot = vi
+      .fn()
+      .mockResolvedValueOnce(installedSnapshot())
+      .mockReturnValueOnce(pending.promise);
+    render(<ExtensionsSettingsView client={{ ...c, snapshot }} scope={scope} />);
+    const title = await screen.findByText("Build Helper");
+    fireEvent.click(screen.getByRole("button", { name: /trust source/i }));
+    await waitFor(() => expect(snapshot).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("Build Helper")).toBe(title);
+    expect(screen.queryByText("Loading extensions…")).not.toBeInTheDocument();
+    await act(async () => pending.resolve(installedSnapshot()));
+    expect(screen.getByText("Build Helper")).toBe(title);
+  });
+
   it("uses open collection sections for installed packages and standalone skills", async () => {
     const c = client({ snapshot: installedSnapshot({ activation: baseActivation() }) });
     const { container } = render(<ExtensionsSettingsView client={c} scope={scope} />);
@@ -484,10 +501,7 @@ describe("ExtensionsSettingsView", () => {
     render(<ExtensionsSettingsView client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
 
-    // Each lifecycle command reloads the snapshot: the card unmounts while
-    // status is loading, then remounts disabled until busy clears. Waiting
-    // only for the command to be recorded races the next click against that
-    // reload. Uninstall is present and enabled only after the card has settled.
+    // Wait for the refreshed snapshot and the command to settle before the next action.
     const expectCommandThenSettled = async (match: (command: ExtensionCommand) => boolean) => {
       await waitFor(() => {
         expect(c.calls.some(match)).toBe(true);

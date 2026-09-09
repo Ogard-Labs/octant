@@ -18,6 +18,7 @@ import { ShellState } from "../shell/ShellState";
 import { MonacoDiffAdapter } from "./MonacoDiffAdapter";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
 import { parseUnifiedDiff, type ParsedDiffFile } from "./unifiedDiff";
+import { UnifiedDiffList } from "./UnifiedDiffList";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 
@@ -101,7 +102,7 @@ export function CodeDiffPane(props: CodeDiffPaneProps) {
     }
     return <AvailableDiff {...props} diff={props.diff} snapshot={summary} />;
   }
-  if (props.diff.state === "loading") return <p role="status">Loading Git diff…</p>;
+  if (props.diff.state === "loading") return <ShellState state="loading" title="Loading diff" />;
   return <p role="alert">{props.diff.message}</p>;
 }
 
@@ -113,7 +114,10 @@ function AvailableDiff(
 ) {
   const [content, setContent] = useState<ContentState>({ kind: "loading" });
   const [selectedId, setSelectedId] = useState<string>();
-  const [sideBySide, setSideBySide] = useState(true);
+  // The stacked unified list is how a change is read; side by side is how one
+  // file is studied, so it keeps the file list and the editor.
+  const [layout, setLayout] = useState<"unified" | "side-by-side">("unified");
+  const sideBySide = layout === "side-by-side";
   const [confirmingDiscard, setConfirmingDiscard] = useState<string>();
   const [discarding, setDiscarding] = useState(false);
   const [discardMessage, setDiscardMessage] = useState<string>();
@@ -225,23 +229,22 @@ function AvailableDiff(
     <section aria-label="Review" className="code-diff-pane">
       <header className="code-diff-pane__toolbar">
         <div>
-          <span>Review</span>
           <h1>{props.snapshot.title}</h1>
         </div>
         <p>
           {props.snapshot.changedPaths.length.toLocaleString()}{" "}
           {props.snapshot.changedPaths.length === 1 ? "changed path" : "changed paths"}
         </p>
-        <OctantToggleGroup<"side-by-side" | "inline">
+        <OctantToggleGroup<"unified" | "side-by-side">
           aria-label="Diff layout"
           onValueChange={(value) => {
             const selected = value[0];
-            if (selected !== undefined) setSideBySide(selected === "side-by-side");
+            if (selected !== undefined) setLayout(selected);
           }}
-          value={[sideBySide ? "side-by-side" : "inline"]}
+          value={[layout]}
         >
+          <OctantToggleGroupItem value="unified">Unified</OctantToggleGroupItem>
           <OctantToggleGroupItem value="side-by-side">Side by side</OctantToggleGroupItem>
-          <OctantToggleGroupItem value="inline">Inline</OctantToggleGroupItem>
         </OctantToggleGroup>
       </header>
 
@@ -266,13 +269,20 @@ function AvailableDiff(
         </div>
       ) : null}
 
-      {content.kind === "loading" ? <p role="status">Loading diff evidence…</p> : null}
+      {content.kind === "loading" ? <ShellState state="loading" title="Loading diff" /> : null}
       {content.kind === "unavailable" ? <p role="alert">{content.message}</p> : null}
       {content.kind === "ready" && files.length === 0 ? (
         <p role="status">This checkout has no textual changes.</p>
       ) : null}
 
-      {selected === undefined ? null : (
+      {selected === undefined ? null : !sideBySide ? (
+        <div className="code-diff-pane__stack">
+          <UnifiedDiffList
+            files={files}
+            {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
+          />
+        </div>
+      ) : (
         <div className="code-diff-pane__body">
           <nav aria-label="Changed files" className="code-diff-pane__files">
             <ul>

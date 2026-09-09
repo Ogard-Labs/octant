@@ -39,8 +39,8 @@ function catalog(overrides: Partial<AutomationEditorCatalog> = {}): AutomationEd
       { label: "Code default", receipt: codeDraft.executionProfile },
     ],
     authorityProfiles: [
-      { label: "Approval-gated Work", receipt: workDraft.authorityProfile },
-      { label: "Approval-gated Code", receipt: codeDraft.authorityProfile },
+      { label: "Ask for approvals Work", receipt: workDraft.authorityProfile },
+      { label: "Ask for approvals Code", receipt: codeDraft.authorityProfile },
     ],
     actorId: AUTOMATION_UI_TEST_IDS.actor,
     ...overrides,
@@ -92,10 +92,10 @@ describe("AutomationDefinitionEditor creation", () => {
     expect(screen.getByLabelText("Environment")).toHaveTextContent("This Mac");
     await chooseLabeledOption("Project", "Docs Project");
     await chooseLabeledOption("Execution profile", "Work default");
-    await chooseLabeledOption("Authority profile", "Approval-gated Work");
+    await chooseLabeledOption("Authority profile", "Ask for approvals Work");
     // The effective authority is summarized as named text, never a token dump.
     expect(
-      screen.getByText("Approval-gated · filesystem, tools · this session only"),
+      screen.getByText("Ask for approvals · filesystem, tools · this session only"),
     ).toBeVisible();
 
     await chooseLabeledOption("Schedule", "Run once");
@@ -137,7 +137,7 @@ describe("AutomationDefinitionEditor creation", () => {
     await userEvent.type(screen.getByLabelText("Task for each run"), "Summarize open work.");
     await chooseLabeledOption("Project", "Docs Project");
     await chooseLabeledOption("Execution profile", "Work default");
-    await chooseLabeledOption("Authority profile", "Approval-gated Work");
+    await chooseLabeledOption("Authority profile", "Ask for approvals Work");
     await chooseLabeledOption("Schedule", "Weekly on chosen days");
     await userEvent.click(screen.getByRole("checkbox", { name: "Mon" }));
     await userEvent.click(screen.getByRole("checkbox", { name: "Wed" }));
@@ -168,7 +168,7 @@ describe("AutomationDefinitionEditor creation", () => {
     await userEvent.type(screen.getByLabelText("Task for each run"), "Summarize open work.");
     await chooseLabeledOption("Project", "Docs Project");
     await chooseLabeledOption("Execution profile", "Work default");
-    await chooseLabeledOption("Authority profile", "Approval-gated Work");
+    await chooseLabeledOption("Authority profile", "Ask for approvals Work");
     await chooseLabeledOption("Schedule", "Run once");
     fireEvent.change(screen.getByLabelText("Run at"), { target: { value: "2026-09-01T09:00" } });
     await userEvent.type(screen.getByLabelText("Delivery target"), "A weekly summary exists.");

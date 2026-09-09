@@ -4,9 +4,12 @@ import {
   ToolRootId,
   ToolWorktreeId,
   type BrowserThreadId,
+  type HostId,
+  type ChatThreadId,
   type CodeThreadId,
   type WorkThreadId,
   type ToolActionAuthority,
+  type WindowId,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { WorkThreadProjection } from "../work/workThreadProjection";
@@ -19,10 +22,13 @@ const decodeToolWorktreeId = Schema.decodeUnknownSync(ToolWorktreeId);
 
 export interface BrowserAuthorityResolverOptions {
   readonly hostId: typeof ToolHostId.Type;
+  /** Workspace shell identity; distinct from the ToolHostId authority namespace. */
+  readonly workspaceHostId: HostId;
   readonly persistence: Pick<
     PersistenceService,
-    "readProject" | "readCodeThread" | "readProviderInstance"
-  >;
+    "readProject" | "readCodeThread" | "readChatThread" | "readProviderInstance"
+  > &
+    Partial<Pick<PersistenceService, "readWindowWorkspace">>;
   readonly workThreads: Pick<WorkThreadProjection, "read">;
 }
 
@@ -33,7 +39,23 @@ export class ServerBrowserAuthorityResolver implements BrowserAuthorityResolver 
     this.#options = options;
   }
 
-  resolve(threadId: BrowserThreadId, mode: "work" | "code"): ToolActionAuthority | undefined {
+  resolve(
+    threadId: BrowserThreadId,
+    mode: ToolActionAuthority["mode"],
+  ): ToolActionAuthority | undefined {
+    if (mode === "chat") {
+      const thread = this.#options.persistence.readChatThread(threadId as unknown as ChatThreadId);
+      if (thread === undefined || thread.lifecycle !== "active") return undefined;
+      const provider = this.#options.persistence.readProviderInstance(thread.providerInstanceId);
+      if (provider?.enabled !== true) return undefined;
+      return {
+        hostId: this.#options.hostId,
+        mode,
+        ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+        providerInstanceId: thread.providerInstanceId,
+        extension: { kind: "core" },
+      };
+    }
     if (mode === "work") {
       const thread = this.#options.workThreads.read(threadId as unknown as WorkThreadId);
       if (thread === undefined || thread.lifecycle !== "active") return undefined;
@@ -47,7 +69,11 @@ export class ServerBrowserAuthorityResolver implements BrowserAuthorityResolver 
         return undefined;
       }
       const revision = project.bindingHistory.at(-1);
-      if (revision === undefined) return undefined;
+      // Work threads carry the binding they were created against. A missing or
+      // stale revision cannot borrow the Project's current root.
+      if (revision === undefined || revision.revisionId !== thread.bindingRevisionId) {
+        return undefined;
+      }
       return {
         hostId: this.#options.hostId,
         mode,
@@ -76,6 +102,27 @@ export class ServerBrowserAuthorityResolver implements BrowserAuthorityResolver 
       providerInstanceId: thread.providerInstanceId,
       extension: { kind: "core" },
     };
+  }
+
+  canAccessWindow(
+    windowId: WindowId,
+    threadId: BrowserThreadId,
+    mode: ToolActionAuthority["mode"],
+  ): boolean {
+    const authority = this.resolve(threadId, mode);
+    const readWindowWorkspace = this.#options.persistence.readWindowWorkspace;
+    if (authority === undefined || readWindowWorkspace === undefined) return false;
+    const projected = readWindowWorkspace(windowId);
+    if (projected === undefined) return false;
+    const workspace = projected.workspace;
+    const context = workspace.contextByMode[mode];
+    if (context.mode !== mode || String(context.host) !== String(this.#options.workspaceHostId)) {
+      return false;
+    }
+    // The persisted mode Project is the window boundary. A thread may keep
+    // running after the user selects another thread in the same Project; pane
+    // selection is presentation state, not a new authority grant.
+    return String(context.projectId) === String(authority.projectId ?? null);
   }
 }
 

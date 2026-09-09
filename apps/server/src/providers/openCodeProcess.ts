@@ -1,11 +1,33 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { constants, accessSync, statSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import {
+  chmodSync,
+  constants,
+  accessSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, isAbsolute, join } from "node:path";
 import { randomBytes } from "node:crypto";
+import { tmpdir } from "node:os";
 import type { Readable } from "node:stream";
-import type { ProviderFailure } from "@octant/contracts";
-import { Effect, type Scope } from "effect";
+import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
+import { Cause, Effect, Exit, Option, type Scope } from "effect";
 import { childProcessEnvironment } from "../childProcessEnvironment";
+import {
+  makeSeatbeltConfinementLive,
+  SeatbeltConfinementError,
+  type SeatbeltConfinementPort,
+} from "../process/seatbeltProfile";
+import {
+  materializeOsNetworkEgress,
+  resolveDefaultThreadEgressPolicy,
+} from "../process/threadEgressPolicy";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 
 export interface OpenCodeBinaryProbe {
@@ -13,15 +35,29 @@ export interface OpenCodeBinaryProbe {
   readonly version: string;
 }
 
+export type OpenCodeRuntime = "legacy" | "beta";
+
 export interface OpenCodeServerConnection {
+  /** Attested only when user/project MCP, plugins, and skills cannot enter the process. */
+  readonly isolatedConfiguration?: true;
   readonly authorization: string;
   readonly pid: number;
+  /** Runtime protocol attested by the binary version probe before startup. */
+  readonly runtime?: OpenCodeRuntime;
+  /** Version emitted by the same probe that selected the runtime protocol. */
+  readonly version?: string;
   readonly url: URL;
 }
 
 export interface OpenCodeProcessStartInput {
   readonly binaryPath: string;
   readonly cwd: string;
+  /** Product mode used to derive the OS process policy before launch. */
+  readonly mode?: "chat" | "work" | "code";
+  /** Effective thread policy used to derive filesystem/process/network limits. */
+  readonly executionPolicy?: ProviderExecutionPolicy;
+  /** Exact loopback ports owned by this connection's app-managed tool bridges. */
+  readonly loopbackPorts?: ReadonlyArray<number>;
 }
 
 export interface OpenCodeProcessPort {
@@ -34,6 +70,9 @@ export interface OpenCodeProcessPort {
 
 export interface OpenCodeProcessOptions {
   readonly inheritedEnvironment?: NodeJS.ProcessEnv;
+  readonly confinement?: SeatbeltConfinementPort;
+  /** Optional host-owned routing projection; credentials remain provider-owned. */
+  readonly runtimeConfigResolver?: OpenCodeConfigResolver;
   readonly onDiagnostic?: (message: string) => void;
   readonly shutdownTimeoutMs?: number;
   readonly startupTimeoutMs?: number;
@@ -46,13 +85,24 @@ export interface OpenCodeProcessDependencies {
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 2_000;
 const DEFAULT_STARTUP_TIMEOUT_MS = 10_000;
 const VERSION_TIMEOUT_MS = 5_000;
-const VERSION_PATTERN = /^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\r?\n?$/;
-const READINESS_PATTERN = /^opencode server listening on (http:\/\/[^\s]+)$/;
+const PROJECTED_CONFIG_LIMIT = 2 * 1024 * 1024;
+const PROJECTED_CONFIG_DEPTH_LIMIT = 8;
+const ISOLATED_OPEN_CODE_VERSION = [1, 18, 21] as const;
+const LEGACY_VERSION_PATTERN = /^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
+const BETA_VERSION_PATTERN = /^opencode2 (v\d+\.\d+\.\d+-[0-9A-Za-z.-]+)$/;
+const READINESS_PATTERN = /^(?:opencode )?server listening on (http:\/\/[^\s]+)$/;
+
+interface ParsedOpenCodeVersion {
+  readonly runtime: OpenCodeRuntime;
+  readonly version: string;
+}
 
 type OpenCodeChild = ChildProcessByStdio<null, Readable, Readable>;
 
 interface ResolvedOpenCodeProcessOptions {
   readonly inheritedEnvironment: NodeJS.ProcessEnv | undefined;
+  readonly runtimeConfig: PrivateRuntimeConfig;
+  readonly confinement: SeatbeltConfinementPort;
   readonly onDiagnostic: ((message: string) => void) | undefined;
   readonly shutdownTimeoutMs: number;
   readonly startupTimeoutMs: number;
@@ -62,6 +112,523 @@ interface ResolvedOpenCodeProcessOptions {
 interface ManagedOpenCodeServer {
   readonly connection: OpenCodeServerConnection;
   readonly terminate: () => Promise<void>;
+}
+
+export interface PrivateRuntimeConfig {
+  readonly content: string;
+}
+
+export interface PrivateOpenCodeProfile {
+  readonly environment: NodeJS.ProcessEnv;
+  readonly cleanup: () => void;
+}
+
+export interface OpenCodeConfigResolverInput {
+  readonly binaryPath: string;
+  readonly cwd: string;
+  /** Explicit environment used to locate routing config without touching auth data. */
+  readonly environment?: NodeJS.ProcessEnv;
+}
+
+export type OpenCodeConfigResolver = (
+  input: OpenCodeConfigResolverInput,
+) => Promise<unknown | undefined>;
+
+type JsonRecord = { readonly [key: string]: unknown };
+const SAFE_ENV_REFERENCE = /^\{env:([A-Z][A-Z0-9_]{0,63})\}$/;
+const SENSITIVE_ROUTING_KEY =
+  /(?:api[_-]?key|access[_-]?token|auth(?:entication)?[_-]?(?:key|token)|token|secret|password|credential|authorization|bearer)/i;
+const ROUTING_HEADER_KEY = /^headers?$/i;
+const ROUTING_URL_KEY = /(?:url|uri|endpoint|base[_-]?url)$/i;
+const SECRET_QUERY_KEY =
+  /(?:api[_-]?key|access[_-]?token|auth(?:entication)?[_-]?(?:key|token)|token|secret|password|credential|authorization|bearer)/i;
+const BUNDLED_PROVIDER_SDK_PACKAGES = new Set([
+  "@ai-sdk/amazon-bedrock",
+  "@ai-sdk/amazon-bedrock/mantle",
+  "@ai-sdk/anthropic",
+  "@ai-sdk/azure",
+  "@ai-sdk/google",
+  "@ai-sdk/google-vertex",
+  "@ai-sdk/google-vertex/anthropic",
+  "@ai-sdk/openai",
+  "@ai-sdk/openai-compatible",
+  "@openrouter/ai-sdk-provider",
+  "@ai-sdk/xai",
+  "@ai-sdk/mistral",
+  "@ai-sdk/groq",
+  "@ai-sdk/deepinfra",
+  "@ai-sdk/cerebras",
+  "@ai-sdk/cohere",
+  "@ai-sdk/gateway",
+  "@ai-sdk/togetherai",
+  "@ai-sdk/perplexity",
+  "@ai-sdk/vercel",
+  "@ai-sdk/alibaba",
+  "gitlab-ai-provider",
+  "@ai-sdk/github-copilot",
+  "venice-ai-sdk-provider",
+]);
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function bundledProviderPackage(value: unknown, label: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !BUNDLED_PROVIDER_SDK_PACKAGES.has(value)) {
+    throw new Error(`OpenCode ${label} must use a bundled provider SDK package.`);
+  }
+  return value;
+}
+
+function validateRoutingUrl(key: string | undefined, value: string): void {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return;
+  }
+  if (url.username !== "" || url.password !== "") {
+    throw new Error("OpenCode routing URL contains URL credentials.");
+  }
+  if (key !== undefined && !ROUTING_URL_KEY.test(key) && url.search === "") return;
+  for (const queryKey of url.searchParams.keys()) {
+    if (SECRET_QUERY_KEY.test(queryKey)) {
+      throw new Error("OpenCode routing URL contains a secret query parameter.");
+    }
+  }
+}
+
+function projectRoutingValue(value: unknown, depth = 0, key?: string): unknown {
+  if (depth > PROJECTED_CONFIG_DEPTH_LIMIT) {
+    throw new Error("OpenCode resolved configuration exceeds the private nesting limit.");
+  }
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    if (typeof value === "string") {
+      validateRoutingUrl(key, value);
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => projectRoutingValue(entry, depth + 1, key));
+  }
+  if (!isRecord(value)) return undefined;
+  const projected: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const next = projectRoutingValue(entry, depth + 1, key);
+    if (next !== undefined) projected[key] = next;
+  }
+  return projected;
+}
+
+function projectProviderOptions(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  const projected: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    // Provider options are intentionally scalar. Nested objects and arrays are
+    // where arbitrary headers, credentials, and executable configuration hide.
+    if (entry !== null && typeof entry === "object") continue;
+    const next = projectRoutingValue(entry, 0, key);
+    if (next !== undefined) projected[key] = next;
+  }
+  return projected;
+}
+
+function projectModelProvider(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  const projected: Record<string, unknown> = {};
+  const npm = bundledProviderPackage(value.npm, "model provider");
+  if (npm !== undefined) projected.npm = npm;
+  const api = projectRoutingValue(value.api, 0, "api");
+  if (api !== undefined) projected.api = api;
+  return projected;
+}
+
+function projectProviderModels(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  const modelKeys = new Set([
+    "id",
+    "name",
+    "family",
+    "release_date",
+    "attachment",
+    "reasoning",
+    "temperature",
+    "tool_call",
+    "interleaved",
+    "cost",
+    "limit",
+    "modalities",
+    "experimental",
+    "status",
+    "provider",
+  ]);
+  const projected: Record<string, unknown> = {};
+  for (const [modelId, model] of Object.entries(value)) {
+    if (!isRecord(model)) continue;
+    // Validate the complete model payload before dropping unsupported fields so
+    // oversized or deeply nested resolver output cannot bypass the bounds.
+    projectRoutingValue(model);
+    const projectedModel: Record<string, unknown> = {};
+    for (const key of modelKeys) {
+      const next =
+        key === "provider"
+          ? projectModelProvider(model[key])
+          : projectRoutingValue(model[key], 0, key);
+      if (next !== undefined) projectedModel[key] = next;
+    }
+    projected[modelId] = projectedModel;
+  }
+  return projected;
+}
+
+function projectProviders(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  const projected: Record<string, unknown> = {};
+  const allowedKeys = ["name", "npm", "options", "models"] as const;
+  for (const [providerId, provider] of Object.entries(value)) {
+    if (!isRecord(provider)) continue;
+    const projectedProvider: Record<string, unknown> = {};
+    const npm = bundledProviderPackage(provider.npm, "provider");
+    for (const key of allowedKeys) {
+      const entry =
+        key === "npm"
+          ? npm
+          : key === "options"
+            ? projectProviderOptions(provider[key])
+            : key === "models"
+              ? projectProviderModels(provider[key])
+              : projectRoutingValue(provider[key], 0, key);
+      if (entry !== undefined) projectedProvider[key] = entry;
+    }
+    projected[providerId] = projectedProvider;
+  }
+  return projected;
+}
+
+function removeRawRoutingSecrets(
+  value: unknown,
+  key: string | undefined,
+  environmentNames?: ReadonlySet<string>,
+): unknown {
+  if (key !== undefined && ROUTING_HEADER_KEY.test(key)) return undefined;
+  if (key !== undefined && SENSITIVE_ROUTING_KEY.test(key)) {
+    if (typeof value !== "string") return undefined;
+    const match = SAFE_ENV_REFERENCE.exec(value);
+    const name = match?.[1];
+    return name !== undefined && (environmentNames === undefined || environmentNames.has(name))
+      ? value
+      : undefined;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => removeRawRoutingSecrets(entry, undefined, environmentNames))
+      .filter((entry): entry is Exclude<typeof entry, undefined> => entry !== undefined);
+  }
+  if (!isRecord(value)) return value;
+  const sanitized: Record<string, unknown> = {};
+  for (const [entryKey, entry] of Object.entries(value)) {
+    const next = removeRawRoutingSecrets(entry, entryKey, environmentNames);
+    if (next !== undefined) sanitized[entryKey] = next;
+  }
+  return sanitized;
+}
+
+/** Projects resolver output to provider/model routing and no executable surfaces. */
+export function projectOpenCodeRuntimeConfig(resolved: unknown): PrivateRuntimeConfig {
+  const resolvedRecord = isRecord(resolved) ? resolved : {};
+  const boundedInput = projectRoutingValue(resolvedRecord);
+  const encodedInput = JSON.stringify(boundedInput);
+  if (
+    encodedInput === undefined ||
+    Buffer.byteLength(encodedInput, "utf8") > PROJECTED_CONFIG_LIMIT
+  ) {
+    throw new Error("OpenCode resolved configuration exceeds the private routing limit.");
+  }
+  const allowedTopLevel = new Set([
+    "$schema",
+    "model",
+    "small_model",
+    "enabled_providers",
+    "disabled_providers",
+    "provider",
+  ]);
+  const sanitized: Record<string, unknown> = {};
+  for (const key of allowedTopLevel) {
+    const value = resolvedRecord[key];
+    if (value === undefined) continue;
+    sanitized[key] = key === "provider" ? projectProviders(value) : projectRoutingValue(value);
+  }
+  const scrubbed = removeRawRoutingSecrets(sanitized, undefined);
+  const content = JSON.stringify(scrubbed);
+  if (content === undefined || Buffer.byteLength(content, "utf8") > PROJECTED_CONFIG_LIMIT) {
+    throw new Error("OpenCode resolved configuration exceeds the private routing limit.");
+  }
+  return { content };
+}
+
+/** Captures one explicitly supplied resolver result without forwarding its raw payload. */
+export async function captureOpenCodeRuntimeConfig(
+  input: OpenCodeConfigResolverInput,
+  resolver: OpenCodeConfigResolver,
+): Promise<PrivateRuntimeConfig | undefined> {
+  const resolved = await resolver(input);
+  if (resolved === undefined) return undefined;
+  const projected = projectOpenCodeRuntimeConfig(resolved);
+  const environmentNames = new Set(Object.keys(input.environment ?? process.env));
+  const scrubbed = removeRawRoutingSecrets(
+    JSON.parse(projected.content) as unknown,
+    undefined,
+    environmentNames,
+  );
+  return { content: JSON.stringify(scrubbed) };
+}
+
+function stripJsoncComments(content: string): string {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+  for (let index = 0; index < content.length; index += 1) {
+    const character = content[index];
+    const next = content[index + 1];
+    if (lineComment) {
+      if (character === "\n") {
+        lineComment = false;
+        output += character;
+      }
+      continue;
+    }
+    if (blockComment) {
+      if (character === "*" && next === "/") {
+        blockComment = false;
+        index += 1;
+      } else if (character === "\n") {
+        output += character;
+      }
+      continue;
+    }
+    if (inString) {
+      output += character;
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      output += character;
+    } else if (character === "/" && next === "/") {
+      lineComment = true;
+      index += 1;
+    } else if (character === "/" && next === "*") {
+      blockComment = true;
+      index += 1;
+    } else {
+      output += character;
+    }
+  }
+  return output.replace(/,\s*([}\]])/g, "$1");
+}
+
+function parseRoutingConfig(content: string): unknown {
+  if (Buffer.byteLength(content, "utf8") > PROJECTED_CONFIG_LIMIT) {
+    throw new Error("OpenCode resolved configuration exceeds the private routing limit.");
+  }
+  try {
+    return JSON.parse(content.replace(/^\uFEFF/, ""));
+  } catch {
+    try {
+      return JSON.parse(stripJsoncComments(content.replace(/^\uFEFF/, "")));
+    } catch {
+      throw new Error("OpenCode routing configuration is not valid JSON.");
+    }
+  }
+}
+
+function routingConfigCandidates(environment: NodeJS.ProcessEnv): ReadonlyArray<string> {
+  const candidates: string[] = [];
+  const explicit = environment.OPENCODE_CONFIG;
+  if (explicit !== undefined && isAbsolute(explicit)) candidates.push(explicit);
+  const configHome = environment.XDG_CONFIG_HOME;
+  if (configHome !== undefined && isAbsolute(configHome)) {
+    candidates.push(join(configHome, "opencode", "opencode.json"));
+    candidates.push(join(configHome, "opencode", "opencode.jsonc"));
+  }
+  const home = environment.HOME;
+  if (home !== undefined && isAbsolute(home)) {
+    candidates.push(join(home, ".config", "opencode", "opencode.json"));
+    candidates.push(join(home, ".config", "opencode", "opencode.jsonc"));
+  }
+  return [...new Set(candidates)];
+}
+
+/** Reads only the configured OpenCode routing files; auth data is never read. */
+export async function resolveOpenCodeRuntimeConfig(
+  input: OpenCodeConfigResolverInput,
+): Promise<unknown | undefined> {
+  for (const path of routingConfigCandidates(input.environment ?? process.env)) {
+    let content: string;
+    try {
+      content = readFileSync(path, "utf8");
+    } catch {
+      continue;
+    }
+    return JSON.parse(projectOpenCodeRuntimeConfig(parseRoutingConfig(content)).content);
+  }
+  return undefined;
+}
+
+function versionNumbers(version: string): readonly [number, number, number] | undefined {
+  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
+  if (match === null) return undefined;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+/** Isolation guards are attested only for the runtime version verified by the hostile fixture. */
+export function supportsOpenCodeIsolation(version: string): boolean {
+  if (version !== "1.18.21") return false;
+  const numbers = versionNumbers(version);
+  if (numbers === undefined) return false;
+  // The hostile fixture proves this exact release. Other patches and minors
+  // must repeat that evidence before they can expose app-managed tools.
+  return (
+    numbers[0] === ISOLATED_OPEN_CODE_VERSION[0] &&
+    numbers[1] === ISOLATED_OPEN_CODE_VERSION[1] &&
+    numbers[2] === ISOLATED_OPEN_CODE_VERSION[2]
+  );
+}
+
+function scrubOpenCodeConfigEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const scrubbed = { ...environment };
+  for (const name of [
+    "OPENCODE_CONFIG",
+    "OPENCODE_CONFIG_CONTENT",
+    "OPENCODE_CONFIG_DIR",
+    "OPENCODE_PERMISSION",
+    "OPENCODE_PLUGIN_META_FILE",
+    "OPENCODE_TUI_CONFIG",
+    "TMPDIR",
+    "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_STATE_HOME",
+  ]) {
+    delete scrubbed[name];
+  }
+  return scrubbed;
+}
+
+function privateDirectory(prefix: string, root: string): string {
+  const directory = mkdtempSync(`${root}/octant-${prefix}-`);
+  chmodSync(directory, 0o700);
+  // macOS exposes /var/folders through a /private symlink. Keep the path in
+  // the child environment identical to the path used in Seatbelt rules so an
+  // allowed private directory is not denied through its alternate spelling.
+  return realpathSync(directory);
+}
+
+/** Creates owner-only runtime paths without changing the provider's auth store. */
+export function createPrivateOpenCodeProfile(
+  config: PrivateRuntimeConfig,
+  inheritedEnvironment: NodeJS.ProcessEnv,
+  temporaryDirectory: () => string = tmpdir,
+): PrivateOpenCodeProfile {
+  const root = temporaryDirectory();
+  const directories: string[] = [];
+  try {
+    const configHome = privateDirectory("config-home", root);
+    directories.push(configHome);
+    // OpenCode resolves its layered config beneath `$XDG_CONFIG_HOME/opencode`
+    // even when OPENCODE_CONFIG points at the private root file. Create that
+    // private directory up front so startup never needs an unlisted parent.
+    const providerConfigDirectory = join(configHome, "opencode");
+    mkdirSync(providerConfigDirectory, { mode: 0o700 });
+    directories.push(providerConfigDirectory);
+    const configDirectory = privateDirectory("config-dir", root);
+    directories.push(configDirectory);
+    const configPath = join(configHome, "opencode.json");
+    let projected: JsonRecord = {};
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(config.content);
+    } catch {
+      throw new Error("OpenCode private routing configuration is not valid JSON.");
+    }
+    const cacheHome = privateDirectory("cache", root);
+    directories.push(cacheHome);
+    const stateHome = privateDirectory("state", root);
+    directories.push(stateHome);
+    const tempHome = privateDirectory("tmp", root);
+    directories.push(tempHome);
+    const environment = scrubOpenCodeConfigEnvironment(
+      childProcessEnvironment(inheritedEnvironment),
+    );
+    Object.assign(environment, {
+      OPENCODE_CONFIG: configPath,
+      OPENCODE_CONFIG_DIR: configDirectory,
+      OPENCODE_DISABLE_AUTOUPDATE: "1",
+      OPENCODE_DISABLE_CLAUDE_CODE: "1",
+      OPENCODE_DISABLE_CLAUDE_CODE_PROMPT: "1",
+      OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1",
+      OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
+      OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
+      OPENCODE_DISABLE_LSP_DOWNLOAD: "1",
+      OPENCODE_DISABLE_MODELS_FETCH: "1",
+      OPENCODE_DISABLE_PROJECT_CONFIG: "1",
+      TMPDIR: tempHome,
+      XDG_CACHE_HOME: cacheHome,
+      XDG_CONFIG_HOME: configHome,
+      XDG_STATE_HOME: stateHome,
+    });
+    const bounded = projectOpenCodeRuntimeConfig(parsed);
+    const boundedParsed: unknown = JSON.parse(bounded.content);
+    const scrubbed = removeRawRoutingSecrets(
+      boundedParsed,
+      undefined,
+      new Set(Object.keys(environment)),
+    );
+    if (isRecord(scrubbed)) projected = scrubbed;
+    // These rules are owned by Octant and override any resolver output. The
+    // provider can still read its auth data through XDG_DATA_HOME, while
+    // executable extensions and compatibility tools stay denied.
+    const ownedConfig: Record<string, unknown> = {
+      ...projected,
+      permission: { skill: { "*": "deny" }, "*_*": "deny" },
+    };
+    writeFileSync(configPath, JSON.stringify(ownedConfig), { mode: 0o600 });
+    chmodSync(configPath, 0o600);
+    let closed = false;
+    return {
+      environment,
+      cleanup: () => {
+        if (closed) return;
+        closed = true;
+        for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+      },
+    };
+  } catch (error) {
+    for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function parseOpenCodeVersion(output: string): ParsedOpenCodeVersion | undefined {
+  const firstLine = output.split(/\r?\n/)[0]?.trim();
+  if (firstLine === undefined) return undefined;
+  const beta = BETA_VERSION_PATTERN.exec(firstLine)?.[1];
+  if (beta !== undefined) return { runtime: "beta", version: firstLine };
+  if (LEGACY_VERSION_PATTERN.test(firstLine)) return { runtime: "legacy", version: firstLine };
+  return undefined;
+}
+
+function runtimeForVersion(version: string): OpenCodeRuntime {
+  return version.startsWith("opencode2 ") ? "beta" : "legacy";
 }
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
@@ -152,6 +719,120 @@ function cleanupDefect(terminate: () => Promise<void>): Effect.Effect<void> {
   }).pipe(Effect.orDie);
 }
 
+function existingAbsolutePaths(paths: ReadonlyArray<string | undefined>): ReadonlyArray<string> {
+  const resolved = new Set<string>();
+  for (const path of paths) {
+    if (path === undefined || !isAbsolute(path) || !existsSync(path)) continue;
+    try {
+      resolved.add(realpathSync(path));
+    } catch {
+      // A path can disappear between the existence and realpath checks; omit
+      // it so the confinement profile cannot grant a stale location.
+    }
+  }
+  return [...resolved];
+}
+
+interface OpenCodeLaunch {
+  readonly command: string;
+  readonly args: ReadonlyArray<string>;
+  readonly cwd: string;
+  readonly environment: NodeJS.ProcessEnv;
+}
+
+function prepareOpenCodeLaunch(
+  input: OpenCodeProcessStartInput,
+  profile: PrivateOpenCodeProfile,
+  confinement: SeatbeltConfinementPort,
+): Effect.Effect<OpenCodeLaunch, ProviderFailure> {
+  const mode = input.mode ?? "code";
+  const executionPolicy = input.executionPolicy ?? "approval-gated";
+  const args = ["serve", "--pure", "--hostname", "127.0.0.1", "--port", "0"];
+  return Effect.try({
+    try: () => {
+      const root = realpathSync(input.cwd);
+      if (!statSync(root).isDirectory()) throw new Error("project root is not a directory");
+      const binaryPath = realpathSync(input.binaryPath);
+      const binaryDirectory = dirname(binaryPath);
+      const runtimeDirectory = dirname(binaryDirectory);
+      const temporaryDirectory = profile.environment.TMPDIR ?? "/tmp";
+      const configDirectory = profile.environment.OPENCODE_CONFIG_DIR;
+      const configHome = profile.environment.XDG_CONFIG_HOME;
+      const cacheHome = profile.environment.XDG_CACHE_HOME;
+      const stateHome = profile.environment.XDG_STATE_HOME;
+      const dataHome = profile.environment.XDG_DATA_HOME;
+      // OpenCode's provider-owned auth/state lives under this child; the
+      // parent XDG data directory belongs to unrelated applications.
+      const providerDataDirectory = dataHome === undefined ? undefined : join(dataHome, "opencode");
+      const loopbackPorts = input.loopbackPorts ?? [];
+      if (loopbackPorts.some((port) => !Number.isInteger(port) || port < 1 || port > 65_535)) {
+        throw new Error("OpenCode app-managed tool bridge port is invalid.");
+      }
+      const readRoots = existingAbsolutePaths([
+        root,
+        binaryDirectory,
+        runtimeDirectory,
+        temporaryDirectory,
+        configDirectory,
+        configHome,
+        cacheHome,
+        stateHome,
+        providerDataDirectory,
+      ]);
+      const writeRoots = existingAbsolutePaths([
+        configDirectory,
+        configHome,
+        cacheHome,
+        stateHome,
+        providerDataDirectory,
+      ]);
+      if (executionPolicy === "full-access") {
+        return {
+          command: input.binaryPath,
+          args,
+          cwd: root,
+          environment: profile.environment,
+        };
+      }
+      const networkEgress = materializeOsNetworkEgress(
+        resolveDefaultThreadEgressPolicy({ mode, executionPolicy }),
+      );
+      const launch = confinement.prepare({
+        executable: input.binaryPath,
+        args,
+        boundRoot: root,
+        temporaryDirectory,
+        additionalWriteRoots: writeRoots,
+        readRoots,
+        privateHomeAllowPaths: readRoots,
+        networkEgress,
+        writeBoundRoot: !(executionPolicy === "plan" || mode === "chat"),
+        allowProcessExec: !(executionPolicy === "plan" || mode === "chat"),
+        allowProcessFork: !(executionPolicy === "plan" || mode === "chat"),
+        allowFileReadStar: true,
+        ...(loopbackPorts.length === 0
+          ? {}
+          : {
+              extraRules: loopbackPorts.map(
+                (port) => `(allow network-outbound (remote ip "localhost:${port}"))`,
+              ),
+            }),
+      });
+      return { ...launch, cwd: root, environment: profile.environment };
+    },
+    catch: (error) =>
+      failure(
+        error instanceof SeatbeltConfinementError && error.reason === "invalid-configuration"
+          ? "invalid-configuration"
+          : "incompatible",
+        error instanceof SeatbeltConfinementError ||
+          (error instanceof Error && error.message.includes("tool bridge port"))
+          ? error.message
+          : "OpenCode process confinement could not be prepared.",
+      ),
+  });
+}
+
 function safeDiagnostic(handler: OpenCodeProcessOptions["onDiagnostic"], message: string): void {
   try {
     handler?.(message);
@@ -230,7 +911,7 @@ export function probeOpenCodeBinary(
         finish(Effect.fail(failure("unavailable", "OpenCode binary probe did not succeed.")));
         return;
       }
-      const version = VERSION_PATTERN.exec(output)?.[1];
+      const version = parseOpenCodeVersion(output)?.version;
       finish(
         version === undefined
           ? Effect.fail(failure("protocol", "OpenCode binary returned an unrecognized version."))
@@ -257,24 +938,65 @@ export function probeOpenCodeBinary(
 function acquireOpenCodeServer(
   input: OpenCodeProcessStartInput,
   options: ResolvedOpenCodeProcessOptions,
+  runtime: OpenCodeRuntime,
+  version: string,
+  isolationAttested: boolean,
   onProcessStarted?: ProviderProcessStartedListener,
 ): Effect.Effect<ManagedOpenCodeServer, ProviderFailure> {
   const invalid = validateBinaryPath(input.binaryPath);
   if (invalid !== undefined) return Effect.fail(invalid);
 
   return Effect.async<ManagedOpenCodeServer, ProviderFailure>((resume) => {
+    let profile: PrivateOpenCodeProfile;
+    try {
+      profile = createPrivateOpenCodeProfile(
+        options.runtimeConfig,
+        options.inheritedEnvironment ?? process.env,
+      );
+    } catch {
+      resume(
+        Effect.fail(
+          failure(
+            "invalid-configuration",
+            "OpenCode private runtime profile could not be created.",
+          ),
+        ),
+      );
+      return cleanupDefect(async () => undefined);
+    }
     const password = randomBytes(32).toString("base64url");
-    const authorization = `Basic ${Buffer.from(`octant:${password}`).toString("base64")}`;
-    const child = spawn(input.binaryPath, ["serve", "--hostname", "127.0.0.1", "--port", "0"], {
-      cwd: input.cwd,
-      detached: process.platform !== "win32",
-      env: {
-        ...childProcessEnvironment(options.inheritedEnvironment ?? process.env),
-        OPENCODE_SERVER_USERNAME: "octant",
-        OPENCODE_SERVER_PASSWORD: password,
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const username = runtime === "beta" ? "opencode" : "octant";
+    const authorization = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+    const prepared = Effect.runSyncExit(prepareOpenCodeLaunch(input, profile, options.confinement));
+    if (Exit.isFailure(prepared)) {
+      profile.cleanup();
+      resume(
+        Effect.fail(
+          Option.getOrElse(Cause.failureOption(prepared.cause), () =>
+            failure("incompatible", "OpenCode process confinement could not be prepared."),
+          ),
+        ),
+      );
+      return cleanupDefect(async () => undefined);
+    }
+    const launch = prepared.value;
+    let child: OpenCodeChild;
+    try {
+      child = spawn(launch.command, launch.args, {
+        cwd: launch.cwd,
+        detached: process.platform !== "win32",
+        env: {
+          ...launch.environment,
+          OPENCODE_SERVER_USERNAME: username,
+          OPENCODE_SERVER_PASSWORD: password,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch {
+      profile.cleanup();
+      resume(Effect.fail(failure("unavailable", "OpenCode server could not be started.")));
+      return cleanupDefect(async () => undefined);
+    }
     const childExited = new Promise<void>((resolveExit) => child.once("exit", () => resolveExit()));
     let ownershipReady: Promise<void> = Promise.resolve();
     if (child.pid !== undefined && onProcessStarted !== undefined) {
@@ -299,12 +1021,23 @@ function acquireOpenCodeServer(
       child.off("error", onError);
       child.off("exit", onExit);
     };
+    const cleanupProfile = () => {
+      try {
+        profile.cleanup();
+      } catch {
+        // Profile cleanup is best effort after the owned process is gone.
+      }
+    };
+    const terminateOwned = () => terminate().finally(cleanupProfile);
     const finishFailure = (providerFailure: ProviderFailure) => {
       if (settled) return;
       settled = true;
       cleanup();
-      void terminate().then(
-        () => resume(Effect.fail(providerFailure)),
+      void terminateOwned().then(
+        () => {
+          cleanupProfile();
+          resume(Effect.fail(providerFailure));
+        },
         () => resume(Effect.fail(cleanupFailure())),
       );
     };
@@ -345,16 +1078,27 @@ function acquireOpenCodeServer(
         () =>
           resume(
             Effect.succeed({
-              connection: { authorization, pid: child.pid!, url },
-              terminate,
+              connection: {
+                authorization,
+                pid: child.pid!,
+                ...(isolationAttested && launch.command !== input.binaryPath
+                  ? { isolatedConfiguration: true as const }
+                  : {}),
+                runtime,
+                version,
+                url,
+              },
+              terminate: terminateOwned,
             }),
           ),
         () =>
-          void terminate().then(
-            () =>
+          void terminateOwned().then(
+            () => {
+              cleanupProfile();
               resume(
                 Effect.fail(failure("provider-failed", "OpenCode process receipt is unavailable.")),
-              ),
+              );
+            },
             () => resume(Effect.fail(cleanupFailure())),
           ),
       );
@@ -398,7 +1142,7 @@ function acquireOpenCodeServer(
     return cleanupDefect(async () => {
       if (!settled) settled = true;
       cleanup();
-      await terminate();
+      await terminateOwned();
     });
   });
 }
@@ -413,14 +1157,43 @@ export function makeOpenCodeProcessLive(
     shutdownTimeoutMs: options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
     startupTimeoutMs: options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS,
     terminateProcessGroup: dependencies.terminateProcessGroup,
+    confinement: options.confinement ?? makeSeatbeltConfinementLive(),
   };
 
   return {
     start: (input) =>
-      Effect.suspend(() => {
+      Effect.gen(function* () {
+        // Probe first so the server command and auth identity follow the
+        // runtime that actually answered, rather than treating the beta
+        // label as a legacy semantic version.
+        const probe = yield* probeOpenCodeBinary(input.binaryPath);
+        const runtime = runtimeForVersion(probe.version);
+        const resolver =
+          options.runtimeConfigResolver ??
+          ((resolverInput: OpenCodeConfigResolverInput) =>
+            resolveOpenCodeRuntimeConfig({
+              ...resolverInput,
+              environment: options.inheritedEnvironment ?? process.env,
+            }));
+        const runtimeConfig = yield* Effect.tryPromise({
+          try: async () =>
+            (await captureOpenCodeRuntimeConfig(
+              { binaryPath: input.binaryPath, cwd: input.cwd },
+              resolver,
+            )) ?? projectOpenCodeRuntimeConfig({}),
+          catch: () =>
+            failure("invalid-configuration", "OpenCode runtime routing could not be prepared."),
+        });
         let terminate: (() => Promise<void>) | undefined;
-        return Effect.acquireReleaseInterruptible(
-          acquireOpenCodeServer(input, resolvedOptions, input.onProcessStarted).pipe(
+        return yield* Effect.acquireReleaseInterruptible(
+          acquireOpenCodeServer(
+            input,
+            { ...resolvedOptions, runtimeConfig },
+            runtime,
+            probe.version,
+            supportsOpenCodeIsolation(probe.version),
+            input.onProcessStarted,
+          ).pipe(
             Effect.tap((managed) =>
               Effect.sync(() => {
                 terminate = managed.terminate;

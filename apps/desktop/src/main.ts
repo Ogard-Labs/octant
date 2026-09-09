@@ -43,6 +43,7 @@ import {
   type PreviewHandoffRequest,
 } from "@octant/contracts/previews";
 import { type AppVersion, isAppReleaseRing } from "@octant/contracts/app-updates";
+import { decodeCodeOperationApprovalRequest } from "@octant/contracts/code-operations";
 import { createAppUpdateService } from "./appUpdateService";
 import { buildApplicationMenuTemplate } from "./applicationMenu";
 import { resolveUpdateFeedBaseUrl } from "./appUpdateFeed";
@@ -66,9 +67,17 @@ import {
   type RendererNavigationWebContentsPort,
 } from "./rendererNavigationPolicy";
 import {
-  requestCodeOperationApprovalFromServer,
-  type NativeCodeOperationApprovalRequest,
+  cancelCodeOperationApprovalFromServer,
+  confirmCodeOperationApprovalFromServer,
+  prepareCodeOperationApprovalChallengeFromServer,
 } from "./codeOperationApproval";
+import {
+  CODE_OPERATION_APPROVAL_VIEW_CHANNELS,
+  createCodeOperationApprovalViewController,
+  type CodeOperationApprovalAnchor,
+  type CodeOperationApprovalBounds,
+  type CodeOperationApprovalViewPort,
+} from "./codeOperationApprovalView";
 import { parseCodeDeepLink, type CodeDeepLink } from "./codeDeepLinks";
 import {
   resolveDesktopCredentialBackend,
@@ -119,6 +128,7 @@ import {
 } from "./attentionNotifications";
 import {
   CODE_FILE_HELPER_FILENAME,
+  CODE_APPROVAL_PRELOAD_FILENAME,
   DESKTOP_PRELOAD_FILENAME,
   KEYCHAIN_HELPER_FILENAME,
   resolveDesktopNativeHelperPath,
@@ -177,6 +187,8 @@ const IPC_CHANNELS = {
   openSettings: "octant:menu:open-settings",
   previewHandoff: "octant:preview:handoff",
   requestCodeOperationApproval: "octant:code:request-operation-approval",
+  updateCodeOperationApprovalAnchor: "octant:code:update-operation-approval-anchor",
+  cancelCodeOperationApproval: "octant:code:cancel-operation-approval",
   startNewAgent: "octant:menu:start-new-agent",
   providerCredentialStatus: "octant:provider-credential:status",
   resetBounds: "octant:window:reset-bounds",
@@ -203,6 +215,7 @@ const IPC_CHANNELS = {
   remoteHostIdentityRotate: "octant:remote-host-identity:rotate",
   remoteHostIdentityRecover: "octant:remote-host-identity:recover",
 } as const;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const MAX_PROVIDER_CREDENTIAL_BYTES = 12 * 1_024;
 const PROVIDER_INSTANCE_ID_PATTERN =
@@ -975,6 +988,128 @@ interface DesktopWindowContext extends DesktopWindowIdentity {
   readonly refreshAuthorityAfterHostRestart: (host: LocalHostDescriptor) => Promise<void>;
 }
 const desktopWindows = createDesktopWindowContextRegistry<BrowserWindow, DesktopWindowContext>();
+let codeOperationApprovalViews:
+  | ReturnType<typeof createCodeOperationApprovalViewController<BrowserWindow>>
+  | undefined;
+
+function codeApprovalBoundsForAnchor(
+  window: BrowserWindow,
+  anchor: CodeOperationApprovalAnchor,
+): CodeOperationApprovalBounds | undefined {
+  if (window.isDestroyed()) return undefined;
+  const content = window.getContentBounds();
+  const bounds = anchor.bounds;
+  if (
+    ![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite) ||
+    bounds.width < 1 ||
+    bounds.height < 1 ||
+    bounds.x < 0 ||
+    bounds.y < 36 ||
+    bounds.x + bounds.width > content.width ||
+    bounds.y + bounds.height > content.height
+  ) {
+    return undefined;
+  }
+  const width = Math.min(560, Math.max(320, Math.floor(bounds.width)), content.width - 24);
+  const height = Math.min(280, Math.max(180, Math.floor(bounds.y - 44)));
+  if (width < 320 || height < 180) return undefined;
+  const x = Math.min(Math.max(12, Math.floor(bounds.x)), content.width - width - 12);
+  const y = Math.floor(bounds.y - height - 8);
+  if (y < 36) return undefined;
+  return { x, y, width, height };
+}
+
+function codeApprovalFallbackBounds(
+  window: BrowserWindow,
+): CodeOperationApprovalBounds | undefined {
+  if (window.isDestroyed()) return undefined;
+  const content = window.getContentBounds();
+  const width = Math.min(560, content.width - 24);
+  const height = Math.min(280, content.height - 44);
+  if (width < 320 || height < 180) return undefined;
+  return {
+    x: content.width - width - 12,
+    y: Math.max(36, content.height - height - 12),
+    width,
+    height,
+  };
+}
+
+function createCodeApprovalView(token: string): CodeOperationApprovalViewPort {
+  const view = new WebContentsView({
+    webPreferences: {
+      additionalArguments: [`--octant-code-approval-token=${token}`],
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: resolve(dirname(fileURLToPath(import.meta.url)), CODE_APPROVAL_PRELOAD_FILENAME),
+      sandbox: true,
+      webSecurity: true,
+    },
+  });
+  view.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  view.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith("data:text/html")) event.preventDefault();
+  });
+  view.webContents.on("will-redirect", (event) => event.preventDefault());
+  view.webContents.on("destroyed", () => {
+    codeOperationApprovalViews?.viewDestroyed(view.webContents.id);
+  });
+  return {
+    webContents: {
+      id: view.webContents.id,
+      loadURL: (url) => view.webContents.loadURL(url),
+      send: (channel, value) => view.webContents.send(channel, value),
+      close: () => view.webContents.close(),
+      isDestroyed: () => view.webContents.isDestroyed(),
+    },
+    setBounds: (bounds) => view.setBounds(bounds),
+    setVisible: (visible) => view.setVisible(visible),
+  };
+}
+
+function installCodeOperationApprovalViews(): void {
+  codeOperationApprovalViews ??= createCodeOperationApprovalViewController({
+    host: {
+      createView: createCodeApprovalView,
+      attach: (window, view) => window.contentView.addChildView(view as unknown as WebContentsView),
+      detach: (window, view) =>
+        window.contentView.removeChildView(view as unknown as WebContentsView),
+      boundsForAnchor: codeApprovalBoundsForAnchor,
+      fallbackBounds: codeApprovalFallbackBounds,
+      isWindowDestroyed: (window) => window.isDestroyed(),
+    },
+    prepare: ({ request, windowCapability }) => {
+      if (activeServerUrl === undefined) throw new Error("Octant Code approval is unavailable.");
+      return prepareCodeOperationApprovalChallengeFromServer({
+        serverUrl: activeServerUrl,
+        desktopBridgeSecret,
+        windowCapability,
+        request,
+        fetch: globalThis.fetch,
+      });
+    },
+    confirm: ({ challengeId, windowCapability }) => {
+      if (activeServerUrl === undefined) throw new Error("Octant Code approval is unavailable.");
+      return confirmCodeOperationApprovalFromServer({
+        serverUrl: activeServerUrl,
+        desktopBridgeSecret,
+        windowCapability,
+        challengeId,
+        fetch: globalThis.fetch,
+      });
+    },
+    cancel: ({ challengeId, windowCapability }) => {
+      if (activeServerUrl === undefined) return Promise.resolve();
+      return cancelCodeOperationApprovalFromServer({
+        serverUrl: activeServerUrl,
+        desktopBridgeSecret,
+        windowCapability,
+        challengeId,
+        fetch: globalThis.fetch,
+      });
+    },
+  });
+}
 let desktopWindowAuthorityInstanceId: string | undefined;
 let desktopWindowAuthorityRefresh:
   | { readonly instanceId: string; readonly operation: Promise<void> }
@@ -1704,6 +1839,7 @@ async function createWindow(): Promise<void> {
         }
       });
       window.webContents.on("render-process-gone", () => {
+        codeOperationApprovalViews?.closeWindow(state.windowId);
         void Promise.all([
           browserSurfaceHost?.closeOwnerContexts(state.windowId),
           closeAuthority(),
@@ -1728,6 +1864,7 @@ async function createWindow(): Promise<void> {
           .finally(() => window.destroy());
       });
       window.once("closed", () => {
+        codeOperationApprovalViews?.closeWindow(state.windowId);
         void browserSurfaceHost?.closeOwnerContexts(state.windowId).catch(() => undefined);
         unregisterTrustedRendererRequestContext(window);
         desktopWindows.remove(window);
@@ -1918,6 +2055,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, resolvedSidebarVibrancy);
         });
         window.webContents.on("render-process-gone", () => {
+          codeOperationApprovalViews?.closeWindow(windowId);
           void Promise.all([
             browserSurfaceHost?.closeOwnerContexts(windowId),
             closeAuthority(),
@@ -1930,6 +2068,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           window.show();
         });
         window.once("closed", () => {
+          codeOperationApprovalViews?.closeWindow(windowId);
           void browserSurfaceHost?.closeOwnerContexts(windowId).catch(() => undefined);
           unregisterTrustedRendererRequestContext(window);
           desktopWindows.remove(window);
@@ -2262,6 +2401,7 @@ function forgetAttentionBadge(windowId: number): void {
 function installIpcHandlers(): void {
   if (handlersInstalled) return;
   handlersInstalled = true;
+  installCodeOperationApprovalViews();
   installProviderCredentialIpcHandlers({
     handle: (channel, handler) => ipcMain.handle(channel, handler),
     resolveOwnedWindow: (event) => void ownedWindowContext(event as IpcMainInvokeEvent),
@@ -2423,22 +2563,49 @@ function installIpcHandlers(): void {
       }
     }
   });
-  ipcMain.handle(IPC_CHANNELS.requestCodeOperationApproval, async (event, request: unknown) => {
-    const context = ownedWindowContext(event);
-    if (activeServerUrl === undefined) {
-      throw new Error("Octant Code approval is unavailable.");
-    }
-    return await requestCodeOperationApprovalFromServer({
-      serverUrl: activeServerUrl,
-      desktopBridgeSecret,
-      windowCapability: context.capability,
-      request: request as NativeCodeOperationApprovalRequest,
-      owner: context.window,
-      dialog: {
-        showMessageBox: (window, options) =>
-          dialog.showMessageBox(window, { ...options, buttons: [...options.buttons] }),
-      },
-      fetch: globalThis.fetch,
+  ipcMain.handle(
+    IPC_CHANNELS.requestCodeOperationApproval,
+    async (event, request: unknown, requestPresentation: unknown) => {
+      const context = ownedWindowContext(event);
+      if (activeServerUrl === undefined) {
+        throw new Error("Octant Code approval is unavailable.");
+      }
+      const decoded = decodeCodeOperationApprovalRequest(request);
+      if (codeOperationApprovalViews === undefined) {
+        throw new Error("Octant Code approval is unavailable.");
+      }
+      const presentation =
+        requestPresentation === undefined
+          ? undefined
+          : decodeCodeOperationApprovalPresentation(requestPresentation);
+      return await codeOperationApprovalViews.request({
+        window: context.window,
+        windowId: context.windowId,
+        windowCapability: context.capability,
+        request: decoded,
+        ...(presentation === undefined ? {} : { presentation }),
+      });
+    },
+  );
+  ipcMain.handle(IPC_CHANNELS.updateCodeOperationApprovalAnchor, (event, value: unknown) => {
+    const context = ownedTopLevelWindowContext(event);
+    const anchor = decodeCodeOperationApprovalAnchor(value);
+    codeOperationApprovalViews?.updateAnchor({
+      window: context.window,
+      windowId: context.windowId,
+      anchor,
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.cancelCodeOperationApproval, (event) => {
+    const context = ownedTopLevelWindowContext(event);
+    codeOperationApprovalViews?.cancel(context.windowId);
+  });
+  ipcMain.handle(CODE_OPERATION_APPROVAL_VIEW_CHANNELS.decision, async (event, value: unknown) => {
+    if (codeOperationApprovalViews === undefined) return undefined;
+    const decision = decodeCodeOperationApprovalViewDecision(value);
+    return await codeOperationApprovalViews.decision({
+      senderId: event.sender.id,
+      ...decision,
     });
   });
   ipcMain.handle(IPC_CHANNELS.maximizeOrRestore, (event) => {
@@ -2748,6 +2915,100 @@ function isStrictRecord(value: unknown, keys: readonly string[]): value is Recor
       .sort()
       .join("\0") === [...keys].sort().join("\0")
   );
+}
+
+function decodeCodeOperationApprovalAnchor(value: unknown): CodeOperationApprovalAnchor {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    !("kind" in value) ||
+    (value.kind !== "thread" && value.kind !== "draft")
+  ) {
+    throw new Error("Octant rejected invalid Code approval anchor bounds.");
+  }
+  const record = value as Record<string, unknown>;
+  const expectedKeys =
+    record.kind === "thread"
+      ? ["bounds", "kind", "projectId", "threadId"]
+      : ["bounds", "composerId", "kind", "projectId"];
+  if (!isStrictRecord(record, expectedKeys)) {
+    throw new Error("Octant rejected invalid Code approval anchor bounds.");
+  }
+  const bounds = record.bounds;
+  if (!isStrictRecord(bounds, ["height", "width", "x", "y"])) {
+    throw new Error("Octant rejected invalid Code approval anchor bounds.");
+  }
+  const { x, y, width, height } = bounds;
+  if (
+    typeof x !== "number" ||
+    typeof y !== "number" ||
+    typeof width !== "number" ||
+    typeof height !== "number" ||
+    ![x, y, width, height].every(Number.isFinite) ||
+    [x, y, width, height].some((entry) => entry < 0 || entry > 32_768) ||
+    typeof record.projectId !== "string" ||
+    !UUID_PATTERN.test(record.projectId) ||
+    (record.kind === "thread" &&
+      (typeof record.threadId !== "string" || !UUID_PATTERN.test(record.threadId))) ||
+    (record.kind === "draft" &&
+      (typeof record.composerId !== "string" || !UUID_PATTERN.test(record.composerId)))
+  ) {
+    throw new Error("Octant rejected invalid Code approval anchor bounds.");
+  }
+  return {
+    projectId: record.projectId,
+    ...(record.kind === "thread"
+      ? { kind: "thread" as const, threadId: record.threadId as string }
+      : { kind: "draft" as const, composerId: record.composerId as string }),
+    bounds: {
+      x,
+      y,
+      width,
+      height,
+    },
+  };
+}
+
+function decodeCodeOperationApprovalViewDecision(value: unknown): {
+  readonly token: string;
+  readonly challengeId: string;
+  readonly decision: "approve" | "cancel";
+} {
+  if (!isStrictRecord(value, ["challengeId", "decision", "token"])) {
+    throw new Error("Octant rejected invalid Code approval decision.");
+  }
+  if (
+    typeof value.token !== "string" ||
+    value.token.length < 32 ||
+    value.token.length > 128 ||
+    typeof value.challengeId !== "string" ||
+    !UUID_PATTERN.test(value.challengeId) ||
+    (value.decision !== "approve" && value.decision !== "cancel")
+  ) {
+    throw new Error("Octant rejected invalid Code approval decision.");
+  }
+  return {
+    token: value.token,
+    challengeId: value.challengeId,
+    decision: value.decision,
+  };
+}
+
+function decodeCodeOperationApprovalPresentation(value: unknown): {
+  readonly projectId: string;
+  readonly composerId: string;
+} {
+  if (
+    !isStrictRecord(value, ["composerId", "projectId"]) ||
+    typeof value.projectId !== "string" ||
+    !UUID_PATTERN.test(value.projectId) ||
+    typeof value.composerId !== "string" ||
+    !UUID_PATTERN.test(value.composerId)
+  ) {
+    throw new Error("Octant rejected invalid Code approval presentation.");
+  }
+  return { projectId: value.projectId, composerId: value.composerId };
 }
 
 function ownedWindow(event: IpcMainInvokeEvent): BrowserWindow {

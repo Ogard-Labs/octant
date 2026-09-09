@@ -9,6 +9,7 @@ import { FolderTree, RefreshCw } from "lucide-react";
 import { CodeFileExplorer, type CodeFileExplorerEntry } from "./CodeFileExplorer";
 import { useCodeFileListingController } from "./useCodeFileListingController";
 import { OctantButton } from "../ui/base/OctantButton";
+import { ShellState } from "../shell/ShellState";
 
 export interface CodeFileExplorerPanelProps {
   readonly threadId?: CodeThreadId | undefined;
@@ -72,9 +73,7 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
       </div>
 
       {controller.status === "loading" ? (
-        <p className="code-file-explorer__status" role="status">
-          Loading repository files…
-        </p>
+        <ShellState state="loading" title="Loading Files" />
       ) : null}
 
       {controller.status === "error" ? (
@@ -90,6 +89,7 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
       ) : null}
 
       <CodeFileExplorer
+        loading={controller.status === "loading"}
         entries={controller.entries}
         onOpenFile={props.onOpenFile}
         {...(props.selectedPath === undefined ? {} : { selectedPath: props.selectedPath })}

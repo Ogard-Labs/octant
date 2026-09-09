@@ -285,14 +285,18 @@ function ProjectGroup(props: {
       aria-label={`Project ${props.project.projectName}`}
       className="surface-section code-project-pull-requests__project"
     >
-      <div className="code-project-pull-requests__project-header">
+      <div className="surface-section__head code-project-pull-requests__project-header">
         <div className="surface-row__copy">
           <h2 className="oct-section-label">{props.project.projectName}</h2>
           {props.project.kind === "connected" ? (
             <span className="oct-meta oct-meta--mono">
               {props.project.repositoryOwner}/{props.project.repositoryName}
             </span>
-          ) : null}
+          ) : (
+            <span className="oct-meta">
+              No github.com origin. Add one to list this Project's pull requests.
+            </span>
+          )}
         </div>
         <div className="code-project-pull-requests__project-actions">
           {backgroundRefresh === undefined ? null : (
@@ -326,11 +330,7 @@ function ProjectGroup(props: {
           {backgroundRefreshCopy(props.backgroundRefreshState)}
         </p>
       )}
-      {props.project.kind === "unconnected" ? (
-        <p className="surface-section__note">
-          No github.com origin detected. Add one to this Project to enable pull-request refresh.
-        </p>
-      ) : repositories.length === 0 ? (
+      {props.project.kind === "unconnected" ? null : repositories.length === 0 ? (
         <p className="surface-section__note">{projectEmptyCopy(props.freshness)}</p>
       ) : (
         repositories.map((group) => (
@@ -360,7 +360,9 @@ function ProjectGroup(props: {
                       />
                       <div className="code-project-pull-requests__row-content">
                         <div className="code-project-pull-requests__title-line">
-                          <span className="code-project-pull-requests__title">{row.title}</span>
+                          <span className="code-project-pull-requests__title" title={row.title}>
+                            {row.title}
+                          </span>
                           <span className="code-project-pull-requests__number">#{row.number}</span>
                         </div>
                         <div className="code-project-pull-requests__details">
@@ -384,11 +386,11 @@ function ProjectGroup(props: {
                             status={mergeabilityStatus(row.mergeability)}
                           />
                         </div>
-                        <div className="code-project-pull-requests__linked">
-                          {row.linkedThreads.length === 0
-                            ? "No linked thread"
-                            : `Linked: ${row.linkedThreads.map((thread) => thread.title).join(", ")}`}
-                        </div>
+                        {row.linkedThreads.length === 0 ? null : (
+                          <div className="code-project-pull-requests__linked">
+                            Linked: {row.linkedThreads.map((thread) => thread.title).join(", ")}
+                          </div>
+                        )}
                       </div>
                     </OctantButton>
                   </li>

@@ -52,7 +52,7 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
         <h2>Speech to text</h2>
         <div className="setgroup">
           <SettingRow
-            description="Turns a recording into text on the chosen provider's audio endpoint. Without one, microphone controls stay hidden rather than guessing an endpoint."
+            description="Choose the provider and model that turn recordings into text."
             focused={props.focusedSetting === settingId("transcription")}
             label="Transcription"
             scope="app"
@@ -76,7 +76,7 @@ export function VoiceSettingsView(props: VoiceSettingsViewProps) {
         <h2>Text to speech</h2>
         <div className="setgroup">
           <SettingRow
-            description="Reads text aloud with the chosen provider's voice. Without one, read-aloud uses this computer's own voices and makes no provider call."
+            description="Choose a provider voice, or use this computer's voices without a provider call."
             focused={props.focusedSetting === settingId("synthesis")}
             label="Speech"
             scope="app"
@@ -226,10 +226,10 @@ function SpeechEndpointForm(props: SpeechEndpointFormProps) {
         </label>
       ) : null}
       <p className="provider-settings__field-guidance">
-        Suggested models are data, not a catalog Octant maintains: {modelPresets.join(", ")}.
+        Suggested models: {modelPresets.join(", ")}.
         {props.direction === "synthesis"
-          ? ` Voices depend on the model; OpenAI's include ${SPEECH_SYNTHESIS_VOICE_PRESETS.join(", ")}.`
-          : " Any model ID the endpoint accepts works."}
+          ? " Choose a voice supported by your model."
+          : " You can also enter another supported model ID."}
       </p>
       {problem === undefined ? null : (
         <p className="provider-settings__field-guidance" role="alert">

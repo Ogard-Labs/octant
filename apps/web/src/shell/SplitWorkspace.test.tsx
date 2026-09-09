@@ -19,6 +19,29 @@ const secondPaneId = decodePaneId("00000000-0000-4000-8000-000000000622");
 const splitNodeId = "00000000-0000-4000-8000-000000000610";
 
 describe("SplitWorkspace", () => {
+  it("labels a restored Code welcome pane as New task", () => {
+    const layout = decodeWorkspaceLayoutNode({
+      kind: "pane",
+      nodeId: "00000000-0000-4000-8000-000000000611",
+      paneId: String(firstPaneId),
+      surface: {
+        kind: "welcome",
+        id: "00000000-0000-4000-8000-000000000613",
+        mode: "code",
+        title: "Welcome to Code",
+      },
+    });
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        layout={layout}
+        renderSurface={() => <p>Composer</p>}
+      />,
+    );
+    expect(screen.getByRole("region", { name: "Workspace pane: New task" })).toBeVisible();
+    expect(screen.queryByText("Welcome to Code")).not.toBeInTheDocument();
+  });
+
   it("shows the resolved provider mark in a thread pane tab when enabled", () => {
     const handlers = splitCallbacks();
     const layout = decodeWorkspaceLayoutNode({
@@ -131,6 +154,21 @@ describe("SplitWorkspace", () => {
     // A header that keeps reporting `false` here says the menu is closed while
     // it is open, which misleads a screen reader rather than informing it.
     expect(header).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("closes an inactive pane without first activating and moving its header", async () => {
+    const user = userEvent.setup();
+    const handlers = splitCallbacks();
+    render(
+      <SplitWorkspace
+        {...handlers}
+        layout={splitLayout()}
+        renderSurface={(surface) => surface.title}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Close Second" }));
+    expect(handlers.onClosePane).toHaveBeenCalledWith(secondPaneId);
+    expect(handlers.onActivatePane).not.toHaveBeenCalled();
   });
 
   it("offers focus, split, and close from a right-click over the pane's header", async () => {

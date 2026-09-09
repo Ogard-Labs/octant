@@ -55,11 +55,19 @@ describe("SettingsNavigation", () => {
   });
 
   it("uses the control radius on navigation rows and keeps panels as open sections", () => {
-    expect(settingsStyles).toMatch(
-      /\.settings-navigation \.setnav-item,\s*\.settings-view__back\s*\{[^}]*border-radius:\s*var\(--oct-radius-sm\);/s,
+    render(
+      <SettingsNavigation
+        sections={[{ id: "general", label: "General" }]}
+        activeSection="general"
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "General" })).toHaveClass("rounded-lg");
+    expect(settingsStyles).not.toMatch(
+      /\.settings-navigation \.setnav-item,\s*\.settings-view__back\s*\{[^}]*border-radius:/s,
     );
     expect(settingsStyles).toMatch(
-      /\.setgroup\s*\{[^}]*border-radius:\s*var\(--oct-radius-md\);[^}]*box-shadow:\s*var\(--octant-shadow-sm\);/s,
+      /\.setgroup\s*\{[^}]*border-radius:\s*0;[^}]*box-shadow:\s*none;/s,
     );
     expect(settingsStyles).toMatch(/\.settings-panel\s*\{[^}]*box-shadow:\s*none;/s);
     expect(settingsStyles).toMatch(/\.settings-panel\s*\{[^}]*background:\s*transparent;/s);

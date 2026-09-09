@@ -53,6 +53,8 @@ export interface AcpConfinementInput {
   readonly mode: AcpSessionMode;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly environment: NodeJS.ProcessEnv;
+  /** Exact loopback ports owned by app-managed ACP tool bridges for this process. */
+  readonly loopbackPorts?: ReadonlyArray<number>;
 }
 
 export interface AcpConfinementPort {
@@ -76,6 +78,8 @@ export interface AcpProcessStartInput {
   readonly mode: AcpSessionMode;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly apiKey?: string;
+  /** Exact loopback ports owned by app-managed ACP tool bridges for this process. */
+  readonly loopbackPorts?: ReadonlyArray<number>;
   readonly onProcessStarted?: ProviderProcessStartedListener;
 }
 
@@ -140,6 +144,30 @@ function canonicalExistingDirectory(
       return canonical;
     },
     catch: () => failure("invalid-configuration", `${label} must be a canonical directory.`),
+  });
+}
+
+function canonicalExistingReadPaths(
+  profile: AcpProviderProfile,
+): Effect.Effect<ReadonlyArray<string>, ProviderFailure> {
+  return Effect.try({
+    try: () => {
+      const paths: string[] = [];
+      for (const path of profile.process.hostReadPaths ?? []) {
+        if (!isAbsolute(path) || resolve(path) !== path) throw new Error();
+        if (!existsSync(path)) continue;
+        const canonical = realpathSync(path);
+        const metadata = statSync(canonical);
+        if (!metadata.isFile() && !metadata.isDirectory()) throw new Error();
+        paths.push(canonical);
+      }
+      return [...new Set(paths)];
+    },
+    catch: () =>
+      failure(
+        "invalid-configuration",
+        `${profile.displayName} user-owned configuration path is not safe to read.`,
+      ),
   });
 }
 
@@ -301,10 +329,27 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
         const name = profile.displayName;
         const invalidBinary = validateBinaryPath(profile, input.binaryPath);
         if (invalidBinary !== undefined) return yield* Effect.fail(invalidBinary);
+        if (
+          profile.process.requiresChildServer === true &&
+          (input.mode === "chat" || input.executionPolicy === "plan")
+        ) {
+          return yield* Effect.fail(
+            failure(
+              "incompatible",
+              `${profile.displayName} cannot run in Chat or Plan mode because its ACP entrypoint requires a child server; use Code or Work mode.`,
+            ),
+          );
+        }
         const managedHome = yield* canonicalManagedDirectory(
           input.managedHome,
           `${name} managed home`,
         );
+        const loopbackPorts = input.loopbackPorts ?? [];
+        if (loopbackPorts.some((port) => !Number.isInteger(port) || port < 1 || port > 65_535)) {
+          return yield* Effect.fail(
+            failure("invalid-configuration", `${name} app-managed tool bridge port is invalid.`),
+          );
+        }
         const strategy = profile.process.confinement;
         if (strategy.kind === "immutable-managed-profile") {
           if (platform !== "darwin") {
@@ -390,6 +435,9 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 "(allow signal (target self))",
                 "(allow sysctl-read)",
                 ...(networkEgress === "allow" ? ["(allow network*)"] : []),
+                ...loopbackPorts.map(
+                  (port) => `(allow network-outbound (remote ip "localhost:${port}"))`,
+                ),
                 `(allow process-exec (literal "${escapeSeatbeltPath(binaryPath)}"))`,
                 ...(sideEffects ? ["(allow process-exec)", "(allow process-fork)"] : []),
                 ...runtimeReadPaths.map((path) => seatbeltAllowRule("file-read*", path)),
@@ -423,6 +471,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           managedHome,
           options.hostAuthenticationPath,
         );
+        const hostReadPaths = yield* canonicalExistingReadPaths(profile);
         yield* writeManagedFiles(profile, { managedHome, executionPolicy: input.executionPolicy });
         const root =
           input.root === input.managedHome
@@ -466,6 +515,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 root,
                 managedHome,
                 ...hostAuthentication.readPaths,
+                ...hostReadPaths,
                 binaryDirectory,
                 binaryRuntimeDirectory,
                 configuredBinaryDirectory,
@@ -475,9 +525,17 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 root,
                 managedHome,
                 ...hostAuthentication.readPaths,
+                ...hostReadPaths,
                 binaryRuntimeDirectory,
                 configuredBinaryDirectory,
               ],
+              ...(input.loopbackPorts === undefined || input.loopbackPorts.length === 0
+                ? {}
+                : {
+                    extraRules: input.loopbackPorts.map(
+                      (port) => `(allow network-outbound (remote ip "localhost:${port}"))`,
+                    ),
+                  }),
             }),
           catch: (error) =>
             failure(
@@ -971,6 +1029,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           mode: input.mode,
           executionPolicy: input.executionPolicy,
           environment,
+          ...(input.loopbackPorts === undefined ? {} : { loopbackPorts: input.loopbackPorts }),
         });
         const managed = yield* Effect.acquireRelease(
           acquireConnection(

@@ -10,9 +10,9 @@ import {
   CorrelationId,
   UtcTimestamp,
 } from "@octant/contracts";
-import { Effect, Schema, Stream } from "effect";
+import { Effect, Queue, Schema, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import { WorkTurnRuntime } from "./workTurnRuntime";
 
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
@@ -107,6 +107,127 @@ describe("WorkTurnRuntime", () => {
     expect(JSON.stringify(acquireInputs[0])).not.toMatch(/shell|worktree|pullRequest|checkoutId/);
     expect(deltas).toEqual(["Hello from Work"]);
     expect(outcome).toEqual({ kind: "completed", response: "Hello from Work" });
+  });
+
+  it("keeps the idle window open while an app-managed action is executing", async () => {
+    const answerTool = vi.fn(() => Effect.void);
+    const execute = vi.fn(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 1_200));
+      return { result: { status: "ok" }, isError: false } as const;
+    });
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection: ProviderConnection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: (input) => Effect.succeed({ sessionId: input.sessionId }),
+      resume: () => Effect.die("unused"),
+      send: () =>
+        Effect.gen(function* () {
+          yield* Queue.offer(queue, {
+            instanceId: ids.provider,
+            sequence: 1,
+            correlationId: decodeCorrelationId(String(ids.project)),
+            occurredAt: decodeTimestamp("2026-08-11T12:00:00.000Z"),
+            kind: "tool-request",
+            sessionId: ids.session as never,
+            requestId: "work-tool-1",
+            toolName: "work_tool",
+            inputJson: "{}",
+          });
+          yield* Queue.offer(queue, {
+            instanceId: ids.provider,
+            sequence: 2,
+            correlationId: decodeCorrelationId(String(ids.project)),
+            occurredAt: decodeTimestamp("2026-08-11T12:00:01.000Z"),
+            kind: "completed",
+            sessionId: ids.session as never,
+          });
+        }),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool,
+    };
+    const driver: ProviderDriver = {
+      kind: "openai-compatible",
+      probe: () => Effect.die("unused"),
+      acquire: () => Effect.succeed(connection),
+    };
+    const outcome = await new WorkTurnRuntime({ timeoutMs: 1_000 }).run({
+      command: decodeStartWorkThreadTurnCommand({
+        kind: "start-work-thread-turn",
+        requestId: ids.request,
+        threadId: ids.thread,
+        turnId: ids.turn,
+        prompt: "Use the Work tool",
+        authority: decodeWorkTurnAuthority({
+          hostId: "local",
+          projectId: ids.project,
+          bindingRevisionId: ids.binding,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: ids.provider,
+          modelId: "gpt-5",
+        }),
+      }),
+      providerSessionId: ids.session as never,
+      projectRoot: "/tmp/work-project",
+      driver,
+      signal: new AbortController().signal,
+      appManagedTools: {
+        definitions: [{ name: "work_tool", inputSchema: { type: "object" } }],
+        execute,
+      },
+    });
+
+    expect(outcome).toEqual({ kind: "completed", response: "" });
+    expect(execute).toHaveBeenCalledOnce();
+    expect(answerTool).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "work-tool-1", isError: false }),
+    );
+  });
+
+  it("still times out when the provider stays silent", async () => {
+    const driver: ProviderDriver = {
+      kind: "openai-compatible",
+      probe: () => Effect.die("unused"),
+      acquire: () =>
+        Effect.succeed({
+          subscribe: Effect.succeed(Stream.never),
+          start: () => Effect.void,
+          send: () => Effect.void,
+          resume: () => Effect.void,
+          interrupt: () => Effect.void,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: () => Effect.void,
+        } as never),
+    };
+    const outcome = await new WorkTurnRuntime({ timeoutMs: 10 }).run({
+      command: decodeStartWorkThreadTurnCommand({
+        kind: "start-work-thread-turn",
+        requestId: ids.request,
+        threadId: ids.thread,
+        turnId: ids.turn,
+        prompt: "Wait",
+        authority: decodeWorkTurnAuthority({
+          hostId: "local",
+          projectId: ids.project,
+          bindingRevisionId: ids.binding,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: ids.provider,
+          modelId: "gpt-5",
+        }),
+      }),
+      providerSessionId: ids.session as never,
+      projectRoot: "/tmp/work-project",
+      driver,
+      signal: new AbortController().signal,
+    });
+    expect(outcome.kind).toBe("waiting");
+    if (outcome.kind === "waiting") expect(outcome.failure?.message).toMatch(/timed out/i);
   });
 
   it("hands the provider the images the host already accepted", async () => {

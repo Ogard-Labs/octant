@@ -170,12 +170,6 @@
   clip-path: inset(50%);
 }
 
-.automation-center__filter:has(input:focus-visible),
-.automation-center__view:has(input:focus-visible) {
-  outline: 2px solid var(--oct-accent-fg);
-  outline-offset: 1px;
-}
-
 .automation-center__create {
   margin-inline-start: auto;
 }
@@ -349,11 +343,6 @@
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-base);
   font-weight: var(--oct-weight-display);
-}
-
-.automation-detail__title:focus-visible {
-  outline: 2px solid var(--oct-accent-fg);
-  outline-offset: 2px;
 }
 
 .automation-detail__state {

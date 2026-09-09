@@ -40,13 +40,23 @@ if (process.argv.slice(2).join(" ") === "--version") {
     console.error("probe failed");
     process.exit(17);
   }
-  console.log(selectedMode === "probe-misleading-version" ? "OpenCode build 1.17.19" : "1.17.19");
+  console.log(
+    selectedMode === "probe-misleading-version"
+      ? "OpenCode build 1.17.19"
+      : selectedMode === "probe-v2" || selectedMode === "v2-ready"
+        ? "opencode2 v0.0.0-beta-18721"
+        : selectedMode === "isolation-supported"
+          ? "1.18.21"
+          : "1.17.19",
+  );
   process.exit(0);
 }
 
+const selectedMode = mode();
+const v2 = selectedMode === "v2-ready";
 if (
-  process.argv.slice(2).join(" ") !== "serve --hostname 127.0.0.1 --port 0" ||
-  process.env.OPENCODE_SERVER_USERNAME !== "octant" ||
+  process.argv.slice(2).join(" ") !== "serve --pure --hostname 127.0.0.1 --port 0" ||
+  process.env.OPENCODE_SERVER_USERNAME !== (v2 ? "opencode" : "octant") ||
   !process.env.OPENCODE_SERVER_PASSWORD
 ) {
   console.error("invalid invocation");
@@ -54,7 +64,6 @@ if (
 }
 
 recordPid(process.pid);
-const selectedMode = mode();
 
 if (selectedMode === "early-exit") {
   console.error(
@@ -87,5 +96,5 @@ if (selectedMode === "non-loopback") {
         : new Response("unauthorized", { status: 401 });
     },
   });
-  console.log(`opencode server listening on http://127.0.0.1:${server.port}`);
+  console.log(`${v2 ? "" : "opencode "}server listening on http://127.0.0.1:${server.port}`);
 }

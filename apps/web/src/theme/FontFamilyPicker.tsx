@@ -89,12 +89,16 @@ export function FontFamilyPicker(props: FontFamilyPickerProps) {
         </OctantComboboxTrigger>
       </OctantComboboxInputGroup>
       <OctantComboboxPortal>
-        <OctantComboboxPositioner align="end" sideOffset={4}>
+        <OctantComboboxPositioner
+          className="settings-font-picker__positioner"
+          align="end"
+          sideOffset={4}
+        >
           <OctantComboboxPopup>
             <OctantComboboxEmpty>No matching fonts</OctantComboboxEmpty>
             <OctantComboboxList>
               {(family: string) => (
-                <OctantComboboxItem key={family} value={family}>
+                <OctantComboboxItem key={family} value={family} title={labelFor(family)}>
                   <span className="settings-font-picker__preview" style={{ fontFamily: family }}>
                     {labelFor(family)}
                   </span>

@@ -21,6 +21,7 @@ import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { groupLocalServerListeners, type LocalServerListenerGroup } from "./localServerGroups";
 import type { LocalServersController } from "./useLocalServersController";
+import { EnvironmentGroup } from "./EnvironmentGroup";
 
 export interface LocalServersGroupProps {
   readonly controller: Pick<
@@ -108,13 +109,20 @@ export function LocalServersGroup(props: LocalServersGroupProps) {
         groups={currentCheckout}
         setConfirming={setConfirming}
       />
-      <LocalServerGroupSection
-        {...props}
-        confirming={confirming}
-        heading="Other leftovers"
-        groups={other}
-        setConfirming={setConfirming}
-      />
+      {currentCheckout.length === 0 && other.length > 0 ? (
+        <p className="local-servers__state">No servers in this checkout.</p>
+      ) : null}
+      {other.length === 0 ? null : (
+        <EnvironmentGroup title="Other servers" summary={String(other.length)}>
+          <LocalServerGroupSection
+            {...props}
+            confirming={confirming}
+            heading="Elsewhere on this computer"
+            groups={other}
+            setConfirming={setConfirming}
+          />
+        </EnvironmentGroup>
+      )}
     </div>
   );
 }
@@ -130,7 +138,12 @@ function LocalServerGroupSection(
   if (props.groups.length === 0) return null;
   return (
     <section aria-label={props.heading} className="local-servers__group">
-      <h3 className="local-servers__group-heading">{props.heading}</h3>
+      <h3
+        aria-label={`${props.heading}, ${String(props.groups.length)} ${props.groups.length === 1 ? "server" : "servers"}`}
+        className="local-servers__group-heading"
+      >
+        {props.heading} ({String(props.groups.length)})
+      </h3>
       {props.groups.map((group) => {
         const listener = group.primary;
         return (
@@ -312,6 +325,7 @@ function LocalServerRow(props: {
 
         {listener.stop.status === "available" ? (
           <OctantButton
+            aria-label={`Stop ${listener.processName} on port ${String(listener.port)}`}
             disabled={props.busy}
             onClick={() =>
               needsConfirmation ? props.onRequestStop() : void props.onStopImmediately()

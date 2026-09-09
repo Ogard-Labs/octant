@@ -249,6 +249,7 @@ export function classifyProductAction(request: Request): string | undefined {
       return "browser.observe";
     }
     if (method === "POST" && path === "/api/browser/actions") return "browser.interact";
+    if (method === "POST" && path === "/api/browser/approvals") return "browser.interact";
     return method === "GET" || method === "HEAD" ? "settings.read-non-secret" : undefined;
   }
   if (

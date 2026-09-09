@@ -229,6 +229,35 @@ describe("ComposerContextMeter", () => {
     );
   });
 
+  it("fills the ring from the window the provider itself reported when no context plan exists", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerContextMeterProvider
+        fallback={{
+          inputTokens: 25_500,
+          outputTokens: 38,
+          contextWindow: 200_000,
+          contextTokens: 50_000,
+          limits: [],
+        }}
+        status="not-planned"
+        subjectKey="code-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+
+    const button = screen.getByRole("button", { name: /Context window 50K of 200K \(25%\)/i });
+    await user.click(button);
+    const popover = screen.getByRole("dialog", { name: "Context window" });
+    expect(
+      within(popover).getByRole("progressbar", { name: "Context window used" }),
+    ).toHaveAttribute("aria-valuenow", "25");
+    expect(popover).toHaveTextContent("Reported by the provider with its last turn.");
+  });
+
   it("keeps provider usage and account limits useful when no context plan exists", async () => {
     const user = userEvent.setup();
     render(

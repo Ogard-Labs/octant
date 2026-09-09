@@ -23,6 +23,26 @@ describe("ComposerModelPicker", () => {
     localStorage.clear();
   });
 
+  it("names a hidden bound model without offering it as a new selection", async () => {
+    const source = groups();
+    const first = source[0];
+    const current = first?.sections[0]?.models[0];
+    if (first === undefined || current === undefined) throw new Error("Expected model fixture");
+    const hidden = [{ ...first, sections: [], hiddenCurrent: current }, ...source.slice(1)];
+    render(
+      <ComposerModelPicker
+        groups={hidden}
+        onSelect={vi.fn()}
+        selectedModelId={modelOne}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "Provider and model" });
+    expect(trigger).toHaveTextContent("Model One");
+    await userEvent.click(trigger);
+    expect(screen.queryByRole("option", { name: "Model One" })).not.toBeInTheDocument();
+  });
+
   it("opens a nested provider → model menu from the compact trigger", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
@@ -62,6 +82,24 @@ describe("ComposerModelPicker", () => {
     expect(
       screen.queryByRole("dialog", { name: "Choose provider and model" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("keeps the active provider when discovery refreshes the groups", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const { rerender } = render(<ComposerModelPicker groups={groups()} onSelect={onSelect} />);
+
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const menu = await screen.findByRole("dialog", { name: "Choose provider and model" });
+    await user.click(within(menu).getByRole("option", { name: "Remote Claude" }));
+    expect(within(menu).getByRole("option", { name: "Model Three" })).toBeVisible();
+
+    // Discovery emits a fresh array as provider state changes. The user's
+    // active rail choice must survive that refresh instead of snapping back
+    // to the selected model's provider.
+    rerender(<ComposerModelPicker groups={groups({ degraded: true })} onSelect={onSelect} />);
+    expect(within(menu).getByRole("option", { name: "Model Three" })).toBeVisible();
+    expect(within(menu).queryByRole("option", { name: "Model One" })).not.toBeInTheDocument();
   });
 
   it("renders the provider rail as icon-only buttons with accessible names", async () => {

@@ -84,7 +84,7 @@ export function SidebarProfile(props: SidebarProfileProps) {
           <ChevronUp aria-hidden="true" className="sidebar-profile__chevron" size={14} />
         </OctantMenuTrigger>
         <OctantMenuPortal>
-          <OctantMenuPositioner align="center" side="top">
+          <OctantMenuPositioner align="start" side="top">
             <OctantMenuPopup aria-label="Octant menu" className="w-[min(248px,calc(100vw-24px))]">
               {props.secondaryActions === undefined ||
               props.secondaryActions.length === 0 ? null : (

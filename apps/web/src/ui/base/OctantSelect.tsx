@@ -99,7 +99,11 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
           <SelectValue placeholder={props.placeholder}>{selectedOption?.label}</SelectValue>
         </SelectTrigger>
         <SelectPortal>
-          <SelectPositioner className="z-50 outline-none window-no-drag" sideOffset={4}>
+          <SelectPositioner
+            alignItemWithTrigger={false}
+            className="z-50 outline-none window-no-drag"
+            sideOffset={4}
+          >
             <SelectPopup>
               {props.options.map((option) => (
                 <SelectItem

@@ -140,6 +140,39 @@ describe("Codex stable 0.144.4 protocol", () => {
     ).toThrow();
   });
 
+  it.each([null, undefined])(
+    "decodes app-tool calls with an optional namespace: %s",
+    (namespace) => {
+      const namespaceField = namespace === undefined ? {} : { namespace };
+      expect(
+        decodeCodexServerMessage({
+          id: "tool-request-1",
+          method: "item/tool/call",
+          params: {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            callId: "call-1",
+            ...namespaceField,
+            tool: "octant_browser",
+            arguments: { operation: "screenshot" },
+          },
+        }),
+      ).toEqual({
+        kind: "request",
+        id: "tool-request-1",
+        method: "item/tool/call",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          callId: "call-1",
+          ...namespaceField,
+          tool: "octant_browser",
+          arguments: { operation: "screenshot" },
+        },
+      });
+    },
+  );
+
   it("decodes correlated stable notification families and strips provider fields", () => {
     const fixtures = [
       {

@@ -7,6 +7,7 @@ export interface EnvironmentGroupProps {
   /** Short trailing summary shown on the header row (e.g. "+102 −0"). */
   readonly summary?: ReactNode;
   readonly defaultOpen?: boolean;
+  readonly open?: boolean;
   /** Lets a parent react to open/close, e.g. to pause polling while collapsed. */
   readonly onOpenChange?: (open: boolean) => void;
   /**
@@ -24,7 +25,8 @@ export interface EnvironmentGroupProps {
  * not fetch or poll in the background.
  */
 export function EnvironmentGroup(props: EnvironmentGroupProps) {
-  const [open, setOpen] = useState(props.defaultOpen === true);
+  const [storedOpen, setOpen] = useState(props.defaultOpen === true);
+  const open = props.open ?? storedOpen;
   const onOpenChange = props.onOpenChange;
   const toggle = () => {
     const next = !open;
@@ -36,6 +38,9 @@ export function EnvironmentGroup(props: EnvironmentGroupProps) {
       <div className="environment-group__head">
         <OctantButton
           aria-expanded={open}
+          aria-label={
+            typeof props.summary === "string" ? `${props.title} ${props.summary}` : undefined
+          }
           className="environment-group__header window-no-drag"
           onClick={toggle}
           type="button"
@@ -49,7 +54,7 @@ export function EnvironmentGroup(props: EnvironmentGroupProps) {
           />
           <span className="environment-group__title">{props.title}</span>
           {props.summary === undefined ? null : (
-            <span className="environment-group__summary">{props.summary}</span>
+            <span className="environment-group__summary"> {props.summary}</span>
           )}
         </OctantButton>
         {props.action === undefined ? null : (

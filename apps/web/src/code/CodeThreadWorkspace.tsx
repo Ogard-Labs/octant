@@ -16,9 +16,11 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import { CirclePause, UserRoundCog } from "lucide-react";
+import { CirclePause, UserRoundCog, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
+import { ComposerAttachButton } from "../composer/ComposerAttachButton";
+import { composerPlaceholder, FILE_HINT, THREAD_HINT } from "../composer/composerPlaceholder";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
@@ -66,6 +68,7 @@ import { TurnHeader, TurnTime, type TurnHeaderOutcome } from "../transcript/Turn
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
+import { boundsInsideViewport } from "../browser/useNativeBrowserSurface";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ScaffoldPicker } from "../scaffolds/ScaffoldPicker";
 import { useScaffoldCatalog } from "../scaffolds/useScaffoldCatalog";
@@ -154,6 +157,14 @@ export interface CodeThreadWorkspaceProps {
     readonly expectedVersion: number;
     readonly permissionPersistence: "current-session" | "project-default";
   }) => Promise<CodeApprovalId | undefined>;
+  /** Positions the desktop-owned approval view beside this thread's composer. */
+  readonly updateApprovalAnchor?: (bounds: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  }) => Promise<void>;
+  readonly cancelApproval?: () => Promise<void>;
   /**
    * Runs the checkpoint restore. Absent on a host that serves no operation
    * route, which keeps the control off the transcript rather than offering an
@@ -219,6 +230,36 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const [accessMessage, setAccessMessage] = useState<string>();
   const [turnAccessOverride, setTurnAccessOverride] = useState<ProviderExecutionPolicy>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const update = props.updateApprovalAnchor;
+    const activeView = view;
+    if (update === undefined || activeView === undefined) return;
+    let disposed = false;
+    const sync = () => {
+      if (disposed) return;
+      const composer = textareaRef.current?.closest<HTMLElement>(".thread-composer");
+      if (composer === undefined || composer === null) return;
+      const rect = composer.getBoundingClientRect();
+      void update(boundsInsideViewport(rect, window.innerWidth, window.innerHeight)).catch(
+        () => undefined,
+      );
+    };
+    const resize = new ResizeObserver(sync);
+    const scroll = () => sync();
+    const composer = textareaRef.current?.closest<HTMLElement>(".thread-composer");
+    if (composer !== undefined && composer !== null) resize.observe(composer);
+    window.addEventListener("resize", sync);
+    window.addEventListener("scroll", scroll, true);
+    sync();
+    return () => {
+      disposed = true;
+      resize.disconnect();
+      window.removeEventListener("resize", sync);
+      window.removeEventListener("scroll", scroll, true);
+      const cancel = props.cancelApproval;
+      if (cancel !== undefined) void cancel().catch(() => undefined);
+    };
+  }, [props.cancelApproval, props.updateApprovalAnchor, view?.thread.id, view?.thread.projectId]);
   const [confirmingRestore, setConfirmingRestore] = useState<string>();
   const [checkpointDraft, setCheckpointDraft] = useState<
     { readonly messageId: string; readonly kind: "mark" | "restore" } | undefined
@@ -856,35 +897,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         </div>
       ) : null}
 
-      {props.controller.providerRequests.map((request) =>
-        request.kind === "approval" ? (
-          <ProviderApprovalPrompt
-            key={String(request.approvalId)}
-            onAnswer={(decision) =>
-              void props.controller.answerProviderRequest({
-                kind: "approval",
-                approvalId: request.approvalId,
-                decision,
-              })
-            }
-            summary={request.summary}
-          />
-        ) : (
-          <ProviderInputPrompt
-            key={request.requestId}
-            onAnswer={(response) =>
-              void props.controller.answerProviderRequest({
-                kind: "input",
-                requestId: request.requestId,
-                response,
-              })
-            }
-            options={request.options}
-            prompt={request.prompt}
-          />
-        ),
-      )}
-
       {messages.length === 0 && pendingMessage === null ? (
         <div
           className="code-thread-workspace__conversation transcript-scroll"
@@ -1033,11 +1045,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                             <TrackerReferenceText asParagraph text={message.text} />
                           ) : null}
                         </div>
-                        {message.at === undefined ? null : <TurnTime at={message.at} />}
+                        {message.at === undefined ? null : (
+                          <TurnTime at={message.at} copyValue={message.text} />
+                        )}
                       </>
                     ) : (
                       <>
                         <TurnHeader
+                          copyValue={message.text}
                           outcome={turnHeaderOutcome(message.status)}
                           provider={
                             message.providerInstanceId === undefined ||
@@ -1063,7 +1078,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                           <CodeTranscriptRow
                             activity={activity}
                             running={message.status === "incomplete"}
-                            settled={message.status === "completed"}
+                            settled={
+                              message.status === "completed" ||
+                              message.status === "failed" ||
+                              message.status === "interrupted"
+                            }
                           />
                         )}
                         {/* An assistant reply is markdown — a plan arrives as a
@@ -1194,12 +1213,50 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           threadKind="code-thread"
         />
       )}
-      <CodeCheckoutBar
-        {...(props.onCreatePullRequest === undefined
-          ? {}
-          : { onCreatePullRequest: props.onCreatePullRequest })}
-      />
+      {props.controller.providerRequests.length === 0 ? null : (
+        <div
+          aria-label="Pending provider requests"
+          className="code-thread-workspace__provider-requests thread-column"
+        >
+          {props.controller.providerRequests.map((request) =>
+            request.kind === "approval" ? (
+              <ProviderApprovalPrompt
+                key={String(request.approvalId)}
+                onAnswer={(decision) =>
+                  void props.controller.answerProviderRequest({
+                    kind: "approval",
+                    approvalId: request.approvalId,
+                    decision,
+                  })
+                }
+                summary={request.summary}
+              />
+            ) : (
+              <ProviderInputPrompt
+                key={request.requestId}
+                onAnswer={(response) =>
+                  void props.controller.answerProviderRequest({
+                    kind: "input",
+                    requestId: request.requestId,
+                    response,
+                  })
+                }
+                options={request.options}
+                prompt={request.prompt}
+              />
+            ),
+          )}
+        </div>
+      )}
       <ThreadComposer
+        presentation="follow-up"
+        context={
+          <CodeCheckoutBar
+            {...(props.onCreatePullRequest === undefined
+              ? {}
+              : { onCreatePullRequest: props.onCreatePullRequest })}
+          />
+        }
         className="thread-composer code-thread-workspace__composer thread-column"
         chips={
           <>
@@ -1236,7 +1293,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       onClick={() => attachments.remove(reference.attachmentId)}
                       type="button"
                     >
-                      ×
+                      <X aria-hidden="true" size={12} strokeWidth={1.8} />
                     </OctantButton>
                   </span>
                 ))}
@@ -1316,7 +1373,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             onPaste={(event) => {
               if (attachFromTransfer(event.clipboardData)) event.preventDefault();
             }}
-            placeholder={busy ? "Send the next message…" : "Ask for follow-up changes…"}
+            placeholder={
+              busy
+                ? "Send the next message…"
+                : composerPlaceholder("Ask for follow-up changes", [
+                    FILE_HINT,
+                    threadMentions.composer === undefined ? undefined : THREAD_HINT,
+                  ])
+            }
             ref={textareaRef}
             rows={2}
             value={draft}
@@ -1352,6 +1416,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           ariaLabel: "Thread context",
           leading: (
             <>
+              <ComposerAttachButton
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                busy={attachments.busy}
+                refusedReason={
+                  props.attachmentClient === undefined
+                    ? "Image attachments are unavailable on this host."
+                    : boundModelReadsImages(providerGroups, thread) === false
+                      ? `${providerModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`
+                      : undefined
+                }
+                onRefused={attachments.refuse}
+                onFileSelected={(file) => void attachments.attach([file])}
+              />
               <ComposerVoiceButton
                 disabled={busy}
                 onTranscript={(transcript) => {
@@ -1402,17 +1479,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         }}
         footer={
           <div aria-live="polite" className="composer-status">
-            <span className="composer-status__hint code-thread-workspace__hint">
-              {providerChanging
-                ? "Checking the selected provider…"
-                : steered.pending !== undefined
-                  ? "Sent · runs when the response in progress finishes"
-                  : busy
-                    ? "Enter sends when this response finishes"
-                    : "Enter to send · Shift+Enter for a new line"}
-            </span>
+            {/* Idle, the line says nothing: Enter sends everywhere else too, and
+                a sentence under every composer read as clutter. */}
+            {providerChanging || steered.pending !== undefined || busy ? (
+              <span className="composer-status__hint code-thread-workspace__hint">
+                {providerChanging
+                  ? "Checking the selected provider…"
+                  : steered.pending !== undefined
+                    ? "Sent · runs when the response in progress finishes"
+                    : "Enter sends when this response finishes"}
+              </span>
+            ) : null}
             {accessMessage === undefined ? null : (
-              <span className="code-thread-workspace__hint" role="status">
+              <span className="code-thread-workspace__hint" role="status" title={accessMessage}>
                 {accessMessage}
               </span>
             )}
@@ -1440,31 +1519,28 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               </span>
             )}
             {forkMessage === undefined ? null : (
-              <span className="code-thread-workspace__hint" role="alert">
+              <span className="code-thread-workspace__hint" role="alert" title={forkMessage}>
                 {forkMessage}
               </span>
             )}
-            {/* Spend and limits sit at the far end of the same line. A provider
-                that has reported nothing shows nothing here rather than a
-                sentence saying so, and a limit appears only once it is worth
-                acting on; the context meter's panel keeps the full account. */}
-            <span className="composer-status__trailing">
-              {threadUsageLabel(props.controller.threadUsage) === undefined ? null : (
-                <span className="code-thread-workspace__hint" aria-label="Thread usage">
-                  {threadUsageLabel(props.controller.threadUsage)}
-                </span>
-              )}
-              {props.controller.threadUsage.limits
-                .filter((limit) => limit.status !== "allowed")
-                .map((limit) => (
-                  <span
-                    className={`code-thread-workspace__limit code-thread-workspace__limit--${limit.status}`}
-                    key={limit.window}
-                  >
-                    {providerLimitLabel(limit)}
-                  </span>
-                ))}
-            </span>
+            {/* Limits sit at the far end of the same line, and only once one is
+                worth acting on; the context meter's panel keeps the account of
+                what a turn spent. */}
+            {props.controller.threadUsage.limits.some((limit) => limit.status !== "allowed") ? (
+              <span className="composer-status__trailing">
+                {props.controller.threadUsage.limits
+                  .filter((limit) => limit.status !== "allowed")
+                  .map((limit) => (
+                    <span
+                      className={`code-thread-workspace__limit code-thread-workspace__limit--${limit.status}`}
+                      key={limit.window}
+                      title={providerLimitLabel(limit)}
+                    >
+                      {providerLimitLabel(limit)}
+                    </span>
+                  ))}
+              </span>
+            ) : null}
           </div>
         }
       />
@@ -1520,7 +1596,7 @@ function codeTurnActions(input: {
       ...(input.restoring ? { disabled: true } : {}),
     });
   }
-  actions.push({ label: "Copy references", value: "copy-references" });
+  actions.push({ label: "Copy message", value: "copy-references" });
   return actions;
 }
 
@@ -1570,13 +1646,6 @@ function forkTitle(sourceTitle: string): string {
     : title;
 }
 
-function threadUsageLabel(usage: CodeController["threadUsage"]): string | undefined {
-  // Zero tokens with no report is not a free thread; it is nothing to say yet.
-  if (usage.inputTokens === 0 && usage.outputTokens === 0) return undefined;
-  const tokens = `${compactTokens(usage.inputTokens)} in · ${compactTokens(usage.outputTokens)} out`;
-  return usage.costUsd === undefined ? tokens : `${tokens} · ${formatUsd(usage.costUsd)}`;
-}
-
 function providerLimitLabel(limit: CodeController["threadUsage"]["limits"][number]): string {
   const share =
     limit.utilization === undefined ? undefined : `${Math.round(limit.utilization * 100)}% used`;
@@ -1593,12 +1662,6 @@ function providerLimitLabel(limit: CodeController["threadUsage"]["limits"][numbe
     (part): part is string => part !== undefined,
   );
   return parts.join(" · ");
-}
-
-function compactTokens(tokens: number): string {
-  if (tokens < 1_000) return String(tokens);
-  if (tokens < 1_000_000) return `${(tokens / 1_000).toFixed(1)}k`;
-  return `${(tokens / 1_000_000).toFixed(2)}M`;
 }
 
 function formatUsd(cost: number): string {
@@ -1695,7 +1758,7 @@ function ProviderApprovalPrompt(props: {
   readonly onAnswer: (decision: "approved" | "denied") => void;
 }) {
   return (
-    <div aria-label="Provider approval" className="approval-row thread-column" role="group">
+    <div aria-label="Provider approval" className="approval-row approval-row--request" role="group">
       <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
       <span className="approval-row__text">{props.summary}</span>
       <div className="approval-row__actions">
@@ -1725,7 +1788,7 @@ function ProviderInputPrompt(props: {
   return (
     <form
       aria-label="Provider question"
-      className="approval-row thread-column code-thread-workspace__provider-request"
+      className="approval-row approval-row--request code-thread-workspace__provider-request"
       noValidate
       onSubmit={(event) => {
         event.preventDefault();

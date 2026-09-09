@@ -20,7 +20,11 @@ behind a separate Back to workspace step.
 
 The server-authoritative workspace remains a recursive split tree whose leaf is
 one pane holding exactly one surface. The renderer may additionally present a
-window-local thread strip as navigation history. A strip entry is not a hidden
+window-local thread strip as navigation history. (Amended 2026-09-07: the
+renderer no longer does. With a strip above them, split panes wore three title
+rows for two conversations. Each pane's own header is now the one title row —
+name, Project, close — and the sidebar is the navigation history. The strip
+bullets below describe a presentation that is no longer shipped.) A strip entry is not a hidden
 surface, does not keep a second transcript mounted, and carries no authority;
 activating it sends the same open-thread command as the sidebar and the server
 revalidates mode, Project, host, and thread identity before replacing or

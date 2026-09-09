@@ -20,6 +20,7 @@ export function EnvironmentSubagents(props: {
     parentThreadId: decodeAgentRunParentThreadId(props.threadId),
   });
   const [selectedRunId, setSelectedRunId] = useState<string>();
+  const [expanded, setExpanded] = useState<boolean>();
   const conversationState = useAgentRunConversation(
     props.client,
     selectedRunId === undefined ? undefined : decodeAgentRunId(selectedRunId),
@@ -36,7 +37,8 @@ export function EnvironmentSubagents(props: {
 
   return (
     <EnvironmentGroup
-      defaultOpen
+      open={expanded ?? controller.entries.length > 0}
+      onOpenChange={setExpanded}
       summary={summary}
       title="Subagents"
       {...(props.onOpenAgents === undefined

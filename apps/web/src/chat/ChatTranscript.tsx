@@ -308,7 +308,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                       />
                       {attachmentList}
                     </div>
-                    <TurnTime at={turn.createdAt} />
+                    <TurnTime at={turn.createdAt} copyValue={userContent?.body} />
                   </>
                 )}
                 {editing || checkpoints === undefined ? null : (
@@ -410,7 +410,7 @@ function chatTurnActions(input: {
       });
     }
   }
-  actions.push({ label: "Copy references", value: "copy-references" });
+  actions.push({ label: "Copy turn with sources", value: "copy-references" });
   return actions;
 }
 
@@ -495,6 +495,7 @@ function AttemptBlock(props: {
       >
         <TurnHeader
           at={props.attempt.updatedAt}
+          copyValue={responseBody}
           outcome={props.attempt.outcome}
           {...(props.providerGroups === undefined
             ? {}

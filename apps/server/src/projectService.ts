@@ -104,6 +104,17 @@ export class ProjectServiceError extends Error {
   }
 }
 
+/**
+ * How long one bootstrap answers every reader. A bootstrap is a realpath and
+ * a stat per bound Project, and every authority read asks for one: the
+ * navigation tick, the pull-request join, the checkout-root authority, and
+ * the environment read all fire together on a thread switch, so the same
+ * stats ran three to five times within a second and contended with the git
+ * processes those readers spawn next. A Project or memory command drops the
+ * memo, so a relink, archive, or memory edit shows on the very next read.
+ */
+const BOOTSTRAP_MAX_AGE_MS = 1_000;
+
 export class ProjectService implements ProjectServiceApi {
   readonly #persistence: PersistenceService;
   readonly #receipts: Pick<BindingReceiptStorePort, "consume">;
@@ -118,6 +129,9 @@ export class ProjectService implements ProjectServiceApi {
   readonly #archiveListeners = new Set<
     (project: Extract<Project, { readonly type: "work" }>) => void
   >();
+  #bootstrapMemo:
+    | { readonly computedAtMs: number; readonly bootstrap: Promise<ProjectBootstrap> }
+    | undefined;
 
   constructor(options: ProjectServiceOptions) {
     this.#persistence = options.persistence;
@@ -154,6 +168,20 @@ export class ProjectService implements ProjectServiceApi {
 
   async bootstrap(_authenticatedWindowId: WindowId): Promise<ProjectBootstrap> {
     this.#assertReady();
+    const nowMs = this.#now();
+    const memo = this.#bootstrapMemo;
+    if (memo !== undefined && nowMs - memo.computedAtMs < BOOTSTRAP_MAX_AGE_MS) {
+      return memo.bootstrap;
+    }
+    const bootstrap = this.#computeBootstrap();
+    this.#bootstrapMemo = { computedAtMs: nowMs, bootstrap };
+    bootstrap.catch(() => {
+      if (this.#bootstrapMemo?.bootstrap === bootstrap) this.#bootstrapMemo = undefined;
+    });
+    return bootstrap;
+  }
+
+  async #computeBootstrap(): Promise<ProjectBootstrap> {
     try {
       const projects = this.#persistence.readProjects();
       const availability = await Promise.all(
@@ -246,6 +274,14 @@ export class ProjectService implements ProjectServiceApi {
   }
 
   async executeMemory(input: unknown): Promise<MemoryCommandResult> {
+    try {
+      return await this.#executeMemory(input);
+    } finally {
+      this.#bootstrapMemo = undefined;
+    }
+  }
+
+  async #executeMemory(input: unknown): Promise<MemoryCommandResult> {
     let command: ReturnType<typeof decodeMemoryCommand>;
     try {
       command = decodeMemoryCommand(input);
@@ -377,6 +413,17 @@ export class ProjectService implements ProjectServiceApi {
   }
 
   async executeProject(
+    authenticatedWindowId: WindowId,
+    input: unknown,
+  ): Promise<ProjectCommandResult> {
+    try {
+      return await this.#executeProject(authenticatedWindowId, input);
+    } finally {
+      this.#bootstrapMemo = undefined;
+    }
+  }
+
+  async #executeProject(
     authenticatedWindowId: WindowId,
     input: unknown,
   ): Promise<ProjectCommandResult> {

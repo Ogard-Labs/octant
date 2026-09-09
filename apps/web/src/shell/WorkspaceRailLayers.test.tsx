@@ -387,7 +387,7 @@ describe("WorkspaceRailLayers", () => {
     expect(await screen.findByRole("button", { name: "Board" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Board" }));
     expect(await screen.findByRole("region", { name: "Task board" })).toBeVisible();
-    expect(queryBoard).toHaveBeenCalled();
+    await waitFor(() => expect(queryBoard).toHaveBeenCalled());
     expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
 
     const board = screen.getByRole("region", { name: "Task board" });

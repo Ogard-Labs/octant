@@ -34,6 +34,8 @@ export interface ComposerPoolCandidateView {
   /** True when routing to this candidate crosses vendors from the current route. */
   readonly requiresMixedVendor: boolean;
   readonly isCurrent: boolean;
+  /** Hidden models are retained only when already bound as the current model. */
+  readonly hiddenCurrent?: boolean;
 }
 
 export type ComposerPoolModel =
@@ -61,14 +63,25 @@ export function buildComposerPoolModel(input: BuildComposerPoolModelInput): Comp
   if (input.snapshot === undefined) return { kind: "loading" };
   const snapshot = input.snapshot;
   const eligibleDefaults = snapshot.defaults.agentEligibleModels ?? [];
-  if (eligibleDefaults.length === 0) {
+  const hiddenKeys = new Set(
+    (snapshot.defaults.hiddenModels ?? []).map((ref) => `${ref.providerInstanceId}:${ref.modelId}`),
+  );
+  const currentKey =
+    input.current === undefined
+      ? undefined
+      : `${input.current.providerInstanceId}:${input.current.modelId}`;
+  const visibleDefaults = eligibleDefaults.filter((ref) => {
+    const key = `${ref.providerInstanceId}:${ref.modelId}`;
+    return !hiddenKeys.has(key) || key === currentKey;
+  });
+  if (visibleDefaults.length === 0) {
     return {
       kind: "unavailable",
       reason:
         "No agent-eligible models are defined in Provider Settings. Define a default pool there first.",
     };
   }
-  if (eligibleDefaults.length < 2) {
+  if (visibleDefaults.length < 2) {
     return {
       kind: "unavailable",
       reason:
@@ -76,7 +89,7 @@ export function buildComposerPoolModel(input: BuildComposerPoolModelInput): Comp
     };
   }
 
-  const candidates = eligibleDefaults.map((ref) =>
+  const candidates = visibleDefaults.map((ref) =>
     decodeMultiModelPoolCandidate({
       hostId: input.hostId,
       providerInstanceId: ref.providerInstanceId,
@@ -151,6 +164,11 @@ export function buildComposerPoolModel(input: BuildComposerPoolModelInput): Comp
       isCurrent:
         currentCandidate !== undefined &&
         candidateKey(candidate) === candidateKey(currentCandidate),
+      ...(currentCandidate !== undefined &&
+      candidateKey(candidate) === candidateKey(currentCandidate) &&
+      hiddenKeys.has(`${candidate.providerInstanceId}:${candidate.modelId}`)
+        ? { hiddenCurrent: true }
+        : {}),
     };
   });
 

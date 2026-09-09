@@ -6,7 +6,7 @@ import type {
 } from "@octant/contracts/providers";
 import { buildModelPickerGroups } from "@octant/domain";
 import { useMemo, useState } from "react";
-import { ModelPicker } from "../providers/ModelPicker";
+import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { SettingRow } from "../settings/primitives";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -28,6 +28,40 @@ export interface ChatSettingsViewProps {
 
 export function ChatSettingsView(props: ChatSettingsViewProps) {
   const [draft, setDraft] = useState(() => draftFrom(props.settings));
+  const [previousSettings, setPreviousSettings] = useState(props.settings);
+  // Saved revisions update untouched fields without remounting a focused editor
+  // or replacing text the user is still composing in another field.
+  if (previousSettings !== props.settings) {
+    const before = draftFrom(previousSettings);
+    const next = draftFrom(props.settings);
+    setPreviousSettings(props.settings);
+    setDraft((current) => ({
+      defaultProviderInstanceId:
+        current.defaultProviderInstanceId === before.defaultProviderInstanceId
+          ? next.defaultProviderInstanceId
+          : current.defaultProviderInstanceId,
+      defaultModelId:
+        current.defaultModelId === before.defaultModelId
+          ? next.defaultModelId
+          : current.defaultModelId,
+      defaultResearchEnabled:
+        current.defaultResearchEnabled === before.defaultResearchEnabled
+          ? next.defaultResearchEnabled
+          : current.defaultResearchEnabled,
+      defaultResearchRouting:
+        current.defaultResearchRouting === before.defaultResearchRouting
+          ? next.defaultResearchRouting
+          : current.defaultResearchRouting,
+      searxngBaseUrl:
+        current.searxngBaseUrl === before.searxngBaseUrl
+          ? next.searxngBaseUrl
+          : current.searxngBaseUrl,
+      defaultPersonalityInstructions:
+        current.defaultPersonalityInstructions === before.defaultPersonalityInstructions
+          ? next.defaultPersonalityInstructions
+          : current.defaultPersonalityInstructions,
+    }));
+  }
   const [endpointError, setEndpointError] = useState<string>();
   const [formError, setFormError] = useState<string>();
   const [saving, setSaving] = useState(false);
@@ -41,6 +75,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
           ),
         ),
         providerOrder: props.providerSnapshot?.defaults.providerOrder,
+        hiddenModels: props.providerSnapshot?.defaults.hiddenModels,
         mode: "chat",
         currentSelection:
           draft.defaultProviderInstanceId === "" || draft.defaultModelId === ""
@@ -131,11 +166,6 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
       <p className="settings-section-note">
         These defaults apply only to new threads. Existing threads keep their explicit values.
       </p>
-      {props.message === undefined ? null : (
-        <p className="provider-settings__alert" role="alert">
-          {props.message}
-        </p>
-      )}
       <form
         aria-label="Chat defaults"
         className="setgroup"
@@ -153,7 +183,9 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
           scope="host"
           settingId="chat-default-model"
         >
-          <ModelPicker
+          <ComposerModelPicker
+            menuSide="bottom"
+            unselectedLabel="Choose model"
             ariaLabel="Default Chat provider and model"
             groups={groups}
             onSelect={(selection) => {
@@ -230,11 +262,6 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
             value={draft.searxngBaseUrl}
           />
         </SettingRow>
-        {endpointError === undefined ? null : (
-          <p className="provider-settings__alert" id="searxng-base-url-error" role="alert">
-            {endpointError}
-          </p>
-        )}
         <SettingRow
           description="How a new Chat thread carries itself before you say otherwise."
           label="Calm personality instructions"
@@ -257,11 +284,23 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
             value={draft.defaultPersonalityInstructions}
           />
         </SettingRow>
-        {formError === undefined ? null : (
-          <p className="provider-settings__alert" role="alert">
-            {formError}
-          </p>
-        )}
+        <div className="settings-feedback-slot" aria-live="polite">
+          {props.message === undefined ? null : (
+            <p className="provider-settings__alert" role="alert">
+              {props.message}
+            </p>
+          )}
+          {endpointError === undefined ? null : (
+            <p className="provider-settings__alert" id="searxng-base-url-error" role="alert">
+              {endpointError}
+            </p>
+          )}
+          {formError === undefined ? null : (
+            <p className="provider-settings__alert" role="alert">
+              {formError}
+            </p>
+          )}
+        </div>
       </form>
     </section>
   );

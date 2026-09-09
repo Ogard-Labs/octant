@@ -116,6 +116,30 @@ export interface BrowserSurfaceRequest {
   };
 }
 
+export type CodeOperationApprovalAnchor =
+  | {
+      readonly kind: "thread";
+      readonly projectId: string;
+      readonly threadId: string;
+      readonly bounds: {
+        readonly x: number;
+        readonly y: number;
+        readonly width: number;
+        readonly height: number;
+      };
+    }
+  | {
+      readonly kind: "draft";
+      readonly projectId: string;
+      readonly composerId: string;
+      readonly bounds: {
+        readonly x: number;
+        readonly y: number;
+        readonly width: number;
+        readonly height: number;
+      };
+    };
+
 export type ProjectWindowTarget =
   | Readonly<{ kind: "project"; projectId: string }>
   | Readonly<{
@@ -183,7 +207,14 @@ export interface OctantHostBridge {
   readonly openInNewWindow?: (target: ProjectWindowTarget) => Promise<void> | void;
   readonly requestCodeOperationApproval?: (
     request: CodeOperationApprovalRequest,
+    presentation?: { readonly projectId: string; readonly composerId: string },
   ) => Promise<string | undefined>;
+  /** Positions an owner-only native approval view; it cannot confirm one. */
+  readonly updateCodeOperationApprovalAnchor?: (
+    anchor: CodeOperationApprovalAnchor,
+  ) => Promise<void>;
+  /** Cancels any pending native approval owned by this window. */
+  readonly cancelCodeOperationApproval?: () => Promise<void>;
   readonly projectWindowCapability: string;
   readonly subscribeProjectWindowCapability?: (
     listener: (capability: string) => void,

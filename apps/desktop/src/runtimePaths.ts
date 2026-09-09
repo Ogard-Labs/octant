@@ -2,6 +2,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const DESKTOP_PRELOAD_FILENAME = "preload.cjs" as const;
+export const CODE_APPROVAL_PRELOAD_FILENAME = "code-approval-preload.cjs" as const;
 export const CODE_FILE_HELPER_FILENAME = "octant-code-file-helper" as const;
 export const KEYCHAIN_HELPER_FILENAME = "octant-keychain-helper" as const;
 

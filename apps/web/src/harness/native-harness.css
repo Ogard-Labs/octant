@@ -23,9 +23,8 @@
 }
 
 .native-harness-slot {
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  padding: var(--oct-space-3) 0;
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .native-harness-slot__head,
@@ -160,4 +159,15 @@
 
 .native-harness-steering__status {
   color: color-mix(in srgb, CanvasText 55%, transparent);
+}
+
+.native-harness-job {
+  justify-content: space-between;
+  min-height: 44px;
+  padding-block: var(--oct-space-2);
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.native-harness-panel > .settings-card-section > h3 {
+  margin: var(--oct-space-4) 0 var(--oct-space-2);
 }

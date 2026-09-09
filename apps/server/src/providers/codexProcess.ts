@@ -432,7 +432,10 @@ function acquireCodexAppServer(
               title: "Octant",
               version: options.octantVersion,
             },
-            capabilities: { experimentalApi: false, requestAttestation: false },
+            // Dynamic tools are an experimental app-server field. Opt in at
+            // connection startup so a later thread/start can carry the
+            // app-owned catalogue through the structured protocol.
+            capabilities: { experimentalApi: true, requestAttestation: false },
           },
           decodeInitializeResult,
         );

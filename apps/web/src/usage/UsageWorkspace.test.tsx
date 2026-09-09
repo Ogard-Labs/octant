@@ -1,3 +1,4 @@
+import { UsageNamesProvider } from "./UsageName";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -349,12 +350,16 @@ describe("UsageWorkspace", () => {
   it("opens the attributed subject without embedding its text", async () => {
     const { client } = clientReturning(dashboard());
     const onOpenSubject = vi.fn();
-    render(<UsageWorkspace client={client} onOpenSubject={onOpenSubject} />);
+    render(
+      <UsageNamesProvider names={new Map([["chat-thread/thread-1", "Holiday plans"]])}>
+        <UsageWorkspace client={client} onOpenSubject={onOpenSubject} />
+      </UsageNamesProvider>,
+    );
 
     await waitFor(() =>
       expect(screen.getByRole("table", { name: "Usage request detail" })).toBeInTheDocument(),
     );
-    await userEvent.click(screen.getByRole("button", { name: "chat-thread/thread-1" }));
+    await userEvent.click(screen.getByRole("button", { name: "Holiday plans" }));
     expect(onOpenSubject).toHaveBeenCalledWith("chat-thread", "thread-1");
   });
 

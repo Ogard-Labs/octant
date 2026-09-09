@@ -451,8 +451,10 @@ describe("ProjectOverview threads and recent activity", () => {
     ).toEqual(["thread-newer", "thread-older"]);
     expect(screen.queryByRole("button", { name: /Someone else's work/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Loose chat/ })).not.toBeInTheDocument();
-    // A dot beside the thread, not a bar wrapped underneath it.
-    expect(within(list).getByLabelText("Needs attention")).toBeVisible();
+    // One compact indicator retains all of the row's attention states.
+    expect(
+      within(list).getByRole("img", { name: "Needs attention · New activity · Follow-up" }),
+    ).toBeVisible();
     expect(within(list).queryByText("Needs attention")).not.toBeInTheDocument();
 
     await user.click(within(list).getByRole("button", { name: /Launch checklist/ }));

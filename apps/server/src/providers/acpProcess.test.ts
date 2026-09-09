@@ -28,6 +28,7 @@ const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeAcpAgent.py", import.m
 const directories: string[] = [];
 
 const kilo = acpProviderProfiles.kilo;
+const opencode = acpProviderProfiles.opencode;
 const devin = acpProviderProfiles.devin;
 const vibe = acpProviderProfiles["mistral-vibe"];
 const kimi = acpProviderProfiles["kimi-code"];
@@ -38,11 +39,14 @@ const gemini = acpProviderProfiles.gemini;
 const copilot = acpProviderProfiles.copilot;
 const cline = acpProviderProfiles.cline;
 const qwen = acpProviderProfiles.qwen;
-const profiles = Object.values(acpProviderProfiles);
+const profiles = Object.values(acpProviderProfiles).filter(
+  (profile) => profile.kind !== "opencode",
+);
 const denyDefaultProfiles = [kilo, devin, vibe, grok, goose, glm, gemini, copilot, cline, qwen];
 
 /** `--version` outputs per profile: [ready, too-old, malformed]. */
 const versionOutputs: Record<AcpProviderProfile["kind"], readonly [string, string, string]> = {
+  opencode: ["opencode2 v0.0.0-beta-18721", "opencode2 v0.0.0-beta-18720", "opencode2 preview"],
   kilo: ["7.4.11", "0.9.9", "kilo release 7.4.11 extra"],
   devin: ["devin 3000.1.27 (0d4bf12e)", "devin 3000.1.26 (0d4bf12e)", "devin release 3000.1.27"],
   "mistral-vibe": ["vibe-acp 2.24.1", "vibe-acp 2.24.0", "mistral vibe release 2.24.1 extra"],
@@ -64,6 +68,7 @@ const versionOutputs: Record<AcpProviderProfile["kind"], readonly [string, strin
   qwen: ["0.23.0", "0.22.9", "qwen-code release 0.23.0 private-noise"],
 };
 const readyVersions: Record<AcpProviderProfile["kind"], string> = {
+  opencode: "0.0.0",
   kilo: "7.4.11",
   devin: "3000.1.27",
   "mistral-vibe": "2.24.1",
@@ -151,7 +156,10 @@ const passthroughConfinement: AcpConfinementPort = {
 function port(overrides: Partial<AcpProcessOptions> = {}) {
   return makeAcpProcessLive({
     confinement: passthroughConfinement,
-    startupTimeoutMs: 500,
+    // The process suite runs profiles in parallel under the monorepo test
+    // load. Keep fixture startup tolerant of scheduler contention; production
+    // uses the separate 10s default in acpProcess.ts.
+    startupTimeoutMs: 2_000,
     shutdownTimeoutMs: 100,
     ...overrides,
   });
@@ -280,6 +288,34 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
 });
 
 describe("ACP process lifecycle", () => {
+  it("uses Devin's supported ACP launch flags", () => {
+    const managedHome = "/private/tmp/octant-devin-home";
+    expect(devin.process.args({ root: "/private/tmp/octant-root", managedHome })).toEqual([
+      "--config",
+      join(managedHome, ".config/devin/config.json"),
+      "--respect-workspace-trust",
+      "true",
+      "--permission-mode",
+      "auto",
+      "acp",
+    ]);
+    const files = devin.process.managedFiles({
+      managedHome,
+      executionPolicy: "approval-gated",
+    });
+    expect(files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: join(managedHome, ".config/devin/mcp_config.json") }),
+      ]),
+    );
+    expect(files.map((file) => file.path)).not.toContain(
+      join(managedHome, ".config/devin/octant-agent.json"),
+    );
+    expect(files.find((file) => file.path.endsWith("/config.json"))?.content).toContain(
+      '"subagents_enabled": false',
+    );
+  });
+
   it("injects a Mistral Vibe API key only when selected", () => {
     const environment = sanitizeAcpEnvironment(
       vibe,
@@ -340,7 +376,11 @@ describe("ACP process lifecycle", () => {
     let processCount = 0;
     const connectionPromise = Effect.runPromise(
       Effect.scoped(
-        port().start({
+        // This test deliberately waits for the second ownership callback
+        // before allowing initialization to continue. Keep enough startup
+        // budget for the fixture process when the full server suite is busy;
+        // production startup defaults stay unchanged.
+        port({ startupTimeoutMs: 5_000 }).start({
           profile: kilo,
           binaryPath: target.binaryPath,
           root: target.root,
@@ -356,12 +396,20 @@ describe("ACP process lifecycle", () => {
       ),
     );
 
-    await vi.waitFor(() => expect(spawnRecord(target.root)).toBeDefined());
-    expect(records(target.root).some((record) => record.kind === "message")).toBe(false);
-    releaseOwnership();
-    await expect(connectionPromise).resolves.toMatchObject({
-      initialized: { protocolVersion: 1 },
-    });
+    // Observe failures immediately even while the test waits for the fixture
+    // to start; always release the held receipt before deleting its directory.
+    void connectionPromise.catch(() => undefined);
+    try {
+      await vi.waitFor(() => expect(spawnRecord(target.root)).toBeDefined(), { timeout: 5_000 });
+      expect(records(target.root).some((record) => record.kind === "message")).toBe(false);
+      releaseOwnership();
+      await expect(connectionPromise).resolves.toMatchObject({
+        initialized: { protocolVersion: 1 },
+      });
+    } finally {
+      releaseOwnership();
+      await connectionPromise.catch(() => undefined);
+    }
   });
 
   it.each(["descendant", "stubborn-descendant"])(
@@ -394,6 +442,100 @@ describe("ACP process lifecycle", () => {
       await expect.poll(() => pids.every((pid) => !isRunning(pid)), { timeout: 3_000 }).toBe(true);
     },
   );
+});
+
+describe("ACP child-server profiles", () => {
+  it("describes the beta OpenCode ACP launch and keeps structured questions unsupported", () => {
+    expect(opencode.process.args({ root: "/tmp/project", managedHome: "/tmp/managed" })).toEqual([
+      "acp",
+    ]);
+    expect(opencode.process.versionPattern.test("opencode2 v0.0.0-beta-18721")).toBe(true);
+    expect(opencode.userQuestions).toBe("unsupported");
+    const environment = sanitizeAcpEnvironment(
+      opencode,
+      { PATH: "/usr/bin" },
+      { managedHome: "/tmp/managed" },
+    );
+    const expectedConfig =
+      [
+        join(homedir(), ".config/opencode/opencode.jsonc"),
+        join(homedir(), ".config/opencode/opencode.json"),
+      ].find((path) => existsSync(path)) ?? join(homedir(), ".config/opencode/opencode.jsonc");
+    expect(environment).toMatchObject({
+      OPENCODE_CONFIG: expectedConfig,
+      OPENCODE_CONFIG_DIR: "/tmp/managed/config",
+      OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1",
+      OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
+      OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
+      OPENCODE_PURE: "1",
+    });
+    expect(JSON.parse(environment.OPENCODE_CONFIG_CONTENT ?? "{}")).toMatchObject({
+      permissions: expect.arrayContaining([
+        { action: "external_directory", effect: "deny", resource: "*" },
+        { action: "skill", effect: "deny", resource: "*" },
+      ]),
+    });
+  });
+
+  it("refuses chat and plan before spawning a nested OpenCode server", async () => {
+    const target = fixture(opencode);
+    const confinement = makeAcpConfinementLive({
+      platform: "darwin",
+      sandboxPath: target.sandboxPath,
+      temporaryDirectory: join(target.canonicalRoot, "tmp"),
+      hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+    });
+    for (const [mode, executionPolicy] of [
+      ["chat", "approval-gated"],
+      ["code", "plan"],
+    ] as const) {
+      const result = await failureOf(
+        confinement.prepare({
+          profile: opencode,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome: join(target.canonicalRoot, "managed-home"),
+          mode,
+          executionPolicy,
+          environment: { PATH: "/usr/bin" },
+        }),
+      );
+      expect(result).toEqual({
+        category: "incompatible",
+        message:
+          "OpenCode 2 cannot run in Chat or Plan mode because its ACP entrypoint requires a child server; use Code or Work mode.",
+      });
+    }
+  });
+
+  it("reads the existing user configuration without granting it write access", async () => {
+    const target = fixture(opencode);
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+      }).prepare({
+        profile: opencode,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome: join(target.canonicalRoot, "managed-home"),
+        mode: "code",
+        executionPolicy: "approval-gated",
+        environment: { PATH: "/usr/bin" },
+      }),
+    );
+    const hostConfigs = [
+      join(homedir(), ".config/opencode/opencode.jsonc"),
+      join(homedir(), ".config/opencode/opencode.json"),
+    ].filter((path) => existsSync(path));
+    for (const hostConfig of hostConfigs) {
+      const canonical = realpathSync(hostConfig);
+      expect(launch.args[1]).toContain(`(allow file-read* (subpath "${canonical}"))`);
+      expect(launch.args[1]).not.toContain(`(allow file-write* (subpath "${canonical}"))`);
+    }
+  });
 });
 
 describe.each(denyDefaultProfiles)("ACP deny-default confinement ($displayName)", (profile) => {
@@ -736,6 +878,41 @@ describe("Kimi Code immutable managed profile", () => {
       expect(launch.args[1]).not.toContain(`(allow file-write* (subpath "${root}"))`);
       expect(launch.args[1]).not.toContain("(allow process-fork)");
     }
+  });
+
+  it("allows only the owned ACP tool bridge port without opening generic network egress", async () => {
+    const target = fixture(kimi);
+    const root = target.canonicalRoot;
+    const launch = await Effect.runPromise(
+      confinement(target, join(root, "sandbox-tmp")).prepare({
+        profile: kimi,
+        binaryPath: target.binaryPath,
+        root,
+        managedHome: join(root, "managed-kimi-loopback"),
+        mode: "work",
+        executionPolicy: "approval-gated",
+        environment: {},
+        loopbackPorts: [43_123],
+      }),
+    );
+    expect(launch.args[1]).toContain('(allow network-outbound (remote ip "localhost:43123"))');
+    expect(launch.args[1]).not.toContain("(allow network*)");
+    const invalid = await failureOf(
+      confinement(target).prepare({
+        profile: kimi,
+        binaryPath: target.binaryPath,
+        root,
+        managedHome: join(root, "managed-kimi-loopback-invalid"),
+        mode: "work",
+        executionPolicy: "approval-gated",
+        environment: {},
+        loopbackPorts: [65_536],
+      }),
+    );
+    expect(invalid).toEqual({
+      category: "invalid-configuration",
+      message: "Kimi Code app-managed tool bridge port is invalid.",
+    });
   });
 
   it("keeps immutable managed-profile confinement and fails closed on Linux even with Bubblewrap", async () => {

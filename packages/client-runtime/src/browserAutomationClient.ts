@@ -17,6 +17,10 @@ import {
   type BrowserThreadScope,
   type BrowserThreadContextCommand,
   type BrowserThreadScopeRequest,
+  decodeBrowserToolApprovalDecision,
+  decodeBrowserToolApprovalList,
+  type BrowserToolApprovalDecision,
+  type BrowserToolApprovalList,
 } from "@octant/contracts/browser-automation-rpc";
 import {
   decodeBrowserAutomationFailure,
@@ -53,6 +57,8 @@ export interface BrowserAutomationClient {
     signal?: AbortSignal,
   ): Promise<BrowserAutomationSnapshot>;
   stop(input: BrowserContextStopCommand, signal?: AbortSignal): Promise<BrowserAutomationSnapshot>;
+  listApprovals?(signal?: AbortSignal): Promise<BrowserToolApprovalList>;
+  decideApproval?(decision: BrowserToolApprovalDecision): Promise<boolean>;
 }
 
 export type BrowserAutomationClientFailureCategory =
@@ -138,6 +144,35 @@ export function createBrowserAutomationClient(
         decodeBrowserAutomationSnapshot,
         signal,
       ),
+    listApprovals: (signal) =>
+      post(
+        options,
+        "/api/browser/approvals",
+        { kind: "list" },
+        decodeBrowserToolApprovalList,
+        signal,
+      ),
+    decideApproval: async (decision) => {
+      const validated = decodeBrowserToolApprovalDecision(decision);
+      const response = await post(
+        options,
+        "/api/browser/approvals",
+        { kind: "decide", ...validated },
+        (value) => {
+          if (
+            typeof value !== "object" ||
+            value === null ||
+            Object.keys(value).length !== 1 ||
+            (value as { accepted?: unknown }).accepted !== true
+          ) {
+            throw new Error("invalid");
+          }
+          return true;
+        },
+        undefined,
+      );
+      return response;
+    },
   };
 }
 

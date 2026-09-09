@@ -8,6 +8,7 @@
  * guards, managed-home layout, Seatbelt strategy, ACP mode mapping, and
  * capability quirks. Everything else is shared behavior.
  */
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ProviderDriverKind, ProviderExecutionPolicy } from "@octant/contracts";
@@ -16,6 +17,7 @@ import type { AcpInitializeResult } from "./acpProtocol";
 export type AcpProviderKind = Extract<
   ProviderDriverKind,
   | "kilo"
+  | "opencode"
   | "devin"
   | "mistral-vibe"
   | "kimi-code"
@@ -80,6 +82,10 @@ export interface AcpProcessProfile {
   readonly npmPackageName?: string;
   readonly passthroughVariables: ReadonlyArray<string>;
   readonly guards: Readonly<Record<string, string>>;
+  /** User-owned configuration files the provider needs to read, never write. */
+  readonly hostReadPaths?: ReadonlyArray<string>;
+  /** The CLI starts a same-binary stdio server before serving ACP messages. */
+  readonly requiresChildServer?: boolean;
   readonly environment: (input: {
     readonly managedHome: string;
     readonly executionPolicy: ProviderExecutionPolicy;
@@ -155,6 +161,79 @@ const HOST_PASSTHROUGH_VARIABLES: ReadonlyArray<string> = [
   "TZ",
   "USER",
 ];
+
+function opencodeConfiguration(executionPolicy: ProviderExecutionPolicy) {
+  const sideEffects = executionPolicy === "full-access" ? "allow" : "ask";
+  return {
+    permissions: [
+      { action: "read", resource: "*", effect: "allow" },
+      { action: "edit", resource: "*", effect: sideEffects },
+      { action: "shell", resource: "*", effect: sideEffects },
+      { action: "external_directory", resource: "*", effect: "deny" },
+      { action: "skill", resource: "*", effect: "deny" },
+      { action: "question", resource: "*", effect: "deny" },
+    ],
+  } as const;
+}
+
+const opencodeGlobalConfigPaths = [
+  join(homedir(), ".config/opencode/opencode.jsonc"),
+  join(homedir(), ".config/opencode/opencode.json"),
+] as const;
+
+function opencodeGlobalConfigPath(): string {
+  return opencodeGlobalConfigPaths.find((path) => existsSync(path)) ?? opencodeGlobalConfigPaths[0];
+}
+
+const opencodeProfile: AcpProviderProfile = {
+  kind: "opencode",
+  displayName: "OpenCode 2",
+  reasoningOptionId: "effort",
+  sessionMode: (_mode, policy) => (policy === "plan" ? "plan" : "build"),
+  chatSessionRoot: "project-root",
+  userQuestions: "unsupported",
+  resumeMethod: "session/resume",
+  closesSessions: true,
+  authenticateOnProbe: false,
+  authentication: { kind: "provider-owned" },
+  unauthenticatedMessage: "OpenCode 2 is not authenticated. Run opencode2 auth login, then retry.",
+  process: {
+    agentName: "OpenCode",
+    versionPattern:
+      /^opencode2 v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\r?\n?$/,
+    minimumVersion: [0, 0, 0],
+    passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    requiresChildServer: true,
+    hostReadPaths: opencodeGlobalConfigPaths,
+    guards: {
+      NO_COLOR: "1",
+      OPENCODE_DISABLE_AUTOUPDATE: "1",
+      OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
+      OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
+      OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1",
+      OPENCODE_DISABLE_LSP_DOWNLOAD: "1",
+      OPENCODE_DISABLE_TERMINAL_TITLE: "1",
+      OPENCODE_PURE: "1",
+    },
+    environment: ({ executionPolicy, managedHome }) => ({
+      OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfiguration(executionPolicy)),
+      OPENCODE_CONFIG: opencodeGlobalConfigPath(),
+      OPENCODE_CONFIG_DIR: join(managedHome, "config"),
+      XDG_CACHE_HOME: join(managedHome, "cache"),
+      XDG_CONFIG_HOME: join(managedHome, "config"),
+      XDG_STATE_HOME: join(managedHome, "state"),
+      TMPDIR: join(managedHome, "tmp"),
+    }),
+    args: () => ["acp"],
+    managedFiles: () => [],
+    hostAuthentication: {
+      kind: "directory",
+      defaultPath: join(homedir(), ".local/share/opencode"),
+      loginHint: "Run opencode2 auth login, then retry.",
+    },
+    confinement: { kind: "deny-default-seatbelt" },
+  },
+};
 
 function kiloConfiguration(executionPolicy: ProviderExecutionPolicy) {
   const permission =
@@ -242,23 +321,20 @@ const DEVIN_CONFIGURATION = {
     agents_standard: false,
   },
   plugin_dirs: [],
+  // Devin enables native subagents by default. Octant owns delegation and
+  // exposes its own bounded AgentRun surface, so the provider's run_subagent
+  // and read_subagent tools must be absent from every managed session.
+  subagents_enabled: false,
   auto_update: false,
   notify: "never",
   attribution: false,
-} as const;
-const DEVIN_AGENT_CONFIGURATION = {
-  system_instructions: "Operate only through Octant-provided context, tools, and authority.",
-  allowed_tools: ["read", "edit", "grep", "glob", "exec"],
-  permissions: { allow: [], deny: [], ask: [] },
-  mcp_servers: [],
-  extensions: [],
 } as const;
 
 function devinConfigPath(managedHome: string): string {
   return join(managedHome, ".config/devin/config.json");
 }
-function devinAgentConfigPath(managedHome: string): string {
-  return join(managedHome, ".config/devin/octant-agent.json");
+function devinMcpConfigPath(managedHome: string): string {
+  return join(managedHome, ".config/devin/mcp_config.json");
 }
 
 const devinProfile: AcpProviderProfile = {
@@ -285,11 +361,11 @@ const devinProfile: AcpProviderProfile = {
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
     guards: { DEVIN_PERMISSION_MODE: "auto", NO_COLOR: "1" },
     environment: ({ managedHome }) => ({ HOME: managedHome }),
+    // Devin 3000.4.x removed the standalone --agent-config flag. Passing it
+    // makes the CLI exit with usage status before writing an ACP response.
     args: ({ managedHome }) => [
       "--config",
       devinConfigPath(managedHome),
-      "--agent-config",
-      devinAgentConfigPath(managedHome),
       "--respect-workspace-trust",
       "true",
       "--permission-mode",
@@ -302,8 +378,11 @@ const devinProfile: AcpProviderProfile = {
         content: `${JSON.stringify(DEVIN_CONFIGURATION, null, 2)}\n`,
       },
       {
-        path: devinAgentConfigPath(managedHome),
-        content: `${JSON.stringify(DEVIN_AGENT_CONFIGURATION, null, 2)}\n`,
+        // Devin 3000.3 moved MCP configuration out of config.json. Keep the
+        // dedicated managed file empty alongside the ACP session's empty
+        // client-provided server list.
+        path: devinMcpConfigPath(managedHome),
+        content: "{}\n",
       },
     ],
     hostAuthentication: {
@@ -805,6 +884,7 @@ const kimiProfile: AcpProviderProfile = {
 };
 
 export const acpProviderProfiles: Readonly<Record<AcpProviderKind, AcpProviderProfile>> = {
+  opencode: opencodeProfile,
   kilo: kiloProfile,
   devin: devinProfile,
   "mistral-vibe": vibeProfile,

@@ -6,6 +6,8 @@ import {
   Archive,
   Cpu,
   BellRing,
+  CircleAlert,
+  LoaderCircle,
   Check,
   Clock,
   ExternalLink,
@@ -20,7 +22,11 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { resolveSnoozePresets } from "@octant/domain";
-import type { ChatThreadNavigationItem, ThreadRowActivity } from "../shell/navigationModel";
+import {
+  threadRowActivity,
+  type ChatThreadNavigationItem,
+  type ThreadRowActivity,
+} from "../shell/navigationModel";
 import { describePullRequestSummary } from "../threadBoard/ThreadBoardPullRequestSummaries";
 import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import { pullRequestKey, threadRowPullRequestDestinations } from "./threadRowPullRequests";
@@ -86,40 +92,53 @@ const ACTIVITY_LABELS: Record<Exclude<ThreadRowActivity, "idle">, string> = {
   unread: "New activity",
 };
 
-/**
- * The row's state, as a dot that says what it means.
- *
- * A state worth noticing carries its word, so the mark is never colour alone.
- * A thread at rest carries none: "Idle" in front of every quiet thread's title
- * would bury the titles a screen reader is there to read.
- */
-function ThreadStatusDot(props: { readonly activity: ThreadRowActivity }) {
-  if (props.activity === "idle") {
+/** One trailing position carries the strongest state; its label retains the others. */
+export function ThreadStatusMark(props: {
+  readonly activity: ThreadRowActivity;
+  readonly unread: boolean;
+  readonly woke: boolean;
+  readonly followUp?: boolean;
+}) {
+  const state =
+    props.activity === "working" || props.activity === "attention"
+      ? props.activity
+      : props.woke
+        ? "woke"
+        : props.unread
+          ? "unread"
+          : "idle";
+  if (state === "idle") {
     return (
       <span aria-hidden="true" className="sidebar-navigation__thread-status" data-activity="idle" />
     );
   }
+  const label = [
+    state === "woke" ? "Snooze ended" : ACTIVITY_LABELS[state],
+    ...(props.woke && state !== "woke" ? ["Snooze ended"] : []),
+    ...(props.unread && state !== "unread" ? [ACTIVITY_LABELS.unread] : []),
+    ...(props.followUp === true ? ["Follow-up"] : []),
+  ].join(" · ");
+  const Icon =
+    state === "working"
+      ? LoaderCircle
+      : state === "attention"
+        ? CircleAlert
+        : state === "woke"
+          ? Clock
+          : undefined;
   return (
     <span
-      aria-label={ACTIVITY_LABELS[props.activity]}
+      aria-label={label}
       className="sidebar-navigation__thread-status"
-      data-activity={props.activity}
+      data-activity={state}
       role="img"
-      title={ACTIVITY_LABELS[props.activity]}
-    />
+      title={label}
+    >
+      {Icon === undefined ? null : (
+        <Icon aria-hidden="true" className="size-3" size={12} strokeWidth={1.8} />
+      )}
+    </span>
   );
-}
-
-/**
- * The state a row shows when the caller did not compute one. Follow-up and
- * unread are the two the sidebar can always see for itself, so a caller that
- * knows nothing more still gets an honest dot rather than a blank one.
- */
-function activityOf(thread: ChatThreadNavigationItem): ThreadRowActivity {
-  if (thread.activity !== undefined) return thread.activity;
-  if (thread.followUp === true) return "attention";
-  if (thread.unread === true) return "unread";
-  return "idle";
 }
 
 /**
@@ -132,7 +151,7 @@ function threadRowStates(thread: ChatThreadNavigationItem): ReadonlyArray<string
   if (thread.followUp === true) states.push("Follow-up");
   if (thread.unread === true) states.push("Unread");
   if (thread.pinned === true) states.push("Pinned");
-  if (thread.woke === true) states.push("Woke");
+  if (thread.woke === true) states.push("Snooze ended");
   else if (thread.shelf === "snoozed") states.push("Snoozed");
   if (thread.shelf === "completed") states.push("Completed");
   return states;
@@ -323,19 +342,19 @@ function ThreadRowInfoCard(props: {
   });
   return (
     <span className="thread-row-info-card">
-      {states.length === 0 && age === undefined ? null : (
-        <span className="thread-row-info-card__header">
-          <span className="thread-row-info-card__states">
-            {states.map((state) => (
-              <span className="thread-row-info-card__state" key={state}>
-                {state}
-              </span>
-            ))}
-          </span>
-          {age === undefined ? null : <span className="thread-row-info-card__age">{age}</span>}
+      <span className="thread-row-info-card__header">
+        <span className="thread-row-info-card__title">{props.thread.title}</span>
+        {age === undefined ? null : <span className="thread-row-info-card__age">{age}</span>}
+      </span>
+      {states.length === 0 ? null : (
+        <span className="thread-row-info-card__states">
+          {states.map((state) => (
+            <span className="thread-row-info-card__state" key={state}>
+              {state}
+            </span>
+          ))}
         </span>
       )}
-      <span className="thread-row-info-card__title">{props.thread.title}</span>
       {facts.length === 0 ? null : (
         <span className="thread-row-info-card__facts">
           {facts.map((fact) => (
@@ -724,7 +743,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
     },
     [drag, props.thread, rowId],
   );
-  const activity = activityOf(props.thread);
+  const activity = threadRowActivity(props.thread);
   const unread = activity === "unread" || props.thread.unread === true;
   if (props.isRenaming) {
     return (
@@ -769,12 +788,6 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
       type="button"
       variant="ghost"
     >
-      {/* The dot leads the row from a gutter every row reserves, so a
-          busy and an idle title start on the same edge. It is never
-          colour alone: the label says the state in words. Unread is the
-          one state that sits at the row's end instead, as a small dot,
-          so a quiet list reads as titles with a mark on what is new. */}
-      <ThreadStatusDot activity={activity === "unread" ? "idle" : activity} />
       {props.thread.provider === undefined ? null : (
         <span
           className="sidebar-navigation__thread-provider"
@@ -837,20 +850,12 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
           {rowAge}
         </span>
       )}
-      {props.thread.woke === true ? (
-        <span className="sidebar-navigation__thread-woke" title="Snooze ended">
-          Woke
-        </span>
-      ) : null}
-      {unread ? (
-        <span
-          aria-label={ACTIVITY_LABELS.unread}
-          className="sidebar-navigation__thread-unread-dot"
-          data-indicator="unread"
-          role="img"
-          title={ACTIVITY_LABELS.unread}
-        />
-      ) : null}
+      <ThreadStatusMark
+        activity={activity}
+        unread={unread}
+        woke={props.thread.woke === true}
+        followUp={props.thread.followUp === true}
+      />
     </OctantButton>
   );
   const wrappedRow = (

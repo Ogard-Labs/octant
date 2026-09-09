@@ -14,6 +14,7 @@ export interface EnvironmentGitGroupProps {
   readonly errorMessage?: string | undefined;
   readonly observation?: CodeEnvironmentObservation | undefined;
   readonly status: CodeEnvironmentControllerStatus;
+  readonly onOpenChanges?: () => void;
 }
 
 export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
@@ -61,7 +62,25 @@ export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
   return (
     <div className="environment-git-group">
       <dl>
-        <GitRow icon={GitCommitHorizontal} label="Changes" value={content.changes} />
+        <GitRow
+          icon={GitCommitHorizontal}
+          label="Changes"
+          value={
+            props.onOpenChanges === undefined ? (
+              content.changes
+            ) : (
+              <OctantButton
+                aria-label="View changes"
+                className="environment-changes-action"
+                onClick={props.onOpenChanges}
+                variant="ghost"
+                type="button"
+              >
+                {content.changes}
+              </OctantButton>
+            )
+          }
+        />
         <GitRow icon={GitBranch} label="Branch" value={content.branch} />
         <GitRow icon={FolderGit2} label="Repository" value={content.repository} />
         {separateWorktree ? (

@@ -75,6 +75,20 @@ function watchingClient(notices: ReadonlyArray<unknown>) {
 }
 
 describe("CodeFileExplorerPanel", () => {
+  it("does not claim that files are missing while the listing is still loading", async () => {
+    render(
+      <CodeFileExplorerPanel
+        threadId={threadId}
+        checkoutId={checkoutId}
+        client={client(() => new Promise(() => undefined))}
+        onOpenFile={vi.fn()}
+      />,
+    );
+    expect(await screen.findByText("Loading Files")).toBeVisible();
+    expect(screen.queryByText("No matching repository files.")).not.toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Filter files" })).toBeVisible();
+  });
+
   it("relists the repository when the host reports that files changed", async () => {
     render(
       <CodeFileExplorerPanel

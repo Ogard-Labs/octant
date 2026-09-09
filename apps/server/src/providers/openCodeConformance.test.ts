@@ -20,6 +20,20 @@ const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000202"
 const modelId = "anthropic/claude-sonnet" as ProviderModelId;
 const projectRoot = "/tmp/octant-conformance";
 
+async function withProcessPlatform<T>(
+  platform: NodeJS.Platform,
+  action: () => Promise<T>,
+): Promise<T> {
+  const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+  if (descriptor === undefined) throw new Error("Expected a process platform descriptor.");
+  Object.defineProperty(process, "platform", { ...descriptor, value: platform });
+  try {
+    return await action();
+  } finally {
+    Object.defineProperty(process, "platform", descriptor);
+  }
+}
+
 describe("OpenCode provider conformance", () => {
   it("passes the provider-neutral lifecycle, capability, resume, and cleanup harness", async () => {
     const source = new EventSourceFixture();
@@ -34,6 +48,8 @@ describe("OpenCode provider conformance", () => {
       version: "1",
       time: { created: 1, updated: 1 },
     } as const;
+    let managedUrl: string | undefined;
+    let managedSessionId: string | undefined;
     const client: OpenCodeClientPort = {
       health: async () => ({ healthy: true, version: "1.18.0" }),
       providers: async () => ({ all: [provider()], connected: ["anthropic"] }),
@@ -43,9 +59,28 @@ describe("OpenCode provider conformance", () => {
         if (id === "stale") throw new Error("not found");
         return session;
       },
-      prompt: async () => {
+      prompt: async ({ permission }) => {
+        const hasManagedTools = permission.some(
+          (rule) => rule.permission.startsWith("octant-") && rule.action === "allow",
+        );
         for (const event of runtimeEvents(session.id)) source.emit(event);
+        if (hasManagedTools && managedUrl !== undefined) {
+          // Provider prompts return before the model's MCP call completes;
+          // keep the fixture's request asynchronous so the conformance
+          // harness can observe and answer the app-owned tool request.
+          void invokeManagedTool(managedUrl, "octant_web_research", managedSessionId).then(
+            () =>
+              source.emit({ type: "session.idle", properties: { sessionID: session.id } } as Event),
+            () =>
+              source.emit({ type: "session.idle", properties: { sessionID: session.id } } as Event),
+          );
+        }
       },
+      addMcpServer: async ({ url }) => {
+        managedUrl = url;
+        managedSessionId = await attestManagedBridge(url);
+      },
+      disconnectMcpServer: async () => undefined,
       abort: async () => {
         source.emit({
           type: "session.error",
@@ -65,6 +100,7 @@ describe("OpenCode provider conformance", () => {
         start: () =>
           Effect.acquireRelease(
             Effect.succeed({
+              isolatedConfiguration: true,
               authorization: "Basic redacted",
               pid: process.pid,
               url: new URL("http://127.0.0.1:1/"),
@@ -119,28 +155,44 @@ describe("OpenCode provider conformance", () => {
       },
       isReleased: () => released,
     });
-    const chatEvidence = await runProviderChatConformance({
-      driver,
-      probeInput: { instanceId },
-      acquireInput: { instanceId, projectRoot },
-      sessionStart: { sessionId, modelId, executionPolicy: "approval-gated" },
-      turn: {
-        sessionId,
-        prompt: "hello",
-        attachments: [],
-        tools: [
-          {
-            name: "octant_web_research",
-            inputSchema: {
-              type: "object",
-              properties: { query: { type: "string" } },
-              required: ["query"],
+    const chatEvidence = await withProcessPlatform("darwin", () =>
+      runProviderChatConformance({
+        driver,
+        probeInput: { instanceId },
+        acquireInput: { instanceId, projectRoot },
+        sessionStart: {
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          tools: [
+            {
+              name: "octant_web_research",
+              inputSchema: {
+                type: "object",
+                properties: { query: { type: "string" } },
+                required: ["query"],
+              },
             },
-          },
-        ],
-      },
-      isReleased: () => released,
-    });
+          ],
+        },
+        turn: {
+          sessionId,
+          prompt: "hello",
+          attachments: [],
+          tools: [
+            {
+              name: "octant_web_research",
+              inputSchema: {
+                type: "object",
+                properties: { query: { type: "string" } },
+                required: ["query"],
+              },
+            },
+          ],
+        },
+        isReleased: () => released,
+      }),
+    );
     recordProviderConformanceEvidence("opencode", evidence);
     recordProviderChatConformanceEvidence("opencode", chatEvidence);
     expect(evidence).toEqual({
@@ -179,6 +231,99 @@ class EventSourceFixture implements AsyncIterable<Event> {
       },
     };
   }
+}
+
+async function invokeManagedTool(
+  url: string,
+  name: string,
+  existingSessionId: string | undefined,
+): Promise<void> {
+  let sessionId = existingSessionId;
+  if (sessionId === undefined) {
+    const initialize = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "open-code-fixture", version: "1" },
+        },
+      }),
+    });
+    if (!initialize.ok) throw new Error("Managed MCP fixture initialization failed.");
+    sessionId = initialize.headers.get("mcp-session-id") ?? undefined;
+    if (sessionId === undefined) throw new Error("Managed MCP fixture did not receive a session.");
+  }
+  const headers = {
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+    "mcp-session-id": sessionId,
+  };
+  if (existingSessionId === undefined) {
+    await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} }),
+    });
+  }
+  await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name,
+        arguments: { query: "hello" },
+        _meta: { progressToken: 2 },
+      },
+    }),
+  });
+}
+
+async function attestManagedBridge(url: string): Promise<string> {
+  const initialize = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "open-code-probe-fixture", version: "1" },
+      },
+    }),
+  });
+  if (!initialize.ok) throw new Error("Managed MCP fixture initialization failed.");
+  const sessionId = initialize.headers.get("mcp-session-id");
+  if (sessionId === null) throw new Error("Managed MCP fixture did not receive a session.");
+  const headers = {
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+    "mcp-session-id": sessionId,
+  };
+  await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} }),
+  });
+  const listed = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+  });
+  if (!listed.ok) throw new Error("Managed MCP fixture tools/list failed.");
+  return sessionId;
 }
 
 function provider() {

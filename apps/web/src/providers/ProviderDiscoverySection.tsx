@@ -36,6 +36,7 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
       <div className="settings-section-head">
         <h2>Detected on this Mac</h2>
         <OctantButton
+          className="provider-discovery__scan-action"
           size="sm"
           variant="ghost"
           disabled={scanning}
@@ -46,62 +47,69 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
         </OctantButton>
       </div>
 
-      <p className="settings-section-note">
-        Octant scans installed runtimes and checks every enabled provider. Enable only the providers
-        you want available.
-      </p>
+      <p className="settings-section-note">Find installed providers and check their connections.</p>
 
-      {scanning && snapshot === undefined ? (
-        <p className="settings-section-line" role="status">
-          Scanning for installed runtimes…
-        </p>
-      ) : null}
+      <div className="provider-discovery__status-slot" aria-live="polite">
+        {!scanning && detected.length === 0 && snapshot?.status === "completed" ? (
+          <p className="settings-section-line" role="status">
+            No new providers found. Use “Add provider manually” for a custom endpoint or binary.
+          </p>
+        ) : null}
+        {scanning && snapshot === undefined ? (
+          <p className="settings-section-line" role="status">
+            Scanning for installed runtimes…
+          </p>
+        ) : null}
 
-      {props.message === undefined ? null : (
-        <p className="settings-section-line" role="alert">
-          {props.message}{" "}
-          <OctantButton
-            size="sm"
-            variant="ghost"
-            aria-label="Retry provider discovery"
-            onClick={() => void props.onScan()}
-            type="button"
-          >
-            Retry
-          </OctantButton>
-        </p>
-      )}
+        {props.message === undefined ? null : (
+          <p className="settings-section-line" role="alert">
+            {props.message}{" "}
+            <OctantButton
+              size="sm"
+              variant="ghost"
+              aria-label="Retry provider discovery"
+              onClick={() => void props.onScan()}
+              type="button"
+            >
+              Retry
+            </OctantButton>
+          </p>
+        )}
 
-      {snapshot !== undefined && snapshot.status === "cancelled" ? (
-        <p className="settings-section-line" role="status">
-          Scan was cancelled.{" "}
-          <OctantButton size="sm" variant="ghost" onClick={() => void props.onScan()} type="button">
-            Retry
-          </OctantButton>
-        </p>
-      ) : null}
+        {snapshot !== undefined && snapshot.status === "cancelled" ? (
+          <p className="settings-section-line" role="status">
+            Scan was cancelled.{" "}
+            <OctantButton
+              size="sm"
+              variant="ghost"
+              onClick={() => void props.onScan()}
+              type="button"
+            >
+              Retry
+            </OctantButton>
+          </p>
+        ) : null}
 
-      {snapshot !== undefined && snapshot.status === "partial" ? (
-        <p className="settings-section-line" role="status">
-          {snapshot.message ?? "Scan completed partially."} Some results may be missing.
-        </p>
-      ) : null}
+        {snapshot !== undefined && snapshot.status === "partial" ? (
+          <p className="settings-section-line" role="status">
+            {snapshot.message ?? "Scan completed partially."} Some results may be missing.
+          </p>
+        ) : null}
 
-      {snapshot !== undefined && snapshot.status === "failed" ? (
-        <p className="settings-section-line" role="alert">
-          {snapshot.message ?? "Discovery scan failed."}{" "}
-          <OctantButton size="sm" variant="ghost" onClick={() => void props.onScan()} type="button">
-            Retry
-          </OctantButton>
-        </p>
-      ) : null}
-
-      {!scanning && detected.length === 0 && snapshot !== undefined ? (
-        <p className="settings-section-line">
-          Installed providers are already listed below. Use “Add provider manually” only for a
-          custom endpoint or unusual binary path.
-        </p>
-      ) : null}
+        {snapshot !== undefined && snapshot.status === "failed" ? (
+          <p className="settings-section-line" role="alert">
+            {snapshot.message ?? "Discovery scan failed."}{" "}
+            <OctantButton
+              size="sm"
+              variant="ghost"
+              onClick={() => void props.onScan()}
+              type="button"
+            >
+              Retry
+            </OctantButton>
+          </p>
+        ) : null}
+      </div>
 
       {detected.length === 0 ? null : (
         <div className="setgroup">

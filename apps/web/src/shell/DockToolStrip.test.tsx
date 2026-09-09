@@ -17,6 +17,47 @@ const tests = surface("tests");
 const canvas = surface("canvas");
 
 describe("the dock tool strip", () => {
+  it("keeps tabs out of the space reserved for window controls", () => {
+    const width = vi
+      .spyOn(HTMLElement.prototype, "clientWidth", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.dataset.testCluster === "true" ? 340 : 0;
+      });
+    const siblingWidth = vi
+      .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.getAttribute("aria-label") === "Add tool" ? 32 : 0;
+      });
+    const bounds = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        return DOMRect.fromRect({
+          width: this.classList.contains("dock-tool-strip__tab") ? 104 : 0,
+          height: 30,
+        });
+      });
+    try {
+      render(
+        <div data-test-cluster="true" style={{ paddingLeft: 8, paddingRight: 76, gap: 8 }}>
+          <DockToolStrip
+            active="terminal"
+            onClose={vi.fn()}
+            onSelect={vi.fn()}
+            tabs={[browser, files, terminal, tests, canvas]}
+          />
+          <button aria-label="Add tool" />
+        </div>,
+      );
+      expect(screen.getAllByRole("tab")).toHaveLength(1);
+      expect(screen.getByRole("tab", { name: "Terminal" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "More tools" })).toBeVisible();
+    } finally {
+      width.mockRestore();
+      siblingWidth.mockRestore();
+      bounds.mockRestore();
+    }
+  });
+
   it("marks the active tool and closes it without stopping other tools", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();

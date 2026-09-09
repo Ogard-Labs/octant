@@ -1,3 +1,4 @@
+import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
 import type { CodeCheckoutId, CodeRepositoryId } from "@octant/contracts/code";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import {
@@ -21,7 +22,7 @@ import {
 } from "@octant/domain/code-worktree-source-policy";
 import { suggestCodeDeliveryOutcome } from "@octant/domain/delivery-target-policy";
 import type { CodeDeliveryOutcomeKind } from "@octant/contracts/code";
-import { FolderOpen, GitBranch, Paperclip } from "lucide-react";
+import { FolderOpen, GitBranch } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -33,6 +34,7 @@ import {
   type ReactNode,
 } from "react";
 import { ComposerModelPicker } from "../../providers/ComposerModelPicker";
+import { composerPlaceholder, THREAD_HINT } from "../../composer/composerPlaceholder";
 import { ThreadComposer } from "../../composer/ThreadComposer";
 import { WelcomeHeading } from "../../composer/WelcomeHeading";
 import { ComposerVoiceButton } from "../../voice/ComposerVoiceButton";
@@ -64,13 +66,8 @@ import type {
   MentionableThreadId,
 } from "@octant/contracts";
 import type { CodeCommand, CodeCommandResult, CodeWorktreeRef } from "@octant/contracts/code";
-
-export const CODE_DELIVERY_OUTCOME_LABELS: Record<CodeDeliveryOutcomeKind, string> = {
-  "investigation-result": "Investigation result",
-  "local-implementation": "Local implementation",
-  "opened-pr": "Opened pull request",
-  "merged-pr": "Merged pull request",
-};
+import type { OctantHostBridge } from "../../shell/hostBridge";
+import { boundsInsideViewport } from "../../browser/useNativeBrowserSurface";
 
 export interface CodeComposerAdapterProps {
   /** The person's name from their profile, for the greeting on the hero. */
@@ -143,6 +140,7 @@ export interface CodeComposerAdapterProps {
   ) => Promise<CodeCommandResult | undefined>;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
+  readonly hostBridge?: OctantHostBridge;
 }
 
 export interface CodeComposerSuggestion {
@@ -172,6 +170,8 @@ export interface CodeComposerSubmitInput {
   readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
   readonly issueContext?: GithubIssueContextRequest;
   readonly linearIssueContext?: LinearIssueContextRequest;
+  /** Local draft identity used only to anchor a native approval view. */
+  readonly presentation?: { readonly composerId: string };
 }
 
 /**
@@ -184,6 +184,38 @@ const LAST_RESORT_BASE_BRANCH = "development";
 export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const [prompt, setPrompt] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composerIdRef = useRef(globalThis.crypto.randomUUID());
+  useEffect(() => {
+    const update = props.hostBridge?.updateCodeOperationApprovalAnchor;
+    if (update === undefined || props.projectId === undefined) return;
+    let disposed = false;
+    const sync = () => {
+      if (disposed) return;
+      const composer = textareaRef.current?.closest<HTMLElement>(".thread-composer");
+      if (composer === undefined || composer === null) return;
+      const rect = composer.getBoundingClientRect();
+      void update({
+        kind: "draft",
+        projectId: String(props.projectId),
+        composerId: composerIdRef.current,
+        bounds: boundsInsideViewport(rect, window.innerWidth, window.innerHeight),
+      }).catch(() => undefined);
+    };
+    const resize = new ResizeObserver(sync);
+    const composer = textareaRef.current?.closest<HTMLElement>(".thread-composer");
+    if (composer !== undefined && composer !== null) resize.observe(composer);
+    window.addEventListener("resize", sync);
+    window.addEventListener("scroll", sync, true);
+    sync();
+    return () => {
+      disposed = true;
+      resize.disconnect();
+      window.removeEventListener("resize", sync);
+      window.removeEventListener("scroll", sync, true);
+      const cancel = props.hostBridge?.cancelCodeOperationApproval;
+      if (cancel !== undefined) void cancel().catch(() => undefined);
+    };
+  }, [props.hostBridge, props.projectId]);
   const appliedPromptRevision = useRef<number | undefined>(undefined);
   const promptRequest = props.promptRequest;
   useEffect(() => {
@@ -424,6 +456,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             startFromOrigin,
             remoteName: resolvedWorktreeRemote,
           },
+          presentation: { composerId: composerIdRef.current },
           ...(staged.length === 0 ? {} : { images: staged }),
           ...(threadMentionIds.length === 0 ? {} : { threadMentionIds }),
         });
@@ -563,7 +596,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   if (props.creating === true) return;
                   if (attachFromTransfer(event.clipboardData)) event.preventDefault();
                 }}
-                placeholder="Describe what to build, ask a follow-up, or attach an image…"
+                placeholder={composerPlaceholder("Describe what to build", [
+                  threadMentions.composer === undefined ? undefined : THREAD_HINT,
+                ])}
                 ref={textareaRef}
                 rows={3}
                 value={prompt}
@@ -587,44 +622,17 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               className: "code-composer-adapter__composer-bar",
               leading: (
                 <>
-                  <label>
-                    <span className="work-composer-adapter__visually-hidden">Add attachment</span>
-                    {/* ui-boundary-exception: native-file-input */}
-                    <input
-                      aria-label="Choose attachment file"
-                      accept="image/png,image/jpeg,image/webp,image/gif"
-                      className="work-composer-adapter__file-input"
-                      disabled={props.creating === true || imageSupport === false}
-                      onChange={(event) => {
-                        const file = event.currentTarget.files?.item(0);
-                        if (file !== null && file !== undefined) {
-                          if (imageSupport === false) {
-                            images.refuse(
-                              "The selected model does not accept images. Choose an image-capable model.",
-                            );
-                          } else {
-                            images.attach([file]);
-                          }
-                        }
-                        event.currentTarget.value = "";
-                      }}
-                      type="file"
-                    />
-                  </label>
-                  <OctantButton
-                    aria-label="Add attachment"
-                    disabled={props.creating === true || imageSupport === false}
-                    onClick={(event) => {
-                      event.currentTarget.parentElement
-                        ?.querySelector<HTMLInputElement>('input[type="file"]')
-                        ?.click();
-                    }}
-                    size="icon"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
-                  </OctantButton>
+                  <ComposerAttachButton
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    busy={props.creating === true}
+                    refusedReason={
+                      imageSupport === false
+                        ? "The selected model does not accept images. Choose an image-capable model."
+                        : undefined
+                    }
+                    onRefused={images.refuse}
+                    onFileSelected={(file) => images.attach([file])}
+                  />
                   <ComposerVoiceButton
                     disabled={props.creating === true}
                     onTranscript={(transcript) =>

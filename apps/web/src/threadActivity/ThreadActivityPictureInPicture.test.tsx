@@ -7,6 +7,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { ThreadActivityEnvironment } from "./ThreadActivityEnvironment";
+import { within } from "@testing-library/react";
 import { ThreadActivityPictureInPicture } from "./ThreadActivityPictureInPicture";
 
 const threadId = "20000000-0000-4000-8000-000000000001";
@@ -156,6 +158,35 @@ describe("ThreadActivityPictureInPicture", () => {
     );
   });
 
+  it("lets Environment show and hide the same live preview without stopping it", async () => {
+    const user = userEvent.setup();
+    const browser = {
+      inspectThread: vi.fn(async () => browserSnapshot()),
+      stop: vi.fn(),
+    } as unknown as BrowserAutomationClient;
+    render(
+      <ThreadActivityPictureInPicture
+        browserClient={browser}
+        pollIntervalMs={60_000}
+        threadId={threadId as never}
+      >
+        <section aria-label="Environment">
+          <ThreadActivityEnvironment />
+        </section>
+      </ThreadActivityPictureInPicture>,
+    );
+    const environment = screen.getByRole("region", { name: "Environment" });
+    expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
+    expect(
+      within(environment).queryByRole("complementary", { name: "Thread activity preview" }),
+    ).not.toBeInTheDocument();
+    await user.click(within(environment).getByRole("button", { name: "Hide Picture in Picture" }));
+    expect(screen.queryByRole("img", { name: /browser activity/ })).not.toBeInTheDocument();
+    expect(browser.stop).not.toHaveBeenCalled();
+    await user.click(within(environment).getByRole("button", { name: "Show Picture in Picture" }));
+    expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
+  });
+
   it("shows, hides, restores, opens, and stops the exact thread Browser preview", async () => {
     const user = userEvent.setup();
     const running = browserSnapshot();
@@ -247,7 +278,8 @@ describe("ThreadActivityPictureInPicture", () => {
 
     await user.click(screen.getByRole("button", { name: "Approve once" }));
     await waitFor(() => expect(computerUse.decide).toHaveBeenCalledOnce());
-    expect(screen.getAllByText("Computer Use running")).toHaveLength(2);
+    // The state reads once, on the card itself; there is no footer repeating it.
+    expect(screen.getByText("Computer Use running")).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Stop Computer Use" }));
     await waitFor(() => expect(computerUse.stop).toHaveBeenCalledOnce());
@@ -330,7 +362,7 @@ describe("ThreadActivityPictureInPicture", () => {
         <div>Conversation</div>
       </ThreadActivityPictureInPicture>,
     );
-    expect(await screen.findByText("Preview is stale")).toBeVisible();
+    expect(await screen.findByText(/Preview is stale/)).toBeVisible();
     expect(screen.queryByRole("img", { name: /browser activity/i })).not.toBeInTheDocument();
   });
 

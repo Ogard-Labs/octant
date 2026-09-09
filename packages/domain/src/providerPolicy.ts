@@ -1692,6 +1692,7 @@ export function updateProviderDefaults(
   permissionPersistence: PermissionPersistence = "current-session",
   providerOrder: ProviderDefaults["providerOrder"] = defaults.providerOrder,
   agentEligibleModels: ProviderDefaults["agentEligibleModels"] = defaults.agentEligibleModels,
+  hiddenModels: ProviderDefaults["hiddenModels"] = defaults.hiddenModels,
 ): ProviderDefaults {
   return {
     permissionPersistence,
@@ -1701,6 +1702,9 @@ export function updateProviderDefaults(
     ...(agentEligibleModels === undefined || agentEligibleModels.length === 0
       ? {}
       : { agentEligibleModels }),
+    // An explicit empty list clears model visibility overrides; an omitted
+    // argument preserves the stored list through unrelated defaults changes.
+    ...(hiddenModels === undefined || hiddenModels.length === 0 ? {} : { hiddenModels }),
     version: nextVersion(defaults.version),
   };
 }

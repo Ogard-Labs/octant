@@ -646,6 +646,7 @@ function runSessionTurn(
       // The clamped run authority is what reaches the provider. Nothing here
       // may widen it, and no parent-thread policy is consulted.
       executionPolicy: input.authority.executionPolicy,
+      tools: input.appManagedTools?.definitions ?? [],
     });
 
     const collected = yield* subscribeThenSend({
@@ -825,6 +826,15 @@ function collectSessionEvents(
         if (event.kind === "tool-request") {
           if (answeredToolRequestIds.has(event.requestId)) return;
           answeredToolRequestIds.add(event.requestId);
+          const requestSignal = connection.toolRequestSignal?.({
+            sessionId: input.sessionId,
+            requestId: event.requestId,
+          });
+          const executionSignal =
+            requestSignal === undefined
+              ? toolAbort.signal
+              : AbortSignal.any([toolAbort.signal, requestSignal]);
+          if (executionSignal.aborted) return;
           const toolSet = input.appManagedTools;
           const offered = toolSet?.definitions.some(
             (definition) => definition.name === event.toolName,
@@ -843,12 +853,13 @@ function collectSessionEvents(
               return await toolSet.execute({
                 name: event.toolName,
                 inputJson: event.inputJson,
-                signal: toolAbort.signal,
+                signal: executionSignal,
               });
             } catch {
               return { result: { error: "tool-execution-failed" }, isError: true } as const;
             }
           });
+          if (executionSignal.aborted) return;
           yield* connection.answerTool({
             sessionId: input.sessionId,
             requestId: event.requestId,

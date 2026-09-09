@@ -124,15 +124,23 @@ export function ExecutionProfileWorkflow(props: {
    * In Settings the same pieces are two open sections (0072): the context
    * picker as a stacked row under its label, then the saved profiles as rows
    * with Reload and Create on the label line. The page already titles itself
-   * "Profiles", so neither section repeats that word.
+   * "Execution profiles", so its sections name the context and saved entries.
    */
   const settingsBody = (
     <>
-      <div className="settings-card-section settings-card-section--open">
-        <h2>Execution context</h2>
+      {alert}
+      <details className="settings-card-section settings-card-section--open settings-profile-disclosure execution-profile-workflow__context">
+        <summary>
+          <span className="settings-profile-disclosure__summary-copy">
+            <h2 className="oct-section-label">Execution context</h2>
+            <span>
+              {controller.selectedEntry?.modelDisplayName ?? "Provider, model, and defaults"}
+            </span>
+          </span>
+          <ChevronDown aria-hidden="true" size={16} />
+        </summary>
         <p className="settings-section-note">
-          Reusable behavior defaults are resolved by the server and never change Project, root,
-          worktree, host, extension trust, or authority.
+          Choose the provider, model, and profile used to resolve draft defaults.
         </p>
         <div className="setgroup">
           <SettingRow
@@ -144,12 +152,11 @@ export function ExecutionProfileWorkflow(props: {
             {picker}
           </SettingRow>
         </div>
-        {alert}
         <ResolutionReceipt controller={controller} quiet />
-      </div>
+      </details>
       <div className="settings-card-section settings-card-section--open">
         <div className="settings-section-head">
-          <h2>Saved profiles</h2>
+          <h2 className="oct-section-label">Saved profiles</h2>
           <div className="settings-section-head__actions">
             <OctantButton
               disabled={controller.busy}
@@ -426,10 +433,10 @@ function ProfileForm(props: {
             aria-label="Execution policy"
             onValueChange={(value) => setPolicy(value as typeof policy)}
             options={[
-              { id: "plan", label: "Plan (read-only)" },
-              { id: "approval-gated", label: "Approval gated" },
+              { id: "plan", label: "Plan · read-only" },
+              { id: "approval-gated", label: "Ask for approvals" },
               { id: "auto-accept-edits", label: "Auto-accept edits" },
-              { id: "full-access", label: "Full access (still bounded by Project)" },
+              { id: "full-access", label: "Full access" },
             ]}
             value={policy}
           />

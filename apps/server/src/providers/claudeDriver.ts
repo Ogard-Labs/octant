@@ -1,3 +1,4 @@
+import type { ManagedToolAnswer } from "./managedMcpTools";
 import { randomUUID } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 
@@ -21,7 +22,6 @@ import {
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import {
   renderProviderTurnPrompt,
-  unsupportedAnswerTool,
   unsupportedChatCapabilities,
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
@@ -150,6 +150,7 @@ const availableCapabilities: ProviderCapabilities = {
   taskProgress: "supported",
   nativeChildAgents: "unsupported",
   ...unsupportedChatCapabilities,
+  appManagedTools: "supported",
 };
 
 const unavailableCapabilities: ProviderCapabilities = {
@@ -263,6 +264,10 @@ interface SessionState {
   readonly initialized: DeferredValue<string>;
   terminalResult: DeferredValue<void>;
   readonly pendingApprovals: Map<string, ClaudePendingApprovalState>;
+  readonly pendingAppTools: Map<
+    string,
+    { readonly answer: DeferredValue<ManagedToolAnswer>; readonly signal: AbortSignal }
+  >;
   readonly pendingQuestions: Map<string, ClaudePendingQuestionState>;
   readonly preToolRequests: Map<string, ClaudePreToolGrant>;
   readonly approvalReuse: Set<string>;
@@ -274,6 +279,7 @@ interface SessionState {
   collector?: Fiber.RuntimeFiber<void, never>;
   outputAccepted: boolean;
   pendingTurns: number;
+  appToolsEnabled: boolean;
   terminal: boolean;
   active: boolean;
   releasing: boolean;
@@ -816,6 +822,10 @@ function makeConnection(
       );
     };
     const clearAuthorityState = (state: SessionState) => {
+      for (const pending of state.pendingAppTools.values()) {
+        pending.answer.resolve({ resultJson: '{"error":"tool-interrupted"}', isError: true });
+      }
+      state.pendingAppTools.clear();
       const denial = {
         behavior: "deny",
         message: "Claude tool request is no longer active.",
@@ -1449,6 +1459,7 @@ function makeConnection(
           initialized,
           terminalResult,
           pendingApprovals: new Map(),
+          pendingAppTools: new Map(),
           pendingQuestions: new Map(),
           preToolRequests: new Map(),
           approvalReuse: new Set(),
@@ -1457,6 +1468,7 @@ function makeConnection(
           turnToolUseIds: new Set(),
           outputAccepted: false,
           pendingTurns: 0,
+          appToolsEnabled: false,
           terminal: false,
           active: true,
           releasing: false,
@@ -1637,6 +1649,11 @@ function makeConnection(
           model,
         );
         if (rejected !== undefined) return Effect.fail(rejected);
+        if ((input.tools.length > 0 || state.appToolsEnabled) && state.pendingTurns > 0) {
+          return Effect.fail(
+            failure("unavailable", "The previous tool-enabled turn is still active."),
+          );
+        }
         return Effect.sync(() => {
           if (state.context?.terminal === true && state.pendingTurns === 0) {
             state.context = makeEventContext(state, state.claudeSessionId!, state.context.sequence);
@@ -1646,9 +1663,64 @@ function makeConnection(
             state.outputAccepted = false;
             state.turnToolUseIds.clear();
           }
+          state.appToolsEnabled = input.tools.length > 0;
           state.pendingTurns += 1;
         }).pipe(
-          Effect.zipRight(state.query.send({ text: renderProviderTurnPrompt(input) })),
+          Effect.zipRight(
+            state.query.send({
+              text: renderProviderTurnPrompt(input),
+              ...(input.tools.length === 0
+                ? {}
+                : {
+                    appManagedTools: input.tools,
+                    onAppToolCall: async (
+                      name: string,
+                      inputJson: string,
+                      signal: AbortSignal,
+                    ): Promise<ManagedToolAnswer> => {
+                      const denied = { resultJson: '{"error":"tool-unavailable"}', isError: true };
+                      if (
+                        signal.aborted ||
+                        state.terminal ||
+                        state.releasing ||
+                        state.released ||
+                        state.context === undefined ||
+                        state.context.terminal ||
+                        !input.tools.some((tool) => tool.name === name) ||
+                        inputJson.length > 262_144 ||
+                        state.pendingAppTools.size >= MAX_PENDING_APPROVALS
+                      )
+                        return denied;
+                      const requestId = factories.makeRequestId();
+                      if (state.pendingAppTools.has(requestId)) return denied;
+                      const pending = deferred<ManagedToolAnswer>();
+                      state.pendingAppTools.set(requestId, { answer: pending, signal });
+                      publish({
+                        kind: "tool-request",
+                        requestId,
+                        toolName: name,
+                        inputJson,
+                        instanceId: options.instanceId,
+                        sessionId: state.sessionId,
+                        correlationId: state.correlationId,
+                        sequence: state.context.sequence++,
+                        occurredAt: factories.clock() as UtcTimestamp,
+                      });
+                      return waitForClaudeAuthorityValue({
+                        promise: pending.promise,
+                        signal,
+                        cancelledValue: {
+                          resultJson: '{"error":"tool-interrupted"}',
+                          isError: true,
+                        },
+                        cancel: () => {
+                          state.pendingAppTools.delete(requestId);
+                        },
+                      });
+                    },
+                  }),
+            }),
+          ),
           Effect.tap(() => Effect.sync(() => (state.outputAccepted = true))),
           Effect.catchAll((providerFailure) => {
             if (state.outputAccepted) {
@@ -1771,7 +1843,26 @@ function makeConnection(
             pending.answer.resolve(normalizedAnswer);
           });
         }),
-      answerTool: () => unsupportedAnswerTool(availableCapabilities.appManagedTools),
+      toolRequestSignal: (input) =>
+        sessions.get(input.sessionId)?.pendingAppTools.get(input.requestId)?.signal ??
+        AbortSignal.abort(),
+      answerTool: (input) =>
+        Effect.suspend(() => {
+          const state = sessions.get(input.sessionId);
+          const pending = state?.pendingAppTools.get(input.requestId);
+          if (
+            state === undefined ||
+            pending === undefined ||
+            state.terminal ||
+            state.releasing ||
+            state.released
+          ) {
+            return Effect.fail(failure("protocol", "App tool answer is no longer active."));
+          }
+          state.pendingAppTools.delete(input.requestId);
+          pending.answer.resolve({ resultJson: input.resultJson, isError: input.isError });
+          return Effect.void;
+        }),
     };
   });
 }

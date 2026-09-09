@@ -12,7 +12,7 @@ const uuid = (() => {
   return () => `00000000-0000-4000-8000-${String(++counter).padStart(12, "0")}`;
 })();
 
-const authority: ToolActionAuthority = {
+const authority = {
   hostId: "00000000-0000-4000-8000-0000000000aa",
   mode: "code",
   projectId: "00000000-0000-4000-8000-0000000000bb",
@@ -20,11 +20,12 @@ const authority: ToolActionAuthority = {
   worktreeId: "00000000-0000-4000-8000-0000000000dd",
   providerInstanceId: "00000000-0000-4000-8000-0000000000ee",
   extension: { kind: "core" },
-} as ToolActionAuthority;
+} as const;
 
 function service(facts: Partial<ToolCallLiveFacts>, authorized = true): ToolCallAuthorityService {
   return new ToolCallAuthorityService({
-    resolveGrantedAuthority: () => (authorized ? authority : undefined),
+    resolveGrantedAuthority: () =>
+      authorized ? (authority as unknown as ToolActionAuthority) : undefined,
     resolveLiveFacts: () => ({
       providerAppManagedTools: "supported",
       host: { computerUseEnabled: false },
@@ -48,7 +49,17 @@ async function fixture(
     threadId: "thread-1",
     mode,
     authority: service(facts),
-    resolveAuthority: () => ({ ...authority, mode }),
+    resolveAuthority: () =>
+      (mode === "chat"
+        ? {
+            hostId: authority.hostId,
+            mode,
+            providerInstanceId: authority.providerInstanceId,
+            extension: authority.extension,
+          }
+        : mode === "work"
+          ? { ...authority, mode: "work" }
+          : { ...authority, mode: "code" }) as unknown as ToolActionAuthority,
     ports: { filesystem, ...ports },
     uuid,
   });
@@ -203,7 +214,7 @@ describe("native harness tools", () => {
       threadId: "thread-1",
       mode: "code",
       authority: service({}),
-      resolveAuthority: () => authority,
+      resolveAuthority: () => authority as unknown as ToolActionAuthority,
       ports: { filesystem: new NativeHarnessFileSystem({ root }) },
       uuid,
       observe: (call) => seen.push(call),

@@ -1,11 +1,64 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { PickerGroup } from "@octant/domain";
 import type { ProviderInstance } from "@octant/contracts";
 import type { DiscoveryController } from "./useDiscoveryController";
 import type { ProviderController } from "./useProviderController";
 import { useProviderBootstrap } from "./useProviderBootstrap";
 
 describe("useProviderBootstrap", () => {
+  it("does not rescan when the user hides every model from an observed provider", async () => {
+    const instance = {
+      id: "00000000-0000-4000-8000-000000000901",
+      driverKind: "codex",
+      displayName: "Codex CLI",
+      enabled: true,
+      version: 1,
+      configuration: { kind: "codex-cli", binaryPath: "/opt/homebrew/bin/codex" },
+      createdAt: "2026-08-06T00:00:00.000Z",
+      updatedAt: "2026-08-06T00:00:00.000Z",
+    } as ProviderInstance;
+    const providerController = {
+      status: "ready",
+      instances: [instance],
+      observedByInstance: new Map([[instance.id, { models: [{ id: "model-one" }] }]]),
+      readInstances: () => [instance],
+      retry: vi.fn(async () => true),
+      probe: vi.fn(async () => true),
+      setEnabled: vi.fn(async () => true),
+    } as unknown as ProviderController;
+    const discoveryController = {
+      scanning: false,
+      scan: vi.fn(async () => undefined),
+      connect: vi.fn(async () => false),
+      connectingPaths: new Set(),
+    } as unknown as DiscoveryController;
+    const visibleGroups = [
+      {
+        instance,
+        sections: [{ models: [{ model: { id: "model-one" } }] }],
+      },
+    ] as unknown as ReadonlyArray<PickerGroup>;
+
+    const { rerender } = renderHook(
+      ({ groups }) =>
+        useProviderBootstrap({
+          discoveryController,
+          enabled: true,
+          providerController,
+          providerGroups: groups,
+        }),
+      { initialProps: { groups: visibleGroups } },
+    );
+
+    await Promise.resolve();
+    rerender({ groups: [] });
+    await Promise.resolve();
+
+    expect(discoveryController.scan).not.toHaveBeenCalled();
+    expect(providerController.retry).not.toHaveBeenCalled();
+  });
+
   it("probes an enabled provider that has no runtime observation after restart", async () => {
     const instance = {
       id: "00000000-0000-4000-8000-000000000902",

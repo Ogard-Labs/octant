@@ -1,0 +1,146 @@
+/* The project reader can open without a Code thread. It owns its scroll and
+   header instead of borrowing the fixed-height Delivery toolbar. */
+.code-pr-review {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  padding: 16px;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.code-pr-review__header,
+.code-pr-review__header > div {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.code-pr-review__header h1,
+.code-pr-review__section-header h2 {
+  margin: 0;
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.code-pr-review__header > div > span,
+.code-pr-review__meta,
+.code-pr-review__guardrail,
+.code-pr-review__muted,
+.code-pr-review__notice,
+.code-pr-review__stale {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-pr-review__meta,
+.code-pr-review__actions,
+.code-pr-review__section-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.code-pr-review__header .code-pr-review__actions {
+  display: flex;
+}
+
+.code-pr-review__meta,
+.code-pr-review__section p {
+  margin: 0;
+}
+
+.code-pr-review__guardrail {
+  margin: 12px 0;
+}
+
+.code-pr-review__section {
+  padding: 16px 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.code-pr-review__section-header {
+  margin-bottom: 10px;
+}
+
+.code-pr-review__commits,
+.code-pr-review__files,
+.code-pr-review__checks,
+.code-pr-review__reviews,
+.code-pr-review__comments {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.code-pr-review__commits > li,
+.code-pr-review__reviews > li,
+.code-pr-review__comments > li {
+  display: grid;
+  gap: 6px;
+}
+
+.code-pr-review__files > li,
+.code-pr-review__checks > li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.code-pr-review__prose > * + * {
+  margin-top: 10px;
+}
+
+.code-pr-review__prose :is(h2, h3, h4) {
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+}
+
+.code-pr-review__prose :is(ul, ol) {
+  padding-left: 20px;
+}
+
+.code-pr-review__diff {
+  max-height: 360px;
+  overflow: auto;
+}
+
+.code-pr-review__prose ul {
+  list-style: disc;
+}
+
+.code-pr-review__prose ol {
+  list-style: decimal;
+}
+
+.code-pr-review__prose li + li {
+  margin-top: 6px;
+}
+
+.code-pr-review__prose a {
+  color: var(--oct-accent-fg);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.code-pr-review__prose hr {
+  border: 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.code-pr-review__source {
+  margin-top: 10px;
+}
+
+.code-pr-review__source > summary {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  cursor: pointer;
+}

@@ -6,6 +6,7 @@ import {
   scopeLabel,
   SettingGroup,
   SettingRow,
+  SettingsDisclosure,
   SettingsFactList,
   SettingsPanel,
   SettingsState,
@@ -151,5 +152,37 @@ describe("SettingGroup", () => {
     expect(group).toBeInTheDocument();
     expect(screen.getByText("Visual workspace preferences.")).toBeInTheDocument();
     expect(within(group).getByRole("slider", { name: "Sidebar width" })).toBeInTheDocument();
+  });
+});
+
+describe("SettingsDisclosure", () => {
+  it("keeps an unfinished field mounted when its details are closed and reopened", async () => {
+    const user = userEvent.setup();
+    render(
+      <SettingsDisclosure title="Stored data" description="Inspect local records.">
+        <input aria-label="Draft" defaultValue="unfinished" />
+      </SettingsDisclosure>,
+    );
+    const input = screen.getByLabelText("Draft");
+    expect(input).not.toBeVisible();
+    await user.click(screen.getByText("Stored data"));
+    expect(input).toBeVisible();
+    await user.type(input, " text");
+    await user.click(screen.getByText("Stored data"));
+    await user.click(screen.getByText("Stored data"));
+    expect(screen.getByLabelText("Draft")).toBe(input);
+    expect(input).toHaveValue("unfinished text");
+  });
+
+  it("reveals a deep-linked field inside closed settings details", () => {
+    render(
+      <SettingsDisclosure title="Advanced preferences">
+        <SettingRow settingId="example" label="Example" scope="app" focused>
+          <input aria-label="Example" />
+        </SettingRow>
+      </SettingsDisclosure>,
+    );
+    expect(screen.getByLabelText("Example")).toBeVisible();
+    expect(screen.getByLabelText("Example")).toHaveFocus();
   });
 });

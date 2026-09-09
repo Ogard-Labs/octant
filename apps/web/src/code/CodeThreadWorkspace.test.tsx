@@ -1,3 +1,4 @@
+import { decodeCodeAttachmentId } from "@octant/contracts/code";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import type { CodeAttachmentId, CodeBoardCard, CodeBoardView, ThreadPlan } from "@octant/contracts";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -82,6 +83,19 @@ describe("CodeThreadWorkspace", () => {
     await user.type(screen.getByLabelText("Follow-up message"), "check tests too");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
     expect(sendFollowUp).toHaveBeenCalledWith("check tests too", [], [], [], "approval-gated");
+  });
+
+  it("keeps the line under the row empty while nothing is running", () => {
+    const { container } = render(
+      <CodeThreadWorkspace
+        controller={controller()}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    // Idle, the status line says nothing and takes no height; the live
+    // region stays mounted so its first announcement is never dropped.
+    expect(container.querySelector(".composer-status")).toBeEmptyDOMElement();
   });
 
   it("keeps new-thread setup hidden while an existing transcript is loading", () => {
@@ -511,9 +525,10 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Thread usage")).toHaveTextContent("12.4k in · 3.1k out · $0.42");
-    // A limit is shown once it is worth acting on; a healthy one stays in the
-    // context meter's panel so the strip does not list every window a provider has.
+    // Spend lives in the context meter's panel, not on the strip. A limit is
+    // shown once it is worth acting on; a healthy one stays in the panel so
+    // the strip does not list every window a provider has.
+    expect(screen.queryByText(/12\.4k in/)).not.toBeInTheDocument();
     expect(screen.getByText(/5-hour limit · low · 87% used/)).toBeVisible();
     expect(screen.queryByText(/7-day limit/)).not.toBeInTheDocument();
   });
@@ -523,8 +538,8 @@ describe("CodeThreadWorkspace", () => {
 
     // Zero tokens with no report is not the same as a thread that cost
     // nothing: the strip says nothing rather than "$0.00" or a sentence about it.
-    expect(screen.queryByLabelText("Thread usage")).not.toBeInTheDocument();
     expect(screen.queryByText(/\$0/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument();
   });
 
   it("keeps the restore control off a thread that cannot change the checkout", async () => {
@@ -721,6 +736,51 @@ describe("CodeThreadWorkspace", () => {
     const composer = screen.getByLabelText("Follow-up message");
     await user.type(composer, "match this mockup");
     pasteImage(composer);
+
+    expect(await screen.findByAltText("pasted.png")).toBeInTheDocument();
+    expect(putAttachment).toHaveBeenCalledOnce();
+
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    // The turn names what the host answered with, never bytes the composer held.
+    expect(sendFollowUp).toHaveBeenCalledWith(
+      "match this mockup",
+      [],
+      [reference],
+      [],
+      "approval-gated",
+    );
+    // Sending is not a discard: the image belongs to the turn that carried it.
+    expect(discardAttachment).not.toHaveBeenCalled();
+  });
+
+  it("uploads an image chosen from the composer before the turn and sends it by the host's own reference", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => true);
+    const reference = {
+      attachmentId: decodeCodeAttachmentId("40000000-0000-4000-8000-000000000001"),
+      // The host decides the name it kept; the composer shows that one back.
+      displayName: "pasted.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "b".repeat(64),
+    };
+    const putAttachment = vi.fn(async () => reference);
+    const discardAttachment = vi.fn(async () => undefined);
+    render(
+      <CodeThreadWorkspace
+        attachmentClient={{ putAttachment, discardAttachment, attachment: vi.fn() }}
+        controller={controller({ sendFollowUp })}
+        threadId={threadId}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "match this mockup");
+    expect(screen.getByRole("button", { name: "Add attachment" })).toBeEnabled();
+    await user.upload(
+      screen.getByLabelText("Choose attachment file"),
+      new File(["png"], "pasted.png", { type: "image/png" }),
+    );
 
     expect(await screen.findByAltText("pasted.png")).toBeInTheDocument();
     expect(putAttachment).toHaveBeenCalledOnce();
@@ -1195,6 +1255,33 @@ describe("CodeThreadWorkspace", () => {
       requestId: "req-1",
       response: "pnpm",
     });
+  });
+
+  it("keeps provider requests immediately above the composer", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          providerRequests: [
+            {
+              kind: "approval",
+              approvalId: "30000000-0000-4000-8000-000000000003" as never,
+              summary: "skill: Approval is required for this action.",
+            },
+          ],
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    const approval = screen.getByRole("group", { name: "Provider approval" });
+    const composer = screen
+      .getByRole("textbox", { name: "Follow-up message" })
+      .closest(".thread-composer");
+    const requests = approval.closest(".code-thread-workspace__provider-requests");
+
+    expect(approval).toHaveClass("approval-row--request");
+    expect(requests).not.toBeNull();
+    expect(requests?.nextElementSibling).toBe(composer);
   });
 
   it("marks a provider handoff between replayed assistant turns", () => {

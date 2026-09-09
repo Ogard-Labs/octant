@@ -1103,24 +1103,42 @@ export class CodeService {
                 ...thread,
                 permissionPersistence: command.permissionPersistence,
               });
-        if (
-          thread.executionPolicy === "full-access" &&
-          !(await this.#approvals?.validate({
-            windowId: authenticatedWindowId,
-            effect: {
-              kind: "create-thread-full-access",
-              thread: approvedThread,
-            } as CodeApprovalEffect,
-            contextDigest: approvalContextDigest({
-              projectId: command.projectId,
-              threadId: thread.id,
-              checkoutId: preparation.checkoutId,
-              repositoryId: preparation.repositoryId,
-              checkoutHead,
-            }),
-            ...(command.approvalId === undefined ? {} : { approvalId: command.approvalId }),
-          }))
-        ) {
+        const { approvalId: _approvalId, ...commandWithoutApproval } = command;
+        const managedApprovalEffect: CodeApprovalEffect = {
+          kind: "create-managed-code-thread-full-access",
+          command: commandWithoutApproval,
+          source: {
+            bindingRevisionId: command.bindingRevisionId,
+            repositoryId: preparation.repositoryId,
+            checkoutId: preparation.checkoutId,
+            checkoutHead,
+          },
+        };
+        const approvalContextDigestValue = approvalContextDigest({
+          projectId: command.projectId,
+          threadId: thread.id,
+          checkoutId: preparation.checkoutId,
+          repositoryId: preparation.repositoryId,
+          checkoutHead,
+        });
+        const approvalValidated =
+          thread.executionPolicy !== "full-access"
+            ? true
+            : this.#approvals !== undefined &&
+              command.approvalId !== undefined &&
+              ((await this.#approvals.validate({
+                windowId: authenticatedWindowId,
+                effect: managedApprovalEffect,
+                contextDigest: approvalContextDigestValue,
+                approvalId: command.approvalId,
+              })) ||
+                (await this.#approvals.validate({
+                  windowId: authenticatedWindowId,
+                  effect: { kind: "create-thread-full-access", thread: approvedThread },
+                  contextDigest: approvalContextDigestValue,
+                  approvalId: command.approvalId,
+                })));
+        if (!approvalValidated) {
           throw this.#failure("unauthorized", "Full access requires native confirmation.");
         }
         // Commit creates the worktree (the only mutation) and confirms the HEAD.

@@ -28,6 +28,7 @@ const STATE_LABELS: Readonly<Record<IntegrationAuthenticationState, string>> = {
 
 export function LinearConnectionSettings({ client }: LinearConnectionSettingsProps) {
   const [snapshotState, setSnapshotState] = useState<SnapshotState>({ kind: "loading" });
+  const [refreshing, setRefreshing] = useState(false);
   const [commandBusy, setCommandBusy] = useState(false);
   const [commandError, setCommandError] = useState<string>();
   const [disconnectArmed, setDisconnectArmed] = useState(false);
@@ -36,14 +37,19 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
   const [personalBusy, setPersonalBusy] = useState(false);
 
   const refresh = useCallback(async () => {
+    setRefreshing(true);
+    setCommandError(undefined);
     try {
       const snapshot = await client.authenticationSnapshot();
       setSnapshotState({ kind: "ready", snapshot });
     } catch (error) {
-      setSnapshotState({
-        kind: "error",
-        message: error instanceof Error ? error.message : "Linear status is unavailable.",
-      });
+      const message = error instanceof Error ? error.message : "Linear status is unavailable.";
+      setSnapshotState((current) =>
+        current.kind === "ready" ? current : { kind: "error", message },
+      );
+      setCommandError(message);
+    } finally {
+      setRefreshing(false);
     }
   }, [client]);
 
@@ -107,7 +113,12 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
       : undefined;
 
   return (
-    <section aria-label="Linear" className="linear-settings" id="settings-linear">
+    <section
+      aria-label="Linear"
+      aria-busy={refreshing}
+      className="linear-settings"
+      id="settings-linear"
+    >
       <SettingsPanel title="Workspace" description="Linear authentication on the selected host.">
         <SettingsFactList
           facts={[
@@ -137,7 +148,7 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
         <div className="linear-settings__controls">
           {snapshot.state === "unauthorized" ? (
             <OctantButton
-              disabled={commandBusy}
+              disabled={commandBusy || refreshing}
               onClick={() => void runCommand("setup")}
               type="button"
               variant="secondary"
@@ -146,11 +157,8 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
             </OctantButton>
           ) : null}
           <OctantButton
-            disabled={commandBusy}
-            onClick={() => {
-              setSnapshotState({ kind: "loading" });
-              void refresh();
-            }}
+            disabled={commandBusy || refreshing}
+            onClick={() => void refresh()}
             type="button"
             variant="secondary"
           >
@@ -159,7 +167,7 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
           {connected ? (
             disconnectArmed ? (
               <OctantButton
-                disabled={commandBusy}
+                disabled={commandBusy || refreshing}
                 onClick={() => void runCommand("logout")}
                 type="button"
                 variant="destructive"
@@ -168,7 +176,7 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
               </OctantButton>
             ) : (
               <OctantButton
-                disabled={commandBusy}
+                disabled={commandBusy || refreshing}
                 onClick={() => setDisconnectArmed(true)}
                 type="button"
                 variant="secondary"
@@ -178,9 +186,11 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
             )
           ) : null}
         </div>
-        {commandError === undefined ? null : (
-          <SettingsState kind="error">{commandError}</SettingsState>
-        )}
+        <div className="settings-feedback-slot" aria-live="polite">
+          {commandError === undefined ? null : (
+            <SettingsState kind="error">{commandError}</SettingsState>
+          )}
+        </div>
       </SettingsPanel>
 
       <SettingsPanel title="Advanced">

@@ -1,4 +1,14 @@
-import { accessSync, chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  accessSync,
+  chmodSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,15 +16,28 @@ import type { ProviderFailure } from "@octant/contracts";
 import { Effect, Either, Fiber } from "effect";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  captureOpenCodeRuntimeConfig,
+  createPrivateOpenCodeProfile,
   makeOpenCodeProcessLive,
+  projectOpenCodeRuntimeConfig,
   probeOpenCodeBinary,
+  resolveOpenCodeRuntimeConfig,
+  supportsOpenCodeIsolation,
   type OpenCodeProcessDependencies,
   type OpenCodeProcessOptions,
   type OpenCodeProcessPort,
 } from "./openCodeProcess";
+import type { SeatbeltConfinementPort } from "../process/seatbeltProfile";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeOpenCodeCli.ts", import.meta.url));
 const directories: string[] = [];
+
+const passthroughConfinement: SeatbeltConfinementPort = {
+  prepare: (input) => ({
+    command: input.executable,
+    args: input.args,
+  }),
+};
 
 function fixtureRoot(mode = "ready"): string {
   const directory = mkdtempSync(join(tmpdir(), "octant-opencode-"));
@@ -44,7 +67,23 @@ function environmentRecordingWrapper(): {
   const environmentPath = join(root, ".fake-opencode-environment");
   writeFileSync(
     binaryPath,
-    `#!/bin/sh\nprintf 'broker-url=%s\\nbroker-token=%s\\ndesktop-secret=%s\\nallowed=%s\\n' "\${OCTANT_CREDENTIAL_BROKER_URL-<unset>}" "\${OCTANT_CREDENTIAL_BROKER_TOKEN-<unset>}" "\${OCTANT_DESKTOP_BRIDGE_SECRET-<unset>}" "\${OCTANT_TEST_ALLOWED_ENV-<unset>}" > '${environmentPath}'\nexec '${fakeCliPath}' "$@"\n`,
+    `#!/bin/sh\nprintf 'broker-url=%s\\nbroker-token=%s\\ndesktop-secret=%s\\nallowed=%s\\nplugins=%s\\nclaude=%s\\nconfig=%s\\n' "\${OCTANT_CREDENTIAL_BROKER_URL-<unset>}" "\${OCTANT_CREDENTIAL_BROKER_TOKEN-<unset>}" "\${OCTANT_DESKTOP_BRIDGE_SECRET-<unset>}" "\${OCTANT_TEST_ALLOWED_ENV-<unset>}" "\${OPENCODE_DISABLE_DEFAULT_PLUGINS-<unset>}" "\${OPENCODE_DISABLE_CLAUDE_CODE-<unset>}" "\${OPENCODE_CONFIG_CONTENT-<unset>}" > '${environmentPath}'\nexec '${fakeCliPath}' "$@"\n`,
+  );
+  chmodSync(binaryPath, 0o755);
+  return { binaryPath, environmentPath, root };
+}
+
+function profileRecordingWrapper(mode = "ready"): {
+  readonly binaryPath: string;
+  readonly environmentPath: string;
+  readonly root: string;
+} {
+  const root = fixtureRoot(mode);
+  const binaryPath = join(root, "opencode-profile-fixture");
+  const environmentPath = join(root, ".fake-opencode-profile");
+  writeFileSync(
+    binaryPath,
+    `#!/bin/sh\ncd '${root}'\nprintf 'config=%s\\nconfig-content=%s\\nconfig-dir=%s\\ndata=%s\\n' "\${OPENCODE_CONFIG-<unset>}" "\${OPENCODE_CONFIG_CONTENT-<unset>}" "\${XDG_CONFIG_HOME-<unset>}" "\${XDG_DATA_HOME-<unset>}" > '${environmentPath}'\nexec '${fakeCliPath}' "$@"\n`,
   );
   chmodSync(binaryPath, 0o755);
   return { binaryPath, environmentPath, root };
@@ -111,6 +150,304 @@ afterEach(() => {
 });
 
 describe("probeOpenCodeBinary", () => {
+  it("resolves only global OpenCode routing config and never project extension config", async () => {
+    const root = fixtureRoot();
+    const configHome = join(root, "xdg-config");
+    mkdirSync(join(configHome, "opencode"), { recursive: true });
+    writeFileSync(
+      join(configHome, "opencode", "opencode.jsonc"),
+      '{\n  // routing only\n  "model": "synthetic/model",\n  "plugin": ["global-hostile"],\n  "provider": { "synthetic": { "options": { "baseURL": "https://provider.invalid" }, }, },\n}\n',
+    );
+    writeFileSync(join(root, "opencode.json"), '{"model":"project-hostile"}');
+    const resolved = await resolveOpenCodeRuntimeConfig({
+      binaryPath: "/synthetic/opencode",
+      cwd: root,
+      environment: { HOME: join(root, "home"), XDG_CONFIG_HOME: configHome },
+    });
+    expect(resolved).toMatchObject({ model: "synthetic/model" });
+    expect(resolved).not.toHaveProperty("plugin");
+  });
+
+  it("only attests isolation for the verified OpenCode runtime version", () => {
+    expect(supportsOpenCodeIsolation("1.18.21")).toBe(true);
+    expect(supportsOpenCodeIsolation("1.18.22")).toBe(false);
+    expect(supportsOpenCodeIsolation("1.18.20")).toBe(false);
+    expect(supportsOpenCodeIsolation("1.18.21-custom")).toBe(false);
+    expect(supportsOpenCodeIsolation("1.18.21+patched")).toBe(false);
+    expect(supportsOpenCodeIsolation("1.17.19")).toBe(false);
+    expect(supportsOpenCodeIsolation("1.19.0")).toBe(false);
+    expect(supportsOpenCodeIsolation("opencode2 v0.0.0-beta-18721")).toBe(false);
+  });
+
+  // This is deliberately opt-in: it launches the installed provider runtime
+  // and is evidence for that local version only. Default CI exercises the
+  // synthetic fixture and must not be presented as installed-runtime proof.
+  it.skipIf(process.env.OCTANT_OPENCODE_PROFILE_SMOKE !== "1")(
+    "keeps hostile project and global plugin fixtures out of the installed runtime",
+    async () => {
+      const binaryPath = "/opt/homebrew/bin/opencode";
+      expect(() => accessSync(binaryPath)).not.toThrow();
+      const root = mkdtempSync(join(tmpdir(), "octant-opencode-isolation-smoke-"));
+      const markerPath = join(root, "hostile-plugin-loaded");
+      const configHome = join(root, "config");
+      const dataHome = join(root, "data");
+      mkdirSync(join(root, ".opencode", "plugins"), { recursive: true });
+      mkdirSync(join(configHome, "opencode", "plugins"), { recursive: true });
+      mkdirSync(join(dataHome, "opencode", "plugins"), { recursive: true });
+      const hostile = `import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(markerPath)}, "loaded");\nexport const Hostile = async () => ({});\n`;
+      writeFileSync(join(root, ".opencode", "plugins", "hostile.js"), hostile);
+      writeFileSync(join(configHome, "opencode", "plugins", "hostile.js"), hostile);
+      writeFileSync(join(dataHome, "opencode", "plugins", "hostile.js"), hostile);
+      writeFileSync(
+        join(configHome, "opencode", "opencode.jsonc"),
+        '{ "plugin": ["hostile-plugin"], "provider": {}, }',
+      );
+      const environment = {
+        PATH: process.env.PATH,
+        HOME: root,
+        XDG_CONFIG_HOME: configHome,
+        XDG_DATA_HOME: dataHome,
+        XDG_STATE_HOME: join(root, "state"),
+        XDG_CACHE_HOME: join(root, "cache"),
+        OPENCODE_DISABLE_AUTOUPDATE: "1",
+        OPENCODE_DISABLE_MODELS_FETCH: "1",
+      };
+      try {
+        const server = await Effect.runPromise(
+          Effect.scoped(
+            makeOpenCodeProcessLive({
+              inheritedEnvironment: environment,
+              startupTimeoutMs: 20_000,
+            }).start({ binaryPath, cwd: root }),
+          ),
+        );
+        expect(server.isolatedConfiguration).toBe(true);
+        expect(() => readFileSync(markerPath)).toThrow();
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    60_000,
+  );
+
+  it("projects provider routing while excluding executable extension surfaces", () => {
+    const projected = projectOpenCodeRuntimeConfig({
+      $schema: "https://example.invalid/config.json",
+      model: "airouter/Qwen3.6",
+      small_model: "airouter/Qwen3.6",
+      provider: {
+        airouter: {
+          name: "aiRouter",
+          npm: "@ai-sdk/openai-compatible",
+          options: { baseURL: "https://router.invalid/v1", apiKey: "{env:OPENAI_API_KEY}" },
+          models: {
+            "Qwen3.6": {
+              name: "Qwen3.6",
+              limit: { context: 128000 },
+              options: { apiKey: "raw-model-secret" },
+              headers: { Authorization: "Bearer raw-model-header" },
+            },
+          },
+          instructions: ["private-instruction-must-not-cross"],
+        },
+      },
+      mcp: { foreign: { type: "remote", url: "https://foreign.invalid" } },
+      plugin: ["foreign-plugin"],
+      skills: ["foreign-skill"],
+    });
+    const parsed: unknown = JSON.parse(projected.content);
+    expect(parsed).toMatchObject({
+      model: "airouter/Qwen3.6",
+      provider: {
+        airouter: {
+          name: "aiRouter",
+          options: { baseURL: "https://router.invalid/v1", apiKey: "{env:OPENAI_API_KEY}" },
+        },
+      },
+    });
+    expect(parsed).not.toHaveProperty("mcp");
+    expect(parsed).not.toHaveProperty("plugin");
+    expect(parsed).not.toHaveProperty("skills");
+    expect(parsed).not.toHaveProperty("provider.airouter.models.Qwen3.6.options");
+    expect(parsed).not.toHaveProperty("provider.airouter.models.Qwen3.6.headers");
+    expect(parsed).toHaveProperty("provider.airouter.options.apiKey", "{env:OPENAI_API_KEY}");
+    expect(JSON.stringify(parsed)).not.toContain("private-instruction-must-not-cross");
+  });
+
+  it("refuses resolver payloads beyond the private size and nesting bounds", () => {
+    expect(() =>
+      projectOpenCodeRuntimeConfig({
+        provider: { airouter: { models: { large: { description: "x".repeat(2_100_000) } } } },
+      }),
+    ).toThrow("exceeds the private routing limit");
+
+    let nested: unknown = "leaf";
+    for (let depth = 0; depth < 10; depth += 1) nested = { nested };
+    expect(() =>
+      projectOpenCodeRuntimeConfig({ provider: { airouter: { models: { large: nested } } } }),
+    ).toThrow("exceeds the private nesting limit");
+  });
+
+  it("captures only the projected resolver result", async () => {
+    const resolver = vi.fn(async () => ({
+      provider: {
+        airouter: {
+          options: { apiKey: "synthetic-secret" },
+          models: { "Qwen3.6": { name: "Qwen3.6" } },
+        },
+      },
+      mcp: { foreign: { type: "remote" } },
+    }));
+    const captured = await captureOpenCodeRuntimeConfig(
+      { binaryPath: "/synthetic/opencode", cwd: "/synthetic/project" },
+      resolver,
+    );
+    expect(resolver).toHaveBeenCalledWith({
+      binaryPath: "/synthetic/opencode",
+      cwd: "/synthetic/project",
+    });
+    expect(captured?.content).not.toContain("synthetic-secret");
+    expect(captured?.content).not.toContain("foreign");
+  });
+
+  it("builds a private profile that leaves provider data ownership unchanged", () => {
+    const root = fixtureRoot();
+    const profile = createPrivateOpenCodeProfile(
+      { content: '{"provider":{"airouter":{"options":{"apiKey":"{env:OPENAI_API_KEY}"}}}}' },
+      {
+        HOME: "/synthetic/home",
+        PATH: "/synthetic/bin",
+        OPENAI_API_KEY: "synthetic-provider-key",
+        XDG_DATA_HOME: "/synthetic/data",
+        XDG_CONFIG_HOME: "/synthetic/user-config",
+        OPENCODE_CONFIG: "/synthetic/opencode.jsonc",
+        OPENCODE_CONFIG_CONTENT: '{"plugin":["foreign"]}',
+        OPENCODE_PERMISSION: "allow",
+        OCTANT_BROWSER_BROKER_TOKEN: "internal-secret",
+      },
+      () => root,
+    );
+    try {
+      const environment = profile.environment;
+      expect(environment.XDG_DATA_HOME).toBe("/synthetic/data");
+      expect(environment.OPENCODE_CONFIG_CONTENT).toBeUndefined();
+      expect(environment.OPENCODE_PERMISSION).toBeUndefined();
+      expect(environment.OCTANT_BROWSER_BROKER_TOKEN).toBeUndefined();
+      const configPath = environment.OPENCODE_CONFIG;
+      expect(configPath).toBeTypeOf("string");
+      if (configPath === undefined) throw new Error("Expected a private config path.");
+      expect(statSync(configPath).mode & 0o777).toBe(0o600);
+      expect(readFileSync(configPath, "utf8")).toContain("{env:OPENAI_API_KEY}");
+      expect(readFileSync(configPath, "utf8")).toContain('"permission"');
+      for (const name of [
+        "XDG_CONFIG_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_STATE_HOME",
+        "TMPDIR",
+        "OPENCODE_CONFIG_DIR",
+      ]) {
+        const directory = environment[name];
+        expect(directory).toBeTypeOf("string");
+        if (directory === undefined) continue;
+        expect(statSync(directory).mode & 0o777).toBe(0o700);
+      }
+    } finally {
+      profile.cleanup();
+      profile.cleanup();
+    }
+  });
+
+  it("does not persist raw provider credentials from a routing projection", () => {
+    const root = fixtureRoot();
+    const profile = createPrivateOpenCodeProfile(
+      {
+        content: JSON.stringify({
+          provider: { airouter: { options: { apiKey: "raw-secret" } } },
+        }),
+      },
+      {},
+      () => root,
+    );
+    try {
+      const configPath = profile.environment.OPENCODE_CONFIG;
+      if (configPath === undefined) throw new Error("Expected a private config path.");
+      const content = readFileSync(configPath, "utf8");
+      expect(content).not.toContain("raw-secret");
+      expect(content).toContain('"permission"');
+    } finally {
+      profile.cleanup();
+    }
+  });
+
+  it("drops nested credential objects, tokens, and headers while keeping bounded placeholders", () => {
+    const root = fixtureRoot();
+    const profile = createPrivateOpenCodeProfile(
+      {
+        content: JSON.stringify({
+          provider: {
+            synthetic: {
+              options: {
+                apiKey: "{env:OPENAI_API_KEY}",
+                accessToken: "{env:lowercase}",
+                secret: "{file:/synthetic/key}",
+                token: "raw-token",
+                headers: [{ name: "Authorization", value: "Bearer raw-header" }],
+                nested: { credential: { value: "raw-nested" }, value: "raw-value" },
+              },
+            },
+          },
+        }),
+      },
+      { OPENAI_API_KEY: "synthetic-provider-key" },
+      () => root,
+    );
+    try {
+      const configPath = profile.environment.OPENCODE_CONFIG;
+      if (configPath === undefined) throw new Error("Expected a private config path.");
+      const content = readFileSync(configPath, "utf8");
+      expect(content).toContain("{env:OPENAI_API_KEY}");
+      expect(content).not.toContain("{env:lowercase}");
+      expect(content).not.toContain("{file:/synthetic/key}");
+      expect(content).not.toContain("raw-token");
+      expect(content).not.toContain("raw-header");
+      expect(content).not.toContain("raw-nested");
+      expect(content).not.toContain("raw-value");
+    } finally {
+      profile.cleanup();
+    }
+  });
+
+  it("rejects URL credentials and secret query parameters in provider routing", () => {
+    expect(() =>
+      projectOpenCodeRuntimeConfig({
+        provider: { synthetic: { options: { baseURL: "https://user:pass@example.invalid/v1" } } },
+      }),
+    ).toThrow("URL credentials");
+    expect(() =>
+      projectOpenCodeRuntimeConfig({
+        provider: { synthetic: { options: { baseURL: "https://example.invalid/v1?api_key=raw" } } },
+      }),
+    ).toThrow("secret query");
+  });
+
+  it("rejects unbundled provider SDK module specs", () => {
+    for (const npm of [
+      "file:///tmp/provider.mjs",
+      "https://example.invalid/provider",
+      "git+ssh://example.invalid/provider",
+      "unknown-provider",
+    ]) {
+      expect(() => projectOpenCodeRuntimeConfig({ provider: { synthetic: { npm } } })).toThrow(
+        "bundled provider SDK package",
+      );
+      expect(() =>
+        projectOpenCodeRuntimeConfig({
+          provider: { synthetic: { models: { model: { provider: { npm } } } } },
+        }),
+      ).toThrow("bundled provider SDK package");
+    }
+  });
+
   it("rejects a relative binary path before spawning", async () => {
     const failure = await failureOf(probeOpenCodeBinary("opencode"));
     expect(failure).toEqual({
@@ -136,6 +473,14 @@ describe("probeOpenCodeBinary", () => {
     });
   });
 
+  it("preserves the beta runtime label instead of parsing it as a v1 semantic version", async () => {
+    const fixture = probeWrapper("probe-v2");
+    await expect(Effect.runPromise(probeOpenCodeBinary(fixture.binaryPath))).resolves.toEqual({
+      binaryPath: fixture.binaryPath,
+      version: "opencode2 v0.0.0-beta-18721",
+    });
+  });
+
   it("preserves a successful fast probe when receipt persistence loses the exit race", async () => {
     await expect(
       Effect.runPromise(
@@ -156,7 +501,7 @@ describe("probeOpenCodeBinary", () => {
     await Effect.runPromise(probeOpenCodeBinary(fixture.binaryPath));
 
     expect(readFileSync(fixture.environmentPath, "utf8")).toBe(
-      "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=allowed-value\n",
+      "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=allowed-value\nplugins=<unset>\nclaude=<unset>\nconfig=<unset>\n",
     );
     expect(process.env.OCTANT_CREDENTIAL_BROKER_URL).toBe("http://127.0.0.1:41000/");
     expect(process.env.OCTANT_CREDENTIAL_BROKER_TOKEN).toBe("broker-secret");
@@ -201,10 +546,115 @@ describe("OpenCodeProcessPort", () => {
       {
         startupTimeoutMs: 2_000,
         shutdownTimeoutMs: 150,
+        runtimeConfigResolver: async () => undefined,
+        confinement: passthroughConfinement,
         ...overrides,
       },
       dependencies,
     );
+
+  it("passes the explicit mode and policy to the OS confinement port before spawning", async () => {
+    const fixture = profileRecordingWrapper("isolation-supported");
+    let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
+    const confinement: SeatbeltConfinementPort = {
+      prepare: (input) => {
+        captured = input;
+        return { command: input.executable, args: input.args };
+      },
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement,
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+        }).start({
+          binaryPath: fixture.binaryPath,
+          cwd: fixture.root,
+          mode: "work",
+          executionPolicy: "plan",
+        }),
+      ),
+    );
+    expect(captured).toMatchObject({
+      boundRoot: realpathSync(fixture.root),
+      networkEgress: "none",
+      writeBoundRoot: false,
+      allowProcessExec: false,
+      allowProcessFork: false,
+    });
+  });
+
+  it("starts with a private config profile while withholding isolation without an OS receipt", async () => {
+    const fixture = profileRecordingWrapper("isolation-supported");
+    const inheritedEnvironment = {
+      ...process.env,
+      HOME: "/synthetic/home",
+      XDG_DATA_HOME: "/synthetic/provider-data",
+      XDG_CONFIG_HOME: "/synthetic/user-config",
+      OPENCODE_CONFIG_CONTENT: '{"plugin":["foreign"]}',
+    };
+    const configPath = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const server = yield* makePort({ inheritedEnvironment }).start({
+            binaryPath: fixture.binaryPath,
+            cwd: fixture.root,
+          });
+          const values = readFileSync(fixture.environmentPath, "utf8");
+          const config = values.match(/^config=(.*)$/m)?.[1];
+          if (config === undefined || config === "<unset>") {
+            throw new Error("Expected a private OpenCode config path.");
+          }
+          expect(values).toContain("config-content=<unset>");
+          expect(values).toContain("config-dir=");
+          expect(values).toContain("data=/synthetic/provider-data");
+          expect(server.isolatedConfiguration).toBeUndefined();
+          expect(readFileSync(config, "utf8")).toContain('"permission"');
+          return config;
+        }),
+      ),
+    );
+    expect(() => readFileSync(configPath)).toThrow();
+  });
+
+  it("imports resolver routing into the private profile without forwarding extension settings", async () => {
+    const fixture = profileRecordingWrapper("isolation-supported");
+    const resolver = vi.fn(async () => ({
+      model: "synthetic/model",
+      provider: {
+        synthetic: {
+          npm: "@ai-sdk/openai-compatible",
+          options: { baseURL: "https://provider.invalid/v1" },
+        },
+      },
+      plugin: ["foreign-plugin"],
+    }));
+    const configPath = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const server = yield* makePort({ runtimeConfigResolver: resolver }).start({
+            binaryPath: fixture.binaryPath,
+            cwd: fixture.root,
+          });
+          const configPath = readFileSync(fixture.environmentPath, "utf8").match(
+            /^config=(.*)$/m,
+          )?.[1];
+          if (configPath === undefined || configPath === "<unset>") {
+            throw new Error("Expected a private OpenCode config path.");
+          }
+          const config = readFileSync(configPath, "utf8");
+          expect(server.isolatedConfiguration).toBeUndefined();
+          expect(config).toContain("synthetic/model");
+          expect(config).toContain("https://provider.invalid/v1");
+          expect(config).not.toContain("foreign-plugin");
+          return configPath;
+        }),
+      ),
+    );
+    expect(resolver).toHaveBeenCalledWith({ binaryPath: fixture.binaryPath, cwd: fixture.root });
+    expect(() => readFileSync(configPath)).toThrow();
+  });
 
   it("starts an authenticated random loopback server", async () => {
     const root = fixtureRoot();
@@ -242,6 +692,18 @@ describe("OpenCodeProcessPort", () => {
     expect(second).not.toBe(observed.authorization);
   });
 
+  it("starts the beta runtime with its own readiness line and auth identity", async () => {
+    const fixture = probeWrapper("v2-ready");
+    const observed = await Effect.runPromise(
+      Effect.scoped(makePort().start({ binaryPath: fixture.binaryPath, cwd: fixture.root })),
+    );
+
+    expect(observed.url.hostname).toBe("127.0.0.1");
+    expect(observed.runtime).toBe("beta");
+    expect(observed.version).toBe("opencode2 v0.0.0-beta-18721");
+    expect(observed.authorization).toMatch(/^Basic b3BlbmNvZGU6/);
+  });
+
   it("does not expose managed-server authority to the provider session", async () => {
     const fixture = environmentRecordingWrapper();
     const inheritedEnvironment = {
@@ -262,7 +724,7 @@ describe("OpenCodeProcessPort", () => {
     );
 
     expect(readFileSync(fixture.environmentPath, "utf8")).toBe(
-      "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=allowed-value\n",
+      "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=allowed-value\nplugins=1\nclaude=1\nconfig=<unset>\n",
     );
     expect(inheritedEnvironment.OCTANT_CREDENTIAL_BROKER_URL).toBe("http://127.0.0.1:41000/");
     expect(inheritedEnvironment.OCTANT_CREDENTIAL_BROKER_TOKEN).toBe("broker-secret");

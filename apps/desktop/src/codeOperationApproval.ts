@@ -3,6 +3,7 @@ import {
   decodeCodeOperationApprovalReceipt,
   decodeCodeOperationApprovalRequest,
   type CodeApprovalId,
+  type CodeOperationApprovalChallenge,
   type CodeOperationApprovalRequest,
 } from "@octant/contracts";
 
@@ -41,20 +42,13 @@ export async function requestCodeOperationApprovalFromServer<TWindow>(options: {
 }): Promise<CodeApprovalId | undefined> {
   const request = decodeCodeOperationApprovalRequest(options.request);
   try {
-    const challengeResponse = await options.fetch(
-      new URL("/api/desktop/code-operation-approval-challenges", options.serverUrl),
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-octant-desktop-secret": options.desktopBridgeSecret,
-          "x-octant-window-capability": options.windowCapability,
-        },
-        body: JSON.stringify(request),
-      },
-    );
-    if (!challengeResponse.ok) throwApprovalResponseFailure(challengeResponse);
-    const challenge = decodeCodeOperationApprovalChallenge(await challengeResponse.json());
+    const challenge = await prepareCodeOperationApprovalChallengeFromServer({
+      serverUrl: options.serverUrl,
+      desktopBridgeSecret: options.desktopBridgeSecret,
+      windowCapability: options.windowCapability,
+      request,
+      fetch: options.fetch,
+    });
     const decision = await options.dialog.showMessageBox(options.owner, {
       type: "question",
       buttons: ["Approve once", "Cancel"],
@@ -66,20 +60,78 @@ export async function requestCodeOperationApprovalFromServer<TWindow>(options: {
       noLink: true,
     });
     if (decision.response !== 0) return undefined;
-    const receiptResponse = await options.fetch(
-      new URL("/api/desktop/code-operation-approval-confirmations", options.serverUrl),
-      {
-        method: "POST",
-        headers: approvalHeaders(options),
-        body: JSON.stringify({ challengeId: challenge.challengeId }),
-      },
-    );
-    if (!receiptResponse.ok) throwApprovalResponseFailure(receiptResponse);
-    return decodeCodeOperationApprovalReceipt(await receiptResponse.json()).approvalId;
+    return await confirmCodeOperationApprovalFromServer({
+      serverUrl: options.serverUrl,
+      desktopBridgeSecret: options.desktopBridgeSecret,
+      windowCapability: options.windowCapability,
+      challengeId: challenge.challengeId,
+      fetch: options.fetch,
+    });
   } catch (error) {
     if (error instanceof CodeOperationApprovalUnavailableError) throw error;
     throw new Error("Octant could not approve this Code authority.");
   }
+}
+
+export async function prepareCodeOperationApprovalChallengeFromServer(options: {
+  readonly serverUrl: string;
+  readonly desktopBridgeSecret: string;
+  readonly windowCapability: string;
+  readonly request: NativeCodeOperationApprovalRequest;
+  readonly fetch: typeof globalThis.fetch;
+}): Promise<CodeOperationApprovalChallenge> {
+  const request = decodeCodeOperationApprovalRequest(options.request);
+  const challengeResponse = await options.fetch(
+    new URL("/api/desktop/code-operation-approval-challenges", options.serverUrl),
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-desktop-secret": options.desktopBridgeSecret,
+        "x-octant-window-capability": options.windowCapability,
+      },
+      body: JSON.stringify(request),
+    },
+  );
+  if (!challengeResponse.ok) throwApprovalResponseFailure(challengeResponse);
+  return decodeCodeOperationApprovalChallenge(await challengeResponse.json());
+}
+
+export async function confirmCodeOperationApprovalFromServer(options: {
+  readonly serverUrl: string;
+  readonly desktopBridgeSecret: string;
+  readonly windowCapability: string;
+  readonly challengeId: string;
+  readonly fetch: typeof globalThis.fetch;
+}): Promise<CodeApprovalId | undefined> {
+  const receiptResponse = await options.fetch(
+    new URL("/api/desktop/code-operation-approval-confirmations", options.serverUrl),
+    {
+      method: "POST",
+      headers: approvalHeaders(options),
+      body: JSON.stringify({ challengeId: options.challengeId }),
+    },
+  );
+  if (!receiptResponse.ok) throwApprovalResponseFailure(receiptResponse);
+  return decodeCodeOperationApprovalReceipt(await receiptResponse.json()).approvalId;
+}
+
+export async function cancelCodeOperationApprovalFromServer(options: {
+  readonly serverUrl: string;
+  readonly desktopBridgeSecret: string;
+  readonly windowCapability: string;
+  readonly challengeId: string;
+  readonly fetch: typeof globalThis.fetch;
+}): Promise<void> {
+  const response = await options.fetch(
+    new URL("/api/desktop/code-operation-approval-cancellations", options.serverUrl),
+    {
+      method: "POST",
+      headers: approvalHeaders(options),
+      body: JSON.stringify({ challengeId: options.challengeId }),
+    },
+  );
+  if (!response.ok) throwApprovalResponseFailure(response);
 }
 
 function throwApprovalResponseFailure(response: Response): never {

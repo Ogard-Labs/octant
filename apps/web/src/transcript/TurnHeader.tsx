@@ -1,4 +1,7 @@
-import { Ban, Check, Circle, CircleAlert, CircleX, Clock3, LoaderCircle } from "lucide-react";
+import { Ban, Check, Circle, CircleAlert, CircleX, Clock3, Copy, LoaderCircle } from "lucide-react";
+
+import { OctantIconButton } from "../ui/base/OctantButton";
+import { copyText } from "./TurnActionMenu";
 
 /**
  * The state a turn can be read in, across Chat, Work, and Code. Each mode maps
@@ -24,6 +27,7 @@ export interface TurnHeaderProps {
   readonly workedFor?: string;
   /** When the turn last changed, ISO 8601. */
   readonly at?: string;
+  readonly copyValue?: string | undefined;
   /** Why the turn failed, stopped, or waits, in the sanitized words the host gives. */
   readonly reason?: string;
 }
@@ -71,7 +75,6 @@ function outcomeIcon(outcome: TurnHeaderOutcome) {
  */
 export function TurnHeader(props: TurnHeaderProps) {
   const Icon = outcomeIcon(props.outcome);
-  const time = turnTimeLabel(props.at);
   return (
     <>
       <header className="turn-header" data-outcome={props.outcome}>
@@ -92,14 +95,10 @@ export function TurnHeader(props: TurnHeaderProps) {
             <span className="turn-header__worked-for">{props.workedFor}</span>
           )}
         </span>
-        {time === undefined || props.at === undefined ? null : (
-          <time
-            className="turn-header__time turn-time"
-            dateTime={props.at}
-            title={turnTimeTitle(props.at)}
-          >
-            {time}
-          </time>
+        {props.at === undefined ? null : (
+          <span className="turn-header__time">
+            <TurnTime at={props.at} copyValue={props.copyValue} />
+          </span>
         )}
       </header>
       {/* Static text on purpose: the transcript window remounts historical rows
@@ -115,13 +114,25 @@ export function TurnHeader(props: TurnHeaderProps) {
  * one time treatment the turn header also uses at its end. Renders nothing
  * for a timestamp the host did not give in a form a clock can read.
  */
-export function TurnTime(props: { readonly at: string }) {
+export function TurnTime(props: { readonly at: string; readonly copyValue?: string | undefined }) {
   const label = turnTimeLabel(props.at);
   if (label === undefined) return null;
   return (
-    <time className="turn-time" dateTime={props.at} title={turnTimeTitle(props.at)}>
-      {label}
-    </time>
+    <span className="turn-message-meta">
+      <time className="turn-time" dateTime={props.at} title={turnTimeTitle(props.at)}>
+        {label}
+      </time>
+      {props.copyValue === undefined || props.copyValue.length === 0 ? null : (
+        <OctantIconButton
+          label="Copy message"
+          onClick={() => void copyText(props.copyValue ?? "")}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <Copy aria-hidden="true" size={14} />
+        </OctantIconButton>
+      )}
+    </span>
   );
 }
 

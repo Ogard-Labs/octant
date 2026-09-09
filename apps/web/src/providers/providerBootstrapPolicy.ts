@@ -20,6 +20,13 @@ export function shouldRunProviderBootstrap(input: {
   readonly scanning: boolean;
   readonly attempted: boolean;
   readonly hasSelectableModels: boolean;
+  /**
+   * An observed runtime can have models that the person deliberately hid in
+   * Settings. That state is different from an unobserved runtime: it must not
+   * trigger another discovery pass every time the final visible model is
+   * hidden.
+   */
+  readonly hasObservedModels: boolean;
   readonly hasUnobservedProviders: boolean;
 }): boolean {
   return (
@@ -27,7 +34,7 @@ export function shouldRunProviderBootstrap(input: {
     input.providerStatus === "ready" &&
     !input.scanning &&
     !input.attempted &&
-    (!input.hasSelectableModels || input.hasUnobservedProviders)
+    ((!input.hasSelectableModels && !input.hasObservedModels) || input.hasUnobservedProviders)
   );
 }
 

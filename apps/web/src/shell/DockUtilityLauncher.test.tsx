@@ -57,12 +57,12 @@ describe("right sidebar tool launcher", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Add tool" }));
-    expect(screen.getByText("Relevant to this task")).toBeVisible();
+    expect(screen.getByText("Relevant to this thread")).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: /#917 Faster issue validation/ }));
     expect(onOpenPullRequest).toHaveBeenCalledOnce();
     // The menu closes on choosing, the same as choosing a tool does.
-    expect(screen.queryByText("Relevant to this task")).not.toBeInTheDocument();
+    expect(screen.queryByText("Relevant to this thread")).not.toBeInTheDocument();
   });
 
   it("still offers references when every tool kind is already open", () => {
@@ -74,6 +74,7 @@ describe("right sidebar tool launcher", () => {
       />,
     );
     expect(screen.getByRole("button", { name: "Add tool" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add tool" })).toHaveClass("shell-icon-button");
   });
 
   it("opens available tools and restores focus to the trigger", () => {
@@ -92,7 +93,7 @@ describe("right sidebar tool launcher", () => {
     const trigger = screen.getByRole("button", { name: "Add tool" });
     expect(trigger).toHaveTextContent("");
     fireEvent.click(trigger);
-    expect(screen.getByRole("button", { name: "Browser" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "New Browser" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Terminal" })).toBeVisible();
     expect(screen.getByRole("button", { name: "iOS Simulator" })).toBeVisible();
 

@@ -404,6 +404,10 @@ export class ChatTurnRunner {
               sessionId: input.attempt.providerSessionId,
               modelId: input.attempt.modelId,
               executionPolicy: "approval-gated",
+              tools: [
+                ...(input.researchEnabled ? researchToolsForRoute(input.researchRoute) : []),
+                ...(input.appManagedTools?.definitions ?? []),
+              ],
               ...modelOptionValues,
             })
       ).pipe(Effect.catchAll(persistProviderFailure));
@@ -557,6 +561,17 @@ export class ChatTurnRunner {
                 if (event.kind === "tool-request") {
                   if (answeredToolRequestIds.has(event.requestId)) return;
                   answeredToolRequestIds.add(event.requestId);
+                  const requestSignal = connection.toolRequestSignal?.({
+                    sessionId: input.attempt.providerSessionId,
+                    requestId: event.requestId,
+                  });
+                  const executionSignal =
+                    requestSignal === undefined
+                      ? input.signal
+                      : input.signal === undefined
+                        ? requestSignal
+                        : AbortSignal.any([input.signal, requestSignal]);
+                  if (executionSignal?.aborted) return;
                   if (event.toolName === RESEARCH_TOOL_NAME) {
                     if (!input.researchEnabled) {
                       yield* connection.answerTool({
@@ -585,16 +600,19 @@ export class ChatTurnRunner {
                       return;
                     }
                     selectedResearchBackend = route.backend;
-                    const results = yield* Effect.tryPromise({
-                      try: () =>
-                        route.execute({
-                          query: parsedQuery,
-                          limit: 5,
-                          ...(input.signal === undefined ? {} : { signal: input.signal }),
-                        }),
-                      catch: () =>
-                        decodeChatFailure({ category: "failed", message: "Research failed." }),
-                    });
+                    const results = yield* idle.during(
+                      Effect.tryPromise({
+                        try: () =>
+                          route.execute({
+                            query: parsedQuery,
+                            limit: 5,
+                            ...(executionSignal === undefined ? {} : { signal: executionSignal }),
+                          }),
+                        catch: () =>
+                          decodeChatFailure({ category: "failed", message: "Research failed." }),
+                      }),
+                    );
+                    if (executionSignal?.aborted) return;
                     yield* connection.answerTool({
                       sessionId: input.attempt.providerSessionId,
                       requestId: event.requestId,
@@ -617,19 +635,22 @@ export class ChatTurnRunner {
                     });
                     return;
                   }
-                  const execution = yield* Effect.tryPromise({
-                    try: () =>
-                      toolSet.execute({
-                        name: event.toolName,
-                        inputJson: event.inputJson,
-                        ...(input.signal === undefined ? {} : { signal: input.signal }),
-                      }),
-                    catch: () =>
-                      decodeChatFailure({
-                        category: "failed",
-                        message: "App-managed tool execution failed.",
-                      }),
-                  });
+                  const execution = yield* idle.during(
+                    Effect.tryPromise({
+                      try: () =>
+                        toolSet.execute({
+                          name: event.toolName,
+                          inputJson: event.inputJson,
+                          ...(executionSignal === undefined ? {} : { signal: executionSignal }),
+                        }),
+                      catch: () =>
+                        decodeChatFailure({
+                          category: "failed",
+                          message: "App-managed tool execution failed.",
+                        }),
+                    }),
+                  );
+                  if (executionSignal?.aborted) return;
                   yield* connection.answerTool({
                     sessionId: input.attempt.providerSessionId,
                     requestId: event.requestId,

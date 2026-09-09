@@ -511,12 +511,16 @@ export function useShellController(options: ShellControllerOptions) {
     if (failure.category === "cross-context") {
       setAuthoritative(committedShell.current);
       const introduced = operation === undefined ? undefined : introducedSurface(operation);
+      const introducedProjectId =
+        introduced?.kind === "project" || introduced?.kind === "draft-thread"
+          ? introduced.projectId
+          : undefined;
       const target =
         requestedTarget ??
         newWindowTargetFromError(error) ??
-        (introduced?.kind === "project"
-          ? ({ kind: "project", projectId: introduced.projectId } as const)
-          : undefined);
+        (introducedProjectId === undefined
+          ? undefined
+          : ({ kind: "project", projectId: introducedProjectId } as const));
       setCrossContextOffer({
         message: failure.message,
         newWindowProjectId: target === undefined ? undefined : (target.projectId as ProjectId),
@@ -540,11 +544,15 @@ export function useShellController(options: ShellControllerOptions) {
     await enqueueMutation({ kind: "workspace", intent: { kind: "set-mode", mode } });
   }
 
-  async function openDraftThread(mode: OctantMode, projectId?: ProjectId): Promise<void> {
+  async function openDraftThread(mode: OctantMode, projectId?: ProjectId): Promise<boolean> {
     if (authoritative?.workspace.activeMode !== mode) {
-      await enqueueMutation({ kind: "workspace", intent: { kind: "set-mode", mode } });
+      const changed = await enqueueMutation({
+        kind: "workspace",
+        intent: { kind: "set-mode", mode },
+      });
+      if (!changed) return false;
     }
-    await enqueueMutation({
+    return enqueueMutation({
       kind: "workspace",
       intent: {
         kind: "open-draft-thread",

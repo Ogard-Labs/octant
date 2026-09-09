@@ -99,6 +99,20 @@ distilled successor of the earlier long-form design specifications.
 | [0089](0089-base-ui-native-shadcn-style.md)                                  | Product controls follow the Base UI-native shadcn style                                     | Accepted           |
 | [0090](0090-recipes-own-their-own-shape-and-focus.md)                        | Recipes own their shape; the app owns its focus ring                                        | Accepted           |
 | [0091](0091-the-application-ground-is-the-theme-pattern-or-a-photo.md)       | The application ground is the theme's pattern or a person's photo                           | Accepted           |
+| [0092](0092-the-terminal-reads-the-shell-s-own-configuration.md)             | The terminal reads the shell's own configuration                                            | Accepted           |
+| [0093](0093-app-owned-tools-use-managed-runtime-transports.md)               | App-owned tools use managed runtime transports                                              | Accepted           |
+| [0094](0094-focus-is-quiet-selection-carries-state.md)                       | Focus is quiet; selection carries state                                                     | Accepted           |
+| [0095](0095-bundled-provider-logo-marks.md)                                  | Bundled provider logo marks stay offline and licensed                                       | Accepted           |
+
+| [0096](0096-settings-editors-share-the-page-layout.md) | Settings editors share the page layout | Accepted |
+| [0097](0097-opencode2-uses-http-discovery-and-acp-turns.md) | OpenCode 2 uses HTTP discovery and ACP turns | Accepted |
+| [0098](0098-follow-up-composers-separate-message-and-context.md) | Follow-up composers separate the message and its context | Accepted |
+
+| [0099](0099-chat-keeps-the-conversation-full-width.md) | Chat keeps the conversation full width | Accepted |
+
+| [0100](0100-trusted-inline-task-approvals.md) | Task authority confirmations use a trusted inline surface | Accepted |
+
+| [0101](0101-browser-authority-across-modes.md) | Browser authority follows the thread across modes | Accepted |
 
 ## Adding an ADR
 

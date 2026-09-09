@@ -23,6 +23,42 @@ const alternateProviderId = "80000000-0000-4000-8000-0000000000b2" as never;
 const alternateModelId = "model-two" as never;
 
 describe("WorkThreadWorkspace", () => {
+  it("keeps a Browser approval visible and explains a failed decision", async () => {
+    const user = userEvent.setup();
+    const approval = {
+      approvalId: "90000000-0000-4000-8000-000000000001",
+      threadId: String(threadId),
+      mode: "work",
+      origin: "https://example.com",
+      requestedAt: "2026-09-09T10:00:00.000Z",
+    };
+    const browserAutomationClient = {
+      listApprovals: vi.fn(async () => [approval]),
+      decideApproval: vi.fn(async () => {
+        throw new Error("offline");
+      }),
+    };
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    render(
+      <WorkThreadWorkspace
+        browserAutomationClient={browserAutomationClient as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+
+    const row = await screen.findByRole("group", { name: "Browser origin approval" });
+    await user.click(within(row).getByRole("button", { name: "Approve once" }));
+    expect(await within(row).findByRole("alert")).toHaveTextContent(
+      "Browser approval could not be sent. Keep this request open and retry.",
+    );
+    expect(screen.getByRole("group", { name: "Browser origin approval" })).toBeInTheDocument();
+  });
+
   it("changes provider and model through the authoritative Work command", async () => {
     const user = userEvent.setup();
     const execute = vi.fn(async () => ({
@@ -94,27 +130,27 @@ describe("WorkThreadWorkspace", () => {
     expect(onThreadUpdated).toHaveBeenCalledWith(updated);
   });
 
-  it("opens Browser from the exact Work thread toolbar", async () => {
-    const user = userEvent.setup();
-    const onOpenBrowser = vi.fn();
+  it("keeps Work actions out of a separate row above the conversation", async () => {
     const threadClient = {
       bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
       execute: vi.fn(),
     } as unknown as WorkThreadClient;
-
     render(
       <WorkThreadWorkspace
-        onOpenBrowser={onOpenBrowser}
         providerGroups={[providerGroup()]}
         threadClient={threadClient}
         threadId={threadId}
         title="Draft brief"
       />,
     );
-
     await screen.findByLabelText("Bound provider and model");
-    await user.click(screen.getByRole("button", { name: "Browser" }));
-    expect(onOpenBrowser).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("toolbar", { name: "Work tools" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Mark this task complete" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Task actions" }).closest(".composer-row"),
+    ).not.toBeNull();
   });
 
   it("confirms completion through the user-facing Work action", async () => {
@@ -138,7 +174,8 @@ describe("WorkThreadWorkspace", () => {
     );
 
     await screen.findByLabelText("Bound provider and model");
-    await user.click(screen.getByRole("button", { name: "Mark this task complete" }));
+    await user.click(screen.getByRole("button", { name: "Task actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Mark complete" }));
     await user.type(
       screen.getByRole("textbox", { name: "What this task delivered" }),
       "The reviewed draft is saved in the bound folder.",
@@ -1456,7 +1493,8 @@ describe("WorkThreadWorkspace", () => {
 
     await user.type(await screen.findByLabelText("Work prompt"), "After done");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    await user.click(screen.getByRole("button", { name: "Mark this task complete" }));
+    await user.click(screen.getByRole("button", { name: "Task actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Mark complete" }));
     await user.type(
       screen.getByRole("textbox", { name: "What this task delivered" }),
       "The reviewed draft is saved in the bound folder.",

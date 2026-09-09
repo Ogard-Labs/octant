@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { originAllowed } from "@octant/domain";
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { isAbsolute } from "node:path";
@@ -313,6 +314,11 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     } catch {
       return undefined;
     }
+  }
+
+  async peek(contextId: BrowserContextId, signal: AbortSignal): Promise<BrowserRuntimeObservation> {
+    const page = await this.#page(contextId, signal);
+    return this.#observe(page, false, this.#contexts.get(contextId)?.protectCredentials ?? true);
   }
 
   async act(
@@ -848,20 +854,4 @@ function httpUrlForWebSocket(target: string): string {
   } catch {
     return target;
   }
-}
-
-function originAllowed(target: string, allowedOrigins: ReadonlyArray<string>): boolean {
-  let targetOrigin: string;
-  try {
-    targetOrigin = new URL(target).origin;
-  } catch {
-    return false;
-  }
-  return allowedOrigins.some((allowed) => {
-    try {
-      return new URL(allowed).origin === targetOrigin;
-    } catch {
-      return false;
-    }
-  });
 }

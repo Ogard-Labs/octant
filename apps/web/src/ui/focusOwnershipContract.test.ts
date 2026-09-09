@@ -7,8 +7,8 @@ const recipeDirectory = join(import.meta.dirname, "shadcn");
 /**
  * The style every recipe is imported from paints keyboard focus per control,
  * as a wide translucent halo. That is a web idiom: it reads as a page element
- * that happens to be focusable. Octant paints one ring for the whole app —
- * a hairline gap then a muted ring, tight to the control (0090).
+ * that happens to be focusable. Octant keeps focus visually quiet so selected
+ * and expanded fills carry the state cue (0094).
  *
  * Eight recipes carried the imported halo before this was checked, so the rule
  * is not self-enforcing: it survives exactly as long as something re-reads the
@@ -23,7 +23,7 @@ describe("focus ownership", () => {
     expect(recipes.length).toBeGreaterThan(0);
   });
 
-  it.each(recipes)("$name leaves keyboard focus to the app's own ring", ({ source }) => {
+  it.each(recipes)("$name leaves keyboard focus free of drawn ring utilities", ({ source }) => {
     const classNames = source.replace(/\/\*[\s\S]*?\*\//g, "");
     expect(classNames).not.toMatch(/focus-visible:ring-/);
     expect(classNames).not.toMatch(/focus-visible:border-ring/);

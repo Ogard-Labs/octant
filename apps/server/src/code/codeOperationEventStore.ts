@@ -471,6 +471,12 @@ export class CodeOperationEventStore {
             inputTokens: frame.event.inputTokens,
             outputTokens: frame.event.outputTokens,
             ...(frame.event.costUsd === undefined ? {} : { costUsd: frame.event.costUsd }),
+            ...(frame.event.contextWindow === undefined
+              ? {}
+              : { contextWindow: frame.event.contextWindow }),
+            ...(frame.event.contextTokens === undefined
+              ? {}
+              : { contextTokens: frame.event.contextTokens }),
           };
         } else if (frame.event.kind === "provider-limit") {
           // Window names are the provider's own, so two providers routinely

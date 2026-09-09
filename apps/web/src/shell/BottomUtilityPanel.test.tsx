@@ -38,7 +38,7 @@ describe("BottomUtilityPanel", () => {
     expect(screen.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("Live Terminal")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Add tool" }));
-    await user.click(screen.getByRole("button", { name: "Browser" }));
+    await user.click(screen.getByRole("button", { name: "New Browser" }));
     expect(onOpenTool).toHaveBeenCalledWith("browser");
     await user.click(screen.getByRole("button", { name: "Hide bottom panel" }));
     expect(onClose).toHaveBeenCalledOnce();

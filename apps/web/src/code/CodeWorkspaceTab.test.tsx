@@ -74,6 +74,33 @@ describe("native Code workspace approvals", () => {
   it("keeps approval unavailable without the native host bridge", () => {
     expect(nativeCodeWorkspaceApprovals(undefined, view)).toBeUndefined();
   });
+
+  it("positions the native approval with the active thread and Project identity", async () => {
+    const updateCodeOperationApprovalAnchor = vi.fn(async () => undefined);
+    const cancelCodeOperationApproval = vi.fn(async () => undefined);
+    const approvals = nativeCodeWorkspaceApprovals(
+      {
+        requestCodeOperationApproval: vi.fn(),
+        updateCodeOperationApprovalAnchor,
+        cancelCodeOperationApproval,
+      } as never,
+      {
+        thread: {
+          id: "10000000-0000-4000-8000-000000000001",
+          projectId: "70000000-0000-4000-8000-000000000001",
+        },
+      } as never,
+    );
+    await approvals?.updateAnchor?.({ x: 12, y: 400, width: 640, height: 96 });
+    await approvals?.cancel?.();
+    expect(updateCodeOperationApprovalAnchor).toHaveBeenCalledWith({
+      kind: "thread",
+      projectId: "70000000-0000-4000-8000-000000000001",
+      threadId: "10000000-0000-4000-8000-000000000001",
+      bounds: { x: 12, y: 400, width: 640, height: 96 },
+    });
+    expect(cancelCodeOperationApproval).toHaveBeenCalledOnce();
+  });
 });
 
 /**

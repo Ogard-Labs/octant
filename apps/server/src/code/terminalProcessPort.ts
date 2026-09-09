@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
@@ -35,6 +36,11 @@ export function shellStateEnvironment(directory: string): Record<string, string>
     // no partial line preceded it; in the dock it read as a rendering fault.
     PROMPT_EOL_MARK: "",
     HISTFILE: join(directory, "zsh_history"),
+    // Completion dumps and the framework's cache default to the home, which
+    // the shell can now read but still never writes; left there, the first
+    // prompt opened under "rm: ~/.zcompdump-…: Operation not permitted".
+    ZSH_COMPDUMP: join(directory, "zcompdump"),
+    ZSH_CACHE_DIR: join(directory, "cache", "zsh"),
     XDG_CACHE_HOME: join(directory, "cache"),
     XDG_STATE_HOME: join(directory, "state"),
     STARSHIP_CACHE: join(directory, "cache", "starship"),
@@ -151,6 +157,54 @@ export function ensureNodePtySpawnHelperExecutable(
   }
 }
 
+/**
+ * What an interactive shell reads to become the person's own: its rc and
+ * login files, the framework and prompt they source, and the tool hooks a rc
+ * commonly loads. Named one by one, read-only, so the rest of the home stays
+ * enumerated as denied (ADR 0092): a path a rc sources that is not here fails
+ * at the prompt where it can be seen, instead of the grant quietly widening.
+ * Credential files that share a directory with a hook (`~/.cargo/credentials`)
+ * are why the hook's file is named rather than its directory.
+ */
+const SHELL_CONFIGURATION_HOME_PATHS: ReadonlyArray<string> = [
+  ".zshenv",
+  ".zprofile",
+  ".zshrc",
+  ".zlogin",
+  ".zlogout",
+  ".zsh",
+  ".oh-my-zsh",
+  ".p10k.zsh",
+  ".zimrc",
+  ".zim",
+  ".antidote",
+  ".zsh_plugins.txt",
+  ".bashrc",
+  ".bash_profile",
+  ".bash_login",
+  ".bash_aliases",
+  ".profile",
+  ".inputrc",
+  ".config/zsh",
+  ".config/fish",
+  ".config/starship.toml",
+  ".fzf.zsh",
+  ".fzf",
+  ".iterm2_shell_integration.zsh",
+  ".nvm",
+  ".bun",
+  ".cargo/env",
+  ".cargo/bin",
+  ".orbstack/shell",
+];
+
+export function shellConfigurationReadRoots(
+  homeDirectory: string,
+  exists: (path: string) => boolean = existsSync,
+): ReadonlyArray<string> {
+  return SHELL_CONFIGURATION_HOME_PATHS.map((entry) => join(homeDirectory, entry)).filter(exists);
+}
+
 export const TERMINAL_TTY_RULES: ReadonlyArray<string> = [
   '(allow file-ioctl (regex #"^/dev/ttys[0-9]+$"))',
   "(allow pseudo-tty)",
@@ -171,6 +225,7 @@ export class TerminalProcessPort {
     readonly temporaryDirectory: string;
     readonly shellStateDirectory: string;
     readonly networkEgress: OsNetworkEgress;
+    readonly homeDirectory: string;
   };
 
   constructor(dependencies: TerminalProcessDependencies = {}) {
@@ -205,6 +260,7 @@ export class TerminalProcessPort {
         process.env.TEMP ??
         "/tmp",
       networkEgress: dependencies.networkEgress ?? "allow",
+      homeDirectory: dependencies.seatbeltHomeDirectory ?? homedir(),
       shellStateDirectory:
         dependencies.shellStateDirectory ??
         join(
@@ -261,7 +317,10 @@ export class TerminalProcessPort {
       const shellDirectory = dirname(input.shell);
       launch = this.#dependencies.confinement.prepare({
         executable: input.shell,
-        args: [],
+        // A login shell, as the platform's own terminal opens one: the login
+        // files are where PATH is assembled, and without them the tools a
+        // person installed were missing from a shell that looked like theirs.
+        args: ["-l"],
         boundRoot: input.cwd,
         temporaryDirectory: this.#dependencies.temporaryDirectory,
         additionalWriteRoots: [shellState],
@@ -288,7 +347,13 @@ export class TerminalProcessPort {
         // resolves to "/", which Seatbelt's confinement builder now refuses
         // as a launch root because it is an ancestor of every sensitive deny
         // path (see seatbeltProfile.ts).
-        readRoots: [input.cwd, this.#dependencies.temporaryDirectory, shellState, shellDirectory],
+        readRoots: [
+          input.cwd,
+          this.#dependencies.temporaryDirectory,
+          shellState,
+          shellDirectory,
+          ...shellConfigurationReadRoots(this.#dependencies.homeDirectory),
+        ],
       });
     } catch (error) {
       if (error instanceof SeatbeltConfinementError) throw error;

@@ -48,7 +48,9 @@ function fixture() {
   authority.register({ windowId, capability, now: 1_000 });
   const prepare = vi.fn(async () => challenge);
   const confirm = vi.fn(async () => receipt);
+  const cancel = vi.fn();
   return {
+    cancel,
     prepare,
     confirm,
     handle: createCodeOperationApprovalRouteHandler({
@@ -56,6 +58,7 @@ function fixture() {
       windowAuthorityStore: authority,
       prepare,
       confirm,
+      cancel,
       now: () => 1_001,
     }),
   };
@@ -92,6 +95,23 @@ describe("Code operation approval route", () => {
     );
     await expect(confirmation?.json()).resolves.toEqual(receipt);
     expect(confirm).toHaveBeenCalledWith(windowId, { challengeId: challenge.challengeId });
+  });
+
+  it("cancels a challenge through the same native window authority", async () => {
+    const { cancel, handle } = fixture();
+    const response = await handle(
+      new Request("http://127.0.0.1/api/desktop/code-operation-approval-cancellations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-desktop-secret": secret,
+          "x-octant-window-capability": capability,
+        },
+        body: JSON.stringify({ challengeId: challenge.challengeId }),
+      }),
+    );
+    expect(response?.status).toBe(204);
+    expect(cancel).toHaveBeenCalledWith(windowId, { challengeId: challenge.challengeId });
   });
 
   it("fails closed for renderer-origin, missing host secret, invalid bodies, and denied scope", async () => {

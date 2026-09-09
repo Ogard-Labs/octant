@@ -1,3 +1,4 @@
+import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import {
   decodeWorkAttachmentId,
   decodeWorkAttachmentMediaType,
@@ -15,17 +16,20 @@ import {
   type WorkTurnStreamFrame,
 } from "@octant/contracts";
 import type { ProjectId } from "@octant/contracts/projects";
+import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
 import type { PickerGroup } from "@octant/domain";
 import type { ChatComposerThreadMentionChip } from "../chat/ChatComposer";
+import { composerPlaceholder, FILE_HINT, THREAD_HINT } from "../composer/composerPlaceholder";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
+import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import {
   WorkTurnClientFailure,
   type WorkTurnClient,
 } from "@octant/client-runtime/work-turn-client";
 import type { FileMentionClient, ThreadMentionClient } from "@octant/client-runtime";
-import { Check, CirclePause, FileText, Globe2, Paperclip } from "lucide-react";
+import { Check, CirclePause, Ellipsis, FileText } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -46,6 +50,7 @@ import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
 import { useSteeredSend } from "../composer/useSteeredSend";
 import type { TurnSettlement } from "../composer/steeredSend";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
+import { OctantMenu } from "../ui/base/OctantMenu";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
@@ -138,6 +143,7 @@ const WORK_TRANSCRIPT_RECONNECTING_MESSAGE = "Work transcript is reconnecting.";
  * turn ended without one.
  */
 function WorkTurnHeader(props: {
+  readonly copyValue?: string;
   readonly turn: WorkTurnState;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
 }) {
@@ -146,6 +152,7 @@ function WorkTurnHeader(props: {
   return (
     <TurnHeader
       at={props.turn.updatedAt}
+      copyValue={props.copyValue}
       outcome={outcome}
       provider={providerModelLabel(props.providerGroups, props.turn.authority)}
       {...(workedFor === undefined ? {} : { workedFor })}
@@ -187,8 +194,8 @@ export interface WorkThreadWorkspaceProps {
   readonly threadClient: WorkThreadClient;
   readonly turnClient?: WorkTurnClient;
   readonly requestClient?: WorkRequestClient;
+  readonly browserAutomationClient?: BrowserAutomationClient;
   readonly mutationClient?: WorkMutationClient;
-  readonly onOpenBrowser?: () => void;
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   readonly threadMentionClient?: ThreadMentionClient;
   readonly fileMentionClient?: FileMentionClient;
@@ -312,6 +319,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const [thread, setThread] = useState<WorkThread | undefined>(props.initialThread);
   const [turns, setTurns] = useState<ReadonlyArray<WorkTurnState>>([]);
   const [pendingRequests, setPendingRequests] = useState<ReadonlyArray<WorkRequest>>([]);
+  const [browserApprovals, setBrowserApprovals] = useState<ReadonlyArray<BrowserToolApproval>>([]);
+  const [browserApprovalBusy, setBrowserApprovalBusy] = useState(false);
+  const [browserApprovalMessage, setBrowserApprovalMessage] = useState<string | undefined>(
+    undefined,
+  );
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
   const [creating, setCreating] = useState(false);
@@ -613,6 +625,68 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       refreshAbort.abort();
     };
   }, [projectId, props.changeRevision, props.requestClient, props.threadId]);
+
+  useEffect(() => {
+    const client = props.browserAutomationClient;
+    const listApprovals = client?.listApprovals;
+    if (listApprovals === undefined) {
+      setBrowserApprovals([]);
+      return;
+    }
+    const controller = new AbortController();
+    let inFlight = false;
+    const refresh = async () => {
+      if (!documentIsVisible() || inFlight) return;
+      inFlight = true;
+      try {
+        const approvals = await listApprovals(controller.signal);
+        if (!controller.signal.aborted) {
+          setBrowserApprovals(
+            approvals.filter((approval) => String(approval.threadId) === String(props.threadId)),
+          );
+        }
+      } catch {
+        if (!controller.signal.aborted) setBrowserApprovals([]);
+      } finally {
+        inFlight = false;
+      }
+    };
+    const stop = scheduleVisibleInterval(() => void refresh(), turnRunning ? 500 : 5_000, {
+      runImmediately: true,
+    });
+    return () => {
+      controller.abort();
+      stop();
+    };
+  }, [props.browserAutomationClient, props.threadId, turnRunning]);
+
+  const pendingBrowserApproval = browserApprovals[0];
+  const decideBrowserApproval = async (decision: "approved" | "denied") => {
+    if (
+      pendingBrowserApproval === undefined ||
+      props.browserAutomationClient?.decideApproval === undefined ||
+      browserApprovalBusy
+    ) {
+      return;
+    }
+    setBrowserApprovalBusy(true);
+    setBrowserApprovalMessage(undefined);
+    try {
+      await props.browserAutomationClient.decideApproval({
+        approvalId: pendingBrowserApproval.approvalId,
+        decision,
+      });
+      setBrowserApprovals((current) =>
+        current.filter((approval) => approval.approvalId !== pendingBrowserApproval.approvalId),
+      );
+    } catch {
+      setBrowserApprovalMessage(
+        "Browser approval could not be sent. Keep this request open and retry.",
+      );
+    } finally {
+      setBrowserApprovalBusy(false);
+    }
+  };
 
   const changeProvider = useCallback(
     async (selection: {
@@ -943,40 +1017,10 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
 
   return (
     <section aria-label="Task workspace" className="work-thread-workspace">
-      <header className="work-thread-workspace__header">
-        {/* The pane's tab already names the task; repeating it here cost a
-            heading, an eyebrow, and a subtitle for nothing. Chat resolved the
-            same duplication by keeping the name for assistive technology only. */}
-        <h1 className="sr-only">{props.title}</h1>
-        {props.childRunStatus}
-        <div aria-label="Work tools" className="work-thread-workspace__toolbar" role="toolbar">
-          {props.onOpenBrowser === undefined ? null : (
-            <OctantButton
-              className="code-thread-workspace__tool window-no-drag"
-              onClick={props.onOpenBrowser}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              <Globe2 aria-hidden="true" size={14} strokeWidth={1.7} />
-              <span>Browser</span>
-            </OctantButton>
-          )}
-          {thread?.lifecycle === "active" && thread.completionConfirmed !== true ? (
-            <OctantButton
-              aria-label="Mark this task complete"
-              disabled={completing || providerChanging || creating}
-              onClick={() => setCompletionFormOpen(true)}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              <Check aria-hidden="true" size={14} strokeWidth={1.8} />
-              <span>{completing ? "Marking complete" : "Mark complete"}</span>
-            </OctantButton>
-          ) : null}
-        </div>
-      </header>
+      <h1 className="sr-only">{props.title}</h1>
+      {props.childRunStatus === undefined ? null : (
+        <header className="work-thread-workspace__header">{props.childRunStatus}</header>
+      )}
 
       {completionFormOpen && thread?.lifecycle === "active" && !completionLocked ? (
         <section aria-label="Mark this task complete" className="work-thread-workspace__completion">
@@ -1028,7 +1072,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   <div className="bubble">
                     <TrackerReferenceText asParagraph text={row.entry.text} />
                   </div>
-                  {row.at === undefined ? null : <TurnTime at={row.at} />}
+                  {row.at === undefined ? null : (
+                    <TurnTime at={row.at} copyValue={row.entry.text} />
+                  )}
                 </article>
               );
             }
@@ -1037,7 +1083,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             return (
               <article aria-label="Assistant message" className="turn-agent">
                 {row.head === undefined ? null : (
-                  <WorkTurnHeader providerGroups={props.providerGroups ?? []} turn={row.head} />
+                  <WorkTurnHeader
+                    copyValue={row.entry.text}
+                    providerGroups={props.providerGroups ?? []}
+                    turn={row.head}
+                  />
                 )}
                 {row.entry.text === "" ? null : <ChatRichText body={row.entry.text} />}
               </article>
@@ -1098,7 +1148,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           }
           if (row.kind === "request") {
             return (
-              <div className="approval-row" role="status">
+              <div className="approval-row approval-row--request" role="status">
                 <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
                 <span className="approval-row__text">
                   {row.request.detail.kind === "approval"
@@ -1148,7 +1198,45 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         }
       />
 
+      {pendingBrowserApproval === undefined ? null : (
+        <section
+          aria-label="Browser origin approval"
+          className="approval-row approval-row--request thread-column"
+          role="group"
+        >
+          <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
+          <span className="approval-row__text">
+            Allow Browser to open {pendingBrowserApproval.origin}?
+            <span className="approval-row__detail">Shell and file access stay unchanged</span>
+          </span>
+          <div className="approval-row__actions">
+            <OctantButton
+              disabled={browserApprovalBusy}
+              onClick={() => void decideBrowserApproval("approved")}
+              size="sm"
+              type="button"
+            >
+              Approve once
+            </OctantButton>
+            <OctantButton
+              disabled={browserApprovalBusy}
+              onClick={() => void decideBrowserApproval("denied")}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Deny
+            </OctantButton>
+          </div>
+          {browserApprovalMessage === undefined ? null : (
+            <p className="approval-row__detail" role="alert">
+              {browserApprovalMessage}
+            </p>
+          )}
+        </section>
+      )}
       <ThreadComposer
+        presentation="follow-up"
         className="thread-composer thread-column"
         chips={
           <>
@@ -1195,7 +1283,12 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               if (attachFromTransfer(event.clipboardData)) event.preventDefault();
             }}
             placeholder={
-              turnRunning ? "Send the next message…" : "Describe the deliverable or paste a draft…"
+              turnRunning
+                ? "Send the next message…"
+                : composerPlaceholder("Describe the deliverable or paste a draft", [
+                    props.fileMentionClient === undefined ? undefined : FILE_HINT,
+                    threadMentions.composer === undefined ? undefined : THREAD_HINT,
+                  ])
             }
             ref={textareaRef}
             rows={4}
@@ -1231,6 +1324,21 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         row={{
           leading: (
             <>
+              {props.turnClient === undefined ? null : (
+                <>
+                  <ComposerAttachButton
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    busy={creating || completionLocked}
+                    refusedReason={
+                      imageSupport === false
+                        ? "The selected model does not accept images. Choose an image-capable model."
+                        : undefined
+                    }
+                    onRefused={images.refuse}
+                    onFileSelected={(file) => images.attach([file])}
+                  />
+                </>
+              )}
               {/* Model sits beside send, not on a strip above the composer:
                       the bar holds how the task runs (0073). */}
               {thread === undefined ? null : (
@@ -1251,48 +1359,24 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   />
                 </span>
               )}
-              {props.turnClient === undefined ? null : (
-                <>
-                  <label>
-                    <span className="work-composer-adapter__visually-hidden">Add attachment</span>
-                    {/* ui-boundary-exception: native-file-input */}
-                    <input
-                      aria-label="Choose attachment file"
-                      accept="image/png,image/jpeg,image/webp,image/gif"
-                      className="work-composer-adapter__file-input"
-                      disabled={creating || completionLocked || imageSupport === false}
-                      onChange={(event) => {
-                        const file = event.currentTarget.files?.item(0);
-                        if (file !== null && file !== undefined) {
-                          if (imageSupport === false) {
-                            images.refuse(
-                              "The selected model does not accept images. Choose an image-capable model.",
-                            );
-                          } else {
-                            images.attach([file]);
-                          }
-                        }
-                        event.currentTarget.value = "";
-                      }}
-                      type="file"
-                    />
-                  </label>
-                  <OctantButton
-                    aria-label="Add attachment"
-                    disabled={creating || completionLocked || imageSupport === false}
-                    onClick={(event) => {
-                      event.currentTarget.parentElement
-                        ?.querySelector<HTMLInputElement>('input[type="file"]')
-                        ?.click();
-                    }}
-                    size="icon"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <Paperclip aria-hidden="true" size={16} strokeWidth={1.8} />
-                  </OctantButton>
-                </>
-              )}
+              {thread?.lifecycle === "active" && !completionLocked ? (
+                <OctantMenu
+                  items={[
+                    {
+                      value: "complete",
+                      label: "Mark complete",
+                      icon: <Check aria-hidden="true" size={14} />,
+                      disabled: completing || providerChanging || creating,
+                    },
+                  ]}
+                  onValueChange={() => setCompletionFormOpen(true)}
+                  selectionMode="action"
+                  trigger={<Ellipsis aria-hidden="true" size={16} />}
+                  triggerClassName="shell-icon-button"
+                  triggerLabel="Task actions"
+                  value=""
+                />
+              ) : null}
               <ComposerVoiceButton
                 disabled={creating || completionLocked}
                 onTranscript={(transcript) =>
@@ -1316,21 +1400,24 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         footer={
           <div aria-live="polite" className="composer-status">
             {errorMessage === undefined ? null : (
-              <span className="composer-status__notice" role="alert">
+              <span className="composer-status__notice" role="alert" title={errorMessage}>
                 {errorMessage}
               </span>
             )}
-            <span className="composer-status__hint" role="status">
-              {steered.pending !== undefined
-                ? "Sent. It runs when the turn in progress finishes."
-                : completionLocked
-                  ? "Reactivate this task before creating another file or changing its provider."
-                  : turnRunning
-                    ? "Enter sends when this response finishes"
-                    : props.turnClient === undefined
-                      ? "Enter saves a Markdown artifact · Shift+Enter for a new line"
-                      : "Enter to send · Shift+Enter for a new line · # mentions a thread · @ mentions a file"}
-            </span>
+            {steered.pending !== undefined ||
+            completionLocked ||
+            turnRunning ||
+            props.turnClient === undefined ? (
+              <span className="composer-status__hint" role="status">
+                {steered.pending !== undefined
+                  ? "Sent. It runs when the turn in progress finishes."
+                  : completionLocked
+                    ? "Reactivate this task before creating another file or changing its provider."
+                    : turnRunning
+                      ? "Enter sends when this response finishes"
+                      : "Enter saves a Markdown artifact · Shift+Enter for a new line"}
+              </span>
+            ) : null}
           </div>
         }
       />

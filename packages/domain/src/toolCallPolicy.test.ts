@@ -4,6 +4,7 @@ import {
   decodeToolActionCapability,
   decodeToolExtensionId,
   lookupClosedToolCatalogEntry,
+  nativeHarnessToolCapabilityId,
 } from "@octant/contracts";
 import {
   resolveNetworkEgressPolicy,
@@ -72,6 +73,31 @@ describe("closed tool catalog grounding", () => {
 });
 
 describe("resolveToolCall fail-closed order", () => {
+  it("keeps Chat filesystem reads and shell commands denied", () => {
+    const chatRead = resolveToolCall(
+      baseInput({
+        capability: decodeToolActionCapability({
+          id: nativeHarnessToolCapabilityId("read") as never,
+          version: 1,
+        }),
+        mode: "chat",
+        arguments: { path: "README.md" },
+      }),
+    );
+    expect(chatRead).toMatchObject({ kind: "deny", step: "mode-policy" });
+    const chatShell = resolveToolCall(
+      baseInput({
+        capability: decodeToolActionCapability({
+          id: nativeHarnessToolCapabilityId("bash") as never,
+          version: 1,
+        }),
+        mode: "chat",
+        arguments: { command: "echo hello" },
+      }),
+    );
+    expect(chatShell).toMatchObject({ kind: "deny", step: "mode-policy" });
+  });
+
   it("1. denies unknown tools at tool-identity before inspecting arguments", () => {
     const decision = resolveToolCall(
       baseInput({

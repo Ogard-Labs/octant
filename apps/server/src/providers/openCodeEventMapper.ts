@@ -1,3 +1,4 @@
+import type { OpenCodeMessageParts } from "./openCodeMessageParts";
 import type {
   CorrelationId,
   ProviderInstanceId,
@@ -13,6 +14,7 @@ export interface OpenCodeEventContext {
   readonly correlationId: CorrelationId;
   readonly occurredAt: UtcTimestamp;
   readonly sequenceStart: number;
+  readonly messageParts?: OpenCodeMessageParts;
 }
 
 type RuntimeEventWithoutEnvelope = ProviderRuntimeEvent extends infer RuntimeEvent
@@ -138,6 +140,8 @@ export function mapOpenCodeEvent(
   context: OpenCodeEventContext,
   event: Event,
 ): ReadonlyArray<ProviderRuntimeEvent> {
+  const parts = context.messageParts?.accept(event);
+  if (parts !== undefined) return parts.map((part, index) => mappedEvent(context, part, index));
   switch (event.type) {
     case "session.next.text.delta": {
       const text = nonEmptyText(event.properties.delta);

@@ -79,6 +79,7 @@ describe("desktop preload bridge", () => {
     expect(Object.keys(bridge).sort()).toEqual([
       "approveRemotePairingRequest",
       "attachBrowserSurface",
+      "cancelCodeOperationApproval",
       "checkForAppUpdate",
       "clearProviderCredential",
       "close",
@@ -133,6 +134,7 @@ describe("desktop preload bridge", () => {
       "subscribeStartNewAgent",
       "tabBrowserSurface",
       "updateBrowserSurfaceBounds",
+      "updateCodeOperationApprovalAnchor",
       "windowChrome",
       "windowId",
     ]);
@@ -244,6 +246,13 @@ describe("desktop preload bridge", () => {
         },
       },
     } as never);
+    await bridge.updateCodeOperationApprovalAnchor({
+      kind: "thread",
+      projectId,
+      threadId: "20000000-0000-4000-8000-000000000001",
+      bounds: { x: 12, y: 400, width: 640, height: 96 },
+    });
+    await bridge.cancelCodeOperationApproval();
 
     expect(invoke.mock.calls).toEqual([
       [IPC_CHANNELS.minimize],
@@ -295,6 +304,16 @@ describe("desktop preload bridge", () => {
           },
         },
       ],
+      [
+        IPC_CHANNELS.updateCodeOperationApprovalAnchor,
+        {
+          kind: "thread",
+          projectId,
+          threadId: "20000000-0000-4000-8000-000000000001",
+          bounds: { x: 12, y: 400, width: 640, height: 96 },
+        },
+      ],
+      [IPC_CHANNELS.cancelCodeOperationApproval],
     ]);
   });
 

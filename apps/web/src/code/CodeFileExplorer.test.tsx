@@ -31,20 +31,20 @@ describe("CodeFileExplorer", () => {
   it("filters the bounded projection and labels binary, oversized, and unavailable files honestly", async () => {
     render(<CodeFileExplorer entries={entries()} onOpenFile={vi.fn()} />);
 
-    await userEvent.setup().type(screen.getByRole("searchbox", { name: "Search files" }), "asset");
+    await userEvent.setup().type(screen.getByRole("searchbox", { name: "Filter files" }), "asset");
     expect(screen.getByRole("treeitem", { name: /asset.bin/ })).toHaveTextContent(
       "Binary · read-only",
     );
     expect(screen.queryByRole("treeitem", { name: /index.ts/ })).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole("searchbox", { name: "Search files" }), {
+    fireEvent.change(screen.getByRole("searchbox", { name: "Filter files" }), {
       target: { value: "large" },
     });
     expect(screen.getByRole("treeitem", { name: /large.log/ })).toHaveTextContent(
       "Oversized · read-only",
     );
 
-    fireEvent.change(screen.getByRole("searchbox", { name: "Search files" }), {
+    fireEvent.change(screen.getByRole("searchbox", { name: "Filter files" }), {
       target: { value: "missing" },
     });
     const unavailable = screen.getByRole("treeitem", { name: /missing.txt/ });
@@ -73,7 +73,7 @@ describe("CodeFileExplorer", () => {
 
     await userEvent
       .setup()
-      .type(screen.getByRole("searchbox", { name: "Search files" }), "only-after-cap");
+      .type(screen.getByRole("searchbox", { name: "Filter files" }), "only-after-cap");
 
     expect(screen.getByRole("treeitem", { name: /src\/only-after-cap\.ts/ })).toBeVisible();
   });

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { originAllowed as sameSiteOriginAllowed } from "@octant/domain";
 import type {
   BrowserActionRequest,
   BrowserContextId,
@@ -595,6 +596,31 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         }
       });
     },
+    /**
+     * The page as it stands, without taking the surface from the person: the
+     * address, the title, and a picture unless the document holds a credential
+     * field. Nothing here is an action, so nothing is queued or journaled.
+     */
+    peek: async (
+      contextId: BrowserContextId | string,
+    ): Promise<BrowserSurfaceRuntimeObservation> => {
+      const owned = surface(contextId);
+      const contents = contentsView(owned).webContents;
+      const sensitiveDocument = await hasSensitiveDocument(
+        contentsView(owned),
+        owned.policy.credentialFieldProtection,
+      );
+      const screenshotDataUrl = sensitiveDocument
+        ? undefined
+        : await captureScreenshot(contentsView(owned));
+      return {
+        ...(contents.getURL() === ""
+          ? {}
+          : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),
+        ...(contents.getTitle() === "" ? {} : { title: contents.getTitle().slice(0, 1_024) }),
+        ...(screenshotDataUrl === undefined ? {} : { screenshotDataUrl }),
+      };
+    },
     command: async (
       contextId: BrowserContextId | string,
       owner: BrowserSurfaceOwner,
@@ -824,8 +850,7 @@ function normalizeUrl(value: string): string {
 function originAllowed(target: string, allowedOrigins: ReadonlyArray<string>): boolean {
   if (target === "about:blank") return true;
   try {
-    const origin = new URL(normalizeUrl(target)).origin;
-    return allowedOrigins.some((allowed) => new URL(normalizeUrl(allowed)).origin === origin);
+    return sameSiteOriginAllowed(normalizeUrl(target), allowedOrigins.map(normalizeUrl));
   } catch {
     return false;
   }

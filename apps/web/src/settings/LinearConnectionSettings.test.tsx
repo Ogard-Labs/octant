@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type {
   IntegrationAuthenticationCommand,
@@ -49,6 +49,26 @@ function makeClient(
 }
 
 describe("LinearConnectionSettings", () => {
+  it("keeps fields and their draft mounted while refreshing connection status", async () => {
+    const pending = Promise.withResolvers<IntegrationAuthenticationSnapshot>();
+    const authenticationSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce(readySnapshot)
+      .mockReturnValueOnce(pending.promise);
+    render(<LinearConnectionSettings client={makeClient({ authenticationSnapshot })} />);
+    await screen.findByText("ogard-labs");
+    fireEvent.click(screen.getByRole("button", { name: "Personal API key" }));
+    const input = screen.getByLabelText("Personal API key");
+    fireEvent.change(input, { target: { value: "unsaved-local-draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
+    expect(screen.getByLabelText("Personal API key")).toBe(input);
+    expect(input).toHaveValue("unsaved-local-draft");
+    expect(screen.getByRole("button", { name: "Refresh status" })).toBeDisabled();
+    await act(async () => pending.reject(new Error("Status refresh failed")));
+    expect(screen.getByLabelText("Personal API key")).toBe(input);
+    expect(await screen.findByText("Status refresh failed")).toBeVisible();
+  });
+
   it("renders the connected workspace identity without token material", async () => {
     render(<LinearConnectionSettings client={makeClient()} />);
     expect(await screen.findByText("ogard-labs")).toBeInTheDocument();

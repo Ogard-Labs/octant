@@ -20,6 +20,34 @@ capabilities.
   configuration and historical thread references.
 - **Removing** is rejected while active sessions depend on the instance.
 
+### Model visibility
+
+Expand a provider and use **Shown / Hidden** beside each reported model to
+choose which models appear in model pickers. This preference applies across
+the app and survives connection checks and discovery refreshes. Hiding a
+model keeps the provider configured and preserves tasks already using that
+model. Show it again in the same list to make it selectable for new tasks.
+
+New-task defaults use visible models. If every model is hidden, show a model
+in Provider Settings before starting a new task. Visibility is a selection
+preference; it does not grant or change provider permissions.
+
+### App-managed browser tools
+
+The Browser view and an agent's browser access are separate capabilities.
+A tool-capable model can still lack an adapter for Octant's app-managed tools;
+check the provider's capability details before relying on agent browser control.
+Manual browser controls remain governed by the thread's normal policy.
+
+Supported app-tool adapters can request an isolated browser session under
+**Ask for approvals** without changing the task to Full access. The request
+names the origin. Cancelling the task revokes its browser grant, and Plan mode
+refuses browser effects. The native OpenCode CLI adapter currently reports
+app-managed tools as unsupported; its text and native-tool support do not imply
+an app-browser bridge. The adapter requires isolated configuration before it can
+expose Octant tools; changing the thread to Full access does not remove that
+requirement.
+
 ### Discovery and auto-registration
 
 Octant scans a sanitized `PATH` plus approved install locations to find
@@ -34,6 +62,21 @@ Local CLI and SDK providers include Codex CLI, Claude Agent SDK,
 OpenCode CLI, Kilo ACP, Pi RPC, Oh My Pi, Devin ACP, Mistral Vibe ACP,
 Ollama, Kimi Code ACP, Grok Build ACP, Goose ACP, GLM Agent, Gemini CLI ACP,
 GitHub Copilot ACP, Cline ACP, and Qwen Code ACP.
+
+The beta `opencode2` executable appears separately as **OpenCode 2 preview**.
+Octant uses its bounded loopback HTTP API to discover the provider catalog and
+models, then uses the executable's ACP transport for Code and Work sessions.
+The ACP path carries `session/request_permission`, model and mode selection,
+streaming updates, resume, and cancellation through the shared ACP driver. Chat
+and Plan sessions stay unavailable because the beta `acp` entrypoint starts a
+same-binary server child and those modes do not grant process-spawn authority.
+Octant never falls back to an unconfined session or treats the beta version as
+the legacy OpenCode runtime. App-managed browser tools remain a separate
+capability and are not implied by this ACP transport.
+The launch keeps the user's existing global OpenCode config readable while
+writing runtime cache, state, and temporary files under Octant's managed home;
+the provider-owned auth directory is the only host data path with write access.
+Custom plugins and discovered skills are suppressed for the ACP child process.
 
 ### API endpoints
 

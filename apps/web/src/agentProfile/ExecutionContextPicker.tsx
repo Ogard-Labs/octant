@@ -141,12 +141,12 @@ export function ExecutionContextPicker(props: ExecutionContextPickerProps) {
 
 function policyLabel(policy: string): string {
   return policy === "plan"
-    ? "Plan"
+    ? "Plan · read-only"
     : policy === "approval-gated"
-      ? "Approval"
+      ? "Ask for approvals"
       : policy === "auto-accept-edits"
-        ? "Auto edits"
-        : "Full";
+        ? "Auto-accept edits"
+        : "Full access";
 }
 
 function permissionSummary(

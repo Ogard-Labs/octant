@@ -5,7 +5,7 @@
   height: 100vh;
   min-width: 0;
   min-height: 0;
-  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-columns: var(--octant-sidebar-width, 248px) minmax(0, 1fr);
   overflow: hidden;
   color: var(--octant-text-primary);
   background: var(--octant-app-background);
@@ -15,7 +15,7 @@
      invisible against the same app ground. */
   --octant-settings-card: var(--octant-card);
   --oct-settings-gutter: clamp(32px, 4vw, 56px);
-  --oct-settings-reading-width: 680px;
+  --oct-settings-reading-width: 800px;
 }
 
 html[data-octant-theme-mode="dark"] .settings-view,
@@ -96,6 +96,7 @@ html[data-theme="dark"] .settings-view {
   min-height: 0;
   flex: 1 1 auto;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   scrollbar-gutter: stable;
 }
 
@@ -136,7 +137,7 @@ html[data-theme="dark"] .settings-view {
 .settings-view__workspace-titlebar {
   display: flex;
   align-items: center;
-  padding: 0 var(--oct-settings-gutter);
+  padding: 0 var(--oct-space-5);
   border-bottom: 1px solid var(--octant-border-soft);
 }
 
@@ -157,23 +158,17 @@ html[data-theme="dark"] .settings-view {
   white-space: nowrap;
 }
 
-/* .setpane-title/.setpane-note carry the type; the header only spaces the
-   sections below it, and the note's own end margin must not stack on top. */
+/* The shared title/subtitle roles carry the type; this header only spaces the
+   sections below it, and the subtitle's own end margin must not stack on top. */
 .settings-view__header {
-  margin-bottom: 18px;
+  margin-bottom: 32px;
 }
 
-.settings-view__header .setpane-title,
 .settings-view__header h1 {
   color: var(--octant-text-primary);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xl);
-  font-weight: 600;
-  letter-spacing: -0.025em;
-  line-height: 1.2;
 }
 
-.settings-view__header .setpane-note {
+.settings-view__header .oct-subtitle {
   max-width: 62ch;
   margin-top: 6px;
   margin-bottom: 0;
@@ -218,7 +213,6 @@ html[data-theme="dark"] .settings-view {
 
 .settings-view__field--search .settings-view__text-input {
   min-height: 32px;
-  border-radius: var(--oct-radius-sm);
   background: var(--octant-control);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
@@ -318,6 +312,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   height: calc(100% - 52px);
   padding: 12px;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   scrollbar-gutter: stable;
 }
 
@@ -376,8 +371,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-navigation .setnav-item,
 .settings-view__back {
   min-height: 32px;
-  border-radius: var(--oct-radius-sm);
-  color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
   line-height: 1.2;
@@ -387,13 +380,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-navigation .setnav-item > .icon,
 .settings-view__back > .icon {
   color: var(--octant-text-muted);
-}
-
-.settings-navigation .setnav-item:hover,
-.settings-navigation .setnav-item[aria-current="page"],
-.settings-view__back:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-surface-hover);
 }
 
 .settings-navigation .setnav-item[aria-current="page"] {
@@ -417,7 +403,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-panel__header {
   display: grid;
   gap: 4px;
-  padding: 10px 0 8px;
+  padding: 0 0 12px;
   border-bottom: 1px solid var(--oct-hairline);
 }
 
@@ -428,8 +414,8 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .settings-panel__header h2 {
   color: var(--octant-text-secondary);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-regular);
   letter-spacing: -0.01em;
   text-transform: none;
 }
@@ -545,7 +531,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
    first row's own border-top, so the note draws none of its own. */
 .setgroup-note {
   margin: 0;
-  padding: 0 20px 12px;
+  padding: 0 0 12px;
   max-width: 64ch;
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
@@ -556,13 +542,11 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 /* Compound editors (multi-field controls) stack under their label instead of
    hanging off the right edge as a one-line value. */
 .setrow[data-setting-id="sidebar-background"],
+.setrow[data-setting-id="app-background"],
 .setrow[data-setting-id="environment-presentation"],
-.setrow[data-setting-id="default-model"],
-.setrow[data-setting-id="vision-reviewer"],
 .setrow[data-setting-id="user-profile"],
 .setrow[data-setting-id="keybindings"],
 .setrow[data-setting-id="export-diagnostics"],
-.setrow[data-setting-id="chat-default-model"],
 .setrow[data-setting-id="chat-personality"],
 .setrow[data-setting-id="code-editor-arguments"],
 .setrow[data-setting-id="execution-context"],
@@ -572,13 +556,11 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 }
 
 .setrow[data-setting-id="sidebar-background"] > .setrow-control,
+.setrow[data-setting-id="app-background"] > .setrow-control,
 .setrow[data-setting-id="environment-presentation"] > .setrow-control,
-.setrow[data-setting-id="default-model"] > .setrow-control,
-.setrow[data-setting-id="vision-reviewer"] > .setrow-control,
 .setrow[data-setting-id="user-profile"] > .setrow-control,
 .setrow[data-setting-id="keybindings"] > .setrow-control,
 .setrow[data-setting-id="export-diagnostics"] > .setrow-control,
-.setrow[data-setting-id="chat-default-model"] > .setrow-control,
 .setrow[data-setting-id="chat-personality"] > .setrow-control,
 .setrow[data-setting-id="code-editor-arguments"] > .setrow-control,
 .setrow[data-setting-id="execution-context"] > .setrow-control,
@@ -680,6 +662,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   scrollbar-gutter: stable;
 }
 
@@ -694,15 +677,14 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   --oct-settings-control-height: 32px;
 }
 
-/* One reading column. A 1080px edge-aligned pane stretched every row into
-   an ops console; form-layout cards need a measure a person can scan. */
+/* One centered reading column keeps long Settings pages balanced at wide widths. */
 .settings-view__content-inner {
   width: 100%;
   max-width: calc(
     var(--oct-settings-reading-width) + var(--oct-settings-gutter) + var(--oct-settings-gutter)
   );
-  padding: 28px var(--oct-settings-gutter) 64px;
-  margin: 0;
+  padding: 40px var(--oct-settings-gutter) 64px;
+  margin: 0 auto;
 }
 
 .settings-view__content-inner > section,
@@ -710,26 +692,64 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   scroll-margin-top: 16px;
 }
 
+/* Feedback is part of the provider surface's reserved geometry. A probe or
+   discovery failure may change the message, but it must not push the list and
+   defaults down by a different amount on every state transition. */
+.settings-feedback-slot,
+.provider-settings__message-slot {
+  height: 42px;
+  overflow-y: auto;
+}
+
+.settings-feedback-slot > :first-child,
+.provider-settings__message-slot > :first-child {
+  margin-block: 0;
+}
+
+.provider-settings__message-slot {
+  height: 32px;
+  /* Reuse the page heading's existing separation for feedback. */
+  margin-block: -32px -20px;
+}
+
+.provider-settings__message-slot .provider-settings__alert {
+  padding: 5px 8px;
+}
+
+/* Header feedback uses the heading's existing separation instead of adding
+   a blank section before Appearance and Host. Errors keep the same footprint. */
+.settings-theme-editor > .settings-feedback-slot:first-child {
+  height: 32px;
+  margin-block: -32px -16px;
+}
+
+.host-settings > .settings-feedback-slot:first-child {
+  height: 32px;
+  margin-block: -32px -20px;
+}
+
+.provider-settings__message-slot:empty {
+  visibility: hidden;
+}
+
 .settings-view__content-inner > section {
   padding: 0;
-  margin: 0 0 24px;
+  margin: 0 0 32px;
 }
 
 .settings-section-stack {
   display: grid;
-  gap: 16px;
+  gap: 32px;
 }
 
-/* A discrete object section is the card. Routine groups opt into the open
-   modifier below; neither treatment leaves a label floating above a second
-   grey well. */
+/* All preference sections share an open layout, including expanded editors. */
 .settings-card-section {
   display: grid;
   gap: 0;
-  overflow: hidden;
-  background: var(--octant-settings-card);
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-sm);
+  overflow: visible;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .settings-card-section--open {
@@ -753,6 +773,23 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   padding-inline: 0;
 }
 
+/* Scanning and partial-result messages share one reserved line so the
+   configured-provider section does not jump when discovery finishes. */
+.provider-discovery__status-slot {
+  height: 48px;
+  overflow-y: auto;
+}
+
+.provider-discovery__status-slot:empty {
+  visibility: hidden;
+}
+
+.provider-discovery__scan-action {
+  min-width: 88px;
+  justify-content: center;
+  white-space: nowrap;
+}
+
 /* The row's trailing control keeps a hair of room before the rule ends: a
    switch or icon button flush with the last pixel drew its shadow and focus
    ring past the hairline, so the controls looked cut off at the edge. */
@@ -760,7 +797,49 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   padding-inline: 0 4px;
 }
 
-.settings-card-section--open > .setgroup > .setrow:first-child {
+/* Observation and action columns are explicit rather than content-sized.
+   "Checking", a model count, and an authentication state then replace one
+   another in place without moving the provider name or trailing controls. */
+.settings-card-section--open > .provlist > .provrow[data-reordering="false"] {
+  grid-template-columns: 32px minmax(0, 1fr) 84px 112px 68px;
+}
+
+.settings-card-section--open > .provlist > .provrow[data-reordering="true"] {
+  grid-template-columns: 24px 32px minmax(0, 1fr) 84px 112px 68px;
+}
+
+.settings-card-section--open > .provlist .prov-models {
+  min-width: 84px;
+  text-align: end;
+}
+
+.settings-card-section--open > .provlist .prov-status {
+  min-width: 112px;
+  justify-items: end;
+}
+
+.settings-card-section--open > .provlist .prov-actions {
+  min-width: 68px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 560px) {
+  .settings-card-section--open > .provlist > .provrow[data-reordering="false"] {
+    grid-template-columns: 16px minmax(0, 1fr) auto;
+  }
+
+  .settings-card-section--open > .provlist > .provrow[data-reordering="true"] {
+    grid-template-columns: 24px 16px minmax(0, 1fr) auto;
+  }
+
+  .settings-card-section--open > .provlist .prov-models,
+  .settings-card-section--open > .provlist .prov-status,
+  .settings-card-section--open > .provlist .prov-actions {
+    min-width: 0;
+  }
+}
+
+.settings-card-section > .setgroup > .setrow:first-child {
   border-top: 1px solid var(--oct-hairline);
 }
 
@@ -848,11 +927,11 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-card-section > summary,
 .settings-card-section > legend {
   margin: 0;
-  padding: 20px 20px 0;
+  padding: 10px 0 8px;
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-regular);
   letter-spacing: -0.01em;
   line-height: 1.3;
   text-transform: none;
@@ -864,7 +943,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-card-section > legend {
   float: left;
   width: 100%;
-  padding: 20px 20px 0;
+  padding: 10px 0 8px;
 }
 
 .settings-card-section > summary {
@@ -881,12 +960,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .settings-card-section > summary:hover {
   color: var(--octant-text-secondary);
-}
-
-.settings-card-section > summary:focus-visible {
-  border-radius: var(--oct-radius-sm);
-  outline: none;
-  box-shadow: var(--oct-focus-ring);
 }
 
 /* One disclosure recipe for the "more" a row can hold: a custom font stack,
@@ -914,12 +987,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   color: var(--octant-text-primary);
 }
 
-.settings-disclosure > summary:focus-visible {
-  border-radius: var(--oct-radius-sm);
-  outline: none;
-  box-shadow: var(--oct-focus-ring);
-}
-
 .settings-disclosure > summary > svg {
   flex: 0 0 auto;
   color: var(--octant-text-muted);
@@ -930,9 +997,37 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   transform: rotate(90deg);
 }
 
+.settings-disclosure--section > summary {
+  width: 100%;
+  justify-content: space-between;
+  min-height: 52px;
+  padding-block: 12px;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.settings-disclosure__label {
+  display: grid;
+  gap: 4px;
+}
+
+.settings-disclosure__description {
+  color: var(--oct-meta);
+}
+
+.settings-disclosure__body {
+  padding-block: 8px 16px;
+}
+
+.settings-collection-scroll {
+  max-height: 360px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
 .settings-profile-disclosure > summary {
   min-height: 52px;
-  padding: 12px 16px;
+  padding: 12px 0;
 }
 
 .settings-profile-disclosure__summary-copy {
@@ -980,14 +1075,12 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   border-top: 0;
 }
 
-/* Standalone groups are cards. A group already inside settings-card-section
-   must not grow a second well. */
 .setgroup {
-  overflow: hidden;
+  overflow: visible;
   border: 0;
-  border-radius: var(--oct-radius-md);
-  background: var(--octant-settings-card);
-  box-shadow: var(--octant-shadow-sm);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .settings-card-section > .setgroup,
@@ -1007,7 +1100,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 }
 
 .settings-view .provider-settings.settings-card-section > .provider-settings__intro {
-  padding: 20px 20px 0;
+  padding: 10px 0 8px;
 }
 
 .settings-view .provider-settings.settings-card-section > .provider-settings__hint,
@@ -1058,12 +1151,12 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 }
 
 .setgroup-head {
-  min-height: 48px;
-  padding: 16px 20px 8px;
+  min-height: 0;
+  padding: 0 0 12px;
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-regular);
 }
 
 .settings-view__field,
@@ -1083,7 +1176,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .setrow {
   column-gap: 24px;
-  padding: 16px 20px;
+  padding: 14px 0;
   font-family: var(--oct-font-display);
 }
 
@@ -1125,6 +1218,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow-control > .settings-view__range,
 .setrow-control > .octant-number-stepper,
 .setrow-control > .settings-view__select,
+.setrow-control > [data-slot="select-trigger"],
 .setrow-control > .settings-font-picker {
   width: var(--oct-settings-control);
 }
@@ -1160,7 +1254,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-view__select,
 .settings-view__text-input,
 .settings-view__textarea {
-  border-radius: var(--oct-radius-sm);
   font-size: var(--oct-text-xs);
 }
 
@@ -1209,7 +1302,7 @@ textarea.settings-view__text-input {
 }
 
 /* Selection is carried by `aria-checked` in the markup; the accent ring is
-   reinforcement, and it is not the focus ring — that stays the system's. */
+   reinforcement and is independent of the quiet focus treatment. */
 .settings-view__preset-swatch[aria-checked="true"] {
   outline: 2px solid var(--oct-accent-fg);
   outline-offset: 2px;
@@ -1297,12 +1390,6 @@ textarea.settings-view__text-input {
 .settings-scheme__card[aria-checked="true"] {
   border-color: var(--oct-fg);
   box-shadow: none;
-}
-
-/* Same specificity as the checked ring and declared after it, so keyboard
-   focus stays visible on the card that is already chosen. */
-.settings-scheme__card:focus-visible {
-  box-shadow: var(--oct-focus-ring);
 }
 
 .settings-scheme__preview {
@@ -1408,7 +1495,7 @@ textarea.settings-view__text-input {
 .setgroup > .settings-view__toggle,
 .provider-settings__form > .settings-view__field,
 .provider-settings__form > .settings-view__toggle {
-  padding: 16px 20px;
+  padding: 14px 0;
 }
 
 /* Typography and Accessibility rows are ordinary setrows: 44px, label in the
@@ -1555,6 +1642,11 @@ textarea.settings-view__text-input {
   white-space: nowrap;
 }
 
+.settings-font-picker__positioner {
+  width: 300px;
+  max-width: min(var(--available-width), calc(100vw - 24px));
+}
+
 .settings-font-picker__sample {
   flex: 0 0 auto;
   color: var(--muted-foreground);
@@ -1586,8 +1678,9 @@ textarea.settings-view__text-input {
 }
 
 .octant-number-stepper:focus-within {
-  border-color: var(--ring);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 35%, transparent);
+  /* Keyboard focus stays visible through the quiet border cue. The previous
+     three-pixel halo read as a second card around the control. */
+  border-color: var(--octant-border-strong);
 }
 
 .octant-number-stepper__button {
@@ -1688,7 +1781,6 @@ textarea.settings-view__text-input {
 
 @media (max-width: 720px) {
   .settings-view:not(.settings-view--narrow) {
-    grid-template-columns: 216px minmax(0, 1fr);
     --oct-settings-gutter: 28px;
   }
 
@@ -1703,10 +1795,6 @@ textarea.settings-view__text-input {
 }
 
 @media (max-width: 560px) {
-  .settings-view {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .settings-view__sidebar-titlebar,
   .settings-view__workspace-titlebar {
     height: 40px;
@@ -2150,4 +2238,14 @@ textarea.settings-view__text-input {
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+/* The same compact chooser is used in Settings and conversation composers. */
+.settings-view .composer-model-picker {
+  max-width: var(--oct-settings-control);
+}
+
+.settings-view .composer-model-picker__trigger {
+  width: 100%;
+  justify-content: space-between;
 }

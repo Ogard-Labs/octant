@@ -6,6 +6,9 @@ import type {
 } from "@octant/contracts";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
+import { Markdown } from "../markdown/Markdown";
+import { CodeBlock } from "../transcript/CodeBlock";
+import "./project-pull-request-review.css";
 import { PullRequestConversation } from "./CodeReviewPane";
 
 const PR_STATE_LABELS: Record<CodeProjectPullRequestDetailObserved["pullRequestState"], string> = {
@@ -63,8 +66,8 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
   const githubUrl = safeGithubUrl(detail.url);
 
   return (
-    <section aria-label="Pull request review" className="code-delivery-pane code-pr-review">
-      <header className="code-delivery-pane__toolbar">
+    <section aria-label="Pull request review" className="code-pr-review">
+      <header className="code-pr-review__header">
         <div>
           <span>Pull request #{detail.number}</span>
           <h1>{detail.title.length === 0 ? `Pull request #${detail.number}` : detail.title}</h1>
@@ -105,10 +108,7 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
         </div>
       </header>
 
-      <p className="code-pr-review__guardrail">
-        Read-only review · merging, commenting, approving, requesting changes, and closing stay on
-        GitHub.
-      </p>
+      <p className="code-pr-review__guardrail">Read-only review · use GitHub for review actions.</p>
 
       {waiting ? (
         <div className="code-pr-review__waiting" role="alert">
@@ -154,7 +154,15 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
         {detail.description.length === 0 ? (
           <p role="status">No description provided.</p>
         ) : (
-          <p>{detail.description}</p>
+          <>
+            <Markdown body={detail.description} className="code-pr-review__prose" skipHtml />
+            <details className="code-pr-review__source">
+              <summary>Original description</summary>
+              <div className="code-pr-review__diff">
+                <CodeBlock code={detail.description} language="markdown" />
+              </div>
+            </details>
+          </>
         )}
       </section>
 
@@ -235,7 +243,9 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
         {detail.diff.length === 0 ? (
           <p role="status">No diff observed.</p>
         ) : (
-          <pre className="code-pr-review__diff">{detail.diff}</pre>
+          <div className="code-pr-review__diff">
+            <CodeBlock code={detail.diff} language="diff" />
+          </div>
         )}
       </section>
 

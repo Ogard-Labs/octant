@@ -115,7 +115,7 @@ describe("the public-block visual language", () => {
     expect(input).toMatch(/border-radius:\s*0/);
     expect(input).toMatch(/box-shadow:\s*none/);
     expect(input).toMatch(/border:\s*0/);
-    expect(input).toMatch(/padding:\s*18px 16px 12px/);
+    expect(input).toMatch(/padding:\s*18px var\(--oct-composer-gutter\) 12px/);
   });
 
   it("lets focus lift the composer instead of framing the prompt", () => {
@@ -125,27 +125,32 @@ describe("the public-block visual language", () => {
         /\.composer:focus-within:has\(\.composer-input:focus-visible\)\s*\{[^}]+\}/,
       )?.[0] ?? "";
 
-    expect(focus).toMatch(/outline:\s*none/);
-    expect(focus).not.toMatch(/border|--oct-accent\b/);
+    expect(focus).toBe("");
+    expect(system).not.toMatch(/\.composer:focus-within:has\(\.composer-input:focus-visible\)/);
     expect(system).toMatch(
       /\.composer:focus-within\s*\{\s*box-shadow:\s*var\(--octant-shadow-lg\)/,
     );
   });
 
-  it("gives a focused button one mark, not an outline and a ring", () => {
+  it("keeps focused buttons free of a drawn outline", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
-    const rule = system.match(/\[data-slot="button"\]:focus-visible\s*\{[^}]+\}/)?.[0] ?? "";
 
-    // A button's focus mark is the outline, chosen because the halo read as a
-    // highlighter circle drawn around the label. The shared rule paints a halo
-    // on anything focusable, so the button rule has to clear it or the button
-    // wears both. Only the shell's icon buttons escaped that, and only because
-    // their own CSS zeroes the shadow for unrelated reasons.
-    expect(rule).toMatch(/outline:\s*2px solid var\(--oct-accent-fg\)/);
-    expect(rule).toMatch(/box-shadow:\s*none/);
+    // The button recipe owns interaction semantics, while the app keeps focus
+    // visually quiet so selected and expanded fills carry the state cue.
+    expect(system).not.toMatch(/\[data-slot="button"\]:focus-visible\s*\{[^}]*outline:/);
   });
 
-  it("paints keyboard focus once, for every control, without reshaping it", () => {
+  it("keeps number steppers free of a focus halo", () => {
+    const settings = readFileSync(join(webRoot, "styles/settings.css"), "utf8");
+    const focus =
+      settings.match(/\.octant-number-stepper:focus-within\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+
+    expect(focus).not.toBe("");
+    expect(focus).toMatch(/border-color:\s*var\(--octant-border-strong\)/);
+    expect(focus).not.toMatch(/box-shadow:\s*(?!none\s*;)[^;]+;/);
+  });
+
+  it("keeps keyboard focus semantics without painting a global ring", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const withoutComments = system.replace(/\/\*[\s\S]*?\*\//g, "");
     const rule = withoutComments.match(/(?:^|\n)\s*:focus-visible\s*\{[^}]+\}/)?.[0] ?? "";
@@ -156,10 +161,10 @@ describe("the public-block visual language", () => {
     // whatever it liked.
     expect(rule).not.toBe("");
 
-    // One app-wide ring (0090). Scoping it away from owned recipes left every
-    // button with no indicator at all, because the recipes do not paint focus
-    // and every one of them carries a `data-slot`.
-    expect(rule).toMatch(/box-shadow:\s*var\(--oct-focus-ring\)/);
+    // Focus remains addressable in the DOM, but the application deliberately
+    // does not draw an outline or halo around the focused element.
+    expect(rule).toMatch(/outline:\s*none/);
+    expect(rule).toMatch(/box-shadow:\s*none/);
     expect(withoutComments).not.toMatch(/:focus-visible:not\(\[data-slot\]\)/);
 
     // No radius here: a box-shadow already follows the control's own corner,
@@ -191,7 +196,7 @@ describe("the public-block visual language", () => {
     expect(system).toMatch(/\.turn-user \{[^}]*justify-items:\s*end/);
     expect(system).not.toMatch(/\.turn-user \{[^}]*position:\s*sticky/);
     expect(system).toMatch(
-      /\.composer-row button,\n\.composer-row \[role="button"\],\n\.composer-row \[role="combobox"\] \{\n  min-height: 30px;\n  height: 30px;/,
+      /\.composer-row button,\n\.composer-row \[role="button"\],\n\.composer-row \[role="combobox"\] \{\n  min-height: 28px;\n  height: 28px;/,
     );
     expect(chat).not.toMatch(/\.chat-transcript \.turn-user/);
     expect(chat).not.toMatch(/\.chat-composer__status \{/);
@@ -212,32 +217,27 @@ describe("the public-block visual language", () => {
     }
   });
 
-  it("keeps the keyboard focus ring on the switch its own reset would swallow", () => {
+  it("does not add a switch-specific focus ring after its reset", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const track = system.match(/\.octant-switch\[data-slot="switch"\]\s*\{[^}]+\}/)?.[0] ?? "";
 
-    // The track drops the adapter's drop shadow, and the global ring is a
-    // box-shadow over `outline: none`, so the reset outranks it on
-    // specificity. Focus has to name the ring back or the switch shows
-    // nothing when it is tabbed to.
+    // The track drops the adapter's drop shadow and does not reintroduce a
+    // focus halo; checked state remains the visible switch cue.
     expect(track).toMatch(/box-shadow:\s*none/);
     expect(system).toMatch(
-      /\.octant-switch\[data-slot="switch"\]:focus-visible\s*\{\s*box-shadow:\s*var\(--oct-focus-ring\)/,
+      /\.octant-switch\[data-slot="switch"\]:focus-visible:not\(\[data-checked\]\)/,
     );
   });
 
-  it("keeps the keyboard focus halo on the Issues search its inner reset would swallow", () => {
+  it("does not add a wrapper focus halo around the Issues search", () => {
     const github = readFileSync(join(webRoot, "styles/github.css"), "utf8");
     const input =
       github.match(/\.github-issue-browser__search input\[type="search"\]\s*\{[^}]+\}/)?.[0] ?? "";
 
-    // The inner input clears box-shadow so no ring is drawn inside the 30px
-    // control. That also outranks the global :focus-visible halo, so the
-    // wrapper has to carry it or focus is only a border tint.
+    // The inner input keeps its compact reset, and the wrapper stays free of a
+    // second focus treatment.
     expect(input).toMatch(/box-shadow:\s*none/);
-    expect(github).toMatch(
-      /\.github-issue-browser__search:has\(input\[type="search"\]:focus-visible\)\s*\{\s*box-shadow:\s*var\(--oct-focus-ring\)/,
-    );
+    expect(github).not.toMatch(/:has\(input\[type="search"\]:focus-visible\)/);
   });
 
   it("keeps empty composer pickers as quiet toolbar items instead of nested fields", () => {
@@ -336,17 +336,15 @@ describe("the public-block visual language", () => {
     expect(legend).toMatch(/font-size:\s*var\(--oct-text-sm\)/);
   });
 
-  it("uses open Settings groups for routine controls and raised cards for discrete objects", () => {
+  it("uses the open layout for Settings groups and inline editors", () => {
     const settings = readFileSync(join(webRoot, "styles/settings.css"), "utf8");
 
     expect(settings).toMatch(
       /\.settings-view\s*\{[^}]*background:\s*var\(--octant-app-background\)/,
     );
-    expect(settings).toMatch(/--oct-settings-reading-width:\s*680px/);
+    expect(settings).toMatch(/--oct-settings-reading-width:\s*800px/);
     expect(settings).toMatch(/\.settings-view__content-inner\s*\{[^}]*margin:\s*0/);
-    expect(settings).toMatch(
-      /\.settings-card-section\s*\{[^}]*box-shadow:\s*var\(--octant-shadow-sm\)/,
-    );
+    expect(settings).toMatch(/\.settings-card-section\s*\{[^}]*box-shadow:\s*none/);
     expect(settings).toMatch(
       /\.settings-card-section--open\s*\{[^}]*background:\s*transparent[^}]*box-shadow:\s*none/,
     );

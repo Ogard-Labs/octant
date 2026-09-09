@@ -4,9 +4,9 @@ import { EXECUTION_POLICY_LABEL, visuallyHiddenStyle } from "./shellCommandWirin
 describe("shell command wiring", () => {
   it("names an agent profile's default policy in words, never by colour", () => {
     expect(EXECUTION_POLICY_LABEL["full-access"]).toBe("Full access");
-    expect(EXECUTION_POLICY_LABEL["approval-gated"]).toBe("Approval gated");
+    expect(EXECUTION_POLICY_LABEL["approval-gated"]).toBe("Ask for approvals");
     expect(EXECUTION_POLICY_LABEL["auto-accept-edits"]).toBe("Auto-accept edits");
-    expect(EXECUTION_POLICY_LABEL.plan).toBe("Plan");
+    expect(EXECUTION_POLICY_LABEL.plan).toBe("Plan · read-only");
   });
 
   it("hides live announcements from layout while keeping them readable", () => {

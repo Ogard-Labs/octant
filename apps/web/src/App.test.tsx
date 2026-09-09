@@ -1,5 +1,6 @@
 import {
   decodeWorkThread,
+  decodeCodeProjectPullRequestView,
   type NavigatorAssistantSnapshot,
   type ShellBootstrap,
   type ProjectBootstrap,
@@ -402,6 +403,26 @@ describe("App", () => {
 
     expect(screen.getByRole("heading", { name: "Project authority is unavailable" })).toBeVisible();
     expect(screen.queryByRole("main", { name: "Octant workspace" })).not.toBeInTheDocument();
+  });
+
+  it("keeps Chat free of generic right and bottom tool panels", async () => {
+    render(
+      <App
+        chatClient={chats()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(splitChatShellBootstrap())}
+      />,
+    );
+    await screen.findByRole("heading", { name: "Exact created chat" });
+    expect(screen.queryByRole("button", { name: /Right sidebar/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /bottom panel/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("complementary", { name: "Right Utility Dock" }),
+    ).not.toBeInTheDocument();
   });
 
   it("renders independent authoritative Chat sessions in every visible split pane", async () => {
@@ -838,9 +859,236 @@ describe("App", () => {
     );
   });
 
-  it("ignores a draft provider selection that became unselectable before create", async () => {
+  it("chooses a visible Chat model when the stored default is hidden", async () => {
     const user = userEvent.setup();
     const chatApi = chats();
+    const execute = vi.mocked(chatApi.execute);
+    const baseExecute = execute.getMockImplementation()!;
+    execute.mockImplementation(async (command) => {
+      if (command.kind === "change-chat-provider") {
+        const created = await baseExecute({ kind: "create-chat-thread", title: "ignored" });
+        if (created?.kind !== "thread-created") throw new Error("Expected created Chat thread");
+        return decodeChatCommandResult({
+          kind: "thread-updated",
+          thread: {
+            ...created.thread,
+            providerInstanceId: command.providerInstanceId,
+            modelId: command.modelId,
+            version: 2,
+          },
+        });
+      }
+      return baseExecute(command);
+    });
+    const providerApi = providersWithToolModel();
+    const providerBootstrap = await providerApi.bootstrap();
+    const instance = providerBootstrap.instances[0];
+    const observed = providerBootstrap.observedStates[0];
+    if (instance === undefined || observed === undefined)
+      throw new Error("Expected provider fixture");
+    const visibleModel = providerModel({
+      id: "visible-model",
+      displayName: "Visible model",
+      toolCalling: "supported",
+      evidence: "supported",
+    });
+    const hiddenModel = providerModel({
+      id: "gpt-5",
+      displayName: "GPT-5",
+      toolCalling: "supported",
+      evidence: "supported",
+    });
+    const hiddenProviderApi = {
+      ...providerApi,
+      bootstrap: vi.fn(async () => ({
+        ...providerBootstrap,
+        defaults: {
+          ...providerBootstrap.defaults,
+          hiddenModels: [{ providerInstanceId: instance.id, modelId: hiddenModel.id }],
+        },
+        observedStates: [{ ...observed, models: [hiddenModel, visibleModel] }],
+      })),
+    };
+
+    render(
+      <App
+        chatClient={chatApi}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={hiddenProviderApi}
+        shellClient={client(chatShellBootstrap())}
+      />,
+    );
+
+    const welcome = await screen.findByRole("region", { name: "Chat welcome" });
+    await user.type(within(welcome).getByRole("textbox", { name: "First message" }), "Visible");
+    await user.click(within(welcome).getByRole("button", { name: "Start chat" }));
+
+    await waitFor(() =>
+      expect(
+        execute.mock.calls.some(
+          ([command]) =>
+            command.kind === "change-chat-provider" && command.modelId === "visible-model",
+        ),
+      ).toBe(true),
+    );
+    expect(
+      execute.mock.calls.some(
+        ([command]) => command.kind === "send-chat-turn" && command.prompt === "Visible",
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps a visible saved Chat default ahead of the first catalog model", async () => {
+    const user = userEvent.setup();
+    const chatApi = chats();
+    const baseBootstrap = vi.mocked(chatApi.bootstrap).getMockImplementation()!;
+    const baseExecute = vi.mocked(chatApi.execute).getMockImplementation()!;
+    const execute = vi.mocked(chatApi.execute);
+    const providerApi = providersWithToolModel();
+    const providerBootstrap = await providerApi.bootstrap();
+    const instance = providerBootstrap.instances[0];
+    const observed = providerBootstrap.observedStates[0];
+    if (instance === undefined || observed === undefined)
+      throw new Error("Expected provider fixture");
+    const preferredModel = providerModel({
+      id: "preferred-model",
+      displayName: "Preferred model",
+      toolCalling: "supported",
+      evidence: "supported",
+    });
+    const firstModel = providerModel({
+      id: "first-model",
+      displayName: "First model",
+      toolCalling: "supported",
+      evidence: "supported",
+    });
+    vi.mocked(chatApi.bootstrap).mockImplementation(async () => {
+      const current = await baseBootstrap();
+      return {
+        ...current,
+        settings: {
+          ...current.settings,
+          defaultProviderInstanceId: instance.id,
+          defaultModelId: preferredModel.id,
+        },
+      };
+    });
+    execute.mockImplementation(async (command) => {
+      if (command.kind === "change-chat-provider") {
+        const created = await baseExecute({ kind: "create-chat-thread", title: "ignored" });
+        if (created?.kind !== "thread-created") throw new Error("Expected created Chat thread");
+        return decodeChatCommandResult({
+          kind: "thread-updated",
+          thread: {
+            ...created.thread,
+            providerInstanceId: command.providerInstanceId,
+            modelId: command.modelId,
+            version: 2,
+          },
+        });
+      }
+      return baseExecute(command);
+    });
+    const preferredProviderApi = {
+      ...providerApi,
+      bootstrap: vi.fn(async () => ({
+        ...providerBootstrap,
+        observedStates: [{ ...observed, models: [firstModel, preferredModel] }],
+      })),
+    };
+
+    render(
+      <App
+        chatClient={chatApi}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={preferredProviderApi}
+        shellClient={client(chatShellBootstrap())}
+      />,
+    );
+
+    const welcome = await screen.findByRole("region", { name: "Chat welcome" });
+    await user.type(within(welcome).getByRole("textbox", { name: "First message" }), "Preferred");
+    await user.click(within(welcome).getByRole("button", { name: "Start chat" }));
+
+    await waitFor(() =>
+      expect(
+        execute.mock.calls.some(
+          ([command]) =>
+            command.kind === "change-chat-provider" && command.modelId === "preferred-model",
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it("refuses a new Chat task when every provider model is hidden", async () => {
+    const user = userEvent.setup();
+    const chatApi = chats();
+    const providerApi = providersWithToolModel();
+    const providerBootstrap = await providerApi.bootstrap();
+    const instance = providerBootstrap.instances[0];
+    const observed = providerBootstrap.observedStates[0];
+    if (instance === undefined || observed === undefined)
+      throw new Error("Expected provider fixture");
+    const hiddenProviderApi = {
+      ...providerApi,
+      bootstrap: vi.fn(async () => ({
+        ...providerBootstrap,
+        defaults: {
+          ...providerBootstrap.defaults,
+          hiddenModels: observed.models.map((model) => ({
+            providerInstanceId: instance.id,
+            modelId: model.id,
+          })),
+        },
+      })),
+    };
+
+    render(
+      <App
+        chatClient={chatApi}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={hiddenProviderApi}
+        shellClient={client(chatShellBootstrap())}
+      />,
+    );
+
+    const welcome = await screen.findByRole("region", { name: "Chat welcome" });
+    await user.type(within(welcome).getByRole("textbox", { name: "First message" }), "Blocked");
+    await user.click(within(welcome).getByRole("button", { name: "Start chat" }));
+
+    expect(chatApi.execute).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "create-chat-thread" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "No visible Chat model is available. Re-enable a model in Settings first.",
+    );
+  });
+
+  it("replaces a disabled draft provider with a visible model before sending", async () => {
+    const user = userEvent.setup();
+    const chatApi = chats();
+    const baseExecute = vi.mocked(chatApi.execute).getMockImplementation();
+    if (baseExecute === undefined) throw new Error("Expected Chat fixture");
+    vi.mocked(chatApi.execute).mockImplementation(async (command) => {
+      const result = await baseExecute(command);
+      if (command.kind !== "change-chat-provider" || result?.kind !== "thread-created")
+        return result;
+      return decodeChatCommandResult({
+        kind: "thread-updated",
+        thread: {
+          ...result.thread,
+          providerInstanceId: command.providerInstanceId,
+          modelId: command.modelId,
+          version: 2,
+        },
+      });
+    });
     const instanceA = openAiProvider("90000000-0000-4000-8000-000000000001", "Primary Gateway");
     const instanceB = openAiProvider("90000000-0000-4000-8000-000000000002", "Backup Gateway");
     let primaryEnabled = true;
@@ -919,8 +1167,12 @@ describe("App", () => {
     await waitFor(() =>
       expect(execute.mock.calls.some(([command]) => command.kind === "send-chat-turn")).toBe(true),
     );
-    expect(execute.mock.calls.some(([command]) => command.kind === "change-chat-provider")).toBe(
-      false,
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "change-chat-provider",
+        providerInstanceId: instanceB.id,
+        modelId: "backup-1",
+      }),
     );
   });
 
@@ -1428,11 +1680,8 @@ describe("App", () => {
     expect(screen.getByRole("dialog", { name: "Context window" })).toBeVisible();
     expect(inspect.mock.calls.length).toBe(inspectCalls);
 
-    await showRightUtilityDock(user);
-    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(within(dock).queryByRole("tab", { name: "Context" })).toBeNull();
-    expect(within(dock).queryByRole("button", { name: /^Context$/ })).toBeNull();
-    expect(within(dock).queryByRole("heading", { name: "Context inspector" })).toBeNull();
+    expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open Right sidebar" })).toBeNull();
   });
 
   it("closes the previous pane's context popover and retargets usage when the active pane changes", async () => {
@@ -3058,7 +3307,7 @@ describe("App", () => {
     ).toBeVisible();
     expect(await screen.findByRole("button", { name: "New task" })).toBeVisible();
     expect(
-      await screen.findByPlaceholderText("Ask for follow-up changes…", {}, { timeout: 5_000 }),
+      await screen.findByPlaceholderText(/^Ask for follow-up changes/, {}, { timeout: 5_000 }),
     ).toBeVisible();
 
     await openSidebarProject(user, "Octant");
@@ -3311,9 +3560,7 @@ describe("App", () => {
       />,
     );
 
-    expect(
-      await screen.findByRole("region", { name: "Workspace pane: Welcome to Code" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Workspace pane: New task" })).toBeVisible();
   });
 
   it("opens implemented settings and deep-links search results to focused controls", async () => {
@@ -3519,7 +3766,7 @@ describe("App", () => {
     expect(
       screen.getByRole("region", { name: "Workspace pane: Controller foundation" }),
     ).not.toHaveAttribute("aria-current");
-    await waitFor(() => expect(within(dock).getByText("Current work")).toBeVisible());
+    await waitFor(() => expect(within(dock).getByText("Tools")).toBeVisible());
     expect(within(dock).queryByRole("tab", { name: "Browser" })).not.toBeInTheDocument();
     await user.click(within(dock).getByRole("button", { name: "Terminal" }));
     dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
@@ -3546,6 +3793,87 @@ describe("App", () => {
       screen.getByRole("region", { name: "Workspace pane: Controller foundation" }),
     ).toBeVisible();
     expect(screen.getByRole("region", { name: "Workspace pane: Second thread" })).toBeVisible();
+  });
+
+  it("opens a selected pull request beside the list without hiding its Review pane", async () => {
+    const user = userEvent.setup();
+    const codeApi = codes();
+    vi.mocked(codeApi.queryProjectPullRequests).mockResolvedValue(
+      decodeCodeProjectPullRequestView({
+        version: 1,
+        query: { version: 1 },
+        projects: [
+          {
+            kind: "connected",
+            projectId,
+            projectName: "Octant",
+            repositoryOwner: "octant",
+            repositoryName: "octant",
+          },
+        ],
+        rows: [
+          {
+            projectId,
+            projectName: "Octant",
+            repositoryOwner: "octant",
+            repositoryName: "octant",
+            number: 12,
+            title: "Inspect selected pull request",
+            draft: false,
+            state: "open",
+            mergeability: "mergeable",
+            author: "octocat",
+            baseBranch: "main",
+            headBranch: "feature/preview",
+            updatedAt: "2026-09-08T00:00:00.000Z",
+            checks: "passing",
+            review: "pending",
+            linkedThreads: [],
+          },
+        ],
+        repositoriesTruncated: false,
+        pullRequestsTruncated: false,
+        freshness: { status: "empty" },
+        generatedAt: "2026-09-08T00:00:00.000Z",
+      }),
+    );
+    render(
+      <App
+        codeClient={codeApi}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    await user.click(screen.getByRole("button", { name: "Pull requests" }));
+    await user.click(await screen.findByRole("button", { name: /Inspect selected pull request/ }));
+    expect(await screen.findByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Pull requests" })).toBeVisible();
+    await waitFor(() =>
+      expect(codeApi.refreshProjectPullRequestDetail).toHaveBeenCalledWith({
+        projectId,
+        repositoryOwner: "octant",
+        repositoryName: "octant",
+        number: 12,
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Image generator" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("complementary", { name: "Right Utility Dock" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(await screen.findByRole("region", { name: "Image generator" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Archive" }));
+    expect(await screen.findByRole("region", { name: "Archive" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Image generator" })).not.toBeInTheDocument();
   });
 
   it("hands the pane to the Board and gives the dock back afterwards, toggle included", async () => {
@@ -3661,7 +3989,7 @@ describe("App", () => {
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     await user.click(within(dock).getByRole("button", { name: "Browser" }));
     await user.click(within(dock).getByRole("button", { name: "Add tool" }));
-    const browserActions = within(dock).getAllByRole("button", { name: "Browser" });
+    const browserActions = within(dock).getAllByRole("button", { name: "New Browser" });
     const addBrowser = browserActions.at(-1);
     if (addBrowser === undefined) throw new Error("Expected the Browser add action.");
     await user.click(addBrowser);
@@ -3916,7 +4244,7 @@ describe("App", () => {
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
     const composer = await screen.findByPlaceholderText(
-      "Ask for follow-up changes…",
+      /^Ask for follow-up changes/,
       {},
       { timeout: 5_000 },
     );
@@ -4033,7 +4361,7 @@ describe("App", () => {
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
     const composer = await screen.findByPlaceholderText(
-      "Ask for follow-up changes…",
+      /^Ask for follow-up changes/,
       {},
       { timeout: 5_000 },
     );
@@ -4127,6 +4455,7 @@ describe("App", () => {
       "aria-selected",
       "true",
     );
+    await user.click(await within(dock).findByRole("button", { name: "Side by side" }));
     expect(await within(dock).findByRole("navigation", { name: "Changed files" })).toBeVisible();
     expect(thread).toBeVisible();
     expect(screen.queryByRole("heading", { name: "No Code Project open" })).not.toBeInTheDocument();

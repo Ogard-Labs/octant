@@ -22,6 +22,7 @@ function runtime(presentation: "native-live" | "headless" = "native-live") {
     createContext: vi.fn(async () => presentation),
     inspectTarget: vi.fn(async () => ({ sensitive: false })),
     act: vi.fn(async () => ({ title: "Example" })),
+    peek: vi.fn(async () => ({ title: "Example" })),
     closeContext: vi.fn(async () => undefined),
     closeAll: vi.fn(async () => undefined),
     onProcessExit: (listener: () => void) => {
@@ -73,6 +74,16 @@ describe("RoutingBrowserRuntime", () => {
 
     expect(native.createContext).not.toHaveBeenCalled();
     expect(headless.createContext).toHaveBeenCalledOnce();
+  });
+
+  it("peeks through the backend that holds the page", async () => {
+    const native = runtime();
+    const headless = runtime("headless");
+    const router = new RoutingBrowserRuntime({ native, headless });
+    await router.createContext(contextId, policy, new AbortController().signal, owner);
+    await router.peek(contextId, new AbortController().signal);
+    expect(native.peek).toHaveBeenCalledWith(contextId, expect.any(AbortSignal));
+    expect(headless.peek).not.toHaveBeenCalled();
   });
 
   it("scopes a backend process exit to contexts owned by that backend", async () => {

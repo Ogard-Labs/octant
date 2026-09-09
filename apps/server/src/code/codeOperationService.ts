@@ -813,6 +813,13 @@ export class CodeOperationService {
         }
         return result;
       }
+    } else if (command.kind === "write-terminal" || command.kind === "resize-terminal") {
+      // Keystrokes and resizes reach a shell that is already open. The owner
+      // record ties that terminal to this window, thread, and checkout — the
+      // authority the root resolution established when the shell opened.
+      // Resolving the root again spawned git four times per key and held
+      // typing to about three characters a second.
+      result = this.#terminalInput(command, windowId, scope.thread, scope.checkout);
     } else {
       const root = await this.#options.authority.resolveCheckoutRoot(
         windowId,
@@ -904,6 +911,11 @@ export class CodeOperationService {
             } catch (error) {
               const category =
                 error instanceof ReviewFindingServiceError ? error.failure : ("failed" as const);
+              // The renderer sees only the category. Without the reason in the
+              // host log, a refused result and a thrown one read the same.
+              console.warn(
+                `Octant code operation ${command.kind} failed unexpectedly: ${(error instanceof Error ? error.message : String(error)).slice(0, 400)}`,
+              );
               result = this.#failed(command.operationId, category, "Code operation failed.");
             }
           }
@@ -1348,26 +1360,9 @@ export class CodeOperationService {
         owner.outputBaseline = snapshot.transcript.characters;
         return this.#terminal(command.operationId, snapshot);
       }
-      case "write-terminal": {
-        const owner = this.#requireTerminalOwner(command, windowId, thread, checkout);
-        if (owner !== undefined) return owner;
-        this.#options.terminals.write(command.terminalId, command.data);
-        return this.#terminal(
-          command.operationId,
-          this.#options.terminals.attach(command.terminalId),
-          false,
-        );
-      }
-      case "resize-terminal": {
-        const owner = this.#requireTerminalOwner(command, windowId, thread, checkout);
-        if (owner !== undefined) return owner;
-        this.#options.terminals.resize(command.terminalId, command.columns, command.rows);
-        return this.#terminal(
-          command.operationId,
-          this.#options.terminals.attach(command.terminalId),
-          false,
-        );
-      }
+      case "write-terminal":
+      case "resize-terminal":
+        return this.#terminalInput(command, windowId, thread, checkout);
       case "stop-terminal": {
         const owner = this.#requireTerminalOwner(command, windowId, thread, checkout);
         if (owner !== undefined) return owner;
@@ -1637,15 +1632,13 @@ export class CodeOperationService {
     snapshot: CodeOperationTerminalSnapshot,
     includeTranscript = true,
   ): CodeOperationResult {
-    const transcript = snapshot.transcript.chunks.join("");
+    const transcript = includeTranscript ? snapshot.transcript.chunks.join("") : "";
     const base = {
       kind: "terminal-state",
       operationId,
       terminalId: snapshot.terminalId,
       state: snapshot.status,
-      ...(!includeTranscript || transcript.length === 0
-        ? {}
-        : { transcript: this.#options.evidence.put(transcript) }),
+      ...(transcript.length === 0 ? {} : { transcript: this.#options.evidence.put(transcript) }),
     } as const;
     return snapshot.status === "exited"
       ? decodeCodeOperationResult({ ...base, state: "exited", exitCode: snapshot.exitCode ?? null })
@@ -1804,6 +1797,26 @@ export class CodeOperationService {
     const owner = this.#terminalOwners.get(terminalId);
     owner?.removeOutputListener?.();
     this.#terminalOwners.delete(terminalId);
+  }
+
+  #terminalInput(
+    command: Extract<CodeOperationCommand, { readonly kind: "write-terminal" | "resize-terminal" }>,
+    windowId: WindowId,
+    thread: CodeThread,
+    checkout: CodeCheckoutIdentity,
+  ): CodeOperationResult {
+    const owner = this.#requireTerminalOwner(command, windowId, thread, checkout);
+    if (owner !== undefined) return owner;
+    if (command.kind === "write-terminal") {
+      this.#options.terminals.write(command.terminalId, command.data);
+    } else {
+      this.#options.terminals.resize(command.terminalId, command.columns, command.rows);
+    }
+    return this.#terminal(
+      command.operationId,
+      this.#options.terminals.attach(command.terminalId),
+      false,
+    );
   }
 
   #requireTerminalOwner(

@@ -148,6 +148,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         sessionId: input.providerSessionId,
         modelId: input.command.authority.modelId,
         executionPolicy: "approval-gated",
+        tools: input.appManagedTools?.definitions ?? [],
       });
 
       if (input.signal.aborted) {
@@ -193,17 +194,32 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                       .pipe(Effect.catchAll(() => Effect.void));
                     return;
                   }
-                  const execution = yield* Effect.promise(async () => {
-                    try {
-                      return await toolSet.execute({
-                        name: event.toolName,
-                        inputJson: event.inputJson,
-                        signal: input.signal,
-                      });
-                    } catch {
-                      return { result: { error: "tool-execution-failed" }, isError: true } as const;
-                    }
+                  const requestSignal = connection.toolRequestSignal?.({
+                    sessionId: input.providerSessionId,
+                    requestId: event.requestId,
                   });
+                  const executionSignal =
+                    requestSignal === undefined
+                      ? input.signal
+                      : AbortSignal.any([input.signal, requestSignal]);
+                  if (executionSignal.aborted) return;
+                  const execution = yield* idle.during(
+                    Effect.promise(async () => {
+                      try {
+                        return await toolSet.execute({
+                          name: event.toolName,
+                          inputJson: event.inputJson,
+                          signal: executionSignal,
+                        });
+                      } catch {
+                        return {
+                          result: { error: "tool-execution-failed" },
+                          isError: true,
+                        } as const;
+                      }
+                    }),
+                  );
+                  if (executionSignal.aborted) return;
                   yield* connection
                     .answerTool({
                       sessionId: input.providerSessionId,
@@ -263,7 +279,15 @@ function boundedCleanup<E, R>(
   effect: Effect.Effect<void, E, R>,
   timeoutMs: number,
 ): Effect.Effect<void, never, R> {
-  return Effect.raceFirst(effect.pipe(Effect.catchAll(() => Effect.void)), Effect.sleep(timeoutMs));
+  // Finalizers are uninterruptible. Keep the raced children interruptible so
+  // a completed cleanup cancels its timer instead of waiting out the budget.
+  return Effect.raceFirst(
+    effect.pipe(
+      Effect.catchAll(() => Effect.void),
+      Effect.interruptible,
+    ),
+    Effect.sleep(timeoutMs).pipe(Effect.interruptible),
+  );
 }
 
 function isTerminalEvent(event: ProviderRuntimeEvent): boolean {

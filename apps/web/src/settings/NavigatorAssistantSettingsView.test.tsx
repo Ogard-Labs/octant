@@ -32,7 +32,9 @@ describe("NavigatorAssistantSettingsView", () => {
       screen.getByText("Navigator is unavailable until a default model is chosen."),
     ).toBeVisible();
 
-    await user.click(screen.getAllByRole("option", { name: /Model A/ })[0]!);
+    expect(screen.queryByRole("option", { name: /Model A/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Navigator default model" }));
+    await user.click(screen.getByRole("option", { name: "Model A" }));
 
     expect(onSettingsChange).toHaveBeenCalledWith({
       navigatorAssistant: {

@@ -236,7 +236,9 @@ describe("ChatComposer", () => {
       onFileSelected,
     });
 
-    expect(screen.getByRole("button", { name: "Add attachment" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add attachment" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Add attachment" }));
+    expect(screen.getByRole("status")).not.toHaveClass("chat-composer__status--quiet");
     expect(screen.getByRole("status")).toHaveTextContent(
       "The selected model cannot accept attachments.",
     );
@@ -244,6 +246,17 @@ describe("ChatComposer", () => {
     const file = new File(["image"], "diagram.png", { type: "image/png" });
     await user.upload(screen.getByLabelText("Choose attachment file"), file);
     expect(onFileSelected).not.toHaveBeenCalled();
+  });
+
+  it("clears an attachment refusal when the selected provider becomes capable", async () => {
+    const user = userEvent.setup();
+    const { props, rerender } = renderComposer({
+      attachment: { kind: "unavailable", reason: "Attachments are unavailable." },
+    });
+    await user.click(screen.getByRole("button", { name: "Add attachment" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Attachments are unavailable.");
+    rerender(<ChatComposer {...props} attachment={{ kind: "supported" }} />);
+    expect(screen.getByRole("status")).not.toHaveTextContent("Attachments are unavailable.");
   });
 
   it("forwards the selected File without reading or exposing a file path", async () => {
@@ -424,7 +437,11 @@ describe("ChatComposer", () => {
     const list = screen.getByRole("list", { name: "Attached preview selections" });
     expect(list).toBeVisible();
     expect(list).toHaveTextContent("report.pdf");
-    await user.click(screen.getByRole("button", { name: "Remove report.pdf selection" }));
+    const remove = screen.getByRole("button", { name: "Remove report.pdf selection" });
+    expect(remove).toHaveClass("chip-x");
+    expect(remove.querySelector("svg")).not.toBeNull();
+    expect(remove).not.toHaveTextContent("Remove");
+    await user.click(remove);
     expect(onRemovePreviewSelection).toHaveBeenCalledWith(selectionId);
   });
 
@@ -458,6 +475,9 @@ describe("ChatComposer", () => {
     expect(list).toHaveTextContent("Build guidance");
     expect(list).toHaveTextContent("Selection verified");
     const remove = screen.getByRole("button", { name: "Remove Build guidance extension" });
+    expect(remove).toHaveClass("chip-x");
+    expect(remove.querySelector("svg")).not.toBeNull();
+    expect(remove).not.toHaveTextContent("Remove");
     remove.focus();
     await user.keyboard("{Enter}");
     expect(onRemoveExtensionSelection).toHaveBeenCalledWith("@build-tools");

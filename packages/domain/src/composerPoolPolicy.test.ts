@@ -134,6 +134,56 @@ describe("buildComposerPoolModel", () => {
     expect(model.mixedVendorRequired).toBe(false);
   });
 
+  it("hides models from the pool while preserving a hidden current route", () => {
+    const model = buildComposerPoolModel({
+      snapshot: snapshot({
+        defaults: {
+          permissionPersistence: "current-session",
+          agentEligibleModels: [
+            { providerInstanceId: openAiInstanceId, modelId: "gpt-5.2" as ProviderModelId },
+            { providerInstanceId: openAiInstanceId, modelId: "gpt-5.2-mini" as ProviderModelId },
+          ],
+          hiddenModels: [
+            { providerInstanceId: openAiInstanceId, modelId: "gpt-5.2" as ProviderModelId },
+          ],
+          version: 1,
+        },
+      } as unknown as Partial<ProviderRegistrySnapshot>),
+      hostId,
+      mode: "chat",
+      current,
+    });
+    expect(model.kind).toBe("ready");
+    if (model.kind !== "ready") return;
+    expect(model.candidates).toHaveLength(2);
+    expect(model.candidates[0]).toMatchObject({ isCurrent: true, hiddenCurrent: true });
+    expect(model.candidates[1]).toMatchObject({ isCurrent: false });
+  });
+
+  it("requires two visible models when Settings hides the pool", () => {
+    const model = buildComposerPoolModel({
+      snapshot: snapshot({
+        defaults: {
+          permissionPersistence: "current-session",
+          agentEligibleModels: [
+            { providerInstanceId: openAiInstanceId, modelId: "gpt-5.2" as ProviderModelId },
+            { providerInstanceId: openAiInstanceId, modelId: "gpt-5.2-mini" as ProviderModelId },
+          ],
+          hiddenModels: [
+            { providerInstanceId: openAiInstanceId, modelId: "gpt-5.2" as ProviderModelId },
+            { providerInstanceId: openAiInstanceId, modelId: "gpt-5.2-mini" as ProviderModelId },
+          ],
+          version: 1,
+        },
+      } as unknown as Partial<ProviderRegistrySnapshot>),
+      hostId,
+      mode: "chat",
+    });
+    expect(model.kind).toBe("unavailable");
+    if (model.kind === "unavailable")
+      expect(model.reason).toMatch(/no agent-eligible models|at least two/i);
+  });
+
   it("fails closed per candidate: unconfigured, not-ready, and vanished models are not selectable", () => {
     const model = buildComposerPoolModel({
       snapshot: snapshot({

@@ -71,7 +71,7 @@ describe("browser automation routes", () => {
     };
     handler = createBrowserAutomationRouteHandler({
       service: service as any,
-      authority: { resolve: () => authority },
+      authority: { canAccessWindow: () => true, resolve: () => authority },
       windowAuthorityStore: store,
       maxRequestBodySize: 64_000,
     });
@@ -87,6 +87,47 @@ describe("browser automation routes", () => {
     expect(response?.status).toBe(401);
   });
 
+  it("rejects a scope and context create from a window without that thread Project", async () => {
+    const isolatedHandler = createBrowserAutomationRouteHandler({
+      service: service as any,
+      authority: { canAccessWindow: () => false, resolve: () => authority },
+      windowAuthorityStore: store,
+      maxRequestBodySize: 64_000,
+    });
+    const headers = {
+      "content-type": "application/json",
+      "x-octant-window-capability": capability,
+    };
+    const scope = await isolatedHandler(
+      new Request("http://127.0.0.1/api/browser/scope", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ threadId, mode: "work" }),
+      }),
+    );
+    expect(scope?.status).toBe(403);
+
+    const created = await isolatedHandler(
+      new Request("http://127.0.0.1/api/browser/contexts", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body()),
+      }),
+    );
+    expect(created?.status).toBe(403);
+    expect(service.create).not.toHaveBeenCalled();
+
+    const current = await isolatedHandler(
+      new Request("http://127.0.0.1/api/browser/contexts/current", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ threadId }),
+      }),
+    );
+    expect(current?.status).toBe(403);
+    expect(service.inspectThread).not.toHaveBeenCalled();
+  });
+
   it("returns only the server-resolved authority for an authenticated thread", async () => {
     const response = await handler(
       new Request("http://127.0.0.1/api/browser/scope", {
@@ -100,6 +141,60 @@ describe("browser automation routes", () => {
     );
     expect(response?.status).toBe(200);
     expect(await response?.json()).toEqual({ threadId, authority });
+  });
+
+  it("lists and decides a browser origin approval under the authenticated window", async () => {
+    const approvals = {
+      list: vi.fn(
+        () =>
+          [
+            {
+              approvalId: "90000000-0000-4000-8000-000000000001",
+              threadId,
+              mode: "chat",
+              origin: "https://example.com",
+              requestedAt: "2026-09-09T10:00:00.000Z",
+            },
+          ] as never,
+      ),
+      decide: vi.fn(() => true),
+    };
+    const approvalHandler = createBrowserAutomationRouteHandler({
+      service: service as any,
+      authority: { canAccessWindow: () => true, resolve: () => authority },
+      approvals,
+      windowAuthorityStore: store,
+      maxRequestBodySize: 64_000,
+    });
+    const headers = {
+      "content-type": "application/json",
+      "x-octant-window-capability": capability,
+    };
+    const listed = await approvalHandler(
+      new Request("http://127.0.0.1/api/browser/approvals", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ kind: "list" }),
+      }),
+    );
+    expect(listed?.status).toBe(200);
+    expect(await listed?.json()).toHaveLength(1);
+    const decided = await approvalHandler(
+      new Request("http://127.0.0.1/api/browser/approvals", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          kind: "decide",
+          approvalId: "90000000-0000-4000-8000-000000000001",
+          decision: "approved",
+        }),
+      }),
+    );
+    expect(decided?.status).toBe(200);
+    expect(approvals.decide).toHaveBeenCalledWith(windowId, {
+      approvalId: "90000000-0000-4000-8000-000000000001",
+      decision: "approved",
+    });
   });
 
   it("dispatches a strict create command under the authenticated window", async () => {

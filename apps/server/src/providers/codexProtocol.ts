@@ -459,10 +459,33 @@ const PermissionsApprovalParams = Schema.Struct({
 export type CodexPermissionsApprovalParams = typeof PermissionsApprovalParams.Type;
 export const decodePermissionsApprovalParams = decode(PermissionsApprovalParams);
 
+/** A function-shaped app tool registered on `thread/start`. */
+const DynamicToolSpec = Schema.Struct({
+  type: Schema.Literal("function"),
+  name: Schema.String,
+  description: Schema.String,
+  inputSchema: Schema.Unknown,
+  deferLoading: Schema.optional(Schema.Boolean),
+});
+export type CodexDynamicToolSpec = typeof DynamicToolSpec.Type;
+
+/** A dynamic tool call the app-server sends back to its client. */
+const DynamicToolCallParams = Schema.Struct({
+  threadId: Schema.String,
+  turnId: Schema.String,
+  callId: Schema.String,
+  namespace: Schema.optional(Schema.NullOr(Schema.String)),
+  tool: Schema.String,
+  arguments: Schema.Unknown,
+});
+export type CodexDynamicToolCallParams = typeof DynamicToolCallParams.Type;
+export const decodeDynamicToolCallParams = decode(DynamicToolCallParams);
+
 const stableRequestSchemas = {
   "item/commandExecution/requestApproval": CommandApprovalParams,
   "item/fileChange/requestApproval": FileChangeApprovalParams,
   "item/permissions/requestApproval": PermissionsApprovalParams,
+  "item/tool/call": DynamicToolCallParams,
 } as const;
 
 export type CodexStableRequestMethod = keyof typeof stableRequestSchemas;
@@ -482,6 +505,7 @@ const stableRequestDecoders: Record<CodexStableRequestMethod, (value: unknown) =
   "item/commandExecution/requestApproval": decode(CommandApprovalParams),
   "item/fileChange/requestApproval": decode(FileChangeApprovalParams),
   "item/permissions/requestApproval": decode(PermissionsApprovalParams),
+  "item/tool/call": decode(DynamicToolCallParams),
 };
 
 export type CodexServerMessage =

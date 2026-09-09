@@ -49,7 +49,7 @@ describe("AutomationNotificationSettings", () => {
     const client = makeClient();
     render(<AutomationNotificationSettings client={client} />);
     expect(await screen.findByRole("button", { name: /Enable notifications/i })).toBeTruthy();
-    expect(screen.getByText(/Credentialed APNs\/FCM delivery is unavailable/i)).toBeTruthy();
+    expect(screen.getByText(/Push delivery is not configured on this host/i)).toBeTruthy();
     expect(screen.getAllByText("Unavailable").length).toBeGreaterThanOrEqual(1);
     await user.click(screen.getByRole("button", { name: /Enable notifications/i }));
     expect(client.update).toHaveBeenCalledWith(

@@ -1,4 +1,5 @@
 import type {
+  BrowserActionRequest,
   BrowserAutomationSnapshot,
   BrowserThreadId,
   CodeBoardView,
@@ -65,17 +66,51 @@ const MAX_APPLE_RESULT_DIAGNOSTICS = 16;
 
 const browserDefinition = {
   name: CODE_BROWSER_TOOL_NAME,
+  description:
+    "Control Octant's built-in browser for this task. Start with navigate and an HTTP(S) URL, then read-page, click or type using CSS selectors, press a key, scroll, wait for a selector, or capture a screenshot. This uses the same isolated page shown in Browser; no external browser skill, debugging URL, or shell command is needed. Browser approval is requested inline when required.",
   inputSchema: {
     type: "object",
     properties: {
       operation: {
         type: "string",
-        enum: ["navigate", "read-page", "click", "type", "scroll", "wait", "screenshot", "stop"],
+        enum: [
+          "navigate",
+          "read-page",
+          "click",
+          "type",
+          "press",
+          "scroll",
+          "wait",
+          "screenshot",
+          "stop",
+        ],
       },
-      url: { type: "string" },
-      selector: { type: "string" },
-      text: { type: "string" },
+      url: { type: "string", maxLength: 4096, description: "HTTP(S) URL for navigate." },
+      selector: {
+        type: "string",
+        maxLength: 4096,
+        description: "CSS selector for click, type, or wait.",
+      },
+      text: {
+        type: "string",
+        maxLength: 65536,
+        description: "Text to fill into the selected field.",
+      },
+      key: { type: "string", description: "Browser key such as Enter, Tab, Escape, or ArrowDown." },
+      deltaX: { type: "integer", minimum: -2000, maximum: 2000 },
+      deltaY: {
+        type: "integer",
+        minimum: -2000,
+        maximum: 2000,
+        description: "Scroll down with positive values, up with negative values.",
+      },
+      expectedObservationRevision: {
+        type: "integer",
+        minimum: 0,
+        description: "Revision from the page observation used to choose this action.",
+      },
     },
+    additionalProperties: false,
     required: ["operation"],
   },
 } as const;
@@ -185,6 +220,15 @@ export interface CodeAppManagedToolsOptions {
   readonly thread: CodeThread;
   readonly readThread: (windowId: WindowId, threadId: CodeThread["id"]) => CodeThread | undefined;
   readonly uuid: () => string;
+  readonly browserApproval?: {
+    readonly isApproved: (contextId: string) => boolean;
+    readonly request: (
+      origin: string,
+      signal?: AbortSignal,
+    ) => Promise<"approved" | "denied" | "cancelled" | "expired">;
+    readonly remember: (contextId: string) => void;
+    readonly forget: (contextId: string) => void;
+  };
   readonly executeOperation: (
     windowId: WindowId,
     command: CodeOperationCommand,
@@ -238,22 +282,7 @@ export interface CodeAppManagedToolsOptions {
     }) => Promise<BrowserAutomationSnapshot>;
     readonly act: (input: {
       readonly windowId: WindowId;
-      readonly request: {
-        readonly actionId: ToolActionRequest["actionId"];
-        readonly contextId: NonNullable<BrowserAutomationSnapshot["context"]>["contextId"];
-        readonly correlationId: ToolActionRequest["correlationId"];
-        readonly authority: ToolActionAuthority;
-        readonly kind:
-          | "navigate"
-          | "click"
-          | "type"
-          | "scroll"
-          | "screenshot"
-          | "extract-text"
-          | "wait";
-        readonly target?: string;
-        readonly value?: string;
-      };
+      readonly request: BrowserActionRequest;
     }) => Promise<BrowserAutomationSnapshot>;
     readonly releaseThread: (
       windowId: WindowId,
@@ -330,13 +359,13 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       if (name === CODE_PROPOSE_THREAD_TOOL_NAME && options.planner !== undefined) {
         return plannerProposeTool(options, parseProposeThreadInput(inputJson));
       }
+      if (name === CODE_BROWSER_TOOL_NAME && options.browser !== undefined) {
+        return browserTool(options, parseBrowserInput(inputJson), signal);
+      }
       const postureFailure = currentAuthorityFailure(options);
       if (postureFailure !== undefined) return failure(postureFailure);
       if (name === CODE_TERMINAL_TOOL_NAME) {
         return terminalTool(options, parseTerminalInput(inputJson), signal);
-      }
-      if (name === CODE_BROWSER_TOOL_NAME && options.browser !== undefined) {
-        return browserTool(options, parseBrowserInput(inputJson), signal);
       }
       if (name === CODE_APPLE_TOOL_NAME && options.apple !== undefined) {
         return appleTool(options, parseAppleInput(inputJson), signal);
@@ -592,16 +621,45 @@ async function browserTool(
   const authority = options.browser.resolveAuthority(threadId, "code");
   if (authority === undefined) return failure("browser-authority-unavailable");
   if (input.operation === "stop") {
+    const context = options.browser.inspectThread(options.windowId, threadId).context;
+    if (context !== undefined) options.browserApproval?.forget(String(context.contextId));
     const released = await options.browser.releaseThread(options.windowId, threadId);
     return browserResult(released);
   }
+  const postureFailure = browserAuthorityFailure(options);
+  if (postureFailure !== undefined) return failure(postureFailure);
   let snapshot = options.browser.inspectThread(options.windowId, threadId);
-  if (snapshot.context === undefined) {
-    if (input.operation !== "navigate" || input.url === undefined) {
-      return failure("browser-navigation-required");
-    }
-    const origin = allowedOrigin(input.url);
-    if (origin === undefined) return failure("invalid-browser-url");
+  const existing = snapshot.context?.state === "active" ? snapshot.context : undefined;
+  if (existing === undefined && snapshot.context !== undefined) {
+    options.browserApproval?.forget(String(snapshot.context.contextId));
+  }
+  const origin =
+    existing === undefined
+      ? input.operation === "navigate" && input.url !== undefined
+        ? allowedOrigin(input.url)
+        : undefined
+      : existing.policy.allowedOrigins.join(", ");
+  if (origin === undefined)
+    return failure(
+      input.operation === "navigate" && input.url !== undefined
+        ? "invalid-browser-url"
+        : "browser-navigation-required",
+    );
+  const requiresApproval = currentAuthorityFailure(options) !== undefined;
+  if (
+    requiresApproval &&
+    (existing === undefined ||
+      options.browserApproval?.isApproved(String(existing.contextId)) !== true)
+  ) {
+    if (options.browserApproval === undefined) return failure("browser-approval-required");
+    const outcome = await options.browserApproval.request(origin, signal);
+    if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
+    const changed = browserAuthorityFailure(options);
+    if (changed !== undefined || signal?.aborted === true)
+      return failure(changed ?? "tool-interrupted");
+    if (existing !== undefined) options.browserApproval.remember(String(existing.contextId));
+  }
+  if (existing === undefined) {
     const action = actionRequest(options, authority);
     const created = await guardedBrowserEffect(options, threadId, signal, () =>
       options.browser!.create({
@@ -619,6 +677,9 @@ async function browserTool(
     );
     if (created.kind === "failure") return failure(created.reason);
     snapshot = created.snapshot;
+    if (requiresApproval && snapshot.context?.state === "active") {
+      options.browserApproval?.remember(String(snapshot.context.contextId));
+    }
   }
   const context = snapshot.context;
   if (context === undefined || context.state !== "active") return browserResult(snapshot);
@@ -864,7 +925,7 @@ async function guardedBrowserEffect(
     while (!settled) {
       await defaultWait(25);
       if (settled) break;
-      const reason = currentAuthorityFailure(options);
+      const reason = browserAuthorityFailure(options);
       if (reason !== undefined) return reason;
     }
     return new Promise<string>(() => undefined);
@@ -878,7 +939,7 @@ async function guardedBrowserEffect(
     ]);
     settled = true;
     if (outcome.kind === "snapshot") {
-      const reason = currentAuthorityFailure(options);
+      const reason = browserAuthorityFailure(options);
       if (reason === undefined && signal?.aborted !== true) return outcome;
       await options.browser?.releaseThread(options.windowId, threadId);
       return { kind: "failure", reason: signal?.aborted === true ? "tool-interrupted" : reason! };
@@ -901,6 +962,9 @@ function browserAction(
     contextId: context.contextId,
     correlationId: context.correlationId,
     authority: context.authority,
+    ...(input.expectedObservationRevision === undefined
+      ? {}
+      : { expectedObservationRevision: input.expectedObservationRevision }),
   } as const;
   switch (input.operation) {
     case "navigate":
@@ -917,12 +981,19 @@ function browserAction(
       return input.selector === undefined || input.text === undefined
         ? undefined
         : { ...base, kind: "type" as const, target: input.selector, value: input.text };
+    case "press":
+      return { ...base, kind: "press" as const, value: input.key };
     case "wait":
       return input.selector === undefined
         ? undefined
         : { ...base, kind: "wait" as const, target: input.selector };
     case "scroll":
-      return { ...base, kind: "scroll" as const };
+      return {
+        ...base,
+        kind: "scroll" as const,
+        ...(input.deltaX === undefined ? {} : { deltaX: input.deltaX }),
+        ...(input.deltaY === undefined ? {} : { deltaY: input.deltaY }),
+      };
     case "screenshot":
       return { ...base, kind: "screenshot" as const };
   }
@@ -998,6 +1069,9 @@ function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = 
         ? {}
         : {
             page: {
+              ...(snapshot.observation.revision === undefined
+                ? {}
+                : { observationRevision: snapshot.observation.revision }),
               ...(snapshot.observation.url === undefined ? {} : { url: snapshot.observation.url }),
               ...(snapshot.observation.title === undefined
                 ? {}
@@ -1014,6 +1088,9 @@ function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = 
                       ? {}
                       : { textTruncated: true }),
                   }),
+              ...(snapshot.observation.revision === undefined
+                ? {}
+                : { revision: snapshot.observation.revision }),
               ...(snapshot.observation.contentHash === undefined
                 ? {}
                 : { contentHash: snapshot.observation.contentHash }),
@@ -1082,11 +1159,16 @@ function parseProposeThreadInput(value: string): ProposeThreadToolInput | undefi
   };
 }
 
-type BrowserToolInput =
-  | { readonly operation: "navigate"; readonly url?: string }
-  | { readonly operation: "read-page" | "scroll" | "screenshot" | "stop" }
-  | { readonly operation: "click" | "wait"; readonly selector?: string }
-  | { readonly operation: "type"; readonly selector?: string; readonly text?: string };
+type BrowserToolInput = {
+  readonly expectedObservationRevision?: number;
+} & (
+  | { readonly operation: "navigate"; readonly url: string }
+  | { readonly operation: "read-page" | "screenshot" | "stop" }
+  | { readonly operation: "scroll"; readonly deltaX?: number; readonly deltaY?: number }
+  | { readonly operation: "click" | "wait"; readonly selector: string }
+  | { readonly operation: "press"; readonly key: string }
+  | { readonly operation: "type"; readonly selector: string; readonly text: string }
+);
 
 function parseTerminalInput(value: string): TerminalToolInput | undefined {
   const parsed = parseObject(value, new Set(["operation", "command"]));
@@ -1111,24 +1193,78 @@ function parseTerminalInput(value: string): TerminalToolInput | undefined {
 }
 
 function parseBrowserInput(value: string): BrowserToolInput | undefined {
-  const parsed = parseObject(value, new Set(["operation", "url", "selector", "text"]));
+  const parsed = parseObject(
+    value,
+    new Set([
+      "operation",
+      "url",
+      "selector",
+      "text",
+      "key",
+      "deltaX",
+      "deltaY",
+      "expectedObservationRevision",
+    ]),
+  );
   if (parsed === undefined) return undefined;
-  const operation = parsed.operation;
+  const revision = parsed.expectedObservationRevision;
   if (
-    operation !== "navigate" &&
-    operation !== "read-page" &&
-    operation !== "click" &&
-    operation !== "type" &&
-    operation !== "scroll" &&
-    operation !== "wait" &&
-    operation !== "screenshot" &&
-    operation !== "stop"
+    revision !== undefined &&
+    (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0)
   )
     return undefined;
-  for (const field of ["url", "selector", "text"] as const) {
-    if (parsed[field] !== undefined && typeof parsed[field] !== "string") return undefined;
+  const common = typeof revision === "number" ? { expectedObservationRevision: revision } : {};
+  const only = (...keys: ReadonlyArray<string>) =>
+    Object.keys(parsed).every(
+      (key) => key === "operation" || key === "expectedObservationRevision" || keys.includes(key),
+    );
+  const text = (field: string, limit: number) =>
+    typeof parsed[field] === "string" && parsed[field].length > 0 && parsed[field].length <= limit;
+  switch (parsed.operation) {
+    case "navigate":
+      return only("url") && text("url", 4096) && typeof parsed.url === "string"
+        ? { ...common, operation: "navigate", url: parsed.url }
+        : undefined;
+    case "click":
+    case "wait":
+      return only("selector") && text("selector", 4096) && typeof parsed.selector === "string"
+        ? { ...common, operation: parsed.operation, selector: parsed.selector }
+        : undefined;
+    case "type":
+      return only("selector", "text") &&
+        text("selector", 4096) &&
+        text("text", 65536) &&
+        typeof parsed.selector === "string" &&
+        typeof parsed.text === "string"
+        ? { ...common, operation: "type", selector: parsed.selector, text: parsed.text }
+        : undefined;
+    case "press":
+      return only("key") && text("key", 64) && typeof parsed.key === "string"
+        ? { ...common, operation: "press", key: parsed.key }
+        : undefined;
+    case "scroll": {
+      if (!only("deltaX", "deltaY")) return undefined;
+      for (const delta of [parsed.deltaX, parsed.deltaY]) {
+        if (
+          delta !== undefined &&
+          (typeof delta !== "number" || !Number.isInteger(delta) || Math.abs(delta) > 2000)
+        )
+          return undefined;
+      }
+      return {
+        ...common,
+        operation: "scroll",
+        ...(typeof parsed.deltaX === "number" ? { deltaX: parsed.deltaX } : {}),
+        ...(typeof parsed.deltaY === "number" ? { deltaY: parsed.deltaY } : {}),
+      };
+    }
+    case "read-page":
+    case "screenshot":
+    case "stop":
+      return only() ? { ...common, operation: parsed.operation } : undefined;
+    default:
+      return undefined;
   }
-  return parsed as BrowserToolInput;
 }
 
 function parseAppleInput(value: string): AppleToolInput | undefined {
@@ -1194,6 +1330,17 @@ function profileToolConstraintFailure(thread: CodeThread, toolName: string): str
     profileDisplayName: thread.profileDisplayName ?? "the bound profile",
   });
   return decision.status === "refused" ? decision.reason : undefined;
+}
+
+function browserAuthorityFailure(options: CodeAppManagedToolsOptions): string | undefined {
+  const stale = currentThreadIdentityFailure(options);
+  if (stale !== undefined) return stale;
+  const current = options.readThread(options.windowId, options.thread.id);
+  const posture = clampTurnAccessPosture({
+    requested: options.thread.executionPolicy,
+    thread: current?.executionPolicy ?? options.thread.executionPolicy,
+  });
+  return posture === "plan" ? "plan-mode-read-only" : undefined;
 }
 
 function currentAuthorityFailure(options: CodeAppManagedToolsOptions): string | undefined {

@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "catalog:",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "@octant/contracts": "workspace:*",
     "@octant/domain": "workspace:*",
     "@octant/host-runtime": "workspace:*",

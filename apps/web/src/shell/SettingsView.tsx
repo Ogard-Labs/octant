@@ -167,13 +167,14 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   code: "Defaults for Code threads and delivery.",
   "navigator-assistant": "The models Navigator uses to converse and to review images.",
   voice: "The providers that turn speech into text and text into speech.",
-  "image-generation":
-    "Pick an already-connected provider and model to also generate images. Add the provider itself, with its endpoint and key, under Providers & Models first.",
+  "image-generation": "Choose connected providers and models for image generation.",
   providers: "Connect providers, manage authentication, and pick default models.",
-  profiles: "Reusable execution profiles for agent runs.",
+  profiles: "Saved provider, model, and behavior defaults for agent runs.",
   agents: "How agent runs behave in this app.",
   harness: "Octant's own agent loop for API-key and local models: which model does which job.",
   skills: "Skills and extensions available to agents.",
+  github: "Connection and repository access on the selected host.",
+  host: "Host status, local storage, and recovery.",
   usage: "Activity and usage across providers.",
   advanced: "Layout resets and diagnostics.",
 };
@@ -209,9 +210,21 @@ export function SettingsView(props: SettingsViewProps) {
     ...(props.initialDeepLink === undefined ? {} : { initialDeepLink: props.initialDeepLink }),
   });
   const narrow = props.isNarrow === true;
+  const contentRef = useRef<HTMLDivElement>(null);
+  const previousSection = useRef(route.activeSection);
   const [navigationOpen, setNavigationOpen] = useState(false);
   const navigationTrigger = useRef<HTMLButtonElement>(null);
   const navigationClose = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const sectionChanged = previousSection.current !== route.activeSection;
+    previousSection.current = route.activeSection;
+    // A focused deep link lets SettingRow scroll the requested control into
+    // view. Reset only ordinary section changes, so a user never lands halfway
+    // down a newly selected Settings page while deep links keep their target.
+    if (!sectionChanged || route.focusedSetting !== undefined) return;
+    if (contentRef.current !== null) contentRef.current.scrollTop = 0;
+  }, [route.activeSection, route.focusedSetting]);
 
   // Apply a pending deep link requested from another app surface (e.g. an
   // empty state or provider error) once, then report it consumed.
@@ -337,14 +350,14 @@ export function SettingsView(props: SettingsViewProps) {
             </nav>
           </div>
         )}
-        <main className="settings-view__content">
+        <main className="settings-view__content" ref={contentRef}>
           <div className="settings-view__content-inner">
             <header className="settings-view__header">
-              <h1 className="setpane-title" id="settings-heading">
+              <h1 className="oct-title" id="settings-heading">
                 {currentSectionLabel}
               </h1>
               {!hasQuery && SECTION_DESCRIPTIONS[route.activeSection] !== undefined ? (
-                <p className="setpane-note">{SECTION_DESCRIPTIONS[route.activeSection]}</p>
+                <p className="oct-subtitle">{SECTION_DESCRIPTIONS[route.activeSection]}</p>
               ) : null}
             </header>
             {hasQuery ? (
@@ -487,7 +500,6 @@ function ActiveSectionContent({
       return props.chatController?.bootstrap !== undefined ? (
         <div id="settings-chat">
           <ChatSettingsView
-            key={props.chatController.bootstrap.settings.version}
             {...(props.chatController.settingsMessage === undefined
               ? {}
               : { message: props.chatController.settingsMessage })}
@@ -503,7 +515,6 @@ function ActiveSectionContent({
       return props.codeController?.bootstrap !== undefined ? (
         <div className="settings-code-stack" id="settings-code">
           <CodeSettingsView
-            key={props.codeController.bootstrap.settings.version}
             onUpdate={props.codeController.updateSettings}
             settings={props.codeController.bootstrap.settings}
           />
@@ -565,12 +576,10 @@ function ActiveSectionContent({
       return props.nativeHarnessClient !== undefined ? (
         <div id="settings-harness">
           <section className="settings-card-section settings-card-section--open">
-            <h2>Octant Harness</h2>
             <p className="native-harness-panel__lead">
-              Octant runs API-key and local endpoint models with its own tools, authority checks,
-              and journal. Those endpoints appear together as <strong>Octant</strong> in the model
-              picker. Slots decide which model does which job; whether a lead may start child runs
-              is the subagent creation posture under Agents.
+              Models connected through API keys or local endpoints appear under{" "}
+              <strong>Octant</strong> in the model picker. Assign models to roles below. Child-agent
+              permissions are managed in Agents.
             </p>
           </section>
           <NativeHarnessRoutingPanel
@@ -706,6 +715,7 @@ function ProvidersSection(props: {
           ? {}
           : { message: props.providerController.message })}
         observedByInstance={props.providerController.observedByInstance}
+        presentationObservedByInstance={props.providerController.presentationObservedByInstance}
         onChangeBinary={props.providerController.changeBinary}
         onChangeClaudeConfiguration={props.providerController.changeClaudeConfiguration}
         onChangeDevinConfiguration={props.providerController.changeDevinConfiguration}
@@ -757,6 +767,7 @@ function ProvidersSection(props: {
         onProbe={props.providerController.probe}
         onProviderOrderChange={props.providerController.updateProviderOrder}
         onAgentEligibleModelsChange={props.providerController.updateAgentEligibleModels}
+        onHiddenModelsChange={props.providerController.updateHiddenModels}
         onVerifyFoundryTools={props.providerController.verifyFoundryTools}
         onProviderCredentialStatus={props.providerController.providerCredentialStatus}
         onRemove={props.providerController.remove}

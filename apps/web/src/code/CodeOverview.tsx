@@ -905,7 +905,7 @@ function policyLabel(policy: ProviderExecutionPolicy): string {
     case "plan":
       return "Plan · read-only";
     case "approval-gated":
-      return "Approval gated";
+      return "Ask for approvals";
     case "auto-accept-edits":
       return "Auto-accept edits";
     case "full-access":

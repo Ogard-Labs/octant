@@ -234,7 +234,11 @@ export interface PersistenceService {
     scopeKind: ProfileScopeKind,
     scopeRef: string,
   ) => ReadonlyArray<AgentProfile>;
-  readonly status: () => DatabaseStatus;
+  /**
+   * Whether the store is usable. Served from an inspection at most
+   * `DATABASE_STATUS_MAX_AGE_MS` old unless `fresh` is set; see the constant.
+   */
+  readonly status: (options?: { readonly fresh?: boolean }) => DatabaseStatus;
   readonly projectionCatchUp: ReadonlyArray<{
     readonly projection: string;
     readonly durationMs: number;
@@ -256,6 +260,19 @@ export class PersistenceStartupFailed extends Data.TaggedError("PersistenceStart
   readonly category: PersistenceFailureCategory;
   readonly message: string;
 }> {}
+
+/**
+ * How long one database inspection answers the readiness gates. `status()`
+ * runs SQLite's integrity check and walks every journal row, and every
+ * service calls it before every read as its readiness gate — on a busy host
+ * that was hundreds of full inspections a minute on the main thread, each
+ * stalling the event loop for about a third of a second; a CPU profile put a
+ * third of all server time here. Only this process writes the store, and
+ * everything that changes its state — migration, recovery, a restored backup —
+ * runs at startup or offline, so an inspection this young answers the gate
+ * exactly. Diagnostics that must not read a memo pass `fresh`.
+ */
+const DATABASE_STATUS_MAX_AGE_MS = 10_000;
 
 export interface PersistenceLiveOptions {
   readonly dataDirectory?: string;
@@ -366,6 +383,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
         message: "Octant storage requires recovery before startup.",
       });
     }
+    let statusMemo = { computedAtMs: Date.parse(clock()), status };
     return {
       dataDirectory: store.directory,
       connection,
@@ -440,7 +458,18 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readAgentProfiles: () => readAgentProfiles(connection),
       readProfilesForScope: (scopeKind, scopeRef) =>
         readProfilesForScope(connection, scopeKind, scopeRef),
-      status: () => databaseStatus({ connection, journal, projections }),
+      status: (statusOptions) => {
+        const nowMs = Date.parse(clock());
+        if (
+          statusOptions?.fresh !== true &&
+          nowMs - statusMemo.computedAtMs < DATABASE_STATUS_MAX_AGE_MS
+        ) {
+          return statusMemo.status;
+        }
+        const inspected = databaseStatus({ connection, journal, projections });
+        statusMemo = { computedAtMs: nowMs, status: inspected };
+        return inspected;
+      },
       projectionCatchUp,
     };
   } catch (error) {

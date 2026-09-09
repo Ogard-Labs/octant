@@ -323,8 +323,6 @@
 .context-health-warning:hover,
 .context-health-warning:focus-visible {
   color: var(--octant-text-primary);
-  border-color: var(--octant-focus-ring);
-  outline: none;
 }
 
 .context-inspector {
@@ -388,8 +386,6 @@
 .context-inspector button:hover:not(:disabled),
 .context-inspector button:focus-visible {
   color: var(--octant-text-primary);
-  border-color: var(--octant-focus-ring);
-  outline: none;
 }
 
 .context-inspector button:disabled {
@@ -510,11 +506,6 @@
 @media (prefers-contrast: more) {
   .composer-context-meter__track {
     stroke: var(--octant-text-primary);
-  }
-
-  .composer-context-meter__button:focus-visible {
-    outline: 2px solid var(--octant-focus-ring);
-    outline-offset: 2px;
   }
 
   .context-health-warning {

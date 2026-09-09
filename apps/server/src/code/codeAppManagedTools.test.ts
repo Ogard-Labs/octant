@@ -481,6 +481,7 @@ describe("Code app-managed tools", () => {
         extractedText: "Readable page text",
         contentHash: "a".repeat(64),
         observedAt: "2026-08-06T08:00:00.000Z",
+        revision: 7,
         stale: false,
       },
     })) as never;
@@ -528,11 +529,86 @@ describe("Code app-managed tools", () => {
     );
     expect(result).toMatchObject({
       isError: false,
+      result: {
+        status: "running",
+        page: { title: "Example", text: "Readable page text", observationRevision: 7 },
+      },
+    });
+  });
+
+  it("asks for browser-session approval without raising the thread access posture", async () => {
+    const approve = vi.fn(async () => "approved" as const);
+    const remember = vi.fn();
+    const authority = browserAuthority();
+    const active = browserSnapshot(authority);
+    const create = vi.fn(async () => active);
+    const act = vi.fn(async ({ request }) => ({
+      ...active,
+      observation: {
+        contextId: active.context!.contextId,
+        actionId: active.context!.actionId,
+        correlationId: active.context!.correlationId,
+        authority,
+        url: request.target,
+        title: "Example",
+        extractedText: "Readable page text",
+        contentHash: "a".repeat(64),
+        observedAt: "2026-08-06T08:00:00.000Z",
+        stale: false,
+      },
+    })) as never;
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread({ executionPolicy: "approval-gated" }),
+      readThread: () => thread({ executionPolicy: "approval-gated" }),
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+      browserApproval: { isApproved: () => false, request: approve, remember, forget: vi.fn() },
+      browser: {
+        resolveAuthority: () => authority,
+        inspectThread: () => ({ status: "ready", threadId: threadId as never, evidence: [] }),
+        create,
+        act,
+        releaseThread: vi.fn(async () => ({
+          status: "ready" as const,
+          threadId: threadId as never,
+          evidence: [],
+        })),
+      },
+    });
+
+    const result = await tools.execute({
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com/docs" }),
+    });
+
+    expect(approve).toHaveBeenCalledWith("https://example.com", undefined);
+    expect(remember).toHaveBeenCalledWith(active.context?.contextId);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        windowId,
+        threadId,
+        policy: expect.objectContaining({
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+        }),
+      }),
+    );
+    expect(act).toHaveBeenCalledWith(
+      expect.objectContaining({
+        windowId,
+        request: expect.objectContaining({ kind: "navigate", target: "https://example.com/docs" }),
+      }),
+    );
+    expect(result).toMatchObject({
+      isError: false,
       result: { status: "running", page: { title: "Example", text: "Readable page text" } },
     });
   });
 
-  it("rechecks effective Full access before every host tool call", async () => {
+  it("refuses browser actions after the thread switches to Plan", async () => {
     let current = thread();
     const act = vi.fn(async () => browserSnapshot(browserAuthority()));
     const tools = createCodeAppManagedTools({
@@ -550,14 +626,14 @@ describe("Code app-managed tools", () => {
         releaseThread: vi.fn(),
       },
     });
-    current = thread({ executionPolicy: "approval-gated" });
+    current = thread({ executionPolicy: "plan" });
 
     const result = await tools.execute({
       name: CODE_BROWSER_TOOL_NAME,
       inputJson: JSON.stringify({ operation: "read-page" }),
     });
 
-    expect(result).toEqual({ result: { error: "full-access-required" }, isError: true });
+    expect(result).toEqual({ result: { error: "plan-mode-read-only" }, isError: true });
     expect(act).not.toHaveBeenCalled();
   });
 
@@ -604,6 +680,61 @@ describe("Code app-managed tools", () => {
       isError: true,
     });
     expect(releaseThread).toHaveBeenCalledWith(windowId, threadId);
+  });
+
+  it("lets the agent submit a form and scroll in either direction in its own browser", async () => {
+    const active = browserSnapshot(browserAuthority());
+    const act = vi.fn(async () => active);
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread(),
+      readThread: () => thread(),
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+      browser: {
+        resolveAuthority: browserAuthority,
+        inspectThread: () => active,
+        create: vi.fn(),
+        act,
+        releaseThread: vi.fn(),
+      },
+    });
+    expect(
+      tools.definitions.find((tool) => tool.name === CODE_BROWSER_TOOL_NAME)?.description,
+    ).toContain("built-in browser");
+    const pressed = await tools.execute({
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "press",
+        key: "Enter",
+        expectedObservationRevision: 7,
+      }),
+    });
+    expect(pressed.isError).toBe(false);
+    expect(act).toHaveBeenLastCalledWith({
+      windowId,
+      request: expect.objectContaining({
+        kind: "press",
+        value: "Enter",
+        expectedObservationRevision: 7,
+      }),
+    });
+    await tools.execute({
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "scroll", deltaX: 100, deltaY: -500 }),
+    });
+    expect(act).toHaveBeenLastCalledWith({
+      windowId,
+      request: expect.objectContaining({ kind: "scroll", deltaX: 100, deltaY: -500 }),
+    });
+    act.mockClear();
+    const invalid = await tools.execute({
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "scroll", deltaY: 2001 }),
+    });
+    expect(invalid.isError).toBe(true);
+    expect(act).not.toHaveBeenCalled();
   });
 
   it("lets the agent stop its thread-owned Browser context", async () => {

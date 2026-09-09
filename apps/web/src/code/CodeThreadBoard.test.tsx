@@ -261,7 +261,8 @@ describe("CodeThreadBoard", () => {
     const statusStatus = within(cardFor("A thread")).getByText("Ready");
     expect(statusStatus).toHaveClass("sr-only");
 
-    fireEvent.click(screen.getByRole("button", { name: "Project" }));
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Project" }));
 
     expect(await screen.findByRole("region", { name: "Project A (1)" })).toBeVisible();
     expect(screen.getByRole("region", { name: "Project B (1)" })).toBeVisible();

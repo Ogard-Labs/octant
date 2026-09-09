@@ -63,6 +63,15 @@ describe("makeProviderDriver", () => {
     expect(fixture.codexStart).not.toHaveBeenCalled();
   });
 
+  it("uses the beta OpenCode catalog process for provider discovery", async () => {
+    const fixture = factoryFixture();
+    const driver = makeProviderDriver(provider("opencode", "/missing/opencode2"), fixture.options);
+
+    await expect(runProbe(driver)).rejects.toThrow(/OpenCode process selected/);
+    expect(fixture.openCodeStart).toHaveBeenCalledOnce();
+    expect(fixture.acpStart).not.toHaveBeenCalled();
+  });
+
   it("selects the Codex process only for a Codex instance", async () => {
     const fixture = factoryFixture();
     const driver = makeProviderDriver(provider("codex"), fixture.options);
@@ -290,6 +299,7 @@ function provider(
     | "kilo"
     | "pi"
     | "ollama",
+  binaryPath = `/missing/${driverKind}`,
 ): ProviderInstance {
   return decodeProviderInstance({
     id: instanceId,
@@ -314,7 +324,7 @@ function provider(
     driverKind,
     configuration:
       driverKind === "opencode"
-        ? { kind: "opencode-cli", binaryPath: "/missing/opencode" }
+        ? { kind: "opencode-cli", binaryPath }
         : driverKind === "codex"
           ? { kind: "codex-cli", binaryPath: "/missing/codex" }
           : driverKind === "claude"

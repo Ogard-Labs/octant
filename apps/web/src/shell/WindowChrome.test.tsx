@@ -45,6 +45,7 @@ const rootStyles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8"
   .replace('@import "./styles/chat.css";', "")
   .replace('@import "./styles/code.css";', "");
 const shellStyles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
+const surfaceStyles = readFileSync(resolve(process.cwd(), "src/styles/surface.css"), "utf8");
 const dockStyles = readFileSync(resolve(process.cwd(), "src/styles/dock.css"), "utf8");
 /*
  * Comments are stripped before matching. `cssRule` reads a rule's prelude as
@@ -53,7 +54,9 @@ const dockStyles = readFileSync(resolve(process.cwd(), "src/styles/dock.css"), "
  * the assertion then silently moved on to the next rule sharing that selector,
  * usually one inside a media query.
  */
-const styles = [rootStyles, shellStyles, dockStyles].join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
+const styles = [rootStyles, shellStyles, dockStyles, surfaceStyles]
+  .join("\n")
+  .replace(/\/\*[\s\S]*?\*\//g, "");
 
 function cssRule(selector: string, occurrence = 0): string {
   if (selector === ":root" && occurrence === 0) {
@@ -66,7 +69,7 @@ function cssRule(selector: string, occurrence = 0): string {
   const matches = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/gs)].filter((match) =>
     match[1]
       ?.split(",")
-      .map((candidate) => candidate.trim())
+      .map((candidate) => candidate.trim().replace(/\s+/g, " "))
       .includes(selector),
   );
   expect(matches, `missing CSS rule for ${selector}`).not.toHaveLength(0);
@@ -289,8 +292,8 @@ describe("WindowChrome", () => {
     expect(sectionLabel).toContain("letter-spacing: 0;");
     expect(sectionLabel).toContain("text-transform: none;");
     expect(sectionLabel).not.toContain("mono");
-    expect(cssRule('.sidebar-navigation__thread-status[data-activity="unread"]')).toContain(
-      "background: var(--octant-text-secondary);",
+    expect(cssRule(".sidebar-navigation__thread-status")).toContain(
+      "color: var(--octant-text-secondary);",
     );
   });
 
@@ -389,12 +392,10 @@ describe("WindowChrome", () => {
     // so the dock and dialog stay workspace-opaque under every theme.
     expect(cssRule(".right-utility-dock")).toContain("background: var(--oct-bg);");
     expect(cssRule(".octant-dialog__popup")).toContain("background: var(--oct-bg);");
-    expect(cssRule(".environment-git-group dl")).toContain("background: var(--octant-control);");
-    expect(cssRule(".environment-git-group dl")).toContain(
-      "border: 1px solid var(--octant-border);",
-    );
-    expect(cssRule(".environment-git-group dl")).toContain("border-radius: var(--oct-radius-sm);");
-    expect(cssRule(".environment-git-group__row")).toContain("min-height: 30px;");
+    expect(cssRule(".environment-git-group dl")).toContain("background: transparent;");
+    expect(cssRule(".environment-git-group dl")).toContain("border: 0;");
+    expect(cssRule(".environment-git-group dl")).toContain("border-radius: 0;");
+    expect(cssRule(".environment-git-group__row")).toContain("min-height: 32px;");
     expect(cssRule(".environment-git-group__row + .environment-git-group__row")).toContain(
       "border-top: 1px solid var(--octant-border);",
     );
@@ -454,11 +455,24 @@ describe("WindowChrome", () => {
     expect(cssRule(".environment-git-group__error")).toContain("color: var(--oct-muted);");
     expect(cssRule(".environment-git-group__error")).toContain("background: transparent;");
     expect(cssRule(".environment-git-group__error")).not.toMatch(/warn|yellow/i);
+    expect(cssRule(".environment-git-group dl")).toContain("background: transparent;");
+    expect(cssRule(".environment-git-group dl")).toContain("border: 0;");
     expect(cssRule(".thread-environment-dock__header span")).toContain("color: var(--oct-muted);");
+    expect(cssRule(".thread-environment-dock__body")).toContain("gap: 0;");
     expect(styles).not.toContain(".thread-environment-summary");
     expect(cssRule(".thread-environment-disclosure .environment-group__summary")).toContain(
       "font-family: var(--oct-font-display);",
     );
+  });
+
+  it("keeps thread row actions in a reserved gutter and bounds the context menu", () => {
+    expect(
+      cssRule(
+        ".sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions) > .sidebar-navigation__thread",
+      ),
+    ).toContain("padding-inline-end: 56px;");
+    expect(cssRule(".thread-row-info-card__header")).toContain("justify-content: space-between;");
+    expect(cssRule(".thread-row-context-menu")).toContain("width: min(248px, calc(100vw - 24px));");
   });
 
   it("exposes the native sidebar canvas and integrated titlebar while keeping workspace surfaces opaque", () => {
@@ -466,27 +480,41 @@ describe("WindowChrome", () => {
     expect(cssRule('html[data-octant-native-host="true"] .shell.shell-frame')).toContain(
       "background: transparent;",
     );
+    expect(cssRule('html[data-octant-native-host="true"]')).toContain("overflow: clip;");
+    expect(cssRule(".shell.shell-frame--standalone")).toContain("position: fixed;");
     expect(cssRule(".workspace")).toContain("background: var(--octant-workspace);");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
   });
 
-  it("clears the workspace, pane, and tab band fills under a translucent workspace so the glass shows", () => {
+  it("preserves the selected translucent material when the background covers the sidebar", () => {
+    expect(
+      cssRule(
+        ".shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-opaque.shell-frame > .sidebar",
+      ),
+    ).toContain("background: var(--octant-sidebar-translucent-subtle);");
+    expect(styles).not.toContain(
+      ".shell--app-backdrop.shell--app-backdrop-sidebar.shell-frame > .sidebar",
+    );
+  });
+
+  it("clears the workspace and pane fills under a translucent workspace so the glass shows", () => {
     // Each surface paints the opaque workspace colour on its own, so any one
     // of them left filled hides the glass behind the whole workspace.
-    for (const surface of [".workspace", ".workspace-pane", ".workspace-thread-tabs"]) {
+    for (const surface of [".workspace", ".workspace-pane"]) {
       expect(cssRule(`.shell--workspace-material-translucent.shell-frame ${surface}`)).toContain(
         "background: transparent;",
       );
     }
   });
 
-  it("keeps the near-opaque native sidebar wash until the host reports applied window vibrancy", () => {
-    // The wash matches only while data-octant-host-vibrancy is absent, and the
-    // gate lives in :where() so the prefers-reduced-transparency override
-    // below it keeps winning on equal specificity.
+  it("uses the host-resolved material without an extra renderer delay", () => {
+    // Material is already resolved by the native presentation controller,
+    // including its platform, performance, contrast, and transparency gates.
+    // The renderer must not keep a second near-opaque wash while waiting for a
+    // duplicate vibrancy event, because standalone Settings shares this state.
     const flattened = styles.replace(/\s+/g, " ");
-    expect(flattened).toContain(
-      'html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="active"])) .shell-frame:not(.shell--material-opaque) > .sidebar { background: color-mix(in srgb, var(--octant-sidebar-opaque) 97%, transparent); }',
+    expect(flattened).not.toContain(
+      "color-mix(in srgb, var(--octant-sidebar-opaque) 97%, transparent)",
     );
     expect(atRuleBlock("@media (prefers-reduced-transparency: reduce)")).toContain(
       'html[data-octant-native-host="true"] .shell-frame:not(.shell--material-opaque) > .sidebar',
@@ -881,6 +909,35 @@ describe("WindowChrome", () => {
     expect(header).not.toMatch(/padding:[^;]*--octant-window-chrome-reserved-width/);
   });
 
+  it("lets split close controls reach their pane edge wherever window controls are absent", () => {
+    expect(cssRule(".workspace-pane__close")).toContain("margin-inline-start: auto");
+    expect(
+      cssRule(
+        '.workspace-split[data-orientation="horizontal"] > :first-child .workspace-pane__header',
+      ),
+    ).toContain("margin-right: 0");
+    expect(
+      cssRule(
+        '.workspace-split[data-orientation="vertical"] > :last-child .workspace-pane__header',
+      ),
+    ).toContain("margin-right: 0");
+    expect(cssRule(".shell--wide-context-open .workspace-pane__header")).toContain(
+      "margin-right: 0",
+    );
+  });
+
+  it("keeps the leading split title clear of native controls when navigation is collapsed", () => {
+    const nativeCollapsed = cssRule(
+      'html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__header',
+    );
+    expect(nativeCollapsed).toContain("padding-left: var(--octant-window-chrome-leading-width");
+    expect(
+      cssRule(
+        '.shell--sidebar-collapsed .workspace-split[data-orientation="horizontal"] > :last-child .workspace-pane__header',
+      ),
+    ).toContain("padding-left: var(--oct-space-3)");
+  });
+
   it("keeps the window controls above the pane header rather than tied with it", () => {
     const nativeChrome = atRuleBlock(
       'html[data-octant-native-host="true"] .shell-frame > .window-chrome',
@@ -893,6 +950,13 @@ describe("WindowChrome", () => {
     // Equal layers left the winner to document order, and the header — rendered
     // after the chrome — covered every control in the title band.
     expect(chromeLayer).toBeGreaterThan(headerLayer);
+  });
+
+  it("keeps the native drag overlay away from split-pane pointer controls", () => {
+    const rule = cssRule(
+      'html[data-octant-native-host="true"] .shell-frame:has(.workspace-pane__header) .shell-frame__native-drag-strip',
+    );
+    expect(rule).toContain("right: calc(100% - var(--octant-rendered-sidebar-width))");
   });
 
   it("leaves native dragging to the shell strip so pointer controls have no nested drag region", () => {

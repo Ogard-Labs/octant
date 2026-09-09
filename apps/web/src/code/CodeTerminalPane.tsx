@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { OctantContextMenu } from "../ui/base/OctantContextMenu";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { XtermTerminalAdapter, type XtermAdapterRuntime } from "./XtermTerminalAdapter";
+import { ShellState } from "../shell/ShellState";
 
 type TerminalResult = Extract<CodeOperationResult, { readonly kind: "terminal-state" }>;
 
@@ -307,7 +308,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
           output={output}
         />
       ) : (
-        <p role="status">Loading terminal replay…</p>
+        <ShellState state="loading" title="Loading Terminal" />
       )}
     </section>
   );

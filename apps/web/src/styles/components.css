@@ -86,7 +86,7 @@
 
 /* The native activity overlay may keep translucency because it floats above
    the workspace instead of behaving like an application menu or form. */
-.thread-activity-pip,
+.thread-activity-pip__card,
 .thread-activity-pip__collapsed-controls {
   background: var(--octant-glass-bg);
   border: 1px solid var(--octant-glass-border);
@@ -98,7 +98,7 @@
 
 /* Reduced transparency (app setting or OS): opaque floating surface. */
 html[data-octant-reduced-transparency="true"] .octant-glass,
-html[data-octant-reduced-transparency="true"] .thread-activity-pip,
+html[data-octant-reduced-transparency="true"] .thread-activity-pip__card,
 html[data-octant-reduced-transparency="true"] .thread-activity-pip__collapsed-controls {
   background: var(--octant-floating);
   border-color: var(--octant-border-strong);
@@ -108,7 +108,7 @@ html[data-octant-reduced-transparency="true"] .thread-activity-pip__collapsed-co
 
 @media (prefers-reduced-transparency: reduce) {
   .octant-glass,
-  .thread-activity-pip,
+  .thread-activity-pip__card,
   .thread-activity-pip__collapsed-controls {
     background: var(--octant-floating);
     border-color: var(--octant-border-strong);
@@ -120,7 +120,7 @@ html[data-octant-reduced-transparency="true"] .thread-activity-pip__collapsed-co
 /* No backdrop-filter support: keep surfaces readable with an opaque fill. */
 @supports not (backdrop-filter: blur(1px)) {
   .octant-glass,
-  .thread-activity-pip,
+  .thread-activity-pip__card,
   .thread-activity-pip__collapsed-controls {
     background: var(--octant-floating);
   }
@@ -240,11 +240,6 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   background: transparent;
   border: 0;
   border-radius: 0;
-  box-shadow: none;
-}
-
-.thread-search__field input:focus-visible {
-  border: 0;
   box-shadow: none;
 }
 
@@ -876,8 +871,8 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   color: var(--octant-success-text);
 }
 
-.turn-header[data-outcome="streaming"] svg,
-.turn-header[data-outcome="running"] svg {
+.turn-header[data-outcome="streaming"] .turn-header__status > svg,
+.turn-header[data-outcome="running"] .turn-header__status > svg {
   animation: turn-header-spin var(--oct-motion-spin) linear infinite;
 }
 
@@ -888,8 +883,8 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .turn-header[data-outcome="streaming"] svg,
-  .turn-header[data-outcome="running"] svg {
+  .turn-header[data-outcome="streaming"] .turn-header__status > svg,
+  .turn-header[data-outcome="running"] .turn-header__status > svg {
     animation: none;
   }
 }
@@ -963,4 +958,35 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
 }
 .octant-slider:active::-moz-range-thumb {
   cursor: grabbing;
+}
+
+/* Time and copy share a reserved row so revealing them never moves a message. */
+.turn-message-meta {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.turn-user:hover .turn-message-meta,
+.turn-user:focus-within .turn-message-meta,
+.turn-agent:hover .turn-message-meta,
+.turn-agent:focus-within .turn-message-meta,
+.turn-message-meta:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.turn-agent:has(.turn-action-menu__more) .turn-header {
+  padding-inline-end: 32px;
+}
+
+@media (hover: none), (prefers-contrast: more) {
+  .turn-message-meta {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }

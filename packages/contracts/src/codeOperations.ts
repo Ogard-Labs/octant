@@ -21,6 +21,7 @@ import {
   CodeTestRunId,
   CodeThread,
   CodeThreadId,
+  CreateManagedCodeThreadCommand,
   MAX_CODE_TURN_ATTACHMENTS,
   WorktreeReceiptId,
 } from "./code";
@@ -1110,6 +1111,14 @@ const UsageEvent = Schema.Struct({
    * its own.
    */
   costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
+  /**
+   * The model's context window and how much of it the last request occupied,
+   * when the provider reports them alongside usage. A runtime the host does
+   * not plan a context for (a CLI it drives) has no other account of the
+   * window, so this is what its meter shows.
+   */
+  contextWindow: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  contextTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
 }).annotations(strict);
 /**
  * How much of a provider usage window this account has spent, as the provider
@@ -1212,6 +1221,9 @@ export const CodeConversationTurnUsage = Schema.Struct({
   outputTokens: Schema.Int.pipe(Schema.nonNegative()),
   /** The provider's own price for the turn. Never one the host derived. */
   costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
+  /** The window and its fill after this turn, when the provider reported them. */
+  contextWindow: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  contextTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
 }).annotations(strict);
 export type CodeConversationTurnUsage = typeof CodeConversationTurnUsage.Type;
 
@@ -1792,6 +1804,20 @@ export const CodeApprovalEffect = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("create-thread-full-access"),
     thread: CodeThread.pipe(Schema.filter((thread) => thread.executionPolicy === "full-access")),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("create-managed-code-thread-full-access"),
+    command: CreateManagedCodeThreadCommand.pipe(
+      Schema.filter((command) => command.executionPolicy === "full-access"),
+    ),
+    source: Schema.optional(
+      Schema.Struct({
+        bindingRevisionId: Schema.UUID,
+        repositoryId: CodeRepositoryId,
+        checkoutId: CodeCheckoutId,
+        checkoutHead: CodeCheckoutHead,
+      }).annotations(strict),
+    ),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-thread-full-access"),

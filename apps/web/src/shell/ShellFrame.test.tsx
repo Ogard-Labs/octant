@@ -167,6 +167,7 @@ describe("ShellFrame", () => {
 
     const shell = container.firstElementChild;
     expect(shell).toHaveClass("shell", "shell-frame--standalone", "shell--material-translucent");
+    expect(shell).toHaveStyle({ "--octant-sidebar-width": "232px" });
     expect(shell).not.toHaveClass("shell-frame");
     expect(shell?.children).toHaveLength(1);
     expect(shell?.children[0]).toBe(screen.getByRole("main", { name: "Settings" }));

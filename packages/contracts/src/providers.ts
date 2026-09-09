@@ -749,6 +749,17 @@ const UniqueAgentEligibleModels = Schema.Array(AgentEligibleModelRef).pipe(
   ),
 );
 
+/**
+ * One Settings-defined model visibility override. Hidden models stay valid
+ * for existing thread bindings; this list only controls new picker options.
+ */
+export const HiddenProviderModelRef = AgentEligibleModelRef;
+export type HiddenProviderModelRef = AgentEligibleModelRef;
+
+const UniqueHiddenProviderModels = Schema.Array(HiddenProviderModelRef).pipe(
+  Schema.filter((refs) => new Set(refs.map(agentEligibleModelKey)).size === refs.length),
+);
+
 export const ProviderDefaults = Schema.Struct({
   permissionPersistence: PermissionPersistence,
   providerOrder: Schema.optional(
@@ -760,6 +771,7 @@ export const ProviderDefaults = Schema.Struct({
    * multi-model pool until Settings defines one.
    */
   agentEligibleModels: Schema.optional(UniqueAgentEligibleModels),
+  hiddenModels: Schema.optional(UniqueHiddenProviderModels),
   version: AggregateVersion,
 }).annotations(strict);
 export type ProviderDefaults = typeof ProviderDefaults.Type;
@@ -1389,6 +1401,7 @@ export const ProviderRegistryCommand = Schema.Union(
       ),
     ),
     agentEligibleModels: Schema.optional(UniqueAgentEligibleModels),
+    hiddenModels: Schema.optional(UniqueHiddenProviderModels),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("probe-provider"),
@@ -1543,6 +1556,14 @@ export const ProviderRuntimeEvent = Schema.Union(
      * this absent rather than showing an invented number.
      */
     costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
+    /**
+     * The model's context window and how much of it the last request occupied,
+     * when the provider reports them alongside usage. A runtime the host does
+     * not plan a context for (a CLI it drives) has no other account of the
+     * window, so this is what its meter shows.
+     */
+    contextWindow: Schema.optional(Schema.Int.pipe(Schema.positive())),
+    contextTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,

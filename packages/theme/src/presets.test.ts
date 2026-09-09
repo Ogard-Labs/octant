@@ -41,7 +41,7 @@ describe("built-in theme preset catalog", () => {
       "System",
       "Light",
       "Dark",
-      "Octant",
+      "Brass",
       "Moss",
       "Lagoon",
       "Harbor",

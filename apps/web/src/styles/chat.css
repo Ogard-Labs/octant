@@ -249,12 +249,19 @@
   text-align: end;
 }
 
-.chat-transcript__turns,
 .chat-transcript__attachments,
 .chat-transcript__citations,
 .thread-work-shelf ol {
   padding: 0;
   margin: 0;
+  list-style: none;
+}
+
+/* Keep the shared thread column's inline margins; a list reset previously
+   pulled assistant replies against the pane divider while the composer stayed inset. */
+.chat-transcript__turns {
+  padding: 0;
+  margin-block: 0;
   list-style: none;
 }
 
@@ -627,7 +634,7 @@
   font-size: calc(11 * var(--oct-text-step));
 }
 
-/* The composer's frame, placement, focus ring, input, chips row, bottom row,
+/* The composer's frame, placement, focus state, input, chips row, bottom row,
    status line, and send control are the system's (`.composer`,
    `.thread-composer`, `.composer-status`); this block only pads the pieces
    the system does not know about. */
@@ -785,17 +792,6 @@
   margin-left: auto;
 }
 
-.chat-composer__leading input[type="file"],
-.chat-composer__actions input[type="file"] {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
 .chat-composer__visually-hidden {
   position: absolute;
   width: 1px;
@@ -872,7 +868,7 @@
 
 /* Inside the Chat composer the mention chips form the leading chips row. */
 .chat-composer .thread-mention__chips {
-  padding: var(--oct-space-3) var(--oct-space-3) 0;
+  padding: var(--oct-space-3) var(--oct-composer-gutter) 0;
 }
 
 .thread-mention__chip-receipt {

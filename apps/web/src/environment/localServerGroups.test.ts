@@ -1,6 +1,10 @@
 import type { LocalServerListener, LocalServerListenerId } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
-import { countGroupedLocalServerListeners, groupLocalServerListeners } from "./localServerGroups";
+import {
+  countGroupedLocalServerListeners,
+  countGroupedLocalServerListenersByScope,
+  groupLocalServerListeners,
+} from "./localServerGroups";
 
 function listener(overrides: Partial<LocalServerListener> = {}): LocalServerListener {
   return {
@@ -79,6 +83,18 @@ describe("grouping local server listeners", () => {
     expect(
       countGroupedLocalServerListeners({ currentCheckout: [ipv4, ipv6], other: [leftover] }),
     ).toBe(2);
+  });
+
+  it("keeps an empty checkout distinct from servers elsewhere", () => {
+    const elsewhere = listener({
+      listenerId: "lsn_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" as LocalServerListenerId,
+      attribution: "other",
+      port: 3000 as LocalServerListener["port"],
+      url: "http://127.0.0.1:3000/" as LocalServerListener["url"],
+    });
+    expect(
+      countGroupedLocalServerListenersByScope({ currentCheckout: [], other: [elsewhere] }),
+    ).toEqual({ currentCheckout: 0, other: 1 });
   });
 
   it("prefers a usable Open target as the group's primary listener", () => {

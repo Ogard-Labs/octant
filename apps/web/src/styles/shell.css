@@ -1,3 +1,10 @@
+.shell.shell-frame--standalone {
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+  overflow: clip;
+}
+
 .shell.shell-frame {
   --octant-rendered-sidebar-width: var(--octant-sidebar-width, 232px);
   /* Published by WindowChrome from each cluster's measured width. The literals
@@ -25,6 +32,27 @@
 html[data-octant-native-host="true"] .shell.shell-frame,
 html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   background: transparent;
+}
+
+/* The native window is transparent only so the sidebar's glass can frost the
+   desktop. With the ground drawn under the whole shell (0091) the workspace
+   layer over it is translucent too, and through that the transparent window
+   showed whatever sat behind Octant, sharp, under every transcript. The ground
+   needs an opaque page beneath it, glass or not. */
+html[data-octant-native-host="true"] .shell.shell-frame.shell--app-backdrop {
+  background: var(--octant-app-background);
+}
+
+/* Keep native sidebar glass clear while backing the reading area with an
+   opaque ground. A solid root behind both columns hid vibrancy in the main
+   window even though standalone Settings used the same translucent sidebar. */
+html[data-octant-native-host="true"]
+  .shell.shell-frame.shell--app-backdrop.shell--material-translucent {
+  background: linear-gradient(
+    to right,
+    transparent var(--octant-rendered-sidebar-width),
+    var(--octant-app-background) var(--octant-rendered-sidebar-width)
+  );
 }
 
 .shell.shell-frame.shell--wide-context-open {
@@ -79,6 +107,16 @@ html[data-octant-native-host="true"] .shell--wide-context-open .shell-frame__nat
 .window-no-drag * {
   -webkit-app-region: no-drag;
   app-region: no-drag;
+}
+
+/* Pane headers already own their empty draggable space. A sibling native
+   drag overlay crossed their close controls when the workspace material
+   established a stacking context: accessibility activation worked, but
+   pointer clicks dragged the window. Keep that overlay on the sidebar. */
+html[data-octant-native-host="true"]
+  .shell-frame:has(.workspace-pane__header)
+  .shell-frame__native-drag-strip {
+  right: calc(100% - var(--octant-rendered-sidebar-width));
 }
 
 .shell-frame > .window-chrome {
@@ -388,7 +426,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
 }
 
 /* The same feedback the system's .split-handle gives: the hairline takes the
-   accent ink while grabbed or focused. */
+   accent ink while grabbed. Keyboard focus remains visually quiet. */
 .shell-frame__sidebar-resize:hover::before,
 .shell-frame__sidebar-resize:focus-visible::before {
   background: var(--oct-accent-fg);
@@ -423,24 +461,10 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
 
 /* Under the native host the window itself is transparent, and CSS
    backdrop-filter blurs only this page's own pixels — it can never frost
-   another app's window. Every point of alpha in the washes above therefore
-   shows the desktop behind Octant SHARP: at the 34–62% vibrancy tiers a code
-   editor behind the window stays readable through the sidebar. The wash stays
-   unless the host reports vibrancy: the desktop process publishes its applied
-   window vibrancy over the resolved-sidebar-vibrancy channel, the renderer
-   mirrors it as data-octant-host-vibrancy="active", and only then do the
-   tiered translucent materials above show the natively frosted desktop. A
-   host that stays silent — or that refused vibrancy for Reduce Transparency,
-   high contrast, or thermals — keeps this near-opaque wash: enough tint to
-   stay a material, not enough transparency to read through. The gate sits in
-   :where() so the wash keeps its original specificity and the
-   prefers-reduced-transparency override below still wins. The opaque material
-   keeps its own rule. */
-html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="active"]))
-  .shell-frame:not(.shell--material-opaque)
-  > .sidebar {
-  background: color-mix(in srgb, var(--octant-sidebar-opaque) 97%, transparent);
-}
+   another app's window. The resolved material already includes the host's
+   composition, performance, contrast, and reduced-transparency gates, so the
+   renderer can apply the same visual state immediately in the main shell and
+   standalone Settings. */
 
 /* Frost sidebar background art behind a mode-aware glass wash so preset and
    custom backgrounds read as material behind the glass, not paint on top. */
@@ -477,19 +501,12 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   background: var(--octant-workspace-translucent-strong);
 }
 
-/* The workspace, its panes, and the thread tab band each paint the opaque
-   workspace colour. With the layer beneath them translucent, that fill hid
+/* The workspace and its panes each paint the opaque workspace colour. With
+   the layer beneath them translucent, that fill hid
    the glass entirely, so the setting appeared to do nothing. */
 .shell--workspace-material-translucent.shell-frame .workspace,
-.shell--workspace-material-translucent.shell-frame .workspace-pane,
-.shell--workspace-material-translucent.shell-frame .workspace-thread-tabs {
+.shell--workspace-material-translucent.shell-frame .workspace-pane {
   background: transparent;
-}
-
-html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="active"]))
-  .shell-frame.shell--workspace-material-translucent
-  > .workspace-layer {
-  background: color-mix(in srgb, var(--oct-bg) 97%, transparent);
 }
 
 .sidebar-navigation {
@@ -602,6 +619,14 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   text-align: left;
 }
 
+/* Keep the row's trailing actions in a reserved gutter. They are revealed on
+   hover/focus, so the title and timestamp must occupy the same width in both
+   states instead of sliding under the action buttons. */
+.sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)
+  > .sidebar-navigation__thread {
+  padding-inline-end: 56px;
+}
+
 .sidebar-navigation__thread:hover {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
@@ -668,57 +693,45 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   white-space: nowrap;
 }
 
-/*
- * The one state marker a thread row carries.
- *
- * It replaced a row of pill badges that said "active" beside nearly every
- * thread. The shape differs with the state as well as the colour — a filled
- * disc for something to attend to, a hollow ring for a thread at rest — so it
- * survives a reader who cannot see hue, and each dot names its state through
- * the label the row gives it.
- */
+/* One fixed trailing slot keeps state changes from shifting the title or age. */
 .sidebar-navigation__thread-status {
+  display: inline-flex;
   flex: none;
-  width: 8px;
-  height: 8px;
-  border: 1.5px solid var(--octant-divider-strong);
-  border-radius: var(--oct-radius-pill);
+  width: 12px;
+  height: 12px;
+  align-items: center;
+  justify-content: center;
+  color: var(--octant-text-secondary);
 }
 
 .sidebar-navigation__thread-status[data-activity="idle"] {
   opacity: 0;
 }
 
-.sidebar-navigation__thread-status[data-activity="unread"] {
-  background: var(--octant-text-secondary);
-  border-color: var(--octant-text-secondary);
+.sidebar-navigation__thread-status[data-activity="unread"]::before {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--oct-radius-pill);
+  background: currentColor;
+  content: "";
 }
 
 .sidebar-navigation__thread-status[data-activity="attention"] {
-  background: var(--oct-warn);
-  border-color: var(--oct-warn);
+  color: var(--octant-text-primary);
 }
 
-.sidebar-navigation__thread-status[data-activity="working"] {
-  background: var(--oct-accent);
-  border-color: var(--oct-accent);
-  animation: octant-thread-pulse 1.4s ease-in-out infinite;
+.sidebar-navigation__thread-status[data-activity="working"] > svg {
+  animation: octant-thread-spin 1.4s linear infinite;
 }
 
-@keyframes octant-thread-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.45;
-    transform: scale(0.72);
+@keyframes octant-thread-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-navigation__thread-status[data-activity="working"] {
+  .sidebar-navigation__thread-status[data-activity="working"] > svg {
     animation: none;
   }
 }
@@ -737,6 +750,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 }
 
 .sidebar-navigation__thread-title {
+  color: var(--octant-text-primary);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -780,17 +794,6 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   content: "\25CF ";
 }
 
-/* Unread ends the row as a small filled dot after the title; the row's own
-   label names it, so it is never colour alone. */
-.sidebar-navigation__thread-unread-dot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  margin-left: auto;
-  border-radius: var(--oct-radius-pill);
-  background: var(--octant-text-primary);
-}
-
 /* Show more and Show less are one quiet row at the end of a folded list. */
 .project-threads__more {
   min-height: var(--oct-nav-row-h);
@@ -805,6 +808,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 }
 
 .sidebar-navigation__thread-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -860,32 +864,38 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   font-size: var(--oct-text-xs);
 }
 
-/* The actions take no room until they are wanted: an invisible gutter at the
-   end of every row read as dead space beside the age. They appear, and take
-   their width, on row hover or focus, and stay while any of their popups is
-   open. */
+/* The actions sit over the end of the row and take no room of their own:
+   given a track, they widened the row under the pointer and the selected
+   row's fill changed width as the pointer left it. They appear on row hover
+   or focus, over the age, and stay while any of their popups is open. */
 .sidebar-navigation__thread-actions {
+  position: absolute;
+  top: 50%;
+  right: 4px;
   display: inline-flex;
-  flex: 0 0 auto;
-  width: 0;
-  min-width: 0;
   align-items: center;
   gap: 2px;
-  overflow: hidden;
+  transform: translateY(-50%);
   opacity: 0;
+  pointer-events: none;
   transition: opacity var(--oct-motion-fast) ease;
 }
 
-/* The gutter collapses rather than each control: the icon-button recipe's
-   transparent hairline kept a zero-width button two pixels wide. Revealed,
-   it lets its controls' focus rings out again. */
 .sidebar-navigation__thread-row:hover .sidebar-navigation__thread-actions,
 .sidebar-navigation__thread-row:focus-within .sidebar-navigation__thread-actions,
 .sidebar-navigation__thread-actions:has([aria-expanded="true"]),
 .sidebar-navigation__thread-actions:has([data-popup-open]) {
-  width: auto;
-  overflow: visible;
   opacity: 1;
+  pointer-events: auto;
+}
+
+/* The age gives its place to the actions, so neither is ever drawn over the
+   other. */
+.sidebar-navigation__thread-row:hover .sidebar-navigation__thread-meta,
+.sidebar-navigation__thread-row:focus-within .sidebar-navigation__thread-meta,
+.sidebar-navigation__thread-row:has([aria-expanded="true"]) .sidebar-navigation__thread-meta,
+.sidebar-navigation__thread-row:has([data-popup-open]) .sidebar-navigation__thread-meta {
+  opacity: 0;
 }
 
 .sidebar-navigation__thread-action {
@@ -912,9 +922,8 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 
 @media (pointer: coarse), (max-width: 560px) {
   .sidebar-navigation__thread-actions {
-    width: auto;
-    overflow: visible;
     opacity: 1;
+    pointer-events: auto;
   }
 
   .sidebar-navigation__thread-action--inline {
@@ -941,11 +950,11 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   max-width: 296px;
 }
 
-/* State and recency answer "does this need me, and how stale is it" before the
-   title is read, so they lead the card on one line. */
+/* The title and recency share one compact line so the card is scannable before
+   the supporting state and context details below it. */
 .thread-row-info-card__header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   justify-content: space-between;
 }
@@ -974,9 +983,13 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 }
 
 .thread-row-info-card__title {
+  min-width: 0;
+  overflow: hidden;
   color: var(--oct-fg);
   font-weight: 500;
   line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* One fact per line. Dot-joined into a single paragraph, the same facts wrapped
@@ -1080,6 +1093,72 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 
 .thread-row-info-card__pr-more {
   padding: 2px 6px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+/* Thread menus are action palettes, not generic context popups. A bounded
+   width keeps long titles from widening the menu, while the shared menu item
+   semantics still own keyboard highlight and disabled states. */
+.thread-row-context-menu {
+  display: grid;
+  width: min(248px, calc(100vw - 24px));
+  min-width: min(224px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  gap: 0;
+  padding: var(--oct-space-1);
+  overflow: hidden;
+  border-radius: var(--oct-radius-md);
+}
+
+.thread-row-context-menu [role="menuitem"] {
+  min-height: 26px;
+  gap: var(--oct-space-2);
+  padding: 3px var(--oct-space-2);
+  border-radius: var(--oct-radius-sm);
+  font-size: var(--oct-text-detail);
+  line-height: 1.25;
+}
+
+.thread-row-context-menu [role="separator"] {
+  margin: var(--oct-space-1) 0;
+}
+
+.thread-row-context-menu__icon {
+  display: inline-flex;
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  color: var(--oct-meta);
+}
+
+.thread-row-context-menu__item-label {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1 1 auto;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-row-context-menu__snooze-item .thread-row-context-menu__item-label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.thread-row-context-menu__snooze-label {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1 1 auto;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-row-context-menu__snooze-when {
+  flex: 0 0 auto;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
 }
@@ -1215,10 +1294,6 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   .shell-frame > .window-chrome,
   .shell-frame > .sidebar {
     border-color: var(--octant-border-strong);
-  }
-
-  .sidebar-navigation > .sidebar-item:focus-visible {
-    box-shadow: inset 0 0 0 1px var(--octant-border-strong);
   }
 }
 
@@ -1405,10 +1480,6 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 
 .composer-folder-selector__trigger {
   max-width: min(15rem, 42vw);
-  height: 24px;
-  padding: 0 6px;
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-detail);
 }
 
 .composer-folder-selector__label {
@@ -1547,10 +1618,6 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   opacity: 0.7;
 }
 
-.draft-thread__context-picker {
-  margin-inline-start: auto;
-}
-
 .work-composer-adapter__visually-hidden {
   position: absolute;
   width: 1px;
@@ -1587,11 +1654,6 @@ form > .work-composer-adapter__attachments {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.work-composer-adapter__file-input,
-.work-composer-adapter__composer-bar input[type="file"] {
-  display: none;
 }
 
 .create-from-issue-control {
@@ -1729,10 +1791,8 @@ form > .work-composer-adapter__attachments {
   border-bottom: 1px solid var(--octant-border);
 }
 
-.work-thread-workspace__toolbar {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 6px;
+.work-thread-workspace__header:empty {
+  display: none;
 }
 
 .work-thread-workspace__conversation {
@@ -1815,20 +1875,6 @@ form > .work-composer-adapter__attachments {
   overflow-wrap: anywhere;
 }
 
-.work-thread-workspace__composer {
-  display: grid;
-  width: min(100%, var(--oct-thread-measure));
-  gap: 7px;
-  padding: 8px clamp(16px, 3vw, 28px) 12px;
-  margin: 0 auto;
-  background: var(--octant-workspace);
-}
-
-.work-thread-workspace__composer-shell {
-  display: grid;
-  gap: 7px;
-}
-
 /* Names the model control for assistive technology without repeating the
    selection as text: the picker's own trigger already shows it. */
 .work-thread-workspace__bound-model {
@@ -1881,62 +1927,10 @@ form > .work-composer-adapter__attachments {
   margin-inline-start: auto;
 }
 
-/* Native select in the composer rows: the same quiet combobox the chat bar
-   gives its selects — transparent, muted, xs, a border only on hover. */
-.code-composer-adapter__policy-select {
-  width: auto;
-  min-width: 7rem;
-  padding: 0 6px;
-}
-
-/* Control sizing on the composer row belongs to the shared row, not to the
-   surface that happens to host it (0038). Sizing icon buttons here is what
-   left one row carrying three different control heights. */
-
-.code-composer-adapter__composer-bar .code-composer-adapter__policy-select {
-  min-width: 0;
-  color: var(--oct-muted);
-  background: transparent;
-  border-color: transparent;
-}
-
-.code-composer-adapter__composer-bar .code-composer-adapter__policy-select:hover:not(:disabled) {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-}
-
 /* ── Branch / worktree source selector ─────────────────────────────── */
 
 .code-branch-selector__trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
   max-width: min(20rem, 50vw);
-  min-height: 24px;
-  padding: 0 7px;
-  color: var(--octant-text-secondary);
-  background: transparent;
-  border: 0;
-  border-radius: var(--oct-radius-sm);
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--oct-text-detail);
-  font-weight: 500;
-}
-
-.code-branch-selector__trigger:hover:not(:disabled) {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-}
-
-.code-branch-selector__trigger:focus-visible {
-  outline: 2px solid var(--oct-muted);
-  outline-offset: 2px;
-}
-
-.code-branch-selector__trigger:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 .code-branch-selector__trigger-label {
@@ -2030,36 +2024,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-composer-choice__trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
   max-width: min(16rem, 46vw);
-  min-height: 24px;
-  padding: 0 7px;
-  white-space: nowrap;
-  color: var(--octant-text-secondary);
-  background: transparent;
-  border: 0;
-  border-radius: var(--oct-radius-sm);
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--oct-text-detail);
-  font-weight: 500;
-}
-
-.code-composer-choice__trigger:hover:not(:disabled) {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-}
-
-.code-composer-choice__trigger:focus-visible {
-  outline: 2px solid var(--oct-muted);
-  outline-offset: 2px;
-}
-
-.code-composer-choice__trigger:disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 
 /* Measured on the running row, this was the only border left on any control in
@@ -2070,17 +2035,6 @@ form > .work-composer-adapter__attachments {
   margin-inline-start: 6px;
   padding-inline-start: 8px;
   border-inline-start: 0;
-}
-
-/* Says the value is a reading, not a decision, until the reader makes it one. */
-.code-composer-choice__hint {
-  color: var(--octant-text-muted);
-  font-weight: 400;
-  /* Measured at 800px: without a truncation rule the hint wrapped the whole
-     pill onto two lines, so the one reading in the band looked like two. */
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .code-composer-choice__menu {
@@ -2183,16 +2137,6 @@ form > .work-composer-adapter__attachments {
   margin: 0;
   color: var(--oct-danger-fg);
   font-size: var(--oct-text-sm);
-}
-
-.code-composer-adapter__hint {
-  margin: 0;
-  padding: 0;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-  line-height: 1.4;
-  opacity: 0.7;
-  text-align: center;
 }
 
 /* Quiet worktree-source status line below the context strip. */
@@ -2725,8 +2669,8 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-home__row .code-home__badge[data-tone="waiting"]::before {
-  background: var(--octant-warning-text);
-  opacity: 1;
+  background: var(--oct-fg-2);
+  opacity: 0.65;
 }
 
 .code-home__row .code-home__badge[data-tone="done"]::before,
@@ -2792,7 +2736,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-home__badge[data-tone="waiting"] {
-  color: var(--octant-warning-text, var(--oct-fg-2));
+  color: var(--oct-fg-2);
 }
 
 .code-home__card-detail {
@@ -2866,37 +2810,48 @@ form > .work-composer-adapter__attachments {
   color: var(--oct-meta);
 }
 
-.code-home__fact--chip {
+/* One pull-request mark wherever a request is named (home list, pane title,
+   board): the glyph, the number, the state as tone. */
+.pull-request-chip {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
   padding: 1px 7px;
   border-radius: var(--oct-radius-pill);
+  color: var(--oct-fg-2);
   background: var(--octant-control);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
 }
 
 /* The chip spends colour on the request's state: open in the accent, merged
-   in green, closed in grey. */
-.code-home__fact--chip[data-tone="open"] {
+   in green, closed and draft in grey. */
+.pull-request-chip[data-tone="open"] {
   color: var(--oct-accent-fg);
   background: var(--oct-accent-soft);
 }
 
-.code-home__fact--chip[data-tone="closed"] {
+.pull-request-chip[data-tone="closed"],
+.pull-request-chip[data-tone="draft"] {
   color: var(--oct-muted);
 }
 
-.code-home__fact--chip[data-tone="merged"] {
+.pull-request-chip[data-tone="merged"] {
   color: var(--octant-success-text);
   background: var(--octant-success-surface);
 }
 
-.code-home__fact--chip > svg {
+.pull-request-chip > svg {
+  flex: 0 0 auto;
   color: inherit;
 }
 
 /* An open request's checks ride the same chip as a mark before the words:
    a filled dot when they fail, a hollow one while they run. Passing checks
    ask nothing of the reader and show nothing. */
-.code-home__fact--chip[data-checks="failing"]::before,
-.code-home__fact--chip[data-checks="pending"]::before {
+.pull-request-chip[data-checks="failing"]::before,
+.pull-request-chip[data-checks="pending"]::before {
   content: "";
   width: 6px;
   height: 6px;
@@ -2904,19 +2859,19 @@ form > .work-composer-adapter__attachments {
   border-radius: 50%;
 }
 
-.code-home__fact--chip[data-checks="failing"]::before {
+.pull-request-chip[data-checks="failing"]::before {
   background: var(--octant-danger-text);
 }
 
-.code-home__fact--chip[data-checks="pending"]::before {
+.pull-request-chip[data-checks="pending"]::before {
   border: 1px solid currentcolor;
 }
 
-.code-home__fact--chip[data-checks="failing"] {
+.pull-request-chip[data-checks="failing"] {
   color: var(--octant-danger-text);
 }
 
-.code-home__fact-checks::before {
+.pull-request-chip__checks::before {
   content: "· ";
 }
 
@@ -2961,21 +2916,4 @@ form > .work-composer-adapter__attachments {
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
-}
-
-.sidebar-navigation__thread-age + .sidebar-navigation__thread-unread-dot {
-  margin-left: 0;
-}
-
-/* A row whose snooze ended says so in a word beside its age: it reappears
-   where it was, so the mark is what makes the return noticeable. */
-.sidebar-navigation__thread-woke {
-  flex: none;
-  margin-left: var(--oct-space-2);
-  color: var(--octant-text-primary);
-  font-size: var(--oct-text-xs);
-}
-
-.sidebar-navigation__thread-woke + .sidebar-navigation__thread-unread-dot {
-  margin-left: var(--oct-space-2);
 }

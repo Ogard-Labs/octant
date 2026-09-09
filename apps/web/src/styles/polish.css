@@ -34,22 +34,6 @@
   border-color: var(--octant-border-strong);
 }
 
-.chat-composer select,
-.chat-composer button,
-.chat-composer textarea,
-.chat-composer [role="combobox"] {
-  transition:
-    background-color var(--oct-motion-fast) ease,
-    border-color var(--oct-motion-fast) ease,
-    color var(--oct-motion-fast) ease,
-    opacity var(--oct-motion-fast) ease;
-}
-
-.chat-composer__actions > button:last-child:not(:disabled) {
-  box-shadow: inset 0 1px 0
-    color-mix(in srgb, var(--octant-text-primary-high-contrast) 10%, transparent);
-}
-
 .project-dialog {
   animation: octant-dialog-enter var(--oct-motion-fast) cubic-bezier(0.2, 0, 0, 1);
 }
@@ -69,9 +53,6 @@
 @media (prefers-reduced-motion: reduce) {
   .workspace-pane__grip,
   .provider-card,
-  .chat-composer select,
-  .chat-composer button,
-  .chat-composer textarea,
   .project-dialog {
     animation: none;
     transition: none;

@@ -123,4 +123,50 @@ describe("BrowserAutomationClient", () => {
       client.resolve({ threadId: threadId as any, mode: "work" }, controller.signal),
     ).rejects.toMatchObject({ category: "interrupted" });
   });
+
+  it("lists and decides browser approvals through the authenticated route", async () => {
+    const requests: Array<{ readonly path: string; readonly body: unknown }> = [];
+    const client = createBrowserAutomationClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch: vi.fn(async (input, init) => {
+        requests.push({
+          path: new URL(String(input)).pathname,
+          body: JSON.parse(String(init?.body)),
+        });
+        return Response.json(
+          new URL(String(input)).pathname.endsWith("approvals") &&
+            (JSON.parse(String(init?.body)) as { kind?: string }).kind === "list"
+            ? [
+                {
+                  approvalId: "60000000-0000-4000-8000-000000000001",
+                  threadId,
+                  mode: "chat",
+                  origin: "https://example.com",
+                  requestedAt: "2026-09-09T10:00:00.000Z",
+                },
+              ]
+            : { accepted: true },
+        );
+      }),
+      windowCapability: capability,
+    });
+    await expect(client.listApprovals?.()).resolves.toHaveLength(1);
+    await expect(
+      client.decideApproval?.({
+        approvalId: "60000000-0000-4000-8000-000000000001" as never,
+        decision: "approved",
+      }),
+    ).resolves.toBe(true);
+    expect(requests).toEqual([
+      { path: "/api/browser/approvals", body: { kind: "list" } },
+      {
+        path: "/api/browser/approvals",
+        body: {
+          kind: "decide",
+          approvalId: "60000000-0000-4000-8000-000000000001",
+          decision: "approved",
+        },
+      },
+    ]);
+  });
 });

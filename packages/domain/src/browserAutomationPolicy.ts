@@ -165,3 +165,42 @@ export function remoteBrowserActionReach(kind: BrowserActionKind): BrowserPolicy
   }
   return { kind: "allowed" };
 }
+
+/**
+ * Whether a page may sit at `target` under a context whose allowlist names
+ * `allowedOrigins`. The allowlist is the context's whole authority, so the
+ * match is by origin — with two readings a person means by one entry: a site's
+ * `www.` host and its bare host are the same place, and a page an allowed
+ * `http:` origin upgraded to `https:` is where it was headed anyway. Every
+ * other host, and every port, stays exact. A redirect from `vg.no` to
+ * `www.vg.no` used to leave the page blank with a notice to open the address
+ * the person had just typed.
+ */
+export function originAllowed(target: string, allowedOrigins: ReadonlyArray<string>): boolean {
+  const page = httpOrigin(target);
+  if (page === undefined) return false;
+  return allowedOrigins.some((allowed) => {
+    const entry = httpOrigin(allowed);
+    if (entry === undefined || entry.port !== page.port) return false;
+    if (bareHost(entry.host) !== bareHost(page.host)) return false;
+    return (
+      entry.protocol === page.protocol || (entry.protocol === "http:" && page.protocol === "https:")
+    );
+  });
+}
+
+function bareHost(host: string): string {
+  return host.startsWith("www.") ? host.slice("www.".length) : host;
+}
+
+function httpOrigin(
+  value: string,
+): { readonly protocol: string; readonly host: string; readonly port: string } | undefined {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    return { protocol: url.protocol, host: url.hostname.toLowerCase(), port: url.port };
+  } catch {
+    return undefined;
+  }
+}

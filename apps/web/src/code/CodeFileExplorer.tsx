@@ -33,6 +33,7 @@ export type CodeFileExplorerEntry =
 
 export interface CodeFileExplorerProps {
   readonly entries: ReadonlyArray<CodeFileExplorerEntry>;
+  readonly loading?: boolean;
   readonly onOpenFile: (entry: Extract<CodeFileExplorerEntry, { readonly kind: "file" }>) => void;
   readonly selectedPath?: CodeRelativePath;
 }
@@ -78,12 +79,12 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
   return (
     <section aria-label="Code file explorer" className="code-file-explorer">
       <label className="code-file-explorer__search">
-        <span className="sr-only">Search files</span>
+        <span className="sr-only">Filter files</span>
         <Search aria-hidden="true" size={14} strokeWidth={1.8} />
         <OctantInput
-          aria-label="Search files"
+          aria-label="Filter files"
           onChange={(event) => setQuery(event.currentTarget.value)}
-          placeholder="Filter relative paths"
+          placeholder="Filter files"
           ref={search}
           type="search"
           value={query}
@@ -112,7 +113,7 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
         </p>
       ) : null}
 
-      {visible.length === 0 ? (
+      {visible.length === 0 && props.loading ? null : visible.length === 0 ? (
         <p className="code-file-explorer__empty">No matching repository files.</p>
       ) : (
         <div aria-label="Repository files" className="code-file-explorer__tree" role="tree">

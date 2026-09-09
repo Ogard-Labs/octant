@@ -47,7 +47,7 @@ function catalog(): AutomationEditorCatalog {
       },
     ],
     executionProfiles: [{ label: "Work default", receipt: workDraft.executionProfile }],
-    authorityProfiles: [{ label: "Approval-gated Work", receipt: workDraft.authorityProfile }],
+    authorityProfiles: [{ label: "Ask for approvals Work", receipt: workDraft.authorityProfile }],
     actorId: AUTOMATION_UI_TEST_IDS.actor,
   };
 }
@@ -261,7 +261,7 @@ describe("AutomationCenter detail disclosure", () => {
     ).toBeVisible();
 
     const authoritySummary = within(detail).getByText(
-      "Approval-gated · filesystem, tools · this session only",
+      "Ask for approvals · filesystem, tools · this session only",
     );
     expect(authoritySummary).not.toBeVisible();
     await userEvent.click(within(detail).getByText("Advanced"));
@@ -449,7 +449,7 @@ describe("AutomationCenter creation and editing", () => {
     await userEvent.click(within(form).getByLabelText("Execution profile"));
     await userEvent.click(await screen.findByRole("option", { name: "Work default" }));
     await userEvent.click(within(form).getByLabelText("Authority profile"));
-    await userEvent.click(await screen.findByRole("option", { name: "Approval-gated Work" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Ask for approvals Work" }));
     fireEvent.change(within(form).getByLabelText("Run at"), {
       target: { value: "2026-09-01T09:00" },
     });

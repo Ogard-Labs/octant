@@ -109,7 +109,7 @@ describe("ImageGenerationSheet", () => {
       <ImageGenerationSheet onClose={vi.fn()} onSubmit={vi.fn()} open profiles={[bflProfile()]} />,
     );
     await user.click(screen.getByLabelText("Variant count"));
-    expect(screen.getByRole("option", { name: "1" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "1" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "2" })).not.toBeInTheDocument();
   });
 
@@ -157,7 +157,7 @@ describe("ImageGenerationSheet", () => {
       />,
     );
     await user.click(screen.getByLabelText("Variant count"));
-    expect(screen.getByRole("option", { name: "1" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "1" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "4" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "5" })).not.toBeInTheDocument();
   });
@@ -200,7 +200,7 @@ describe("ImageGenerationSheet", () => {
       />,
     );
     await user.click(screen.getByLabelText("Variant count"));
-    expect(screen.getByRole("option", { name: "1" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "1" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "4" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "5" })).not.toBeInTheDocument();
   });

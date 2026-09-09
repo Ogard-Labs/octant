@@ -34,7 +34,15 @@ import {
 } from "./browserRuntimePort";
 
 export interface BrowserAuthorityResolver {
-  resolve(threadId: BrowserThreadId, mode: "work" | "code"): ToolActionAuthority | undefined;
+  resolve(
+    threadId: BrowserThreadId,
+    mode: ToolActionAuthority["mode"],
+  ): ToolActionAuthority | undefined;
+  canAccessWindow(
+    windowId: WindowId,
+    threadId: BrowserThreadId,
+    mode: ToolActionAuthority["mode"],
+  ): boolean;
 }
 
 export interface BrowserAutomationServiceOptions {
@@ -50,6 +58,9 @@ export interface BrowserAutomationServiceOptions {
   readonly now: () => number;
   readonly schedule?: (delayMs: number, callback: () => void) => () => void;
 }
+
+/** How long a picture of a page stays current before a preview may ask for another. */
+const PEEK_INTERVAL_MS = 1_500;
 
 interface OwnedContext {
   readonly windowId: WindowId;
@@ -140,8 +151,18 @@ export class BrowserAutomationService {
     readonly dedicated?: boolean | undefined;
   }): Promise<BrowserAutomationSnapshot> {
     const dedicated = input.dedicated === true;
-    const denied = this.#authorizeCreate(input.action, input.policy, input.threadId);
     const current = this.#current(input.windowId, input.threadId);
+    if (
+      !this.#authority.canAccessWindow(input.windowId, input.threadId, input.action.authority.mode)
+    ) {
+      if (current !== undefined) this.#revokeAuthority(current);
+      return failedSnapshot(
+        input.threadId,
+        { category: "unauthorized", message: "Browser thread is not owned by this window." },
+        "failed",
+      );
+    }
+    const denied = this.#authorizeCreate(input.action, input.policy, input.threadId);
     if (denied !== undefined) {
       if (current !== undefined && !this.#authorityIsActive(current)) {
         this.#revokeAuthority(current);
@@ -296,7 +317,15 @@ export class BrowserAutomationService {
       );
     }
     const granted = this.#authority.resolve(owned.threadId, modeOf(owned.action.authority));
-    if (granted === undefined || authorizeToolAction(owned.action, granted).kind !== "allowed") {
+    if (
+      !this.#authority.canAccessWindow(
+        owned.windowId,
+        owned.threadId,
+        modeOf(owned.action.authority),
+      ) ||
+      granted === undefined ||
+      authorizeToolAction(owned.action, granted).kind !== "allowed"
+    ) {
       owned.abort.abort();
       await this.#destroy(owned, "authority-revoked", "interrupted");
       return failedSnapshot(
@@ -568,7 +597,15 @@ export class BrowserAutomationService {
       return { status: "unavailable" };
     }
     const granted = this.#authority.resolve(owned.threadId, modeOf(owned.action.authority));
-    if (granted === undefined || authorizeToolAction(owned.action, granted).kind !== "allowed") {
+    if (
+      !this.#authority.canAccessWindow(
+        owned.windowId,
+        owned.threadId,
+        modeOf(owned.action.authority),
+      ) ||
+      granted === undefined ||
+      authorizeToolAction(owned.action, granted).kind !== "allowed"
+    ) {
       return { status: "unavailable" };
     }
     const describe = this.#runtime.describePoint;
@@ -586,6 +623,68 @@ export class BrowserAutomationService {
     const owned = this.#current(windowId, threadId);
     if (owned === undefined) return { status: "ready", threadId, evidence: [] };
     return this.inspect(windowId, threadId, owned.record.contextId);
+  }
+
+  /**
+   * The thread's Browser as it stands, with a fresh look at the page when the
+   * runtime can take one. A page the person drives records no action, so its
+   * picture was whatever the agent last saw — usually nothing. A peek records
+   * no evidence and takes no authority: it reads what the context already
+   * shows, and no more often than the interval however often a preview asks.
+   */
+  async peekThread(
+    windowId: WindowId,
+    threadId: BrowserThreadId,
+    signal?: AbortSignal,
+  ): Promise<BrowserAutomationSnapshot> {
+    const owned = this.#current(windowId, threadId);
+    // Called on the runtime, never detached: a runtime's peek reaches for its
+    // own state, and a bare reference to it arrived there with no `this`.
+    const runtime = this.#runtime;
+    if (
+      owned !== undefined &&
+      runtime.peek !== undefined &&
+      // A live context is "running" for as long as it exists; "waiting" is one
+      // still being created, whose page is not there to look at yet.
+      owned.status === "running" &&
+      !this.#observedWithin(owned, PEEK_INTERVAL_MS)
+    ) {
+      try {
+        const observed = await runtime.peek(
+          owned.record.contextId,
+          signal ?? new AbortController().signal,
+        );
+        owned.observation = {
+          contextId: owned.record.contextId,
+          actionId: owned.record.actionId,
+          correlationId: owned.record.correlationId,
+          authority: owned.record.authority,
+          ...(observed.url === undefined ? {} : { url: observed.url }),
+          ...(observed.title === undefined ? {} : { title: observed.title }),
+          ...(observed.contentHash === undefined ? {} : { contentHash: observed.contentHash }),
+          ...(observed.screenshotDataUrl === undefined
+            ? {}
+            : { screenshotDataUrl: observed.screenshotDataUrl }),
+          ...(observed.viewport === undefined ? {} : { viewport: observed.viewport }),
+          revision: ++owned.observationRevision,
+          observedAt: this.#clock() as BrowserObservation["observedAt"],
+          stale: false,
+        };
+      } catch (error) {
+        // The last observation stands; a peek that fails changes nothing for
+        // the thread, but the host log says why the preview has no picture.
+        console.warn(
+          `Octant Browser peek failed: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`,
+        );
+      }
+    }
+    return this.inspectThread(windowId, threadId);
+  }
+
+  #observedWithin(owned: OwnedContext, intervalMs: number): boolean {
+    const observedAt = owned.observation?.observedAt;
+    if (observedAt === undefined || owned.observation?.stale === true) return false;
+    return Date.parse(this.#clock()) - Date.parse(observedAt) < intervalMs;
   }
 
   async releaseThread(
@@ -718,6 +817,15 @@ export class BrowserAutomationService {
   }
 
   #authorityIsActive(owned: OwnedContext): boolean {
+    if (
+      !this.#authority.canAccessWindow(
+        owned.windowId,
+        owned.threadId,
+        modeOf(owned.action.authority),
+      )
+    ) {
+      return false;
+    }
     const granted = this.#authority.resolve(owned.threadId, modeOf(owned.action.authority));
     return granted !== undefined && authorizeToolAction(owned.action, granted).kind === "allowed";
   }
@@ -774,8 +882,8 @@ export class BrowserAutomationService {
   }
 }
 
-function modeOf(authority: ToolActionAuthority): "work" | "code" {
-  return authority.mode === "code" ? "code" : "work";
+function modeOf(authority: ToolActionAuthority): ToolActionAuthority["mode"] {
+  return authority.mode;
 }
 
 /**
@@ -813,7 +921,6 @@ export function createBrowserToolCallAuthorityService(
 ): ToolCallAuthorityService {
   return new ToolCallAuthorityService({
     resolveGrantedAuthority: (threadId, mode) => {
-      if (mode !== "work" && mode !== "code") return undefined;
       return authority.resolve(threadId as BrowserThreadId, mode);
     },
     resolveLiveFacts: ({ threadId, request }) => {
@@ -849,7 +956,10 @@ function mapToolCallDenial(reason: string, request: ToolActionRequest): BrowserA
     return { category: "invalid", message: "Browser capability request is invalid." };
   }
   if (reason === "mode-capability-denied") {
-    return { category: "policy-denied", message: "Browser automation requires Work or Code." };
+    return {
+      category: "policy-denied",
+      message: "Browser automation is unavailable in this mode.",
+    };
   }
   if (
     reason === "granted-authority-missing" ||

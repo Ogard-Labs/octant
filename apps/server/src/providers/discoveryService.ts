@@ -220,7 +220,8 @@ async function scanDescriptor(
 
       candidates.push({
         driverKind: descriptor.driverKind as DiscoveryCandidate["driverKind"],
-        displayName: descriptor.displayName as DiscoveryCandidate["displayName"],
+        displayName: (descriptor.displayNameForExecutable?.(execName) ??
+          descriptor.displayName) as DiscoveryCandidate["displayName"],
         binaryPath: validated as DiscoveryCandidate["binaryPath"],
         ...(version !== undefined ? { version: version as DiscoveryCandidate["version"] } : {}),
         readiness,

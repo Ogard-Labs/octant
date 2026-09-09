@@ -210,6 +210,22 @@ function ProviderGroupView(props: {
       {group.unavailableCurrent !== undefined ? (
         <UnavailableCurrentView picker={group.unavailableCurrent} instanceId={group.instance.id} />
       ) : null}
+      {group.hiddenCurrent !== undefined ? (
+        <p className="model-picker__selected-hidden" role="status">
+          <span className="model-picker__option-name">{group.hiddenCurrent.model.displayName}</span>
+          <span className="model-picker__option-reason">
+            Hidden in Settings. Existing threads can keep using it; re-enable it to choose it for a
+            new thread.
+          </span>
+        </p>
+      ) : null}
+      {group.sections.length === 0 &&
+      group.hiddenCurrent === undefined &&
+      group.unavailableCurrent === undefined ? (
+        <p className="model-picker__empty" role="status">
+          No selectable models. Re-enable a model in Settings to choose it here.
+        </p>
+      ) : null}
       {group.sections.map((section) => (
         <SectionView
           key={section.id}

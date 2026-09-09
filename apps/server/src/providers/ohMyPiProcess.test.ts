@@ -1,7 +1,7 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Effect, Exit } from "effect";
 import {
   makeOhMyPiProcessLive,
@@ -69,17 +69,19 @@ describe("Oh My Pi process probe", () => {
     });
     const receipt = { ready: Promise.resolve(), remove: async () => undefined };
     let settled = false;
+    let ownershipStarted = false;
     const connectionPromise = Effect.runPromise(
       Effect.scoped(
         makeOhMyPiProcessLive({
-          versionTimeoutMs: 500,
-          readyTimeoutMs: 500,
+          versionTimeoutMs: 2_000,
+          readyTimeoutMs: 2_000,
           shutdownTimeoutMs: 100,
         }).startProbe({
           binaryPath,
           managedHome: root,
           supportedVersion: "17.2.1",
           onProcessStarted: async () => {
+            ownershipStarted = true;
             await ownershipReady;
             return receipt;
           },
@@ -95,7 +97,7 @@ describe("Oh My Pi process probe", () => {
       },
     );
     try {
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await vi.waitFor(() => expect(ownershipStarted).toBe(true), { timeout: 5_000 });
       expect(settled).toBe(false);
       releaseOwnership();
       await expect(connectionPromise).resolves.toMatchObject({

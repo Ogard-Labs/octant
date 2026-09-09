@@ -496,6 +496,9 @@ describe("ProjectSidebarSection activity view", () => {
               projectId: String(chatProjectA.id),
               threadId: "thread-today",
               title: "Update AuroraDocs logos",
+              activity: "working",
+              followUp: true,
+              woke: true,
               unread: true,
               updatedAt: "2026-08-14T12:00:00.000Z",
             },
@@ -535,8 +538,14 @@ describe("ProjectSidebarSection activity view", () => {
         }),
       ).toBeVisible();
       expect(within(priority).getAllByText("Test")).toHaveLength(2);
-      expect(within(priority).getByLabelText("Unread")).toBeVisible();
-      expect(within(priority).getByLabelText("Follow-up")).toBeVisible();
+      expect(
+        within(priority).getByRole("img", {
+          name: "Working · Snooze ended · New activity · Follow-up",
+        }),
+      ).toBeVisible();
+      expect(
+        within(priority).getByRole("img", { name: "Needs attention · Follow-up" }),
+      ).toBeVisible();
       expect(screen.getByRole("button", { name: /Estimate app rebrand effort/ })).toHaveTextContent(
         "Unfiled",
       );

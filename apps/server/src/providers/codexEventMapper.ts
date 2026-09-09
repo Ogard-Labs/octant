@@ -47,6 +47,17 @@ export interface CodexToolState {
   lifecycle: "active" | "terminal";
 }
 
+export interface CodexPendingTool {
+  readonly kind: "tool";
+  readonly requestId: string;
+  readonly providerRequestId: CodexRpcId;
+  readonly threadId: string;
+  readonly turnId: string;
+  readonly toolName: string;
+  readonly inputJson: string;
+  readonly event: ProviderRuntimeEvent;
+}
+
 interface CodexAgentMessageState {
   lifecycle: "active" | "terminal";
   text: string;
@@ -85,6 +96,7 @@ export type CodexPendingApproval =
 export type CodexMappedMessage =
   | { readonly kind: "event"; readonly event: ProviderRuntimeEvent }
   | { readonly kind: "approval"; readonly approval: CodexPendingApproval }
+  | { readonly kind: "tool"; readonly tool: CodexPendingTool }
   | { readonly kind: "ignored" }
   | { readonly kind: "protocol-failure"; readonly failure: ProviderFailure };
 
@@ -412,9 +424,14 @@ function mapLifecycle(
   }
 }
 
+type CodexApprovalRequest = Exclude<
+  Extract<CodexServerMessage, { readonly kind: "request" }>,
+  { readonly method: "item/tool/call" }
+>;
+
 function approval(
   context: CodexEventContext,
-  message: CodexServerRequest,
+  message: CodexApprovalRequest,
 ): ReadonlyArray<CodexMappedMessage> {
   if (!matchesCorrelation(context, message.params.threadId, message.params.turnId)) {
     return correlationFailure();
@@ -478,6 +495,59 @@ function approval(
         },
       ];
   }
+  return protocolFailure("Provider approval method is unsupported.");
+}
+
+function dynamicTool(
+  context: CodexEventContext,
+  message: Extract<
+    CodexServerMessage,
+    { readonly kind: "request"; readonly method: "item/tool/call" }
+  >,
+): ReadonlyArray<CodexMappedMessage> {
+  if (!matchesCorrelation(context, message.params.threadId, message.params.turnId)) {
+    return correlationFailure();
+  }
+  if (context.requestIds.has(message.id)) {
+    return protocolFailure("Provider repeated an app-tool request ID.");
+  }
+  const toolName =
+    message.params.namespace === null || message.params.namespace === undefined
+      ? message.params.tool.trim()
+      : `${message.params.namespace.trim()}/${message.params.tool.trim()}`;
+  if (toolName.length === 0 || toolName.length > 128) {
+    return protocolFailure("Provider app-tool name exceeded the supported size.");
+  }
+  let inputJson: string | undefined;
+  try {
+    const encoded = JSON.stringify(message.params.arguments);
+    if (encoded !== undefined && Buffer.byteLength(encoded, "utf8") <= 65_536) {
+      inputJson = encoded;
+    }
+  } catch {
+    inputJson = undefined;
+  }
+  if (inputJson === undefined) {
+    return protocolFailure("Provider app-tool arguments exceeded the supported size.");
+  }
+  const requestId = context.makeRequestId();
+  context.requestIds.set(message.id, requestId);
+  const event = mappedEvent(context, { kind: "tool-request", requestId, toolName, inputJson });
+  return [
+    {
+      kind: "tool",
+      tool: {
+        kind: "tool",
+        requestId,
+        providerRequestId: message.id,
+        threadId: message.params.threadId,
+        turnId: message.params.turnId,
+        toolName,
+        inputJson,
+        event,
+      },
+    },
+  ];
 }
 
 function mapTerminal(
@@ -604,6 +674,20 @@ function mapNotification(
           outputTokens: message.params.tokenUsage.total.outputTokens,
           reasoningTokens: message.params.tokenUsage.total.reasoningOutputTokens,
           cacheReadInputTokens: message.params.tokenUsage.total.cachedInputTokens,
+          // The app-server names the model's window with every report. What
+          // sits in it is the last request less its reasoning output, which
+          // the model does not keep between turns.
+          ...(message.params.tokenUsage.modelContextWindow === null ||
+          message.params.tokenUsage.modelContextWindow === 0
+            ? {}
+            : {
+                contextWindow: message.params.tokenUsage.modelContextWindow,
+                contextTokens: Math.max(
+                  0,
+                  message.params.tokenUsage.last.totalTokens -
+                    message.params.tokenUsage.last.reasoningOutputTokens,
+                ),
+              }),
         }),
       ];
     case "account/rateLimits/updated":
@@ -681,6 +765,7 @@ export function mapCodexMessage(
     case "notification":
       return mapNotification(context, message);
     case "request":
+      if (message.method === "item/tool/call") return dynamicTool(context, message);
       return approval(context, message);
     case "unknown-notification":
       return isActiveRuntimeMethod(message.method)

@@ -51,8 +51,9 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
   return (
     <section aria-label="Image Generation" id="settings-image-generation">
       <p className="provider-settings__field-guidance">
-        For example, a Recraft endpoint works here directly, since its API matches OpenAI&apos;s
-        image format.
+        Sources connect a provider and image model. Saved profiles in Image generator choose
+        defaults for a generation, such as the model, size, and quality. Custom sources require an
+        OpenAI-compatible image API.
       </p>
       {eligible.length === 0 ? (
         <p className="provider-settings__hint" role="status">

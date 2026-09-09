@@ -43,14 +43,14 @@ describe("SidebarProfile", () => {
     expect(label).not.toHaveAttribute("aria-hidden");
   });
 
-  it("centers the menu above the row instead of anchoring it to the content edge", async () => {
+  it("aligns the account menu with the leading edge of its row", async () => {
     const user = userEvent.setup();
     render(<SidebarProfile onOpenNavigator={vi.fn()} onOpenSettings={vi.fn()} profile={profile} />);
 
     await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
     const menu = await screen.findByRole("menu");
     expect(menu).toHaveAttribute("data-side", "top");
-    expect(menu).toHaveAttribute("data-align", "center");
+    expect(menu).toHaveAttribute("data-align", "start");
   });
 
   it("shows the name the person gave and leads to the settings that are theirs", async () => {

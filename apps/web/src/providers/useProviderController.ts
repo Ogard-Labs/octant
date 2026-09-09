@@ -1,6 +1,7 @@
 import {
   decodeProviderInstanceId,
   type AgentEligibleModelRef,
+  type HiddenProviderModelRef,
   type AnthropicCompatibleProviderConfiguration,
   type AzureFoundryProviderConfiguration,
   type BflImageProviderConfiguration,
@@ -93,10 +94,19 @@ export function useProviderController(options: ProviderControllerOptions) {
   const client = options.client ?? fallbackClient;
   const mounted = useRef(true);
   const authoritative = useRef<ProviderRegistrySnapshot | undefined>(undefined);
+  // Settings should keep its geometry while a probe replaces an observation,
+  // but the provider registry must still clear that observation immediately
+  // so no stale capability can authorize a turn. Keep this second projection
+  // presentation-only and reconcile it whenever authoritative state changes.
+  const pendingProbes = useRef(new Set<ProviderInstanceId>());
+  const presentationObserved = useRef(new Map<ProviderInstanceId, ProviderObservedState>());
   const mutationQueue = useRef(settledMutationQueue);
   const credentialCleanupRequired = useRef<Set<ProviderInstanceId>>(new Set());
   const credentialStatusUnconfirmed = useRef<Set<ProviderInstanceId>>(new Set());
   const [snapshot, setSnapshot] = useState<ProviderRegistrySnapshot>();
+  const [presentationObservedSnapshot, setPresentationObservedSnapshot] = useState<
+    ReadonlyMap<ProviderInstanceId, ProviderObservedState>
+  >(new Map());
   const [status, setStatus] = useState<ProviderControllerStatus>("loading");
   const [message, setMessage] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -110,7 +120,20 @@ export function useProviderController(options: ProviderControllerOptions) {
       }
     }
     authoritative.current = value;
+    const nextPresentation = new Map<ProviderInstanceId, ProviderObservedState>();
+    const preserved = pendingProbes.current;
+    const instanceIds = new Set(value.instances.map((instance) => instance.id));
+    for (const observed of value.observedStates) {
+      nextPresentation.set(observed.instanceId, observed);
+    }
+    for (const instanceId of preserved) {
+      if (!instanceIds.has(instanceId) || nextPresentation.has(instanceId)) continue;
+      const prior = presentationObserved.current.get(instanceId);
+      if (prior !== undefined) nextPresentation.set(instanceId, prior);
+    }
+    presentationObserved.current = nextPresentation;
     if (!mounted.current) return;
+    setPresentationObservedSnapshot(new Map(nextPresentation));
     setSnapshot(value);
     setStatus("ready");
   }, []);
@@ -2555,9 +2578,20 @@ export function useProviderController(options: ProviderControllerOptions) {
       })),
     [execute],
   );
+  const updateHiddenModels = useCallback(
+    (hiddenModels: ReadonlyArray<HiddenProviderModelRef>) =>
+      execute((current) => ({
+        kind: "update-provider-defaults",
+        expectedVersion: current.defaults.version,
+        permissionPersistence: current.defaults.permissionPersistence,
+        hiddenModels,
+      })),
+    [execute],
+  );
   const probe = useCallback(
     async (instanceId: ProviderInstanceId) => {
       if (client === undefined) return false;
+      pendingProbes.current.add(instanceId);
       const current = authoritative.current;
       if (current !== undefined) {
         install({
@@ -2586,9 +2620,28 @@ export function useProviderController(options: ProviderControllerOptions) {
         } catch {
           // The locally cleared snapshot remains fail-closed when authority is unavailable.
         }
-        if (mounted.current) setMessage(redactedProbeFailureMessage(error));
+        // A probe can be interrupted while the host is restarting or while a
+        // discovery sweep is being superseded. That transient lifecycle state
+        // is not a provider configuration problem and must not linger as the
+        // page-level alert after the next registry snapshot is ready. Other
+        // probe failures remain visible through the shared alert and the row's
+        // authoritative readiness details.
+        if (mounted.current && !isInterruptedFailure(error)) {
+          setMessage(redactedProbeFailureMessage(error));
+        }
         return false;
       } finally {
+        pendingProbes.current.delete(instanceId);
+        // A failed probe and failed bootstrap must not leave a ready-looking
+        // presentation behind after Checking ends.
+        if (
+          !authoritative.current?.observedStates.some((state) => state.instanceId === instanceId)
+        ) {
+          presentationObserved.current.delete(instanceId);
+          if (mounted.current)
+            setPresentationObservedSnapshot(new Map(presentationObserved.current));
+        }
+
         if (mounted.current) {
           setProbingIds((current) => {
             const next = new Set(current);
@@ -2665,6 +2718,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     observedByInstance: new Map(
       snapshot?.observedStates.map((value) => [value.instanceId, value] as const) ?? [],
     ) as ReadonlyMap<ProviderInstanceId, ProviderObservedState>,
+    presentationObservedByInstance: presentationObservedSnapshot,
     busy,
     probingIds,
     credentialManagementAvailable: hostBridge !== undefined,
@@ -2720,6 +2774,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     updatePermissionPersistence,
     updateProviderOrder,
     updateAgentEligibleModels,
+    updateHiddenModels,
   };
 }
 
@@ -2852,4 +2907,13 @@ function redactedProbeFailureMessage(error: unknown): string {
   if (error.category === "protocol") return "Provider returned an invalid response.";
   if (error.category === "provider-failed") return "Provider operation failed.";
   return "Octant Provider service is unavailable.";
+}
+
+function isInterruptedFailure(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "category" in error &&
+    error.category === "interrupted"
+  );
 }

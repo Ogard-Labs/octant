@@ -73,6 +73,38 @@ describe("discoveryService", () => {
     expect(codex!.readiness).toBe("ready");
   });
 
+  it("discovers the beta OpenCode executable from the approved user bin", async () => {
+    const fs = makeFakeFs(new Map([["/Users/test/.local/bin/opencode2", { file: true }]]));
+    const exec = makeFakeExec(
+      new Map([
+        [
+          "/Users/test/.local/bin/opencode2 --version",
+          { stdout: "opencode2 v0.0.0-beta-18721\n", stderr: "" },
+        ],
+      ]),
+    );
+    const service = makeDiscoveryService({
+      exec,
+      fs,
+      environment: { PATH: "/usr/bin", HOME: "/Users/test" },
+      now: () => 1753430400000,
+    });
+
+    const snapshot = await service.scan();
+    expect(snapshot.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          driverKind: "opencode",
+          displayName: "OpenCode 2 preview",
+          binaryPath: "/Users/test/.local/bin/opencode2",
+          version: "opencode2 v0.0.0-beta-18721",
+          readiness: "unknown",
+          pathSummary: "~/.local/bin/opencode2",
+        }),
+      ]),
+    );
+  });
+
   it("discovers user-installed runtimes when a Finder launch PATH omits home bins", async () => {
     const fs = makeFakeFs(
       new Map([

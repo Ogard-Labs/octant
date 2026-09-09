@@ -523,6 +523,37 @@ describe("mapCodexMessage", () => {
     ).toMatchObject([{ kind: "event", event: { toolCallId: "tool-1", ...expected } }]);
   });
 
+  it.each([null, undefined])(
+    "maps an app-tool call with an optional namespace: %s",
+    (namespace) => {
+      const result = map(context(), {
+        kind: "request",
+        id: "provider-request-1",
+        method: "item/tool/call",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          callId: "call-1",
+          ...(namespace === undefined ? {} : { namespace }),
+          tool: "octant_browser",
+          arguments: { operation: "screenshot" },
+        },
+      });
+
+      expect(result).toMatchObject([
+        {
+          kind: "tool",
+          tool: {
+            requestId: "request-1",
+            providerRequestId: "provider-request-1",
+            toolName: "octant_browser",
+            inputJson: '{"operation":"screenshot"}',
+          },
+        },
+      ]);
+    },
+  );
+
   it("maps completed file changes to confined relative paths and a sanitized tool result", () => {
     const ctx = context();
     const started = map(
@@ -945,7 +976,7 @@ describe("mapCodexMessage", () => {
     expect(reordered.map(({ taskId }) => taskId)).toEqual(["task-1", "task-3", "task-2"]);
   });
 
-  it("maps only numeric total usage", () => {
+  it("maps total usage and the window the last request sat in", () => {
     expect(
       map(
         context(),
@@ -972,7 +1003,17 @@ describe("mapCodexMessage", () => {
         }),
       ),
     ).toMatchObject([
-      { kind: "event", event: { kind: "usage", inputTokens: 12, outputTokens: 8 } },
+      {
+        kind: "event",
+        event: {
+          kind: "usage",
+          inputTokens: 12,
+          outputTokens: 8,
+          contextWindow: 200_000,
+          // The last request's total less its reasoning output.
+          contextTokens: 6,
+        },
+      },
     ]);
   });
 

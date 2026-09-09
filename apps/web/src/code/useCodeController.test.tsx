@@ -1361,42 +1361,57 @@ describe("useCodeController", () => {
     unmount();
   });
 
-  it("settles a waiting provider turn and keeps the prompt available for retry", async () => {
-    const operationId = "70000000-0000-4000-8000-000000000031";
-    async function* waitingFrames() {
-      yield {
-        threadId: ids.thread,
-        operationId,
-        cursor: 1,
-        occurredAt: now,
-        event: { kind: "operation-state", state: "waiting" },
-      };
-    }
-    const subscribeOperation = vi.fn(() => waitingFrames());
-    const client = fakeClient({
-      executeOperation: vi.fn(async () => ({
-        kind: "provider-turn-state",
-        operationId,
-        state: "running",
-      })) as never,
-      subscribeOperation: subscribeOperation as never,
-    });
-    const { result } = renderHook(() =>
-      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
-    );
-    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+  it.each(["waiting", "failed", "interrupted"] as const)(
+    "settles a %s turn and keeps only actionable approvals",
+    async (state) => {
+      const operationId = "70000000-0000-4000-8000-000000000031";
+      async function* waitingFrames() {
+        yield {
+          threadId: ids.thread,
+          operationId,
+          cursor: 1,
+          occurredAt: now,
+          event: {
+            kind: "approval-requested",
+            approvalId: "70000000-0000-4000-8000-000000000030",
+            action: "provider-tool",
+            summary: "Allow browser access?",
+          },
+        };
+        yield {
+          threadId: ids.thread,
+          operationId,
+          cursor: 2,
+          occurredAt: now,
+          event: { kind: "operation-state", state },
+        };
+      }
+      const subscribeOperation = vi.fn(() => waitingFrames());
+      const client = fakeClient({
+        executeOperation: vi.fn(async () => ({
+          kind: "provider-turn-state",
+          operationId,
+          state: "running",
+        })) as never,
+        subscribeOperation: subscribeOperation as never,
+      });
+      const { result } = renderHook(() =>
+        useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+      );
+      await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
 
-    let ok = true;
-    await act(async () => {
-      ok = await result.current.sendFollowUp("approve this turn");
-    });
+      let ok = true;
+      await act(async () => {
+        ok = await result.current.sendFollowUp("approve this turn");
+      });
 
-    expect(ok).toBe(false);
-    expect(subscribeOperation).toHaveBeenCalledOnce();
-    expect(result.current.turnStatus).toBe("waiting");
-    expect(result.current.turnError).toMatch(/waiting for approval, input, or recovery/i);
-    expect(result.current.pendingDraft).toBe("approve this turn");
-  });
+      expect(ok).toBe(false);
+      expect(subscribeOperation).toHaveBeenCalledOnce();
+      expect(result.current.turnStatus).toBe(state === "waiting" ? "waiting" : "failed");
+      expect(result.current.providerRequests).toHaveLength(state === "waiting" ? 1 : 0);
+      expect(result.current.pendingDraft).toBe("approve this turn");
+    },
+  );
 
   it("keeps the dropped-context warning when a running Code turn fails", async () => {
     const store = createComposerThreadDraftStore(memoryDraftStorage());

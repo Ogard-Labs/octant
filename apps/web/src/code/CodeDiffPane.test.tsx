@@ -22,11 +22,37 @@ const DIFF = [
   "",
 ].join("\n");
 
+/** The side-by-side layout is where the file list and the editor live. */
+async function chooseSideBySide() {
+  await userEvent.setup().click(await screen.findByRole("button", { name: "Side by side" }));
+}
+
 describe("CodeDiffPane", () => {
+  it("stacks every changed file with its numbered lines by default", async () => {
+    render(
+      <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
+    );
+
+    const index = await screen.findByRole("region", { name: "src/index.ts" });
+    expect(
+      within(index)
+        .getAllByRole("row")
+        .map((row) => row.textContent),
+    ).toEqual([
+      "11 unchanged lines",
+      "12−const answer = 41;",
+      "12+const answer = 42;",
+      "1313 export { answer };",
+    ]);
+    expect(screen.getByRole("region", { name: "README.md" })).toBeVisible();
+    expect(screen.queryByRole("navigation", { name: "Changed files" })).not.toBeInTheDocument();
+  });
+
   it("loads exact Git evidence and compares one changed file at a time", async () => {
     const code = client();
     const fixture = runtime();
     render(<CodeDiffPane client={code} diff={available()} loadRuntime={fixture.loadRuntime} />);
+    await chooseSideBySide();
 
     expect(await screen.findByRole("heading", { name: "Local changes" })).toBeVisible();
     expect(code.operationContent).toHaveBeenCalledWith(ids.thread, ids.operation, ids.content);
@@ -48,6 +74,7 @@ describe("CodeDiffPane", () => {
     render(
       <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
     );
+    await chooseSideBySide();
 
     const files = await screen.findByRole("navigation", { name: "Changed files" });
     const entries = within(files).getAllByRole("button");
@@ -62,6 +89,7 @@ describe("CodeDiffPane", () => {
     const user = userEvent.setup();
     const fixture = runtime();
     render(<CodeDiffPane client={client()} diff={available()} loadRuntime={fixture.loadRuntime} />);
+    await chooseSideBySide();
 
     await user.click(await screen.findByRole("button", { name: /README\.md/ }));
     await waitFor(() => expect(fixture.options?.modified).toBe("Octant"));
@@ -69,15 +97,21 @@ describe("CodeDiffPane", () => {
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("README.md");
   });
 
-  it("toggles between side-by-side and inline layout", async () => {
+  it("mounts the editor only for the side-by-side layout and returns to the stack", async () => {
     const user = userEvent.setup();
     const fixture = runtime();
     render(<CodeDiffPane client={client()} diff={available()} loadRuntime={fixture.loadRuntime} />);
 
+    expect(await screen.findByRole("region", { name: "src/index.ts" })).toBeVisible();
+    expect(fixture.loadRuntime).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Side by side" }));
     await waitFor(() => expect(fixture.options?.renderSideBySide).toBe(true));
-    await user.click(screen.getByRole("button", { name: "Inline" }));
-    expect(fixture.session?.setRenderSideBySide).toHaveBeenCalledWith(false);
-    expect(screen.getByRole("button", { name: "Inline" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Side by side" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await user.click(screen.getByRole("button", { name: "Unified" }));
+    expect(await screen.findByRole("region", { name: "README.md" })).toBeVisible();
   });
 
   it("hands the selected file to the editor", async () => {
@@ -92,7 +126,7 @@ describe("CodeDiffPane", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "Open in editor" }));
+    await user.click((await screen.findAllByRole("button", { name: "Open" }))[0]!);
     expect(onOpenFile).toHaveBeenCalledWith("src/index.ts");
   });
 
@@ -101,7 +135,7 @@ describe("CodeDiffPane", () => {
       <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
     );
     expect(await screen.findByRole("heading", { name: "Local changes" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Open in editor" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open" })).not.toBeInTheDocument();
   });
 
   it("marks truncated diff evidence as visibly incomplete", async () => {
@@ -114,7 +148,7 @@ describe("CodeDiffPane", () => {
   });
 
   it.each([
-    [{ state: "loading" }, "Loading Git diff…"],
+    [{ state: "loading" }, "Loading diff"],
     [{ state: "stale", message: "Git state changed; refresh the diff." }, "Git state changed"],
     [{ state: "unavailable", message: "Git observation is unavailable." }, "unavailable"],
   ] as const)("renders purposeful $state state", (diff, message) => {
@@ -157,6 +191,7 @@ describe("CodeDiffPane", () => {
       />,
     );
 
+    await chooseSideBySide();
     await user.click(await screen.findByRole("button", { name: "Discard changes" }));
     // Nothing happens on the first click: the change is gone for good, so the
     // pane asks before it asks the host.
@@ -192,6 +227,7 @@ describe("CodeDiffPane", () => {
       />,
     );
 
+    await chooseSideBySide();
     await user.click(await screen.findByRole("button", { name: "Discard changes" }));
     await user.click(screen.getByRole("button", { name: "Discard permanently" }));
 
@@ -225,6 +261,7 @@ describe("CodeDiffPane", () => {
     expect(
       await screen.findByRole("heading", { name: "Changes vs origin/development" }),
     ).toBeVisible();
+    await chooseSideBySide();
     expect(await screen.findByRole("navigation", { name: "Changed files" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
   });
@@ -240,6 +277,7 @@ describe("CodeDiffPane", () => {
       />,
     );
 
+    await chooseSideBySide();
     expect(await screen.findByRole("navigation", { name: "Changed files" })).toBeVisible();
     expect(screen.getByRole("alert")).toHaveTextContent("Git state changed; refresh the diff.");
     await userEvent.setup().click(screen.getByRole("button", { name: "Refresh" }));
@@ -286,6 +324,7 @@ describe("CodeDiffPane", () => {
         loadRuntime={runtime().loadRuntime}
       />,
     );
+    await chooseSideBySide();
     expect(await screen.findByRole("button", { name: "Discard changes" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "README.mdadded+1−0" }));
     expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();

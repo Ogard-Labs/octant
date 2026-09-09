@@ -1,3 +1,4 @@
+import { UsageNamesProvider } from "./usage/UsageName";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
@@ -49,7 +50,11 @@ import {
   decodeCodeThreadId,
   type CodeDeliveryOutcomeKind,
 } from "@octant/contracts/code";
-import { decodeCodeOperationId } from "@octant/contracts/code-operations";
+import {
+  decodeCodeApprovalId,
+  decodeCodeOperationId,
+  type CodeOperationApprovalRequest,
+} from "@octant/contracts/code-operations";
 import type { CodeComposerSubmitInput } from "./code/composer/CodeComposerAdapter";
 import { decodeContextSubjectRef, type ContextHealth } from "@octant/contracts/context";
 import {
@@ -106,7 +111,7 @@ import {
   preselectCreateHost,
   resolveDraftProviderSelection,
 } from "@octant/domain";
-import type { CreateHostViewScope, ModelPickerSelection } from "@octant/domain";
+import type { CreateHostViewScope, ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { assertCreateDestinationFromHosts } from "./shell/assertCreateDestination";
 import { resolveSidebarBackground } from "@octant/theme/backgrounds";
 import {
@@ -1938,7 +1943,7 @@ function LaunchedShell(
     const surface = bottomPanelSurfaces.find((candidate) => candidate.id === tab.surface);
     return surface === undefined ? [] : [surface];
   });
-  const bottomPanelAvailable = bottomPanelSurfaces.length > 0;
+  const bottomPanelAvailable = activeMode !== "chat" && bottomPanelSurfaces.length > 0;
   // The panel belongs to the thread whose tab opened it. Held only as a window
   // flag, opening a terminal on one thread also opened the panel on every other
   // thread the reader switched to, showing that thread's own empty default
@@ -2020,10 +2025,11 @@ function LaunchedShell(
     [displayedDockState.tabs],
   );
   const dockAvailable =
-    dockThreadId !== undefined ||
-    projectPullRequestReviewOpen ||
-    dockTabs.length > 0 ||
-    launchableDockSurfaces.length > 0;
+    activeMode !== "chat" &&
+    (dockThreadId !== undefined ||
+      projectPullRequestReviewOpen ||
+      dockTabs.length > 0 ||
+      launchableDockSurfaces.length > 0);
   const dockOpen = dockVisible && dockAvailable;
   const bottomPanelHeight = previewBottomPanelHeight ?? bottomPanelPresentation.height;
   const providerController = useProviderController({
@@ -2185,12 +2191,14 @@ function LaunchedShell(
         instances: providerController.instances,
         observedByInstance: providerController.observedByInstance,
         providerOrder: providerController.defaults.providerOrder,
+        hiddenModels: providerController.defaults.hiddenModels,
         mode: "code",
       }),
     [
       providerController.instances,
       providerController.observedByInstance,
       providerController.defaults.providerOrder,
+      providerController.defaults.hiddenModels,
     ],
   );
   const workProviderGroups = useMemo(
@@ -2199,12 +2207,14 @@ function LaunchedShell(
         instances: providerController.instances,
         observedByInstance: providerController.observedByInstance,
         providerOrder: providerController.defaults.providerOrder,
+        hiddenModels: providerController.defaults.hiddenModels,
         mode: "work",
       }),
     [
       providerController.instances,
       providerController.observedByInstance,
       providerController.defaults.providerOrder,
+      providerController.defaults.hiddenModels,
     ],
   );
   const chatProviderGroups = useMemo(
@@ -2213,12 +2223,14 @@ function LaunchedShell(
         instances: providerController.instances,
         observedByInstance: providerController.observedByInstance,
         providerOrder: providerController.defaults.providerOrder,
+        hiddenModels: providerController.defaults.hiddenModels,
         mode: "chat",
       }),
     [
       providerController.instances,
       providerController.observedByInstance,
       providerController.defaults.providerOrder,
+      providerController.defaults.hiddenModels,
     ],
   );
   useEffect(() => {
@@ -2311,15 +2323,31 @@ function LaunchedShell(
     draftProviderInstanceId,
     draftModelId,
   );
-  const effectiveDraftProviderInstanceId =
-    activeMode === "work" ? workProviderChoice?.instanceId : draftProviderInstanceId;
-  const effectiveDraftModelId = activeMode === "work" ? workProviderChoice?.modelId : draftModelId;
   const draftProviderGroups =
     activeMode === "chat"
       ? chatProviderGroups
       : activeMode === "work"
         ? workProviderGroups
         : codeProviderGroups;
+  const rawDraftSelection =
+    draftProviderInstanceId !== undefined && draftModelId !== undefined
+      ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
+      : undefined;
+  const preferredChatSelection =
+    resolveDraftProviderSelection(chatProviderGroups, rawDraftSelection) ??
+    resolveDraftProviderSelection(chatProviderGroups, firstRunChatDefault) ??
+    firstSelectableProviderSelection(chatProviderGroups);
+  const visibleDraftSelection =
+    activeMode === "chat"
+      ? preferredChatSelection
+      : (resolveDraftProviderSelection(draftProviderGroups, rawDraftSelection) ??
+        firstSelectableProviderSelection(draftProviderGroups));
+  const effectiveDraftProviderInstanceId =
+    activeMode === "work"
+      ? workProviderChoice?.instanceId
+      : visibleDraftSelection?.providerInstanceId;
+  const effectiveDraftModelId =
+    activeMode === "work" ? workProviderChoice?.modelId : visibleDraftSelection?.modelId;
   const executionProfileScope = useMemo(
     () =>
       activeProjectId === undefined
@@ -2452,14 +2480,7 @@ function LaunchedShell(
   function threadUtility(surface: RightUtilityDockSurfaceId, utilityTab?: ThreadUtilityDockTab) {
     if (dockThread === undefined || dockThreadKey === undefined) return null;
     if (dockThread.mode === "code" && !activeCodeThreadDisplayReady) {
-      return (
-        <ShellState
-          eyebrow="Thread tools"
-          message="The selected tool will open after the transcript is ready."
-          state="loading"
-          title="Loading thread first"
-        />
-      );
+      return <ShellState state="loading" title="Loading thread" />;
     }
     const sidecarThreadId = dockSidecarsByThread.get(dockThreadKey);
     const appleProjectPath = appleProjects[0]?.projectPath;
@@ -3523,16 +3544,20 @@ function LaunchedShell(
     archiveOpen ||
     automationCenterOpen ||
     agentsCenterOpen ||
-    artifactLibraryOpen;
-  // What the shell shows for the dock right now: open, unless a reader has
-  // it step aside. The remembered `dockOpen` is what comes back afterwards.
-  const dockPresentedOpen = dockOpen && !readerOpen;
+    artifactLibraryOpen ||
+    imageLibraryOpen;
+  // Readers hide unrelated thread tools. Selecting a pull request explicitly
+  // opens its Review beside that list, so the detail must remain visible.
+  const dockPresentedOpen =
+    dockOpen && (!readerOpen || (codePullRequestsOpen && projectPullRequestReviewOpen));
 
   function closeWorkspaceReaders() {
     setRailPlaceholder(undefined);
     setAutomationCenterOpen(false);
     setAgentsCenterOpen(false);
     setArtifactLibraryOpen(false);
+    setImageLibraryOpen(false);
+    setSelectedProjectPullRequest(undefined);
     setWorkBoardOpen(false);
     setCodeBoardOpen(false);
     setCodePullRequestsOpen(false);
@@ -3555,6 +3580,7 @@ function LaunchedShell(
     // overview on screen for a frame before the draft replaced it, which read
     // as an old page flashing past every time a task was started from a row.
     closeWorkspaceReaders();
+    setDraftResetRevision((revision) => revision + 1);
     await controller.openDraftThread(mode, projectId);
   }
 
@@ -3573,6 +3599,7 @@ function LaunchedShell(
   function createChat(prompt?: string) {
     if (prompt === undefined || prompt.trim() === "") {
       closeWorkspaceReaders();
+      setDraftResetRevision((revision) => revision + 1);
       setDraftProjectSelection(({ chat: _previous, ...rest }) => rest);
       void controller.openDraftThread("chat");
       return;
@@ -3587,26 +3614,12 @@ function LaunchedShell(
   }
 
   function openAutomationCenter() {
-    setRailPlaceholder(undefined);
-    setCodeBoardOpen(false);
-    setCodePullRequestsOpen(false);
-    setGithubIssuesOpen(false);
-    setWorkBoardOpen(false);
-    setArchiveOpen(false);
-    setArtifactLibraryOpen(false);
-    setAgentsCenterOpen(false);
+    closeWorkspaceReaders();
     setAutomationCenterOpen(true);
   }
 
   function openAgentsCenter() {
-    setRailPlaceholder(undefined);
-    setCodeBoardOpen(false);
-    setCodePullRequestsOpen(false);
-    setGithubIssuesOpen(false);
-    setWorkBoardOpen(false);
-    setArchiveOpen(false);
-    setArtifactLibraryOpen(false);
-    setAutomationCenterOpen(false);
+    closeWorkspaceReaders();
     setAgentsCenterOpen(true);
   }
 
@@ -3614,40 +3627,17 @@ function LaunchedShell(
   // Center it is not dismissed when the mode changes: a person who opened it
   // in Work is looking for the same artifacts in Code.
   function openArtifactLibrary() {
-    setRailPlaceholder(undefined);
-    setCodeBoardOpen(false);
-    setCodePullRequestsOpen(false);
-    setGithubIssuesOpen(false);
-    setWorkBoardOpen(false);
-    setArchiveOpen(false);
-    setAutomationCenterOpen(false);
-    setAgentsCenterOpen(false);
-    setImageLibraryOpen(false);
+    closeWorkspaceReaders();
     setArtifactLibraryOpen(true);
   }
 
   function openImageLibrary() {
-    setRailPlaceholder(undefined);
-    setCodeBoardOpen(false);
-    setCodePullRequestsOpen(false);
-    setGithubIssuesOpen(false);
-    setWorkBoardOpen(false);
-    setArchiveOpen(false);
-    setAutomationCenterOpen(false);
-    setAgentsCenterOpen(false);
-    setArtifactLibraryOpen(false);
+    closeWorkspaceReaders();
     setImageLibraryOpen(true);
   }
 
   function openArchive() {
-    setRailPlaceholder(undefined);
-    setCodeBoardOpen(false);
-    setCodePullRequestsOpen(false);
-    setGithubIssuesOpen(false);
-    setWorkBoardOpen(false);
-    setAutomationCenterOpen(false);
-    setAgentsCenterOpen(false);
-    setArtifactLibraryOpen(false);
+    closeWorkspaceReaders();
     setArchiveOpen(true);
   }
 
@@ -3811,6 +3801,11 @@ function LaunchedShell(
         String(candidate.id) === String(projectId),
     );
     if (project === undefined) return false;
+    const selection = preferredChatSelection;
+    if (selection === undefined && chatProviderGroups.length > 0) {
+      setDraftError("No visible Chat model is available. Re-enable a model in Settings first.");
+      return false;
+    }
     const title = prompt.length > 60 ? `${prompt.slice(0, 57)}…` : prompt;
     const created = await chatController.execute({
       kind: "create-chat-thread",
@@ -3823,12 +3818,6 @@ function LaunchedShell(
     // turn fails. Open its exact thread before either follow-up command so the
     // user can see the failure and retry instead of creating a duplicate.
     if (!(await controller.openChatThread(thread.id, thread.title, project.id))) return false;
-    const selection = resolveDraftProviderSelection(
-      draftProviderGroups,
-      draftProviderInstanceId !== undefined && draftModelId !== undefined
-        ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
-        : undefined,
-    );
     if (
       selection !== undefined &&
       (thread.providerInstanceId !== selection.providerInstanceId ||
@@ -3954,7 +3943,40 @@ function LaunchedShell(
         setDraftError(plan.message);
         return false;
       }
-      const created = await codeController.execute(plan.command);
+      let command = plan.command;
+      if (input.executionPolicy === "full-access") {
+        const requestApproval = props.hostBridge?.requestCodeOperationApproval;
+        const presentation = input.presentation;
+        if (requestApproval === undefined || presentation === undefined) {
+          setDraftError(
+            "Full access needs the native approval surface. Keep Ask for approvals or retry.",
+          );
+          return false;
+        }
+        const approvalRequest: CodeOperationApprovalRequest | undefined =
+          command.kind === "create-managed-code-thread"
+            ? { effect: { kind: "create-managed-code-thread-full-access", command } }
+            : command.kind === "create-code-thread"
+              ? { effect: { kind: "create-thread-full-access", thread: command.thread } }
+              : undefined;
+        if (approvalRequest === undefined) {
+          setDraftError("Full access could not be prepared for this Code thread.");
+          return false;
+        }
+        const approvalId = await requestApproval(approvalRequest, {
+          projectId: String(project.id),
+          composerId: presentation.composerId,
+        });
+        if (approvalId === undefined) {
+          setDraftError("Full access was not confirmed. Nothing was created.");
+          return false;
+        }
+        command =
+          command.kind === "create-managed-code-thread" || command.kind === "create-code-thread"
+            ? { ...command, approvalId: decodeCodeApprovalId(approvalId) }
+            : command;
+      }
+      const created = await codeController.execute(command);
       if (created?.kind !== "managed-thread-created" && created?.kind !== "thread-created") {
         setDraftError(
           codeController.lastExecuteError.current?.message ??
@@ -4039,6 +4061,11 @@ function LaunchedShell(
     setRailPlaceholder(undefined);
     try {
       if (mode === "chat") {
+        const draftSelection = preferredChatSelection;
+        if (draftSelection === undefined && chatProviderGroups.length > 0) {
+          setDraftError("No visible Chat model is available. Re-enable a model in Settings first.");
+          return;
+        }
         const title = prompt.length > 60 ? `${prompt.slice(0, 57)}…` : prompt;
         const chatDraftProjectId =
           draftProjectId ??
@@ -4057,12 +4084,6 @@ function LaunchedShell(
           return;
         }
         let thread = result.thread;
-        const draftSelection = resolveDraftProviderSelection(
-          draftProviderGroups,
-          draftProviderInstanceId !== undefined && draftModelId !== undefined
-            ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
-            : undefined,
-        );
         if (
           draftSelection !== undefined &&
           (thread.providerInstanceId !== draftSelection.providerInstanceId ||
@@ -4494,6 +4515,18 @@ function LaunchedShell(
     },
   });
 
+  const usageNames = new Map<string, string>();
+  for (const instance of providerController.instances)
+    usageNames.set(`provider/${instance.id}`, instance.displayName);
+  for (const project of projectController.allProjects)
+    usageNames.set(`project/${project.id}`, project.name);
+  for (const thread of chatController.bootstrap?.threads ?? [])
+    usageNames.set(`chat-thread/${thread.id}`, thread.title);
+  for (const thread of workNavigation.bootstrap?.threads ?? [])
+    usageNames.set(`work-thread/${thread.id}`, thread.title);
+  for (const thread of codeController.bootstrap?.threads ?? [])
+    usageNames.set(`code-thread/${thread.id}`, thread.title);
+
   const usageSurface = (
     <Suspense
       fallback={
@@ -4727,7 +4760,11 @@ function LaunchedShell(
       )}
       <ShellFrame
         standaloneSurface={
-          controller.settingsOpen ? settingsSurface : usageOpen ? usageSurface : undefined
+          controller.settingsOpen || usageOpen ? (
+            <UsageNamesProvider names={usageNames}>
+              {controller.settingsOpen ? settingsSurface : usageSurface}
+            </UsageNamesProvider>
+          ) : undefined
         }
         {...(shellBackdrop === undefined
           ? {}
@@ -5024,7 +5061,7 @@ function LaunchedShell(
         }
         sidebarResizable={!isNarrow}
         sidebarWidth={sidebarWidth}
-        wideContextOpen={!isNarrow && dockOpen && !readerOpen}
+        wideContextOpen={!isNarrow && dockPresentedOpen}
         workspace={
           <>
             <div className="primary-workspace-layer">
@@ -5273,14 +5310,21 @@ function LaunchedShell(
                     draftResetRevision={draftResetRevision}
                     draftProjectSelection={draftProjectSelection}
                     onDraftSelectProject={(mode, projectId) => {
-                      setDraftProjectSelection((current) => ({ ...current, [mode]: projectId }));
                       // Choosing a folder in the composer is the authority
                       // transition, not a renderer preference: the window is
                       // refused every Code command about a Project its
                       // persisted workspace does not name. Re-opening the draft
                       // with the Project records it on the surface the server
                       // reads.
-                      const binding = controller.openDraftThread(mode, projectId);
+                      const binding = controller
+                        .openDraftThread(mode, projectId)
+                        .then((accepted) => {
+                          if (accepted)
+                            setDraftProjectSelection((current) => ({
+                              ...current,
+                              [mode]: projectId,
+                            }));
+                        });
                       draftProjectBinding.current = binding;
                       void binding.catch(() => undefined);
                     }}
@@ -5364,28 +5408,6 @@ function LaunchedShell(
                         void chatController.refreshNavigation();
                       }
                       void controller.openChatThread(threadId, title, projectId);
-                    }}
-                    onActivateThreadTab={(tab) => {
-                      closeWorkspaceReaders();
-                      if (tab.mode === "chat") {
-                        void controller.openChatThread(tab.threadId, tab.title, tab.projectId);
-                        return;
-                      }
-                      if (tab.mode === "work") {
-                        void controller.openWorkThread(
-                          tab.threadId,
-                          tab.title,
-                          tab.hostId,
-                          tab.projectId,
-                        );
-                        return;
-                      }
-                      void controller.openCodeThread(
-                        tab.threadId,
-                        tab.title,
-                        tab.hostId,
-                        tab.projectId,
-                      );
                     }}
                     onViewAllChatProjectThreads={viewAllChatProjectThreads}
                     onOpenSideChat={(sidecar) => void controller.openSideChat(sidecar)}
@@ -5997,4 +6019,19 @@ function focusLogicalOpener(opener: InspectorOpener): void {
       ? opener.element
       : document.querySelector<HTMLElement>(`[data-${opener.logicalTarget}-opener="true"]`);
   current?.focus();
+}
+
+function firstSelectableProviderSelection(
+  groups: ReadonlyArray<PickerGroup>,
+): ModelPickerSelection | undefined {
+  for (const group of groups) {
+    for (const section of group.sections) {
+      for (const picker of section.models) {
+        if (picker.unavailableReason === undefined) {
+          return { providerInstanceId: group.instance.id, modelId: picker.model.id };
+        }
+      }
+    }
+  }
+  return undefined;
 }

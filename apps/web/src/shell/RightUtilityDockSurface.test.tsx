@@ -18,6 +18,23 @@ function surface(id: "browser" | "terminal" | "files") {
 }
 
 describe("the right sidebar surface", () => {
+  it("puts every tool's toolbar on the dock's own rail", () => {
+    const rail = dockStylesheet.match(/\.right-utility-dock__tool\s+:is\(([^)]*)\)\s*\{([^}]*)\}/);
+    expect(rail).not.toBeNull();
+    for (const toolbar of [
+      ".code-file-explorer-panel__toolbar",
+      ".code-delivery-pane__toolbar",
+      ".code-diff-pane__toolbar",
+      ".browser-workspace__chrome",
+      ".side-chat__header",
+      ".thread-environment-dock__header",
+    ]) {
+      expect(rail?.[1]).toContain(toolbar);
+    }
+    expect(rail?.[2]).toMatch(/min-height:\s*var\(--oct-title-rail-h\)/);
+    expect(rail?.[2]).toMatch(/background:\s*transparent/);
+  });
+
   it("keeps Add tool beside the visible tabs and draws the tab in front like a thread tab", () => {
     expect(ruleBody(dockStylesheet, ".dock-tool-strip")).toMatch(/flex:\s*0\s+1\s+auto/);
     // Selected and hovered must not share one tint, or pointing at a tab looks
@@ -32,6 +49,12 @@ describe("the right sidebar surface", () => {
     expect(selected).toMatch(/box-shadow:\s*inset 0 0 0 1px var\(--octant-border\)/);
     expect(ruleBody(dockStylesheet, ".dock-tool-strip__tab:hover")).not.toMatch(
       /var\(--octant-selection\)/,
+    );
+    expect(dockStylesheet).not.toContain("--oct-radius-xs");
+    expect(ruleBody(dockStylesheet, ".dock-tool-strip__close")).toMatch(/width:\s*24px/);
+    expect(ruleBody(dockStylesheet, ".dock-tool-strip__tab")).not.toMatch(/overflow:\s*hidden/);
+    expect(dockStylesheet).toMatch(
+      /\.dock-tool-strip__select:active,\n\.dock-tool-strip__close:active \{\n  transform: none;/,
     );
   });
   it("shows the active thread work map with no tool open", async () => {
@@ -48,8 +71,8 @@ describe("the right sidebar surface", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Current work" })).toBeVisible();
-    expect(screen.getByText("Tools available for the active thread.")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Tools" })).toBeVisible();
+    expect(screen.getByText("Available for the active thread.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Browser" })).toHaveTextContent(
       "Inspect live web activity",
     );
@@ -132,9 +155,23 @@ describe("the right sidebar surface", () => {
     );
 
     expect(screen.queryByText("Previous thread Browser")).toBeNull();
-    expect(
-      screen.getByRole("heading", { name: "Browser has nothing to describe here" }),
-    ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Browser is unavailable" })).toBeVisible();
+  });
+
+  it("uses a generic detail for an unknown launchable tool", () => {
+    render(
+      <RightUtilityDockSurface
+        launchableSurfaces={[{ ...browser, id: "unknown-tool" as never, label: "Custom tool" }]}
+        onCloseTab={vi.fn()}
+        onOpenTab={vi.fn()}
+        onSelectSurface={vi.fn()}
+        resolution={{ kind: "closed", reason: "no-surface" }}
+        tabs={[]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Custom tool" })).toHaveTextContent("Open this tool");
+    expect(screen.queryByText("Run discovered repository tests")).not.toBeInTheDocument();
   });
 });
 

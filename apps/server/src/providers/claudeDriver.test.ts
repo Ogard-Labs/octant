@@ -46,7 +46,7 @@ const readyCapabilities = {
   nativeChildAgents: "unsupported",
   nativeAttachments: "unsupported",
   nativeWebResearch: "unsupported",
-  appManagedTools: "unsupported",
+  appManagedTools: "supported",
   citations: "unsupported",
 } as const;
 
@@ -120,7 +120,7 @@ class FakeQuery implements ClaudeQueryPort {
     Effect.succeed(this.initialization.account),
   );
   readonly close = vi.fn(() => Effect.void);
-  readonly send = vi.fn(({ text }: { readonly text: string }) =>
+  readonly send = vi.fn(({ text }: Parameters<ClaudeQueryPort["send"]>[0]) =>
     Effect.sync(() => {
       this.sent.push(text);
     }),
@@ -320,6 +320,75 @@ async function acquire(driver: ReturnType<typeof makeClaudeDriver>) {
 }
 
 describe("Claude execution policy", () => {
+  it("offers app-owned tools and resolves their answers through the provider connection", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      const definition = { name: "octant_browser", inputSchema: { type: "object" } };
+      await Effect.runPromise(
+        acquired.connection.send({
+          sessionId,
+          prompt: "Read the browser",
+          attachments: [],
+          tools: [definition],
+        }),
+      );
+      expect(f.queries[0]?.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          appManagedTools: [definition],
+          onAppToolCall: expect.any(Function),
+        }),
+      );
+      const call = f.queries[0]?.send.mock.calls[0]?.[0].onAppToolCall;
+      if (call === undefined) throw new Error("Expected a tool callback");
+      const subscriptionScope = await Effect.runPromise(Scope.make());
+      try {
+        const stream = await Effect.runPromise(
+          acquired.connection.subscribe.pipe(Effect.provideService(Scope.Scope, subscriptionScope)),
+        );
+        const next = Effect.runPromise(Stream.runHead(stream));
+        const answer = call(
+          "octant_browser",
+          '{"operation":"read-page"}',
+          new AbortController().signal,
+        );
+        const received = await next;
+        if (received._tag !== "Some" || received.value.kind !== "tool-request")
+          throw new Error("Expected the app tool request");
+        await Effect.runPromise(
+          acquired.connection.answerTool({
+            sessionId,
+            requestId: received.value.requestId,
+            resultJson: '{"heading":"Example Domain"}',
+            isError: false,
+          }),
+        );
+        expect(await answer).toEqual({
+          resultJson: '{"heading":"Example Domain"}',
+          isError: false,
+        });
+        const replay = await Effect.runPromise(
+          Effect.exit(
+            acquired.connection.answerTool({
+              sessionId,
+              requestId: received.value.requestId,
+              resultJson: "{}",
+              isError: false,
+            }),
+          ),
+        );
+        expect(replay._tag).toBe("Failure");
+      } finally {
+        await Effect.runPromise(Scope.close(subscriptionScope, Exit.void));
+      }
+    } finally {
+      await acquired.close();
+    }
+  });
+
   it("maps every Octant policy to the exact Claude permission options", () => {
     expect(claudeExecutionOptions("full-access")).toEqual({
       permissionMode: "bypassPermissions",
@@ -2346,7 +2415,7 @@ describe("Claude driver probe", () => {
         nativeChildAgents: "unsupported",
         nativeAttachments: "unsupported",
         nativeWebResearch: "unsupported",
-        appManagedTools: "unsupported",
+        appManagedTools: "supported",
         citations: "unsupported",
       },
       observedAt,

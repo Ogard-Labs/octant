@@ -5,8 +5,9 @@ import type {
   WorkspacePane,
   WorkspaceTab,
 } from "@octant/contracts/shell";
-import { GripVertical } from "lucide-react";
+import { GripVertical, X } from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { OctantIconButton } from "../ui/base/OctantButton";
 import { OctantSlider } from "../ui/base/OctantSlider";
 import {
   OctantContextMenuContent,
@@ -20,6 +21,8 @@ import {
 import { WorkspaceDragStatus, WorkspaceDropOverlay } from "./WorkspaceDropOverlay";
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
+import { workspaceSurfaceTitle } from "./workspaceTabLifecycle";
+import { PullRequestChip, type PullRequestChipProps } from "../code/PullRequestChip";
 import type { ThreadProviderIdentity } from "./navigationModel";
 
 const splitContainerStyle = { height: "100%", minHeight: 0, minWidth: 0, width: "100%" };
@@ -58,9 +61,26 @@ export interface SplitWorkspaceProps {
   readonly providerByThreadId?: ReadonlyMap<string, ThreadProviderIdentity>;
   /** The same preference controls provider marks in navigation and pane tabs. */
   readonly showProviderIcons?: boolean;
-  /** The window-level thread strip owns the title band for an unsplit workspace. */
+  /**
+   * The Project the window's panes live in, worn as a chip beside each
+   * thread's title. Every pane shares it: placement across Projects is
+   * server-refused, so one label is true of them all.
+   */
+  readonly contextLabel?: string;
+  /**
+   * What a thread's pane says about where its work is: the pull request it
+   * carries and its Project/branch. Read the way a person names a change,
+   * so two panes on one Project tell apart by more than their titles.
+   */
+  readonly paneFactsByThreadId?: ReadonlyMap<string, PaneFacts>;
+  /** Start screens alone in the window keep the title band clear. */
   readonly showSinglePaneHeader?: boolean;
   readonly totalWorkspacePaneCount: number;
+}
+
+export interface PaneFacts {
+  readonly pullRequest?: Pick<PullRequestChipProps, "number" | "state" | "checks">;
+  readonly path?: string;
 }
 
 interface WorkspaceNodeProps extends SplitWorkspaceProps {
@@ -275,11 +295,21 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
     props.showProviderIcons === false || !("threadId" in surface)
       ? undefined
       : props.providerByThreadId?.get(String(surface.threadId));
+  const facts =
+    "threadId" in surface ? props.paneFactsByThreadId?.get(String(surface.threadId)) : undefined;
+  const path = "threadId" in surface ? (facts?.path ?? props.contextLabel) : undefined;
   const showHeader = props.layout.kind !== "pane" || props.showSinglePaneHeader !== false;
+  const title = workspaceSurfaceTitle(surface);
+  const activateUnlessClosing = (target: EventTarget | null) => {
+    // Activating can open another dock and resize the pane between pointer
+    // down and click, moving its close button away from the pointer.
+    if (target instanceof Element && target.closest(".workspace-pane__close") !== null) return;
+    props.onActivatePane(pane.paneId);
+  };
   return (
     <section
       aria-current={active ? "true" : undefined}
-      aria-label={`Workspace pane: ${surface.title}`}
+      aria-label={`Workspace pane: ${title}`}
       className="workspace-pane"
       data-active={active ? "true" : "false"}
       data-focused={focused ? "true" : "false"}
@@ -287,8 +317,8 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
       data-workspace-can-split={canSplit ? "true" : "false"}
       data-workspace-pane-id={pane.paneId}
       onBeforeInputCapture={() => props.onActivatePane(pane.paneId)}
-      onKeyDownCapture={() => props.onActivatePane(pane.paneId)}
-      onPointerDownCapture={() => props.onActivatePane(pane.paneId)}
+      onKeyDownCapture={(event) => activateUnlessClosing(event.target)}
+      onPointerDownCapture={(event) => activateUnlessClosing(event.target)}
     >
       {showHeader ? (
         <OctantContextMenuRoot onOpenChange={setMenuOpen}>
@@ -305,7 +335,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                   dragKey,
                   paneId: pane.paneId,
                   surface,
-                  title: surface.title,
+                  title,
                 })
               }
               onPointerMove={props.drag.onPointerMove}
@@ -326,12 +356,39 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                   />
                 </span>
               )}
-              <span className="workspace-pane__title">{surface.title}</span>
+              {facts?.pullRequest === undefined ? null : (
+                <PullRequestChip
+                  className="workspace-pane__pull-request"
+                  number={facts.pullRequest.number}
+                  state={facts.pullRequest.state}
+                  {...(facts.pullRequest.checks === undefined
+                    ? {}
+                    : { checks: facts.pullRequest.checks })}
+                />
+              )}
+              <span className="workspace-pane__title">{title}</span>
             </span>
+            {path === undefined ? null : (
+              <span aria-hidden="true" className="workspace-pane__path" title={path}>
+                {path}
+              </span>
+            )}
             <span
               aria-hidden="true"
               className="workspace-pane__window-drag-space window-drag-region"
             />
+            {/* Alone in the window there is nothing to close into; the × is a
+                split's control, for giving one pane's room back to the other. */}
+            {props.layout.kind === "pane" ? null : (
+              <OctantIconButton
+                className="workspace-pane__close"
+                label={`Close ${title}`}
+                onClick={() => props.onClosePane(pane.paneId)}
+                type="button"
+              >
+                <X aria-hidden="true" size={14} strokeWidth={1.8} />
+              </OctantIconButton>
+            )}
           </OctantContextMenuTrigger>
           <PaneMenu
             canSplit={canSplit}
@@ -377,7 +434,7 @@ function PaneMenu(props: {
   return (
     <OctantContextMenuContent>
       <OctantContextMenuGroup>
-        <OctantContextMenuLabel>{props.surface.title}</OctantContextMenuLabel>
+        <OctantContextMenuLabel>{workspaceSurfaceTitle(props.surface)}</OctantContextMenuLabel>
       </OctantContextMenuGroup>
       <OctantContextMenuItem
         label={focusLabel}

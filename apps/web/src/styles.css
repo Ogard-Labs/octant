@@ -259,6 +259,19 @@ html[data-octant-theme-mode="light"] {
 html[data-octant-native-host="true"],
 html[data-octant-native-host="true"] body {
   background: transparent;
+  /* Every scroller Octant has is its own, so a trackpad scroll that reaches
+     the document only bounces it. On a transparent window that bounce shows
+     the desktop for its whole length, which reads as the app shrinking or
+     vanishing under the pointer. */
+  overscroll-behavior: none;
+  overflow: clip;
+}
+
+/* Nothing frosts the transparent window until the host says its glass is on,
+   so until then the page is the last opaque thing between the desktop and
+   every surface that scrolls, bounces, or goes translucent. */
+html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) body {
+  background: var(--octant-app-background);
 }
 
 .thread-activity-frame {
@@ -289,11 +302,50 @@ html[data-octant-native-host="true"] body {
 
 .thread-activity-pip {
   display: grid;
-  width: clamp(248px, 24vw, 312px);
+  width: clamp(200px, 20vw, 256px);
+  gap: 8px;
+  animation: thread-activity-pip-enter var(--oct-motion-fast) cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* One floating picture per tool, and nothing around it. */
+.thread-activity-pip__card {
+  position: relative;
   overflow: hidden;
   border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-overlay);
-  animation: thread-activity-pip-enter var(--oct-motion-fast) cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Name, status, and controls ride the picture's top edge and show under the
+   pointer or keyboard focus. A card with no picture keeps them in the open. */
+.thread-activity-pip__controls {
+  position: absolute;
+  z-index: 1;
+  inset: 0 0 auto;
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 4px 8px 10px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--octant-app-background) 82%, transparent),
+    transparent
+  );
+  opacity: 0;
+  transition: opacity var(--oct-motion-fast) ease;
+}
+
+.thread-activity-pip__card:hover .thread-activity-pip__controls,
+.thread-activity-pip__card:focus-within .thread-activity-pip__controls,
+.thread-activity-pip__card:not(:has(img)) .thread-activity-pip__controls {
+  opacity: 1;
+}
+
+.thread-activity-pip__card:not(:has(img)) .thread-activity-pip__controls {
+  position: static;
+  padding-bottom: 4px;
+  background: none;
 }
 
 .thread-activity-pip-trigger {
@@ -328,20 +380,6 @@ html[data-octant-native-host="true"] body {
   font-size: var(--oct-text-xs);
 }
 
-.thread-activity-pip__header,
-.thread-activity-pip__footer {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.thread-activity-pip__header {
-  min-height: 38px;
-  padding: 5px 6px 5px 10px;
-}
-
 .thread-activity-pip__identity,
 .thread-activity-pip__header-actions {
   display: flex;
@@ -372,8 +410,7 @@ html[data-octant-native-host="true"] body {
   gap: 1px;
 }
 
-.thread-activity-pip__header-actions .shell-icon-button,
-.thread-activity-pip__footer .shell-icon-button {
+.thread-activity-pip__header-actions .shell-icon-button {
   width: 26px;
   height: 26px;
   min-width: 26px;
@@ -388,11 +425,6 @@ html[data-octant-native-host="true"] body {
   border-radius: 50%;
 }
 
-.thread-activity-pip__visual--interactive:focus-visible {
-  outline: 2px solid var(--oct-muted);
-  outline-offset: -2px;
-}
-
 .thread-activity-pip__visual {
   position: relative;
   display: grid;
@@ -403,11 +435,15 @@ html[data-octant-native-host="true"] body {
   color: var(--octant-text-secondary);
   background: var(--octant-surface-inset);
   border: 0;
-  border-top: 1px solid var(--octant-border);
-  border-bottom: 1px solid var(--octant-border);
 }
 
+/* The picture is a button so it opens the tab, but the button recipe sizes
+   itself to its content and centres it; a tall capture of a narrow pane then
+   sat as a sliver in the middle of the card. The picture is the whole card
+   width, cropped from its top. */
 .thread-activity-pip__visual--interactive {
+  display: block;
+  height: 148px;
   padding: 0;
   cursor: pointer;
 }
@@ -454,6 +490,14 @@ html[data-octant-native-host="true"] body {
   line-height: 1.45;
 }
 
+.thread-activity-pip__note {
+  margin: 0;
+  padding: 0 10px 10px;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
+}
+
 .thread-activity-pip__approval {
   display: flex;
   justify-content: center;
@@ -464,19 +508,6 @@ html[data-octant-native-host="true"] body {
 .thread-activity-pip__approval button {
   height: 28px;
   font-size: var(--oct-text-xs);
-}
-
-.thread-activity-pip__footer {
-  min-height: 36px;
-  padding: 5px 6px 5px 10px;
-}
-
-.thread-activity-pip__footer > span {
-  overflow: hidden;
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 @keyframes thread-activity-pip-enter {
@@ -611,18 +642,21 @@ body {
 }
 
 h1,
-h2,
-h3,
-h4,
-h5,
-h6,
 strong {
   font-weight: 600;
 }
 
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-weight: var(--oct-weight-display);
+}
+
 /* Unlayered element rules beat every Tailwind utility, so a filled Button
    rendered as bare text. Keep the reset in the base layer so recipes can
-   paint; leave the focus outline unlayered so keyboard rings stay as they are. */
+   paint; the shared focus reset stays unlayered with the rest of the shell. */
 @layer base {
   button {
     appearance: none;
@@ -983,6 +1017,11 @@ strong {
   font-weight: 400;
 }
 
+.activity-nav__group > .sidebar-section {
+  padding-inline: 6px;
+  color: var(--octant-text-secondary);
+}
+
 .activity-nav__group {
   display: grid;
   gap: 2px;
@@ -994,9 +1033,9 @@ strong {
 }
 
 .sidebar-navigation__thread.activity-nav__thread {
-  min-height: 42px;
+  min-height: 48px;
   align-items: flex-start;
-  padding: 5px 6px;
+  padding: 6px;
 }
 
 .sidebar-navigation__thread-copy {
@@ -1007,8 +1046,8 @@ strong {
 
 .activity-nav__thread .sidebar-navigation__thread-copy {
   flex: 1 1 auto;
-  grid-template-rows: 16px 14px;
-  gap: 1px;
+  grid-template-rows: minmax(20px, auto) minmax(16px, auto);
+  gap: 2px;
 }
 
 .activity-nav__thread .sidebar-navigation__thread-title,
@@ -1016,15 +1055,15 @@ strong {
   display: block;
   min-width: 0;
   overflow: hidden;
-  line-height: 1;
+  line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .sidebar-navigation__thread-project {
   overflow: hidden;
-  color: var(--octant-text-muted);
-  font-size: calc(11 * var(--oct-text-step));
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1073,31 +1112,6 @@ strong {
   gap: var(--oct-space-2);
   color: var(--oct-fg-2);
   font-size: var(--oct-text-sm);
-}
-
-/* 8px wide like the thread-status dot, so activity titles and tree titles
-   start on the same edge. */
-.activity-nav__glyph {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  min-width: 8px;
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
-  line-height: 1;
-}
-
-.activity-nav__glyph[data-indicator="unread"] {
-  color: var(--octant-text-primary);
-}
-
-.activity-nav__glyph[data-indicator="follow-up"] {
-  color: var(--octant-warning-text);
-}
-
-.activity-nav__glyph[data-indicator="live"] {
-  color: var(--octant-text-secondary);
 }
 
 /* A Project name is a section header over its thread rows, not a row among
@@ -1244,7 +1258,11 @@ strong {
   text-align: left;
 }
 
-.project-row__select:hover {
+/* The name button is what opens and closes the Project, so the recipe marks
+   it expanded and would fill it; that turned every open Project into a
+   highlighted row, which is the header's mistake all over again. */
+.project-row__select:hover,
+.project-row__select[aria-expanded] {
   background: transparent;
 }
 
@@ -1489,223 +1507,12 @@ strong {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  /* One row: the split tree fills the workspace. The band above it used to be
+     the thread strip's; without that row the tree landed in an auto track and
+     sat content-high, with the composer floating mid-pane. */
+  grid-template-rows: minmax(0, 1fr);
   place-items: stretch;
   background: var(--octant-workspace);
-}
-
-/* The title band is the title rail the dock head and the window controls
-   share: 30px tabs 4px down, and the hairline closing the band at exactly the
-   rail height so it meets the dock's rule. The hairline runs to the window's
-   edge: the space reserved for the native window controls is padding inside
-   the band, not a margin outside it, which stopped the rule short and left a
-   gap before the dock's own rule. */
-.workspace-thread-tabs {
-  position: relative;
-  z-index: 5;
-  display: flex;
-  min-width: 0;
-  min-height: var(--oct-title-rail-h);
-  align-items: center;
-  gap: 6px;
-  padding: 4px var(--octant-window-chrome-reserved-width, 148px) 3px var(--oct-space-3);
-  border-bottom: 1px solid var(--octant-border);
-  background: color-mix(in srgb, var(--octant-workspace) 96%, var(--octant-control));
-}
-
-.shell--sidebar-collapsed .workspace-thread-tabs {
-  padding-left: var(--octant-window-chrome-leading-width, 148px);
-}
-
-.workspace-thread-tabs__context,
-.workspace-thread-tabs__surface {
-  display: inline-flex;
-  min-width: 0;
-  flex: 0 1 auto;
-  align-items: center;
-  gap: 5px;
-  overflow: hidden;
-  color: var(--octant-text-muted);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  white-space: nowrap;
-}
-
-.workspace-thread-tabs__context > span:first-of-type,
-.workspace-thread-tabs__surface {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.workspace-thread-tabs__context > svg {
-  flex: 0 0 auto;
-  opacity: 0.72;
-}
-
-.workspace-thread-tabs__separator {
-  color: var(--octant-border-strong);
-}
-
-.workspace-thread-tabs__list {
-  display: flex;
-  min-width: 0;
-  max-width: min(1040px, 80%);
-  flex: 0 1 auto;
-  align-items: center;
-  gap: 2px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.workspace-thread-tabs__list::-webkit-scrollbar {
-  display: none;
-}
-
-/* Thread tabs follow the dock's tab grammar: quiet labels, the active one
-   on the selection fill, no border or shadow. The bordered, shadowed pill
-   read as a button dropped into the breadcrumb. */
-.workspace-thread-tabs__item {
-  display: inline-flex;
-  min-width: 0;
-  flex: 0 1 auto;
-  align-items: center;
-  padding-inline-end: 2px;
-  border: 0;
-  border-radius: var(--oct-radius-sm);
-  color: var(--octant-text-muted);
-  background: transparent;
-}
-
-.workspace-thread-tabs__item:hover {
-  color: var(--octant-text-primary);
-  background: var(--oct-fg-soft);
-}
-
-/* The tab in front is a different thing from the tab under the pointer: it
-   takes the selection fill and a hairline edge, the same treatment the dock's
-   tool tabs use, so the two strips read as one grammar. */
-.workspace-thread-tabs__item[data-active="true"] {
-  color: var(--octant-text-primary);
-  background: var(--octant-selection);
-  box-shadow: inset 0 0 0 1px var(--octant-border);
-}
-
-/* The title is what the tab is for, so it gets the width: it grows into the
-   tab and yields to the chips only when the tab itself has run out of room.
-   Measured before this rule a 30ch tab cut "Add a one-line JSDoc comment" to
-   "Add a one-li…" while the Project chip beside it kept every letter. */
-.workspace-thread-tabs__select {
-  min-width: 0;
-  max-width: 440px;
-  height: var(--oct-rail-tab-h);
-  flex: 1 1 auto;
-  gap: 6px;
-  padding: 0 10px;
-  color: inherit;
-  font-size: var(--oct-text-sm);
-}
-
-.workspace-thread-tabs__where {
-  width: var(--oct-icon-sm);
-  height: var(--oct-icon-sm);
-  flex: 0 0 auto;
-  opacity: 0.7;
-}
-
-.workspace-thread-tabs__item[data-active="true"] .workspace-thread-tabs__where {
-  opacity: 1;
-}
-
-/* "PR #917" on the tab of a thread that delivers to a pull request: a tinted
-   chip in the request's state colour, ahead of the title, so the tab says
-   where the work is going before it says what the work is. */
-.workspace-thread-tabs__pr {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  height: 18px;
-  padding: 0 6px;
-  border-radius: var(--oct-radius-sm);
-  color: var(--oct-meta);
-  background: color-mix(in srgb, currentcolor 12%, transparent);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-display);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.workspace-thread-tabs__pr[data-state="open"] {
-  color: var(--octant-success-text);
-}
-
-.workspace-thread-tabs__pr[data-state="merged"] {
-  color: var(--octant-palette-purple);
-}
-
-.workspace-thread-tabs__pr[data-state="closed"] {
-  color: var(--octant-danger-text);
-}
-
-.workspace-thread-tabs__title {
-  flex: 1 1 auto;
-  min-width: 6ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The Project rides on the tab rather than heading the whole strip, so a
-   strip holding threads from two Projects names each one. It stays quiet:
-   the thread is what the person is looking for, the Project is the answer to
-   "which one is this". */
-.workspace-thread-tabs__project {
-  flex: 0 0 auto;
-  max-width: 16ch;
-  overflow: hidden;
-  padding: 1px 6px 2px;
-  border-radius: var(--oct-radius-xs, 3px);
-  color: var(--octant-text-muted);
-  background: var(--oct-fg-soft);
-  font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The controls take no room until they are wanted: an invisible 44px at the
-   end of every tab read as dead space and pushed the next tab along. The
-   tab in front always shows its close, the way a tab bar is expected to;
-   the others reveal theirs on hover or focus, and a pinned tab keeps its pin. */
-.workspace-thread-tabs__pin,
-.workspace-thread-tabs__close {
-  width: 0;
-  min-width: 0;
-  height: 22px;
-  min-height: 22px;
-  padding: 0;
-  overflow: hidden;
-  color: var(--octant-text-muted);
-  opacity: 0;
-}
-
-.workspace-thread-tabs__item:hover .workspace-thread-tabs__pin,
-.workspace-thread-tabs__item:hover .workspace-thread-tabs__close,
-.workspace-thread-tabs__item:focus-within .workspace-thread-tabs__pin,
-.workspace-thread-tabs__item:focus-within .workspace-thread-tabs__close,
-.workspace-thread-tabs__item[data-active="true"] .workspace-thread-tabs__close,
-.workspace-thread-tabs__item[data-pinned="true"] .workspace-thread-tabs__pin {
-  width: 22px;
-  min-width: 22px;
-  opacity: 1;
-}
-
-.workspace-thread-tabs__item[data-pinned="true"] .workspace-thread-tabs__pin {
-  color: var(--octant-text-primary);
-}
-
-.workspace-thread-tabs__drag-space {
-  min-width: 12px;
-  align-self: stretch;
-  flex: 1 1 auto;
 }
 
 .workspace-cross-context-banner {
@@ -1727,6 +1534,58 @@ strong {
   color: var(--octant-text-secondary);
   transform: translateX(-50%);
   backdrop-filter: blur(10px) saturate(110%);
+}
+
+.composer--has-notice {
+  position: relative;
+  isolation: isolate;
+}
+
+.workspace-cross-context-banner--inline {
+  position: absolute;
+  top: auto;
+  bottom: calc(100% - 8px);
+  left: 0;
+  z-index: -1;
+  width: 100%;
+  transform: none;
+  margin: 0;
+  padding-bottom: 14px;
+  animation: composer-notice-reveal var(--oct-motion-fast) ease-out;
+}
+
+.composer-notice-fallback {
+  position: absolute;
+  inset-inline: 16px;
+  bottom: 16px;
+  z-index: 20;
+}
+
+.composer-notice-fallback > .workspace-cross-context-banner--inline {
+  position: relative;
+  bottom: auto;
+  z-index: 0;
+}
+
+@keyframes composer-notice-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-cross-context-banner--inline {
+    animation: none;
+  }
+}
+
+html[data-octant-reduced-motion="true"] .workspace-cross-context-banner--inline {
+  animation: none;
 }
 
 .workspace-cross-context-banner__message {
@@ -1821,7 +1680,7 @@ strong {
 }
 
 .workspace-split__resize:hover::before,
-.workspace-split__resize:has(.workspace-split__resize-input:focus-visible)::before {
+.workspace-split__resize:focus-visible::before {
   background: color-mix(in srgb, var(--octant-focus-ring) 35%, var(--octant-border));
 }
 
@@ -1877,6 +1736,60 @@ strong {
   padding: 2px 0 2px 4px;
 }
 
+/* Only the top-right pane shares its edge with window controls. Reserving
+   their width in every split pulled each close button away from its edge. */
+.workspace-split[data-orientation="horizontal"] > :first-child .workspace-pane__header {
+  margin-right: 0;
+}
+.workspace-split[data-orientation="vertical"] > :last-child .workspace-pane__header {
+  margin-right: 0;
+}
+.shell--wide-context-open .workspace-pane__header {
+  margin-right: 0;
+}
+
+/* After the title, where the work is: Project/branch in the editor's mono at
+   meta ink, the way a person names a change. It is what tells two panes on
+   one Project apart, so it yields before the title does but never vanishes
+   while there is room for a few characters. The close stays visible at rest
+   because it is the pane's one inline action and a hidden close read as no
+   close. */
+.workspace-pane__path {
+  flex: 0 1 auto;
+  min-width: 6ch;
+  max-width: 36ch;
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-family: var(--octant-editor-font-family);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-pane__path::before {
+  content: "·";
+  margin-right: 6px;
+}
+
+/* The request rides inside the grip with the title, so it drags with it. */
+.workspace-pane__pull-request {
+  flex: 0 0 auto;
+}
+
+.workspace-pane__close {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  margin-right: var(--oct-space-1);
+  color: var(--octant-text-muted);
+}
+
+.workspace-pane__close:hover {
+  color: var(--oct-fg);
+}
+
 /* The tab sits in the corner the sidebar and the title band make, so it takes
    the same inset from both. Keep the native header on the compact 34px
    centerline with the window controls — a taller 42px band was matching a
@@ -1891,6 +1804,24 @@ html[data-octant-native-host="true"] .workspace-pane__header {
    and New thread cluster kept clear of the pane tab. */
 .shell--sidebar-collapsed .workspace-pane__header {
   padding-left: var(--octant-window-chrome-leading-width, 148px);
+}
+
+/* Native header padding must not cover the leading controls when navigation
+   is collapsed. Only the top-left pane shares that part of the title bar. */
+html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__header {
+  padding-left: var(--octant-window-chrome-leading-width, 148px);
+}
+.shell--sidebar-collapsed
+  .workspace-split[data-orientation="horizontal"]
+  > :last-child
+  .workspace-pane__header {
+  padding-left: var(--oct-space-3);
+}
+.shell--sidebar-collapsed
+  .workspace-split[data-orientation="vertical"]
+  > :last-child
+  .workspace-pane__header {
+  padding-left: var(--oct-space-3);
 }
 
 /* The grip carries the pane's surface title and is its one drag handle, in
@@ -2216,12 +2147,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   padding: 2px;
 }
 
-.settings-view__checkbox:focus-visible,
-.settings-view__range:focus-visible {
-  outline: 2px solid var(--oct-muted);
-  outline-offset: 2px;
-}
-
 /* No forced color-scheme: the root's declared scheme keeps the native
    popup matched to the active theme, which "dark" broke in light mode. */
 .settings-view__select {
@@ -2362,9 +2287,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   resize: vertical;
 }
 
-.provider-settings__alert,
-.provider-card__guidance,
-.provider-card__authority-note {
+.provider-settings__alert {
   padding: 10px 12px;
   color: var(--octant-text-secondary);
   background: var(--octant-control);
@@ -2374,10 +2297,17 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   line-height: 1.45;
 }
 
+.provider-card__guidance,
+.provider-card__authority-note {
+  margin: 0;
+  padding: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  line-height: 1.45;
+}
+
 .provider-card__authority-note {
   color: var(--octant-text-muted);
-  background: color-mix(in srgb, var(--octant-control) 75%, transparent);
-  border-color: var(--octant-border);
 }
 
 /* The form is rows in the open section, not a raised card inside it. */
@@ -2507,23 +2437,64 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   transform: rotate(180deg);
 }
 
-/* A provider instance's expanded setup and auth panel is the one discrete
-   object in the list (0072): it takes the raised recipe under its open row. */
+/* Expanded preferences share the row edge; only floating overlays are raised. */
 .prov-details {
   display: grid;
   gap: 12px;
   grid-column: 1 / -1;
-  margin: var(--oct-space-3) 0 var(--oct-space-1);
-  padding: var(--oct-space-4);
-  background: var(--octant-settings-card);
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-sm);
+  margin: 0 0 var(--oct-space-3);
+  padding: var(--oct-space-3) 0 0 36px;
+  min-width: 0;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* Details are a small sequence of named decisions rather than one technical
+   dump. Each section owns a quiet rule; the section head provides the label
+   and the body keeps values on the same reading edge as the provider row. */
+.provider-details__section {
+  display: grid;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+.provider-details__section--configuration,
+.provider-details__section--catalog,
+.provider-details__section--capabilities {
+  padding-top: var(--oct-space-3);
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.provider-details__connection-disclosure {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.provider-details__connection-trigger {
+  justify-self: start;
+  min-height: 28px;
+  padding-inline: 0;
+  font-size: var(--oct-text-xs);
+}
+
+.provider-details__connection-trigger svg {
+  transition: transform var(--oct-motion-fast) ease;
+}
+
+.provider-details__connection-trigger[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+.provider-details__connection-body {
+  display: grid;
+  gap: var(--oct-space-2);
+  min-width: 0;
 }
 
 @media (max-width: 560px) {
-  .provrow > .prov-actions {
-    grid-area: 1 / 3;
-    justify-self: end;
+  .prov-details {
+    padding-inline-start: 0;
   }
 }
 
@@ -2532,19 +2503,41 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--oct-space-2);
 }
 
 .provider-card__facts {
   margin-top: 3px;
   color: var(--octant-text-muted);
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
 }
 
-.provider-card__facts span:not(:last-child)::after {
-  margin-left: 8px;
-  color: var(--octant-divider-strong);
-  content: "·";
+.provider-details__connection-body > .provider-card__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--oct-space-2) var(--oct-space-4);
+  margin-top: 0;
+}
+
+.provider-details__connection-body > .provider-card__facts span {
+  min-width: 0;
+}
+
+.provider-details__section--connection > .provider-card__guidance,
+.provider-details__section--connection > .provider-card__authority-note {
+  max-width: 68ch;
+}
+
+.provider-card__credential-status {
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}
+
+.provider-card__credential-status strong {
+  color: var(--octant-text-primary);
+  font-weight: 500;
 }
 
 .provider-card__edit {
@@ -2556,7 +2549,15 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .provider-card__configuration {
   display: grid;
-  gap: 12px;
+  gap: var(--oct-space-4);
+  padding-top: var(--oct-space-3);
+}
+
+.provider-details__section--configuration > h3 {
+  margin: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
 }
 
 .provider-card__configuration[data-expanded="false"] {
@@ -2579,18 +2580,13 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .provider-card__discovery {
   display: grid;
-  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
-  gap: 18px;
-  padding-top: 4px;
-  border-top: 1px solid var(--octant-border);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--oct-space-4);
 }
 
-.provider-card__discovery h4 {
-  margin-bottom: 8px;
-  color: var(--octant-text-secondary);
-  font-size: calc(11 * var(--oct-text-step));
-  text-transform: none;
-  letter-spacing: 0;
+.provider-card__discovery h4,
+.provider-details__section--capabilities h4 {
+  margin: 0 0 var(--oct-space-2);
 }
 
 .provider-card__discovery ul {
@@ -2600,21 +2596,99 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   font-size: calc(12 * var(--oct-text-step));
 }
 
-.provider-card__discovery dl {
+.provider-details__section--capabilities dl {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px 14px;
 }
 
-.provider-card__discovery dl div {
+.provider-model-visibility {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+.provider-model-visibility__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+}
+
+.provider-model-visibility__head > div {
+  min-width: 0;
+}
+
+.provider-model-visibility__head .oct-section-label {
+  margin-bottom: 2px;
+}
+
+.provider-model-visibility__count {
+  flex: 0 0 auto;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.provider-model-visibility__search {
+  min-width: 0;
+}
+
+.provider-model-visibility__search input {
+  width: 100%;
+}
+
+.provider-model-visibility > ul {
+  max-height: min(320px, 36vh);
+  overflow-y: auto;
+  padding: 0;
+  list-style: none;
+  scrollbar-gutter: stable;
+}
+
+.provider-model-visibility li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  min-height: 36px;
+  padding-block: var(--oct-space-2);
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+.provider-model-visibility li:first-child {
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.provider-model-visibility li > .provider-model-visibility__name {
+  min-width: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  overflow-wrap: anywhere;
+}
+
+.provider-model-visibility li > .octant-switch {
+  flex: 0 0 auto;
+}
+
+.provider-details__section--capabilities dl div {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  color: var(--octant-text-muted);
-  font-size: calc(11 * var(--oct-text-step));
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
 }
 
-.provider-card__discovery dd {
+.provider-details__section--capabilities {
+  gap: var(--oct-space-2);
+}
+
+.provider-details__section--capabilities > .oct-row-detail {
+  margin: 0;
+}
+
+.provider-details__section--capabilities dd {
   color: var(--octant-text-secondary);
 }
 
@@ -2835,7 +2909,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .project-overview__name:focus-visible {
   border-color: var(--oct-accent-fg);
   outline: none;
-  box-shadow: var(--oct-focus-ring);
 }
 
 /* The caption above the folder chooser. It is a paragraph rather than a label
@@ -2877,7 +2950,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .project-dialog__folder:focus-visible {
   border-color: var(--oct-accent-fg);
   outline: none;
-  box-shadow: var(--oct-focus-ring);
 }
 
 .project-dialog__folder:disabled {
@@ -3257,7 +3329,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 }
 
 /* The name is the page title, editable in place: it wears no field chrome
-   until pointed at, and takes the ordinary focus ring when edited. */
+   until pointed at, and keeps the same quiet focus treatment as the shell. */
 .project-overview__title {
   min-width: 0;
 }
@@ -3515,11 +3587,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   font-size: var(--oct-text-xs);
 }
 
-.project-memory-inspector__toolbar select:focus-visible {
-  outline: 2px solid var(--oct-muted);
-  outline-offset: 2px;
-}
-
 .project-memory-status-stack {
   grid-area: status;
   display: grid;
@@ -3557,19 +3624,20 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .environment-git-group dl {
   margin: 0;
+  padding: var(--oct-space-2) 0;
   overflow: hidden;
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-sm);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
 }
 
 .environment-git-group__row {
   display: grid;
   min-width: 0;
-  min-height: 30px;
+  min-height: 32px;
   grid-template-columns: 86px minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
+  gap: var(--oct-space-3);
   padding: 0 10px;
 }
 
@@ -3580,10 +3648,10 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .environment-git-group__row dt {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--oct-space-2);
   min-width: 0;
   color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-sm);
 }
 
 .environment-git-group__row dd {
@@ -3591,7 +3659,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   margin: 0;
   overflow: hidden;
   color: var(--octant-text-secondary);
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3603,7 +3671,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   align-items: baseline;
   min-width: 0;
   overflow: hidden;
-  gap: 8px;
+  gap: var(--oct-space-2);
 }
 
 .environment-git-group__identity-primary,
@@ -3823,7 +3891,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   min-width: 0;
   align-items: baseline;
   gap: var(--oct-space-2);
-  padding: 14px 14px 10px;
+  padding: var(--oct-space-2) var(--oct-space-4);
   border-bottom: 1px solid var(--oct-hairline);
 }
 .thread-environment-dock__header h2 {
@@ -3842,17 +3910,55 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 }
 .thread-environment-dock__body {
   display: grid;
-  padding: 0 14px 18px;
+  align-content: start;
+  gap: 0;
+  padding: 0 var(--oct-space-4) var(--oct-space-4);
 }
 .thread-environment-dock__body > * + * {
   border-top: 1px solid var(--oct-hairline);
+  padding-top: var(--oct-space-2);
+}
+.environment-checkout {
+  min-width: 0;
+}
+.environment-quick-action {
+  display: flex;
+  width: 100%;
+  justify-content: flex-start;
+  gap: var(--oct-space-2);
+  min-height: 32px;
+  padding: 0;
+  font-weight: var(--oct-weight-regular);
+}
+.environment-quick-action__detail {
+  margin-inline-start: auto;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+.environment-section-label {
+  margin: 0 0 6px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-regular);
+}
+.environment-changes-action {
+  min-height: 28px;
+  height: auto;
+  padding: 0 6px;
+  margin-inline-start: -6px;
+}
+.thread-environment-dock .environment-group .environment-group {
+  border: 0;
+  margin-top: 0;
 }
 /* Title and action share one row so a section's action sits with the section
    it belongs to, rather than floating between two of them. */
 .thread-environment-dock .environment-group__head {
+  border-bottom: 0;
   display: flex;
   align-items: center;
   gap: var(--oct-space-2);
+  min-width: 0;
 }
 
 .thread-environment-dock .environment-group__head .environment-group__header {
@@ -3876,7 +3982,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 }
 
 .thread-environment-dock .environment-group__header {
-  min-height: 36px;
+  min-height: 32px;
   padding: 0;
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
@@ -3884,14 +3990,16 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   text-transform: none;
 }
 .thread-environment-dock .environment-group__summary {
+  flex: 0 1 auto;
   overflow: hidden;
-  max-width: 55%;
+  max-width: 60%;
+  color: var(--oct-muted);
   font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .thread-environment-dock .environment-group__body {
-  padding: 0 0 var(--oct-space-3);
+  padding: 0 0 var(--oct-space-2);
 }
 /* The git facts are a definition list, not a card: label column, value
    column, one line each, the same type scale as the group headers below. */
@@ -3910,16 +4018,16 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   background: transparent;
 }
 .thread-environment-dock .environment-git-group__row {
-  grid-template-columns: 96px minmax(0, 1fr);
+  grid-template-columns: 104px minmax(0, 1fr);
   gap: var(--oct-space-2);
 }
 .thread-environment-dock .environment-git-group__row + .environment-git-group__row {
   border-top: 0;
 }
 .thread-environment-dock .environment-git-group__row dt {
-  gap: var(--oct-space-2);
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
+  gap: 12px;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
 }
 .thread-environment-dock .environment-git-group__row dd {
   color: var(--oct-fg-2);
@@ -3930,6 +4038,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 }
 .thread-environment-dock .environment-git-group__identity-secondary {
   font-size: var(--oct-text-xs);
+  max-width: 100%;
 }
 /* Actions read as rows, not links: same height as a group header, foreground
    text, no underline, and they start where the group titles start. */
@@ -3958,9 +4067,44 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-regular);
 }
+/* One rhythm for every row in the rail: 32px tall, identity left, controls
+   right. Name, address, and state sit in fixed columns so the state label
+   lines up down the list instead of trailing each address's own width. */
 .thread-environment-dock .local-servers__row {
-  gap: 3px;
-  padding: var(--oct-space-2) 0;
+  min-height: 32px;
+  gap: var(--oct-space-2);
+  padding: 0;
+}
+
+.thread-environment-dock .local-servers__identity {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.thread-environment-dock .local-servers__meta {
+  min-width: 84px;
+  justify-content: flex-end;
+}
+
+.thread-environment-dock .local-servers__actions {
+  gap: 0;
+  margin: 0;
+}
+
+.thread-environment-dock .local-servers__actions button,
+.thread-environment-dock .local-servers__more {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  justify-content: center;
+}
+
+/* Icon-only in the rail; every control names itself with an aria-label. */
+.thread-environment-dock .local-servers__actions > button > span,
+.thread-environment-dock .local-servers__more > span {
+  display: none;
 }
 .thread-environment-dock .local-servers__row + .local-servers__row {
   border-top: 1px solid var(--oct-hairline);
@@ -3979,10 +4123,27 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
 }
-.thread-environment-dock .local-servers__actions {
-  margin-top: 2px;
-  margin-left: calc(var(--oct-space-2) * -1);
+.thread-environment-dock .code-composer-choice__trigger {
+  display: inline-flex;
+  width: 100%;
+  max-width: none;
+  min-height: 28px;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: 0;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
 }
+
+.thread-environment-dock .code-composer-choice__trigger > :last-child {
+  margin-left: auto;
+}
+
+.thread-environment-dock .code-composer-choice__trigger:hover:not(:disabled) {
+  background: transparent;
+  color: var(--oct-fg);
+}
+
 .thread-environment-dock .environment-pull-requests__refresh {
   top: -32px;
 }
@@ -4114,6 +4275,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 }
 
 .environment-pull-requests {
+  display: grid;
+  align-content: start;
   position: relative;
   min-width: 0;
 }
@@ -4132,9 +4295,9 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .environment-pull-requests__row {
   display: grid;
-  gap: 4px;
+  gap: var(--oct-space-1);
   min-width: 0;
-  padding: 9px 0;
+  padding: var(--oct-space-2) 0;
   color: inherit;
   text-decoration: none;
 }
@@ -4148,7 +4311,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 6px;
+  gap: var(--oct-space-2);
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
 }
@@ -4252,9 +4415,9 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .environment-chat-group__row {
   display: grid;
   grid-template-columns: minmax(88px, 0.8fr) minmax(0, 1.2fr);
-  gap: 10px;
+  gap: var(--oct-space-3);
   align-items: baseline;
-  padding: 7px 0;
+  padding: var(--oct-space-2) 0;
 }
 
 .environment-chat-group__row + .environment-chat-group__row {
@@ -4263,14 +4426,14 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .environment-chat-group__row dt {
   color: var(--octant-text-muted);
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-sm);
 }
 
 .environment-chat-group__row dd {
   min-width: 0;
   margin: 0;
   color: var(--octant-text-secondary);
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-sm);
   overflow-wrap: anywhere;
   text-align: right;
 }
@@ -4278,7 +4441,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .environment-chat-group__status {
   margin: 0;
   color: var(--octant-text-muted);
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 /* Collapsible groups are ordinary product rows: each group's name is a
@@ -4317,7 +4480,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   transition: transform var(--oct-motion-fast) ease;
 }
 
-.environment-group--open .environment-group__chevron {
+.environment-group--open > .environment-group__head .environment-group__chevron {
   transform: rotate(90deg);
 }
 
@@ -4412,19 +4575,29 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   text-transform: none;
 }
 
+/* One line per server, in a list rather than a stack of cards: the name, its
+   address, and its state read left to right, and the controls sit at the end.
+   Five cards of four rows each made a fifteen-server host a wall. */
 .local-servers__row {
   display: grid;
-  gap: 6px;
-  padding: 8px 10px;
-  border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-sm);
-  background: var(--octant-control);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-height: 30px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--octant-border);
+}
+
+.local-servers__row:last-child {
+  border-bottom: 0;
 }
 
 .local-servers__identity {
-  display: grid;
+  display: flex;
   min-width: 0;
-  gap: 2px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--oct-space-2);
 }
 
 .local-servers__name {
@@ -4455,15 +4628,20 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .local-servers__actions {
   display: flex;
-  flex-wrap: wrap;
+  flex: none;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
 }
 
 .local-servers__actions button {
   height: 22px;
-  padding: 0 8px;
+  padding: 0 6px;
+  color: var(--octant-text-muted);
   font-size: calc(11 * var(--oct-text-step));
+}
+
+.local-servers__actions button:hover {
+  color: var(--oct-fg);
 }
 
 .local-servers__action-feedback,
@@ -5496,7 +5674,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
     grid-template-columns: 1fr;
   }
 
-  .provider-card__discovery dl {
+  .provider-details__section--capabilities dl {
     grid-template-columns: 1fr;
   }
 }
@@ -5541,7 +5719,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
     grid-column: 1;
   }
 
-  .provider-card__discovery dl {
+  .provider-details__section--capabilities dl {
     grid-template-columns: 1fr;
   }
 
@@ -5691,15 +5869,17 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 }
 
 .composer-model-picker__menu {
+  box-sizing: border-box;
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
-  width: min(640px, 90vw);
+  grid-template-columns: 40px minmax(0, 1fr);
+  width: min(560px, 90vw);
   /* A fixed box, not a cap. The rail switches provider inside one open menu,
      and provider lists differ wildly in length — a twelve-model list next to
      an empty one resized the panel between clicks, so the menu appeared to
      jump under the pointer. A stable height costs some empty space on short
      lists and buys a menu that holds still. The list pane scrolls. */
-  height: min(60vh, 520px);
+  height: min(46vh, 420px);
+  max-height: calc(100dvh - 24px);
   padding: 0;
   overflow: hidden;
   background: var(--octant-surface);
@@ -5739,7 +5919,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   height: 100%;
   padding: 8px 0;
   overflow-y: auto;
@@ -5756,8 +5936,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 .composer-model-picker__rail-item {
   position: relative;
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   flex: 0 0 auto;
   place-items: center;
   padding: 0;
@@ -5770,11 +5950,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .composer-model-picker__rail-item:hover {
   background: var(--octant-control-hover);
-}
-
-.composer-model-picker__rail-item:focus-visible {
-  outline: 2px solid var(--oct-muted);
-  outline-offset: -2px;
 }
 
 .composer-model-picker__rail-item--active {
@@ -5794,10 +5969,10 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .composer-model-picker__rail-status {
   position: absolute;
-  right: 4px;
-  bottom: 4px;
-  width: 8px;
-  height: 8px;
+  right: 3px;
+  bottom: 3px;
+  width: 7px;
+  height: 7px;
   background: var(--octant-warning-text);
   border: 1.5px solid var(--octant-surface);
   border-radius: 50%;
@@ -5852,8 +6027,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
-  min-height: 34px;
-  margin: 10px 10px 6px;
+  min-height: 32px;
+  margin: 8px 10px 6px;
   padding: 0 12px;
   color: var(--octant-text-muted);
   background: var(--octant-control);
@@ -5863,7 +6038,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .composer-model-picker__search:focus-within {
   border-color: var(--octant-focus-ring);
-  box-shadow: 0 0 0 2px var(--octant-accent-tint);
 }
 
 .composer-model-picker__search input {
@@ -5910,11 +6084,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .composer-model-picker__catalog:hover {
   background: var(--octant-control-hover);
-}
-
-.composer-model-picker__catalog:focus-visible {
-  outline: 2px solid var(--oct-muted);
-  outline-offset: -2px;
 }
 
 .composer-model-picker__catalog--on {
@@ -5975,9 +6144,9 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  min-height: 40px;
+  min-height: 38px;
   min-width: 0;
-  padding: 6px 4px 6px 10px;
+  padding: 5px 4px 5px 10px;
   color: var(--octant-text-primary);
   background: transparent;
   border: 0;
@@ -5986,12 +6155,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   font: inherit;
   font-size: var(--oct-text-sm);
   text-align: left;
-}
-
-.composer-model-picker__model:focus-visible,
-.composer-model-picker__star:focus-visible {
-  outline: 2px solid var(--oct-muted);
-  outline-offset: -2px;
 }
 
 .composer-model-picker__model-copy {
@@ -6031,8 +6194,8 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 .composer-model-picker__star {
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   place-items: center;
   padding: 0;
   color: var(--octant-text-muted);
@@ -6091,7 +6254,7 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 @media (max-width: 640px) {
   .composer-model-picker__menu {
     width: calc(100vw - 32px);
-    height: min(70vh, 520px);
+    height: min(70vh, 420px);
   }
 }
 
@@ -6166,13 +6329,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   font-size: var(--oct-text-sm);
 }
 
-/* Placement only: the recipe is the system's `.approval-row`, the measure the
-   shared `.thread-column`, the distance the same one a notice keeps. */
-.code-thread-workspace > .approval-row {
-  flex: 0 0 auto;
-  margin: 12px auto 0;
-}
-
 .code-thread-workspace__waiting svg {
   flex: 0 0 auto;
   color: var(--octant-warning-text);
@@ -6194,6 +6350,22 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 /* A provider's question takes the approval row with its answer field. */
 .code-thread-workspace__provider-request > input {
   flex: 1 1 200px;
+}
+
+/* Provider questions are actionable composer state. Keep them with the
+   composer at the foot of the thread so the answer never gets separated from
+   the message field by a long transcript. The shared request row supplies
+   its controls and neutral surface; this wrapper owns the stack and measure. */
+.code-thread-workspace__provider-requests {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 8px;
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+.code-thread-workspace__provider-requests .approval-row {
+  width: 100%;
 }
 
 /* The scroll frame and its padding are the system's `.transcript-scroll`. */
@@ -6227,23 +6399,22 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   color: var(--oct-fg);
 }
 
-/* Sits directly on the composer, sharing its column, so the branch reads as
-   part of the box the next message is typed into rather than as a banner
-   floating above the transcript. */
+/* The checkout belongs to the follow-up composer's attached context strip. */
 .code-checkout-bar {
   display: flex;
   min-width: 0;
   align-items: center;
   gap: var(--oct-space-3);
-  width: min(100% - 40px, var(--oct-thread-measure));
-  margin-inline: auto;
-  padding: 6px 14px 0;
+  width: 100%;
+  margin: 0;
+  padding: 0;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
 }
 
 .code-checkout-bar__identity {
   display: flex;
+  flex: 1 1 auto;
   min-width: 0;
   align-items: center;
   gap: 6px;
@@ -6290,6 +6461,16 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   padding-inline: 8px;
 }
 
+@media (max-width: 560px) {
+  .thread-composer__context .code-checkout-bar__action {
+    width: 28px;
+    padding-inline: 0;
+  }
+  .thread-composer__context .code-checkout-bar__action span {
+    display: none;
+  }
+}
+
 /* The message's bubble, time, reply prose, and their rhythm are the system's
    (`.turn-user`, `.bubble`, `.turn-time`, `.turn-agent`, as in Chat and
    Work). Only the access receipt under a person's message is Code's own: a
@@ -6306,13 +6487,12 @@ html[data-octant-native-host="true"] .workspace-pane__header {
    `.thread-composer`, `.composer-row`, `.composer-status`, as in Chat and
    Work); this block only pads the pieces the system does not know about. */
 
-/* Chips, queued turns, and attachments are frameless rows of the frame, so
-   they take the same gutter the system gives `.composer-chips`. */
+/* Chips and attachments are frameless rows of the frame, so they take the
+   same gutter the system gives `.composer-chips`. */
 .code-thread-workspace__composer .thread-mention__chips,
-.code-thread-workspace__queue,
 .code-thread-workspace__attachments {
   margin: 0;
-  padding: var(--oct-space-3) var(--oct-space-3) 0;
+  padding: var(--oct-space-3) var(--oct-composer-gutter) 0;
 }
 
 /* Attached images, in the composer and on the message that carried them.
@@ -6531,40 +6711,6 @@ html[data-octant-native-host="true"] .workspace-pane__header {
 
 html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   animation: none;
-}
-
-.code-thread-workspace__queue {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  list-style: none;
-}
-
-.code-thread-workspace__queue-chip {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-2);
-  padding: 4px 4px 4px 8px;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  background: var(--oct-surface-warm);
-  font-size: var(--oct-text-xs);
-}
-
-.code-thread-workspace__queue-position {
-  flex: none;
-  min-width: 16px;
-  color: var(--oct-muted);
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
-
-.code-thread-workspace__queue-prompt {
-  flex: 1;
-  overflow: hidden;
-  color: var(--oct-fg);
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 .code-thread-workspace__access {
@@ -6912,11 +7058,6 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   max-height: 28rem;
   overflow-y: auto;
   outline: none;
-}
-
-.model-picker__listbox:focus-visible {
-  border-radius: var(--oct-radius-sm);
-  box-shadow: var(--oct-focus-ring);
 }
 
 .model-picker__group {
@@ -7500,10 +7641,6 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   outline: none;
 }
 
-.host-selector__select:focus-visible {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--octant-accent) 45%, transparent);
-}
-
 /* ── Federated host lifecycle (Post-preview B6) ────────────────────────── */
 
 .federated-hosts-lifecycle {
@@ -7977,11 +8114,6 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   opacity: 1;
 }
 
-.code-board__status-option input:focus-visible + span {
-  outline: 2px solid var(--oct-accent-fg);
-  outline-offset: 1px;
-}
-
 .code-board__filter-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -8075,10 +8207,24 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
 }
 
 .code-board__view-popover {
+  display: grid;
   left: auto;
   right: 0;
-  min-width: 190px;
+  min-width: 220px;
   padding: var(--oct-space-2);
+  gap: var(--oct-space-2);
+}
+
+.code-board__view-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+}
+
+.code-board__view-label {
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-detail);
 }
 
 .code-board__view-popover label {
@@ -8135,11 +8281,6 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
 
 .code-board .board-card:hover {
   background: var(--oct-fg-soft);
-}
-
-.code-board .board-card:focus-visible {
-  outline: 2px solid var(--oct-focus);
-  outline-offset: 1px;
 }
 
 .code-board .board-card-top {
@@ -8201,12 +8342,6 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   font-family: var(--oct-font-display);
 }
 
-.code-board .code-board__card-details summary:focus-visible {
-  outline: 2px solid var(--oct-focus);
-  outline-offset: 1px;
-  border-radius: var(--oct-radius-sm);
-}
-
 /* Pull-request chips inside a card keep the compact facts grammar and
    truncate so a long PR title never forces the card wider than its column. */
 .board-card-pr-list {
@@ -8243,11 +8378,6 @@ html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
 .board-card-pr:hover {
   border-color: var(--oct-border);
   background: var(--oct-fg-soft);
-}
-
-.board-card-pr:focus-visible {
-  outline: 2px solid var(--oct-focus);
-  outline-offset: 1px;
 }
 
 .board-card-pr .icon {
@@ -8439,10 +8569,6 @@ ul.board-col-body {
 
   .code-board__subtitle {
     display: none;
-  }
-
-  .code-board__grouping {
-    order: 2;
   }
 
   .code-board__search {
@@ -8707,6 +8833,7 @@ ul.board-col-body {
    language; this sheet keeps the search field, the PR row anatomy, and the
    status line the dock review tools share. */
 .code-project-pull-requests {
+  container: pull-requests / inline-size;
   display: grid;
   min-width: 0;
   gap: var(--oct-space-3);
@@ -8717,10 +8844,11 @@ ul.board-col-body {
 }
 
 .code-project-pull-requests__status {
-  width: min(100%, 840px);
-  margin: -4px auto 0;
+  width: 100%;
+  margin: -2px 0 0;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
 }
 
 .code-project-pull-requests__status[data-state="stale"] {
@@ -8768,7 +8896,7 @@ ul.board-col-body {
 .code-project-pull-requests__groups {
   display: grid;
   min-width: 0;
-  gap: var(--oct-space-2);
+  gap: var(--oct-space-6);
 }
 
 .code-project-pull-requests__project-header {
@@ -8777,7 +8905,8 @@ ul.board-col-body {
   align-items: center;
   justify-content: space-between;
   gap: var(--oct-space-4);
-  padding: 10px 0 8px;
+  min-height: 40px;
+  padding: 4px 0 2px;
   border-bottom: 1px solid var(--oct-hairline);
 }
 
@@ -8819,9 +8948,9 @@ ul.board-col-body {
   grid-template-columns: 16px minmax(0, 1fr);
   width: 100%;
   height: auto;
-  min-height: 66px;
   gap: 10px;
-  padding: 10px 8px;
+  min-height: 64px;
+  padding: var(--oct-space-3) var(--oct-space-2);
   border: 0;
   border-bottom: 1px solid var(--oct-border-soft);
   border-radius: 0;
@@ -8832,7 +8961,7 @@ ul.board-col-body {
 }
 
 .code-project-pull-requests__row[aria-pressed="true"] {
-  background: var(--accent);
+  background: var(--oct-selection);
 }
 
 .code-project-pull-requests__row:hover,
@@ -8906,7 +9035,7 @@ ul.board-col-body {
   white-space: nowrap;
 }
 
-@media (max-width: 900px) {
+@container pull-requests (max-width: 700px) {
   .code-project-pull-requests__row-content {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -8914,6 +9043,9 @@ ul.board-col-body {
     grid-column: 1;
     grid-row: auto;
     justify-content: flex-start;
+  }
+  .code-project-pull-requests__details {
+    flex-wrap: wrap;
   }
 }
 

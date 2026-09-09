@@ -87,6 +87,28 @@ describe("ProjectService", () => {
     expect(fixture.append).not.toHaveBeenCalled();
   });
 
+  it("answers every reader within a second from one bootstrap and recomputes after a command", async () => {
+    const validate = vi.fn(async (_type: "work" | "code", path: string) => ({
+      canonicalRoot: path,
+    }));
+    const fixture = fixtureService({ projects: [codeProject()], validate });
+
+    await fixture.service.bootstrap(windowId);
+    await fixture.service.bootstrap(windowId);
+    expect(validate).toHaveBeenCalledTimes(1);
+
+    await fixture.service.executeProject(windowId, {
+      kind: "create-chat-project",
+      projectId: chatId,
+      expectedVersion: 0,
+      name: "Research",
+      hostId: "local",
+    });
+    const bootstrap = await fixture.service.bootstrap(windowId);
+    expect(validate).toHaveBeenCalledTimes(2);
+    expect(bootstrap.active.map((project) => project.name)).toContain("Research");
+  });
+
   it("creates and mutates Projects with local-user events and optimistic versions", async () => {
     const fixture = fixtureService();
     await expect(

@@ -4,6 +4,7 @@ import {
   type ProviderFailure,
   type ProviderModelId,
   type ProviderRuntimeEvent,
+  type ProviderToolDefinition,
 } from "@octant/contracts";
 import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -12,6 +13,7 @@ import type { AcpConnection, AcpProcessPort } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind, type AcpProviderProfile } from "./acpProfiles";
 import { AcpFailure, type AcpNewSessionResult } from "./acpProtocol";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import type { ManagedToolAnswer, ManagedToolCallContext } from "./managedMcpTools";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000311");
 const otherInstanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000312");
@@ -155,7 +157,9 @@ function permissionRequest(id: string, toolCallId: string) {
 
 function fixture(
   profile: AcpProviderProfile,
-  overrides: Partial<Pick<AcpDriverOptions, "authentication">> = {},
+  overrides: Partial<Pick<AcpDriverOptions, "authentication" | "managedToolsBridgeFactory">> & {
+    readonly mcpHttp?: boolean;
+  } = {},
 ) {
   const client = new FakeClient(profile);
   const starts: Array<Record<string, unknown>> = [];
@@ -171,6 +175,7 @@ function fixture(
         loadSession: true,
         promptCapabilities: { image: true, audio: false, embeddedContext: true },
         sessionCapabilities: { list: {} },
+        ...(overrides.mcpHttp === true ? { mcpCapabilities: { http: true } } : {}),
       },
       authMethods: [{ id: "provider-auth" }],
       agentInfo: { name: profile.process.agentName, version: "0.0.0-dev" },
@@ -227,6 +232,20 @@ function fixture(
     active: () => active,
     released: () => released,
   };
+}
+
+async function withProcessPlatform<T>(
+  platform: NodeJS.Platform,
+  action: () => Promise<T>,
+): Promise<T> {
+  const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+  if (descriptor === undefined) throw new Error("Expected a process platform descriptor.");
+  Object.defineProperty(process, "platform", { ...descriptor, value: platform });
+  try {
+    return await action();
+  } finally {
+    Object.defineProperty(process, "platform", descriptor);
+  }
 }
 
 async function collectTerminal(
@@ -374,6 +393,204 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       message: `${profile.displayName} did not report a selectable model.`,
     });
     expect(result.lastSuccessfulProbeAt).toBeDefined();
+  });
+
+  it("reports app-managed tools only when the ACP handshake advertises HTTP MCP", async () => {
+    const unsupported = await Effect.runPromise(
+      Effect.scoped(fixture(profile).driver.probe({ instanceId })),
+    );
+    expect(unsupported.capabilities.appManagedTools).toBe("unsupported");
+    const supported = await withProcessPlatform("darwin", () =>
+      Effect.runPromise(
+        Effect.scoped(fixture(profile, { mcpHttp: true }).driver.probe({ instanceId })),
+      ),
+    );
+    expect(supported.capabilities.appManagedTools).toBe("supported");
+  });
+
+  it("registers the exact app tool catalogue before an HTTP-capable ACP session starts", async () => {
+    const bridgeClose = vi.fn(async () => undefined);
+    type ExecuteManagedTool = (
+      name: string,
+      inputJson: string,
+      signal: AbortSignal,
+      context?: ManagedToolCallContext,
+    ) => Promise<ManagedToolAnswer>;
+    const bridgeFactory = vi.fn(
+      async (_definitions: ReadonlyArray<ProviderToolDefinition>, _handler: ExecuteManagedTool) => {
+        return {
+          server: {
+            type: "http" as const,
+            name: "octant-browser",
+            url: "http://127.0.0.1:43123/mcp/test",
+            headers: [{ name: "Authorization", value: "Bearer test" }],
+          },
+          port: 43123,
+          attested: Promise.resolve(),
+          close: bridgeClose,
+        };
+      },
+    );
+    const { driver, client } = fixture(profiles[0]!, {
+      mcpHttp: true,
+      managedToolsBridgeFactory: bridgeFactory,
+    });
+    const tools = [
+      {
+        name: "octant_browser",
+        inputSchema: { type: "object", properties: { operation: { type: "string" } } },
+      },
+    ] as const;
+
+    await withProcessPlatform("darwin", () =>
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({
+              sessionId,
+              modelId,
+              executionPolicy: "approval-gated",
+              tools,
+            });
+            expect(client.newSession).toHaveBeenCalledWith(projectRoot, [
+              expect.objectContaining({ type: "http", name: "octant-browser" }),
+            ]);
+            yield* connection.stop(sessionId);
+          }),
+        ),
+      ),
+    );
+    expect(bridgeFactory).toHaveBeenCalledOnce();
+    expect(bridgeClose).toHaveBeenCalledOnce();
+  });
+
+  it("refuses app tools before session creation when ACP HTTP MCP was not negotiated", async () => {
+    const bridgeClose = vi.fn(async () => undefined);
+    const bridgeFactory = vi.fn(async () => ({
+      server: {
+        type: "http" as const,
+        name: "octant-browser",
+        url: "http://127.0.0.1:43123/mcp/test",
+        headers: [{ name: "Authorization", value: "Bearer test" }],
+      },
+      port: 43123,
+      attested: Promise.resolve(),
+      close: bridgeClose,
+    }));
+    const { driver, client } = fixture(profiles[0]!, { managedToolsBridgeFactory: bridgeFactory });
+    const tools = [
+      { name: "octant_browser", inputSchema: { type: "object", properties: {} } },
+    ] as const;
+    const refusal = await withProcessPlatform("linux", () =>
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.flip(
+            Effect.gen(function* () {
+              const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+              yield* connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+                tools,
+              });
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(refusal).toEqual({
+      category: "unsupported",
+      message: "App-managed tools are unsupported by this ACP runtime on this platform.",
+    });
+    expect(client.newSession).not.toHaveBeenCalled();
+    expect(bridgeFactory).not.toHaveBeenCalled();
+    expect(bridgeClose).not.toHaveBeenCalled();
+  });
+
+  it("correlates an ACP MCP tool request through the provider SDK answer seam and cancels it", async () => {
+    const bridgeClose = vi.fn(async () => undefined);
+    type ExecuteManagedTool = (
+      name: string,
+      inputJson: string,
+      signal: AbortSignal,
+      context?: ManagedToolCallContext,
+    ) => Promise<ManagedToolAnswer>;
+    let execute: ExecuteManagedTool | undefined;
+    const bridgeFactory = vi.fn(
+      async (_definitions: ReadonlyArray<ProviderToolDefinition>, handler: ExecuteManagedTool) => {
+        execute = handler;
+        return {
+          server: {
+            type: "http" as const,
+            name: "octant-browser",
+            url: "http://127.0.0.1:43123/mcp/test",
+            headers: [{ name: "Authorization", value: "Bearer test" }],
+          },
+          port: 43123,
+          attested: Promise.resolve(),
+          close: bridgeClose,
+        };
+      },
+    );
+    const { driver } = fixture(profiles[0]!, {
+      mcpHttp: true,
+      managedToolsBridgeFactory: bridgeFactory,
+    });
+    const tools = [
+      { name: "octant_browser", inputSchema: { type: "object", properties: {} } },
+    ] as const;
+    await withProcessPlatform("darwin", () =>
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({
+              sessionId,
+              modelId,
+              executionPolicy: "approval-gated",
+              tools,
+            });
+            if (execute === undefined)
+              throw new Error("ACP managed tool handler was not registered.");
+            const controller = new AbortController();
+            const result = execute(
+              "octant_browser",
+              '{"operation":"read-page"}',
+              controller.signal,
+            );
+            const stream = yield* connection.subscribe;
+            const requestFiber = yield* Effect.fork(
+              Stream.runCollect(
+                stream.pipe(
+                  Stream.filter((event) => event.kind === "tool-request"),
+                  Stream.take(1),
+                ),
+              ),
+            );
+            const requestEvents = yield* Fiber.join(requestFiber);
+            const requestEvent = Array.from(requestEvents)[0];
+            if (requestEvent?.kind !== "tool-request") throw new Error("Missing ACP tool request.");
+            const requestSignal = connection.toolRequestSignal?.({
+              sessionId,
+              requestId: requestEvent.requestId,
+            });
+            expect(requestSignal).toBeInstanceOf(AbortSignal);
+            expect(requestSignal).not.toBe(controller.signal);
+            controller.abort();
+            expect(requestSignal?.aborted).toBe(true);
+            yield* Effect.promise(() =>
+              expect(result).resolves.toEqual({
+                resultJson: '{"error":"tool-interrupted"}',
+                isError: true,
+              }),
+            );
+            yield* connection.stop(sessionId);
+          }),
+        ),
+      ),
+    );
+    expect(bridgeClose).toHaveBeenCalledOnce();
   });
 
   it("requires an explicit product mode and matching instance before acquire", async () => {

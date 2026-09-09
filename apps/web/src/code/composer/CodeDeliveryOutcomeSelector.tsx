@@ -40,8 +40,6 @@ export interface CodeDeliveryOutcomeSelectorProps {
   readonly disabled?: boolean;
   readonly onChange: (outcome: CodeDeliveryOutcomeKind) => void;
   readonly value: CodeDeliveryOutcomeKind;
-  /** True while the value is still the one read from the prompt. */
-  readonly suggested: boolean;
 }
 
 /**
@@ -69,9 +67,6 @@ export function CodeDeliveryOutcomeSelector(props: CodeDeliveryOutcomeSelectorPr
         <>
           <TriggerIcon aria-hidden="true" size={12} strokeWidth={1.8} />
           <span>{selected?.label}</span>
-          {props.suggested ? (
-            <span className="code-composer-choice__hint">read from your prompt</span>
-          ) : null}
           <ChevronDown aria-hidden="true" size={12} />
         </>
       }

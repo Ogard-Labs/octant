@@ -842,7 +842,11 @@ export function mapClaudeMessage(
     case "result":
       return mapResult(context, message);
     case "tool-progress": {
-      const state = context.toolStates.get(message.toolUseId);
+      const state =
+        context.toolStates.get(message.toolUseId) ??
+        (message.parentToolUseId === undefined
+          ? undefined
+          : context.toolStates.get(message.parentToolUseId));
       if (
         state === undefined ||
         state.toolName !== normalized(message.toolName, LABEL_MAX_CHARACTERS) ||

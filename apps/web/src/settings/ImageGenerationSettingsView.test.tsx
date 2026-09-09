@@ -62,11 +62,12 @@ describe("ImageGenerationSettingsView", () => {
     expect(screen.getByRole("button", { name: "Add image source" })).toBeDisabled();
   });
 
-  it("mentions Recraft as a working example", () => {
+  it("explains the difference between image sources and saved profiles", () => {
     render(
       <ImageGenerationSettingsView onSettingsChange={vi.fn()} settings={{ customSources: [] }} />,
     );
-    expect(screen.getByText(/Recraft/)).toBeVisible();
+    expect(screen.getByText(/Sources connect a provider and image model/)).toBeVisible();
+    expect(screen.getByText(/Saved profiles in Image generator/)).toBeVisible();
   });
 
   it("adds a custom image source through one shell settings patch", async () => {
