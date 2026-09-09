@@ -17,6 +17,12 @@ describe("Git history reads", () => {
     expect(decodeGitHistoryQuery(query)).toEqual(query);
   });
 
+  it("accepts a local branch name containing Unicode", () => {
+    expect(
+      decodeGitHistoryQuery({ kind: "history", ...scope, revision: "refs/heads/forbedring/æøå" }),
+    ).toMatchObject({ revision: "refs/heads/forbedring/æøå" });
+  });
+
   it("refuses shell options, host paths, and oversized pages at the boundary", () => {
     for (const extra of [
       { revision: "--all" },

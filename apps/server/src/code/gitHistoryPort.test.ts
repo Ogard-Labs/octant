@@ -130,6 +130,13 @@ describe("local Git history", () => {
     const empty = await reader.read(root, decodeGitHistoryQuery({ kind: "history", ...scope }));
     expect(empty).toMatchObject({ status: "history", commits: [], head: null });
     const oid = commit(root, "A searchable note");
+    git(root, "branch", "forbedring/æøå");
+    expect(
+      await reader.read(
+        root,
+        decodeGitHistoryQuery({ kind: "history", ...scope, revision: "refs/heads/forbedring/æøå" }),
+      ),
+    ).toMatchObject({ status: "history", commits: [{ oid }] });
     git(root, "checkout", "--detach", "-q");
     const searched = await reader.read(
       root,

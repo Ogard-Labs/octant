@@ -113,7 +113,7 @@ function BoundHistory(props: GitHistoryPanelProps) {
   const commits = page?.commits ?? [];
   const graph = useMemo(() => layoutCommitGraph(commits), [commits]);
   const lanes = Math.max(1, ...graph.map((row) => row.width));
-  const graphWidth = Math.min(160, Math.max(48, lanes * 14 + 20));
+  const graphWidth = search === "" ? Math.min(160, Math.max(48, lanes * 14 + 20)) : 48;
   const spacing = Math.min(14, (graphWidth - 20) / Math.max(1, lanes - 1));
   const virtual = useVirtualizer({
     count: commits.length,
@@ -291,7 +291,7 @@ function BoundHistory(props: GitHistoryPanelProps) {
                           selection.current = commit.oid;
                           setSelected(commit.oid);
                         }}
-                        title={`${commit.subject}\n${commit.parents.length} parents`}
+                        title={`${commit.subject}\n${commit.parents.length} ${commit.parents.length === 1 ? "parent" : "parents"}`}
                         aria-label={`Open commit ${commit.oid.slice(0, 7)}: ${commit.subject}`}
                       >
                         {commit.subject}
