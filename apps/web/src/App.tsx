@@ -4620,6 +4620,7 @@ function LaunchedShell(
       integrationClient={linearClient}
       usageClient={usageClient}
       {...(providerUsageLimitsClient === undefined ? {} : { providerUsageLimitsClient })}
+      {...(localUsageHistoryClient === undefined ? {} : { localUsageHistoryClient })}
       visibleSettings={controller.visibleSettings}
       backgroundImageLibrary={backgroundImageLibrary}
       announcement={controller.announcement}
