@@ -456,7 +456,12 @@
 
 /* Under one start screen the ground clears a hole for the composer. The hole
    is measured in pixels because the composer is: it sits under a capped top
-   padding, so its place does not scale with the pane. */
+   padding, so its place does not scale with the pane.
+
+   The ground stays at z-index 0 and the start screen's own content is lifted
+   above it: at -1 the ground disappeared entirely behind the workspace fill,
+   and sharing a level with the content painted its dots over the greeting and
+   over the suggestion cards, which read as the cards being see-through. */
 .app-backdrop[data-placement="welcome"] {
   mask-image:
     radial-gradient(
