@@ -817,7 +817,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         expectedVersion: thread.version,
         executionPolicy: thread.executionPolicy,
         permissionPersistence: thread.permissionPersistence,
-        ...(next ? { autoApprove: true } : {}),
+        autoApprove: next,
       });
     } finally {
       setAccessChanging(false);
