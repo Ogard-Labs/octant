@@ -8,7 +8,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { OctantSlider } from "../ui/base/OctantSlider";
+import { SliderField } from "./SliderField";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 
 /** The host's shared background image library, read through the window's authority. */
@@ -232,50 +232,54 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
           ) : null}
           <label className="settings-view__field">
             <span>Pattern opacity</span>
-            <OctantSlider
+            <SliderField
               aria-label="Pattern opacity"
               className="settings-view__range"
               max={100}
               min={0}
               onChange={(event) => dial("patternOpacity", Number(event.currentTarget.value))}
               step={1}
+              format={(value) => `${String(value)}%`}
               value={background.patternOpacity}
             />
           </label>
           <label className="settings-view__field">
             <span>Pattern speed</span>
-            <OctantSlider
+            <SliderField
               aria-label="Pattern speed"
               className="settings-view__range"
               max={100}
               min={0}
               onChange={(event) => dial("patternSpeed", Number(event.currentTarget.value))}
               step={1}
+              format={(value) => `${String(value)}%`}
               value={background.patternSpeed}
             />
           </label>
           <label className="settings-view__field">
             <span>Pattern intensity</span>
-            <OctantSlider
+            <SliderField
               aria-label="Pattern intensity"
               className="settings-view__range"
               max={100}
               min={0}
               onChange={(event) => dial("patternIntensity", Number(event.currentTarget.value))}
               step={1}
+              format={(value) => `${String(value)}%`}
               value={background.patternIntensity}
             />
           </label>
           {background.kind === "photo" ? (
             <label className="settings-view__field">
               <span>Photo opacity</span>
-              <OctantSlider
+              <SliderField
                 aria-label="Photo opacity"
                 className="settings-view__range"
                 max={100}
                 min={0}
                 onChange={(event) => dial("photoOpacity", Number(event.currentTarget.value))}
                 step={1}
+                format={(value) => `${String(value)}%`}
                 value={background.photoOpacity}
               />
             </label>

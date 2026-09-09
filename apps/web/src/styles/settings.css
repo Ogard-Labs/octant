@@ -1465,14 +1465,22 @@ textarea.settings-view__text-input {
   width: 70%;
 }
 
-.settings-scheme__preview-dot {
-  position: absolute;
-  right: 2px;
-  bottom: 2px;
-  width: 10px !important;
-  height: 10px !important;
-  border-radius: 50% !important;
-  background: var(--oct-accent) !important;
+.settings-view__slider-field {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+/* Tabular figures so the number does not jitter while the thumb moves, and a
+   floor wide enough for "100%" so the track does not resize under the hand. */
+.settings-view__slider-value {
+  flex: none;
+  min-width: 4ch;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .settings-scheme__label {
