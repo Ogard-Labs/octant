@@ -140,6 +140,7 @@ function localCost(
       ? {
           pricingRevision: resolved.estimate.pricingRevision,
           pricingSource: resolved.estimate.source.url,
+          cacheSavingsUsd: resolved.estimate.cacheSavingsUsd,
         }
       : {}),
   };

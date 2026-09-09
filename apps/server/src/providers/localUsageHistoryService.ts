@@ -299,6 +299,12 @@ function recordFits(target: TotalsAccumulator, record: LocalUsageHistoryRecord):
         ? target.costs.providerRecordedUsd
         : target.costs.apiEstimateUsd;
     if (!safeSum(current, record.cost.amount)) return false;
+    if (
+      record.cost.kind === "api-estimate" &&
+      record.cost.cacheSavingsUsd !== undefined &&
+      !safeSignedSum(target.costs.cacheSavingsUsd, record.cost.cacheSavingsUsd)
+    )
+      return false;
   }
   return true;
 }
@@ -308,11 +314,13 @@ function safeSum(left: number, right: number): boolean {
   return Number.isFinite(next) && next >= 0 && next <= Number.MAX_SAFE_INTEGER;
 }
 
+function safeSignedSum(left: number, right: number): boolean {
+  const next = left + right;
+  return Number.isFinite(next) && Math.abs(next) <= Number.MAX_SAFE_INTEGER;
+}
+
 function tokenTotals(value: TotalsAccumulator): LocalUsageHistoryTokenTotals {
-  const totalTokens =
-    value.inputTokens > Number.MAX_SAFE_INTEGER - value.outputTokens
-      ? ((value.overflowed = true), Number.MAX_SAFE_INTEGER)
-      : value.inputTokens + value.outputTokens;
+  const totalTokens = value.inputTokens + value.outputTokens;
   return {
     inputTokens: value.inputTokens,
     totalTokens,

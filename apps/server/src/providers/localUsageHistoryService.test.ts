@@ -54,6 +54,7 @@ const records: ReadonlyArray<LocalUsageHistoryRecord> = [
       kind: "api-estimate",
       pricingRevision: "anthropic-api-2026-09-09",
       pricingSource: "https://platform.claude.com/docs/en/about-claude/pricing",
+      cacheSavingsUsd: 0.005,
     },
   },
 ];
@@ -108,6 +109,8 @@ describe("local usage history aggregation", () => {
       apiEstimateUsd: 0.02,
       pricedRecordCount: 2,
       unpricedRecordCount: 1,
+      cacheSavingsUsd: 0.005,
+      cacheSavingsRecordCount: 1,
       pricingReferences: [
         {
           revision: "anthropic-api-2026-09-09",

@@ -208,6 +208,7 @@ describe("local provider usage history", () => {
       amount: 0.00011475,
       pricingRevision: "2026-09-09",
       pricingSource: "https://platform.claude.com/docs/en/about-claude/pricing",
+      cacheSavingsUsd: expect.any(Number),
     });
     expect(result.records[1]?.cost).toBeUndefined();
     expect(result.records[1]?.cacheWriteInputTokens).toBe(5);

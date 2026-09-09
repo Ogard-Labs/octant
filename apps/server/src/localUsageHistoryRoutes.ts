@@ -1,6 +1,6 @@
 import { decodeLocalUsageHistoryRequest, type LocalUsageHistoryResponse } from "@octant/contracts";
 import type { ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
-import { authenticateRouteWindowId } from "./principalRouteContext";
+import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import { readLocalUsageHistoryDashboard } from "./providers/localUsageHistoryService";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -39,7 +39,13 @@ export function createLocalUsageHistoryRouteHandler(
     if (request.method !== "POST" || url.search !== "")
       return failure("Usage history requires POST.", 405, origin);
     try {
-      authenticateRouteWindowId({ request, store: dependencies.windowAuthorityStore, now: now() });
+      const context = authenticateRoutePrincipal({
+        request,
+        store: dependencies.windowAuthorityStore,
+        now: now(),
+      });
+      if (context.principal.kind !== "local-window")
+        return failure("Usage history is local-window only.", 403, origin);
     } catch (error) {
       return failure(
         "Usage history request is unauthorized.",

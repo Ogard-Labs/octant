@@ -4,6 +4,8 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type { ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
 import { createLocalUsageHistoryRouteHandler } from "./localUsageHistoryRoutes";
+import { createRemoteDevicePrincipal } from "./clientPrincipal";
+import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { createCodexLocalUsageHistorySource } from "./providers/codexUsageHistory";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -120,6 +122,37 @@ describe("local provider usage history route", () => {
       models: [expect.objectContaining({ key: "codex/gpt-5.6-sol" })],
       coverage: [expect.objectContaining({ status: "ready" })],
     });
+  });
+
+  it("refuses a bound remote principal even when the URL is loopback", async () => {
+    const handler = createLocalUsageHistoryRouteHandler({
+      windowAuthorityStore: new WindowAuthorityStore(),
+      sources: [source()],
+    });
+    const request = new Request("http://127.0.0.1/api/usage/local-history", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        from: "2026-09-01T00:00:00.000Z",
+        to: "2026-09-09T23:59:59.999Z",
+        timeZone: "UTC",
+      }),
+    });
+    const principal = createRemoteDevicePrincipal({
+      hostId: "host-remote" as never,
+      deviceId: "device-remote" as never,
+      credentialGeneration: 1,
+      origin: "http://127.0.0.1",
+      protocolVersion: 1,
+      capabilityDigest: "a".repeat(64),
+      sessionId: "session-remote" as never,
+    });
+    bindPrincipalRouteContext(request, {
+      principal,
+      scopeId: "10000000-0000-4000-8000-000000000002" as never,
+    });
+    const response = await handler(request);
+    expect(response?.status).toBe(403);
   });
 
   it("does not expose local history without window authority", async () => {

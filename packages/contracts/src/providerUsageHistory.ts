@@ -71,6 +71,8 @@ export const LocalUsageHistoryCostTotals = Schema.Struct({
   providerRecordedRecordCount: Schema.optional(NonNegativeInt),
   apiEstimateRecordCount: Schema.optional(NonNegativeInt),
   excludedRecordCount: Schema.optional(NonNegativeInt),
+  cacheSavingsUsd: Schema.optional(Schema.Number.pipe(Schema.finite())),
+  cacheSavingsRecordCount: Schema.optional(NonNegativeInt),
   pricingReferences: Schema.optional(
     Schema.Array(LocalUsageHistoryPricingReference).pipe(Schema.maxItems(8)),
   ),
