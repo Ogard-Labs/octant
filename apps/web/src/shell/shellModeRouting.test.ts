@@ -20,17 +20,14 @@ describe("threadRest", () => {
   const snooze = { until: "2026-09-08T09:00:00.000Z", at: "2026-09-07T09:00:00.000Z" };
 
   it("files a snoozed row with its wake countdown and a completed row under Completed", () => {
-    expect(threadRest({ lifecycle: "active", snooze }, { now, awaitingInput: false })).toEqual({
+    expect(threadRest({ snooze }, { now, awaitingInput: false })).toEqual({
       shelf: "snoozed",
       wakeLabel: "23h",
     });
     expect(
-      threadRest(
-        { lifecycle: "active", completedAt: "2026-09-01T00:00:00.000Z" },
-        { now, awaitingInput: false },
-      ),
+      threadRest({ completedAt: "2026-09-01T00:00:00.000Z" }, { now, awaitingInput: false }),
     ).toEqual({ shelf: "completed" });
-    expect(threadRest({ lifecycle: "active" }, { now, awaitingInput: false })).toEqual({});
+    expect(threadRest({}, { now, awaitingInput: false })).toEqual({});
   });
 
   it("reads a row that says working as a running turn, for Chat and Work rows without an executing flag", () => {
@@ -43,15 +40,17 @@ describe("threadRest", () => {
     });
   });
 
-  it("wakes a snoozed row that needs the person, but leaves a follow-up mark alone", () => {
-    expect(threadRest({ lifecycle: "active", snooze }, { now, awaitingInput: true })).toEqual({
-      woke: true,
+  it("wakes a snoozed row only when the host says the thread waits on the person", () => {
+    expect(threadRest({ snooze }, { now, awaitingInput: true })).toEqual({ woke: true });
+    // A row that says it needs attention for any other reason — a follow-up
+    // mark, a resting Code lifecycle — stays where the person put it.
+    expect(threadRest({ snooze, activity: "attention" }, { now, awaitingInput: false })).toEqual({
+      shelf: "snoozed",
+      wakeLabel: "23h",
     });
-    expect(threadRest({ lifecycle: "waiting", snooze }, { now, awaitingInput: false })).toEqual({
-      woke: true,
+    expect(threadRest({ snooze, executing: false }, { now, awaitingInput: false })).toEqual({
+      shelf: "snoozed",
+      wakeLabel: "23h",
     });
-    expect(
-      threadRest({ lifecycle: "active", snooze, executing: false }, { now, awaitingInput: false }),
-    ).toEqual({ shelf: "snoozed", wakeLabel: "23h" });
   });
 });
