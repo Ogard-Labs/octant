@@ -372,6 +372,7 @@ async function readLocalUsageHistoryImpl(
         endOffset,
         fileSize,
         Math.min(maxRecordBytes, Math.max(0, availableBytes - chunkLength)),
+        signal,
       );
       const startsMidLine = startOffset > 0 && !(await byteIsLineBreak(handle, startOffset - 1));
       scannedBytes += streamEndOffset - startOffset + 1;
@@ -581,13 +582,34 @@ async function extendToLineBoundary(
   endOffset: number,
   fileSize: number,
   maxExtensionBytes: number,
+  signal: AbortSignal | undefined,
 ): Promise<number> {
-  if (maxExtensionBytes <= 0 || (await byteIsLineBreak(handle, endOffset))) return endOffset;
-  const limit = Math.min(fileSize - 1, endOffset + maxExtensionBytes);
-  for (let offset = endOffset + 1; offset <= limit; offset += 1) {
-    if (await byteIsLineBreak(handle, offset)) return offset;
+  if (maxExtensionBytes <= 0 || endOffset >= fileSize - 1) return endOffset;
+  const probeLength = Math.min(fileSize - endOffset, maxExtensionBytes + 1);
+  const buffer = Buffer.allocUnsafe(probeLength);
+  let bytesRead = 0;
+  while (bytesRead < probeLength) {
+    throwIfAborted(signal);
+    const result = await handle.read(
+      buffer,
+      bytesRead,
+      probeLength - bytesRead,
+      endOffset + bytesRead,
+    );
+    if (result.bytesRead === 0) break;
+    bytesRead += result.bytesRead;
   }
-  return endOffset;
+  throwIfAborted(signal);
+  if (bytesRead === 0 || buffer[0] === 10 || buffer[0] === 13) return endOffset;
+  const firstLineBreak = findLineBreak(buffer, 1, bytesRead);
+  return firstLineBreak === -1 ? endOffset : endOffset + firstLineBreak;
+}
+
+function findLineBreak(buffer: Buffer, start: number, end: number): number {
+  for (let index = start; index < end; index += 1) {
+    if (buffer[index] === 10 || buffer[index] === 13) return index;
+  }
+  return -1;
 }
 
 async function byteIsLineBreak(
