@@ -14,7 +14,8 @@ against that address, and every client then sent the capability in a request
 header to the same place. A launch address naming a plain-HTTP host on another
 machine therefore made the renderer hand its capability to anyone on the path.
 The server's refusal cannot help: it arrives after the header has left the
-browser.
+browser. Judging only that first URL is not enough: default `fetch` following
+would resend the header onto a later hop, including HTTPS to non-loopback HTTP.
 
 ## Decision
 
@@ -23,12 +24,16 @@ browser.
   `127.0.0.0/8`, `::1`, or the name `localhost`, judged on the parsed hostname
   so that shorthand and alternate spellings of one address normalise first.
   IPv4-mapped IPv6 forms are not loopback, matching the host's own listener.
-- The rule is one pure function in the renderer's shell, applied where the
-  address enters: the launch parser. No client, hook, or fetcher re-checks the
-  transport, and none accepts an address the parser did not.
+- The address rule is one pure function in the renderer's shell, applied where
+  the address enters: the launch parser. No client, hook, or fetcher accepts an
+  address the parser did not, and none re-validates redirect targets against
+  that function.
+- A request that sends `x-octant-window-capability` sets `redirect: "error"`.
+  A redirect is a refused transport, never followed.
 - A refused address is a value, never an exception and never a silent fallback
   to another address or to pairing. The renderer shows why it refused and
-  which host, and sends nothing.
+  which host, and sends nothing. `fetch` rejecting on `redirect: "error"` is
+  platform behavior and is handled as an existing transport failure.
 - The server keeps its own loopback and HTTPS checks unchanged. The client rule
   is not a substitute for them; it exists because a client-side leak happens
   before a server-side refusal can.
@@ -42,8 +47,11 @@ from the listener to the client that would connect to it. Every other rule of
 - A launch address that is plain HTTP on a LAN address no longer opens the
   product; it explains itself. The canonical host, loopback development
   renderers, and HTTPS remote access are unaffected.
-- A future client built on the same shell inherits the rule by going through
-  the parser; a client with its own entry point must apply the same function.
+- A capability-bearing fetch that receives a redirect fails as a transport
+  error rather than completing against another host.
+- A future client built on the same shell inherits the address rule by going
+  through the parser and the redirect rule by going through the authenticated
+  fetch seam; a client with its own entry point must apply both.
 
 ## Related
 

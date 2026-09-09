@@ -6,8 +6,11 @@
  * other host would show it to whoever sits on the path. The server refuses
  * non-loopback HTTP on its side too, but that refusal arrives after the header
  * has already left the browser, so the renderer judges the address before its
- * first request. This is the only place that judgement is made: the launch
- * parser applies it, and no client or hook checks again.
+ * first request. The launch parser is the only place that judges the address.
+ * Fetches that carry the capability still set `redirect: "error"` so a later
+ * hop cannot take the header to a host this function never saw — an HTTPS
+ * endpoint that 302s to non-loopback HTTP would otherwise forward it in
+ * plaintext.
  */
 export type CapabilityTransport =
   | { readonly status: "accepted"; readonly transport: "https" | "loopback-http" }
