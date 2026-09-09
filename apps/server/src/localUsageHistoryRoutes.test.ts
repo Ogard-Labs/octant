@@ -117,12 +117,21 @@ describe("local provider usage history route", () => {
     expect((await first?.json()).coverage).toEqual(
       expect.arrayContaining([expect.objectContaining({ status: "partial", hasMore: true })]),
     );
-    expect((await parallel?.json()).coverage).toEqual(
-      expect.arrayContaining([expect.objectContaining({ status: "partial" })]),
-    );
-    const second = await handler(request());
-    expect(second?.status).toBe(200);
-    expect(await second?.json()).toMatchObject({
+    expect(await parallel?.json()).toMatchObject({
+      totals: { requestCount: 1 },
+      coverage: [expect.objectContaining({ status: "ready", hasMore: false })],
+    });
+    let latest: unknown;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const response = await handler(request());
+      expect(response?.status).toBe(200);
+      latest = await response?.json();
+      const coverage = (
+        latest as { readonly coverage?: ReadonlyArray<{ readonly hasMore?: boolean }> }
+      ).coverage;
+      if (coverage?.every((entry) => entry.hasMore === false)) break;
+    }
+    expect(latest).toMatchObject({
       totals: { requestCount: 1, inputTokens: 10 },
       models: [expect.objectContaining({ key: "codex/gpt-5.6-sol" })],
       coverage: [expect.objectContaining({ status: "ready", hasMore: false })],

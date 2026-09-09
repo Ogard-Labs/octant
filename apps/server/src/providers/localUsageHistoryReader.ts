@@ -57,6 +57,8 @@ interface ActiveRead {
 
 const activeReads = new Map<string, ActiveRead>();
 const sourceLocks = new Map<string, Promise<LocalUsageHistoryReadResult>>();
+const parserIds = new WeakMap<LocalUsageHistoryLineParser, number>();
+let nextParserId = 1;
 
 interface LocalUsageHistoryReadResult {
   readonly records: ReadonlyArray<LocalUsageHistoryRecord>;
@@ -106,6 +108,7 @@ export function readLocalUsageHistory(
     options.maxFileBytes ?? "",
     options.maxRecordBytes ?? "",
     options.maxRecords ?? "",
+    parserId(parse),
   ].join("\0");
   const active = activeReads.get(key);
   if (active !== undefined) {
@@ -185,6 +188,15 @@ function waitForRead(
       },
     );
   });
+}
+
+function parserId(parse: LocalUsageHistoryLineParser): number {
+  const existing = parserIds.get(parse);
+  if (existing !== undefined) return existing;
+  const assigned = nextParserId;
+  nextParserId += 1;
+  parserIds.set(parse, assigned);
+  return assigned;
 }
 
 function releaseRead(entry: ActiveRead): void {
