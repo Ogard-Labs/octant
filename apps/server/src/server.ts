@@ -3166,12 +3166,15 @@ export function startOctantServer(
           driverKind: instance.driverKind,
           root:
             instance.driverKind === "codex"
-              ? join(homedir(), ".codex", "sessions")
+              ? join(homedir(), ".codex")
               : join(homedir(), ".claude", "projects"),
         }),
     };
     const localUsageHistoryRoutes = createLocalUsageHistoryRouteHandler({
       windowAuthorityStore,
+      ...(options.allowedRendererHttpOrigin === undefined
+        ? {}
+        : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
       sources: () => {
         const seen = new Set<string>();
         const sources: ProviderLocalUsageHistorySource[] = [];

@@ -17,6 +17,13 @@ const DEFAULT_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 const DEFAULT_MAX_FILE_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_RECORD_BYTES = 256 * 1024;
 const DEFAULT_MAX_RECORDS = 20_000;
+const MAX_CACHED_RECORDS = 100_000;
+
+/** In-process resumable cursors keep bounded refreshes progressing through long files. */
+const scanOffsets = new Map<string, { readonly offset: number; readonly size: number }>();
+/** Bounded records let a later refresh aggregate chunks already scanned this process. */
+const recordCaches = new Map<string, Map<string, LocalUsageHistoryRecord>>();
+const recordCacheTruncated = new Set<string>();
 
 export interface LocalUsageHistoryReaderOptions {
   readonly sourceKind: LocalUsageHistorySourceKind;
@@ -69,7 +76,7 @@ export async function readLocalUsageHistory(
     options.maxRecords ?? DEFAULT_MAX_RECORDS,
     DEFAULT_MAX_RECORDS,
   );
-  const sourceInstallationId = installationId(options.sourceKind, options.root);
+  const requestedInstallationId = installationId(options.sourceKind, options.root);
   let root: string;
   try {
     root = await realpath(options.root);
@@ -80,7 +87,7 @@ export async function readLocalUsageHistory(
       records: [],
       coverage: coverage(
         options,
-        sourceInstallationId,
+        requestedInstallationId,
         "unavailable",
         0,
         0,
@@ -91,14 +98,16 @@ export async function readLocalUsageHistory(
     };
   }
 
-  const files = await collectFiles(root, maxFiles + 1);
-  const truncated = files.length > maxFiles;
+  const sourceInstallationId = installationId(options.sourceKind, root);
+  const collected = await collectFiles(root, maxFiles + 1);
+  const files = collected.files;
+  let truncated = files.length > maxFiles;
   const selected = files.slice(0, maxFiles);
   const records: LocalUsageHistoryRecord[] = [];
   let scannedFileCount = 0;
   let omittedRecordCount = truncated ? 1 : 0;
   let scannedBytes = 0;
-  let failed = false;
+  let failed = collected.failed;
   for (const filePath of selected) {
     throwIfAborted(signal);
     let handle: Awaited<ReturnType<typeof open>> | undefined;
@@ -114,34 +123,56 @@ export async function readLocalUsageHistory(
       const fileStat = await handle.stat();
       if (!fileStat.isFile()) throw new Error("history path is not a regular file");
       const fileSize = fileStat.size;
-      if (
-        !Number.isSafeInteger(fileSize) ||
-        fileSize > maxFileBytes ||
-        scannedBytes + fileSize > maxTotalBytes
-      ) {
+      if (!Number.isSafeInteger(fileSize)) {
         omittedRecordCount += 1;
         failed = true;
         continue;
       }
-      scannedBytes += fileSize;
+      if (fileSize === 0) continue;
+      const cursorKey = `${sourceInstallationId}\0${resolvedFilePath}`;
+      const previous = scanOffsets.get(cursorKey);
+      const startOffset =
+        previous === undefined || fileSize < previous.size || previous.offset >= fileSize
+          ? 0
+          : previous.offset;
+      const availableBytes = maxTotalBytes - scannedBytes;
+      if (availableBytes <= 0) {
+        truncated = true;
+        break;
+      }
+      const chunkLength = Math.min(fileSize - startOffset, maxFileBytes, availableBytes);
+      if (chunkLength <= 0) {
+        truncated = true;
+        break;
+      }
+      const endOffset = startOffset + chunkLength - 1;
+      const streamEndOffset = await extendToLineBoundary(
+        handle,
+        endOffset,
+        fileSize,
+        maxRecordBytes,
+      );
+      const startsMidLine = startOffset > 0 && !(await byteIsLineBreak(handle, startOffset - 1));
+      scannedBytes += streamEndOffset - startOffset + 1;
       scannedFileCount += 1;
       const relativePath = relative(root, resolvedFilePath);
       const sessionHint = sessionHintForPath(relativePath);
       let lineNumber = 0;
-      if (fileSize === 0) continue;
       const stream = createReadStream(resolvedFilePath, {
         encoding: "utf8",
         fd: handle.fd,
         autoClose: false,
-        start: 0,
-        end: fileSize - 1,
+        start: startOffset,
+        end: streamEndOffset,
         ...(signal === undefined ? {} : { signal }),
       });
       const lines = createInterface({ input: stream, crlfDelay: Infinity });
+      let bytesRead = 0;
       try {
         for await (const line of lines) {
           throwIfAborted(signal);
           lineNumber += 1;
+          if (startsMidLine && lineNumber === 1) continue;
           if (Buffer.byteLength(line, "utf8") > maxRecordBytes) {
             omittedRecordCount += 1;
             continue;
@@ -154,7 +185,8 @@ export async function readLocalUsageHistory(
           }
           if (records.length >= maxRecords) {
             omittedRecordCount += 1;
-            break;
+            truncated = true;
+            continue;
           }
           try {
             const record = parse({
@@ -170,17 +202,23 @@ export async function readLocalUsageHistory(
               omittedRecordCount += 1;
               continue;
             }
-            const from = Date.parse(String(request.from));
-            const to = Date.parse(String(request.to));
-            if (observedAt < from || observedAt > to) continue;
             records.push(decodeLocalUsageHistoryRecord(record));
           } catch {
             omittedRecordCount += 1;
           }
         }
       } finally {
+        bytesRead = stream.bytesRead;
         lines.close();
         stream.destroy();
+      }
+      if (!signal?.aborted) {
+        const nextOffset = startOffset + bytesRead;
+        if (nextOffset >= fileSize) scanOffsets.delete(cursorKey);
+        else {
+          truncated = true;
+          scanOffsets.set(cursorKey, { offset: nextOffset, size: fileSize });
+        }
       }
     } catch (error) {
       if (signal?.aborted) throw error;
@@ -190,8 +228,34 @@ export async function readLocalUsageHistory(
       if (handle !== undefined) await handle.close().catch(() => undefined);
     }
   }
-  const status = failed ? "failed" : omittedRecordCount > 0 ? "partial" : "ready";
-  const range = records.reduce<{ from?: string; to?: string }>(
+  const recordCache = recordCaches.get(sourceInstallationId) ?? new Map();
+  recordCaches.set(sourceInstallationId, recordCache);
+  for (const record of records) {
+    recordCache.set(`${record.sourceSessionId}\0${record.sourceEventId}`, record);
+  }
+  while (recordCache.size > MAX_CACHED_RECORDS) {
+    const oldest = recordCache.keys().next().value;
+    if (oldest === undefined) break;
+    recordCache.delete(oldest);
+    recordCacheTruncated.add(sourceInstallationId);
+  }
+  const from = Date.parse(String(request.from));
+  const to = Date.parse(String(request.to));
+  const cachedRecords = [...recordCache.values()].filter((record) => {
+    const observedAt = Date.parse(String(record.observedAt));
+    return observedAt >= from && observedAt <= to;
+  });
+  const responseRecords = cachedRecords.slice(0, maxRecords);
+  if (cachedRecords.length > maxRecords || recordCacheTruncated.has(sourceInstallationId)) {
+    truncated = true;
+  }
+  const status =
+    failed && responseRecords.length === 0
+      ? "failed"
+      : omittedRecordCount > 0 || truncated || failed
+        ? "partial"
+        : "ready";
+  const range = responseRecords.reduce<{ from?: string; to?: string }>(
     (current, record) => ({
       from:
         current.from === undefined || record.observedAt < current.from
@@ -203,21 +267,46 @@ export async function readLocalUsageHistory(
     {},
   );
   return {
-    records,
+    records: responseRecords,
     coverage: coverage(
       options,
       sourceInstallationId,
       status,
       scannedFileCount,
-      records.length,
+      responseRecords.length,
       omittedRecordCount,
       truncated,
       failed
         ? "Some provider history files could not be read."
-        : "Provider accounting history was scanned.",
+        : truncated
+          ? "Bounded provider history scan is partial; the next refresh resumes its cursor."
+          : "Provider accounting history was scanned.",
       range,
     ),
   };
+}
+
+async function extendToLineBoundary(
+  handle: Awaited<ReturnType<typeof open>>,
+  endOffset: number,
+  fileSize: number,
+  maxRecordBytes: number,
+): Promise<number> {
+  if (await byteIsLineBreak(handle, endOffset)) return endOffset;
+  const limit = Math.min(fileSize - 1, endOffset + maxRecordBytes);
+  for (let offset = endOffset + 1; offset <= limit; offset += 1) {
+    if (await byteIsLineBreak(handle, offset)) return offset;
+  }
+  return endOffset;
+}
+
+async function byteIsLineBreak(
+  handle: Awaited<ReturnType<typeof open>>,
+  offset: number,
+): Promise<boolean> {
+  const buffer = Buffer.allocUnsafe(1);
+  const result = await handle.read(buffer, 0, 1, offset);
+  return result.bytesRead === 1 && (buffer[0] === 10 || buffer[0] === 13);
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
@@ -235,14 +324,19 @@ function isWithinRoot(root: string, candidate: string): boolean {
   );
 }
 
-async function collectFiles(root: string, limit: number): Promise<ReadonlyArray<string>> {
-  const files: string[] = [];
+async function collectFiles(
+  root: string,
+  limit: number,
+): Promise<{ readonly files: ReadonlyArray<string>; readonly failed: boolean }> {
+  const files: Array<{ readonly path: string; readonly mtimeMs: number }> = [];
+  let failed = false;
   const visit = async (directory: string): Promise<void> => {
     if (files.length >= limit) return;
     let entries;
     try {
       entries = await readdir(directory, { withFileTypes: true });
     } catch {
+      failed = true;
       return;
     }
     for (const entry of entries) {
@@ -252,18 +346,24 @@ async function collectFiles(root: string, limit: number): Promise<ReadonlyArray<
       try {
         entryStat = await lstat(candidate);
       } catch {
+        failed = true;
         continue;
       }
       if (entryStat.isSymbolicLink()) continue;
       if (entryStat.isDirectory()) {
         await visit(candidate);
       } else if (entryStat.isFile() && candidate.endsWith(".jsonl")) {
-        files.push(candidate);
+        files.push({ path: candidate, mtimeMs: entryStat.mtimeMs });
       }
     }
   };
   await visit(root);
-  return files.sort((left, right) => left.localeCompare(right));
+  return {
+    files: files
+      .sort((left, right) => right.mtimeMs - left.mtimeMs || left.path.localeCompare(right.path))
+      .map((entry) => entry.path),
+    failed,
+  };
 }
 
 function installationId(sourceKind: LocalUsageHistorySourceKind, root: string): string {

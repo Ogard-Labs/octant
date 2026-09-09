@@ -7,6 +7,8 @@ import type {
 } from "@octant/contracts";
 import type { ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
 import { resolveLocalUsageCost, type PricingUsageRecord } from "./localUsagePricing";
+
+const modelCaches = new Map<string, Map<string, string>>();
 import {
   readLocalUsageHistory,
   stableUsageId,
@@ -18,6 +20,8 @@ import {
 export function createCodexLocalUsageHistorySource(
   options: Omit<LocalUsageHistoryReaderOptions, "sourceKind" | "providerKey">,
 ): ProviderLocalUsageHistorySource {
+  const models = modelCaches.get(options.root) ?? new Map<string, string>();
+  modelCaches.set(options.root, models);
   return {
     sourceKind: "codex",
     read: (request: LocalUsageHistoryRequest, signal) =>
@@ -26,7 +30,7 @@ export function createCodexLocalUsageHistorySource(
           ...(await readLocalUsageHistory(
             { ...options, sourceKind: "codex", providerKey: "codex" },
             request,
-            createCodexLineParser(),
+            createCodexLineParser(models),
             signal ?? effectSignal,
           )),
         }),
@@ -38,8 +42,7 @@ export function createCodexLocalUsageHistorySource(
   };
 }
 
-function createCodexLineParser(): LocalUsageHistoryLineParser {
-  const models = new Map<string, string>();
+function createCodexLineParser(models: Map<string, string>): LocalUsageHistoryLineParser {
   const seenUsageIds = new Set<string>();
   return (input) => parseCodexLine(input, models, seenUsageIds);
 }
@@ -82,8 +85,8 @@ function parseCodexLine(
   const info = record(payload.info);
   const last = record(info?.last_token_usage);
   if (last === undefined) return undefined;
-  const inputTokens = nonNegativeInt(last.input_tokens);
-  const outputTokens = nonNegativeInt(last.output_tokens);
+  const inputTokens = nonNegativeInt(last.input_tokens) ?? nonNegativeInt(last.inputTokens);
+  const outputTokens = nonNegativeInt(last.output_tokens) ?? nonNegativeInt(last.outputTokens);
   if (inputTokens === undefined || outputTokens === undefined) return undefined;
   const observedAt = timestamp(value.timestamp);
   if (observedAt === undefined) return undefined;
@@ -95,9 +98,12 @@ function parseCodexLine(
     sessionIdFromPath(input.sourceSessionIdHint);
   const modelId =
     text(payload.model) ?? text(info?.model) ?? models.get(sourceSessionId) ?? "unknown";
-  const cacheReadInputTokens = nonNegativeInt(last.cached_input_tokens);
-  const cacheWriteInputTokens = nonNegativeInt(last.cache_write_input_tokens);
-  const reasoningTokens = nonNegativeInt(last.reasoning_output_tokens);
+  const cacheReadInputTokens =
+    nonNegativeInt(last.cached_input_tokens) ?? nonNegativeInt(last.cachedInputTokens);
+  const cacheWriteInputTokens =
+    nonNegativeInt(last.cache_write_input_tokens) ?? nonNegativeInt(last.cacheWriteInputTokens);
+  const reasoningTokens =
+    nonNegativeInt(last.reasoning_output_tokens) ?? nonNegativeInt(last.reasoningOutputTokens);
   const costUsd = nonNegativeNumber(last.cost_usd) ?? nonNegativeNumber(info?.cost_usd);
   const pricingRecord: PricingUsageRecord = {
     modelId,

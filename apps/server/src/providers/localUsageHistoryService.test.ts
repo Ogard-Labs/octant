@@ -48,7 +48,13 @@ const records: ReadonlyArray<LocalUsageHistoryRecord> = [
     cacheReadInputTokens: 20,
     cacheWriteInputTokens: 5,
     outputTokens: 4,
-    cost: { amount: 0.02, currency: "USD", kind: "api-estimate" },
+    cost: {
+      amount: 0.02,
+      currency: "USD",
+      kind: "api-estimate",
+      pricingRevision: "anthropic-api-2026-09-09",
+      pricingSource: "https://platform.claude.com/docs/en/about-claude/pricing",
+    },
   },
 ];
 
@@ -102,7 +108,25 @@ describe("local usage history aggregation", () => {
       apiEstimateUsd: 0.02,
       pricedRecordCount: 2,
       unpricedRecordCount: 1,
+      pricingReferences: [
+        {
+          revision: "anthropic-api-2026-09-09",
+          source: "https://platform.claude.com/docs/en/about-claude/pricing",
+        },
+      ],
     });
+  });
+
+  it("keeps identical provider sequence IDs from independent installations separate", async () => {
+    const first = records[0]!;
+    const second = { ...first, sourceInstallationId: "install-2" };
+    const response = await readLocalUsageHistoryDashboard({
+      sources: [source([first]), source([second])],
+      request,
+      queryAt: "2026-09-11T00:00:00.000Z",
+    });
+    expect(response.totals.requestCount).toBe(2);
+    expect(response.totals.inputTokens).toBe(60);
   });
 
   it("marks coverage partial when host totals reach the safe arithmetic bound", async () => {

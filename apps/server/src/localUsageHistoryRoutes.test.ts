@@ -1,7 +1,10 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type { ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
 import { createLocalUsageHistoryRouteHandler } from "./localUsageHistoryRoutes";
+import { createCodexLocalUsageHistorySource } from "./providers/codexUsageHistory";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
 const windowId = "10000000-0000-4000-8000-000000000001" as never;
@@ -40,6 +43,7 @@ describe("local provider usage history route", () => {
       new Request("http://127.0.0.1/api/usage/local-history", {
         method: "POST",
         headers: {
+          origin: "null",
           "content-type": "application/json",
           "x-octant-window-capability": capability,
         },
@@ -55,6 +59,66 @@ describe("local provider usage history route", () => {
       source: "local-provider-history",
       totals: { requestCount: 0, sessionCount: 0, totalTokens: 0 },
       coverage: [{ sourceKind: "codex", status: "ready" }],
+    });
+  });
+
+  it("continues a bounded Codex scan across fresh route source instances", async () => {
+    const root = await mkdtemp(join(process.env.TMPDIR ?? "/tmp", "octant-route-resume-"));
+    const metadata = JSON.stringify({
+      type: "session_meta",
+      payload: { id: "route-session", base_instructions: { provenance: { model: "gpt-5.6-sol" } } },
+    });
+    const usage = JSON.stringify({
+      timestamp: "2026-09-09T12:00:00.000Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        thread_id: "route-session",
+        info: {
+          total_token_usage: { input_tokens: 20, output_tokens: 3 },
+          last_token_usage: {
+            input_tokens: 10,
+            cached_input_tokens: 2,
+            cache_write_input_tokens: 0,
+            output_tokens: 3,
+          },
+        },
+      },
+    });
+    await writeFile(join(root, "rollout.jsonl"), `${metadata}\n${usage}\n`);
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: Date.now() });
+    const handler = createLocalUsageHistoryRouteHandler({
+      windowAuthorityStore: store,
+      sources: () => [
+        createCodexLocalUsageHistorySource({
+          root,
+          maxFileBytes: Buffer.byteLength(`${metadata}\n`),
+        }),
+      ],
+    });
+    const body = JSON.stringify({
+      from: "2026-09-01T00:00:00.000Z",
+      to: "2026-09-09T23:59:59.999Z",
+      timeZone: "UTC",
+    });
+    const request = () =>
+      new Request("http://127.0.0.1/api/usage/local-history", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+        body,
+      });
+    const first = await handler(request());
+    expect(first?.status).toBe(200);
+    expect((await first?.json()).coverage).toEqual(
+      expect.arrayContaining([expect.objectContaining({ status: "partial" })]),
+    );
+    const second = await handler(request());
+    expect(second?.status).toBe(200);
+    expect(await second?.json()).toMatchObject({
+      totals: { requestCount: 1, inputTokens: 10 },
+      models: [expect.objectContaining({ key: "codex/gpt-5.6-sol" })],
+      coverage: [expect.objectContaining({ status: "ready" })],
     });
   });
 

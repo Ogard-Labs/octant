@@ -57,16 +57,27 @@ function parseClaudeLine(input: {
     nonNegativeInt(usage.cache_creation_input_tokens) ??
     (cacheCreation === undefined
       ? undefined
-      : (nonNegativeInt(cacheCreation.ephemeral_5m_input_tokens) ?? 0) +
-        (nonNegativeInt(cacheCreation.ephemeral_1h_input_tokens) ?? 0));
-  const cacheWriteDuration =
+      : (() => {
+          const fiveMinute = nonNegativeInt(cacheCreation.ephemeral_5m_input_tokens);
+          const oneHour = nonNegativeInt(cacheCreation.ephemeral_1h_input_tokens);
+          return fiveMinute === undefined && oneHour === undefined
+            ? undefined
+            : (fiveMinute ?? 0) + (oneHour ?? 0);
+        })());
+  const fiveMinuteCacheWrite =
     cacheCreation === undefined
       ? undefined
-      : nonNegativeInt(cacheCreation.ephemeral_5m_input_tokens) !== undefined &&
-          nonNegativeInt(cacheCreation.ephemeral_1h_input_tokens) === undefined
+      : nonNegativeInt(cacheCreation.ephemeral_5m_input_tokens);
+  const oneHourCacheWrite =
+    cacheCreation === undefined
+      ? undefined
+      : nonNegativeInt(cacheCreation.ephemeral_1h_input_tokens);
+  const cacheWriteDuration =
+    fiveMinuteCacheWrite === undefined && oneHourCacheWrite === undefined
+      ? undefined
+      : fiveMinuteCacheWrite !== undefined && oneHourCacheWrite === undefined
         ? ("5-minute" as const)
-        : nonNegativeInt(cacheCreation.ephemeral_1h_input_tokens) !== undefined &&
-            nonNegativeInt(cacheCreation.ephemeral_5m_input_tokens) === undefined
+        : oneHourCacheWrite !== undefined && fiveMinuteCacheWrite === undefined
           ? ("1-hour" as const)
           : ("unknown" as const);
   const inputTokens =
@@ -94,7 +105,9 @@ function parseClaudeLine(input: {
     outputTokens,
     ...(costUsd === undefined
       ? {}
-      : { cost: { amount: costUsd, currency: "USD" as const, kind: "api-estimate" as const } }),
+      : {
+          cost: { amount: costUsd, currency: "USD" as const, kind: "provider-recorded" as const },
+        }),
   };
   const cost = localCost("anthropic", pricingRecord);
   return {

@@ -56,6 +56,12 @@ export const LocalUsageHistoryCoverage = Schema.Struct({
 }).annotations(strict);
 export type LocalUsageHistoryCoverage = typeof LocalUsageHistoryCoverage.Type;
 
+export const LocalUsageHistoryPricingReference = Schema.Struct({
+  revision: BoundedKey,
+  source: Schema.String.pipe(Schema.pattern(/^https:\/\//), Schema.maxLength(255)),
+}).annotations(strict);
+export type LocalUsageHistoryPricingReference = typeof LocalUsageHistoryPricingReference.Type;
+
 export const LocalUsageHistoryCostTotals = Schema.Struct({
   providerRecordedUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
   apiEstimateUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
@@ -63,6 +69,9 @@ export const LocalUsageHistoryCostTotals = Schema.Struct({
   unpricedRecordCount: NonNegativeInt,
   providerRecordedRecordCount: Schema.optional(NonNegativeInt),
   apiEstimateRecordCount: Schema.optional(NonNegativeInt),
+  pricingReferences: Schema.optional(
+    Schema.Array(LocalUsageHistoryPricingReference).pipe(Schema.maxItems(8)),
+  ),
 }).annotations(strict);
 export type LocalUsageHistoryCostTotals = typeof LocalUsageHistoryCostTotals.Type;
 

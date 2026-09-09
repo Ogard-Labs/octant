@@ -1,5 +1,5 @@
 import { appendFileSync } from "node:fs";
-import { mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
@@ -55,7 +55,12 @@ describe("local provider usage history", () => {
             thread_id: "session-1",
             info: {
               total_token_usage: { input_tokens: 50, output_tokens: 8 },
-              last_token_usage: { input_tokens: 20, cached_input_tokens: 15, output_tokens: 3 },
+              last_token_usage: {
+                inputTokens: 20,
+                cachedInputTokens: 15,
+                cacheWriteInputTokens: 0,
+                outputTokens: 3,
+              },
             },
           },
         }),
@@ -84,7 +89,41 @@ describe("local provider usage history", () => {
       modelId: "gpt-5.6-sol",
     });
     expect(result.records[1]?.modelId).toBe("gpt-5.6-luna");
+    expect(result.records[1]?.cacheWriteInputTokens).toBe(0);
     expect(result.coverage.status).toBe("ready");
+  });
+
+  it("retains Codex session model metadata while a long rollout resumes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-codex-resume-model-"));
+    const meta = JSON.stringify({
+      type: "session_meta",
+      payload: {
+        id: "session-resume",
+        base_instructions: { provenance: { model: "gpt-5.6-sol" } },
+      },
+    });
+    const token = JSON.stringify({
+      timestamp: "2026-09-09T10:00:00.000Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        thread_id: "session-resume",
+        info: {
+          total_token_usage: { input_tokens: 30, output_tokens: 5 },
+          last_token_usage: { input_tokens: 20, cached_input_tokens: 15, output_tokens: 4 },
+        },
+      },
+    });
+    await writeFile(join(root, "rollout.jsonl"), `${meta}\n${token}\n`);
+    const source = createCodexLocalUsageHistorySource({
+      root,
+      maxFileBytes: Buffer.byteLength(`${meta}\n`),
+    });
+    const first = await Effect.runPromise(source.read(request));
+    expect(first.records).toHaveLength(0);
+    expect(first.coverage.status).toBe("partial");
+    const second = await Effect.runPromise(source.read(request));
+    expect(second.records[0]?.modelId).toBe("gpt-5.6-sol");
   });
 
   it("normalizes Claude uncached input plus cache dimensions into processed input", async () => {
@@ -117,7 +156,11 @@ describe("local provider usage history", () => {
         cacheReadInputTokens: 20,
         cacheWriteInputTokens: 5,
         outputTokens: 4,
-        cost: expect.objectContaining({ amount: 0.001, kind: "api-estimate", currency: "USD" }),
+        cost: expect.objectContaining({
+          amount: 0.001,
+          kind: "provider-recorded",
+          currency: "USD",
+        }),
       }),
     ]);
   });
@@ -170,6 +213,27 @@ describe("local provider usage history", () => {
     expect(result.records[1]?.cacheWriteInputTokens).toBe(5);
   });
 
+  it("does not treat an empty Claude cache object as a measured zero", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-claude-empty-cache-"));
+    await writeFile(
+      join(root, "session.jsonl"),
+      JSON.stringify({
+        type: "assistant",
+        session_id: "claude-empty-cache",
+        timestamp: "2026-09-09T11:00:00.000Z",
+        message: {
+          id: "message-empty-cache",
+          model: "claude-sonnet-4-6",
+          usage: { input_tokens: 10, cache_creation: {}, output_tokens: 4 },
+        },
+      }),
+    );
+    const source = createClaudeLocalUsageHistorySource({ root });
+    const result = await Effect.runPromise(source.read(request));
+    expect(result.records[0]?.cacheWriteInputTokens).toBeUndefined();
+    expect(result.records[0]?.cacheWriteDuration).toBeUndefined();
+  });
+
   it("reads a fixed file snapshot and honors cancellation", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-history-snapshot-"));
     const file = join(root, "events.jsonl");
@@ -207,6 +271,72 @@ describe("local provider usage history", () => {
         controller.signal,
       ),
     ).rejects.toBeDefined();
+  });
+
+  it("resumes a long file from its bounded cursor across refreshes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-history-resume-"));
+    const file = join(root, "events.jsonl");
+    const firstLine = JSON.stringify({ marker: "first" });
+    const secondLine = JSON.stringify({ marker: "second" });
+    await writeFile(file, `${firstLine}\n${secondLine}\n`);
+    const parser = ({ line }: { readonly line: string }) => {
+      const marker = JSON.parse(line).marker;
+      return {
+        sourceKind: "fixture",
+        sourceInstallationId: "fixture-install",
+        sourceSessionId: "fixture-session",
+        sourceEventId: marker,
+        providerKey: "fixture",
+        modelId: "fixture",
+        observedAt: "2026-09-09T12:00:00.000Z" as never,
+        inputTokens: 1,
+        outputTokens: 1,
+      };
+    };
+    const options = {
+      sourceKind: "fixture" as never,
+      providerKey: "fixture",
+      root,
+      maxFileBytes: Buffer.byteLength(`${firstLine}\n`),
+    };
+    const first = await readLocalUsageHistory(options, request, parser as never);
+    expect(first.records).toHaveLength(1);
+    expect(first.coverage.status).toBe("partial");
+    const second = await readLocalUsageHistory(options, request, parser as never);
+    expect(second.records).toHaveLength(2);
+    expect(second.records.map((record) => record.sourceEventId)).toEqual(["first", "second"]);
+    expect(second.coverage.status).toBe("ready");
+  });
+
+  it("prioritizes the newest files when a bounded file-count window applies", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-history-newest-"));
+    const older = join(root, "older.jsonl");
+    const newer = join(root, "newer.jsonl");
+    await writeFile(older, JSON.stringify({ marker: "older" }));
+    await writeFile(newer, JSON.stringify({ marker: "newer" }));
+    await utimes(older, new Date("2026-09-01T00:00:00.000Z"), new Date("2026-09-01T00:00:00.000Z"));
+    await utimes(newer, new Date("2026-09-09T00:00:00.000Z"), new Date("2026-09-09T00:00:00.000Z"));
+    const parser = ({ line }: { readonly line: string }) => {
+      const marker = JSON.parse(line).marker;
+      return {
+        sourceKind: "fixture",
+        sourceInstallationId: "fixture-install",
+        sourceSessionId: "fixture-session",
+        sourceEventId: marker,
+        providerKey: "fixture",
+        modelId: "fixture",
+        observedAt: "2026-09-09T12:00:00.000Z" as never,
+        inputTokens: 1,
+        outputTokens: 1,
+      };
+    };
+    const result = await readLocalUsageHistory(
+      { sourceKind: "fixture" as never, providerKey: "fixture", root, maxFiles: 1 },
+      request,
+      parser as never,
+    );
+    expect(result.records[0]?.sourceEventId).toBe("newer");
+    expect(result.coverage.truncated).toBe(true);
   });
 
   it("reports partial coverage for malformed input and does not follow symlinks", async () => {

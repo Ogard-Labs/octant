@@ -38,6 +38,7 @@ interface CostAccumulator {
   providerRecordedMeasured: number;
   apiEstimateMeasured: number;
   unpricedRecordCount: number;
+  pricingReferences: Map<string, { readonly revision: string; readonly source: string }>;
 }
 
 function accumulator(): TotalsAccumulator {
@@ -61,6 +62,7 @@ function accumulator(): TotalsAccumulator {
       providerRecordedMeasured: 0,
       apiEstimateMeasured: 0,
       unpricedRecordCount: 0,
+      pricingReferences: new Map(),
     },
   };
 }
@@ -249,6 +251,15 @@ function add(target: TotalsAccumulator, record: LocalUsageHistoryRecord): void {
   } else {
     target.costs.apiEstimateUsd = addNumber(target, target.costs.apiEstimateUsd, cost.amount);
     target.costs.apiEstimateMeasured = addNumber(target, target.costs.apiEstimateMeasured, 1);
+    if (cost.pricingRevision !== undefined && cost.pricingSource !== undefined) {
+      const key = `${cost.pricingRevision}\0${cost.pricingSource}`;
+      if (target.costs.pricingReferences.size < 8 || target.costs.pricingReferences.has(key)) {
+        target.costs.pricingReferences.set(key, {
+          revision: cost.pricingRevision,
+          source: cost.pricingSource,
+        });
+      }
+    }
   }
 }
 
@@ -303,6 +314,9 @@ function costTotals(value: CostAccumulator): LocalUsageHistoryCostTotals {
     unpricedRecordCount: value.unpricedRecordCount,
     providerRecordedRecordCount: value.providerRecordedMeasured,
     apiEstimateRecordCount: value.apiEstimateMeasured,
+    ...(value.pricingReferences.size === 0
+      ? {}
+      : { pricingReferences: [...value.pricingReferences.values()] }),
   };
 }
 
@@ -320,7 +334,7 @@ function deduplicate(
 ): ReadonlyArray<LocalUsageHistoryRecord> {
   const seen = new Set<string>();
   return records.filter((record) => {
-    const key = `${record.sourceKind}\0${record.sourceSessionId}\0${record.sourceEventId}`;
+    const key = `${record.sourceKind}\0${record.sourceInstallationId}\0${record.sourceSessionId}\0${record.sourceEventId}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

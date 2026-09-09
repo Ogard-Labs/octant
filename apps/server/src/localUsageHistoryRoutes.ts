@@ -1,7 +1,7 @@
 import { decodeLocalUsageHistoryRequest, type LocalUsageHistoryResponse } from "@octant/contracts";
 import type { ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
 import { authenticateRouteWindowId } from "./principalRouteContext";
-import { isLoopbackHostname } from "./shellRoutes";
+import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import { readLocalUsageHistoryDashboard } from "./providers/localUsageHistoryService";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -12,6 +12,7 @@ const MAX_BODY_BYTES = 16 * 1024;
 
 export interface LocalUsageHistoryRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
+  readonly allowedRendererHttpOrigin?: string | null;
   readonly sources:
     | ReadonlyArray<ProviderLocalUsageHistorySource>
     | (() => ReadonlyArray<ProviderLocalUsageHistorySource>);
@@ -31,7 +32,7 @@ export function createLocalUsageHistoryRouteHandler(
     const origin = request.headers.get("origin");
     if (!isLoopbackHostname(url.hostname))
       return failure("Usage history requires loopback.", 400, null);
-    if (origin !== null && !isAllowedOrigin(origin))
+    if (origin !== null && !isAllowedRendererOrigin(origin, dependencies.allowedRendererHttpOrigin))
       return failure("Renderer origin is not allowed.", 400, null);
     if (request.method === "OPTIONS")
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
@@ -82,27 +83,13 @@ function failure(message: string, status: number, origin: string | null): Respon
   return json({ message }, status, origin);
 }
 
-function isAllowedOrigin(origin: string): boolean {
-  if (origin === "file://") return true;
-  try {
-    const parsed = new URL(origin);
-    return (
-      (parsed.protocol === "http:" &&
-        (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1")) ||
-      parsed.protocol === "app:"
-    );
-  } catch {
-    return false;
-  }
-}
-
 function corsHeaders(origin: string | null): Headers {
   const headers = new Headers({
     "access-control-allow-methods": METHODS,
     "access-control-allow-headers": HEADERS,
     vary: "Origin",
   });
-  if (origin !== null && isAllowedOrigin(origin))
+  if (origin !== null && isAllowedRendererOrigin(origin))
     headers.set("access-control-allow-origin", origin);
   return headers;
 }
