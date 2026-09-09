@@ -29,6 +29,7 @@ export interface WorkThreadEnvironmentProps {
   readonly goalClient?: GoalClient;
   readonly goalLoopClient?: GoalLoopClient;
   readonly usageDashboardClient?: UsageDashboardClient;
+  readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
   readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
 }
 
@@ -103,11 +104,16 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
             threadId={String(props.tab.threadId)}
           />
         )}
-        {props.usageDashboardClient === undefined ? null : (
+        {props.usageDashboardClient === undefined &&
+        props.spendCeilingClient === undefined ? null : (
           <ThreadUsagePanel
             client={props.usageDashboardClient}
             subjectType="work-thread"
             subjectId={String(props.tab.threadId)}
+            {...(project === undefined ? {} : { projectId: String(project.id) })}
+            {...(props.spendCeilingClient === undefined
+              ? {}
+              : { spendCeilingClient: props.spendCeilingClient })}
             {...(props.onOpenUsageDashboard === undefined
               ? {}
               : { onOpenUsageDashboard: props.onOpenUsageDashboard })}

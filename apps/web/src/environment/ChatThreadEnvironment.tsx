@@ -5,6 +5,8 @@ import type { ChatController } from "../chat/useChatController";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
+import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
+import type { UsageDashboardClient, UsageQueryFilter } from "@octant/client-runtime";
 
 type ChatThreadWorkspaceTab = Extract<WorkspaceTab, { readonly kind: "chat-thread" }>;
 type ChatProject = Extract<ProjectSummary, { readonly type: "chat" }>;
@@ -18,6 +20,9 @@ export interface ChatThreadEnvironmentProps {
   readonly agentRunClient?: AgentRunClient;
   readonly onOpenAgents?: () => void;
   readonly environmentOpen?: boolean;
+  readonly usageDashboardClient?: UsageDashboardClient;
+  readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
+  readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
 }
 
 /**
@@ -59,6 +64,21 @@ export function ChatThreadEnvironment(props: ChatThreadEnvironmentProps) {
             client={props.agentRunClient}
             {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
             threadId={String(props.tab.threadId)}
+          />
+        )}
+        {props.usageDashboardClient === undefined &&
+        props.spendCeilingClient === undefined ? null : (
+          <ThreadUsagePanel
+            client={props.usageDashboardClient}
+            subjectType="chat-thread"
+            subjectId={String(props.tab.threadId)}
+            {...(projectId === undefined ? {} : { projectId: String(projectId) })}
+            {...(props.spendCeilingClient === undefined
+              ? {}
+              : { spendCeilingClient: props.spendCeilingClient })}
+            {...(props.onOpenUsageDashboard === undefined
+              ? {}
+              : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
           />
         )}
       </ThreadEnvironmentPanel>

@@ -1,6 +1,10 @@
 import { ThreadActivityEnvironment } from "../threadActivity/ThreadActivityEnvironment";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
-import type { LocalServerClient } from "@octant/client-runtime";
+import type {
+  LocalServerClient,
+  UsageDashboardClient,
+  UsageQueryFilter,
+} from "@octant/client-runtime";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type {
@@ -30,6 +34,7 @@ import { ChangeWorkingFolder, workingFolderLabel } from "./WorkingDirectoryContr
 import { OpenInMenu } from "./OpenInMenu";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
+import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   CODE_DELIVERY_OUTCOME_OPTIONS,
@@ -86,6 +91,9 @@ export interface CodeThreadEnvironmentProps {
   readonly onCreatePullRequest?: () => void;
   readonly sources?: ReadonlyArray<CodeAttachmentReference>;
   readonly sourceClient?: CodeAttachmentReader;
+  readonly usageDashboardClient?: UsageDashboardClient;
+  readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
+  readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
 }
 
 /**
@@ -238,6 +246,21 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
             client={props.agentRunClient}
             {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
             threadId={String(props.tab.threadId)}
+          />
+        )}
+        {props.usageDashboardClient === undefined &&
+        props.spendCeilingClient === undefined ? null : (
+          <ThreadUsagePanel
+            client={props.usageDashboardClient}
+            subjectType="code-thread"
+            subjectId={String(props.tab.threadId)}
+            {...(props.project === undefined ? {} : { projectId: String(props.project.id) })}
+            {...(props.spendCeilingClient === undefined
+              ? {}
+              : { spendCeilingClient: props.spendCeilingClient })}
+            {...(props.onOpenUsageDashboard === undefined
+              ? {}
+              : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
           />
         )}
         <EnvironmentGroup

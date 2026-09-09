@@ -27,9 +27,9 @@ The design rests on a small set of invariants that every package obeys:
   changelog rides that update path and bundled notes rather than adding a
   third call ([decisions/0061-in-app-changelog.md](decisions/0061-in-app-changelog.md)).
 - **The server is the authority.** Every authority check (mode, Project,
-  thread, provider, approval, remote principal) runs in `apps/server` before a
-  side effect. The renderer and mobile app render what the server says is
-  allowed; they never decide it.
+  thread, provider, approval, remote principal, optional spend ceiling) runs in
+  `apps/server` before a side effect. The renderer and mobile app render what
+  the server says is allowed; they never decide it.
 - **The event journal is authoritative; projections are rebuildable.** Commands
   append versioned events to a SQLite journal. Read models are idempotent
   projections that can be dropped and rebuilt from the journal at any time.
@@ -383,8 +383,12 @@ Refusal fails creation visibly. No Linear write-back path exists.
 Context usage is a circular used-versus-available meter on
 the active thread's composer; opening it shows an authoritative breakdown
 popover without a further provider call, and Inspect context opens the
-composition inspector for pin, exclude, and rebuild. Project memory lives on
-every mode's Project Overview. Navigator is one host-owned conversation opened
+composition inspector for pin, exclude, and rebuild. Optional Project and
+thread token spend ceilings (0060) are host owner policy: the server refuses a
+provider-consuming turn at admission when remaining reserved capacity cannot
+cover a declared per-turn bound, and the composer and Environment name a
+recovery. Spend is the existing `UsageRecord` ledger, never imported provider
+history. Project memory lives on every mode's Project Overview. Navigator is one host-owned conversation opened
 as an app-wide popover from the bottom-left profile and Settings control, and
 opening it never changes the active Project or thread. Zen is a separate
 presentation aggregate inside the same window, not a split-tree tab and not a

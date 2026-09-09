@@ -36,6 +36,7 @@ import {
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import { AGENT_RUN_AGGREGATE_TYPE } from "./agentRunEventStore";
+import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import {
   AgentRunSessionError,
   type AgentRunSessionOutcome,
@@ -119,6 +120,10 @@ export interface AgentRunSessionRuntimeOptions {
   /** Resolves the configured driver for a provider instance, or undefined. */
   readonly resolveDriver: (providerInstanceId: ProviderInstanceId) => ProviderDriver | undefined;
   readonly capacityScheduler: ProviderCapacityScheduler;
+  readonly spendCeiling?: {
+    readonly admit: SpendCeilingService["admit"];
+    readonly settle: SpendCeilingService["settle"];
+  };
   readonly context: AgentRunContextSnapshotPort;
   readonly uuid: () => string;
   /** Filesystem root for Chat children, which own no workspace of their own. */
@@ -243,6 +248,32 @@ export function createAgentRunSessionRuntime(
         aggregateType: AGENT_RUN_AGGREGATE_TYPE,
         aggregateId: String(run.id),
       });
+      const estimatedTokens = estimateInputTokens(run, context);
+      const spendReservationId =
+        options.spendCeiling === undefined
+          ? undefined
+          : decodeSpendCeilingReservationId(options.uuid());
+      if (options.spendCeiling !== undefined && spendReservationId !== undefined) {
+        const threadType =
+          run.workspaceReceipt.kind === "work-root"
+            ? ("work-thread" as const)
+            : run.workspaceReceipt.kind === "code-worktree"
+              ? ("code-thread" as const)
+              : ("chat-thread" as const);
+        const spendAdmission = options.spendCeiling.admit({
+          reservationId: spendReservationId,
+          threadId: String(run.parentThreadId),
+          threadType,
+          ...("projectId" in run.workspaceReceipt
+            ? { projectId: String(run.workspaceReceipt.projectId) }
+            : {}),
+          turnUpperBoundTokens: estimatedTokens,
+          childSubjectIds: [String(run.id)],
+        });
+        if (spendAdmission.status === "refused") {
+          throw new AgentRunSessionError("spend-ceiling-exhausted", spendAdmission.refusal.message);
+        }
+      }
       const reservationId = reserveCapacity({
         capacityScheduler: options.capacityScheduler,
         ...(options.serviceLimits === undefined ? {} : { serviceLimits: options.serviceLimits }),
@@ -253,7 +284,7 @@ export function createAgentRunSessionRuntime(
         subject,
         providerInstanceId: target.providerInstanceId,
         modelId: target.modelId,
-        estimatedTokens: estimateInputTokens(run, context),
+        estimatedTokens,
       });
 
       const listeners = new Set<(outcome: AgentRunSessionOutcome) => void>();
@@ -310,6 +341,8 @@ export function createAgentRunSessionRuntime(
             projectRoot,
             context,
             reservationId,
+            ...(spendReservationId === undefined ? {} : { spendReservationId }),
+            ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
             capacityScheduler: options.capacityScheduler,
             providerInstanceId: target.providerInstanceId,
             modelId: target.modelId,
@@ -503,6 +536,8 @@ interface ManagedSessionInput {
   readonly projectRoot: string;
   readonly context: ReadonlyArray<ProviderContextBlock>;
   readonly reservationId: CapacityReservationId;
+  readonly spendReservationId?: ReturnType<typeof decodeSpendCeilingReservationId>;
+  readonly spendCeiling?: AgentRunSessionRuntimeOptions["spendCeiling"];
   readonly capacityScheduler: ProviderCapacityScheduler;
   readonly providerInstanceId: ProviderInstanceId;
   readonly modelId: ProviderModelId;
@@ -558,6 +593,14 @@ function runManagedSession(
       const releaseCapacity = (): void => {
         if (released) return;
         released = true;
+        if (input.spendReservationId !== undefined) {
+          input.spendCeiling?.settle({
+            reservationId: input.spendReservationId,
+            ...(state.outcome?.kind === "completed" && state.sawUsage
+              ? { observedTokens: state.inputTokens + state.outputTokens }
+              : {}),
+          });
+        }
         input.capacityScheduler.recordTerminal({
           reservationId: input.reservationId,
           outcome: capacityOutcomeFor(state),

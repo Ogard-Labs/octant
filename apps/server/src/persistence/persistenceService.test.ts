@@ -183,6 +183,7 @@ describe("PersistenceLive", () => {
         { name: "product-feedback", lastSequence: 1, lag: 0 },
         { name: "thread-retention", lastSequence: 1, lag: 0 },
         { name: "thread-external-content-taint", lastSequence: 1, lag: 0 },
+        { name: "spend-ceilings", lastSequence: 1, lag: 0 },
       ],
     });
   });
@@ -443,6 +444,7 @@ describe("PersistenceLive", () => {
         { projection_name: "product-feedback", global_sequence: 1, reason },
         { projection_name: "thread-retention", global_sequence: 1, reason },
         { projection_name: "thread-external-content-taint", global_sequence: 1, reason },
+        { projection_name: "spend-ceilings", global_sequence: 1, reason },
       ]);
       inspected.close();
     },

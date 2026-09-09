@@ -88,6 +88,7 @@ const REMOTE_APPROVABLE_ACTIONS = new Set([
   "preview.open-authorized",
   "settings.read-non-secret",
   "provider.list-models",
+  "usage.spend-ceiling.read",
 ]);
 const LOCAL_HOST_ACTIONS = new Set([
   "desktop.enable-listener",
@@ -131,6 +132,7 @@ const LOCAL_HOST_ACTIONS = new Set([
   "host.store.retention",
   "host.store.purge",
   "host.store.data-map",
+  "host.store.spend-ceiling",
   "diagnostics.export",
 ]);
 

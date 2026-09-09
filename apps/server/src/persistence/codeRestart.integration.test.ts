@@ -262,6 +262,7 @@ describe("Code persistence restart", () => {
       { projection_name: "providers", reason: "unsupported-event-version" },
       { projection_name: "remote-access", reason: "unsupported-event-version" },
       { projection_name: "shell", reason: "unsupported-event-version" },
+      { projection_name: "spend-ceilings", reason: "unsupported-event-version" },
       { projection_name: "theme", reason: "unsupported-event-version" },
       { projection_name: "thread-checkpoint", reason: "unsupported-event-version" },
       { projection_name: "thread-external-content-taint", reason: "unsupported-event-version" },

@@ -12,6 +12,7 @@ export type AgentRunSessionFailureReason =
   | "provider-unavailable"
   | "context-unavailable"
   | "capacity-unavailable"
+  | "spend-ceiling-exhausted"
   | "workspace-unavailable"
   | "authority-drift";
 

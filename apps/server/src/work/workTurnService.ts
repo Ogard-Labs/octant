@@ -50,6 +50,7 @@ import {
   type WorkTurnContextContribution,
 } from "./workTurnContext";
 import type { WorkTurnWrittenFiles } from "@octant/contracts/work-turns";
+import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import { Schema } from "effect";
 import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
@@ -176,6 +177,10 @@ export interface WorkTurnServiceDependencies {
    * while its turn ran would be a half-applied state.
    */
   readonly onTurnRequested?: (threadId: WorkThreadId) => void;
+  readonly spendCeiling?: {
+    readonly admit: SpendCeilingService["admit"];
+    readonly settle: SpendCeilingService["settle"];
+  };
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
     /** Absent means every turn is admitted. */
@@ -235,6 +240,11 @@ export class WorkTurnService {
   readonly #turnRuntime: WorkTurnRuntimePort;
   readonly #resolveAppManagedTools: WorkTurnServiceDependencies["resolveAppManagedTools"];
   readonly #nativeHarness: WorkTurnServiceDependencies["nativeHarness"];
+  readonly #spendCeiling: WorkTurnServiceDependencies["spendCeiling"];
+  readonly #spendReservations = new Map<
+    string,
+    ReturnType<typeof decodeSpendCeilingReservationId>
+  >();
   readonly #onTurnRequested: WorkTurnServiceDependencies["onTurnRequested"];
   readonly #turnFileObserver: WorkTurnFileObserver | undefined;
   readonly #resolveThreadMentionContext: WorkTurnServiceDependencies["resolveThreadMentionContext"];
@@ -263,6 +273,7 @@ export class WorkTurnService {
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
     this.#resolveAppManagedTools = dependencies.resolveAppManagedTools;
     this.#nativeHarness = dependencies.nativeHarness;
+    this.#spendCeiling = dependencies.spendCeiling;
     this.#onTurnRequested = dependencies.onTurnRequested;
     this.#turnFileObserver = dependencies.turnFileObserver;
     this.#resolveThreadMentionContext = dependencies.resolveThreadMentionContext;
@@ -428,6 +439,21 @@ export class WorkTurnService {
     });
     if (planned.kind === "blocked") {
       throw this.#failure("invalid", planned.message);
+    }
+
+    const spendReservationId = decodeSpendCeilingReservationId(this.#uuid());
+    const spendAdmission = this.#spendCeiling?.admit({
+      reservationId: spendReservationId,
+      threadId: String(command.threadId),
+      threadType: "work-thread",
+      projectId: String(command.authority.projectId),
+      turnUpperBoundTokens: this.#safeInputBudgetTokens,
+    });
+    if (spendAdmission?.status === "refused") {
+      throw this.#failure("unavailable", spendAdmission.refusal.message);
+    }
+    if (spendAdmission !== undefined && spendAdmission.reservedTokens > 0) {
+      this.#spendReservations.set(String(command.requestId), spendReservationId);
     }
 
     try {
@@ -717,6 +743,11 @@ export class WorkTurnService {
     );
     const settled = this.#projection.lookup(input.command.requestId);
     if (settled !== undefined) this.#liveUpdates.settle(input.command.threadId, settled);
+    const spendReservationId = this.#spendReservations.get(String(input.command.requestId));
+    if (spendReservationId !== undefined) {
+      this.#spendReservations.delete(String(input.command.requestId));
+      this.#spendCeiling?.settle({ reservationId: spendReservationId });
+    }
   }
 
   #issueContextContribution(threadId: WorkThreadId): ReadonlyArray<WorkTurnContextContribution> {

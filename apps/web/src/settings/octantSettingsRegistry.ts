@@ -353,7 +353,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Usage",
       scope: "host",
       keywords:
-        "usage operational dashboard provider model host mode project thread request shape attribution filters totals daily weekly cumulative top consumers measurement quality exact estimated reconciled stale unavailable export reset retention purge",
+        "usage operational dashboard provider model host mode project thread request shape attribution filters totals daily weekly cumulative top consumers measurement quality exact estimated reconciled stale unavailable export reset retention purge spend ceiling token budget",
       settings: [],
     },
     {

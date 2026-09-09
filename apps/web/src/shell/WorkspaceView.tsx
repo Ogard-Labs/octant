@@ -193,6 +193,7 @@ export interface WorkspaceViewProps {
   readonly goalLoopClient?: GoalLoopClient;
   readonly planClient?: PlanClient;
   readonly usageDashboardClient?: UsageDashboardClient;
+  readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
   readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
   readonly workOverviewModel?: WorkOverviewModel;
   readonly workCreateThreadAvailable?: boolean;
@@ -924,6 +925,15 @@ function renderCodeTab(
             {...(props.onOpenReview === undefined
               ? {}
               : { onOpenChanges: () => props.onOpenReview?.(tab.threadId) })}
+            {...(props.usageDashboardClient === undefined
+              ? {}
+              : { usageDashboardClient: props.usageDashboardClient })}
+            {...(props.spendCeilingClient === undefined
+              ? {}
+              : { spendCeilingClient: props.spendCeilingClient })}
+            {...(props.onOpenUsageDashboard === undefined
+              ? {}
+              : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
           >
             {content}
           </CodeThreadEnvironment>
@@ -1143,6 +1153,15 @@ function renderNonCodeTab(
         {...(props.environmentDockOpen === undefined
           ? {}
           : { environmentOpen: props.environmentDockOpen })}
+        {...(props.usageDashboardClient === undefined
+          ? {}
+          : { usageDashboardClient: props.usageDashboardClient })}
+        {...(props.spendCeilingClient === undefined
+          ? {}
+          : { spendCeilingClient: props.spendCeilingClient })}
+        {...(props.onOpenUsageDashboard === undefined
+          ? {}
+          : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
         key={tab.threadId}
         onClearCanvasSelections={canvasContext.clearCanvasSelections}
         onRemoveCanvasSelection={canvasContext.onRemoveCanvasSelection}
@@ -1220,6 +1239,9 @@ function renderNonCodeTab(
             {...(props.usageDashboardClient === undefined
               ? {}
               : { usageDashboardClient: props.usageDashboardClient })}
+            {...(props.spendCeilingClient === undefined
+              ? {}
+              : { spendCeilingClient: props.spendCeilingClient })}
             {...(props.onOpenUsageDashboard === undefined
               ? {}
               : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
@@ -1886,6 +1908,9 @@ function ChatThreadWorkspace(props: {
   readonly onOpenAgents?: () => void;
   readonly environmentOpen?: boolean;
   readonly revealTurnId?: import("@octant/contracts/chat").ChatTurnId;
+  readonly usageDashboardClient?: UsageDashboardClient;
+  readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
+  readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
 }) {
   const controller = useChatController({
     // The App-level controller already refreshes navigation from the Machine
@@ -1919,6 +1944,15 @@ function ChatThreadWorkspace(props: {
       {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
       controller={controller}
       {...(props.environmentOpen === undefined ? {} : { environmentOpen: props.environmentOpen })}
+      {...(props.usageDashboardClient === undefined
+        ? {}
+        : { usageDashboardClient: props.usageDashboardClient })}
+      {...(props.spendCeilingClient === undefined
+        ? {}
+        : { spendCeilingClient: props.spendCeilingClient })}
+      {...(props.onOpenUsageDashboard === undefined
+        ? {}
+        : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
       projects={props.projects}
       tab={props.tab}
     >
