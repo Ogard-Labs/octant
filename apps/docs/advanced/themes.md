@@ -1,5 +1,5 @@
 ---
-description: Semantic themes, presets, typography, sidebar appearance, translucency, backgrounds, and vibrancy.
+description: Semantic themes, presets, typography, sidebar destinations and appearance, translucency, backgrounds, and vibrancy.
 ---
 
 # Themes and Appearance
@@ -19,6 +19,21 @@ accessibility, and theme import and export.
 views: a dropdown, or one icon button per view that shows the view name on
 hover. Each project view can be given its own icon and color when you create or
 edit it.
+
+### Sidebar destinations
+
+**Sidebar destinations** controls where navigation destinations live: as a
+sidebar row, in the account menu, or nowhere. Open **Customize sidebar** from
+the account menu or use **Settings → Appearance → Sidebar destinations**. Use
+the visibility control to choose **Always show**, **Menu only** where the
+destination offers that placement, or **Don't show**, and use the chevrons to
+move it up or down. **Reset sidebar destinations** restores the untouched
+placement and order.
+
+Availability still follows the active mode and the host's capabilities: a
+destination that is unavailable or unauthorized does not appear merely because
+it is set to **Always show**. Destination choices are durable shell settings and
+replay across restarts.
 
 ### Theme mode and presets
 
