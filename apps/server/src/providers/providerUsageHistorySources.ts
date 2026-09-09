@@ -1,5 +1,6 @@
 import type { ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
 import type { ProviderDriverKind } from "@octant/contracts";
+import { join } from "node:path";
 import { createClaudeLocalUsageHistorySource } from "./claudeUsageHistory";
 import { createCodexLocalUsageHistorySource } from "./codexUsageHistory";
 
@@ -13,13 +14,16 @@ export { createCodexLocalUsageHistorySource } from "./codexUsageHistory";
  */
 export function createLocalUsageHistorySourceForDriver(input: {
   readonly driverKind: ProviderDriverKind;
-  readonly root: string;
+  readonly home: string;
 }): ProviderLocalUsageHistorySource | undefined {
   if (input.driverKind === "codex") {
-    return createCodexLocalUsageHistorySource({ root: input.root });
+    return createCodexLocalUsageHistorySource({
+      root: join(input.home, ".codex"),
+      allowedRelativeRoots: ["sessions", "archived_sessions"],
+    });
   }
   if (input.driverKind === "claude") {
-    return createClaudeLocalUsageHistorySource({ root: input.root });
+    return createClaudeLocalUsageHistorySource({ root: join(input.home, ".claude", "projects") });
   }
   return undefined;
 }

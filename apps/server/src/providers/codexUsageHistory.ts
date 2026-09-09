@@ -36,7 +36,11 @@ import {
 export function createCodexLocalUsageHistorySource(
   options: Omit<LocalUsageHistoryReaderOptions, "sourceKind" | "providerKey">,
 ): ProviderLocalUsageHistorySource {
-  let state = parserCaches.get(options.root);
+  const readerOptions = {
+    ...options,
+    allowedRelativeRoots: options.allowedRelativeRoots ?? ["sessions", "archived_sessions"],
+  };
+  let state = parserCaches.get(readerOptions.root);
   if (state === undefined) {
     if (parserCaches.size >= MAX_PARSER_CACHES) {
       const oldest = parserCaches.keys().next().value;
@@ -46,7 +50,7 @@ export function createCodexLocalUsageHistorySource(
       models: new Map<string, string>(),
       cumulative: new Map<string, CodexUsageSnapshot>(),
     };
-    parserCaches.set(options.root, state);
+    parserCaches.set(readerOptions.root, state);
   }
   return {
     sourceKind: "codex",
@@ -58,7 +62,7 @@ export function createCodexLocalUsageHistorySource(
           return {
             ...(await readLocalUsageHistory(
               {
-                ...options,
+                ...readerOptions,
                 sourceKind: "codex",
                 providerKey: "codex",
                 onSourceInvalidated: () => {

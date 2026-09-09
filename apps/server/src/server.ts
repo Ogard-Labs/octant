@@ -3164,10 +3164,7 @@ export function startOctantServer(
       localUsageHistorySourceForInstance: (instance) =>
         createLocalUsageHistorySourceForDriver({
           driverKind: instance.driverKind,
-          root:
-            instance.driverKind === "codex"
-              ? join(homedir(), ".codex")
-              : join(homedir(), ".claude", "projects"),
+          home: homedir(),
         }),
     };
     const localUsageHistoryRoutes = createLocalUsageHistoryRouteHandler({

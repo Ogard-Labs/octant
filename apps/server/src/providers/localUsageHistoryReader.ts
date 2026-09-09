@@ -18,6 +18,7 @@ const DEFAULT_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 const DEFAULT_MAX_FILE_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_RECORD_BYTES = 256 * 1024;
 const DEFAULT_MAX_RECORDS = 100_000;
+const DEFAULT_MAX_DIRECTORIES = 4096;
 const MAX_DISCOVERED_FILES = 100_000;
 const MAX_TRACKED_SOURCES = 32;
 const MAX_CACHED_RECORDS = 100_000;
@@ -74,6 +75,8 @@ export interface LocalUsageHistoryReaderOptions {
   readonly maxFileBytes?: number;
   readonly maxRecordBytes?: number;
   readonly maxRecords?: number;
+  readonly maxDirectories?: number;
+  readonly allowedRelativeRoots?: ReadonlyArray<string>;
   readonly onSourceInvalidated?: () => void;
 }
 
@@ -109,6 +112,8 @@ export function readLocalUsageHistory(
     options.maxFileBytes ?? "",
     options.maxRecordBytes ?? "",
     options.maxRecords ?? "",
+    options.maxDirectories ?? "",
+    ...(options.allowedRelativeRoots ?? []),
     parserId(parse),
   ].join("\0");
   const active = activeReads.get(key);
@@ -230,6 +235,10 @@ async function readLocalUsageHistoryImpl(
     DEFAULT_MAX_RECORDS,
   );
   const cacheCapacity = Math.min(MAX_CACHED_RECORDS, maxRecords);
+  const maxDirectories = boundedPositive(
+    options.maxDirectories ?? DEFAULT_MAX_DIRECTORIES,
+    DEFAULT_MAX_DIRECTORIES,
+  );
   const requestedInstallationId = installationId(options.sourceKind, options.root);
   let root: string;
   try {
@@ -255,7 +264,12 @@ async function readLocalUsageHistoryImpl(
 
   const sourceInstallationId = installationId(options.sourceKind, root);
   trackSource(sourceInstallationId);
-  const collected = await collectFiles(root, MAX_DISCOVERED_FILES);
+  const collected = await collectFiles(
+    root,
+    MAX_DISCOVERED_FILES,
+    maxDirectories,
+    options.allowedRelativeRoots,
+  );
   const files = collected.files;
   const previousFile = fileCursors.get(sourceInstallationId);
   const previousIndex = previousFile === undefined ? -1 : files.indexOf(previousFile);
@@ -603,6 +617,8 @@ function isWithinRoot(root: string, candidate: string): boolean {
 async function collectFiles(
   root: string,
   limit: number,
+  maxDirectories: number,
+  allowedRelativeRoots: ReadonlyArray<string> | undefined,
 ): Promise<{
   readonly files: ReadonlyArray<string>;
   readonly failed: boolean;
@@ -611,11 +627,14 @@ async function collectFiles(
   const files: Array<{ readonly path: string; readonly mtimeMs: number }> = [];
   let failed = false;
   let truncated = false;
+  let visitedDirectories = 0;
   const visit = async (directory: string): Promise<void> => {
-    if (files.length >= limit) {
+    if (files.length >= limit || visitedDirectories >= maxDirectories) {
       truncated = true;
       return;
     }
+    if (!isAllowedPath(root, directory, allowedRelativeRoots)) return;
+    visitedDirectories += 1;
     let entries;
     try {
       entries = await readdir(directory, { withFileTypes: true });
@@ -624,7 +643,7 @@ async function collectFiles(
       return;
     }
     for (const entry of entries) {
-      if (files.length >= limit) {
+      if (files.length >= limit || visitedDirectories >= maxDirectories) {
         truncated = true;
         return;
       }
@@ -639,7 +658,11 @@ async function collectFiles(
       if (entryStat.isSymbolicLink()) continue;
       if (entryStat.isDirectory()) {
         await visit(candidate);
-      } else if (entryStat.isFile() && candidate.endsWith(".jsonl")) {
+      } else if (
+        entryStat.isFile() &&
+        candidate.endsWith(".jsonl") &&
+        isAllowedPath(root, candidate, allowedRelativeRoots)
+      ) {
         files.push({ path: candidate, mtimeMs: entryStat.mtimeMs });
       }
     }
@@ -652,6 +675,20 @@ async function collectFiles(
     failed,
     truncated,
   };
+}
+
+function isAllowedPath(
+  root: string,
+  candidate: string,
+  allowedRelativeRoots: ReadonlyArray<string> | undefined,
+): boolean {
+  if (allowedRelativeRoots === undefined || allowedRelativeRoots.length === 0) return true;
+  const relativePath = relative(root, candidate);
+  if (relativePath === "") return true;
+  return allowedRelativeRoots.some(
+    (allowedRoot) =>
+      relativePath === allowedRoot || relativePath.startsWith(`${allowedRoot}${sep}`),
+  );
 }
 
 function installationId(sourceKind: LocalUsageHistorySourceKind, root: string): string {

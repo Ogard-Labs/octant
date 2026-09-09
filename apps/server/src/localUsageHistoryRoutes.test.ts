@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
@@ -67,6 +67,8 @@ describe("local provider usage history route", () => {
 
   it("continues a bounded Codex scan across fresh route source instances", async () => {
     const root = await mkdtemp(join(process.env.TMPDIR ?? "/tmp", "octant-route-resume-"));
+    await mkdir(join(root, "sessions"), { recursive: true });
+    await mkdir(join(root, "archived_sessions"), { recursive: true });
     const metadata = JSON.stringify({
       type: "session_meta",
       payload: { id: "route-session", base_instructions: { provenance: { model: "gpt-5.6-sol" } } },
@@ -88,7 +90,7 @@ describe("local provider usage history route", () => {
         },
       },
     });
-    await writeFile(join(root, "rollout.jsonl"), `${metadata}\n${usage}\n`);
+    await writeFile(join(root, "sessions", "rollout.jsonl"), `${metadata}\n${usage}\n`);
     const store = new WindowAuthorityStore();
     store.register({ windowId, capability, now: Date.now() });
     const handler = createLocalUsageHistoryRouteHandler({

@@ -1,5 +1,5 @@
 import { appendFileSync } from "node:fs";
-import { mkdtemp, symlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
@@ -10,6 +10,13 @@ import {
 } from "./providerUsageHistorySources";
 import { readLocalUsageHistory } from "./localUsageHistoryReader";
 
+async function codexFixtureRoot(prefix: string): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), prefix));
+  await mkdir(join(root, "sessions"), { recursive: true });
+  await mkdir(join(root, "archived_sessions"), { recursive: true });
+  return root;
+}
+
 const request = {
   from: "2026-09-01T00:00:00.000Z",
   to: "2026-09-30T23:59:59.999Z",
@@ -18,9 +25,13 @@ const request = {
 
 describe("local provider usage history", () => {
   it("projects Codex per-turn token_count events without cumulative double counting", async () => {
-    const root = await mkdtemp(join(tmpdir(), "octant-codex-history-"));
+    const root = await codexFixtureRoot("octant-codex-history-");
     await writeFile(
-      join(root, "rollout-2026-09-09T10-00-00-00000000-0000-4000-8000-000000000001.jsonl"),
+      join(
+        root,
+        "sessions",
+        "rollout-2026-09-09T10-00-00-00000000-0000-4000-8000-000000000001.jsonl",
+      ),
       [
         JSON.stringify({
           type: "session_meta",
@@ -115,8 +126,31 @@ describe("local provider usage history", () => {
     expect(result.coverage.status).toBe("ready");
   });
 
+  it("scans only Codex sessions and archived_sessions directories", async () => {
+    const root = await codexFixtureRoot("octant-codex-scope-");
+    await mkdir(join(root, "worktrees", "repo", "node_modules"), { recursive: true });
+    const usage = JSON.stringify({
+      timestamp: "2026-09-09T10:00:00.000Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          last_token_usage: { input_tokens: 10, cached_input_tokens: 2, output_tokens: 3 },
+        },
+      },
+    });
+    await writeFile(join(root, "sessions", "session.jsonl"), usage);
+    await writeFile(join(root, "archived_sessions", "archived.jsonl"), usage);
+    await writeFile(join(root, "worktrees", "repo", "node_modules", "hostile.jsonl"), usage);
+    await writeFile(join(root, "auth.jsonl"), usage);
+    const source = createCodexLocalUsageHistorySource({ root });
+    const result = await Effect.runPromise(source.read(request));
+    expect(result.records).toHaveLength(2);
+    expect(result.coverage.scannedFileCount).toBe(2);
+  });
+
   it("keeps no-identity Codex events distinct by timestamp and line position", async () => {
-    const root = await mkdtemp(join(tmpdir(), "octant-codex-no-identity-"));
+    const root = await codexFixtureRoot("octant-codex-no-identity-");
     const makeLine = (timestamp: string) =>
       JSON.stringify({
         timestamp,
@@ -129,7 +163,7 @@ describe("local provider usage history", () => {
         },
       });
     await writeFile(
-      join(root, "rollout.jsonl"),
+      join(root, "sessions", "rollout.jsonl"),
       `${makeLine("2026-09-09T10:00:00.000Z")}\n${makeLine("2026-09-09T10:01:00.000Z")}\n`,
     );
     const source = createCodexLocalUsageHistorySource({ root });
@@ -139,7 +173,7 @@ describe("local provider usage history", () => {
   });
 
   it("retains Codex session model metadata while a long rollout resumes", async () => {
-    const root = await mkdtemp(join(tmpdir(), "octant-codex-resume-model-"));
+    const root = await codexFixtureRoot("octant-codex-resume-model-");
     const meta = JSON.stringify({
       type: "session_meta",
       payload: {
@@ -159,7 +193,7 @@ describe("local provider usage history", () => {
         },
       },
     });
-    await writeFile(join(root, "rollout.jsonl"), `${meta}\n${token}\n`);
+    await writeFile(join(root, "sessions", "rollout.jsonl"), `${meta}\n${token}\n`);
     const source = createCodexLocalUsageHistorySource({
       root,
       maxFileBytes: Buffer.byteLength(`${meta}\n`),
