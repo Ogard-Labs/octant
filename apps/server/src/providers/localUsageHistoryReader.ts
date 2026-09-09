@@ -353,6 +353,10 @@ async function readLocalUsageHistoryImpl(
         scanOffsets.delete(cursorKey);
         removeFileRecords(sourceInstallationId, resolvedFilePath);
       }
+      if (previous !== undefined && !replaced && previous.offset >= fileSize) {
+        processedFile = true;
+        continue;
+      }
       if (fileSize === 0) {
         processedFile = true;
         fileIdentities.set(cursorKey, {
@@ -366,12 +370,9 @@ async function readLocalUsageHistoryImpl(
         continue;
       }
       const startOffset =
-        previous === undefined ||
-        replaced ||
-        fileSize < previous.size ||
-        previous.offset >= fileSize
+        previous === undefined || replaced || fileSize < previous.size
           ? 0
-          : previous.offset;
+          : Math.min(previous.offset, fileSize);
       const availableBytes = maxTotalBytes - scannedBytes;
       if (availableBytes <= 0) {
         truncated = true;
@@ -399,6 +400,10 @@ async function readLocalUsageHistoryImpl(
       const sessionHint = sessionHintForPath(relativePath);
       let lineNumber = 0;
       let lineOffset = startOffset;
+      const endedWithLineBreak = await byteIsLineBreak(handle, streamEndOffset);
+      let lastLineOffset = startOffset;
+      let lastLineBytes = 0;
+      let lastLineValid = false;
       processedFile = true;
       const stream = createReadStream(resolvedFilePath, {
         encoding: "utf8",
@@ -415,7 +420,11 @@ async function readLocalUsageHistoryImpl(
           throwIfAborted(signal);
           lineNumber += 1;
           const byteOffset = lineOffset;
-          lineOffset += Buffer.byteLength(line, "utf8") + 1;
+          const lineBytes = Buffer.byteLength(line, "utf8");
+          lastLineOffset = byteOffset;
+          lastLineBytes = lineBytes;
+          lastLineValid = false;
+          lineOffset += lineBytes + 1;
           if (startsMidLine && lineNumber === 1) continue;
           if (Buffer.byteLength(line, "utf8") > maxRecordBytes) {
             omittedRecordCount += 1;
@@ -423,6 +432,7 @@ async function readLocalUsageHistoryImpl(
           }
           try {
             JSON.parse(line);
+            lastLineValid = true;
           } catch {
             omittedRecordCount += 1;
             continue;
@@ -459,8 +469,11 @@ async function readLocalUsageHistoryImpl(
       }
       if (!signal?.aborted) {
         const nextOffset = startOffset + bytesRead;
+        const hasPendingTrailingLine =
+          !endedWithLineBreak && !lastLineValid && lastLineBytes <= maxRecordBytes;
+        const cursorOffset = hasPendingTrailingLine ? lastLineOffset : nextOffset;
         const identity = {
-          offset: nextOffset >= fileSize ? 0 : nextOffset,
+          offset: cursorOffset,
           size: fileSize,
           dev: fileStat.dev,
           ino: fileStat.ino,
@@ -468,7 +481,7 @@ async function readLocalUsageHistoryImpl(
           prefixLength,
         };
         fileIdentities.set(cursorKey, identity);
-        if (nextOffset >= fileSize) scanOffsets.delete(cursorKey);
+        if (cursorOffset >= fileSize) scanOffsets.delete(cursorKey);
         else {
           truncated = true;
           scanOffsets.set(cursorKey, identity);
