@@ -103,6 +103,35 @@ describe("ThreadUsagePanel", () => {
     );
   });
 
+  it("names a token ceiling refusal and a recovery on Environment", async () => {
+    const load = vi.fn().mockResolvedValue(dashboard(4));
+    const snapshot = vi.fn().mockResolvedValue({
+      refusal: {
+        kind: "exhausted",
+        scopeKind: "thread",
+        scopeId: "73000000-0000-4000-8000-000000000001",
+        dimension: "tokens",
+        remainingTokens: 0,
+        ceilingTokens: 1_000,
+        recovery: ["raise-ceiling", "clear-ceiling", "open-usage", "pause-work"],
+        message:
+          "This thread's token spend ceiling has 0 tokens remaining of 1,000. Raise or clear the ceiling, open Usage for this thread, or pause work.",
+      },
+    });
+    render(
+      <ThreadUsagePanel
+        client={{ load } as UsageDashboardClient}
+        spendCeilingClient={{ snapshot, execute: vi.fn() } as never}
+        subjectId="thread-1"
+        subjectType="chat-thread"
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("Raise or clear the ceiling"),
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("open Usage");
+  });
+
   it("reports a host failure instead of an empty total", async () => {
     const load = vi.fn().mockRejectedValue(new UsageDashboardClientFailure("Host is down.", 0));
     render(

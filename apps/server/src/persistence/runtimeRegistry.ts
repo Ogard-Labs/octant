@@ -114,6 +114,11 @@ import {
   ThreadRetentionWindowSet,
   ContentIngestedPayload,
   THREAD_EXTERNAL_CONTENT_EVENT_NAMES,
+  SPEND_CEILING_EVENT_NAMES,
+  SpendCeilingSet,
+  SpendCeilingRaised,
+  SpendCeilingCleared,
+  SpendCeilingOverrunRecorded,
 } from "@octant/contracts";
 import {
   REMOTE_ACCESS_EVENT_NAMES,
@@ -157,6 +162,7 @@ import {
   ProductFeedbackProjection,
 } from "./productFeedbackProjection";
 import { ThreadRetentionProjection } from "./threadRetentionProjection";
+import { SpendCeilingProjection } from "./spendCeilingProjection";
 import { ExternalContentTaintProjection } from "../context/externalContentTaintProjection";
 import {
   THREAD_CHECKPOINT_FORGOTTEN,
@@ -351,7 +357,11 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(IMAGE_JOB_STATUS_CHANGED, 1, ImageJobStatusChanged)
     .register(THREAD_RETENTION_EVENT_NAMES.windowSet, 1, ThreadRetentionWindowSet)
     .register(THREAD_RETENTION_EVENT_NAMES.threadPurged, 1, ThreadRetentionThreadPurged)
-    .register(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested, 1, ContentIngestedPayload);
+    .register(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested, 1, ContentIngestedPayload)
+    .register(SPEND_CEILING_EVENT_NAMES.set, 1, SpendCeilingSet)
+    .register(SPEND_CEILING_EVENT_NAMES.raised, 1, SpendCeilingRaised)
+    .register(SPEND_CEILING_EVENT_NAMES.cleared, 1, SpendCeilingCleared)
+    .register(SPEND_CEILING_EVENT_NAMES.overrunRecorded, 1, SpendCeilingOverrunRecorded);
   for (const eventName of RETIRED_EVENT_NAMES) {
     events.register(eventName, 1, RetiredEventPayload);
   }
@@ -401,6 +411,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ThreadCheckpointProjection())
       .register(new ProductFeedbackProjection())
       .register(new ThreadRetentionProjection())
-      .register(new ExternalContentTaintProjection()),
+      .register(new ExternalContentTaintProjection())
+      .register(new SpendCeilingProjection()),
   };
 }

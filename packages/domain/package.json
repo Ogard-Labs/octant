@@ -54,6 +54,7 @@
     "./project-policy": "./src/projectPolicy.ts",
     "./project-view-policy": "./src/projectViewPolicy.ts",
     "./provider-capacity-policy": "./src/providerCapacityPolicy.ts",
+    "./spend-ceiling-policy": "./src/spendCeilingPolicy.ts",
     "./provider-policy": "./src/providerPolicy.ts",
     "./research-policy": "./src/researchPolicy.ts",
     "./shell-policy": "./src/shellPolicy.ts",

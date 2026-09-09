@@ -62,6 +62,8 @@ import {
   decidesCodeEffectsByApproval,
   harnessAutoReviewEffective,
 } from "@octant/domain";
+import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
+import { WORK_TURN_SAFE_INPUT_TOKENS } from "../work/workTurnContext";
 import {
   approvalContextDigest,
   CodeOperationApprovalStore,
@@ -225,6 +227,10 @@ export interface CodeOperationRuntimeOptions {
     readonly checkoutRoot: string;
     readonly windowId: WindowId;
   }) => AppManagedToolSet | undefined;
+  readonly spendCeiling?: {
+    readonly admit: SpendCeilingService["admit"];
+    readonly settle: SpendCeilingService["settle"];
+  };
   /** The harness around a turn: stable instructions in front, the reply observed after. */
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
@@ -343,6 +349,7 @@ export interface CodeOperationRuntime {
 export function createCodeOperationRuntime(
   options: CodeOperationRuntimeOptions,
 ): CodeOperationRuntime {
+  const spendReservations = new Map<string, ReturnType<typeof decodeSpendCeilingReservationId>>();
   const events = new CodeOperationEventStore({
     journal: options.persistence.journal,
     actor: options.actor,
@@ -513,6 +520,7 @@ export function createCodeOperationRuntime(
     gitService,
     runtimeWork,
     observeRuntimeWorkOutcome,
+    spendReservations,
   });
   const authorityForTurn: CodeOperationAuthorityPort = {
     ...authority,
@@ -801,6 +809,27 @@ export function createCodeOperationRuntime(
               message: `${admission.status === "paused-by-advisor" ? "The advisor paused this thread" : "This thread is paused"}: ${admission.detail} Resume the harness session to continue.`,
             }),
           );
+        }
+        if (thread !== undefined && options.spendCeiling !== undefined) {
+          const spendReservationId = decodeSpendCeilingReservationId(options.uuid());
+          const spendAdmission = options.spendCeiling.admit({
+            reservationId: spendReservationId,
+            threadId: String(thread.id),
+            threadType: "code-thread",
+            projectId: String(thread.projectId),
+            turnUpperBoundTokens: WORK_TURN_SAFE_INPUT_TOKENS,
+          });
+          if (spendAdmission.status === "refused") {
+            throw new CodeServiceError(
+              decodeCodeFailure({
+                category: "unavailable",
+                message: spendAdmission.refusal.message,
+              }),
+            );
+          }
+          if (spendAdmission.reservedTokens > 0) {
+            spendReservations.set(String(thread.id), spendReservationId);
+          }
         }
         turns.noteStart(command);
       }
@@ -1173,6 +1202,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   readonly #active = new Map<string, ActiveTurn>();
   readonly #approvedBrowserContexts = new Set<string>();
 
+  readonly #spendReservations: Map<string, ReturnType<typeof decodeSpendCeilingReservationId>>;
+
   constructor(input: {
     options: CodeOperationRuntimeOptions;
     events: CodeOperationEventStore;
@@ -1180,8 +1211,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     gitService: GitService;
     runtimeWork: CodeRuntimeWorkRecorder;
     observeRuntimeWorkOutcome: (outcome: CodeRuntimeWorkRecordOutcome) => void;
+    spendReservations: Map<string, ReturnType<typeof decodeSpendCeilingReservationId>>;
   }) {
     this.#options = input.options;
+    this.#spendReservations = input.spendReservations;
     this.#events = input.events;
     this.#roots = input.roots;
     this.#git = input.gitService;
@@ -1528,8 +1561,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(this.#options.nativeHarness === undefined
             ? {}
             : {
-                onTurnCompleted: (completed) =>
-                  this.#options.nativeHarness!.turnCompleted({ ...harnessScope, ...completed }),
+                onTurnCompleted: (completed) => {
+                  const reservationId = this.#spendReservations.get(String(active.thread.id));
+                  if (reservationId !== undefined) {
+                    this.#spendReservations.delete(String(active.thread.id));
+                    this.#options.spendCeiling?.settle({ reservationId });
+                  }
+                  return this.#options.nativeHarness!.turnCompleted({
+                    ...harnessScope,
+                    ...completed,
+                  });
+                },
               }),
           ...(attachments === undefined ? {} : { attachments }),
           ...(harnessAutoReviewEnabled ? { harnessAutoReviewEnabled: true } : {}),

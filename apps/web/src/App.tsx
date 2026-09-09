@@ -1152,6 +1152,7 @@ function LaunchedShell(
     shipClient,
     usageClient,
     usageDashboardClient,
+    spendCeilingClient,
     localUsageHistoryClient,
     workMutationClient,
     workOverviewClient,
@@ -5530,6 +5531,7 @@ function LaunchedShell(
                       });
                     }}
                     usageDashboardClient={usageDashboardClient}
+                    spendCeilingClient={spendCeilingClient}
                     onOpenUsageDashboard={(filter) => {
                       setPendingUsageFilter(filter);
                       setUsageOpen(true);

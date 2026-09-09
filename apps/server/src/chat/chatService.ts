@@ -461,6 +461,10 @@ export interface ChatServiceOptions {
   ) => ProviderDriver;
   readonly contextHarness: ContextHarnessService;
   readonly capacityScheduler: ProviderCapacityScheduler;
+  readonly spendCeiling?: {
+    readonly admit: import("../spendCeilingService").SpendCeilingService["admit"];
+    readonly settle: import("../spendCeilingService").SpendCeilingService["settle"];
+  };
   readonly researchRouter: ResearchRouter;
   readonly threadWork: ThreadWorkService;
   readonly turnTimeoutMs?: number;
@@ -757,6 +761,7 @@ export class ChatService {
       contextHarness: options.contextHarness,
       researchRouter: options.researchRouter,
       ...(options.turnTimeoutMs === undefined ? {} : { timeoutMs: options.turnTimeoutMs }),
+      ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
     });
   }
 

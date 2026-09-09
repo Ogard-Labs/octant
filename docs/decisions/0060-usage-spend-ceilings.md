@@ -1,6 +1,6 @@
 # 0060. Usage spend ceilings
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
@@ -20,8 +20,9 @@ spend without a host-owned cap.
 People need Project- and thread-level spend ceilings so concurrent or
 unattended work cannot burn provider quota unnoticed. Vendor billing portals
 and account APIs differ by provider and are not a local-first core dependency.
-This record is design only: no enforcement lands until it is Accepted and an
-implementation change is authorized.
+Token ceilings are enforced at turn admission. Monetary, time, and turn
+ceilings remain unenforced until pricing or those dimensions are actually
+configured on a host.
 
 ## Decision
 
@@ -82,10 +83,9 @@ implementation change is authorized.
   `ThreadGoalBudget` without a parallel budget vocabulary, and can aggregate
   from the usage projection the Usage dashboard already reads.
 - Projects without ceilings stay unbounded on spend; setting a ceiling is
-  opt-in. First enforcement should cover token ceilings first, then monetary
-  once pricing metadata is actually configured on a host.
-- Until Accepted, the roadmap keeps spend ceilings outside the shipping
-  boundary. This note is the start gate for later enforcement work.
+  opt-in. Token ceilings are the first enforced dimension. Monetary ceilings
+  wait until scoped pricing metadata is actually configured on a host; time
+  and turn ceilings remain schema-optional and unused.
 
 ## Related
 

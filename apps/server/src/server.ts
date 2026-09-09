@@ -455,6 +455,8 @@ import { createWebAssetsHandler } from "./webAssets";
 import { createZenRouteHandler } from "./zenRoutes";
 import { createZenBackgroundRouteHandler } from "./zenBackgroundRoutes";
 import { createUsageRouteHandler } from "./usageRoutes";
+import { SpendCeilingService } from "./spendCeilingService";
+import { createSpendCeilingRouteHandler } from "./spendCeilingRoutes";
 import { CacheStatsProjection } from "./cacheStatsProjection";
 import { createUsageDashboardRouteHandler } from "./usageDashboardRoutes";
 import { createLocalUsageHistoryRouteHandler } from "./localUsageHistoryRoutes";
@@ -1647,6 +1649,13 @@ export function startOctantServer(
       maxRetryJitterMs: 250,
       ambiguousReservationTtlMs: 60_000,
     });
+    const spendCeilingHolder: { service?: SpendCeilingService } = {};
+    const spendCeiling = {
+      admit: ((request: Parameters<SpendCeilingService["admit"]>[0]) =>
+        spendCeilingHolder.service!.admit(request)) as SpendCeilingService["admit"],
+      settle: ((input: Parameters<SpendCeilingService["settle"]>[0]) =>
+        spendCeilingHolder.service!.settle(input)) as SpendCeilingService["settle"],
+    };
     const agentRunLiveConversations = new AgentRunLiveConversationStore();
     // Managed subagent execution. A managed child runs as an in-process
     // provider session, not a spawned process, so authority is re-derived from
@@ -1654,6 +1663,7 @@ export function startOctantServer(
     const agentRunSessionSupervisor = new AgentRunSessionSupervisor({
       port: createAgentRunSessionRuntime({
         capacityScheduler,
+        spendCeiling,
         appManagedTools: (input) => nativeHarnessComposition?.forAgentRun(input),
         // `configuredDriverOptions` is declared later in this scope; the closure
         // only runs when a child starts, long after boot, so the reference is safe.
@@ -2103,6 +2113,13 @@ export function startOctantServer(
     // disagree about what a window may see.
     const readWindowUsageProjectScope = (windowId: WindowId): UsageProjectScope =>
       resolveWindowProjectScope(persistence.readWindowWorkspace(windowId)?.workspace);
+    const spendCeilingRoutes = createSpendCeilingRouteHandler({
+      service: {
+        snapshot: (input) => spendCeilingHolder.service!.snapshot(input),
+        execute: (principal, command) => spendCeilingHolder.service!.execute(principal, command),
+      } as SpendCeilingService,
+      windowAuthorityStore,
+    });
     const usageDashboardRoutes = createUsageDashboardRouteHandler({
       connection: persistence.connection,
       windowAuthorityStore,
@@ -2336,6 +2353,24 @@ export function startOctantServer(
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
     const workThreadProjection = new WorkThreadProjection();
+    const spendCeilingService = new SpendCeilingService({
+      connection: persistence.connection,
+      journal: persistence.journal,
+      clock: () => new Date().toISOString(),
+      uuid: randomUUID,
+      agentRuns: persistence.agentRunProjection,
+      threadExists: (input) => {
+        if (input.threadType === "chat-thread") {
+          return persistence.readChatThread(input.threadId as never) !== undefined;
+        }
+        if (input.threadType === "code-thread") {
+          return persistence.readCodeThread(input.threadId as never) !== undefined;
+        }
+        return workThreadProjection.read(input.threadId as never) !== undefined;
+      },
+      projectExists: (projectId) => persistence.readProject(projectId as never) !== undefined,
+    });
+    spendCeilingHolder.service = spendCeilingService;
     requireJournalHydration(
       hydrateWorkThreadProjectionFromJournal({
         replay: (cursor) =>
@@ -3485,6 +3520,7 @@ export function startOctantServer(
             }),
             selection,
           ),
+        spendCeiling,
         terminalProcessPort,
         repositoryTestProcessPort,
         scaffoldProcess: {
@@ -4345,6 +4381,7 @@ export function startOctantServer(
           }),
           selection,
         ),
+      spendCeiling,
       persistence,
       issueContext: githubIssueContextService,
       linearIssueContext: linearIssueContextService,
@@ -4757,6 +4794,7 @@ export function startOctantServer(
       linearIssueContext: linearIssueContextService,
     });
     const workTurnService = new WorkTurnService({
+      spendCeiling,
       onTurnRequested: (threadId) => workThreadService.noteTurnRequested(threadId),
       persistence,
       resolveAppManagedTools: (input) => {
@@ -6941,6 +6979,7 @@ export function startOctantServer(
       (await localServerRoutes(request)) ??
       (await threadMentionRoutes(request)) ??
       (await fileMentionRoutes(request)) ??
+      (await spendCeilingRoutes(request)) ??
       (await usageDashboardRoutes(request)) ??
       (await localUsageHistoryRoutes(request)) ??
       (await usageRoutes(request)) ??

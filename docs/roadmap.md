@@ -41,8 +41,9 @@ Everything here is merged or being hardened for it.
 - **Shell and appearance** — borderless macOS shell, dockable tabs and splits,
   command palette, semantic themes and presets, sidebar materials, Zen focus
   workspace with backgrounds, notes, checklists, and timer.
-- **Operations** — usage dashboard, diagnostics export, first-run onboarding,
-  packaged desktop smoke scripts.
+- **Operations** — usage dashboard, optional Project and thread token spend
+  ceilings with atomic reservation at turn admission, diagnostics export,
+  first-run onboarding, packaged desktop smoke scripts.
 
 Hardening in progress for the preview:
 
@@ -145,10 +146,9 @@ starts.
   on the foundation named in its own design note.
   Changelog design is
   [decisions/0061-in-app-changelog.md](decisions/0061-in-app-changelog.md).
-- **Usage spend ceilings** — Project and thread caps on provider usage,
-  reusing the usage ledger and goal-budget shape; design in
-  [0060](decisions/0060-usage-spend-ceilings.md). Enforcement waits until that
-  record is Accepted.
+- **Monetary spend ceilings** — token ceilings are enforced
+  ([0060](decisions/0060-usage-spend-ceilings.md)); money waits until scoped
+  pricing metadata is actually configured on a host.
 
 ## Not planned
 

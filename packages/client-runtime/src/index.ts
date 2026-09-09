@@ -69,6 +69,7 @@ export * from "./threadMentionClient";
 export * from "./fileMentionClient";
 export * from "./usageClient";
 export * from "./usageDashboardClient";
+export * from "./spendCeilingClient";
 export * from "./diagnosticsExportClient";
 export * from "./threadExportClient";
 export * from "./validationEvidenceClient";
