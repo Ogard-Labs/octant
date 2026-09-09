@@ -488,6 +488,17 @@ their own pane headers and lifecycle controls. Capability-gated toggles for
 Open in, Environment, bottom panel, and right dock remain window chrome. Zen
 remains in the bottom-left identity menu.
 
+Zen arranges itself. A space tiles its cards from their number and the room it
+has, leaving the spaces pill and the Navigator bar their own edges, so two pins
+never land on each other, removing a card closes the gap, and resizing the
+window re-tiles rather than stranding the arrangement. The column count follows
+the card count and drops when the area is too narrow for a readable measure; a
+short last row spreads across the full width instead of leaving one card beside
+dead space. A wall offers no drag, resize grip, nudge, pan, or zoom, because
+each would write a position the wall ignores. Arrange, on the surface itself,
+is the exception: it restores hand placement and every card's stored geometry,
+which a wall never rewrites (0106).
+
 The app has three server-enforced modes—Chat, Work, and Code. Mode switching is
 available as a labeled selector, compact list, or icon presentation according
 to the user's setting. Code and Work keep separate Project View sets. The
