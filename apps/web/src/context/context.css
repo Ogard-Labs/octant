@@ -74,7 +74,7 @@
 }
 
 .context-window-popover__header {
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
 }
 
 .context-window-popover__header strong,
@@ -100,7 +100,7 @@
 .context-window-popover__facts dt,
 .context-window-popover__facts dd {
   margin: 0;
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -175,7 +175,7 @@
   align-items: center;
   gap: 6px;
   margin: 0;
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 .context-window-popover__breakdown dt > span {
@@ -370,7 +370,7 @@
 
 .context-inspector__header h2 {
   margin-top: 2px;
-  font-size: calc(13 * var(--oct-text-step));
+  font-size: var(--oct-text-sm);
 }
 
 .context-inspector button {
@@ -408,12 +408,12 @@
 }
 
 .context-inspector__section h3 {
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
 }
 
 .context-inspector__section h4 {
   margin-top: 10px;
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 .context-inspector__health {
@@ -472,7 +472,7 @@
 
 .context-entry-card h4 {
   margin-top: 2px;
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 .context-entry-card__actions {

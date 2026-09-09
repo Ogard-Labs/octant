@@ -61,7 +61,7 @@
 .chat-workspace__load-state > p {
   margin: 0;
   color: var(--oct-muted);
-  font-size: calc(13 * var(--oct-text-step));
+  font-size: var(--oct-text-sm);
   line-height: 1.5;
 }
 
@@ -110,7 +110,7 @@
   background: color-mix(in srgb, var(--oct-danger-fg) 10%, var(--oct-bg));
   border: 1px solid color-mix(in srgb, var(--oct-danger-fg) 32%, var(--oct-border));
   border-radius: var(--oct-radius-sm);
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   line-height: 1.4;
 }
 
@@ -163,7 +163,7 @@
 .chat-transcript__empty p {
   max-width: 44ch;
   color: var(--oct-muted);
-  font-size: calc(13 * var(--oct-text-step));
+  font-size: var(--oct-text-sm);
   line-height: 1.5;
 }
 
@@ -174,7 +174,7 @@
   background: var(--oct-warn-soft);
   border: 1px solid color-mix(in oklab, var(--oct-warn-fg) 32%, transparent);
   border-radius: var(--oct-radius-sm);
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   line-height: 1.4;
 }
 
@@ -499,7 +499,7 @@
   color: var(--oct-muted);
   border-radius: var(--oct-radius-sm);
   cursor: pointer;
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   text-align: left;
 }
 
@@ -519,7 +519,7 @@
   margin: 0;
   overflow: hidden;
   color: var(--oct-warn-fg);
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -559,7 +559,7 @@
 .thread-work-shelf__item-copy strong {
   display: block;
   color: var(--oct-fg);
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   font-weight: 500;
   line-height: 1.35;
 }
@@ -567,7 +567,7 @@
 .thread-work-shelf__item-copy p {
   margin: 3px 0 0;
   color: var(--oct-muted);
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   line-height: 1.4;
 }
 
@@ -631,7 +631,7 @@
   gap: 4px;
   padding: 6px 6px 2px;
   color: var(--oct-muted);
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 /* The composer's frame, placement, focus state, input, chips row, bottom row,
@@ -985,7 +985,7 @@
   gap: 6px;
   margin: 0;
   color: var(--oct-fg);
-  font-size: calc(13 * var(--oct-text-step));
+  font-size: var(--oct-text-sm);
   font-weight: 500;
 }
 
@@ -1001,7 +1001,7 @@
   gap: var(--oct-space-2);
   padding: var(--oct-space-4);
   color: var(--oct-muted);
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
 }
 
 .side-chat__empty p {

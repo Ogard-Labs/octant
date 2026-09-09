@@ -374,7 +374,7 @@ describe("the public-block visual language", () => {
       settings.match(/(?:^|\n)\.settings-navigation \.setnav-section\s*\{[^}]+\}/)?.[0] ?? "";
     const hint = settings.match(/\.setrow-hint\s*\{[^}]+\}/)?.[0] ?? "";
 
-    expect(navigation).toMatch(/font-size:\s*calc\(12 \* var\(--oct-text-step\)\)/);
+    expect(navigation).toMatch(/font-size:\s*var\(--oct-text-detail\)/);
     expect(navigation).toMatch(/font-weight:\s*var\(--oct-weight-regular\)/);
     expect(navigation).toMatch(/text-transform:\s*none/);
     expect(navigation).toMatch(/letter-spacing:\s*normal/);
@@ -392,7 +392,7 @@ describe("the public-block visual language", () => {
     expect(settings).not.toMatch(
       /\.settings-navigation__group \+ \.settings-navigation__group\s*\{[^}]*border-top/,
     );
-    expect(hint).toMatch(/font-size:\s*calc\(12 \* var\(--oct-text-step\)\)/);
+    expect(hint).toMatch(/font-size:\s*var\(--oct-text-detail\)/);
   });
 
   it("keeps Usage on the open grammar instead of stat cards", () => {

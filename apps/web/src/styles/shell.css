@@ -1689,14 +1689,14 @@ form > .work-composer-adapter__attachments {
 .create-from-issue__hint {
   margin: 0;
   color: var(--octant-text-muted);
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 .draft-thread__error,
 .work-composer-adapter__error {
   margin: 0;
   color: var(--octant-destructive);
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
 }
 
 .draft-thread__hint,
@@ -1704,7 +1704,7 @@ form > .work-composer-adapter__attachments {
   margin: 0;
   padding: 0 2px;
   color: var(--octant-text-muted);
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   opacity: 0.7;
 }
 
@@ -1978,7 +1978,7 @@ form > .work-composer-adapter__attachments {
   border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   text-align: left;
 }
 
@@ -2008,7 +2008,7 @@ form > .work-composer-adapter__attachments {
   margin: 0;
   padding: 8px;
   color: var(--octant-text-muted);
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
 }
 
 .code-branch-selector__footer {
@@ -2107,7 +2107,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-composer-choice__option-label {
-  font-size: calc(13 * var(--oct-text-step));
+  font-size: var(--oct-text-sm);
   font-weight: 500;
 }
 
@@ -2159,13 +2159,13 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-worktree-source__title {
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   font-weight: 500;
   color: var(--octant-text-primary);
 }
 
 .code-worktree-source__copy {
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   color: var(--octant-text-muted);
 }
 
@@ -2175,7 +2175,7 @@ form > .work-composer-adapter__attachments {
   align-items: baseline;
   gap: 6px;
   margin: 0;
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
 }
 
 .code-worktree-source__disclosure-label {
@@ -2185,13 +2185,13 @@ form > .work-composer-adapter__attachments {
 
 .code-worktree-source__disclosure-detail {
   color: var(--octant-text-muted);
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 .code-worktree-source__field {
   display: grid;
   gap: 4px;
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   color: var(--octant-text-secondary);
 }
 
@@ -2204,7 +2204,7 @@ form > .work-composer-adapter__attachments {
 
 .code-worktree-source__cached-detail {
   color: var(--octant-text-muted);
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 .browser-workspace {

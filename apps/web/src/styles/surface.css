@@ -13,9 +13,9 @@
      `.surface--wide`. */
   --oct-surface-measure: 880px;
   --oct-surface-gutter: 24px;
-  /* The one size between metadata (11) and body (13). Row descriptions,
+  /* The one size between metadata (12) and body (14). Row descriptions,
      subtitles, and menu details use it; nothing uses 11.5 or 12.5. */
-  --oct-text-detail: calc(12 * var(--oct-text-step));
+  --oct-text-detail: calc(13 * var(--oct-text-step));
 }
 
 /* ── Type roles ─────────────────────────────────────────────────────────
