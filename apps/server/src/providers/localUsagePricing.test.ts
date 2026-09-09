@@ -104,6 +104,86 @@ describe("local usage API-equivalent pricing", () => {
     expect(oneHour.amount).toBeCloseTo(3 + 0.15 + 1 + 2.5, 10);
   });
 
+  it("prices Claude records when both cache-write TTL partitions are explicit", () => {
+    const result = estimateApiEquivalentCost(
+      "anthropic",
+      record({
+        modelId: "claude-opus-4-6",
+        inputTokens: 1_000_000,
+        uncachedInputTokens: 500_000,
+        cacheReadInputTokens: 300_000,
+        cacheWriteInputTokens: 200_000,
+        cacheWrite5mInputTokens: 100_000,
+        cacheWrite1hInputTokens: 100_000,
+        outputTokens: 100_000,
+      }),
+    );
+    expect(result).toMatchObject({ kind: "api-estimate", amount: 6.775 });
+  });
+
+  it("infers a Claude cache-write total only when both TTL partitions are known", () => {
+    const withKnownPartitions = record({
+      modelId: "claude-opus-4-6",
+      inputTokens: 1_000_000,
+      uncachedInputTokens: 500_000,
+      cacheReadInputTokens: 300_000,
+      cacheWrite5mInputTokens: 100_000,
+      cacheWrite1hInputTokens: 100_000,
+      outputTokens: 100_000,
+    });
+    const { cacheWriteInputTokens: _aggregate, ...withoutAggregate } = withKnownPartitions;
+    const result = estimateApiEquivalentCost("anthropic", withoutAggregate);
+    expect(result).toMatchObject({ kind: "api-estimate", amount: 6.775 });
+    expect(
+      estimateApiEquivalentCost(
+        "anthropic",
+        record({
+          modelId: "claude-opus-4-6",
+          inputTokens: 1_000_000,
+          uncachedInputTokens: 700_000,
+          cacheReadInputTokens: 300_000,
+          cacheWriteInputTokens: 100_000,
+          cacheWrite5mInputTokens: 100_000,
+          outputTokens: 100_000,
+        }),
+      ),
+    ).toMatchObject({ kind: "unpriced", reason: "missing-cache-write-duration" });
+  });
+
+  it("rejects cache-write totals that contradict explicit TTL partitions", () => {
+    expect(
+      estimateApiEquivalentCost(
+        "anthropic",
+        record({
+          modelId: "claude-opus-4-6",
+          inputTokens: 1_000_000,
+          uncachedInputTokens: 500_000,
+          cacheReadInputTokens: 300_000,
+          cacheWriteInputTokens: 150_000,
+          cacheWrite5mInputTokens: 100_000,
+          cacheWrite1hInputTokens: 100_000,
+          outputTokens: 100_000,
+        }),
+      ),
+    ).toMatchObject({ kind: "unpriced", reason: "inconsistent-input-breakdown" });
+    expect(
+      estimateApiEquivalentCost(
+        "anthropic",
+        record({
+          modelId: "claude-opus-4-6",
+          inputTokens: 1_000_000,
+          uncachedInputTokens: 500_000,
+          cacheReadInputTokens: 300_000,
+          cacheWriteInputTokens: 200_000,
+          cacheWrite5mInputTokens: 100_000,
+          cacheWrite1hInputTokens: 100_000,
+          cacheWriteDuration: "5-minute",
+          outputTokens: 100_000,
+        }),
+      ),
+    ).toMatchObject({ kind: "unpriced", reason: "inconsistent-input-breakdown" });
+  });
+
   it("leaves a record unpriced when a required cache-write dimension is absent", () => {
     const { cacheWriteInputTokens: _missingWrite, ...withoutWrite } = record();
     const missingWrite = estimateApiEquivalentCost("openai", withoutWrite);
@@ -149,6 +229,48 @@ describe("local usage API-equivalent pricing", () => {
         }),
       ),
     ).toMatchObject({ kind: "unpriced", reason: "long-context-rate-unavailable" });
+    expect(
+      estimateApiEquivalentCost(
+        "anthropic",
+        record({
+          modelId: "claude-sonnet-4-5-20990101",
+          inputTokens: 100,
+          uncachedInputTokens: 100,
+          cacheReadInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          outputTokens: 1,
+        }),
+      ),
+    ).toMatchObject({ kind: "unpriced", reason: "unknown-model" });
+  });
+
+  it("prices only documented dated Claude snapshots", () => {
+    expect(
+      estimateApiEquivalentCost(
+        "anthropic",
+        record({
+          modelId: "claude-sonnet-4-5-20250929",
+          inputTokens: 100,
+          uncachedInputTokens: 100,
+          cacheReadInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          outputTokens: 1,
+        }),
+      ),
+    ).toMatchObject({ kind: "api-estimate" });
+    expect(
+      estimateApiEquivalentCost(
+        "anthropic",
+        record({
+          modelId: "claude-haiku-4-5-20251001",
+          inputTokens: 100,
+          uncachedInputTokens: 100,
+          cacheReadInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          outputTokens: 1,
+        }),
+      ),
+    ).toMatchObject({ kind: "api-estimate" });
   });
 
   it("refuses unsupported cache dimensions and contradictory reasoning counts", () => {

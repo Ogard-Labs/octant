@@ -106,6 +106,12 @@ function parseClaudeLine(input: {
     uncachedInputTokens,
     ...(cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens }),
     ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens }),
+    ...(fiveMinuteCacheWrite === undefined || oneHourCacheWrite === undefined
+      ? {}
+      : {
+          cacheWrite5mInputTokens: fiveMinuteCacheWrite,
+          cacheWrite1hInputTokens: oneHourCacheWrite,
+        }),
     ...(cacheWriteDuration === undefined || cacheWriteDuration === "unknown"
       ? {}
       : { cacheWriteDuration }),
@@ -129,6 +135,12 @@ function parseClaudeLine(input: {
     uncachedInputTokens,
     ...(cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens }),
     ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens }),
+    ...(fiveMinuteCacheWrite === undefined || oneHourCacheWrite === undefined
+      ? {}
+      : {
+          cacheWrite5mInputTokens: fiveMinuteCacheWrite,
+          cacheWrite1hInputTokens: oneHourCacheWrite,
+        }),
     ...(cacheWriteDuration === undefined ? {} : { cacheWriteDuration }),
     outputTokens,
     ...(cost === undefined ? {} : { cost }),

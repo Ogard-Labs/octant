@@ -36,6 +36,9 @@ export const LocalUsageHistoryRecord = Schema.Struct({
   uncachedInputTokens: Schema.optional(NonNegativeInt),
   cacheReadInputTokens: Schema.optional(NonNegativeInt),
   cacheWriteInputTokens: Schema.optional(NonNegativeInt),
+  /** Claude prompt-cache writes split by their independently priced TTL. */
+  cacheWrite5mInputTokens: Schema.optional(NonNegativeInt),
+  cacheWrite1hInputTokens: Schema.optional(NonNegativeInt),
   cacheWriteDuration: Schema.optional(Schema.Literal("5-minute", "1-hour", "unknown")),
   outputTokens: NonNegativeInt,
   reasoningTokens: Schema.optional(NonNegativeInt),

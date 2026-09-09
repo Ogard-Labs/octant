@@ -29,6 +29,9 @@ export interface PricingUsageRecord {
   readonly uncachedInputTokens?: number;
   readonly cacheReadInputTokens?: number;
   readonly cacheWriteInputTokens?: number;
+  /** Explicit Claude prompt-cache partitions; pricing requires both fields together. */
+  readonly cacheWrite5mInputTokens?: number;
+  readonly cacheWrite1hInputTokens?: number;
   readonly cacheWriteDuration?: CacheWriteDuration;
   readonly outputTokens: number;
   /** Reasoning is a subset of output for the supported API billing tables. */
@@ -291,6 +294,16 @@ const ANTHROPIC = new Map<string, ModelPricing>([
   ["claude-haiku-3-5", claudeRates(0.8, 4, 0.08, 1, 1.6, 200_000)],
 ]);
 
+/**
+ * Anthropic documents these dated snapshots as examples of the pre-4.6 API
+ * aliases. Keep this allowlist exact: an arbitrary date suffix can represent a
+ * different snapshot with different availability or pricing.
+ */
+const ANTHROPIC_SNAPSHOT_ALIASES = new Map<string, string>([
+  ["claude-sonnet-4-5-20250929", "claude-sonnet-4-5"],
+  ["claude-haiku-4-5-20251001", "claude-haiku-4-5"],
+]);
+
 function pricingTable(provider: PricingProvider): Map<string, ModelPricing> | undefined {
   if (provider === "openai") return OPENAI;
   if (provider === "anthropic") return ANTHROPIC;
@@ -321,7 +334,11 @@ export function estimateApiEquivalentCost(
 ): PricingResult {
   const table = pricingTable(provider);
   if (table === undefined) return unpriced(provider, "unknown-provider");
-  const model = table.get(record.modelId);
+  const modelId =
+    provider === "anthropic"
+      ? (ANTHROPIC_SNAPSHOT_ALIASES.get(record.modelId) ?? record.modelId)
+      : record.modelId;
+  const model = table.get(modelId);
   if (model === undefined) return unpriced(provider, "unknown-model");
   if (
     !safeTokenCount(record.inputTokens) ||
@@ -329,6 +346,8 @@ export function estimateApiEquivalentCost(
     !safeTokenCount(record.uncachedInputTokens) ||
     !safeTokenCount(record.cacheReadInputTokens) ||
     !safeTokenCount(record.cacheWriteInputTokens) ||
+    !safeTokenCount(record.cacheWrite5mInputTokens) ||
+    !safeTokenCount(record.cacheWrite1hInputTokens) ||
     !safeTokenCount(record.reasoningTokens) ||
     record.inputTokens === undefined ||
     record.outputTokens === undefined ||
@@ -348,7 +367,40 @@ export function estimateApiEquivalentCost(
 
   const requiresCacheWrite =
     tier.cacheWrite5mPerMillion !== undefined || tier.cacheWrite1hPerMillion !== undefined;
-  const writeTokens = record.cacheWriteInputTokens;
+  const splitFiveMinute = record.cacheWrite5mInputTokens;
+  const splitOneHour = record.cacheWrite1hInputTokens;
+  const hasSplitWrite = splitFiveMinute !== undefined || splitOneHour !== undefined;
+  if (hasSplitWrite && (splitFiveMinute === undefined || splitOneHour === undefined)) {
+    return unpriced(provider, "missing-cache-write-duration");
+  }
+  if (
+    hasSplitWrite &&
+    record.cacheWriteDuration === "5-minute" &&
+    splitOneHour !== undefined &&
+    splitOneHour > 0
+  ) {
+    return unpriced(provider, "inconsistent-input-breakdown");
+  }
+  if (
+    hasSplitWrite &&
+    record.cacheWriteDuration === "1-hour" &&
+    splitFiveMinute !== undefined &&
+    splitFiveMinute > 0
+  ) {
+    return unpriced(provider, "inconsistent-input-breakdown");
+  }
+  const splitWriteTokens =
+    splitFiveMinute === undefined || splitOneHour === undefined
+      ? undefined
+      : splitFiveMinute + splitOneHour;
+  if (
+    splitWriteTokens !== undefined &&
+    record.cacheWriteInputTokens !== undefined &&
+    splitWriteTokens !== record.cacheWriteInputTokens
+  ) {
+    return unpriced(provider, "inconsistent-input-breakdown");
+  }
+  const writeTokens = record.cacheWriteInputTokens ?? splitWriteTokens;
   if (requiresCacheWrite && writeTokens === undefined) {
     return unpriced(provider, "missing-cache-write");
   }
@@ -367,11 +419,11 @@ export function estimateApiEquivalentCost(
     writeTokens !== undefined &&
     writeTokens > 0 &&
     model.cacheWriteDurationRequired === true &&
-    record.cacheWriteDuration === undefined
+    record.cacheWriteDuration === undefined &&
+    !hasSplitWrite
   ) {
     return unpriced(provider, "missing-cache-write-duration");
   }
-
   const readTokens = record.cacheReadInputTokens;
   if (readTokens !== undefined && readTokens > 0 && tier.cachedInputPerMillion === undefined) {
     return unpriced(provider, "unsupported-cache-read");
@@ -396,22 +448,32 @@ export function estimateApiEquivalentCost(
   if (
     resolvedWrite > 0 &&
     model.cacheWriteDurationRequired === true &&
-    record.cacheWriteDuration === undefined
+    record.cacheWriteDuration === undefined &&
+    !hasSplitWrite
   ) {
     return unpriced(provider, "missing-cache-write-duration");
   }
 
   const writeRate =
-    model.cacheWriteDurationRequired === true && record.cacheWriteDuration === "1-hour"
-      ? tier.cacheWrite1hPerMillion
-      : tier.cacheWrite5mPerMillion;
-  if (resolvedWrite > 0 && writeRate === undefined) {
+    model.cacheWriteDurationRequired === true && hasSplitWrite
+      ? undefined
+      : model.cacheWriteDurationRequired === true && record.cacheWriteDuration === "1-hour"
+        ? tier.cacheWrite1hPerMillion
+        : tier.cacheWrite5mPerMillion;
+  if (resolvedWrite > 0 && hasSplitWrite) {
+    if (tier.cacheWrite5mPerMillion === undefined || tier.cacheWrite1hPerMillion === undefined) {
+      return unpriced(provider, "unsupported-cache-write");
+    }
+  } else if (resolvedWrite > 0 && writeRate === undefined) {
     return unpriced(provider, "unsupported-cache-write");
   }
   const inputAmount =
     tokenCharge(resolvedUncached, tier.inputPerMillion) +
     tokenCharge(resolvedRead, tier.cachedInputPerMillion ?? tier.inputPerMillion) +
-    tokenCharge(resolvedWrite, writeRate ?? 0);
+    (hasSplitWrite
+      ? tokenCharge(splitFiveMinute ?? 0, tier.cacheWrite5mPerMillion ?? 0) +
+        tokenCharge(splitOneHour ?? 0, tier.cacheWrite1hPerMillion ?? 0)
+      : tokenCharge(resolvedWrite, writeRate ?? 0));
   const amount = inputAmount + tokenCharge(record.outputTokens, tier.outputPerMillion);
   const cacheSavingsUsd = tokenCharge(record.inputTokens, tier.inputPerMillion) - inputAmount;
   if (!Number.isFinite(amount) || amount < 0) return unpriced(provider, "overflow");

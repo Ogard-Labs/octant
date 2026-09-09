@@ -355,6 +355,48 @@ describe("local provider usage history", () => {
     expect(result.records[1]?.cacheWriteInputTokens).toBe(5);
   });
 
+  it("prices a realistic Claude record with both cache-write TTL partitions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-claude-mixed-cache-pricing-"));
+    await writeFile(
+      join(root, "session.jsonl"),
+      JSON.stringify({
+        type: "assistant",
+        session_id: "claude-session-mixed-cache",
+        timestamp: "2026-09-09T11:02:00.000Z",
+        message: {
+          id: "message-mixed-cache",
+          model: "claude-sonnet-4-5-20250929",
+          usage: {
+            input_tokens: 100,
+            cache_read_input_tokens: 200,
+            cache_creation: {
+              ephemeral_5m_input_tokens: 50,
+              ephemeral_1h_input_tokens: 25,
+            },
+            output_tokens: 30,
+          },
+        },
+      }),
+    );
+    const source = createClaudeLocalUsageHistorySource({ root });
+    const result = await Effect.runPromise(source.read(request));
+    expect(result.records[0]).toMatchObject({
+      modelId: "claude-sonnet-4-5-20250929",
+      inputTokens: 375,
+      cacheReadInputTokens: 200,
+      cacheWriteInputTokens: 75,
+      cacheWrite5mInputTokens: 50,
+      cacheWrite1hInputTokens: 25,
+      cacheWriteDuration: "unknown",
+      cost: {
+        kind: "api-estimate",
+        amount: 0.0011475,
+        pricingRevision: "2026-09-09",
+        pricingSource: "https://platform.claude.com/docs/en/about-claude/pricing",
+      },
+    });
+  });
+
   it("does not treat an empty Claude cache object as a measured zero", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-claude-empty-cache-"));
     await writeFile(

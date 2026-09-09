@@ -26,6 +26,23 @@ describe("provider local usage history contracts", () => {
     expect(() => decodeLocalUsageHistoryRecord({ ...record, prompt: "secret" })).toThrow();
   });
 
+  it("retains explicit Claude cache-write TTL partitions", () => {
+    expect(
+      decodeLocalUsageHistoryRecord({
+        ...record,
+        providerKey: "claude-code",
+        modelId: "claude-sonnet-4-5-20250929",
+        inputTokens: 375,
+        uncachedInputTokens: 100,
+        cacheReadInputTokens: 200,
+        cacheWriteInputTokens: 75,
+        cacheWrite5mInputTokens: 50,
+        cacheWrite1hInputTokens: 25,
+        cacheWriteDuration: "unknown",
+      }),
+    ).toMatchObject({ cacheWrite5mInputTokens: 50, cacheWrite1hInputTokens: 25 });
+  });
+
   it("rejects inverted ranges and unknown timezones", () => {
     expect(() =>
       decodeLocalUsageHistoryRequest({
