@@ -1,11 +1,11 @@
 # 0101. Browser authority follows the thread across modes
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
-Browser is host-owned, but the current resolver accepts only Work and Code and
-only Code composes the app-owned browser tool independently of the native
+Browser is host-owned, but the previous resolver accepted only Work and Code and
+only Code composed the app-owned browser tool independently of the native
 harness. Chat's virtual context must not be promoted into filesystem authority
 merely to read or operate a page. Unfiled Chat threads have no Project.
 

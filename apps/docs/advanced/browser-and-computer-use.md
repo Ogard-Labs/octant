@@ -47,11 +47,31 @@ CSS-selected elements, press a browser key, scroll horizontally or vertically,
 wait for an element, take a screenshot, and stop its session. Page observations
 include a revision that subsequent actions may use to refuse stale targets.
 
-An approval-gated Code task may request an isolated browser session for its
-origin through an inline approval. This does not change the task to Full
+Chat, Work, and approval-gated Code tasks may request an isolated browser
+session for an origin through an inline approval. This does not change the task to Full
 access. Unsupported runtimes, expired grants, changed owners, and cancelled
-requests are refused explicitly. Browser support in Chat is a separate mode
-capability and is not granted by opening a panel.
+requests are refused explicitly. Chat keeps its virtual scope: Browser access
+adds no filesystem or shell authority. Background tasks retain their own
+browser when the visible pane changes within the same Project. Switching the
+selected model requires a fresh origin approval before that model can use the
+existing page.
+
+The host supplies the tool transport automatically for supported runtimes:
+
+| Runtime          | Transport and current boundary                                  |
+| ---------------- | --------------------------------------------------------------- |
+| Codex            | App-server dynamic tools                                        |
+| Claude Code      | Agent SDK managed tools                                         |
+| OpenCode         | Private MCP profile, verified on 1.18.21 with macOS confinement |
+| ACP runtimes     | HTTP MCP when the runtime advertises and accepts it             |
+| Pi               | Owned extension and verified CLI catalogue on 0.85.1            |
+| Direct endpoints | Only models with verified tool support                          |
+
+A supported transport is checked before it is advertised. It does not require
+editing a user's global MCP configuration or granting Full access. A runtime
+or platform that cannot carry the tool within its confinement policy stays
+unavailable; Linux OpenCode/ACP/Pi bridge support is not inferred from a macOS
+check. Oh My Pi remains unavailable where its driver is probe-only.
 
 ## Computer use
 

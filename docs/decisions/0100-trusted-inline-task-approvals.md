@@ -1,6 +1,6 @@
 # 0100. Task authority confirmations use a trusted inline surface
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
