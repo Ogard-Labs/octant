@@ -26,6 +26,7 @@ function source(): ProviderLocalUsageHistorySource {
           acceptedRecordCount: 0,
           omittedRecordCount: 0,
           truncated: false,
+          hasMore: false,
           detail: "synthetic",
         },
       } as never),
@@ -110,9 +111,13 @@ describe("local provider usage history route", () => {
         headers: { "content-type": "application/json", "x-octant-window-capability": capability },
         body,
       });
-    const first = await handler(request());
+    const [first, parallel] = await Promise.all([handler(request()), handler(request())]);
     expect(first?.status).toBe(200);
+    expect(parallel?.status).toBe(200);
     expect((await first?.json()).coverage).toEqual(
+      expect.arrayContaining([expect.objectContaining({ status: "partial", hasMore: true })]),
+    );
+    expect((await parallel?.json()).coverage).toEqual(
       expect.arrayContaining([expect.objectContaining({ status: "partial" })]),
     );
     const second = await handler(request());
@@ -120,7 +125,7 @@ describe("local provider usage history route", () => {
     expect(await second?.json()).toMatchObject({
       totals: { requestCount: 1, inputTokens: 10 },
       models: [expect.objectContaining({ key: "codex/gpt-5.6-sol" })],
-      coverage: [expect.objectContaining({ status: "ready" })],
+      coverage: [expect.objectContaining({ status: "ready", hasMore: false })],
     });
   });
 

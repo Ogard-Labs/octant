@@ -23,6 +23,7 @@ interface CodexParserState {
 }
 
 const parserCaches = new Map<string, CodexParserState>();
+const MAX_PARSER_CACHES = 32;
 import {
   readLocalUsageHistory,
   stableUsageId,
@@ -34,13 +35,18 @@ import {
 export function createCodexLocalUsageHistorySource(
   options: Omit<LocalUsageHistoryReaderOptions, "sourceKind" | "providerKey">,
 ): ProviderLocalUsageHistorySource {
-  const state =
-    parserCaches.get(options.root) ??
-    ({
+  let state = parserCaches.get(options.root);
+  if (state === undefined) {
+    if (parserCaches.size >= MAX_PARSER_CACHES) {
+      const oldest = parserCaches.keys().next().value;
+      if (oldest !== undefined) parserCaches.delete(oldest);
+    }
+    state = {
       models: new Map<string, string>(),
       cumulative: new Map<string, CodexUsageSnapshot>(),
-    } satisfies CodexParserState);
-  parserCaches.set(options.root, state);
+    };
+    parserCaches.set(options.root, state);
+  }
   return {
     sourceKind: "codex",
     read: (request: LocalUsageHistoryRequest, signal) =>
@@ -53,10 +59,13 @@ export function createCodexLocalUsageHistorySource(
             signal ?? effectSignal,
           )),
         }),
-        catch: (): ProviderFailure => ({
-          category: "provider-failed",
-          message: "Codex local usage history could not be read.",
-        }),
+        catch: (): ProviderFailure => {
+          if (signal?.aborted) state.cumulative.clear();
+          return {
+            category: "provider-failed",
+            message: "Codex local usage history could not be read.",
+          };
+        },
       }),
   };
 }
@@ -120,9 +129,12 @@ function parseCodexLine(
     const previous = state.cumulative.get(sourceSessionId);
     if (previous !== undefined) {
       const delta = subtractUsage(cumulative, previous);
-      if (delta === undefined) usage = last;
-      else if (delta === "unchanged") return undefined;
-      else usage = delta;
+      if (delta === undefined) {
+        state.cumulative.set(sourceSessionId, cumulative);
+        return undefined;
+      }
+      if (delta === "unchanged") return undefined;
+      usage = delta;
     }
     state.cumulative.set(sourceSessionId, cumulative);
   }
@@ -150,7 +162,7 @@ function parseCodexLine(
     text(payload.turn_id) ?? text(payload.turnId) ?? text(info?.turn_id) ?? text(info?.turnId);
   const eventIdentity =
     cumulative === undefined
-      ? (turnIdentity ?? JSON.stringify(lastValue))
+      ? (turnIdentity ?? `${JSON.stringify(lastValue)}\0${observedAt}\0${input.lineNumber}`)
       : `${turnIdentity ?? ""}\0${JSON.stringify(cumulative)}`;
   const sourceEventId = stableUsageId("codex", sourceSessionId, eventIdentity);
   if (seenUsageIds.has(sourceEventId)) return undefined;

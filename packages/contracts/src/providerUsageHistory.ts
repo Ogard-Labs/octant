@@ -53,6 +53,7 @@ export const LocalUsageHistoryCoverage = Schema.Struct({
   coveredFrom: Schema.optional(UtcTimestamp),
   coveredTo: Schema.optional(UtcTimestamp),
   truncated: Schema.Boolean,
+  hasMore: Schema.Boolean,
   detail: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
 }).annotations(strict);
 export type LocalUsageHistoryCoverage = typeof LocalUsageHistoryCoverage.Type;

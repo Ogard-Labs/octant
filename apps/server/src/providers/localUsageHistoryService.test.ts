@@ -73,6 +73,7 @@ function source(values: ReadonlyArray<LocalUsageHistoryRecord>): ProviderLocalUs
           acceptedRecordCount: values.length,
           omittedRecordCount: 0,
           truncated: false,
+          hasMore: false,
           detail: "synthetic",
         },
       } as never),

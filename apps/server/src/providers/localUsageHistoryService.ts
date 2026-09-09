@@ -417,6 +417,7 @@ function failedCoverage(sourceKind: string): LocalUsageHistoryCoverage {
     acceptedRecordCount: 0,
     omittedRecordCount: 0,
     truncated: false,
+    hasMore: false,
     detail: "The local provider history source failed.",
   };
 }
