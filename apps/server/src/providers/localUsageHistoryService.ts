@@ -101,6 +101,12 @@ export async function readLocalUsageHistoryDashboard(input: {
   const truncatedByRecordLimit = deduplicated.length > MAX_RECORDS;
   const records = deduplicated.slice(0, MAX_RECORDS);
   const coverage = results.map((result) => result.coverage);
+  const dayFormatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: input.request.timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
   const totals = accumulator();
   const providers = new Map<string, TotalsAccumulator>();
   const models = new Map<
@@ -126,7 +132,7 @@ export async function readLocalUsageHistoryDashboard(input: {
       models.set(modelKey, created);
       add(created.totals, record);
     } else add(model.totals, record);
-    const day = dayKey(record.observedAt, input.request.timeZone);
+    const day = dayKey(record.observedAt, dayFormatter);
     const overall = dailyTotals.get(day);
     if (overall === undefined) {
       const created = accumulator();
@@ -395,14 +401,9 @@ function deduplicate(
   });
 }
 
-function dayKey(timestamp: string, timeZone: string): string {
+function dayKey(timestamp: string, formatter: Intl.DateTimeFormat): string {
   try {
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).formatToParts(new Date(timestamp));
+    const parts = formatter.formatToParts(new Date(timestamp));
     const values = new Map(parts.map((part) => [part.type, part.value]));
     return `${values.get("year")}-${values.get("month")}-${values.get("day")}`;
   } catch {

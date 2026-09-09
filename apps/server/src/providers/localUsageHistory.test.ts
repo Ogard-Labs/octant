@@ -174,6 +174,42 @@ describe("local provider usage history", () => {
     expect(second.coverage.hasMore).toBe(false);
   });
 
+  it("prioritizes a pending long-file cursor before untouched files", async () => {
+    const root = await codexFixtureRoot("octant-codex-pending-priority-");
+    const usage = (session: string) =>
+      JSON.stringify({
+        timestamp: "2026-09-09T10:00:00.000Z",
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          thread_id: session,
+          info: { last_token_usage: { input_tokens: 10, output_tokens: 3 } },
+        },
+      });
+    const hugeFile = join(root, "sessions", "huge.jsonl");
+    const otherFile = join(root, "sessions", "other.jsonl");
+    await writeFile(hugeFile, `${usage("huge-session")}\n${"x".repeat(9 * 1024 * 1024)}\n`);
+    await writeFile(otherFile, `${usage("other-session")}\n`);
+    await utimes(
+      hugeFile,
+      new Date("2026-09-09T00:00:00.000Z"),
+      new Date("2026-09-09T00:00:00.000Z"),
+    );
+    await utimes(
+      otherFile,
+      new Date("2026-09-01T00:00:00.000Z"),
+      new Date("2026-09-01T00:00:00.000Z"),
+    );
+    const source = createCodexLocalUsageHistorySource({ root, maxFiles: 1, maxFileBytes: 1024 });
+    const first = await Effect.runPromise(source.read(request));
+    expect(first.records).toHaveLength(1);
+    expect(first.coverage.hasMore).toBe(true);
+    const second = await Effect.runPromise(source.read(request));
+    expect(second.records).toHaveLength(1);
+    expect(second.records[0]?.sourceSessionId).toBe("huge-session");
+    expect(second.coverage.hasMore).toBe(true);
+  });
+
   it("keeps no-identity Codex events distinct by timestamp and line position", async () => {
     const root = await codexFixtureRoot("octant-codex-no-identity-");
     const makeLine = (timestamp: string) =>

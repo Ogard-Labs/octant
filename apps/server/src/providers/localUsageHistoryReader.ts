@@ -276,7 +276,12 @@ async function readLocalUsageHistoryImpl(
   const startIndex =
     previousIndex < 0 || files.length === 0 ? 0 : (previousIndex + 1) % files.length;
   const rotatedFiles = files.slice(startIndex).concat(files.slice(0, startIndex));
-  const selected = rotatedFiles.slice(0, maxFiles);
+  const pendingFiles = rotatedFiles.filter((file) =>
+    scanOffsets.has(`${sourceInstallationId}\0${file}`),
+  );
+  const pendingSet = new Set(pendingFiles);
+  const scanOrder = pendingFiles.concat(rotatedFiles.filter((file) => !pendingSet.has(file)));
+  const selected = scanOrder.slice(0, maxFiles);
   const seen = fileSeen.get(sourceInstallationId) ?? new Set<string>();
   let cacheInvalidated = [...seen].some((file) => !files.includes(file));
   let parserInvalidated = false;
