@@ -168,15 +168,15 @@ export interface DraftThreadWorkspaceProps {
   readonly pendingMessage?: string;
   readonly onCancelFirstTurn?: () => void;
   /**
-   * What the Code start screen shows under the composer: the board loader for
-   * Continue, the Linear loader for Up next, names for cards, and the openers
+   * What the Code start screen shows under the composer: the threads to
+   * continue, the Linear loader for Up next, names for cards, and the openers
    * the sections hand off to. Absent on hosts that have none of it.
    */
   readonly codeHome?: Pick<
     CodeHomeProps,
     | "loadAssignedLinearIssues"
     | "loadOpenLinearIssues"
-    | "loadBoard"
+    | "continueCards"
     | "projectNames"
     | "providerLabels"
     | "onOpenThread"
@@ -511,9 +511,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(githubHomeClient === undefined ? {} : { githubClient: githubHomeClient })}
           {...(linearHome === undefined ? {} : { loadAssignedLinearIssues: linearHome })}
           {...(linearFresh === undefined ? {} : { loadOpenLinearIssues: linearFresh })}
-          {...(props.codeHome?.loadBoard === undefined
+          {...(props.codeHome?.continueCards === undefined
             ? {}
-            : { loadBoard: props.codeHome.loadBoard })}
+            : { continueCards: props.codeHome.continueCards })}
           {...(props.codeHome?.projectNames === undefined
             ? {}
             : { projectNames: props.codeHome.projectNames })}

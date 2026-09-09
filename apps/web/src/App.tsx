@@ -322,6 +322,7 @@ import { ComposerContextMeterProvider } from "./context/composerContextMeterScop
 import { useContextController } from "./context/useContextController";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { createCodeReadCursorStore, useCodeController } from "./code/useCodeController";
+import { useContinueCards } from "./code/useContinueCards";
 import {
   CodeThreadControllerSlots,
   createCodeThreadControllers,
@@ -1249,6 +1250,11 @@ function LaunchedShell(
     (query: CodeBoardQuery) => codeClient.queryBoard(query),
     [codeClient],
   );
+  // Continue names the window's own threads, so the window reads them. The
+  // draft screen that shows them is remounted whenever a new task starts, and
+  // a read held down there began again — and emptied the section — on every
+  // New task. The board is re-read on the same signal the thread list follows.
+  const continueCards = useContinueCards(loadCodeBoard, machineChanges.codeNavigation);
   const loadOpenLinearIssues = useCallback(
     () => linearClient.listIssues({ filter: { assigneeId: "unassigned" }, pageSize: 20 }),
     [linearClient],
@@ -5596,7 +5602,7 @@ function LaunchedShell(
                     }
                     linearClient={linearClient}
                     codeHome={{
-                      loadBoard: loadCodeBoard,
+                      continueCards,
                       ...(pendingIssue === undefined ? {} : { pendingIssue }),
                       onPendingIssueConsumed: () => setPendingIssue(undefined),
                       loadAssignedLinearIssues,

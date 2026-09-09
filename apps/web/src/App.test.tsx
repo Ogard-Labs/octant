@@ -1,6 +1,7 @@
 import {
   decodeWorkThread,
   decodeCodeProjectPullRequestView,
+  type CodeBoardView,
   type NavigatorAssistantSnapshot,
   type ShellBootstrap,
   type ProjectBootstrap,
@@ -2622,6 +2623,61 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "New task" }));
 
     expect(await screen.findByRole("button", { name: "Project: Choose a Project" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "What should we build?" })).toBeVisible();
+  });
+
+  it("keeps the threads to continue on screen when a new task starts over", async () => {
+    const user = userEvent.setup();
+    const codeApi = codes();
+    // Starting over remounts the draft to clear the composer. A second read
+    // that has not landed stands in for the frame the Continue section used to
+    // spend empty: the threads it already showed belong to the window, so they
+    // have to survive the remount whether or not a fresh read answers.
+    const laterRead = deferred<CodeBoardView>();
+    let reads = 0;
+    vi.mocked(codeApi.queryBoard).mockImplementation(async () => {
+      reads += 1;
+      if (reads > 1) return await laterRead.promise;
+      return {
+        version: 1,
+        query: { version: 1 },
+        generatedAt: "2026-07-21T12:00:00.000Z",
+        cards: [
+          {
+            threadId: codeThreadId,
+            projectId,
+            checkoutKind: "managed-worktree",
+            title: "Ai slop callouts",
+            status: "done",
+            executing: false,
+            worktree: { kind: "unavailable" },
+            changedFiles: { kind: "unavailable" },
+            linkedPullRequest: { kind: "none" },
+            checks: { freshness: { status: "empty" }, state: "unknown" },
+            lastMeaningfulActivityAt: "2026-07-21T11:00:00.000Z",
+          },
+        ],
+      } as unknown as CodeBoardView;
+    });
+    render(
+      <App
+        codeClient={codeApi}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects({ ...projectBootstrap(), availability: [] })}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "New task" }));
+    const shown = await screen.findByRole("region", { name: "Continue" });
+    expect(within(shown).getByText("Ai slop callouts")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "New task" }));
+
+    const kept = screen.getByRole("region", { name: "Continue" });
+    expect(within(kept).getByText("Ai slop callouts")).toBeVisible();
     expect(screen.getByRole("heading", { name: "What should we build?" })).toBeVisible();
   });
 
