@@ -154,7 +154,12 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
                   type="button"
                   variant="secondary"
                 >
-                  {preset.motion === "animated" ? `${preset.title} (animated)` : preset.title}
+                  {/* Several built-in titles already end in "animated", and
+                      appending the suffix to those said it twice and pushed
+                      the name past the chip. */}
+                  {preset.motion === "animated" && !preset.title.toLowerCase().includes("animated")
+                    ? `${preset.title} (animated)`
+                    : preset.title}
                 </OctantButton>
               ))}
             </div>
