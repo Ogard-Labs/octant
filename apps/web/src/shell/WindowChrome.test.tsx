@@ -210,12 +210,10 @@ describe("WindowChrome", () => {
     // centreline. The earlier 34px row sat its buttons two pixels above them.
     expect(cssRule(".shell-frame > .window-chrome")).toContain("height: var(--oct-title-rail-h);");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("top: 0;");
-    expect(
-      cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome'),
-    ).not.toContain("top: calc(var(--oct-space-2) + 4px);");
-    expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
-      "z-index: 7;",
+    expect(cssRule(".shell-frame > .window-chrome")).not.toContain(
+      "top: calc(var(--oct-space-2) + 4px);",
     );
+    expect(cssRule(".shell-frame > .window-chrome")).toContain("z-index: 7;");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("border-bottom: 0;");
     expect(cssRule(".window-chrome__button")).toContain("width: var(--oct-rail-button-h);");
@@ -227,6 +225,62 @@ describe("WindowChrome", () => {
     expect(cssRule('.window-chrome__button[aria-expanded="true"]')).toContain(
       "background: var(--oct-fg-soft);",
     );
+  });
+
+  it("keeps the window chrome's toggles above every rail reader layer", () => {
+    // Board, Inbox, pull requests, issues, and Archive render as absolutely
+    // positioned overlays inside .primary-workspace-layer, which is positioned
+    // but not a stacking context, so each layer's z-index is weighed against
+    // the chrome's rather than against its own column. While a layer outranked
+    // the chrome, the reader covered the dock and bottom-panel toggles and
+    // swallowed their clicks on every reader route — the documented way back
+    // out of a reader was reachable only from the keyboard.
+    const railSource = readFileSync(
+      resolve(process.cwd(), "src/shell/WorkspaceRailLayers.tsx"),
+      "utf8",
+    );
+    const railClasses = [
+      ...new Set(
+        [...railSource.matchAll(/className="(rail-placeholder|[a-z-]+-layer)"/g)].map(
+          (match) => match[1] ?? "",
+        ),
+      ),
+    ];
+    // A rail layer that stopped being discoverable here would make the rest of
+    // this test pass by proving nothing.
+    expect(railClasses).toEqual(
+      expect.arrayContaining([
+        "rail-placeholder",
+        "inbox-layer",
+        "code-board-layer",
+        "archive-layer",
+      ]),
+    );
+
+    const railStyles = ["inbox", "artifacts", "automation", "agents-center"]
+      .map((sheet) => readFileSync(resolve(process.cwd(), `src/styles/${sheet}.css`), "utf8"))
+      .join("\n")
+      .replace(/\/\*[\s\S]*?\*\//g, "");
+    const layerStyles = `${styles}\n${railStyles}`;
+    const stackingRank = (selector: string): number => {
+      const rule = [...layerStyles.matchAll(/([^{}]+)\{([^{}]*)\}/gs)].find((candidate) =>
+        candidate[1]
+          ?.split(",")
+          .map((value) => value.trim())
+          .includes(selector),
+      );
+      expect(rule, `missing CSS rule for ${selector}`).toBeDefined();
+      const zIndex = /z-index:\s*(-?\d+);/.exec(rule?.[2] ?? "");
+      expect(zIndex, `${selector} declares no numeric z-index`).not.toBeNull();
+      return Number(zIndex?.[1]);
+    };
+
+    const chrome = stackingRank(".shell-frame > .window-chrome");
+    for (const railClass of railClasses) {
+      expect(stackingRank(`.${railClass}`), `${railClass} outranks the window chrome`).toBeLessThan(
+        chrome,
+      );
+    }
   });
 
   it("keeps shell separators and authority notices visually quiet", () => {
@@ -939,16 +993,16 @@ describe("WindowChrome", () => {
   });
 
   it("keeps the window controls above the pane header rather than tied with it", () => {
-    const nativeChrome = atRuleBlock(
-      'html[data-octant-native-host="true"] .shell-frame > .window-chrome',
-    );
+    const chrome = cssRule(".shell-frame > .window-chrome");
     const nativeHeader = atRuleBlock(
       'html[data-octant-native-host="true"] .workspace-pane__header',
     );
-    const chromeLayer = Number(/z-index:\s*(\d+)/.exec(nativeChrome)?.[1] ?? "0");
+    const chromeLayer = Number(/z-index:\s*(\d+)/.exec(chrome)?.[1] ?? "0");
     const headerLayer = Number(/z-index:\s*(\d+)/.exec(nativeHeader)?.[1] ?? "0");
     // Equal layers left the winner to document order, and the header — rendered
-    // after the chrome — covered every control in the title band.
+    // after the chrome — covered every control in the title band. The native
+    // header takes the higher of the two ranks, so the chrome's single rank has
+    // to clear that one.
     expect(chromeLayer).toBeGreaterThan(headerLayer);
   });
 
@@ -977,9 +1031,9 @@ describe("WindowChrome", () => {
 
     expect(container.firstChild).toHaveClass("window-chrome--material-opaque");
     expect(container.firstChild).not.toHaveClass("window-drag-region");
-    expect(
-      cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome'),
-    ).not.toContain("top: calc(var(--oct-space-2) + 4px);");
+    expect(cssRule(".shell-frame > .window-chrome")).not.toContain(
+      "top: calc(var(--oct-space-2) + 4px);",
+    );
     expect(container.querySelector(".window-chrome__drag-space")).not.toHaveClass(
       "window-drag-region",
     );
