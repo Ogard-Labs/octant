@@ -603,6 +603,12 @@ step use `OctantToggleGroup`. Answers still write through to the settings that
 own them.
 
 The right dock follows the active pane and never leaks another pane's content.
+The dock and the bottom panel both step aside while a reader route (Board,
+Inbox, pull requests, issues, Archive) holds the pane: a reader is a page about
+many threads and shows none of them, so one thread's tools do not keep a
+quarter of the viewport there. Both keep their tabs and their height and return
+with the thread, and their toggle leaves the reader rather than closing a
+region that was only stepped aside.
 On wide windows it may use at most 38 percent of the viewport, preserving a
 560px primary workspace; the bottom panel may use at most 38 percent of the
 viewport height while preserving 320px for the primary workspace. It can host

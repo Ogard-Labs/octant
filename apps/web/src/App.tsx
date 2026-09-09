@@ -2782,7 +2782,13 @@ function LaunchedShell(
     if (nextState.tabs.length === 0) closeBottomPanel();
   }
   function toggleBottomPanel(opener: HTMLElement) {
-    if (bottomPanelOpen) {
+    // With a reader up the panel is stepped aside, not closed, so the toggle
+    // leaves the reader and shows it again rather than closing something the
+    // person cannot see (the dock's toggle reads the same way).
+    if (readerOpen) {
+      closeWorkspaceReaders();
+      if (bottomPanelOpen) return;
+    } else if (bottomPanelOpen) {
       closeBottomPanel(false);
       opener.focus();
       return;
@@ -3567,6 +3573,14 @@ function LaunchedShell(
   // opens its Review beside that list, so the detail must remain visible.
   const dockPresentedOpen =
     dockOpen && (!readerOpen || (codePullRequestsOpen && projectPullRequestReviewOpen));
+  // The bottom panel steps aside for the same reason, and it had not been:
+  // a terminal opened on a thread kept a quarter of the viewport on Board,
+  // Inbox, and the pull request list, pages that are about many threads and
+  // show none of them. The panel keeps its tabs and its height and comes back
+  // with the thread; only the presentation is withheld. Ownership stays on
+  // `bottomPanelOpen`, so which tools the dock may still launch does not
+  // change while a reader is up.
+  const bottomPanelPresentedOpen = bottomPanelOpen && !readerOpen;
 
   function closeWorkspaceReaders() {
     setRailPlaceholder(undefined);
@@ -4803,7 +4817,7 @@ function LaunchedShell(
           <WindowChrome
             activeSurface={activeSurface}
             bottomPanelAvailable={bottomPanelAvailable && !isNarrow}
-            bottomPanelExpanded={bottomPanelOpen}
+            bottomPanelExpanded={bottomPanelPresentedOpen}
             dockAvailable={dockAvailable}
             dockExpanded={dockPresentedOpen}
             dockLabel="Right sidebar"
@@ -4830,7 +4844,7 @@ function LaunchedShell(
         }
         contextSidebarWidth={contextSidebarWidth}
         bottomPanelHeight={bottomPanelHeight}
-        bottomPanelOpen={bottomPanelOpen}
+        bottomPanelOpen={bottomPanelPresentedOpen}
         material={material}
         workspaceMaterial={workspaceMaterial}
         onCommitSidebarWidth={(width) => {
@@ -5796,7 +5810,7 @@ function LaunchedShell(
               tabs={dockTabs}
               width={contextSidebarWidth}
             />
-            {bottomPanelOpen && activeBottomSurface !== undefined ? (
+            {bottomPanelPresentedOpen && activeBottomSurface !== undefined ? (
               <BottomUtilityPanel
                 activeSurface={activeBottomSurface}
                 content={bottomToolContent(activeBottomSurface.id)}

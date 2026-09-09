@@ -3955,6 +3955,61 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "Back to workspace" })).not.toBeInTheDocument();
   });
 
+  it("hands the pane to the Board and gives the bottom panel back afterwards, toggle included", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    const initial = codeShellBootstrap();
+    const workspaceWithContext = {
+      ...initial.workspace,
+      contextByMode: {
+        ...initial.workspace.contextByMode,
+        code: {
+          ...initial.workspace.contextByMode.code,
+          projectId,
+          boundRoot: "/Users/example/Dev/Repos/octant",
+        },
+      },
+    } as typeof initial.workspace;
+    render(
+      <App
+        codeClient={codes()}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client({
+          ...initial,
+          workspace: workspaceWithContext,
+          workspaceVersion: workspaceWithContext.version,
+        })}
+      />,
+    );
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    await user.click(screen.getByRole("button", { name: "Open bottom panel" }));
+    await screen.findByRole("region", { name: "Bottom panel" });
+
+    // The Board is a page about many threads and shows none of them, so the
+    // panel steps aside the way the dock does instead of keeping a quarter of
+    // the viewport for one thread's terminal.
+    await user.click(screen.getByRole("button", { name: "Board" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "Bottom panel" })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "Open bottom panel" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+
+    // The toggle leaves the Board and shows the panel again, with the tab it
+    // had, rather than closing a panel that was only stepped aside.
+    await user.click(screen.getByRole("button", { name: "Open bottom panel" }));
+    const restored = await screen.findByRole("region", { name: "Bottom panel" });
+    expect(within(restored).getByRole("tab", { name: "Terminal" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Back to workspace" })).not.toBeInTheDocument();
+  });
+
   it("restores a thread's dock tools after the window reloads", async () => {
     writeUtilityDockPresentation(globalThis, String(windowId), {
       open: true,
