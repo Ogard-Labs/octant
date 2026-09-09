@@ -19,7 +19,12 @@ import {
 } from "./codexProcess";
 import { CodexRpcClientFailure } from "./codexRpcClient";
 import type { CodexServerMessage } from "./codexProtocol";
-import type { CodexAccountReadResult, CodexThreadResult } from "./codexProtocol";
+import type {
+  CodexAccountReadResult,
+  CodexRateLimitsReadResult,
+  CodexThreadResult,
+  RateLimitSnapshot,
+} from "./codexProtocol";
 import {
   codexExecutionSettings,
   makeCodexClient,
@@ -109,6 +114,10 @@ interface Fixture {
 function fixture(
   input: {
     readonly account?: CodexAccountReadResult;
+    readonly rateLimitsByLimitId?: Readonly<Record<string, RateLimitSnapshot>>;
+    readonly rateLimitsRead?: () => Promise<CodexRateLimitsReadResult>;
+    readonly rateLimits?: RateLimitSnapshot;
+    readonly ordinaryUsageAllowed?: boolean | null;
     readonly modelPages?: ReadonlyArray<{
       readonly data: ReadonlyArray<ReturnType<typeof model>>;
       readonly nextCursor: string | null;
@@ -133,6 +142,19 @@ function fixture(
     accountRead: async () => {
       calls.push({ method: "account/read" });
       return input.account ?? account;
+    },
+    rateLimitsRead: async () => {
+      calls.push({ method: "account/rateLimits/read" });
+      if (input.rateLimitsRead !== undefined) return input.rateLimitsRead();
+      return {
+        rateLimits: input.rateLimits ?? { rateLimitReachedType: null },
+        ...(input.ordinaryUsageAllowed === undefined
+          ? {}
+          : { ordinaryUsageAllowed: input.ordinaryUsageAllowed }),
+        ...(input.rateLimitsByLimitId === undefined
+          ? {}
+          : { rateLimitsByLimitId: input.rateLimitsByLimitId }),
+      };
     },
     modelList: async (cursor) => {
       calls.push({ method: "model/list", input: cursor });
@@ -384,6 +406,143 @@ afterAll(() => {
 });
 
 describe("Codex driver probe and runtime lifecycle", () => {
+  it("refreshes account limits through a non-generating app-server read", async () => {
+    const f = fixture({
+      rateLimits: {
+        limitId: "codex",
+        limitName: "Codex",
+        primary: {
+          usedPercent: 42,
+          windowDurationMins: 300,
+          resetsAt: 1_800_000_000,
+        },
+        secondary: {
+          usedPercent: 91,
+          windowDurationMins: 10_080,
+          resetsAt: 1_800_060_000,
+        },
+        rateLimitReachedType: null,
+      },
+    });
+    const driver = makeCodexDriver(f.options({ idleLeaseMs: 0 }));
+    const facts = driver.contextFacts;
+    expect(facts).toBeDefined();
+    if (facts === undefined) return;
+    const limits = await Effect.runPromise(
+      Effect.scoped(facts.observeServiceLimits({ instanceId })),
+    );
+    expect(limits).toMatchObject({
+      providerInstanceId: instanceId,
+      scope: "account",
+      source: "runtime-reported",
+      confidence: "high",
+      requests: { status: "unavailable" },
+      tokens: { status: "unavailable" },
+      quota: "available",
+      rateLimitWindows: [
+        { window: "codex:primary_5h", status: "allowed", utilization: 0.42 },
+        { window: "codex:secondary_7d", status: "warning", utilization: 0.91 },
+      ],
+    });
+    expect(f.calls.map((call) => call.method)).toEqual(["account/rateLimits/read"]);
+  });
+
+  it("keeps multiple Codex limit IDs as distinct account windows", async () => {
+    const f = fixture({
+      rateLimits: { rateLimitReachedType: null },
+      rateLimitsByLimitId: {
+        codex: {
+          limitId: "codex",
+          primary: { usedPercent: 10, windowDurationMins: 300, resetsAt: 1_800_000_000 },
+          rateLimitReachedType: null,
+        },
+        "codex-mini": {
+          limitId: "codex-mini",
+          primary: { usedPercent: 80, windowDurationMins: 60, resetsAt: 1_800_060_000 },
+          rateLimitReachedType: null,
+        },
+      },
+    });
+    const facts = makeCodexDriver(f.options({ idleLeaseMs: 0 })).contextFacts;
+    if (facts === undefined) throw new Error("Expected Codex context facts.");
+    const limits = await Effect.runPromise(
+      Effect.scoped(facts.observeServiceLimits({ instanceId })),
+    );
+    expect(limits.rateLimitWindows).toMatchObject([
+      { window: "codex:primary_5h", utilization: 0.1 },
+      { window: "codex-mini:primary_1h", utilization: 0.8 },
+    ]);
+  });
+
+  it("leaves account capacity unknown when the sanctioned read fails", async () => {
+    const f = fixture({
+      rateLimitsRead: async () => {
+        throw new CodexRpcClientFailure("timeout", "synthetic timeout");
+      },
+    });
+    const facts = makeCodexDriver(f.options({ idleLeaseMs: 0 })).contextFacts;
+    if (facts === undefined) throw new Error("Expected Codex context facts.");
+    const exit = await Effect.runPromise(
+      Effect.scoped(Effect.exit(facts.observeServiceLimits({ instanceId }))),
+    );
+    expect(String(exit)).toContain("unavailable");
+    expect(f.calls.map((call) => call.method)).toEqual(["account/rateLimits/read"]);
+  });
+
+  it("does not fabricate capacity from malformed account windows", async () => {
+    const f = fixture({
+      rateLimits: {
+        primary: { usedPercent: 101, windowDurationMins: 300, resetsAt: 1_800_000_000 },
+        rateLimitReachedType: null,
+      },
+    });
+    const facts = makeCodexDriver(f.options({ idleLeaseMs: 0 })).contextFacts;
+    if (facts === undefined) throw new Error("Expected Codex context facts.");
+    const limits = await Effect.runPromise(
+      Effect.scoped(facts.observeServiceLimits({ instanceId })),
+    );
+    expect(limits.quota).toBe("unknown");
+    expect(limits.confidence).toBe("unknown");
+    expect(limits.rateLimitWindows).toBeUndefined();
+  });
+
+  it("uses the account permission flag when Codex supplies no window buckets", async () => {
+    const f = fixture({
+      ordinaryUsageAllowed: false,
+      rateLimits: { rateLimitReachedType: null },
+    });
+    const facts = makeCodexDriver(f.options({ idleLeaseMs: 0 })).contextFacts;
+    if (facts === undefined) throw new Error("Expected Codex context facts.");
+    const limits = await Effect.runPromise(
+      Effect.scoped(facts.observeServiceLimits({ instanceId })),
+    );
+    expect(limits).toMatchObject({
+      quota: "exhausted",
+      confidence: "high",
+      requests: { status: "unavailable" },
+      tokens: { status: "unavailable" },
+    });
+  });
+
+  it("cancels an in-flight account read and closes its runtime lease", async () => {
+    const f = fixture({
+      rateLimitsRead: () => new Promise<CodexRateLimitsReadResult>(() => undefined),
+    });
+    const facts = makeCodexDriver(f.options({ idleLeaseMs: 0 })).contextFacts;
+    if (facts === undefined) throw new Error("Expected Codex context facts.");
+    const controller = new AbortController();
+    const running = Effect.runPromise(Effect.scoped(facts.observeServiceLimits({ instanceId })), {
+      signal: controller.signal,
+    });
+    await vi.waitFor(() =>
+      expect(f.calls.map((call) => call.method)).toContain("account/rateLimits/read"),
+    );
+    controller.abort();
+    await expect(running).rejects.toBeDefined();
+    await vi.waitFor(() => expect(f.closeCount()).toBe(1));
+    expect(f.calls.map((call) => call.method)).toEqual(["account/rateLimits/read"]);
+  });
+
   it("carries the app-server pid as runtime metadata for ownership receipts", async () => {
     const receiptDirectory = mkdtempSync(join(tmpdir(), "octant-codex-receipts-"));
     try {

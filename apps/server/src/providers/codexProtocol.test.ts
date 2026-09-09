@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  decodeAccountRateLimitsReadResult,
   decodeAccountReadResult,
   decodeCodexServerMessage,
   decodeInitializeResult,
@@ -333,6 +334,34 @@ describe("Codex stable 0.144.4 protocol", () => {
     });
     expect(decoded).not.toHaveProperty("params.rateLimits.credits");
     expect(decoded).not.toHaveProperty("params.rateLimits.planType");
+  });
+
+  it("decodes the account rate-limit read with distinct modern limit IDs", () => {
+    const decoded = decodeAccountRateLimitsReadResult({
+      rateLimits: { rateLimitReachedType: null },
+      rateLimitsByLimitId: {
+        codex: {
+          limitId: "codex",
+          normalModelSlug: "gpt-5.4",
+          primary: { usedPercent: 12, windowDurationMins: 300, resetsAt: 1_784_000_000 },
+          rateLimitReachedType: null,
+        },
+        "codex-mini": {
+          limitId: "codex-mini",
+          normalModelSlug: "gpt-5.4-mini",
+          primary: { usedPercent: 4, windowDurationMins: 60, resetsAt: null },
+          rateLimitReachedType: null,
+        },
+      },
+      accountId: "private-account-must-not-cross",
+      rateLimitResetCredits: { availableCount: 2 },
+    });
+    expect(decoded.rateLimitsByLimitId).toMatchObject({
+      codex: { limitId: "codex", normalModelSlug: "gpt-5.4" },
+      "codex-mini": { limitId: "codex-mini", normalModelSlug: "gpt-5.4-mini" },
+    });
+    expect(decoded).not.toHaveProperty("accountId");
+    expect(decoded).not.toHaveProperty("rateLimitResetCredits");
   });
 
   it("does not forward raw tool results through item lifecycle messages", () => {
