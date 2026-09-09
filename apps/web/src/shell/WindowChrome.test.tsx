@@ -360,8 +360,9 @@ describe("WindowChrome", () => {
     const projects = cssRule(".project-block + .project-block");
     const sections = cssRule(".project-section + .project-section");
 
-    expect(rows).toContain("gap: 2px;");
-    expect(projects).toContain("margin-top: var(--oct-space-2);");
+    // Rows sit flush inside a Project; the Project gap is what the eye finds.
+    expect(rows).toContain("gap: 0;");
+    expect(projects).toContain("margin-top: var(--oct-space-4);");
     expect(sections).toContain("border-top: 1px solid var(--oct-hairline);");
   });
 

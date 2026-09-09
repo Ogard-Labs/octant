@@ -1114,10 +1114,12 @@ h6 {
 
    2px was the same step the thread rows inside a Project use, so a sidebar of
    several Projects read as one unbroken list and a Project header looked like
-   another thread. The step is the one below a section break, which keeps its
-   hairline, so the three levels stay ordered: rows, Projects, sections. */
+   another thread. The gap between Projects is now wide enough to group at a
+   glance, and the rows inside one are pulled tighter than that gap, so the
+   two readings do not compete: the eye finds the Project first, then its
+   threads. The three levels stay ordered: rows, Projects, sections. */
 .project-block + .project-block {
-  margin-top: var(--oct-space-2);
+  margin-top: var(--oct-space-4);
 }
 
 /* Projects, then Chats: two flat groups parted by one hairline, never cards. */
@@ -1127,14 +1129,18 @@ h6 {
   border-top: 1px solid var(--oct-hairline);
 }
 
-/* Child threads stay one compact step inside their folder row. */
+/* Child threads stay one compact step inside their folder row, and closer to
+   each other than one Project sits from the next. */
 .project-threads {
   display: grid;
   /* The implicit `auto` track sized itself to the longest title, so a long
      thread name pushed the whole row past the sidebar edge instead of
      truncating inside it. */
   grid-template-columns: minmax(0, 1fr);
-  gap: 2px;
+  /* Flush. The rows are 30px tall, which already parts them; a gap on top of
+     that made a Project's own threads sit as far apart as two Projects did,
+     so neither reading won. */
+  gap: 0;
   margin: 2px 0 0;
   /* Enough to read as nested under its Project, and no more: the row inside
      adds its own inset, and the two together were pushing thread titles most
@@ -1336,9 +1342,17 @@ h6 {
 
 /* Reveal follows the pointer and focus only. The active row used to keep its
    controls on permanently, which put a menu and an edit button on screen at
-   all times for the one row a user looks at most. */
+   all times for the one row a user looks at most.
+
+   While a row's menu is open, every one of that row's controls stays revealed,
+   not only the one that opened it. The menu is anchored to its trigger, and
+   moving the pointer off the row to reach the menu collapsed the sibling
+   control beside it, which widened the name column and slid the trigger, and
+   the open menu slid with it, out from under the pointer. */
 .project-row:hover .project-row__action--icon,
 .project-row:focus-within .project-row__action--icon,
+.project-row:has([aria-expanded="true"]) .project-row__action--icon,
+.project-row:has([data-popup-open]) .project-row__action--icon,
 .project-row__action--icon:has([aria-expanded="true"]),
 .project-row__action--icon[aria-expanded="true"],
 .project-row__action--icon[data-popup-open] {
