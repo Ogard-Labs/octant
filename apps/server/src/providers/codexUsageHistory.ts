@@ -50,7 +50,7 @@ export function createCodexLocalUsageHistorySource(
   }
   return {
     sourceKind: "codex",
-    read: (request: LocalUsageHistoryRequest, signal) =>
+    read: (request: LocalUsageHistoryRequest) =>
       Effect.tryPromise({
         try: async (effectSignal) => ({
           ...(await readLocalUsageHistory(
@@ -66,16 +66,13 @@ export function createCodexLocalUsageHistorySource(
             },
             request,
             createCodexLineParser(state),
-            signal ?? effectSignal,
+            effectSignal,
           )),
         }),
-        catch: (): ProviderFailure => {
-          if (signal?.aborted) state.cumulative.clear();
-          return {
-            category: "provider-failed",
-            message: "Codex local usage history could not be read.",
-          };
-        },
+        catch: (): ProviderFailure => ({
+          category: "provider-failed",
+          message: "Codex local usage history could not be read.",
+        }),
       }),
   };
 }

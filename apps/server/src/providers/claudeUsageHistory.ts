@@ -19,14 +19,14 @@ export function createClaudeLocalUsageHistorySource(
 ): ProviderLocalUsageHistorySource {
   return {
     sourceKind: "claude-code",
-    read: (request: LocalUsageHistoryRequest, signal) =>
+    read: (request: LocalUsageHistoryRequest) =>
       Effect.tryPromise({
         try: (effectSignal) =>
           readLocalUsageHistory(
             { ...options, sourceKind: "claude-code", providerKey: "claude-code" },
             request,
             parseClaudeLine,
-            signal ?? effectSignal,
+            effectSignal,
           ),
         catch: (): ProviderFailure => ({
           category: "provider-failed",
