@@ -710,5 +710,9 @@ describe("local provider usage history", () => {
     expect(result.records).toEqual([]);
     expect(result.coverage.status).toBe("partial");
     expect(result.coverage.omittedRecordCount).toBeGreaterThan(0);
+    const unchanged = await Effect.runPromise(source.read(request));
+    expect(unchanged.coverage.status).toBe("partial");
+    expect(unchanged.coverage.omittedRecordCount).toBe(result.coverage.omittedRecordCount);
+    expect(unchanged.coverage.scannedFileCount).toBe(0);
   });
 });
