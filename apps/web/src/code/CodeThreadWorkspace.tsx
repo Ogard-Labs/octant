@@ -35,6 +35,7 @@ import {
 } from "../composer/composerThreadDraftStore";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -1480,11 +1481,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               />
               {props.harnessAutoReviewSupported === true &&
               (nextTurnAccess === "approval-gated" || nextTurnAccess === "auto-accept-edits") ? (
-                <label className="code-thread-workspace__auto-approve">
-                  <input
-                    type="checkbox"
+                <label
+                  className="code-thread-workspace__auto-approve"
+                  htmlFor={`code-thread-auto-approve-${String(thread.id)}`}
+                >
+                  <OctantCheckbox
                     checked={thread.autoApprove === true}
                     disabled={accessChanging}
+                    id={`code-thread-auto-approve-${String(thread.id)}`}
                     onChange={(event) => void changeAutoApprove(event.currentTarget.checked)}
                   />
                   <span>Approve for me</span>
