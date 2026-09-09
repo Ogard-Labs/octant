@@ -457,7 +457,8 @@ const NO_VOICE_SETTINGS: VoiceSettings = {};
 
 export function App(props: AppProps) {
   const [locationLaunch] = useState(() => launchFromLocation(window.location.href));
-  const launch = props.launch ?? locationLaunch;
+  const launch =
+    props.launch ?? (locationLaunch.status === "accepted" ? locationLaunch.launch : undefined);
   const initialInjectedCapability =
     props.projectWindowCapability ?? props.hostBridge?.projectWindowCapability;
   const injectedCapability = useDesktopWindowAuthority(initialInjectedCapability, props.hostBridge);
@@ -468,6 +469,21 @@ export function App(props: AppProps) {
       : {}),
     onExchanged: clearLaunchTokenFragment,
   });
+
+  // A launch address the capability must not travel to is explained here,
+  // before the pairing and "open from the desktop" states below could hide it.
+  if (launch === undefined && locationLaunch.status === "refused") {
+    return (
+      <main className="shell-boundary">
+        <ShellState
+          eyebrow="Browser session"
+          message={locationLaunch.message}
+          state="warning"
+          title="Octant refuses this launch address"
+        />
+      </main>
+    );
+  }
 
   // A non-loopback browser remains a pairing surface. Loopback launches are
   // resolved above and establish their process-local client context directly.

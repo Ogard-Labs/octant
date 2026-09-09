@@ -195,12 +195,16 @@ function sharedExchange(
       reject(new Error("Launch session request timed out."));
     }, LAUNCH_REQUEST_TIMEOUT_MS);
   });
-  const request = fetch(endpoint, { ...init, signal: controller.signal }).then(
-    async (response) => ({
-      status: response.status,
-      body: response.status === 200 ? await response.json() : undefined,
-    }),
-  );
+  const request = fetch(endpoint, {
+    ...init,
+    signal: controller.signal,
+    // A 302 from the judged URL onto another host would complete this
+    // handshake against an address the launch parser never accepted.
+    redirect: "error",
+  }).then(async (response) => ({
+    status: response.status,
+    body: response.status === 200 ? await response.json() : undefined,
+  }));
   const exchange = Promise.race([request, timeout]).finally(() => {
     if (timer !== undefined) clearTimeout(timer);
   });

@@ -13,6 +13,7 @@ const domTestFilesWithoutJsx = [
   "src/preview/usePreviewController.test.ts",
   "src/settings/useSettingsRoute.test.ts",
   "src/shell/useLaunchSession.test.ts",
+  "src/shell/useShellPresentation.test.ts",
   "src/thread/threadExport.test.ts",
   "src/voice/voiceRecorder.test.ts",
   "src/work/useWorkThreadNavigation.test.ts",

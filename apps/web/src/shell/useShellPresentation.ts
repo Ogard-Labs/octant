@@ -160,9 +160,11 @@ export function useSidebarBackgroundFetcher(
       }
       // `new URL` absorbs a trailing slash on the server URL; string joining
       // produced `//api/...`, which no route claims.
+      // Do not follow redirects: a 302 from the judged URL onto non-loopback
+      // HTTP would forward x-octant-window-capability in plaintext.
       const response = await fetch(
         new URL(`/api/theme/sidebar-backgrounds/${backgroundId}`, serverUrl),
-        { headers },
+        { headers, redirect: "error" },
       );
       if (!response.ok) {
         throw new Error(`Sidebar background fetch failed: ${response.status}`);
@@ -320,7 +322,9 @@ export function useBackgroundImageLibrary(
     return {
       fetch: fetcher,
       list: async () => {
-        const response = await fetch(collection, { headers: headers() });
+        // Same redirect refusal as the sidebar fetcher: the capability header
+        // must not follow a hop onto a host the launch parser never judged.
+        const response = await fetch(collection, { headers: headers(), redirect: "error" });
         if (!response.ok) throw new Error(`Background list failed: ${response.status}`);
         return decodeSidebarBackgroundListResult(await response.json()).backgrounds;
       },
@@ -332,6 +336,7 @@ export function useBackgroundImageLibrary(
             "x-octant-sidebar-background-display-name": encodeURIComponent(file.name),
           }),
           body: file,
+          redirect: "error",
         });
         if (!response.ok) {
           const body: unknown = await response.json().catch(() => undefined);

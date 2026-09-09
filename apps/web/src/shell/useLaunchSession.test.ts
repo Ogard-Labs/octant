@@ -286,6 +286,40 @@ describe("useLaunchSession", () => {
     expect(onExchanged).toHaveBeenCalledOnce();
   });
 
+  it("refuses to follow a redirect during the launch exchange", async () => {
+    const fetchMock = mockFetch(jsonResponse({ windowId, capability }));
+    const { result } = renderHook(() =>
+      useLaunchSession({
+        serverUrl,
+        href: `http://127.0.0.1:13773/#launchToken=${launchToken}`,
+        fetch: fetchMock,
+      }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("/api/shell/launch-session", serverUrl),
+      expect.objectContaining({ redirect: "error" }),
+    );
+  });
+
+  it("treats a redirect error as a failed launch exchange and stores no capability", async () => {
+    const storage = createMemoryStorage();
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    }) as unknown as typeof fetch;
+    const { result } = renderHook(() =>
+      useLaunchSession({
+        serverUrl,
+        href: `http://127.0.0.1:13773/#launchToken=${launchToken}`,
+        fetch: fetchMock,
+        storage,
+      }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("failed"));
+    expect(result.current.capability).toBeUndefined();
+    expect(storage.getItem(`octant:launch-session:${serverUrl}`)).toBeNull();
+  });
+
   it("shares the one-shot launch exchange across StrictMode effect replay", async () => {
     let resolveFetch!: (response: Response) => void;
     const fetchMock = vi.fn(

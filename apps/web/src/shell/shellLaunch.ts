@@ -1,11 +1,28 @@
 import { decodeWindowId, type WindowId } from "@octant/contracts/shell";
+import {
+  capabilityTransportFor,
+  isLoopbackHostname,
+  type CapabilityTransportRefusal,
+} from "./capabilityTransport";
 
 export interface ShellLaunch {
   readonly serverUrl: string;
   readonly windowId?: WindowId;
 }
 
-export function launchFromLocation(href: string): ShellLaunch | undefined {
+/**
+ * `absent` is a page nothing launched: there is no Machine address to speak to,
+ * so the renderer asks to be opened from the desktop application or, on a
+ * remote origin, offers pairing. `refused` is a page that did name a Machine
+ * address, one the window capability must not travel to; it carries the
+ * explanation the renderer shows instead of sending anything.
+ */
+export type ShellLaunchResolution =
+  | { readonly status: "accepted"; readonly launch: ShellLaunch }
+  | CapabilityTransportRefusal
+  | { readonly status: "absent" };
+
+export function launchFromLocation(href: string): ShellLaunchResolution {
   try {
     const url = new URL(href);
     const launchTokenFragment = url.hash.startsWith("#launchToken=");
@@ -15,21 +32,27 @@ export function launchFromLocation(href: string): ShellLaunch | undefined {
       serverUrl === null &&
       !launchTokenFragment &&
       url.protocol === "http:" &&
-      (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]");
-    if (serverUrl === null && !launchTokenFragment && !directCanonicalHost) return undefined;
+      isLoopbackHostname(url.hostname);
+    if (serverUrl === null && !launchTokenFragment && !directCanonicalHost) {
+      return { status: "absent" };
+    }
     const resolvedServerUrl =
       serverUrl === null ? `${url.origin}${url.pathname === "/" ? "" : url.pathname}` : serverUrl;
     const parsedServerUrl = new URL(resolvedServerUrl);
-    if (parsedServerUrl.protocol !== "http:" && parsedServerUrl.protocol !== "https:") {
-      return undefined;
-    }
+    // Judged before anything else about the launch is read, so a refused
+    // address is reported as refused even when the rest of the URL is broken.
+    const transport = capabilityTransportFor(parsedServerUrl);
+    if (transport.status === "refused") return transport;
     const windowId = windowIdParam === null ? undefined : decodeWindowId(windowIdParam);
     return {
-      serverUrl: parsedServerUrl.toString(),
-      ...(windowId === undefined ? {} : { windowId }),
+      status: "accepted",
+      launch: {
+        serverUrl: parsedServerUrl.toString(),
+        ...(windowId === undefined ? {} : { windowId }),
+      },
     };
   } catch {
-    return undefined;
+    return { status: "absent" };
   }
 }
 
