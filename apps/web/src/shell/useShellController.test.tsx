@@ -216,6 +216,74 @@ describe("useShellController", () => {
     );
   });
 
+  it("starts a task in another Project by moving the window there, not by refusing", async () => {
+    const currentProjectId = decodeProjectId("00000000-0000-4000-8000-000000000896");
+    const nextProjectId = decodeProjectId("00000000-0000-4000-8000-000000000897");
+    const initial = codeBootstrap();
+    const bootstrap: ShellBootstrap = {
+      ...initial,
+      workspace: {
+        ...initial.workspace,
+        contextByMode: {
+          ...initial.workspace.contextByMode,
+          code: {
+            ...initial.workspace.contextByMode.code,
+            projectId: currentProjectId,
+            boundRoot: "/current",
+          },
+        },
+      },
+    };
+    const execute = vi.fn(async (command: ShellCommand): Promise<ShellCommandResult> => {
+      // Opening an existing thread from another Project already moves the
+      // window there. A new task in that Project was the one path that asked
+      // for a new window instead, which is not a choice the person made.
+      expect(command).toMatchObject({
+        kind: "apply-workspace-operation",
+        operation: {
+          kind: "switch-project-surface",
+          mode: "code",
+          surface: { kind: "draft-thread", projectId: nextProjectId },
+        },
+      });
+      const pane = firstPane(bootstrap.workspace.layouts.code);
+      const operation =
+        command.kind === "apply-workspace-operation" ? command.operation : undefined;
+      if (operation === undefined || operation.kind !== "switch-project-surface") {
+        throw new Error("expected Project switch");
+      }
+      return {
+        kind: "workspace-replaced",
+        workspace: {
+          ...bootstrap.workspace,
+          contextByMode: {
+            ...bootstrap.workspace.contextByMode,
+            code: {
+              ...bootstrap.workspace.contextByMode.code,
+              projectId: nextProjectId,
+              boundRoot: "/next",
+            },
+          },
+          layouts: {
+            ...bootstrap.workspace.layouts,
+            code: { ...pane, surface: operation.surface },
+          },
+        },
+        version: 1 as ShellBootstrap["workspaceVersion"],
+      };
+    });
+    const client: ShellClient = { bootstrap: vi.fn(async () => bootstrap), execute };
+    const { result } = renderHook(() =>
+      useShellController({ client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => result.current.openDraftThread("code", nextProjectId));
+
+    expect(result.current.workspace?.contextByMode.code.projectId).toBe(nextProjectId);
+    expect(result.current.crossContextOffer).toBeUndefined();
+  });
+
   it("switches a bound window to another Project instead of offering a new window", async () => {
     const currentProjectId = decodeProjectId("00000000-0000-4000-8000-000000000898");
     const nextProjectId = decodeProjectId("00000000-0000-4000-8000-000000000899");
