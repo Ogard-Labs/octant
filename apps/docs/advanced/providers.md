@@ -52,11 +52,14 @@ requirement.
 
 Octant scans a sanitized `PATH` plus approved install locations to find
 local provider runtimes. Opening **Providers & Models** auto-registers at most
-one **disabled** instance per driver family for the preferred safe candidate.
-Auto-registration never enables a provider, never stores credentials, never
-logs in, and never installs or updates CLIs. Auto-registered rows show
-**"Detected on this host — enable to use"**; enabling runs the Connection
-Check first.
+one instance per driver family for the preferred safe candidate. On first run,
+a detected Claude Code or Codex CLI instance is created enabled; every other
+detected runtime is created disabled. After first run, auto-registration
+always creates a disabled instance. Auto-registration never toggles an
+existing instance, never stores credentials, never logs in, and never
+installs or updates CLIs. Disabled auto-registered rows show **"Detected on
+this host — enable to use"**; enabling runs the Connection Check first.
+Enabled is not ready: detection does not assert authentication.
 
 Local CLI and SDK providers include Codex CLI, Claude Agent SDK,
 OpenCode CLI, Kilo ACP, Pi RPC, Oh My Pi, Devin ACP, Mistral Vibe ACP,
