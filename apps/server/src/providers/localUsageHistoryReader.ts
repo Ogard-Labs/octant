@@ -33,6 +33,7 @@ const scanOffsets = new Map<
     readonly ino: number;
     readonly prefixRevision: string;
     readonly prefixLength: number;
+    readonly waitingForAppend: boolean;
   }
 >();
 const fileIdentities = new Map<
@@ -44,6 +45,7 @@ const fileIdentities = new Map<
     readonly ino: number;
     readonly prefixRevision: string;
     readonly prefixLength: number;
+    readonly waitingForAppend: boolean;
   }
 >();
 const fileCursors = new Map<string, string>();
@@ -305,6 +307,7 @@ async function readLocalUsageHistoryImpl(
   const records: LocalUsageHistoryRecord[] = [];
   const recordPaths = new Map<string, Set<string>>();
   const processedPaths = new Set<string>();
+  let waitingForAppend = false;
   let scannedFileCount = 0;
   let omittedRecordCount = collected.truncated ? 1 : 0;
   let scannedBytes = 0;
@@ -333,7 +336,7 @@ async function readLocalUsageHistoryImpl(
       }
       const cursorKey = `${sourceInstallationId}\0${resolvedFilePath}`;
       const previous = scanOffsets.get(cursorKey) ?? fileIdentities.get(cursorKey);
-      const prefixLength = Math.min(previous?.size ?? fileSize, 4096);
+      const prefixLength = Math.min(previous?.prefixLength ?? fileSize, 4096);
       const prefixRevision = await filePrefixRevision(handle, fileSize, prefixLength);
       const replaced =
         previous !== undefined &&
@@ -360,6 +363,7 @@ async function readLocalUsageHistoryImpl(
           ino: fileStat.ino,
           prefixRevision,
           prefixLength,
+          waitingForAppend: false,
         });
         continue;
       }
@@ -367,6 +371,11 @@ async function readLocalUsageHistoryImpl(
         previous === undefined || replaced || fileSize < previous.size
           ? 0
           : Math.min(previous.offset, fileSize);
+      if (previous?.waitingForAppend === true && fileSize === previous.size) {
+        waitingForAppend = true;
+        processedFile = true;
+        continue;
+      }
       const availableBytes = maxTotalBytes - scannedBytes;
       if (availableBytes <= 0) {
         truncated = true;
@@ -464,7 +473,10 @@ async function readLocalUsageHistoryImpl(
       if (!signal?.aborted) {
         const nextOffset = startOffset + bytesRead;
         const hasPendingTrailingLine =
-          !endedWithLineBreak && !lastLineValid && lastLineBytes <= maxRecordBytes;
+          nextOffset >= fileSize &&
+          !endedWithLineBreak &&
+          !lastLineValid &&
+          lastLineBytes <= maxRecordBytes;
         const cursorOffset = hasPendingTrailingLine ? lastLineOffset : nextOffset;
         const identity = {
           offset: cursorOffset,
@@ -473,8 +485,10 @@ async function readLocalUsageHistoryImpl(
           ino: fileStat.ino,
           prefixRevision,
           prefixLength,
+          waitingForAppend: hasPendingTrailingLine,
         };
         fileIdentities.set(cursorKey, identity);
+        if (identity.waitingForAppend) waitingForAppend = true;
         if (cursorOffset >= fileSize) scanOffsets.delete(cursorKey);
         else {
           truncated = true;
@@ -496,10 +510,11 @@ async function readLocalUsageHistoryImpl(
     }
   }
   const hasPendingFiles = files.some((file) => !seen.has(file));
-  const hasPendingChunks = [...scanOffsets.keys()].some((key) =>
-    key.startsWith(`${sourceInstallationId}\0`),
+  const hasPendingChunks = [...scanOffsets.entries()].some(
+    ([key, cursor]) =>
+      key.startsWith(`${sourceInstallationId}\0`) && cursor.waitingForAppend !== true,
   );
-  truncated = collected.truncated || hasPendingFiles || hasPendingChunks;
+  truncated = collected.truncated || hasPendingFiles || hasPendingChunks || waitingForAppend;
   if (cacheInvalidated) truncated = true;
   const recordCache = recordCaches.get(sourceInstallationId) ?? new Map();
   recordCaches.set(sourceInstallationId, recordCache);

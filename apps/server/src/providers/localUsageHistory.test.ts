@@ -634,7 +634,7 @@ describe("local provider usage history", () => {
     expect(second.records.map((record) => record.sourceEventId)).toEqual(
       expect.arrayContaining(["new", "stable"]),
     );
-    expect(second.coverage.status).toBe("ready");
+    expect(second.coverage.status).toBe("partial");
     expect(second.coverage.hasMore).toBe(false);
   });
 
@@ -688,7 +688,11 @@ describe("local provider usage history", () => {
     appendFileSync(file, `\n{"marker":"second`);
     const partial = await readLocalUsageHistory(options, request, parser as never);
     expect(partial.records.map((record) => record.sourceEventId)).toEqual(["first"]);
-    expect(partial.coverage.hasMore).toBe(true);
+    expect(partial.coverage.hasMore).toBe(false);
+    const unchanged = await readLocalUsageHistory(options, request, parser as never);
+    expect(unchanged.records.map((record) => record.sourceEventId)).toEqual(["first"]);
+    expect(unchanged.coverage.scannedFileCount).toBe(0);
+    expect(unchanged.coverage.hasMore).toBe(false);
     appendFileSync(file, `"}`);
     const complete = await readLocalUsageHistory(options, request, parser as never);
     expect(complete.records.map((record) => record.sourceEventId)).toEqual(["first", "second"]);
