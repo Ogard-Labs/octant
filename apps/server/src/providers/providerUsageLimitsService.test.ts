@@ -180,6 +180,68 @@ describe("ProviderUsageLimitsService", () => {
     });
   });
 
+  it("merges poll and event windows by identity while keeping the newest observation", async () => {
+    const observerObservedAt = "2026-08-23T12:00:00.000Z" as UtcTimestamp;
+    const runtimeObservedAt = "2026-08-23T12:01:00.000Z" as UtcTimestamp;
+    const service = new ProviderUsageLimitsService({
+      listInstances: () => [instance(firstId)],
+      observe: vi.fn(async () => ({
+        source: "local-observer" as const,
+        limits: decodeProviderServiceLimits({
+          ...limits(firstId, 75),
+          updatedAt: observerObservedAt,
+          rateLimitWindows: [
+            {
+              window: "codex:primary_5h",
+              status: "warning",
+              utilization: 0.8,
+              observedAt: observerObservedAt,
+            },
+            {
+              window: "codex:secondary_7d",
+              status: "allowed",
+              utilization: 0.2,
+              observedAt: observerObservedAt,
+            },
+          ],
+        }),
+      })),
+      runtimeLimits: () =>
+        decodeProviderServiceLimits({
+          ...limits(firstId, 75),
+          source: "runtime-reported",
+          updatedAt: runtimeObservedAt,
+          rateLimitWindows: [
+            {
+              window: "codex:primary_5h",
+              status: "exhausted",
+              utilization: 1,
+              observedAt: runtimeObservedAt,
+            },
+            {
+              window: "codex-mini:primary_1h",
+              status: "allowed",
+              utilization: 0.1,
+              observedAt: runtimeObservedAt,
+            },
+          ],
+        }),
+      now: () => runtimeObservedAt,
+    });
+
+    const snapshot = await service.refresh();
+    expect(snapshot.entries[0]).toMatchObject({
+      source: "local-observer",
+      limits: {
+        rateLimitWindows: [
+          { window: "codex-mini:primary_1h", utilization: 0.1 },
+          { window: "codex:primary_5h", utilization: 1, status: "exhausted" },
+          { window: "codex:secondary_7d", utilization: 0.2 },
+        ],
+      },
+    });
+  });
+
   it("keeps runtime evidence visible when an active observer fails", async () => {
     const runtimeObservedAt = "2026-08-23T01:00:00.000Z" as UtcTimestamp;
     const refreshStartedAt = "2026-08-23T12:00:00.000Z" as UtcTimestamp;

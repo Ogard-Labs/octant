@@ -1504,7 +1504,7 @@ describe("mapCodexMessage", () => {
         kind: "event",
         event: expect.objectContaining({
           kind: "rate-limit-window",
-          window: "primary_5h",
+          window: "codex:primary_5h",
           status: "warning",
           utilization: 0.85,
           resetsAt: "2026-07-14T03:33:20.000Z",
@@ -1515,7 +1515,7 @@ describe("mapCodexMessage", () => {
         kind: "event",
         event: expect.objectContaining({
           kind: "rate-limit-window",
-          window: "secondary_7d",
+          window: "codex:secondary_7d",
           status: "allowed",
           utilization: 0.12,
           sequence: 42,
@@ -1525,7 +1525,7 @@ describe("mapCodexMessage", () => {
     expect(results[1]).not.toHaveProperty("event.resetsAt");
   });
 
-  it("marks account windows exhausted when the backend says the limit was reached", () => {
+  it("keeps per-window status tied to utilization when the account limit was reached", () => {
     const results = map(
       context({ terminal: true }),
       notification("account/rateLimits/updated", {
@@ -1539,9 +1539,8 @@ describe("mapCodexMessage", () => {
 
     expect(results.map((result) => (result.kind === "event" ? result.event : result))).toEqual([
       expect.objectContaining({ window: "primary", status: "exhausted", utilization: 1 }),
-      expect.objectContaining({ window: "secondary_7d", status: "exhausted" }),
     ]);
-    expect(results[1]).not.toHaveProperty("event.utilization");
+    expect(results).toHaveLength(1);
   });
 
   it("ignores an account usage update that names no window", () => {

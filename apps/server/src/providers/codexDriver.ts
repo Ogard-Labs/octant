@@ -53,7 +53,9 @@ import {
   type CodexTurnResult,
 } from "./codexProtocol";
 import { CodexRpcClientFailure } from "./codexRpcClient";
+import { modelEvidenceFromObservedState } from "./providerContextFacts";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import { rateLimitWindowId } from "./rateLimitWindowIdentity";
 
 export interface CodexThreadStartInput {
   readonly cwd: string;
@@ -267,24 +269,6 @@ export function codexModelOptionSettings(
   };
 }
 
-function codexRateLimitWindowName(
-  scope: string,
-  slot: "primary" | "secondary",
-  durationMinutes: number | null | undefined,
-): string {
-  const boundedScope = scope.trim().slice(0, 48) || "account";
-  if (durationMinutes === undefined || durationMinutes === null || durationMinutes <= 0) {
-    return `${boundedScope}:${slot}`.slice(0, 64);
-  }
-  const duration =
-    durationMinutes % 1_440 === 0
-      ? `${durationMinutes / 1_440}d`
-      : durationMinutes % 60 === 0
-        ? `${durationMinutes / 60}h`
-        : `${durationMinutes}m`;
-  return `${boundedScope}:${slot}_${duration}`.slice(0, 64);
-}
-
 function codexResetTimestamp(resetsAt: number | null | undefined): UtcTimestamp | undefined {
   if (resetsAt === undefined || resetsAt === null || !Number.isFinite(resetsAt) || resetsAt <= 0) {
     return undefined;
@@ -314,7 +298,7 @@ function codexRateLimitSnapshots(result: CodexRateLimitsReadResult): ReadonlyArr
         result.rateLimits.limitId ??
         result.rateLimits.normalModelSlug ??
         result.rateLimits.limitName ??
-        "account",
+        undefined,
       snapshot: result.rateLimits,
     },
   ];
@@ -343,7 +327,7 @@ function normalizeCodexServiceLimits(
       const utilization = window.usedPercent / 100;
       const resetsAt = codexResetTimestamp(window.resetsAt);
       windows.push({
-        window: codexRateLimitWindowName(scope, slot, window.windowDurationMins),
+        window: rateLimitWindowId(scope, slot, window.windowDurationMins),
         status:
           snapshot.rateLimitReachedType !== undefined && snapshot.rateLimitReachedType !== null
             ? "exhausted"
@@ -396,10 +380,15 @@ function makeCodexContextFacts(
   clock: () => string,
 ): ProviderContextFactsSource {
   return {
-    // Codex's model/list payload does not carry context bounds. Returning no
-    // model observations leaves Chat's existing probe/reviewed-catalog
-    // fallback in charge instead of fabricating limits during a quota poll.
-    observeModelLimits: () => Effect.succeed([]),
+    // Codex's model/list payload does not carry context bounds. Reuse any
+    // probe-derived evidence already published by this driver; an empty result
+    // before the first probe remains honest and lets the host's reviewed
+    // catalog fallback decide whether a model can be admitted.
+    observeModelLimits: ({ instanceId }) =>
+      Effect.sync(() => {
+        const observed = options.runtimeRegistry.observedState(instanceId);
+        return observed === undefined ? [] : modelEvidenceFromObservedState(observed);
+      }),
     observeServiceLimits: ({ instanceId }) =>
       Effect.gen(function* () {
         const runtime = yield* acquireRuntime(options, clientFactory);

@@ -12,6 +12,7 @@ import {
   type UtcTimestamp,
 } from "@octant/contracts";
 import { Schema } from "effect";
+import { canonicalRateLimitWindowId } from "./rateLimitWindowIdentity";
 
 const decodeUtcTimestamp = Schema.decodeUnknownSync(UtcTimestampSchema);
 
@@ -61,6 +62,28 @@ const DEFAULT_REFRESH_TIMEOUT_MS = 15_000;
  * direct observer and only borrow the runtime's rolling windows.
  */
 type RuntimeEvidenceOrigin = "runtime-only" | "merged";
+type RateLimitWindow = NonNullable<ProviderServiceLimits["rateLimitWindows"]>[number];
+
+function mergeRateLimitWindows(
+  left: ReadonlyArray<RateLimitWindow> | undefined,
+  right: ReadonlyArray<RateLimitWindow> | undefined,
+): ReadonlyArray<RateLimitWindow> | undefined {
+  if (left === undefined && right === undefined) return undefined;
+  const merged = new Map<string, RateLimitWindow>();
+  const add = (window: RateLimitWindow) => {
+    const key = canonicalRateLimitWindowId(window.window);
+    const previous = merged.get(key);
+    if (
+      previous === undefined ||
+      Date.parse(window.observedAt) >= Date.parse(previous.observedAt)
+    ) {
+      merged.set(key, { ...window, window: key });
+    }
+  };
+  for (const window of left ?? []) add(window);
+  for (const window of right ?? []) add(window);
+  return [...merged.values()].sort((a, b) => a.window.localeCompare(b.window));
+}
 
 export class ProviderUsageLimitsService {
   readonly #options: ProviderUsageLimitsServiceOptions;
@@ -182,18 +205,19 @@ export class ProviderUsageLimitsService {
       } else {
         this.#runtimeOrigins.set(key, "merged");
       }
+      const rateLimitWindows = mergeRateLimitWindows(
+        observation.limits.rateLimitWindows,
+        runtimeLimits?.rateLimitWindows,
+      );
       return {
         providerInstanceId: instance.id,
         status: "available",
         source: observation.source,
         observedAt,
         limits:
-          runtimeLimits?.rateLimitWindows === undefined
+          rateLimitWindows === undefined
             ? observation.limits
-            : {
-                ...observation.limits,
-                rateLimitWindows: runtimeLimits.rateLimitWindows,
-              },
+            : { ...observation.limits, rateLimitWindows },
       };
     } catch (error) {
       if (error instanceof ProviderUsageLimitsStopped) {
@@ -206,10 +230,16 @@ export class ProviderUsageLimitsService {
           : previous?.status === "failed"
             ? (previous.staleLimits ?? runtimeLimits)
             : runtimeLimits;
+      const staleRateLimitWindows = mergeRateLimitWindows(
+        priorStaleLimits?.rateLimitWindows,
+        runtimeLimits?.rateLimitWindows,
+      );
       const staleLimits =
-        priorStaleLimits === undefined || runtimeLimits?.rateLimitWindows === undefined
-          ? priorStaleLimits
-          : { ...priorStaleLimits, rateLimitWindows: runtimeLimits.rateLimitWindows };
+        priorStaleLimits === undefined
+          ? runtimeLimits
+          : staleRateLimitWindows === undefined
+            ? priorStaleLimits
+            : { ...priorStaleLimits, rateLimitWindows: staleRateLimitWindows };
       if (this.#runtimeOrigins.get(key) === "runtime-only" || priorStaleLimits === runtimeLimits) {
         if (staleLimits === undefined) this.#runtimeOrigins.delete(key);
         else this.#runtimeOrigins.set(key, "runtime-only");
@@ -308,12 +338,16 @@ export class ProviderUsageLimitsService {
           continue;
         }
         if (previous?.status === "failed") {
+          const staleRateLimitWindows = mergeRateLimitWindows(
+            previous.staleLimits?.rateLimitWindows,
+            limits.rateLimitWindows,
+          );
           const staleLimits =
             origin === "runtime-only" || previous.staleLimits === undefined
               ? limits
-              : limits.rateLimitWindows === undefined
+              : staleRateLimitWindows === undefined
                 ? withoutWindows(previous.staleLimits)
-                : { ...previous.staleLimits, rateLimitWindows: limits.rateLimitWindows };
+                : { ...previous.staleLimits, rateLimitWindows: staleRateLimitWindows };
           if (previous.staleLimits === undefined) this.#runtimeOrigins.set(key, "runtime-only");
           entries.set(key, {
             ...previous,
@@ -337,11 +371,15 @@ export class ProviderUsageLimitsService {
             }
             continue;
           }
+          const rateLimitWindows = mergeRateLimitWindows(
+            previousAvailable.limits.rateLimitWindows,
+            limits.rateLimitWindows,
+          );
           this.#runtimeOrigins.set(key, "merged");
           entries.set(key, {
             ...previousAvailable,
             observedAt: latestTimestamp(previousAvailable.observedAt, limits.updatedAt),
-            limits: { ...previousAvailable.limits, rateLimitWindows: limits.rateLimitWindows },
+            limits: { ...previousAvailable.limits, rateLimitWindows },
           });
           continue;
         }

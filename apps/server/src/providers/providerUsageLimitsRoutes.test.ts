@@ -4,6 +4,7 @@ import {
   type UtcTimestamp,
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
+import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { createProviderUsageLimitsRouteHandler } from "./providerUsageLimitsRoutes";
 
@@ -55,6 +56,37 @@ describe("provider usage limit routes", () => {
     for (const request of requests) {
       expect((await route(request))?.status).toBeGreaterThanOrEqual(400);
     }
+  });
+
+  it("accepts the packaged renderer's opaque Origin while retaining window auth", async () => {
+    const route = fixture({
+      snapshot: vi.fn(() => snapshot),
+      refresh: vi.fn(async () => snapshot),
+    });
+    const response = await route(
+      new Request("http://127.0.0.1/api/provider-usage-limits", {
+        headers: { origin: "null", "x-octant-window-capability": capability },
+      }),
+    );
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("access-control-allow-origin")).toBe("null");
+  });
+
+  it("refuses a paired remote principal even when it rewrites the URL to loopback", async () => {
+    const route = fixture({
+      snapshot: vi.fn(() => snapshot),
+      refresh: vi.fn(async () => snapshot),
+    });
+    // URL rewriting to loopback must not turn a bound remote principal into a
+    // local-window principal.
+    const loopback = new Request("http://127.0.0.1/api/provider-usage-limits", {
+      headers: { origin: "null", "x-octant-window-capability": capability },
+    });
+    bindPrincipalRouteContext(loopback, {
+      principal: { kind: "remote-device" } as never,
+      scopeId: windowId,
+    });
+    expect((await route(loopback))?.status).toBe(403);
   });
 });
 

@@ -2,8 +2,8 @@ import {
   decodeProviderUsageLimitsSnapshot,
   type ProviderUsageLimitsSnapshot,
 } from "@octant/contracts";
-import { authenticateProjectRequest } from "../projectBindingRoutes";
-import { isLoopbackHostname } from "../shellRoutes";
+import { authenticateRoutePrincipal } from "../principalRouteContext";
+import { isAllowedRendererOrigin, isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 
 export interface ProviderUsageLimitsRouteService {
@@ -15,6 +15,7 @@ export function createProviderUsageLimitsRouteHandler(dependencies: {
   readonly service: ProviderUsageLimitsRouteService;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
+  readonly allowedRendererHttpOrigin?: string | null;
 }) {
   const now = dependencies.now ?? Date.now;
   return async (request: Request): Promise<Response | undefined> => {
@@ -25,7 +26,7 @@ export function createProviderUsageLimitsRouteHandler(dependencies: {
     const origin = request.headers.get("origin");
     if (!isLoopbackHostname(url.hostname))
       return response({ message: "Provider limits require loopback." }, 400, null);
-    if (origin !== null && !allowedOrigin(origin))
+    if (origin !== null && !isAllowedRendererOrigin(origin, dependencies.allowedRendererHttpOrigin))
       return response({ message: "Renderer origin is not allowed." }, 400, null);
     if (request.method === "OPTIONS")
       return new Response(null, { status: 204, headers: cors(origin) });
@@ -35,12 +36,15 @@ export function createProviderUsageLimitsRouteHandler(dependencies: {
     if (url.search !== "")
       return response({ message: "Provider limits request is invalid." }, 400, origin);
     try {
-      authenticateProjectRequest({
+      const principal = authenticateRoutePrincipal({
         request,
         body: {},
         store: dependencies.windowAuthorityStore,
         now: now(),
       });
+      if (principal.principal.kind !== "local-window") {
+        return response({ message: "Provider limits require a local window." }, 403, origin);
+      }
     } catch (error) {
       return response(
         {
@@ -74,15 +78,4 @@ function cors(origin: string | null): Record<string, string> {
     "access-control-allow-methods": "GET, POST, OPTIONS",
     ...(origin === null ? {} : { "access-control-allow-origin": origin, vary: "origin" }),
   };
-}
-
-function allowedOrigin(origin: string): boolean {
-  try {
-    const url = new URL(origin);
-    return (
-      url.protocol === "file:" || (url.protocol === "http:" && isLoopbackHostname(url.hostname))
-    );
-  } catch {
-    return false;
-  }
 }

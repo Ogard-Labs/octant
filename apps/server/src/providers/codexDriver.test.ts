@@ -537,6 +537,26 @@ describe("Codex driver probe and runtime lifecycle", () => {
     expect(limits.rateLimitWindows).toBeUndefined();
   });
 
+  it("returns probe-derived model evidence when the runtime registry has context bounds", async () => {
+    const f = fixture();
+    const registry = new ProviderRuntimeRegistry();
+    const driver = makeCodexDriver(f.options({ runtimeRegistry: registry }));
+    const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    const model = probe.models[0];
+    if (model === undefined) throw new Error("Expected a Codex model probe result.");
+    registry.setObservedState({
+      ...probe,
+      models: [{ ...model, contextLimit: 128_000 }],
+    });
+    const facts = driver.contextFacts;
+    if (facts === undefined) throw new Error("Expected Codex context facts.");
+    await expect(
+      Effect.runPromise(Effect.scoped(facts.observeModelLimits({ instanceId }))),
+    ).resolves.toMatchObject([
+      { providerInstanceId: instanceId, modelId: model.id, contextWindow: 128_000 },
+    ]);
+  });
+
   it("cancels an in-flight account read and closes its runtime lease", async () => {
     const f = fixture({
       rateLimitsRead: () => new Promise<CodexRateLimitsReadResult>(() => undefined),
@@ -1237,7 +1257,7 @@ describe("Codex thread and turn lifecycle", () => {
     await expect(events).resolves.toMatchObject([
       {
         kind: "rate-limit-window",
-        window: "primary_5h",
+        window: "codex:primary_5h",
         status: "allowed",
         utilization: 0.4,
         sessionId,
