@@ -80,7 +80,7 @@ export interface LocalUsageHistoryReaderOptions {
   readonly maxRecords?: number;
   readonly maxDirectories?: number;
   readonly allowedRelativeRoots?: ReadonlyArray<string>;
-  readonly onSourceInvalidated?: () => void;
+  readonly onSourceInvalidated?: (relativePath: string) => void;
 }
 
 export type LocalUsageHistoryLineParser = (input: {
@@ -288,12 +288,10 @@ async function readLocalUsageHistoryImpl(
   const seen = fileSeen.get(sourceInstallationId) ?? new Set<string>();
   const deletedFiles = [...seen].filter((file) => !files.includes(file));
   let cacheInvalidated = deletedFiles.length > 0;
-  let parserInvalidated = false;
   if (cacheInvalidated) {
-    parserInvalidated = true;
-    options.onSourceInvalidated?.();
     for (const file of deletedFiles) {
       seen.delete(file);
+      options.onSourceInvalidated?.(relative(root, file));
       removeFileRecords(sourceInstallationId, file);
       clearScanOffsetForFile(sourceInstallationId, file);
     }
@@ -345,10 +343,7 @@ async function readLocalUsageHistoryImpl(
           previous.prefixRevision !== prefixRevision);
       if (replaced) {
         cacheInvalidated = true;
-        if (!parserInvalidated) {
-          parserInvalidated = true;
-          options.onSourceInvalidated?.();
-        }
+        options.onSourceInvalidated?.(relative(root, resolvedFilePath));
         scanOffsets.delete(cursorKey);
         removeFileRecords(sourceInstallationId, resolvedFilePath);
       }

@@ -20,6 +20,7 @@ interface CodexUsageSnapshot {
 interface CodexParserState {
   readonly models: Map<string, string>;
   readonly cumulative: Map<string, CodexUsageSnapshot>;
+  readonly sessionFiles: Map<string, Set<string>>;
 }
 
 const parserCaches = new Map<string, CodexParserState>();
@@ -49,6 +50,7 @@ export function createCodexLocalUsageHistorySource(
     state = {
       models: new Map<string, string>(),
       cumulative: new Map<string, CodexUsageSnapshot>(),
+      sessionFiles: new Map<string, Set<string>>(),
     };
     parserCaches.set(readerOptions.root, state);
   }
@@ -65,10 +67,14 @@ export function createCodexLocalUsageHistorySource(
                 ...readerOptions,
                 sourceKind: "codex",
                 providerKey: "codex",
-                onSourceInvalidated: () => {
-                  options.onSourceInvalidated?.();
-                  state.models.clear();
-                  state.cumulative.clear();
+                onSourceInvalidated: (relativePath) => {
+                  options.onSourceInvalidated?.(relativePath);
+                  for (const [sessionId, paths] of state.sessionFiles) {
+                    if (!paths.has(relativePath)) continue;
+                    state.sessionFiles.delete(sessionId);
+                    state.models.delete(sessionId);
+                    state.cumulative.delete(sessionId);
+                  }
                 },
               },
               request,
@@ -113,6 +119,7 @@ function parseCodexLine(
   if (value?.type === "session_meta") {
     const payload = record(value.payload);
     const sessionId = text(payload?.id) ?? sessionIdFromPath(input.sourceSessionIdHint);
+    trackSessionFile(state, sessionId, input.relativePath);
     const provenance = record(record(payload?.base_instructions)?.provenance);
     const model = text(payload?.model) ?? text(provenance?.model);
     if (model !== undefined) setBounded(state.models, sessionId, model);
@@ -126,6 +133,7 @@ function parseCodexLine(
       text(payload?.session_id) ??
       text(payload?.sessionId) ??
       sessionIdFromPath(input.sourceSessionIdHint);
+    trackSessionFile(state, sessionId, input.relativePath);
     const model = text(payload?.model);
     if (model !== undefined) setBounded(state.models, sessionId, model);
     return undefined;
@@ -143,6 +151,7 @@ function parseCodexLine(
     text(payload.session_id) ??
     text(payload.sessionId) ??
     sessionIdFromPath(input.sourceSessionIdHint);
+  trackSessionFile(state, sourceSessionId, input.relativePath);
   const modelId =
     text(payload.model) ?? text(info?.model) ?? state.models.get(sourceSessionId) ?? "unknown";
   const cumulativeValue = record(info?.total_token_usage);
@@ -302,6 +311,23 @@ function localCost(
         }
       : {}),
   };
+}
+
+function trackSessionFile(state: CodexParserState, sessionId: string, relativePath: string): void {
+  let paths = state.sessionFiles.get(sessionId);
+  if (paths === undefined) {
+    if (state.sessionFiles.size >= MAX_PARSER_SESSIONS) {
+      const oldest = state.sessionFiles.keys().next().value;
+      if (oldest !== undefined) {
+        state.sessionFiles.delete(oldest);
+        state.models.delete(oldest);
+        state.cumulative.delete(oldest);
+      }
+    }
+    paths = new Set<string>();
+    state.sessionFiles.set(sessionId, paths);
+  }
+  paths.add(relativePath);
 }
 
 function setBounded<T>(map: Map<string, T>, key: string, value: T): void {
