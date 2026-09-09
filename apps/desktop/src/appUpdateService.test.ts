@@ -130,6 +130,15 @@ describe("update verification", () => {
     expect(String(state.available?.version)).toBe("0.3.0");
   });
 
+  it("carries signed feed notes on an offered release", async () => {
+    const { updates } = service({ document: signedFeed({ notes: "The dock keeps pins." }) });
+
+    const state = await updates.check();
+
+    expect(state.status).toBe("available");
+    expect(state.available?.notes).toBe("The dock keeps pins.");
+  });
+
   it("refuses a release signed by a key that is not ours", async () => {
     const other = generateKeyPairSync("ed25519");
     const payload = release;
@@ -144,6 +153,24 @@ describe("update verification", () => {
     const state = await updates.check();
 
     expect(state).toMatchObject({ status: "refused", refusal: "untrusted-signature" });
+    expect(state.available).toBeUndefined();
+  });
+
+  it("does not surface notes from an untrusted feed", async () => {
+    const other = generateKeyPairSync("ed25519");
+    const payload = { ...release, notes: "Install this." } as AppUpdateRelease;
+    const { updates } = service({
+      document: {
+        schemaVersion: 1,
+        release: payload,
+        signature: sign(null, canonicalReleaseBytes(payload), other.privateKey).toString("base64"),
+      },
+    });
+
+    const state = await updates.check();
+
+    expect(state).toMatchObject({ status: "refused", refusal: "untrusted-signature" });
+    expect(state.available).toBeUndefined();
   });
 
   it("refuses a release whose payload was swapped after signing", async () => {
@@ -537,9 +564,10 @@ describe("automatic checking", () => {
   it("schedules nothing until the persisted preference says it may", () => {
     // The host starts with automatic checks off, so a person who turned them
     // off does not get one check per launch before the setting is read.
-    const { timers } = scheduled(false);
+    const { timers, updates } = scheduled(false);
 
     expect(timers).toHaveLength(0);
+    expect(updates.state().available).toBeUndefined();
   });
 
   it("checks on a schedule once switched on", async () => {

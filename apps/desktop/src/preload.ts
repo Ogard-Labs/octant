@@ -20,6 +20,8 @@ export const IPC_CHANNELS = {
   appUpdateInstall: "octant:app-update:install",
   appUpdateAutomatic: "octant:app-update:automatic",
   appUpdateRing: "octant:app-update:ring",
+  appUpdateWhatsNew: "octant:app-update:whats-new",
+  appUpdateWhatsNewAck: "octant:app-update:whats-new-ack",
   clearProviderCredential: "octant:provider-credential:clear",
   codeDeepLink: "octant:code:deep-link",
   close: "octant:window:close",
@@ -124,6 +126,19 @@ export type AppUpdateInstallOutcome =
       readonly attentionRequired: boolean;
     }
   | { readonly kind: "not-ready" };
+
+export type BundledWhatsNew =
+  | {
+      readonly kind: "notes";
+      readonly version: string;
+      readonly text: string;
+      readonly showAfterApply: boolean;
+    }
+  | {
+      readonly kind: "empty";
+      readonly version: string;
+      readonly showAfterApply: false;
+    };
 
 export interface BrowserSurfaceTabState {
   readonly tabId: string;
@@ -353,6 +368,8 @@ export interface OctantHostBridge {
   readonly installAppUpdate: () => Promise<AppUpdateInstallOutcome>;
   readonly setAutomaticAppUpdateChecks: (enabled: boolean) => Promise<AppUpdateState>;
   readonly subscribeAppUpdateState: (listener: (state: AppUpdateState) => void) => () => void;
+  readonly readBundledWhatsNew: () => Promise<BundledWhatsNew>;
+  readonly acknowledgeWhatsNew: () => Promise<void>;
   readonly openBrowserExternal: (url: string) => Promise<void>;
   readonly subscribeBrowserSurfaceState: (
     listener: (state: BrowserSurfaceState) => void,
@@ -548,6 +565,9 @@ export function createHostBridge(
       ipc.on(IPC_CHANNELS.appUpdateState, receive);
       return () => ipc.removeListener(IPC_CHANNELS.appUpdateState, receive);
     },
+    readBundledWhatsNew: async () =>
+      decodeBundledWhatsNew(await ipc.invoke(IPC_CHANNELS.appUpdateWhatsNew)),
+    acknowledgeWhatsNew: () => invoke(IPC_CHANNELS.appUpdateWhatsNewAck),
     openBrowserExternal: (url: string) => {
       validateExternalBrowserUrl(url);
       return invoke(IPC_CHANNELS.browserSurfaceOpenExternal, url);
@@ -1487,7 +1507,7 @@ function decodeAppUpdateRelease(value: unknown): AppUpdateRelease {
     !value.url.startsWith("https://") ||
     typeof value.sha256 !== "string" ||
     typeof value.releasedAt !== "string" ||
-    (value.notes !== undefined && typeof value.notes !== "string")
+    (value.notes !== undefined && (typeof value.notes !== "string" || value.notes.length > 4096))
   ) {
     throw new TypeError("Invalid update release.");
   }
@@ -1500,6 +1520,34 @@ function decodeAppUpdateRelease(value: unknown): AppUpdateRelease {
     sha256: value.sha256,
     releasedAt: value.releasedAt,
     ...(value.notes === undefined ? {} : { notes: value.notes }),
+  });
+}
+
+function decodeBundledWhatsNew(value: unknown): BundledWhatsNew {
+  if (
+    !isRecord(value) ||
+    typeof value.version !== "string" ||
+    value.version.length > 64 ||
+    typeof value.showAfterApply !== "boolean"
+  ) {
+    throw new TypeError("Invalid What's new document.");
+  }
+  if (value.kind === "empty") {
+    return Object.freeze({ kind: "empty", version: value.version, showAfterApply: false });
+  }
+  if (
+    value.kind !== "notes" ||
+    typeof value.text !== "string" ||
+    value.text.length === 0 ||
+    value.text.length > 32_768
+  ) {
+    throw new TypeError("Invalid What's new document.");
+  }
+  return Object.freeze({
+    kind: "notes",
+    version: value.version,
+    text: value.text,
+    showAfterApply: value.showAfterApply,
   });
 }
 

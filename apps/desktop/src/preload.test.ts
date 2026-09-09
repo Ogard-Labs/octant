@@ -77,6 +77,7 @@ describe("desktop preload bridge", () => {
     const [key, bridge] = exposeInMainWorld.mock.calls[0] as [string, Record<string, unknown>];
     expect(key).toBe(HOST_BRIDGE_KEY);
     expect(Object.keys(bridge).sort()).toEqual([
+      "acknowledgeWhatsNew",
       "approveRemotePairingRequest",
       "attachBrowserSurface",
       "cancelCodeOperationApproval",
@@ -107,6 +108,7 @@ describe("desktop preload bridge", () => {
       "previewHandoff",
       "projectWindowCapability",
       "providerCredentialStatus",
+      "readBundledWhatsNew",
       "reconcileExpiredRemoteDevices",
       "recoverRemoteHostIdentity",
       "renameRemoteDevice",

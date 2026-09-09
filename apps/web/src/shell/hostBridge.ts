@@ -100,6 +100,23 @@ export type AppUpdateInstallOutcome =
     }
   | { readonly kind: "not-ready" };
 
+/**
+ * Bundled notes for the running desktop build. Absent on a remote client,
+ * which must not fetch notes or pretend to update the Machine.
+ */
+export type BundledWhatsNewView =
+  | {
+      readonly kind: "notes";
+      readonly version: string;
+      readonly text: string;
+      readonly showAfterApply: boolean;
+    }
+  | {
+      readonly kind: "empty";
+      readonly version: string;
+      readonly showAfterApply: false;
+    };
+
 export type BrowserSurfaceTabCommand =
   | { readonly kind: "open" }
   | { readonly kind: "select"; readonly tabId: string }
@@ -183,6 +200,12 @@ export interface OctantHostBridge {
   readonly setAutomaticAppUpdateChecks?: (enabled: boolean) => Promise<AppUpdateStateView>;
   readonly setAppUpdateRing?: (ring: AppReleaseRing) => Promise<AppUpdateStateView>;
   readonly subscribeAppUpdateState?: (listener: (state: AppUpdateStateView) => void) => () => void;
+  /**
+   * Local What's new for the build on disk. Desktop-owned; never a network
+   * fetch. Absent on a remote client.
+   */
+  readonly readBundledWhatsNew?: () => Promise<BundledWhatsNewView>;
+  readonly acknowledgeWhatsNew?: () => Promise<void>;
   readonly openBrowserExternal?: (url: string) => Promise<void>;
   readonly subscribeBrowserSurfaceState?: (
     listener: (state: BrowserSurfaceState) => void,

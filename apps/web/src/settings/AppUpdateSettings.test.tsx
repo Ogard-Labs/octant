@@ -2,6 +2,7 @@ import {
   OCTANT_UPDATE_CHECK_DISCLOSURE,
   OCTANT_UPDATE_CHECK_INFERENCE,
 } from "@octant/contracts/app-updates";
+import type { UtcTimestamp } from "@octant/contracts";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AppUpdateSettings } from "./AppUpdateSettings";
@@ -14,6 +15,19 @@ const ready: AppUpdateStateView = {
   ring: "stable",
 };
 
+function offeredRelease(notes: string): NonNullable<AppUpdateStateView["available"]> {
+  return {
+    version: "0.2.0" as AppUpdateStateView["currentVersion"],
+    platform: "darwin",
+    arch: "arm64",
+    ring: "stable",
+    url: "https://updates.example.test/Octant.zip",
+    sha256: "a".repeat(64),
+    releasedAt: "2026-08-19T09:00:00.000Z" as UtcTimestamp,
+    notes,
+  };
+}
+
 function bridge(overrides: Partial<OctantHostBridge> = {}): OctantHostBridge {
   return {
     checkForAppUpdate: vi.fn(async () => ready),
@@ -21,6 +35,13 @@ function bridge(overrides: Partial<OctantHostBridge> = {}): OctantHostBridge {
     installAppUpdate: vi.fn(async () => ({ kind: "installing" }) as const),
     setAutomaticAppUpdateChecks: vi.fn(async () => ready),
     setAppUpdateRing: vi.fn(async () => ready),
+    readBundledWhatsNew: vi.fn(async () => ({
+      kind: "notes" as const,
+      version: "0.1.0",
+      text: "The dock keeps pins.",
+      showAfterApply: false,
+    })),
+    acknowledgeWhatsNew: vi.fn(async () => undefined),
     // The host pushes state; without an emission the surface is correctly idle.
     subscribeAppUpdateState: vi.fn((listener: (state: AppUpdateStateView) => void) => {
       listener(ready);
@@ -158,15 +179,99 @@ describe("AppUpdateSettings", () => {
   });
 
   it("says plainly that a non-desktop client does not update itself", () => {
+    const readBundledWhatsNew = vi.fn();
     render(
       <AppUpdateSettings
         automaticChecks
-        hostBridge={{ close: vi.fn() } as unknown as OctantHostBridge}
+        hostBridge={{ close: vi.fn(), readBundledWhatsNew } as unknown as OctantHostBridge}
         onAutomaticChecksChange={vi.fn()}
         onReleaseRingChange={vi.fn()}
       />,
     );
 
     expect(screen.getByText(/not the desktop app, so it does not update itself/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "What's new" })).toBeNull();
+    expect(readBundledWhatsNew).not.toHaveBeenCalled();
+  });
+
+  it("opens bundled notes from What's new without checking the feed", async () => {
+    const { host } = view();
+
+    fireEvent.click(screen.getByRole("button", { name: "What's new" }));
+
+    expect(await screen.findByText("The dock keeps pins.")).toBeTruthy();
+    expect(host.readBundledWhatsNew).toHaveBeenCalledOnce();
+    expect(host.checkForAppUpdate).not.toHaveBeenCalled();
+    await waitFor(() => expect(host.acknowledgeWhatsNew).toHaveBeenCalledOnce());
+  });
+
+  it("shows an empty state when the bundled document is missing", async () => {
+    view({
+      readBundledWhatsNew: vi.fn(async () => ({
+        kind: "empty" as const,
+        version: "0.1.0",
+        showAfterApply: false as const,
+      })),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "What's new" }));
+
+    expect(await screen.findByText("There are no notes for this build.")).toBeTruthy();
+  });
+
+  it("renders signed notes when an update is offered", () => {
+    view({
+      subscribeAppUpdateState: vi.fn((listener: (state: AppUpdateStateView) => void) => {
+        listener({
+          status: "available",
+          currentVersion: "0.1.0" as AppUpdateStateView["currentVersion"],
+          automaticChecks: true,
+          ring: "stable",
+          available: offeredRelease("The dock keeps pins."),
+        });
+        return () => undefined;
+      }),
+    });
+
+    expect(screen.getByRole("note")).toHaveTextContent("The dock keeps pins.");
+  });
+
+  it("does not display notes from a feed that was refused", () => {
+    view({
+      subscribeAppUpdateState: vi.fn((listener: (state: AppUpdateStateView) => void) => {
+        listener({
+          status: "refused",
+          currentVersion: "0.1.0" as AppUpdateStateView["currentVersion"],
+          automaticChecks: true,
+          ring: "stable",
+          refusal: "untrusted-signature",
+          available: offeredRelease("Install this."),
+        });
+        return () => undefined;
+      }),
+    });
+
+    expect(screen.queryByText("Install this.")).toBeNull();
+    expect(screen.queryByRole("note")).toBeNull();
+  });
+
+  it("does not show a remote summary while automatic checking is off and no check has run", () => {
+    view(
+      {
+        subscribeAppUpdateState: vi.fn((listener: (state: AppUpdateStateView) => void) => {
+          listener({
+            status: "idle",
+            currentVersion: "0.1.0" as AppUpdateStateView["currentVersion"],
+            automaticChecks: false,
+            ring: "stable",
+          });
+          return () => undefined;
+        }),
+      },
+      false,
+    );
+
+    expect(screen.queryByRole("note")).toBeNull();
+    expect(screen.getByRole("button", { name: "What's new" })).toBeTruthy();
   });
 });

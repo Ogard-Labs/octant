@@ -48,6 +48,12 @@ import { createAppUpdateService } from "./appUpdateService";
 import { buildApplicationMenuTemplate } from "./applicationMenu";
 import { resolveUpdateFeedBaseUrl } from "./appUpdateFeed";
 import {
+  acknowledgeWhatsNew,
+  loadBundledWhatsNew,
+  resolveBundledWhatsNewPath,
+  resolveWhatsNewStatePath,
+} from "./bundledWhatsNew";
+import {
   createBrowserSurfaceHost,
   type BrowserSurfaceTabCommand,
   type BrowserSurfaceViewPort,
@@ -174,6 +180,8 @@ const IPC_CHANNELS = {
   appUpdateInstall: "octant:app-update:install",
   appUpdateAutomatic: "octant:app-update:automatic",
   appUpdateRing: "octant:app-update:ring",
+  appUpdateWhatsNew: "octant:app-update:whats-new",
+  appUpdateWhatsNewAck: "octant:app-update:whats-new-ack",
   codeDeepLink: "octant:code:deep-link",
   close: "octant:window:close",
   hostCapabilities: "octant:window:host-capabilities",
@@ -2711,6 +2719,19 @@ function installIpcHandlers(): void {
     if (!isAppReleaseRing(value)) throw new Error("Octant rejected an unknown release ring.");
     return appUpdates().setRing(value);
   });
+  ipcMain.handle(IPC_CHANNELS.appUpdateWhatsNew, async (event) => {
+    ownedTopLevelWindowContext(event);
+    return await loadBundledWhatsNew(bundledWhatsNewOptions());
+  });
+  ipcMain.handle(IPC_CHANNELS.appUpdateWhatsNewAck, async (event) => {
+    ownedTopLevelWindowContext(event);
+    const options = bundledWhatsNewOptions();
+    await acknowledgeWhatsNew({
+      currentVersion: options.currentVersion,
+      statePath: options.statePath,
+      writeFile: options.writeFile,
+    });
+  });
   ipcMain.handle(IPC_CHANNELS.browserSurfaceOpenExternal, async (event, value: unknown) => {
     ownedTopLevelWindowContext(event);
     await shell.openExternal(validateExternalBrowserUrl(value));
@@ -2846,6 +2867,30 @@ function validateBrowserSurfaceTabCommand(
  * a constant a build could forget to bump — so the version the updater compares
  * against the feed is the version on disk.
  */
+function bundledWhatsNewOptions(): {
+  readonly currentVersion: string;
+  readonly notesPath: string;
+  readonly statePath: string;
+  readonly readFile: (path: string) => Promise<string>;
+  readonly writeFile: (path: string, contents: string) => Promise<void>;
+} {
+  const statePath = resolveWhatsNewStatePath(app.getPath("userData"));
+  return {
+    currentVersion: app.getVersion(),
+    notesPath: resolveBundledWhatsNewPath({
+      packaged: app.isPackaged,
+      appPath: app.getAppPath(),
+      moduleUrl: import.meta.url,
+    }),
+    statePath,
+    readFile: (path) => readFile(path, "utf8"),
+    writeFile: async (path, contents) => {
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, contents, "utf8");
+    },
+  };
+}
+
 function appUpdates(): ReturnType<typeof createAppUpdateService> {
   appUpdateService ??= createAppUpdateService({
     updater: electronAutoUpdater,

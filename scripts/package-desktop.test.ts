@@ -159,6 +159,7 @@ describe("desktop packaging boundary", () => {
       "apps/desktop/resources/icon.png",
       "apps/desktop/resources/menuBarTemplate.png",
       "apps/desktop/resources/menuBarTemplate@2x.png",
+      "apps/desktop/resources/whats-new.txt",
       "apps/server/dist/main.mjs",
       "apps/web/dist/index.html",
       "apps/server/node_modules/@anthropic-ai/claude-agent-sdk/package.json",
