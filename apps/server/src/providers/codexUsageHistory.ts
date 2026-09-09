@@ -24,6 +24,7 @@ interface CodexParserState {
 
 const parserCaches = new Map<string, CodexParserState>();
 const MAX_PARSER_CACHES = 32;
+const MAX_PARSER_SESSIONS = 4096;
 import {
   readLocalUsageHistory,
   stableUsageId,
@@ -53,7 +54,16 @@ export function createCodexLocalUsageHistorySource(
       Effect.tryPromise({
         try: async (effectSignal) => ({
           ...(await readLocalUsageHistory(
-            { ...options, sourceKind: "codex", providerKey: "codex" },
+            {
+              ...options,
+              sourceKind: "codex",
+              providerKey: "codex",
+              onSourceInvalidated: () => {
+                options.onSourceInvalidated?.();
+                state.models.clear();
+                state.cumulative.clear();
+              },
+            },
             request,
             createCodexLineParser(state),
             signal ?? effectSignal,
@@ -92,7 +102,7 @@ function parseCodexLine(
     const sessionId = text(payload?.id) ?? sessionIdFromPath(input.sourceSessionIdHint);
     const provenance = record(record(payload?.base_instructions)?.provenance);
     const model = text(payload?.model) ?? text(provenance?.model);
-    if (model !== undefined) state.models.set(sessionId, model);
+    if (model !== undefined) setBounded(state.models, sessionId, model);
     return undefined;
   }
   if (value?.type === "turn_context") {
@@ -104,7 +114,7 @@ function parseCodexLine(
       text(payload?.sessionId) ??
       sessionIdFromPath(input.sourceSessionIdHint);
     const model = text(payload?.model);
-    if (model !== undefined) state.models.set(sessionId, model);
+    if (model !== undefined) setBounded(state.models, sessionId, model);
     return undefined;
   }
   if (value?.type !== "event_msg") return undefined;
@@ -130,13 +140,13 @@ function parseCodexLine(
     if (previous !== undefined) {
       const delta = subtractUsage(cumulative, previous);
       if (delta === undefined) {
-        state.cumulative.set(sourceSessionId, cumulative);
+        setBounded(state.cumulative, sourceSessionId, cumulative);
         return undefined;
       }
       if (delta === "unchanged") return undefined;
       usage = delta;
     }
-    state.cumulative.set(sourceSessionId, cumulative);
+    setBounded(state.cumulative, sourceSessionId, cumulative);
   }
   const observedAt = timestamp(value.timestamp);
   if (observedAt === undefined) return undefined;
@@ -279,6 +289,14 @@ function localCost(
         }
       : {}),
   };
+}
+
+function setBounded<T>(map: Map<string, T>, key: string, value: T): void {
+  if (!map.has(key) && map.size >= MAX_PARSER_SESSIONS) {
+    const oldest = map.keys().next().value;
+    if (oldest !== undefined) map.delete(oldest);
+  }
+  map.set(key, value);
 }
 
 function parseRecord(line: string): Record<string, unknown> | undefined {

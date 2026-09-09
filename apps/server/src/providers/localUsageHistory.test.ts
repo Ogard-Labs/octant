@@ -320,6 +320,35 @@ describe("local provider usage history", () => {
     ).rejects.toBeDefined();
   });
 
+  it("does not let one coalesced caller cancellation cancel another", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-history-coalesced-cancel-"));
+    await writeFile(join(root, "events.jsonl"), JSON.stringify({ marker: "event" }));
+    const parser = ({ line }: { readonly line: string }) => ({
+      sourceKind: "fixture",
+      sourceInstallationId: "fixture-install",
+      sourceSessionId: "fixture-session",
+      sourceEventId: JSON.parse(line).marker,
+      providerKey: "fixture",
+      modelId: "fixture",
+      observedAt: "2026-09-09T12:00:00.000Z" as never,
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+    const options = { sourceKind: "fixture" as never, providerKey: "fixture", root };
+    const first = readLocalUsageHistory(options, request, parser as never, firstController.signal);
+    const second = readLocalUsageHistory(
+      options,
+      request,
+      parser as never,
+      secondController.signal,
+    );
+    firstController.abort(new Error("first caller cancelled"));
+    await expect(first).rejects.toBeDefined();
+    await expect(second).resolves.toMatchObject({ records: [{ sourceEventId: "event" }] });
+  });
+
   it("resumes a long file from its bounded cursor across refreshes", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-history-resume-"));
     const file = join(root, "events.jsonl");

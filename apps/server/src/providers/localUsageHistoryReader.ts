@@ -48,7 +48,14 @@ const fileSeen = new Map<string, Set<string>>();
 /** Bounded records let a later refresh aggregate chunks already scanned this process. */
 const recordCaches = new Map<string, Map<string, LocalUsageHistoryRecord>>();
 const recordCacheTruncated = new Set<string>();
-const activeReads = new Map<string, Promise<LocalUsageHistoryReadResult>>();
+interface ActiveRead {
+  readonly operation: Promise<LocalUsageHistoryReadResult>;
+  readonly controller: AbortController;
+  waiters: number;
+  settled: boolean;
+}
+
+const activeReads = new Map<string, ActiveRead>();
 const sourceLocks = new Map<string, Promise<LocalUsageHistoryReadResult>>();
 
 interface LocalUsageHistoryReadResult {
@@ -65,6 +72,7 @@ export interface LocalUsageHistoryReaderOptions {
   readonly maxFileBytes?: number;
   readonly maxRecordBytes?: number;
   readonly maxRecords?: number;
+  readonly onSourceInvalidated?: () => void;
 }
 
 export type LocalUsageHistoryLineParser = (input: {
@@ -89,7 +97,10 @@ export function readLocalUsageHistory(
 ): Promise<LocalUsageHistoryReadResult> {
   const key = `${options.sourceKind}\0${options.root}\0${request.from}\0${request.to}\0${request.timeZone}`;
   const active = activeReads.get(key);
-  if (active !== undefined) return active;
+  if (active !== undefined) {
+    active.waiters += 1;
+    return waitForRead(active, signal);
+  }
   const sourceKey = `${options.sourceKind}\0${options.root}`;
   const previous = sourceLocks.get(sourceKey);
   const previousDone =
@@ -99,17 +110,75 @@ export function readLocalUsageHistory(
           () => undefined,
           () => undefined,
         );
+  const controller = new AbortController();
   const operation = previousDone.then(() =>
-    readLocalUsageHistoryImpl(options, request, parse, signal),
+    readLocalUsageHistoryImpl(options, request, parse, controller.signal),
   );
-  activeReads.set(key, operation);
+  const entry: ActiveRead = { operation, controller, waiters: 0, settled: false };
+  activeReads.set(key, entry);
   sourceLocks.set(sourceKey, operation);
   const cleanup = () => {
-    if (activeReads.get(key) === operation) activeReads.delete(key);
+    entry.settled = true;
+    if (activeReads.get(key) === entry) activeReads.delete(key);
     if (sourceLocks.get(sourceKey) === operation) sourceLocks.delete(sourceKey);
   };
   void operation.then(cleanup, cleanup);
-  return operation;
+  void operation.catch(() => undefined);
+  entry.waiters += 1;
+  return waitForRead(entry, signal);
+}
+
+function waitForRead(
+  entry: ActiveRead,
+  signal: AbortSignal | undefined,
+): Promise<LocalUsageHistoryReadResult> {
+  if (signal?.aborted) {
+    releaseRead(entry);
+    return Promise.reject(
+      signal.reason instanceof Error
+        ? signal.reason
+        : new Error("Local usage history read aborted."),
+    );
+  }
+  if (signal === undefined) {
+    return entry.operation.finally(() => releaseRead(entry));
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      releaseRead(entry);
+      reject(
+        signal.reason instanceof Error
+          ? signal.reason
+          : new Error("Local usage history read aborted."),
+      );
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    entry.operation.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        releaseRead(entry);
+        resolve(value);
+      },
+      (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        releaseRead(entry);
+        reject(error);
+      },
+    );
+  });
+}
+
+function releaseRead(entry: ActiveRead): void {
+  entry.waiters -= 1;
+  if (entry.waiters <= 0 && !entry.settled) entry.controller.abort();
 }
 
 async function readLocalUsageHistoryImpl(
@@ -172,7 +241,10 @@ async function readLocalUsageHistoryImpl(
   const selected = rotatedFiles.slice(0, maxFiles);
   const seen = fileSeen.get(sourceInstallationId) ?? new Set<string>();
   let cacheInvalidated = [...seen].some((file) => !files.includes(file));
+  let parserInvalidated = false;
   if (cacheInvalidated) {
+    parserInvalidated = true;
+    options.onSourceInvalidated?.();
     seen.clear();
     fileCursors.delete(sourceInstallationId);
     recordCaches.delete(sourceInstallationId);
@@ -219,6 +291,10 @@ async function readLocalUsageHistoryImpl(
           previous.prefixRevision !== prefixRevision);
       if (replaced) {
         cacheInvalidated = true;
+        if (!parserInvalidated) {
+          parserInvalidated = true;
+          options.onSourceInvalidated?.();
+        }
         scanOffsets.delete(cursorKey);
         recordCaches.delete(sourceInstallationId);
         recordCacheTruncated.delete(sourceInstallationId);
