@@ -42,6 +42,7 @@ function parseClaudeLine(input: {
   readonly sourceSessionIdHint: string;
   readonly relativePath: string;
   readonly lineNumber: number;
+  readonly byteOffset: number;
 }): LocalUsageHistoryRecord | undefined {
   const value = parseRecord(input.line);
   if (value?.type !== "assistant") return undefined;
@@ -90,7 +91,13 @@ function parseClaudeLine(input: {
   const sourceEventId =
     text(message?.id) ??
     text(value.request_id) ??
-    stableUsageId("claude-code", sourceSessionId, observedAt, JSON.stringify(usage));
+    stableUsageId(
+      "claude-code",
+      sourceSessionId,
+      observedAt,
+      JSON.stringify(usage),
+      String(input.byteOffset),
+    );
   const modelId = text(message?.model) ?? text(value.model) ?? "unknown";
   const costUsd = nonNegativeNumber(value.cost_usd) ?? nonNegativeNumber(value.costUsd);
   const pricingRecord: PricingUsageRecord = {

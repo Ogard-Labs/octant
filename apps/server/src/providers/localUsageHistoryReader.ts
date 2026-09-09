@@ -83,6 +83,7 @@ export type LocalUsageHistoryLineParser = (input: {
   readonly sourceSessionIdHint: string;
   readonly relativePath: string;
   readonly lineNumber: number;
+  readonly byteOffset: number;
 }) => LocalUsageHistoryRecord | undefined;
 
 /**
@@ -364,6 +365,7 @@ async function readLocalUsageHistoryImpl(
       const relativePath = relative(root, resolvedFilePath);
       const sessionHint = sessionHintForPath(relativePath);
       let lineNumber = 0;
+      let lineOffset = startOffset;
       const stream = createReadStream(resolvedFilePath, {
         encoding: "utf8",
         fd: handle.fd,
@@ -378,6 +380,8 @@ async function readLocalUsageHistoryImpl(
         for await (const line of lines) {
           throwIfAborted(signal);
           lineNumber += 1;
+          const byteOffset = lineOffset;
+          lineOffset += Buffer.byteLength(line, "utf8") + 1;
           if (startsMidLine && lineNumber === 1) continue;
           if (Buffer.byteLength(line, "utf8") > maxRecordBytes) {
             omittedRecordCount += 1;
@@ -396,6 +400,7 @@ async function readLocalUsageHistoryImpl(
               sourceSessionIdHint: sessionHint,
               relativePath,
               lineNumber,
+              byteOffset,
             });
             if (record === undefined) continue;
             const observedAt = Date.parse(String(record.observedAt));

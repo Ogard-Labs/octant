@@ -100,6 +100,7 @@ function parseCodexLine(
     readonly sourceSessionIdHint: string;
     readonly relativePath: string;
     readonly lineNumber: number;
+    readonly byteOffset: number;
   },
   state: CodexParserState,
   seenUsageIds: Set<string>,
@@ -180,7 +181,7 @@ function parseCodexLine(
     text(payload.turn_id) ?? text(payload.turnId) ?? text(info?.turn_id) ?? text(info?.turnId);
   const eventIdentity =
     cumulative === undefined
-      ? (turnIdentity ?? `${JSON.stringify(lastValue)}\0${observedAt}\0${input.lineNumber}`)
+      ? (turnIdentity ?? `${JSON.stringify(lastValue)}\0${observedAt}\0${input.byteOffset}`)
       : `${turnIdentity ?? ""}\0${JSON.stringify(cumulative)}`;
   const sourceEventId = stableUsageId("codex", sourceSessionId, eventIdentity);
   if (seenUsageIds.has(sourceEventId)) return undefined;
