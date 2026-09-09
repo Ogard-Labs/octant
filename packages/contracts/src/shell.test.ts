@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   MAX_SIDEBAR_WIDTH,
@@ -18,6 +19,7 @@ import {
   decodeWorkspaceLayoutReplaced,
   decodeWorkspaceSurfaceCatalog,
   decodeWorkspaceTab,
+  SidebarDestinationCustomization,
 } from "./shell";
 import { MAX_AVATAR_IMAGE_CHARACTERS } from "./userProfile";
 
@@ -64,6 +66,7 @@ const settings = {
     overlayOpacity: 100,
     vibrancyMode: "off",
   },
+  sidebarDestinations: { order: [], visibility: [] },
   environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
   firstRunOnboarding: "pending",
   automaticUpdateChecks: true,
@@ -986,5 +989,41 @@ describe("environment presentation contracts", () => {
       version: 2,
     };
     expect(decodeShellCommandResult(result).kind).toBe("environment-presentation-replaced");
+  });
+});
+
+describe("sidebar destination customization", () => {
+  const decode = Schema.decodeUnknownSync(SidebarDestinationCustomization);
+
+  it("decodes a customized order and per-destination visibility", () => {
+    const customization = {
+      order: ["inbox", "plugins"],
+      visibility: [
+        { id: "inbox", visibility: "hidden" },
+        { id: "plugins", visibility: "shown" },
+      ],
+    };
+    expect(decode(customization)).toEqual(customization);
+  });
+
+  it("decodes a store without the section to the untouched sidebar", () => {
+    expect(decodeShellSettings(settings).sidebarDestinations).toEqual({
+      order: [],
+      visibility: [],
+    });
+  });
+
+  it("rejects unknown destinations and duplicated entries", () => {
+    expect(() => decode({ order: ["threads"], visibility: [] })).toThrow();
+    expect(() => decode({ order: ["inbox", "inbox"], visibility: [] })).toThrow();
+    expect(() =>
+      decode({
+        order: [],
+        visibility: [
+          { id: "inbox", visibility: "shown" },
+          { id: "inbox", visibility: "hidden" },
+        ],
+      }),
+    ).toThrow();
   });
 });

@@ -7,6 +7,7 @@ import {
   Compass,
   FileStack,
   GitFork,
+  PanelLeft,
   Plug,
   Puzzle,
   Settings,
@@ -116,6 +117,13 @@ export function SidebarProfile(props: SidebarProfileProps) {
                   icon={Settings}
                   label="Settings"
                   onClick={() => props.onOpenSettings()}
+                />
+                <ProfileAction
+                  icon={PanelLeft}
+                  label="Customize sidebar"
+                  onClick={() =>
+                    props.onOpenSettings({ section: "appearance", setting: "sidebar-destinations" })
+                  }
                 />
                 <ProfileAction
                   icon={ChartNoAxesColumn}

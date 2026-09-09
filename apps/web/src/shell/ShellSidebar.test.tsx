@@ -553,4 +553,65 @@ describe("ShellSidebar", () => {
     await user.click(screen.getByRole("button", { name: "Search" }));
     expect(onOpenSearch).toHaveBeenCalledOnce();
   });
+
+  it("honours the persisted customization: hidden Inbox gone, promoted Automations a row", async () => {
+    const user = userEvent.setup();
+    const automations = vi.fn();
+    render(
+      <ShellSidebar
+        codeNavigation={{
+          actions: { "new-code-thread": vi.fn(), inbox: vi.fn(), automations },
+        }}
+        automationsEnabled
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={null}
+        settings={{
+          ...defaultShellSettings(),
+          sidebarDestinations: {
+            order: [],
+            visibility: [
+              { id: "inbox", visibility: "hidden" },
+              { id: "automations", visibility: "shown" },
+            ],
+          },
+        }}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Inbox" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Automations" }));
+    expect(automations).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
+    await screen.findByRole("menuitem", { name: "Settings" });
+    expect(screen.queryByRole("menuitem", { name: "Automations" })).not.toBeInTheDocument();
+  });
+
+  it("renders the rows in the customized order", () => {
+    render(
+      <ShellSidebar
+        codeNavigation={{ actions: { "new-code-thread": vi.fn(), "thread-board": vi.fn() } }}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={null}
+        settings={{
+          ...defaultShellSettings(),
+          sidebarDestinations: {
+            order: ["board", "new-thread"],
+            visibility: [],
+          },
+        }}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />,
+    );
+
+    const board = screen.getByRole("button", { name: "Board" });
+    const newTask = screen.getByRole("button", { name: "New task" });
+    expect(board.compareDocumentPosition(newTask)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
 });

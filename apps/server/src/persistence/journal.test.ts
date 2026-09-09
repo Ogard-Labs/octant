@@ -202,6 +202,7 @@ describe("Journal", () => {
           vibrancyMode: "off",
         },
         environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
+        sidebarDestinations: { order: [], visibility: [] },
       },
     } as const;
 

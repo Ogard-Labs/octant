@@ -13,6 +13,7 @@ import {
 import type { ReactNode } from "react";
 import {
   buildSidebarNavigation,
+  sidebarNavigationDescriptor,
   type SidebarNavigationDescriptorId,
   type SidebarNavigationInput,
 } from "./navigationModel";
@@ -25,10 +26,18 @@ export interface SidebarNavigationProps {
   readonly input: SidebarNavigationInput;
   readonly projectAction?: ReactNode;
   readonly projectSection?: ReactNode;
+  /**
+   * Resolved row order from the person's destination customization. Absent
+   * falls back to the mode's default ordering.
+   */
+  readonly rows?: ReadonlyArray<SidebarNavigationDescriptorId>;
 }
 
 export function SidebarNavigation(props: SidebarNavigationProps) {
-  const descriptors = buildSidebarNavigation(props.input);
+  const descriptors =
+    props.rows === undefined
+      ? buildSidebarNavigation(props.input)
+      : props.rows.map((id) => sidebarNavigationDescriptor(id));
 
   return (
     <div className="sidebar-navigation">

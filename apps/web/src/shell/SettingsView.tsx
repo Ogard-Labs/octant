@@ -35,6 +35,7 @@ import {
   type FirstPartyPluginComponentId,
 } from "./contributionRegistry";
 import { SettingsNavigation, type SettingsNavigationItem } from "./SettingsNavigation";
+import { SidebarDestinationSettings } from "./SidebarDestinationSettings";
 import { PluginSettingsSection } from "./PluginSettingsSection";
 import { ChatSettingsView } from "../chat/ChatSettingsView";
 import type { ChatController } from "../chat/useChatController";
@@ -1010,6 +1011,20 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
                   props.onSettingsChange({ sidebarWidth: Number(event.currentTarget.value) })
                 }
                 value={props.settings.sidebarWidth}
+              />
+            </SettingRow>
+          ) : null}
+          {isAvailable("sidebar-destinations") ? (
+            <SettingRow
+              description="Choose which destinations appear in the sidebar, where they live, and in what order."
+              focused={focusedSetting === settingId("sidebar-destinations")}
+              label="Sidebar destinations"
+              scope="app"
+              settingId="sidebar-destinations"
+            >
+              <SidebarDestinationSettings
+                customization={props.settings.sidebarDestinations}
+                onChange={(sidebarDestinations) => props.onSettingsChange({ sidebarDestinations })}
               />
             </SettingRow>
           ) : null}
