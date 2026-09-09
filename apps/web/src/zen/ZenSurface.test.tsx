@@ -1447,6 +1447,63 @@ describe("ZenSurface live thread cards", () => {
     } as never;
   }
 
+  it("names a card in the interface face and dates it in the head", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-28T15:00:00.000Z"));
+    try {
+      const element = threadElement(1, "code");
+      render(
+        <ZenSurface
+          barCollapsed={false}
+          onExit={() => undefined}
+          onExpandBar={() => undefined}
+          onHideBar={() => undefined}
+          onUpdateElement={() => undefined}
+          onUpdateViewport={() => undefined}
+          renderLiveThread={() => undefined}
+          space={makeSpace([element], "wall")}
+          threadEntries={[catalogEntry(element)]}
+        />,
+      );
+
+      // The head carries the card's identity, so it is set in the interface
+      // face at the body size rather than the editor face at the metadata
+      // size, and it says how long ago the thread last moved.
+      const head = screen.getByText("Thread 1", { selector: ".zen-el-title" });
+      expect(head).toBeVisible();
+      expect(screen.getByText("3h ago", { selector: "time" })).toBeVisible();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("dates a card that is not streaming instead of printing its stored timestamp", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-29T12:00:00.000Z"));
+    try {
+      const element = threadElement(1, "code");
+      render(
+        <ZenSurface
+          barCollapsed={false}
+          onExit={() => undefined}
+          onExpandBar={() => undefined}
+          onHideBar={() => undefined}
+          onUpdateElement={() => undefined}
+          onUpdateViewport={() => undefined}
+          renderLiveThread={() => undefined}
+          space={makeSpace([element], "wall")}
+          threadEntries={[catalogEntry(element)]}
+        />,
+      );
+
+      expect(screen.getByText(/1d ago/)).toBeVisible();
+      expect(screen.queryByText(/2026-07-28T12:00:00\.000Z/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/00000000-0000-4000-8000-000000000003/)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps a live thread's resize grip above its composer", () => {
     const element = threadElement(1, "code");
     render(
