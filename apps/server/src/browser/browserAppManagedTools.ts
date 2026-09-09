@@ -66,7 +66,7 @@ export interface BrowserAppManagedToolsOptions {
     mode: ToolActionAuthority["mode"],
   ) => string | undefined;
   /** Host-owned in-memory bindings that survive per-turn tool-set factories. */
-  readonly modelBindings: Map<string, string>;
+  readonly modelBindings: Map<string, BrowserModelBinding>;
   readonly resolveAuthority: (
     threadId: BrowserThreadId,
     mode: ToolActionAuthority["mode"],
@@ -95,6 +95,11 @@ export interface BrowserAppManagedToolsOptions {
   };
   readonly approvals?: Pick<BrowserToolApprovalService, "request">;
   readonly uuid: () => string;
+}
+
+export interface BrowserModelBinding {
+  readonly modelId: string;
+  readonly authority: ToolActionAuthority;
 }
 
 type BrowserToolInput =
@@ -142,6 +147,7 @@ export function createBrowserAppManagedTools(
   options: BrowserAppManagedToolsOptions,
 ): AppManagedToolSet {
   const rememberedContexts = new Set<string>();
+  const initialAuthority = options.resolveAuthority(options.threadId, options.mode);
   const definitions = isToolAllowedByAllowlist(options.toolConstraints ?? [], BROWSER_TOOL_NAME)
     ? [browserDefinition]
     : [];
@@ -156,6 +162,9 @@ export function createBrowserAppManagedTools(
       if (input === undefined) return failure("invalid-browser-input");
       const authority = options.resolveAuthority(options.threadId, options.mode);
       if (authority === undefined) return failure("browser-authority-unavailable");
+      if (initialAuthority !== undefined && !sameToolActionAuthority(initialAuthority, authority)) {
+        return failure("browser-authority-stale");
+      }
       if (input.operation === "stop") {
         const snapshot = options.browser.inspectThread(options.windowId, options.threadId);
         if (snapshot.context !== undefined) {
@@ -200,6 +209,12 @@ export function createBrowserAppManagedTools(
           return failure("browser-authority-stale");
         }
         if (!modelIsCurrent(options)) return failure("browser-model-stale");
+        if (existing !== undefined) {
+          rememberModelBinding(options.modelBindings, String(existing.contextId), {
+            modelId: options.modelId,
+            authority: refreshed,
+          });
+        }
       }
       if (existing === undefined) {
         const created = await options.browser.create({
@@ -210,18 +225,44 @@ export function createBrowserAppManagedTools(
         });
         snapshot = created;
         if (created.context?.state === "active") {
-          rememberedContexts.add(String(created.context.contextId));
-          options.modelBindings.set(String(created.context.contextId), options.modelId);
+          const contextId = String(created.context.contextId);
+          rememberedContexts.add(contextId);
+          rememberModelBinding(options.modelBindings, contextId, {
+            modelId: options.modelId,
+            authority,
+          });
         }
       }
       const context = snapshot.context;
       if (context === undefined || context.state !== "active") return browserResult(snapshot);
-      const boundModel = options.modelBindings.get(String(context.contextId));
-      if (boundModel === undefined || String(boundModel) !== String(options.modelId)) {
-        return failure("browser-model-stale");
+      const contextId = String(context.contextId);
+      const binding = options.modelBindings.get(contextId);
+      const bindingMatches =
+        binding !== undefined &&
+        String(binding.modelId) === String(options.modelId) &&
+        sameToolActionAuthority(binding.authority, authority);
+      if (!bindingMatches && existing !== undefined) {
+        if (options.approvals === undefined) return failure("browser-approval-required");
+        const outcome = await options.approvals.request({
+          windowId: options.windowId,
+          threadId: String(options.threadId),
+          authority,
+          origin,
+          ...(signal === undefined ? {} : { signal }),
+        });
+        if (outcome !== "approved") return failure(`browser-approval-${outcome}`);
+        if (signal?.aborted) return failure("tool-interrupted");
+        const refreshed = options.resolveAuthority(options.threadId, options.mode);
+        if (refreshed === undefined || !sameToolActionAuthority(authority, refreshed)) {
+          return failure("browser-authority-stale");
+        }
+        if (!modelIsCurrent(options)) return failure("browser-model-stale");
+        rememberModelBinding(options.modelBindings, contextId, {
+          modelId: options.modelId,
+          authority: refreshed,
+        });
       }
-      if (!rememberedContexts.has(String(context.contextId)))
-        rememberedContexts.add(String(context.contextId));
+      if (!rememberedContexts.has(contextId)) rememberedContexts.add(String(context.contextId));
       const request = browserAction(input, context);
       if (request === undefined) return failure("invalid-browser-input");
       if (signal?.aborted) return failure("tool-interrupted");
@@ -239,6 +280,20 @@ export function createBrowserAppManagedTools(
 function modelIsCurrent(options: BrowserAppManagedToolsOptions): boolean {
   const current = options.resolveModelId(options.threadId, options.mode);
   return current !== undefined && String(current) === String(options.modelId);
+}
+
+const MAX_BROWSER_MODEL_BINDINGS = 256;
+
+function rememberModelBinding(
+  bindings: Map<string, BrowserModelBinding>,
+  contextId: string,
+  binding: BrowserModelBinding,
+): void {
+  if (!bindings.has(contextId) && bindings.size >= MAX_BROWSER_MODEL_BINDINGS) {
+    const oldest = bindings.keys().next().value;
+    if (oldest !== undefined) bindings.delete(oldest);
+  }
+  bindings.set(contextId, binding);
 }
 
 function actionRequest(

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BrowserAutomationSnapshot, ToolActionAuthority } from "@octant/contracts";
-import { createBrowserAppManagedTools } from "./browserAppManagedTools";
+import { createBrowserAppManagedTools, type BrowserModelBinding } from "./browserAppManagedTools";
 
 const windowId = "10000000-0000-4000-8000-000000000001" as never;
 const threadId = "20000000-0000-4000-8000-000000000001" as never;
@@ -180,6 +180,7 @@ describe("createBrowserAppManagedTools", () => {
 
   it("refuses an existing browser context after a provider model switch", async () => {
     let currentModel = modelId;
+    const modelBindings = new Map<string, BrowserModelBinding>();
     let observed = snapshot();
     const create = vi.fn(async () => {
       observed = snapshot({
@@ -210,7 +211,7 @@ describe("createBrowserAppManagedTools", () => {
       mode: "chat",
       modelId,
       resolveModelId: () => currentModel,
-      modelBindings: new Map(),
+      modelBindings,
       executionPolicy: "approval-gated",
       resolveAuthority: () => authority,
       browser: {
@@ -238,11 +239,75 @@ describe("createBrowserAppManagedTools", () => {
       }),
     ).resolves.toEqual({ result: { error: "browser-model-stale" }, isError: true });
     expect(act).toHaveBeenCalledOnce();
+    const freshApproval = vi.fn(async () => "approved" as const);
+    const freshTools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "chat",
+      modelId: "model-b",
+      resolveModelId: () => currentModel,
+      modelBindings,
+      executionPolicy: "approval-gated",
+      resolveAuthority: () => authority,
+      browser: {
+        inspectThread: () => observed,
+        create,
+        act,
+        releaseThread: vi.fn(async () => snapshot()),
+      },
+      approvals: { request: freshApproval } as never,
+      uuid: () => crypto.randomUUID(),
+    });
+    await expect(
+      freshTools.execute({
+        name: "octant_browser",
+        inputJson: JSON.stringify({ operation: "read-page" }),
+      }),
+    ).resolves.toMatchObject({ isError: false });
+    expect(freshApproval).toHaveBeenCalledOnce();
+    expect(act).toHaveBeenCalledTimes(2);
     await expect(
       tools.execute({
         name: "octant_browser",
         inputJson: JSON.stringify({ operation: "stop" }),
       }),
     ).resolves.toMatchObject({ isError: false });
+  });
+
+  it("refuses an old factory when the provider changes under the same model name", async () => {
+    let currentAuthority = authority;
+    const approval = vi.fn(async () => "approved" as const);
+    const create = vi.fn(async () => snapshot());
+    const tools = createBrowserAppManagedTools({
+      windowId,
+      threadId,
+      mode: "chat",
+      modelId,
+      resolveModelId: () => modelId,
+      modelBindings: new Map<string, BrowserModelBinding>(),
+      executionPolicy: "approval-gated",
+      resolveAuthority: () => currentAuthority,
+      browser: {
+        inspectThread: () => snapshot(),
+        create,
+        act: vi.fn(async () => snapshot()),
+        releaseThread: vi.fn(async () => snapshot()),
+      },
+      approvals: { request: approval } as never,
+      uuid: () => crypto.randomUUID(),
+    });
+    currentAuthority = {
+      ...authority,
+      providerInstanceId: "40000000-0000-0000-0000-000000000002",
+    } as ToolActionAuthority;
+
+    await expect(
+      tools.execute({
+        name: "octant_browser",
+        inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com" }),
+      }),
+    ).resolves.toEqual({ result: { error: "browser-authority-stale" }, isError: true });
+    expect(approval).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
   });
 });

@@ -542,7 +542,10 @@ import {
   BrowserAutomationService,
   createBrowserToolCallAuthorityService,
 } from "./browser/browserAutomationService";
-import { createBrowserAppManagedTools } from "./browser/browserAppManagedTools";
+import {
+  createBrowserAppManagedTools,
+  type BrowserModelBinding,
+} from "./browser/browserAppManagedTools";
 import { BrowserToolApprovalService } from "./browser/browserToolApprovalService";
 import { ExternalContentIngestionStore } from "./context/externalContentIngestionStore";
 import { readThreadExternalContentTaint } from "./context/externalContentTaintProjection";
@@ -1516,7 +1519,7 @@ export function startOctantServer(
     const codeSessionAuthority = new CodeSessionAuthorityStore();
     let activeCodeService: CodeRouteService | undefined;
     let browserAutomationService: BrowserAutomationService | undefined;
-    const browserModelBindings = new Map<string, string>();
+    const browserModelBindings = new Map<string, BrowserModelBinding>();
     const requireBrowserAutomationService = (): BrowserAutomationService => {
       const service = browserAutomationService;
       if (service === undefined) {
