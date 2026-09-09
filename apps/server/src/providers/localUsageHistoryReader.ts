@@ -95,7 +95,18 @@ export function readLocalUsageHistory(
   parse: LocalUsageHistoryLineParser,
   signal?: AbortSignal,
 ): Promise<LocalUsageHistoryReadResult> {
-  const key = `${options.sourceKind}\0${options.root}\0${request.from}\0${request.to}\0${request.timeZone}`;
+  const key = [
+    options.sourceKind,
+    options.root,
+    request.from,
+    request.to,
+    request.timeZone,
+    options.maxFiles ?? "",
+    options.maxTotalBytes ?? "",
+    options.maxFileBytes ?? "",
+    options.maxRecordBytes ?? "",
+    options.maxRecords ?? "",
+  ].join("\0");
   const active = activeReads.get(key);
   if (active !== undefined) {
     active.waiters += 1;
