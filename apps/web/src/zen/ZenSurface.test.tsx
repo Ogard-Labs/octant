@@ -250,8 +250,10 @@ describe("ZenSurface", () => {
     expect(styles).toMatch(
       /\.zen-surface__manual-panel\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*calc\(100% - 32px\);/s,
     );
+    // One preset per row. Two columns in a 360px sheet cut every name that
+    // says what the background is, and a name nobody can read is not a choice.
     expect(styles).toMatch(
-      /\.zen-appearance__preset-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/s,
+      /\.zen-appearance__preset-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s,
     );
     expect(styles).toMatch(
       /\.zen-appearance__preset-grid > \[data-slot="button"\]\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s,
@@ -378,7 +380,33 @@ describe("ZenSurface", () => {
     expect(onTimerAction).toHaveBeenCalledWith(elementId, "start");
   });
 
-  it("adds a bounded Timer from the manual Widgets panel", () => {
+  it("closes the open panel on Escape rather than leaving Zen", () => {
+    const onExit = vi.fn();
+    const onCloseThreadPicker = vi.fn();
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onCloseThreadPicker={onCloseThreadPicker}
+        onExit={onExit}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onOpenThreads={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        space={makeSpace()}
+        threadEntries={[]}
+        threadPickerOpen
+      />,
+    );
+
+    // The picker holds focus inside itself, so the key never reached the
+    // surface and the only way out was its own Close button.
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onCloseThreadPicker).toHaveBeenCalledOnce();
+    expect(onExit).not.toHaveBeenCalled();
+  });
+
+  it("adds a bounded Timer from the Add panel", () => {
     const onAddTimer = vi.fn();
     render(
       <ZenSurface
@@ -393,8 +421,8 @@ describe("ZenSurface", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Widgets" }));
-    expect(screen.getByRole("dialog", { name: "Zen additions" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByRole("dialog", { name: "Add to this space" })).toBeInTheDocument();
     fireEvent.change(screen.getByRole("spinbutton", { name: "Timer duration in minutes" }), {
       target: { value: "40" },
     });
@@ -709,7 +737,7 @@ describe("ZenSurface", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Widgets" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(screen.getByRole("button", { name: "Add Notes" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add Checklist" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add timer" })).toBeInTheDocument();
