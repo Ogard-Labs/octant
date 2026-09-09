@@ -85,3 +85,5 @@ export * from "./mobileWorkClient";
 export * from "./zenClient";
 export * from "./workspacePresetClient";
 export * from "./providerUsageHistoryClient";
+
+export { createGitHistoryClient, type GitHistoryClient } from "./gitHistoryClient";

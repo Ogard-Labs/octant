@@ -264,7 +264,15 @@ accessible active state. Completed layout operations go through
 server-authoritative workspace commands. One visible tree belongs to one
 authority context (host, mode, Project, and bound root); a cross-Project,
 cross-mode, or cross-host placement is refused or offered in a new window.
-Thread utilities live in the Right Utility Dock outside the split tree. The
+Thread utilities live in the Right Utility Dock outside the split tree.
+The shell loads each tool through `dockModuleRegistry`; modules under
+`apps/web/src/dockModules` receive only declared inputs and contain render
+failures. Review owns local Working tree and Git History views. History reads
+through `GitHistoryReader` and the authenticated Code checkout-read boundary;
+its Git subprocesses are network-denied and its data is an ephemeral read,
+not a second journal. Pages anchor to immutable Git tips, and commit details
+compare immutable object IDs with an explicit parent for merges.
+The
 top-right control reveals the dock only when the active pane has a bound thread
 or a valid launchable tool. An available empty dock shows a compact launcher;
 an open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,

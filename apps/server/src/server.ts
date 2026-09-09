@@ -10,6 +10,7 @@ import {
   decodeComputerUseOwner,
   type ComputerUseOwner,
 } from "@octant/contracts/computer-use-plugin";
+import { GitHistoryPort } from "./code/gitHistoryPort";
 import type { RepositoryIdentityObservation } from "./code/repositoryIdentity";
 import { IMAGE_LIBRARY_SCOPE_ID } from "@octant/contracts";
 import { createHash, randomUUID } from "node:crypto";
@@ -1351,6 +1352,9 @@ function withCodeOperationRuntime(
       : { readOperationContents: (windowId, input) => readEvidenceBatch(windowId, input) }),
     saveFile: (windowId, input) => service.saveFile(windowId, input),
     openFile: (windowId, input) => service.openFile(windowId, input),
+    ...(service.readGitHistory === undefined
+      ? {}
+      : { readGitHistory: service.readGitHistory.bind(service) }),
     ...(service.listFiles === undefined ? {} : { listFiles: service.listFiles.bind(service) }),
     ...(service.listTests === undefined ? {} : { listTests: service.listTests.bind(service) }),
     ...(service.watchFiles === undefined ? {} : { watchFiles: service.watchFiles.bind(service) }),
@@ -1426,6 +1430,9 @@ function withCodeBoard(
     readContent: (windowId, contentId) => service.readContent(windowId, contentId),
     saveFile: (windowId, input) => service.saveFile(windowId, input),
     openFile: (windowId, input) => service.openFile(windowId, input),
+    ...(service.readGitHistory === undefined
+      ? {}
+      : { readGitHistory: service.readGitHistory.bind(service) }),
     ...(service.listFiles === undefined ? {} : { listFiles: service.listFiles.bind(service) }),
     ...(service.listTests === undefined ? {} : { listTests: service.listTests.bind(service) }),
     ...(service.watchFiles === undefined ? {} : { watchFiles: service.watchFiles.bind(service) }),
@@ -2663,6 +2670,7 @@ export function startOctantServer(
     const codeService =
       options.codeService ??
       new CodeService({
+        gitHistory: new GitHistoryPort(),
         persistence,
         access: {
           canBrowseProject: (projectId) => projectService.hasActiveProject(projectId, "code"),

@@ -1360,6 +1360,36 @@ describe("Code project pull-request detail routes", () => {
   });
 });
 
+describe("Git history routes", () => {
+  it("passes only the authenticated identity and decoded query to Git history", async () => {
+    const readGitHistory = vi.fn(async () => ({ status: "unavailable", message: "No Git" }));
+    const route = routeFixture({ readGitHistory });
+    const query = { kind: "history", threadId, checkoutId };
+    const response = await route(
+      request(`/api/code/git/history?query=${encodeURIComponent(JSON.stringify(query))}`),
+    );
+    expect(response?.status).toBe(200);
+    expect(readGitHistory).toHaveBeenCalledWith(windowId, query, expect.any(AbortSignal));
+  });
+  it("refuses missing authentication and renderer-supplied roots before running Git", async () => {
+    const readGitHistory = vi.fn();
+    const route = routeFixture({ readGitHistory });
+    const url = `/api/code/git/history?query=${encodeURIComponent(JSON.stringify({ kind: "history", threadId, checkoutId }))}`;
+    expect((await route(new Request(`http://127.0.0.1${url}`)))?.status).toBe(401);
+    expect(
+      (
+        await route(
+          request(
+            `/api/code/git/history?query=${encodeURIComponent(JSON.stringify({ kind: "history", threadId, checkoutId, root: "/private" }))}`,
+          ),
+        )
+      )?.status,
+    ).toBe(400);
+    expect((await route(request(url, { method: "POST" })))?.status).toBe(400);
+    expect(readGitHistory).not.toHaveBeenCalled();
+  });
+});
+
 function settings() {
   return {
     defaultExecutionPolicy: "approval-gated" as const,

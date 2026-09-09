@@ -58,6 +58,12 @@ policy) plus a public `@octant/plugin-api` (types and contribution point
 schemas). Existing package, component, and capability schemas are extended, not
 replaced.
 
+The right dock now has independently loaded bundled modules with explicit
+input projections and local render-failure containment (0044). This is a
+build-time/presentation boundary, not a security sandbox or completion of the
+third-party renderer activation work below. Git history consumes the published
+`GitHistoryReader` port and cannot invoke a raw shell or select a host path.
+
 ### 1. Plugin kinds and manifest
 
 A plugin is one package that may contribute any mix of these kinds:

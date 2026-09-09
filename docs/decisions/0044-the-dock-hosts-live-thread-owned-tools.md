@@ -91,6 +91,28 @@ not copy content or treat renderer focus as authority. Environment is a direct
 thread-owned dock tool under 0077. The central pane remains the thread, a board,
 a Project overview, or a Project-level list.
 
+### Tool modules and Git history
+
+Every right-dock tool renders through an independently loaded module. The
+shell registry selects the module and passes only its declared inputs. A
+module owns its presentation and feature state; placement, tab identity,
+thread/checkout binding, and capability availability remain shell/host-owned.
+The same modules serve the bottom panel. Loading or rendering failure is
+contained at the tool boundary, including portalled Environment content.
+
+These are bundled modules, not a claim that arbitrary executable renderer
+plugins or the full activation catalog in 0001 are implemented. New module
+reads use published typed ports; modules never receive raw process handles or
+choose filesystem authority. `@octant/plugin-api/git-history` publishes the
+read-only history port as the first Git-specific example.
+
+Review owns Working tree and History views. History reads local Git refs,
+paged commits and parent links, and immutable commit comparisons. Selecting a
+commit preserves the history list and its scroll position. Root commits
+compare against the empty tree; merge commits expose their parent choice.
+History remains read-only in every Code access posture, including Plan.
+Browsing and refreshing never fetch, check out, stage, revert, or reset.
+
 ## Consequences
 
 - Project memory now lives in Project Overview, and Navigator opens from the
