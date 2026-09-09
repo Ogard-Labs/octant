@@ -351,6 +351,20 @@ describe("WindowChrome", () => {
     );
   });
 
+  it("parts one Project from the next by more than it parts two threads", () => {
+    // Three levels, ordered: rows inside a Project, then Projects, then the
+    // sections a hairline divides. A Project block used the same 2px step as
+    // the rows inside it, so a sidebar of several Projects read as one
+    // unbroken list and a Project header looked like another thread.
+    const rows = cssRule(".project-threads");
+    const projects = cssRule(".project-block + .project-block");
+    const sections = cssRule(".project-section + .project-section");
+
+    expect(rows).toContain("gap: 2px;");
+    expect(projects).toContain("margin-top: var(--oct-space-2);");
+    expect(sections).toContain("border-top: 1px solid var(--oct-hairline);");
+  });
+
   it("keeps semantic shell borders and controls restrained", () => {
     expect(cssRule(":root")).toContain("--octant-border: #303030;");
     expect(cssRule(":root")).toContain("--octant-border-strong: #4d4d4d;");
