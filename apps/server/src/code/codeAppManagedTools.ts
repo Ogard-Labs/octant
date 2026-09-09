@@ -1,3 +1,4 @@
+import { BROWSER_TOOL_DEFINITION } from "../browser/browserToolDefinition";
 import type {
   BrowserActionRequest,
   BrowserAutomationSnapshot,
@@ -45,7 +46,7 @@ const MAX_BROWSER_TEXT_RESULT_BYTES = 24 * 1024;
 const TERMINAL_COMMAND_TIMEOUT_MS = 30_000;
 const TERMINAL_COMPLETION_POLL_MS = 50;
 
-export const CODE_BROWSER_TOOL_NAME = "octant_browser";
+export const CODE_BROWSER_TOOL_NAME = BROWSER_TOOL_DEFINITION.name;
 export const CODE_TERMINAL_TOOL_NAME = "octant_terminal";
 export const CODE_APPLE_TOOL_NAME = "octant_apple";
 export const CODE_BOARD_TOOL_NAME = "octant_board";
@@ -64,59 +65,10 @@ const APPLE_BOOT_TIMEOUT_MS = 120_000;
 const APPLE_SIMULATOR_TIMEOUT_MS = 30_000;
 const MAX_APPLE_RESULT_DIAGNOSTICS = 16;
 
-const browserDefinition = {
-  name: CODE_BROWSER_TOOL_NAME,
-  description:
-    "Control Octant's built-in browser for this task. Start with navigate and an HTTP(S) URL, then read-page, click or type using CSS selectors, press a key, scroll, wait for a selector, or capture a screenshot. This uses the same isolated page shown in Browser; no external browser skill, debugging URL, or shell command is needed. Browser approval is requested inline when required.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      operation: {
-        type: "string",
-        enum: [
-          "navigate",
-          "read-page",
-          "click",
-          "type",
-          "press",
-          "scroll",
-          "wait",
-          "screenshot",
-          "stop",
-        ],
-      },
-      url: { type: "string", maxLength: 4096, description: "HTTP(S) URL for navigate." },
-      selector: {
-        type: "string",
-        maxLength: 4096,
-        description: "CSS selector for click, type, or wait.",
-      },
-      text: {
-        type: "string",
-        maxLength: 65536,
-        description: "Text to fill into the selected field.",
-      },
-      key: { type: "string", description: "Browser key such as Enter, Tab, Escape, or ArrowDown." },
-      deltaX: { type: "integer", minimum: -2000, maximum: 2000 },
-      deltaY: {
-        type: "integer",
-        minimum: -2000,
-        maximum: 2000,
-        description: "Scroll down with positive values, up with negative values.",
-      },
-      expectedObservationRevision: {
-        type: "integer",
-        minimum: 0,
-        description: "Revision from the page observation used to choose this action.",
-      },
-    },
-    additionalProperties: false,
-    required: ["operation"],
-  },
-} as const;
-
 const boardDefinition = {
   name: CODE_BOARD_TOOL_NAME,
+  description:
+    "Read the current Project's server-authoritative task board as its designated planner. Use the returned task states, delivery evidence, checks, and child-agent activity to decide what needs attention. The result is a bounded recent list; check truncation before claiming it covers every task. This tool does not change task status or create work.",
   inputSchema: {
     type: "object",
     properties: { operation: { type: "string", enum: ["read"] } },
@@ -126,6 +78,8 @@ const boardDefinition = {
 
 const proposeThreadDefinition = {
   name: CODE_PROPOSE_THREAD_TOOL_NAME,
+  description:
+    "Propose a new Code task to the user from the current Project's designated planner. Supply a clear title, the intended outcome in intent, and an optional rationale. The proposal waits for user acceptance; it does not create or start a task, checkout, or pull request. Report proposed work as proposed, not running or completed.",
   inputSchema: {
     type: "object",
     properties: {
@@ -139,6 +93,8 @@ const proposeThreadDefinition = {
 
 const terminalDefinition = {
   name: CODE_TERMINAL_TOOL_NAME,
+  description:
+    "Use Octant's terminal for this Code task: run starts a command, write supplies input to the running terminal, read checks its output, and stop terminates it. command is required for run or write. Check commandCompleted and commandExitCode; a running terminal is not proof that its command succeeded. For document artifacts, create files within the bound checkout and report their real relative paths. Octant's Files and Document tools provide host-authorized previews; never invent an artifact URL or claim a preview opened based on a write alone. Ordinary terminal permissions still apply.",
   inputSchema: {
     type: "object",
     properties: {
@@ -151,6 +107,8 @@ const terminalDefinition = {
 
 const appleDefinition = {
   name: CODE_APPLE_TOOL_NAME,
+  description:
+    "Build, test, run, and inspect Apple apps through Octant's Apple workbench. Begin with discover or status and use the returned project, scheme, and destination identifiers for later operations. boot and shutdown control the selected Simulator; screenshot observes it. Use only supported operations and inspect returned build, test, or runtime evidence before claiming success. An unavailable operation is not a successful action or permission to bypass the host's validation and approval policy.",
   inputSchema: {
     type: "object",
     properties: {
@@ -332,7 +290,7 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
   const allowlist = options.thread.toolConstraints ?? [];
   const tools: AppManagedToolSet = {
     definitions: [
-      browserDefinition,
+      BROWSER_TOOL_DEFINITION,
       terminalDefinition,
       ...(options.apple === undefined ? [] : [appleDefinition]),
       // The planner tools appear only in the currently designated planner

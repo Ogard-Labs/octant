@@ -45,9 +45,32 @@ describe("planWorkTurnContext", () => {
     expect(planned.kind).toBe("ok");
     if (planned.kind !== "ok") return;
     expect(planned.context).toEqual([
+      { kind: "instructions", text: expect.stringContaining("Octant's Files") },
       { kind: "user-message", text: "Summarize the brief" },
       { kind: "assistant-message", text: "Here is the summary." },
     ]);
+  });
+
+  it("budgets the artifact instructions even when the provider has no app-managed tools", () => {
+    let n = 0;
+    const plan = (safeInputBudget: number) =>
+      planWorkTurnContext({
+        threadId,
+        providerInstanceId: provider,
+        modelId: model,
+        uuid: () => `aaaaaaaa-aaaa-4aaa-8aaa-${String(++n).padStart(12, "0")}`,
+        createdAt: "2026-08-11T12:00:00.000Z",
+        safeInputBudget,
+        contributions: [],
+      });
+    const planned = plan(1_000);
+    expect(planned.kind).toBe("ok");
+    if (planned.kind !== "ok") throw new Error("The Work guide should fit the budget.");
+    expect(planned.context).toEqual([
+      { kind: "instructions", text: expect.stringContaining("relative paths") },
+    ]);
+    expect(JSON.stringify(planned.context)).not.toContain("octant_canvas");
+    expect(plan(1).kind).toBe("blocked");
   });
 
   it("refuses required file mentions that cannot fit the context budget", () => {
@@ -59,7 +82,7 @@ describe("planWorkTurnContext", () => {
       modelId: model,
       uuid: () => `aaaaaaaa-aaaa-4aaa-8aaa-${String(++n).padStart(12, "0")}`,
       createdAt: "2026-08-11T12:00:00.000Z",
-      safeInputBudget: 50,
+      safeInputBudget: 500,
       contributions: [
         {
           text: huge,

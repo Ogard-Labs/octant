@@ -1,12 +1,14 @@
 import {
+  CanvasBlock,
+  CANVAS_SCHEMA_VERSION,
   decodeCanvasBlock,
-  type CanvasBlock,
   type ChatThread,
   type HostId,
   type PermissionPersistence,
   type ProviderExecutionPolicy,
   type WindowId,
 } from "@octant/contracts";
+import { JSONSchema, Schema } from "effect";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { CanvasService } from "./canvasService";
 
@@ -20,18 +22,43 @@ export const CANVAS_TOOL_NAME = "octant_canvas";
  */
 const MAX_AUTHORED_BLOCKS = 128;
 const MAX_TITLE_CHARS = 120;
+const MAX_DESCRIBED_BLOCK_KINDS = 3;
+const blockKinds = CanvasBlock.members.map((block) => block.fields.kind.literals[0]);
 
 const canvasDefinitionSchema = {
   type: "object",
   properties: {
-    operation: { type: "string", enum: ["create", "revise"] },
-    title: { type: "string" },
-    canvasId: { type: "string" },
-    expectedSequence: { type: "number" },
-    prompt: { type: "string" },
-    blocks: { type: "array", items: { type: "object" } },
+    operation: { type: "string", enum: ["describe", "create", "revise"] },
+    blockKinds: {
+      type: "array",
+      items: { type: "string", enum: blockKinds },
+      minItems: 1,
+      maxItems: MAX_DESCRIBED_BLOCK_KINDS,
+      description:
+        "For describe: request the schemas of up to three block kinds. Omit to list kinds and see a create example.",
+    },
+    title: { type: "string", maxLength: MAX_TITLE_CHARS, description: "Title of a new Canvas." },
+    canvasId: { type: "string", description: "For revise: the id returned by create." },
+    expectedSequence: {
+      type: "integer",
+      minimum: 1,
+      description:
+        "For revise: the last observed sequence. Creation starts at 1; use the sequence returned by each revision.",
+    },
+    prompt: {
+      type: "string",
+      description: "Optional provenance note. The blocks must contain the actual document.",
+    },
+    blocks: {
+      type: "array",
+      minItems: 1,
+      maxItems: MAX_AUTHORED_BLOCKS,
+      items: { type: "object" },
+      description:
+        "Required for create and revise. Complete document blocks matching the schemas from describe; revise replaces the block list.",
+    },
   },
-  required: ["operation", "blocks"],
+  required: ["operation"],
 } as const;
 
 /**
@@ -63,7 +90,7 @@ export interface CanvasAgentToolPort {
   readonly hostId: HostId;
 }
 
-interface CanvasToolInput {
+interface CanvasAuthoringInput {
   readonly operation: "create" | "revise";
   readonly title?: string;
   readonly canvasId?: string;
@@ -71,6 +98,13 @@ interface CanvasToolInput {
   readonly prompt?: string;
   readonly blocks: ReadonlyArray<CanvasBlock>;
 }
+
+type CanvasToolInput =
+  | CanvasAuthoringInput
+  | {
+      readonly operation: "describe";
+      readonly blockKinds?: ReadonlyArray<string>;
+    };
 
 /**
  * The authority a Canvas an agent wrote carries: none.
@@ -111,8 +145,25 @@ function parseInput(inputJson: string): CanvasToolInput | { readonly error: stri
   if (typeof raw !== "object" || raw === null) return { error: "Canvas tool input is invalid." };
   const record = raw as Record<string, unknown>;
   const operation = record["operation"];
+  if (operation === "describe") {
+    const requested = record["blockKinds"];
+    if (requested === undefined) return { operation };
+    if (
+      !Array.isArray(requested) ||
+      requested.length === 0 ||
+      requested.length > MAX_DESCRIBED_BLOCK_KINDS ||
+      !requested.every(
+        (kind): kind is string =>
+          typeof kind === "string" && blockKinds.some((known) => known === kind),
+      )
+    )
+      return {
+        error: "Describe needs one to three known block kinds, or no blockKinds to list them.",
+      };
+    return { operation, blockKinds: requested };
+  }
   if (operation !== "create" && operation !== "revise") {
-    return { error: "Canvas tool operation must be create or revise." };
+    return { error: "Canvas tool operation must be describe, create, or revise." };
   }
   const blocks = record["blocks"];
   if (!Array.isArray(blocks) || blocks.length === 0) {
@@ -162,10 +213,44 @@ export function createCanvasAgentTools(options: {
   readonly port: CanvasAgentToolPort;
 }): AppManagedToolSet {
   return {
-    definitions: [{ name: CANVAS_TOOL_NAME, inputSchema: canvasDefinitionSchema }],
-    execute: async ({ inputJson }) => {
+    definitions: [
+      {
+        name: CANVAS_TOOL_NAME,
+        description:
+          "Create or revise an Octant Canvas for a report, diagram, table, or dashboard in this Chat Project. Start with describe to see the available block kinds and a create example, then describe the kinds you need for their exact schemas. Author the content in blocks, not in prompt. Use structured blocks rather than HTML, JavaScript, CSS, or Mermaid. Creation adds a card to this Chat; the user can select Open Canvas to view it. Do not claim a pane opened or invent a download URL. Revise the returned canvasId with the last observed expectedSequence and the complete replacement blocks. Reference blocks require source ids already in the Canvas source manifest; create attaches no sources. Never invent file or artifact references.",
+        inputSchema: canvasDefinitionSchema,
+      },
+    ],
+    execute: async ({ name, inputJson }) => {
+      if (name !== CANVAS_TOOL_NAME)
+        return { result: { error: "tool-unavailable" }, isError: true };
       const input = parseInput(inputJson);
       if ("error" in input) return { result: { error: input.error }, isError: true };
+      if (input.operation === "describe") {
+        if (input.blockKinds === undefined) {
+          return {
+            result: {
+              blockKinds,
+              example: {
+                operation: "create",
+                title: "Report",
+                blocks: [
+                  {
+                    blockId: "summary",
+                    schemaVersion: CANVAS_SCHEMA_VERSION,
+                    kind: "rich-text",
+                    text: "The report goes here.",
+                  },
+                ],
+              },
+            },
+          };
+        }
+        const selected = CanvasBlock.members.filter((block) =>
+          input.blockKinds?.includes(block.fields.kind.literals[0]),
+        );
+        return { result: { blockSchema: JSONSchema.make(Schema.Union(...selected)) } };
+      }
 
       const active = await options.port.activeContext(options.windowId);
       if (active === undefined || active.projectId === null || active.mode !== "chat") {

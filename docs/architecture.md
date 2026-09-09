@@ -138,6 +138,19 @@ raising thread access. The grant is bound to the exact browser context and
 owner, and browser-service policy is checked again before effects. See
 [decision 0093](decisions/0093-app-owned-tools-use-managed-runtime-transports.md).
 
+Tool definitions carry the agent's usage guidance alongside their argument
+schemas. Each mode offers only its admitted tools, so providers receive the
+same guidance through MCP, dynamic tools, or direct tool calls without a
+separate global tool installation or prompt catalogue. Browser shares one
+definition across modes. Canvas's `describe` operation lists the closed block
+catalogue and a creation example, or returns canonical schemas for up to three
+requested block kinds. It reads no Project data and creates no artifact.
+Descriptions explain the existing presentation flows and distinguish creation,
+queued jobs, and work proposals from opened previews or completed work.
+Work also includes a short, budgeted artifact instruction in its required
+context, so runtimes that use their own file tools know how written documents
+appear in Files and Document. That instruction offers no tools or authority.
+
 The local-server provider adapter owns a separate process for each acquired
 connection and allows one live session per connection. Its MCP protocol does
 not reliably carry native session identity, so the private endpoint binds calls

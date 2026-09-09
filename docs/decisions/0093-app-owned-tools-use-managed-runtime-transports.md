@@ -22,6 +22,11 @@ browser operation, even when a narrower isolated session was sufficient.
   contract. Adapters do not call host browser, terminal, filesystem, or
   approval services directly. The host's existing tool policy remains the
   authority before every effect.
+- Tool definitions own their usage guidance and argument schemas. Adapters
+  preserve both for the exact offered catalogue; unavailable tools contribute
+  no guidance. Detailed schema discovery can use a read-only operation on an
+  already offered tool, as Canvas does for its closed block catalogue. This
+  introduces no separate global MCP registration or additional authority.
 - The connection binds the tool catalogue before sending its prompt. Only
   the expected in-process server and its offered tool names are accepted
   during runtime attestation. Changing a catalogue cannot overlap a running

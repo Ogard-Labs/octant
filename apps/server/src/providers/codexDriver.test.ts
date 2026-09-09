@@ -1,3 +1,4 @@
+import { BROWSER_TOOL_DEFINITION } from "../browser/browserToolDefinition";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -919,11 +920,7 @@ describe("Codex thread and turn lifecycle", () => {
     const driver = makeCodexDriver(f.options({ runtimeRegistry: registry }));
     registry.setObservedState(await Effect.runPromise(Effect.scoped(driver.probe({ instanceId }))));
     const acquired = await acquireConnection(driver);
-    const tool = {
-      name: "octant_browser",
-      description: "Inspect the active browser context.",
-      inputSchema: { type: "object", properties: { operation: { type: "string" } } },
-    } as const;
+    const tool = BROWSER_TOOL_DEFINITION;
 
     await Effect.runPromise(
       acquired.connection.start({

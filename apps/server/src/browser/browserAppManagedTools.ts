@@ -1,3 +1,4 @@
+import { BROWSER_TOOL_DEFINITION } from "./browserToolDefinition";
 import type {
   BrowserActionRequest,
   BrowserAutomationSnapshot,
@@ -17,42 +18,9 @@ import { isToolAllowedByAllowlist } from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { BrowserToolApprovalService } from "./browserToolApprovalService";
 
-export const BROWSER_TOOL_NAME = "octant_browser";
+export const BROWSER_TOOL_NAME = BROWSER_TOOL_DEFINITION.name;
 const MAX_TEXT_RESULT_BYTES = 24 * 1024;
 const MAX_TOOL_INPUT_BYTES = 16 * 1024;
-const browserDefinition = {
-  name: BROWSER_TOOL_NAME,
-  description:
-    "Control Octant's built-in browser for this task. Start with navigate and an HTTP(S) URL, then read-page, click or type using CSS selectors, press a key, scroll, wait for a selector, or capture a screenshot. Browser approval is requested inline when required.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      operation: {
-        type: "string",
-        enum: [
-          "navigate",
-          "read-page",
-          "click",
-          "type",
-          "press",
-          "scroll",
-          "wait",
-          "screenshot",
-          "stop",
-        ],
-      },
-      url: { type: "string", maxLength: 4096 },
-      selector: { type: "string", maxLength: 4096 },
-      text: { type: "string", maxLength: 65536 },
-      key: { type: "string", maxLength: 64 },
-      deltaX: { type: "integer", minimum: -2000, maximum: 2000 },
-      deltaY: { type: "integer", minimum: -2000, maximum: 2000 },
-      expectedObservationRevision: { type: "integer", minimum: 0 },
-    },
-    additionalProperties: false,
-    required: ["operation"],
-  },
-} as const;
 
 export interface BrowserAppManagedToolsOptions {
   readonly windowId: WindowId;
@@ -149,7 +117,7 @@ export function createBrowserAppManagedTools(
   const rememberedContexts = new Set<string>();
   const initialAuthority = options.resolveAuthority(options.threadId, options.mode);
   const definitions = isToolAllowedByAllowlist(options.toolConstraints ?? [], BROWSER_TOOL_NAME)
-    ? [browserDefinition]
+    ? [BROWSER_TOOL_DEFINITION]
     : [];
   return {
     definitions,

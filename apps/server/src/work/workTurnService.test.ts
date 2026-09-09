@@ -262,6 +262,7 @@ describe("WorkTurnService", () => {
     expect(followUp.kind).toBe("accepted");
     await fixture.waitForIdle(decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaac"));
     expect(sent[1]).toEqual([
+      { kind: "instructions", text: expect.stringContaining("Octant's Files") },
       { kind: "user-message", text: "Summarize the brief" },
       { kind: "assistant-message", text: "Revised summary" },
     ]);
@@ -269,7 +270,7 @@ describe("WorkTurnService", () => {
 
   it("refuses a turn whose mentioned files cannot fit the context budget", async () => {
     const fixture = serviceFixture({
-      safeInputBudgetTokens: 50,
+      safeInputBudgetTokens: 500,
       resolveFileMentionContext: async () => [
         { kind: "user-message" as const, text: "a".repeat(8_000) },
       ],
@@ -283,7 +284,7 @@ describe("WorkTurnService", () => {
       new WorkTurnServiceError({
         category: "invalid",
         message:
-          "Mentioned files and prior Work context exceed the model's input budget. Remove a file mention or start a new thread.",
+          "Work instructions, mentioned files, and prior context exceed the model's input budget. Remove a file mention or start a new thread.",
       }),
     );
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
@@ -370,6 +371,7 @@ describe("WorkTurnService", () => {
     expect(run.mock.calls[1]?.[0]).toMatchObject({
       command: expect.objectContaining({ prompt: "Make that summary shorter" }),
       context: [
+        { kind: "instructions", text: expect.stringContaining("Octant's Files") },
         { kind: "user-message", text: "Summarize the brief" },
         { kind: "assistant-message", text: "Provider reply" },
       ],
