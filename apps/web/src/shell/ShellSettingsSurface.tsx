@@ -10,6 +10,7 @@ import type { HostControlClient } from "@octant/client-runtime/host-control-clie
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
+import type { LocalUsageHistoryClient } from "@octant/client-runtime/provider-usage-history-client";
 import type { SettingsDeepLink } from "@octant/contracts";
 import type { ShellSettings } from "@octant/contracts/shell";
 import type { ThemeTypography } from "@octant/contracts/theme";
@@ -67,6 +68,7 @@ export interface ShellSettingsSurfaceProps {
   readonly integrationClient?: IntegrationClient;
   readonly usageClient: UsageClient;
   readonly providerUsageLimitsClient?: ProviderUsageLimitsClient;
+  readonly localUsageHistoryClient?: LocalUsageHistoryClient;
   readonly visibleSettings: ReadonlyArray<ImplementedSettingId>;
   readonly backgroundImageLibrary?: BackgroundImageLibrary;
   readonly announcement: string;
@@ -139,6 +141,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.providerUsageLimitsClient === undefined
               ? {}
               : { providerUsageLimitsClient: props.providerUsageLimitsClient })}
+            {...(props.localUsageHistoryClient === undefined
+              ? {}
+              : { localUsageHistoryClient: props.localUsageHistoryClient })}
             visibleSettings={props.visibleSettings}
           />
         </Suspense>
