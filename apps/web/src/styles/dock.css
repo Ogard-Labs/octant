@@ -241,6 +241,10 @@
   display: grid;
   gap: 2px;
   padding: 4px 10px 10px;
+  /* The rows below are buttons, and the ghost recipe gives each a 1px
+     transparent border. Carry the same border here so the section label
+     starts on the pixel the tool names start on, not 1px to their left. */
+  border-inline: 1px solid transparent;
   border-bottom: 1px solid var(--oct-hairline);
 }
 
@@ -268,6 +272,7 @@
 
 .dock-work-map__empty {
   padding: 0 10px;
+  border-inline: 1px solid transparent;
 }
 
 .dock-work-map__list {
@@ -276,9 +281,13 @@
 }
 
 /* A launcher row: a 16px tool icon, the tool's name, and one line saying
-   what it opens, on a 44px row. */
+   what it opens. The name and its description need about 42px between them,
+   so the row is sized by what it holds; the button recipe's own `height`
+   would otherwise clamp it to 44px, spilling the description past the hover
+   fill and pushing the icon 6px below the row's centre. */
 .dock-work-map__item {
   display: grid;
+  height: auto;
   min-height: 44px;
   grid-template-columns: var(--oct-icon-md) minmax(0, 1fr);
   align-items: center;
