@@ -281,16 +281,23 @@ export function spendCeilingWindowStart(
   if (window.kind === "lifetime") return undefined;
   const parts = dateParts(now, window.timeZone);
   if (window.period === "day") {
-    return `${parts.year}-${parts.month}-${parts.day}T00:00:00.000Z`;
+    return zonedMidnight(parts, window.timeZone);
   }
   if (window.period === "month") {
-    return `${parts.year}-${parts.month}-01T00:00:00.000Z`;
+    return zonedMidnight({ ...parts, day: "01" }, window.timeZone);
   }
   const date = new Date(`${parts.year}-${parts.month}-${parts.day}T00:00:00.000Z`);
   const day = date.getUTCDay();
   const offset = day === 0 ? -6 : 1 - day;
   date.setUTCDate(date.getUTCDate() + offset);
-  return date.toISOString();
+  return zonedMidnight(
+    {
+      year: String(date.getUTCFullYear()).padStart(4, "0"),
+      month: String(date.getUTCMonth() + 1).padStart(2, "0"),
+      day: String(date.getUTCDate()).padStart(2, "0"),
+    },
+    window.timeZone,
+  );
 }
 
 function dateParts(
@@ -308,6 +315,69 @@ function dateParts(
     year: values.year ?? "1970",
     month: values.month ?? "01",
     day: values.day ?? "01",
+  };
+}
+
+/**
+ * Instant at local midnight in `timeZone` for the civil date. Uses the same
+ * Intl offset-probe as automation scheduling so DST folds and gaps do not
+ * treat the local calendar date as UTC.
+ */
+function zonedMidnight(
+  parts: { readonly year: string; readonly month: string; readonly day: string },
+  timeZone: string,
+): string {
+  const utcGuess = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day));
+  const offsetMs = (instant: number): number => {
+    const local = zonedDateTimeParts(instant, timeZone);
+    return (
+      Date.UTC(
+        Number(local.year),
+        Number(local.month) - 1,
+        Number(local.day),
+        Number(local.hour),
+        Number(local.minute),
+        Number(local.second),
+      ) - instant
+    );
+  };
+  const first = utcGuess - offsetMs(utcGuess);
+  const secondOffset = offsetMs(first);
+  const resolved = secondOffset === offsetMs(utcGuess) ? first : utcGuess - secondOffset;
+  return new Date(resolved).toISOString();
+}
+
+function zonedDateTimeParts(
+  instant: number,
+  timeZone: string,
+): {
+  readonly year: string;
+  readonly month: string;
+  readonly day: string;
+  readonly hour: string;
+  readonly minute: string;
+  readonly second: string;
+} {
+  const formatted = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    calendar: "iso8601",
+    numberingSystem: "latn",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(instant));
+  const values = Object.fromEntries(formatted.map((part) => [part.type, part.value]));
+  return {
+    year: values.year ?? "1970",
+    month: values.month ?? "01",
+    day: values.day ?? "01",
+    hour: values.hour ?? "00",
+    minute: values.minute ?? "00",
+    second: values.second ?? "00",
   };
 }
 

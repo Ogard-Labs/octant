@@ -471,6 +471,7 @@ export class WorkTurnService {
         acceptedAt,
       });
     } catch (error) {
+      this.#settleSpendReservation(command.requestId);
       if (error instanceof ConcurrencyConflict) {
         const duplicate = this.#projection.lookup(command.requestId);
         if (duplicate !== undefined) return this.#lookupMatching(command, duplicate);
@@ -482,6 +483,7 @@ export class WorkTurnService {
 
     const accepted = this.#projection.lookup(command.requestId);
     if (accepted === undefined) {
+      this.#settleSpendReservation(command.requestId);
       throw this.#failure("unavailable", "Work turn acceptance could not be projected.");
     }
     if (starting.attachments.length > 0) {
@@ -504,6 +506,7 @@ export class WorkTurnService {
       context: planned.context,
       signal: controller.signal,
     }).finally(() => {
+      this.#settleSpendReservation(command.requestId);
       this.#controllers.delete(String(command.requestId));
       this.#inflight.delete(String(command.requestId));
       this.#liveResponses.delete(String(command.requestId));
@@ -557,6 +560,7 @@ export class WorkTurnService {
       });
     }
     this.#controllers.get(String(command.requestId))?.abort();
+    this.#settleSpendReservation(command.requestId);
     this.#persistUpdate(turn, {
       status: "cancelled",
       ...(turn.response === undefined ? {} : { response: turn.response }),
@@ -743,11 +747,13 @@ export class WorkTurnService {
     );
     const settled = this.#projection.lookup(input.command.requestId);
     if (settled !== undefined) this.#liveUpdates.settle(input.command.threadId, settled);
-    const spendReservationId = this.#spendReservations.get(String(input.command.requestId));
-    if (spendReservationId !== undefined) {
-      this.#spendReservations.delete(String(input.command.requestId));
-      this.#spendCeiling?.settle({ reservationId: spendReservationId });
-    }
+  }
+
+  #settleSpendReservation(requestId: WorkTurnRequestId | string): void {
+    const reservationId = this.#spendReservations.get(String(requestId));
+    if (reservationId === undefined) return;
+    this.#spendReservations.delete(String(requestId));
+    this.#spendCeiling?.settle({ reservationId });
   }
 
   #issueContextContribution(threadId: WorkThreadId): ReadonlyArray<WorkTurnContextContribution> {

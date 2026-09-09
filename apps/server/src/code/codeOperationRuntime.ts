@@ -839,12 +839,12 @@ export function createCodeOperationRuntime(
       const observed = codeRuntimeWorkObserved(command);
       try {
         const result = await service.execute(windowId, command, executeOptions);
-        if (
-          command.kind === "start-provider-turn" &&
-          result.kind === "provider-turn-state" &&
-          result.state === "running"
-        ) {
-          turns.launch(command.threadId);
+        if (command.kind === "start-provider-turn") {
+          if (result.kind === "provider-turn-state" && result.state === "running") {
+            turns.launch(command.threadId);
+          } else {
+            turns.settleSpendReservation(command.threadId);
+          }
         }
         if (observed !== undefined) {
           const state = codeRuntimeWorkStateFrom(command, result);
@@ -863,6 +863,9 @@ export function createCodeOperationRuntime(
         // A throw is the service refusing or breaking, not the work finishing.
         // The record closes rather than staying open for a unit that will never
         // report again.
+        if (command.kind === "start-provider-turn") {
+          turns.settleSpendReservation(command.threadId);
+        }
         if (observed !== undefined)
           observeRuntimeWorkOutcome(
             runtimeWork.settle({
@@ -1241,6 +1244,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     launch?.();
   }
 
+  settleSpendReservation(threadId: string): void {
+    const reservationId = this.#spendReservations.get(String(threadId));
+    if (reservationId === undefined) return;
+    this.#spendReservations.delete(String(threadId));
+    this.#options.spendCeiling?.settle({ reservationId });
+  }
+
   async start(input: Parameters<CodeOperationTurnPort["start"]>[0]) {
     const key = String(input.thread.id);
     const existing = this.#active.get(key);
@@ -1253,6 +1263,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       // launch()/stream evidence may still own the in-memory controller.
       return turnState(existing.state);
     }
+    const failStart = () => {
+      this.settleSpendReservation(key);
+      return turnState("failed");
+    };
     const command = this.#pending.get(key);
     const root = this.#roots.get(key);
     if (
@@ -1262,9 +1276,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       root.checkoutRoot !== input.checkoutRoot ||
       this.#active.has(key)
     )
-      return turnState("failed");
+      return failStart();
     const driver = await this.#options.resolveProviderDriver(input.thread);
-    if (driver === undefined) return turnState("failed");
+    if (driver === undefined) return failStart();
     if (
       command.computerUseSelection !== undefined &&
       (this.#options.supportsAppManagedTools?.(input.thread) !== true ||
@@ -1274,11 +1288,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           selection: command.computerUseSelection,
         }) === undefined)
     )
-      return turnState("failed");
+      return failStart();
     const secrets: string[] = [];
     for (const credential of root.credentialReferences) {
       const value = await this.#options.credentialResolver.resolve(credential.reference);
-      if (value === undefined) return turnState("failed");
+      if (value === undefined) return failStart();
       if (value.length > 0) secrets.push(value);
     }
     const active: ActiveTurn = {
@@ -1562,11 +1576,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             ? {}
             : {
                 onTurnCompleted: (completed) => {
-                  const reservationId = this.#spendReservations.get(String(active.thread.id));
-                  if (reservationId !== undefined) {
-                    this.#spendReservations.delete(String(active.thread.id));
-                    this.#options.spendCeiling?.settle({ reservationId });
-                  }
+                  this.settleSpendReservation(String(active.thread.id));
                   return this.#options.nativeHarness!.turnCompleted({
                     ...harnessScope,
                     ...completed,
@@ -1827,6 +1837,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    * forever.
    */
   #persistRuntimeWork(active: ActiveTurn, state: CodeTurnOutcome): void {
+    this.settleSpendReservation(String(active.thread.id));
     this.#observeRuntimeWorkOutcome(
       this.#runtimeWork.settle({
         id: active.operationId,

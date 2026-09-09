@@ -24,6 +24,7 @@ import {
   type WorkTurnServiceDependencies,
 } from "./workTurnService";
 import type { WorkTurnRuntimePort } from "./workTurnRuntime";
+import { ConcurrencyConflict } from "../persistence/journalErrors";
 
 const attachmentRoots: string[] = [];
 
@@ -99,6 +100,88 @@ describe("WorkTurnService", () => {
       }),
     );
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("releases the spend reservation when a Work turn is cancelled", async () => {
+    const gate = deferred<void>();
+    const settle = vi.fn();
+    const admit = vi.fn().mockReturnValue({
+      status: "admitted",
+      reservedTokens: 100,
+      reservations: [{ scopeKind: "thread", scopeId: String(ids.thread), reservedTokens: 100 }],
+    });
+    const fixture = serviceFixture({
+      spendCeiling: { admit, settle },
+      turnRuntime: {
+        run: async (input) => {
+          await gate.promise;
+          if (input.signal.aborted) return { kind: "cancelled" };
+          return { kind: "completed", response: "Provider reply" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    expect(admit).toHaveBeenCalledOnce();
+    const cancelled = await fixture.service.cancelFirstTurn(ids.window, {
+      kind: "cancel-work-turn",
+      requestId: ids.request,
+      threadId: ids.thread,
+      turnId: ids.turn,
+    });
+    expect(cancelled.kind).toBe("turn-cancelled");
+    expect(settle).toHaveBeenCalledOnce();
+    gate.resolve();
+    await fixture.waitForIdle();
+    expect(settle).toHaveBeenCalledOnce();
+  });
+
+  it("releases the spend reservation when a Work turn fails at runtime", async () => {
+    const settle = vi.fn();
+    const admit = vi.fn().mockReturnValue({
+      status: "admitted",
+      reservedTokens: 100,
+      reservations: [{ scopeKind: "thread", scopeId: String(ids.thread), reservedTokens: 100 }],
+    });
+    const fixture = serviceFixture({
+      spendCeiling: { admit, settle },
+      turnRuntime: {
+        run: async () => ({
+          kind: "failed",
+          failure: { category: "unavailable", message: "provider died" },
+        }),
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await vi.waitFor(() => expect(settle).toHaveBeenCalledOnce());
+    expect(admit).toHaveBeenCalledOnce();
+  });
+
+  it("releases the spend reservation when a Work turn fails to persist", async () => {
+    const settle = vi.fn();
+    const admit = vi.fn().mockReturnValue({
+      status: "admitted",
+      reservedTokens: 100,
+      reservations: [{ scopeKind: "thread", scopeId: String(ids.thread), reservedTokens: 100 }],
+    });
+    const fixture = serviceFixture({
+      spendCeiling: { admit, settle },
+    });
+    fixture.persistence.journal.append.mockImplementation(() => {
+      throw new ConcurrencyConflict({
+        aggregateType: "work-turn",
+        aggregateId: String(ids.request),
+        expectedVersion: 0,
+        actualVersion: 1,
+      });
+    });
+    await expect(fixture.service.startFirstTurn(ids.window, startCommand())).rejects.toEqual(
+      new WorkTurnServiceError({
+        category: "stale",
+        message: "Work turn already exists.",
+      }),
+    );
+    expect(admit).toHaveBeenCalledOnce();
+    expect(settle).toHaveBeenCalledOnce();
   });
 
   it("cancels an in-flight turn and keeps the durable transcript recoverable", async () => {
@@ -410,6 +493,7 @@ function serviceFixture(
     readonly supportsAttachments?: () => boolean;
     readonly safeInputBudgetTokens?: number;
     readonly resolveFileMentionContext?: WorkTurnServiceDependencies["resolveFileMentionContext"];
+    readonly spendCeiling?: WorkTurnServiceDependencies["spendCeiling"];
   } = {},
 ) {
   const projection = new WorkTurnProjection();
@@ -546,6 +630,7 @@ function serviceFixture(
     ...(options.resolveFileMentionContext === undefined
       ? {}
       : { resolveFileMentionContext: options.resolveFileMentionContext }),
+    ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
     uuid: (() => {
       let n = 0;
       return () => {

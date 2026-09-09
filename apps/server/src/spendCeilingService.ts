@@ -438,11 +438,13 @@ function sumUsageTokens(
     params.push(...usageProjectConditionParams([input.projectId]));
   }
   if (conditions.length === 0) return { status: "known", tokens: 0 };
+  const scopeWhere = conditions.join(" OR ");
+  const clauses = [`(${scopeWhere})`];
   if (input.from !== undefined) {
-    conditions.push("observed_at >= ?");
+    clauses.push("observed_at >= ?");
     params.push(input.from);
   }
-  const where = conditions.join(" OR ");
+  const where = clauses.join(" AND ");
   const row = connection
     .prepare(
       `SELECT

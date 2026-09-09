@@ -50,6 +50,7 @@ export class SpendCeilingProjection implements Projection {
       if (existing === undefined) return;
       this.#upsert(connection, event, {
         ...existing,
+        version: event.aggregateVersion,
         overrun: {
           reservedTokens: payload.reservedTokens,
           observedTokens: payload.observedTokens,
