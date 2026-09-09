@@ -143,6 +143,7 @@ function probeFixture(overrides?: Partial<ProviderProbeResult>): ProviderProbeRe
       diffs: "supported",
       taskProgress: "supported",
       nativeChildAgents: "supported",
+      harnessAutoReview: "unsupported",
       nativeAttachments: "supported",
       nativeWebResearch: "supported",
       appManagedTools: "supported",

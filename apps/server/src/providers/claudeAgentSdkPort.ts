@@ -31,7 +31,7 @@ import {
 import { BoundedAsyncInput, makeClaudeCloseCoordinator } from "./claudeAgentSdkLifecycle";
 import type { ClaudeProcessPort } from "./claudeProcess";
 
-export type ClaudePermissionMode = "default" | "bypassPermissions" | "plan";
+export type ClaudePermissionMode = "default" | "bypassPermissions" | "plan" | "auto";
 
 export type ClaudeToolDecision =
   | { readonly behavior: "allow"; readonly updatedInput?: Readonly<Record<string, unknown>> }
@@ -93,6 +93,13 @@ export interface ClaudeOpenQueryInput {
   /** Agent SDK `effort` for the session; absent means the SDK default. */
   readonly effort?: ClaudeEffortLevel;
   readonly executionPolicy: ProviderExecutionPolicy;
+  /**
+   * Whether the harness may answer approval prompts via its native `auto`
+   * permission mode. The driver only sends `auto` when this is true and the
+   * posture produces prompts; `canUseTool` and `PreToolUse` stay registered
+   * regardless, so Octant's authority check runs if the SDK calls it.
+   */
+  readonly autoApprove?: boolean;
   readonly resumeSessionId?: string;
   /**
    * The id a new session is opened under. The runtime initializes lazily, so
@@ -597,7 +604,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
           failure("invalid-configuration", "Claude sandbox configuration is invalid."),
         );
       }
-      const expectedMode = permissionMode(input.executionPolicy);
+      const expectedMode = permissionMode(input.executionPolicy, input.autoApprove);
       const acquire = Effect.tryPromise({
         try: async () => {
           const prompt = new BoundedAsyncInput<ClaudeAgentSdkInputMessage>(inputCapacity);

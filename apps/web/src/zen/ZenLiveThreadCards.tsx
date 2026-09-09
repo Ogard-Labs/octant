@@ -272,6 +272,13 @@ function ZenCodeCardSurface(props: {
     [providerController],
   );
   const nextUuid = useCallback(() => globalThis.crypto.randomUUID(), []);
+  const harnessAutoReviewSupported =
+    controller?.activeView !== undefined &&
+    providerController !== undefined &&
+    providerController.observedByInstance.get(controller.activeView.thread.providerInstanceId)
+      ?.capabilities.harnessAutoReview === "supported"
+      ? true
+      : undefined;
   if (controller === undefined) {
     return (
       <div className="zen-thread-element__unreachable">
@@ -293,6 +300,7 @@ function ZenCodeCardSurface(props: {
         nextUuid={nextUuid}
         operationClient={props.codeClient}
         providerGroups={providerGroups}
+        {...(harnessAutoReviewSupported === undefined ? {} : { harnessAutoReviewSupported })}
         threadId={props.threadId}
         {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
         {...(props.windowCapability === undefined

@@ -93,6 +93,7 @@ describe("Ollama native endpoint", () => {
         usage: "unavailable",
         toolActivity: "unavailable",
         nativeChildAgents: "unsupported",
+        harnessAutoReview: "unsupported",
       },
     });
     expect(fetch.mock.calls.map(([input, init]) => [String(input), init?.method ?? "GET"])).toEqual(

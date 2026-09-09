@@ -338,6 +338,14 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
     );
   }
   const tab = codeUtilityTab(props.surface, threadId, props.appleProjectPath, props.utilityTabId);
+  const providerInstanceId = controller.activeView.thread.providerInstanceId;
+  const harnessAutoReviewSupported =
+    props.providerController === undefined
+      ? undefined
+      : props.providerController.observedByInstance.get(providerInstanceId)?.capabilities
+            .harnessAutoReview === "supported"
+        ? true
+        : undefined;
   return (
     <Suspense
       fallback={<ShellState state="loading" title={`Loading ${surfaceLabel(props.surface)}`} />}
@@ -350,6 +358,7 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
         {...(props.codeProviderGroups === undefined
           ? {}
           : { providerGroups: props.codeProviderGroups })}
+        {...(harnessAutoReviewSupported === undefined ? {} : { harnessAutoReviewSupported })}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
         tab={tab}

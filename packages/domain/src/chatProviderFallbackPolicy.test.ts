@@ -19,6 +19,7 @@ const capabilities = (overrides: Partial<ProviderCapabilities> = {}): ProviderCa
   diffs: "supported",
   taskProgress: "supported",
   nativeChildAgents: "supported",
+  harnessAutoReview: "unsupported",
   nativeAttachments: "supported",
   nativeWebResearch: "supported",
   appManagedTools: "supported",

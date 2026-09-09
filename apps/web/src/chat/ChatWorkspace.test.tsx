@@ -348,6 +348,7 @@ function providerSnapshot(
           diffs: "unsupported",
           taskProgress: capability,
           nativeChildAgents: "unsupported",
+          harnessAutoReview: "unsupported",
           nativeAttachments: capability,
           nativeWebResearch: capability,
           appManagedTools: capability,

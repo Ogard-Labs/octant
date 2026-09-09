@@ -1009,6 +1009,7 @@ export const ProviderCapabilities = Schema.Struct({
   nativeWebResearch: ProviderCapabilitySupport,
   appManagedTools: ProviderCapabilitySupport,
   citations: ProviderCapabilitySupport,
+  harnessAutoReview: ProviderCapabilitySupport,
 }).annotations(strict);
 export type ProviderCapabilities = typeof ProviderCapabilities.Type;
 

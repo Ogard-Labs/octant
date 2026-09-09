@@ -233,6 +233,7 @@ describe("OpenCode driver", () => {
         approvals: "supported",
         fileChanges: "unsupported",
         nativeChildAgents: "unsupported",
+        harnessAutoReview: "unsupported",
       },
     });
   });

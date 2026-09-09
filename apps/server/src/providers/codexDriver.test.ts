@@ -644,6 +644,7 @@ describe("Codex driver probe and runtime lifecycle", () => {
         resume: "supported",
         userQuestions: "unsupported",
         nativeChildAgents: "unsupported",
+        harnessAutoReview: "supported",
       },
       models: [
         {

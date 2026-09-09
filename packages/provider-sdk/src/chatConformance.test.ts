@@ -74,6 +74,7 @@ const supportedChatCapabilities: ProviderCapabilities = {
   diffs: "unsupported",
   taskProgress: "unsupported",
   nativeChildAgents: "unsupported",
+  harnessAutoReview: "unsupported",
   nativeAttachments: "supported",
   nativeWebResearch: "supported",
   appManagedTools: "supported",

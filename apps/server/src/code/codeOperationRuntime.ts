@@ -32,6 +32,7 @@ import {
   type CodeThread,
   type CodeThreadId,
   type EventActor,
+  type ProviderCapabilities,
   type ProviderRuntimeEvent,
   type WindowId,
   decodeCodeFailure,
@@ -56,7 +57,11 @@ import {
   type CodeRuntimeWorkRecordFailure,
   type CodeRuntimeWorkRecordOutcome,
 } from "./codeRuntimeWorkRecorder";
-import { clampTurnAccessPosture, decidesCodeEffectsByApproval } from "@octant/domain";
+import {
+  clampTurnAccessPosture,
+  decidesCodeEffectsByApproval,
+  harnessAutoReviewEffective,
+} from "@octant/domain";
 import {
   approvalContextDigest,
   CodeOperationApprovalStore,
@@ -228,6 +233,21 @@ export interface CodeOperationRuntimeOptions {
     readonly answerQuestion?: (threadId: string, questionId: string, answer: string) => void;
   };
   readonly recordExternalContentIngestion?: CodeAppManagedToolsOptions["recordExternalContentIngestion"];
+  /**
+   * Reads whether a thread has ingested untrusted external content. Used to
+   * clamp harness-delegated approvals back to user-answered prompts when taint
+   * is present (0104). Absent means no taint reader is available, so
+   * delegation is never enabled.
+   */
+  readonly readThreadExternalContentTaint?: (threadId: CodeThreadId) => {
+    readonly externalContentIngested: boolean;
+  };
+  /**
+   * Resolves the cached provider capabilities for a thread's provider, so the
+   * runtime can check `harnessAutoReview` without re-probing on every turn.
+   * Absent means capabilities are unknown, so delegation is never enabled.
+   */
+  readonly resolveProviderCapabilities?: (thread: CodeThread) => ProviderCapabilities | undefined;
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
   /** Reads the `@file` mentions a turn names against this thread's bound root. */
@@ -1477,6 +1497,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const harnessContext = this.#options.nativeHarness?.contextFor(harnessScope) ?? [];
     this.#options.nativeHarness?.turnStarted(harnessScope);
     const fullContext = [...harnessContext, ...(context ?? [])];
+    const harnessAutoReviewEnabled = this.#resolveHarnessAutoReview(active.thread);
     void Effect.runPromise(
       Effect.scoped(
         this.#runner.run({
@@ -1492,6 +1513,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                   this.#options.nativeHarness!.turnCompleted({ ...harnessScope, ...completed }),
               }),
           ...(attachments === undefined ? {} : { attachments }),
+          ...(harnessAutoReviewEnabled ? { harnessAutoReviewEnabled: true } : {}),
           signal: active.abort.signal,
           provider: {
             acquire: (acquireInput) => {
@@ -1656,6 +1678,26 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (stored === undefined) return undefined;
     const session = this.#options.sessionAuthority?.effectiveThread(windowId, stored) ?? stored;
     return this.threadWithActiveTurnPosture(session);
+  }
+
+  /**
+   * Computes whether the harness's native reviewer may answer approval prompts
+   * for the next turn on this thread. Clamps to `false` when the thread has
+   * ingested untrusted content, when the provider does not advertise the
+   * capability, or when the posture produces no prompts (0104).
+   */
+  #resolveHarnessAutoReview(thread: CodeThread): boolean {
+    if (thread.autoApprove !== true) return false;
+    const capabilities = this.#options.resolveProviderCapabilities?.(thread);
+    if (capabilities === undefined) return false;
+    const taint = this.#options.readThreadExternalContentTaint?.(thread.id);
+    const externalContentIngested = taint?.externalContentIngested ?? true;
+    return harnessAutoReviewEffective({
+      autoApprove: true,
+      posture: thread.executionPolicy,
+      externalContentIngested,
+      capabilitySupported: capabilities.harnessAutoReview === "supported",
+    });
   }
 
   #persistNormalized(active: ActiveTurn, event: CodeTurnEvent): void {

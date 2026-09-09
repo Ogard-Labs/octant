@@ -57,6 +57,7 @@ describe("provider Settings presentation", () => {
         diffs: "unavailable",
         taskProgress: "unavailable",
         nativeChildAgents: "unavailable",
+        harnessAutoReview: "unsupported",
         nativeAttachments: "unavailable",
         nativeWebResearch: "unavailable",
         appManagedTools: "unavailable",

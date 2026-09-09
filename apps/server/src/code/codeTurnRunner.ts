@@ -111,6 +111,14 @@ export interface CodeTurnRunnerInput {
   readonly context?: Parameters<ProviderConnection["send"]>[0]["context"];
   readonly attachments?: Parameters<ProviderConnection["send"]>[0]["attachments"];
   readonly appManagedTools?: AppManagedToolSet;
+  /**
+   * Whether the harness's native reviewer may answer approval prompts for
+   * this turn. The caller computes this from the thread's `autoApprove` flag,
+   * the provider's `harnessAutoReview` capability, and the thread's taint
+   * status (0104). When `false` or absent, the driver runs in its default
+   * permission mode and Octant's own gate answers every prompt.
+   */
+  readonly harnessAutoReviewEnabled?: boolean;
   readonly sanitizeProviderEvent: (
     input: CodeProviderEventSanitizerInput,
   ) => Effect.Effect<ProviderRuntimeEvent, CodeTurnFailure>;
@@ -216,6 +224,7 @@ export class CodeTurnRunner {
           modelId: input.thread.modelId,
           executionPolicy: input.thread.executionPolicy,
           tools: input.appManagedTools?.definitions ?? [],
+          ...(input.harnessAutoReviewEnabled === true ? { autoApprove: true } : {}),
         })
         .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
 

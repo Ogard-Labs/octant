@@ -592,6 +592,12 @@ function withoutPinned(thread: CodeThread): Omit<CodeThread, "pinned"> {
   return rest;
 }
 
+/** Drop the flag rather than storing `false`, so a pre-flag journal and an opt-out replay the same. */
+function withoutAutoApprove(thread: CodeThread): Omit<CodeThread, "autoApprove"> {
+  const { autoApprove: _autoApprove, ...rest } = thread;
+  return rest;
+}
+
 /**
  * A thread back in play carries neither rest: completion and snooze are
  * dropped rather than stored as "not any more", so a thread that was never
@@ -1687,9 +1693,16 @@ export class CodeService {
                       }
                     : command.kind === "change-code-thread-access"
                       ? {
-                          ...current,
+                          ...withoutAutoApprove(current),
                           executionPolicy: command.executionPolicy,
                           permissionPersistence: command.permissionPersistence,
+                          // Store `true` when enabled; drop the field when disabled so
+                          // a journal written before the flag existed replays as false.
+                          // A posture-only change omits the field and keeps the current value.
+                          ...(command.autoApprove === true ||
+                          (command.autoApprove === undefined && current.autoApprove === true)
+                            ? { autoApprove: true }
+                            : {}),
                           version: command.expectedVersion + 1,
                           updatedAt,
                         }

@@ -41,6 +41,7 @@ const supportedCapabilities: ProviderCapabilities = {
   diffs: "supported",
   taskProgress: "supported",
   nativeChildAgents: "supported",
+  harnessAutoReview: "unsupported",
   nativeAttachments: "unavailable",
   nativeWebResearch: "supported",
   appManagedTools: "unavailable",

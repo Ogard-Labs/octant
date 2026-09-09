@@ -91,7 +91,10 @@ export interface ClaudeExecutionOptions {
   readonly tools: readonly string[];
 }
 
-export function claudeExecutionOptions(policy: ProviderExecutionPolicy): ClaudeExecutionOptions {
+export function claudeExecutionOptions(
+  policy: ProviderExecutionPolicy,
+  autoApprove?: boolean,
+): ClaudeExecutionOptions {
   switch (policy) {
     case "full-access":
       return {
@@ -103,9 +106,12 @@ export function claudeExecutionOptions(policy: ProviderExecutionPolicy): ClaudeE
     case "approval-gated":
       // Both postures run Claude in its ordinary permission mode: Octant's own
       // gate decides every call, so auto-accepting edits stays a decision the
-      // host records rather than one the provider makes for it.
+      // host records rather than one the provider makes for it. When the user
+      // opts into harness-delegated approvals, the SDK's `auto` classifier
+      // answers prompts Octant would otherwise surface; `canUseTool` and
+      // `PreToolUse` stay registered regardless (0104).
       return {
-        permissionMode: "default",
+        permissionMode: autoApprove === true ? "auto" : "default",
         allowDangerouslySkipPermissions: false,
         tools: [...CLAUDE_TOOLS],
       };
@@ -149,6 +155,7 @@ const availableCapabilities: ProviderCapabilities = {
   diffs: "supported",
   taskProgress: "supported",
   nativeChildAgents: "unsupported",
+  harnessAutoReview: "supported",
   ...unsupportedChatCapabilities,
   appManagedTools: "supported",
 };
@@ -166,6 +173,7 @@ const unavailableCapabilities: ProviderCapabilities = {
   diffs: "unavailable",
   taskProgress: "unavailable",
   nativeChildAgents: "unsupported",
+  harnessAutoReview: "unsupported",
   ...unsupportedChatCapabilities,
 };
 
@@ -1079,6 +1087,7 @@ function makeConnection(
         readonly sessionId: ProviderSessionId;
         readonly modelId: ProviderModelId;
         readonly executionPolicy: ProviderExecutionPolicy;
+        readonly autoApprove?: boolean;
         readonly modelOptionValues?: ProviderModelOptionValues;
       },
       signal: AbortSignal,
@@ -1136,7 +1145,7 @@ function makeConnection(
             throw failure("unauthenticated", "Claude authentication is required.");
           }
         }
-        const executionOptions = claudeExecutionOptions(input.executionPolicy);
+        const executionOptions = claudeExecutionOptions(input.executionPolicy, input.autoApprove);
         const sandbox = claudeSandboxSettings(input.executionPolicy, projectRoot);
         let callbackState: SessionState | undefined;
         const canUseTool: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
@@ -1420,6 +1429,7 @@ function makeConnection(
               model: input.modelId,
               ...(effort === undefined ? {} : { effort }),
               executionPolicy: input.executionPolicy,
+              ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
               ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
               ...(assignedSessionId === undefined ? {} : { sessionId: assignedSessionId }),
               tools: executionOptions.tools,
@@ -1622,6 +1632,7 @@ function makeConnection(
               sessionId: input.sessionId,
               modelId: identity.modelId,
               executionPolicy: input.executionPolicy,
+              ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
               ...(input.modelOptionValues === undefined
                 ? {}
                 : { modelOptionValues: input.modelOptionValues }),

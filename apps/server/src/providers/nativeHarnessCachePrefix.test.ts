@@ -97,6 +97,7 @@ describe("native harness request prefix stability", () => {
         diffs: "unsupported",
         taskProgress: "unsupported",
         nativeChildAgents: "unsupported",
+        harnessAutoReview: "unsupported",
         nativeAttachments: "unsupported",
         nativeWebResearch: "unsupported",
         appManagedTools: "supported",

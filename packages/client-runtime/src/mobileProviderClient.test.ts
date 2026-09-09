@@ -30,6 +30,7 @@ const capabilities = {
   diffs: "supported",
   taskProgress: "supported",
   nativeChildAgents: "unavailable",
+  harnessAutoReview: "unsupported",
   nativeAttachments: "supported",
   nativeWebResearch: "unsupported",
   appManagedTools: "supported",

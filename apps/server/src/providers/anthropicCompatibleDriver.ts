@@ -55,6 +55,7 @@ const initialCapabilities: ProviderCapabilities = {
   diffs: "unsupported",
   taskProgress: "unsupported",
   nativeChildAgents: "unsupported",
+  harnessAutoReview: "unsupported",
   ...unsupportedChatCapabilities,
   // Tool use is part of the Messages protocol itself, not a per-model extra,
   // so an Anthropic-compatible endpoint offers app-managed tools from the

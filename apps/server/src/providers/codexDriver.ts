@@ -62,6 +62,11 @@ export interface CodexThreadStartInput {
   readonly model: string;
   readonly approvalPolicy: "never" | "on-request";
   readonly sandbox: "danger-full-access" | "workspace-write" | "read-only";
+  /**
+   * Routes approval requests to the harness's built-in reviewer instead of
+   * the host callback. Only sent when `autoApprove` is effective (0104).
+   */
+  readonly approvalsReviewer?: "auto_review";
   /** app-server `thread/start` `serviceTier`: the model's declared speed tier. */
   readonly serviceTier?: string;
   /** app-server config overrides; `model_reasoning_effort` carries the reasoning selection. */
@@ -153,6 +158,7 @@ const capabilities = {
   diffs: "supported",
   taskProgress: "supported",
   nativeChildAgents: "unsupported",
+  harnessAutoReview: "supported",
   ...unsupportedChatCapabilities,
   appManagedTools: "supported",
 } as const;
@@ -229,7 +235,8 @@ function request<A>(operation: () => Promise<A>): Effect.Effect<A, ProviderFailu
 
 export function codexExecutionSettings(
   policy: ProviderExecutionPolicy,
-): Pick<CodexThreadStartInput, "approvalPolicy" | "sandbox"> {
+  autoApprove?: boolean,
+): Pick<CodexThreadStartInput, "approvalPolicy" | "sandbox" | "approvalsReviewer"> {
   if (policy === "full-access") {
     return { approvalPolicy: "never", sandbox: "danger-full-access" };
   }
@@ -237,7 +244,13 @@ export function codexExecutionSettings(
     // Codex confines writes to the workspace either way; which of those writes
     // Octant asks about is decided by the driver's approval handler (auto-accept
     // edits answers project-confined file changes itself), not by this mapping.
-    return { approvalPolicy: "on-request", sandbox: "workspace-write" };
+    // When the user opts into harness-delegated approvals, the reviewer answers
+    // prompts Octant would otherwise surface; the sandbox is unchanged (0104).
+    return {
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+      ...(autoApprove === true ? { approvalsReviewer: "auto_review" as const } : {}),
+    };
   }
   return { approvalPolicy: "never", sandbox: "read-only" };
 }
@@ -955,7 +968,7 @@ function makeConnection(
         withPendingLifecycle(() =>
           Effect.gen(function* () {
             ensureSubscribed();
-            const settings = codexExecutionSettings(input.executionPolicy);
+            const settings = codexExecutionSettings(input.executionPolicy, input.autoApprove);
             const requestedOptions = input.modelOptionValues;
             let optionSettings: Pick<CodexThreadStartInput, "serviceTier" | "config"> = {};
             if (requestedOptions !== undefined && Object.keys(requestedOptions).length > 0) {

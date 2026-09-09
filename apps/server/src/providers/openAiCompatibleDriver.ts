@@ -68,6 +68,7 @@ const initialCapabilities: ProviderCapabilities = {
   diffs: "unsupported",
   taskProgress: "unsupported",
   nativeChildAgents: "unsupported",
+  harnessAutoReview: "unsupported",
   ...unsupportedChatCapabilities,
 };
 

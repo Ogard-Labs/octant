@@ -290,6 +290,15 @@ export const CodeThread = Schema.Struct({
   ),
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
   deliveryTarget: CodeDeliveryTarget,
+  /**
+   * Whether the harness may answer approval prompts on the user's behalf using
+   * its native reviewer (Codex `auto_review`, Claude `permissionMode: "auto"`).
+   * Optional so a journal written before the flag existed replays as `false`.
+   * Orthogonal to the posture: the posture says what the sandbox permits and
+   * which classes prompt; this says who answers the prompts. Inert under `plan`
+   * and `full-access` (no prompts exist). Clamped by taint and capability.
+   */
+  autoApprove: Schema.optional(Schema.Boolean),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
@@ -551,6 +560,7 @@ export const CodeCommand = Schema.Union(
     executionPolicy: ProviderExecutionPolicy,
     permissionPersistence: PermissionPersistence,
     approvalId: Schema.optional(CodeApprovalId),
+    autoApprove: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-provider"),

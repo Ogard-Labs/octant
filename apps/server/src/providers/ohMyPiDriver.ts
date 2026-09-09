@@ -40,6 +40,7 @@ const capabilities = {
   diffs: "unavailable",
   taskProgress: "unavailable",
   nativeChildAgents: "unsupported",
+  harnessAutoReview: "unsupported",
   ...unsupportedChatCapabilities,
 } as const;
 

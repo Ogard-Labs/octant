@@ -129,6 +129,7 @@ export interface CodeWorkspaceProps {
     options?: { readonly terminalId?: CodeTerminalId },
   ) => void;
   readonly providerGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
+  readonly harnessAutoReviewSupported?: boolean;
   readonly tab: CodeTab;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
@@ -178,6 +179,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.onAddAgent === undefined ? {} : { onAddAgent: props.onAddAgent })}
         controller={props.controller}
         {...(props.providerGroups === undefined ? {} : { providerGroups: props.providerGroups })}
+        {...(props.harnessAutoReviewSupported === undefined
+          ? {}
+          : { harnessAutoReviewSupported: props.harnessAutoReviewSupported })}
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
         {...(props.imageGenerationClient === undefined
           ? {}

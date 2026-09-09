@@ -711,7 +711,9 @@ mechanisms are:
   Plan mode is read-only; auto-accept-edits waives only project file writes;
   Full access is a remembered, per-Project decision. A composer turn may
   request a narrower posture; the server clamps it to the thread's grant
-  and records the posture the turn ran under.
+  and records the posture the turn ran under. Compatible harnesses may
+  answer those prompts themselves when the thread opts in
+  (`docs/decisions/0104`); categories and confinement stay Octant's.
 - **Sandbox.** Provider CLIs, Git, terminals, test runners, and extension
   executables launch through one shared confinement port. On macOS that is
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap

@@ -178,6 +178,7 @@ function baseCapabilities(
     diffs: "unavailable",
     taskProgress: "supported",
     nativeChildAgents: "unavailable",
+    harnessAutoReview: "unsupported",
     ...unsupportedChatCapabilities,
     appManagedTools,
   } as const;

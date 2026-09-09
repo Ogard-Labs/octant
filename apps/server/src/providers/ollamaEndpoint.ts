@@ -86,6 +86,7 @@ const unsupportedCapabilities = {
   diffs: "unsupported",
   taskProgress: "unsupported",
   nativeChildAgents: "unsupported",
+  harnessAutoReview: "unsupported",
 } as const;
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {

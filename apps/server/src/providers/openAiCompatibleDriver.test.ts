@@ -48,6 +48,7 @@ describe("makeOpenAiCompatibleDriver", () => {
         toolActivity: "unsupported",
         fileChanges: "unsupported",
         nativeChildAgents: "unsupported",
+        harnessAutoReview: "unsupported",
       },
     });
     expect(first.models).toEqual(

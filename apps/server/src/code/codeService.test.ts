@@ -1395,6 +1395,48 @@ describe("CodeService commands", () => {
     expect("pinned" in after).toBe(false);
   });
 
+  it("erases harness-delegated approvals rather than storing a false", async () => {
+    const current = thread({
+      executionPolicy: "approval-gated",
+      autoApprove: true,
+    });
+    const fixture = serviceFixture({ threads: [current] });
+
+    const disabled = await fixture.service.execute(ids.window, {
+      kind: "change-code-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+      autoApprove: false,
+    });
+    expect(disabled).toEqual({ kind: "thread-updated", thread: expect.any(Object) });
+    const after =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    expect("autoApprove" in after).toBe(false);
+  });
+
+  it("keeps harness-delegated approvals when access posture changes without mentioning the flag", async () => {
+    const current = thread({
+      executionPolicy: "approval-gated",
+      autoApprove: true,
+    });
+    const fixture = serviceFixture({ threads: [current] });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        executionPolicy: "auto-accept-edits",
+        permissionPersistence: "current-session",
+      }),
+    ).resolves.toMatchObject({
+      kind: "thread-updated",
+      thread: { autoApprove: true, executionPolicy: "auto-accept-edits", version: 2 },
+    });
+  });
+
   it("updates lifecycle and access with optimistic versions and public results", async () => {
     const fixture = serviceFixture();
 

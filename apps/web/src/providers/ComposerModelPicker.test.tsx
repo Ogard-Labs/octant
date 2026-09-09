@@ -365,6 +365,7 @@ function observation(
       diffs: "unavailable",
       taskProgress: "supported",
       nativeChildAgents: "unavailable",
+      harnessAutoReview: "unsupported",
       nativeAttachments: "unavailable",
       nativeWebResearch: "unavailable",
       appManagedTools: "supported",
