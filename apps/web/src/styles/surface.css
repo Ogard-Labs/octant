@@ -443,8 +443,14 @@
   background: var(--octant-app-background);
 }
 
-.welcome-stage > .draft-thread,
-.welcome-stage > .chat-welcome {
+/* Everything the stage holds except the ground itself takes a level above it.
+   An unpositioned block paints below every positioned sibling however late it
+   comes in the DOM, so naming the two screens that had been lifted left the
+   Code and Work composers static and under the cloud: its dots landed inside
+   the suggestion cards and over the Continue list, which reads as the cards
+   being see-through even though their fill is fully opaque. Keying on "not
+   the ground" also means a start screen added later arrives lifted. */
+.welcome-stage > :not(.app-backdrop) {
   position: relative;
   z-index: 1;
   background: transparent;
