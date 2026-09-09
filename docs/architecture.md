@@ -536,7 +536,8 @@ modelId }`, and the model picker is provider-first. Discovery can find
   Code turn drivers), SDK/RPC drivers (Claude Agent SDK, Codex app-server,
   OpenCode, Pi and Oh My Pi), and ACP-based agent CLIs
   (Kilo, Devin, Mistral Vibe, Kimi Code, Grok Build, Goose, GLM Agent, Gemini CLI,
-  GitHub Copilot, Cline, Qwen Code). Image profiles are
+  GitHub Copilot, Cline, Qwen Code). fx ACP was probed and remains unselectable;
+  see [fx-acp-compatibility.md](fx-acp-compatibility.md). Image profiles are
   recorded in [decisions/0055-image-generation-provider-profiles.md](decisions/0055-image-generation-provider-profiles.md).
   Generation itself is a journaled job with OpenAI and Gemini adapters, a
   bounded generated-image attachment scope, and usage rows attributed as

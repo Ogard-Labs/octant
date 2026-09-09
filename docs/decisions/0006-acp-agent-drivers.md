@@ -86,3 +86,5 @@ returns GO.
 - 0005 Provider SDK contract
 - 0009 Sandbox confinement, approvals, and Plan mode
 - 0012 Mixed-provider subagents
+- [fx ACP compatibility](../fx-acp-compatibility.md): probed; remains unselectable
+  until a managed process can exclude the interactive `~/.fx` profile.
