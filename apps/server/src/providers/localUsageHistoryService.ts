@@ -12,7 +12,8 @@ import {
 } from "@octant/contracts";
 import type { ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
 
-const MAX_RECORDS = 100_000;
+const MAX_RECORDS_PER_SOURCE = 250_000;
+const MAX_TOTAL_RECORDS = 1_000_000;
 const MAX_GROUPS = 256;
 const MAX_DAYS = 512;
 
@@ -97,9 +98,14 @@ export async function readLocalUsageHistoryDashboard(input: {
       }),
     ),
   );
-  const deduplicated = deduplicate(results.flatMap((result) => result.records));
-  const truncatedByRecordLimit = deduplicated.length > MAX_RECORDS;
-  const records = deduplicated.slice(0, MAX_RECORDS);
+  const sourceRecordLimitReached = results.some(
+    (result) => result.records.length > MAX_RECORDS_PER_SOURCE,
+  );
+  const deduplicated = deduplicate(
+    results.flatMap((result) => result.records.slice(0, MAX_RECORDS_PER_SOURCE)),
+  );
+  const truncatedByRecordLimit = deduplicated.length > MAX_TOTAL_RECORDS;
+  const records = deduplicated.slice(0, MAX_TOTAL_RECORDS);
   const coverage = results.map((result) => result.coverage);
   const dayFormatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: input.request.timeZone,
@@ -149,7 +155,10 @@ export async function readLocalUsageHistoryDashboard(input: {
   }
   const aggregateTotals = tokenTotals(totals);
   const truncationDetails = [
-    ...(truncatedByRecordLimit ? ["The bounded local history scan reached its record limit."] : []),
+    ...(sourceRecordLimitReached ? ["A provider source reached its per-source record bound."] : []),
+    ...(truncatedByRecordLimit
+      ? ["The bounded local history response reached its total record limit."]
+      : []),
     ...(providers.size > MAX_GROUPS || models.size > MAX_GROUPS
       ? ["The bounded local history response reached its group limit."]
       : []),

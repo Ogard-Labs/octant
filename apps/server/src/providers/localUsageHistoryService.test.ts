@@ -135,6 +135,25 @@ describe("local usage history aggregation", () => {
     expect(response.totals.inputTokens).toBe(30 * 20_001);
   });
 
+  it("keeps bounded Codex and Claude histories in one provider-wide total", async () => {
+    const codex = Array.from({ length: 100_000 }, (_, index) => ({
+      ...records[0]!,
+      sourceEventId: `codex-many-${index}`,
+    }));
+    const claude = Array.from({ length: 76_000 }, (_, index) => ({
+      ...records[2]!,
+      sourceEventId: `claude-many-${index}`,
+      sourceInstallationId: "install-claude-many",
+    }));
+    const response = await readLocalUsageHistoryDashboard({
+      sources: [source(codex), source(claude)],
+      request,
+      queryAt: "2026-09-11T00:00:00.000Z",
+    });
+    expect(response.totals.requestCount).toBe(176_000);
+    expect(response.providers).toHaveLength(2);
+  });
+
   it("keeps identical provider sequence IDs from independent installations separate", async () => {
     const first = records[0]!;
     const second = { ...first, sourceInstallationId: "install-2" };

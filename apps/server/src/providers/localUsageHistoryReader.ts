@@ -17,11 +17,11 @@ const DEFAULT_MAX_FILES = 512;
 const DEFAULT_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 const DEFAULT_MAX_FILE_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_RECORD_BYTES = 256 * 1024;
-const DEFAULT_MAX_RECORDS = 100_000;
+const DEFAULT_MAX_RECORDS = 250_000;
 const DEFAULT_MAX_DIRECTORIES = 4096;
 const MAX_DISCOVERED_FILES = 100_000;
 const MAX_TRACKED_SOURCES = 32;
-const MAX_CACHED_RECORDS = 100_000;
+const MAX_CACHED_RECORDS = 250_000;
 
 /** In-process resumable cursors keep bounded refreshes progressing through long files. */
 const scanOffsets = new Map<
