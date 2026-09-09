@@ -240,6 +240,12 @@
   text-align: center;
 }
 
+/* An empty column sits beside full ones, so it says so quietly and takes the
+   room of a row rather than of a page. */
+.surface-empty[data-tone="lane"] {
+  padding: var(--oct-space-3) var(--oct-space-2);
+}
+
 .surface-empty > .oct-row-label {
   color: var(--oct-fg);
 }

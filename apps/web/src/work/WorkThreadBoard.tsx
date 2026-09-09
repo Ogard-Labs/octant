@@ -505,7 +505,7 @@ function WorkBoardListView(props: {
             </span>
           </header>
           {column.cards.length === 0 ? (
-            <SurfaceEmpty title="No threads" />
+            <SurfaceEmpty title="No threads" tone="lane" />
           ) : (
             <ul className="issuelist">
               {column.cards.map((card) => (
@@ -555,7 +555,7 @@ function WorkBoardColumnView(props: {
       </header>
       {column.cards.length === 0 ? (
         <div className="board-col-body">
-          <SurfaceEmpty title="No threads" />
+          <SurfaceEmpty title="No threads" tone="lane" />
         </div>
       ) : (
         <ul className="board-col-body">
