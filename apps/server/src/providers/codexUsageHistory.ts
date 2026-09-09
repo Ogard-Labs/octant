@@ -50,30 +50,41 @@ export function createCodexLocalUsageHistorySource(
   }
   return {
     sourceKind: "codex",
-    read: (request: LocalUsageHistoryRequest) =>
-      Effect.tryPromise({
-        try: async (effectSignal) => ({
-          ...(await readLocalUsageHistory(
-            {
-              ...options,
-              sourceKind: "codex",
-              providerKey: "codex",
-              onSourceInvalidated: () => {
-                options.onSourceInvalidated?.();
-                state.models.clear();
-                state.cumulative.clear();
+    read: (request: LocalUsageHistoryRequest) => {
+      let operationSignal: AbortSignal | undefined;
+      return Effect.tryPromise({
+        try: async (effectSignal) => {
+          operationSignal = effectSignal;
+          return {
+            ...(await readLocalUsageHistory(
+              {
+                ...options,
+                sourceKind: "codex",
+                providerKey: "codex",
+                onSourceInvalidated: () => {
+                  options.onSourceInvalidated?.();
+                  state.models.clear();
+                  state.cumulative.clear();
+                },
               },
-            },
-            request,
-            createCodexLineParser(state),
-            effectSignal,
-          )),
-        }),
-        catch: (): ProviderFailure => ({
-          category: "provider-failed",
-          message: "Codex local usage history could not be read.",
-        }),
-      }),
+              request,
+              createCodexLineParser(state),
+              effectSignal,
+            )),
+          };
+        },
+        catch: (): ProviderFailure => {
+          if (operationSignal?.aborted) {
+            state.models.clear();
+            state.cumulative.clear();
+          }
+          return {
+            category: "provider-failed",
+            message: "Codex local usage history could not be read.",
+          };
+        },
+      });
+    },
   };
 }
 
