@@ -53,7 +53,7 @@ export function UserAvatar(props: UserAvatarProps) {
         blockSize: `${String(size)}px`,
         // Initials scale with the mark but never below what a person can read:
         // the 20px sidebar avatar drew them at 8px.
-        fontSize: `${String(Math.max(10, Math.round(size * 0.4)))}px`,
+        fontSize: `${String(Math.max(11, Math.round(size * 0.4)))}px`,
       }}
       {...accessibility}
     >

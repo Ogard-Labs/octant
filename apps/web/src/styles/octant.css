@@ -38,7 +38,7 @@
   --oct-fg: light-dark(#1b1b1b, #f0f0f0);
   --oct-fg-2: color-mix(in oklab, var(--oct-fg) 90%, transparent);
   --oct-muted: light-dark(#4f4f4f, #a9a9a9);
-  --oct-meta: light-dark(#6b6b6b, #8a8a8a);
+  --oct-meta: light-dark(#666666, #949494);
   --oct-border: light-dark(#e0e0de, #303030);
   --oct-border-soft: color-mix(in oklab, var(--oct-fg) 7%, transparent);
   /* the chosen row: an opaque ground a step past hover, because active
@@ -126,18 +126,22 @@
   --oct-font-transcript:
     system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   /* The interface scale is the size the user chose, not a frozen ladder.
-     Every step keeps the ratio it had to the 13px default, so the shipped
+     Every step keeps the ratio it had to the 14px default, so the shipped
      look is unchanged at the default and the whole scale moves together
      when the setting changes. Freezing these was why Appearance's interface
      font size reached almost nothing: the ladder carried the great majority
      of the app's text and none of it could hear the setting.
 
      `--oct-text-step` is 1px at the default size, which is what lets each
-     step read as the pixel value it has always been. */
-  --oct-text-step: calc(var(--octant-ui-font-size, 13px) / 13);
-  --oct-text-xs: calc(11 * var(--oct-text-step));
-  --oct-text-sm: calc(13 * var(--oct-text-step));
-  --oct-text-base: calc(14 * var(--oct-text-step));
+     step read as the pixel value it has always been. The default moved from
+     13 to 14 because the 13 ladder put every timestamp, count, and chip at
+     11px, under the 12px floor DESIGN.md promises for labels, and the
+     transcript at 13px under 13px chrome. Feature CSS reads the tokens
+     below rather than authoring `calc(N * step)` so the floor is one edit. */
+  --oct-text-step: calc(var(--octant-ui-font-size, 14px) / 14);
+  --oct-text-xs: calc(12 * var(--oct-text-step));
+  --oct-text-sm: calc(14 * var(--oct-text-step));
+  --oct-text-base: calc(15 * var(--oct-text-step));
   --oct-text-lg: calc(17 * var(--oct-text-step));
   --oct-text-xl: calc(20 * var(--oct-text-step));
   --oct-text-2xl: calc(26 * var(--oct-text-step));
@@ -285,7 +289,7 @@
      Medium is the body size the rest of the interface reads at: a reply set
      one step larger than the question above it and the composer below it
      read as three sizes on one surface. */
-  --oct-transcript-font-size: 13px;
+  --oct-transcript-font-size: 14px;
 
   /* app shell. The sidebar width is a token rather than a literal because
      the drag handle writes to it — resizing and the default come from the
@@ -853,11 +857,11 @@ h4 {
 }
 
 .shell[data-transcript-text-size="small"] {
-  --oct-transcript-font-size: 12px;
+  --oct-transcript-font-size: 13px;
 }
 
 .shell[data-transcript-text-size="medium"] {
-  --oct-transcript-font-size: 13px;
+  --oct-transcript-font-size: 14px;
 }
 
 .shell[data-transcript-text-size="large"] {
@@ -1107,7 +1111,7 @@ input.switch:checked::after {
   color: var(--oct-muted);
   font-weight: 500;
   font-family: var(--oct-font-mono);
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   letter-spacing: var(--oct-tracking-wordmark);
   text-transform: none;
 }
@@ -1622,7 +1626,7 @@ input.switch:checked::after {
   place-items: center;
   color: var(--oct-muted);
   font-family: var(--oct-font-mono);
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   letter-spacing: var(--oct-tracking-wordmark);
 }
 .ph-img.square {

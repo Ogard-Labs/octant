@@ -2,7 +2,7 @@ import { DEFAULT_THEME_SETTINGS, type ThemeTypography } from "@octant/contracts/
 
 export const DEFAULT_UI_TYPOGRAPHY: UiTypographyProjection = {
   fontFamily: DEFAULT_THEME_SETTINGS.typography.ui.family,
-  fontSize: 13,
+  fontSize: DEFAULT_THEME_SETTINGS.typography.ui.size,
   fontWeight: 400,
 };
 
