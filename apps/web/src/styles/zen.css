@@ -223,9 +223,12 @@
 
 /* The zoom controls are the same floating chrome as the orbit bar, placed
    at the surface's top right instead of bottom centre. */
+/* On the same row as the spaces pill, not below it: a wall reserves one band
+   at the top for the surface's floating chrome, and a cluster sitting under
+   that band lands on the first row of cards. */
 .zen-bar.zen-surface__controls {
   position: absolute;
-  top: 52px;
+  top: 12px;
   right: 16px;
   bottom: auto;
   left: auto;
