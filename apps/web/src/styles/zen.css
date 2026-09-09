@@ -190,11 +190,19 @@
   flex: 1;
 }
 
+/* One row of buttons and two text fields never fitted a 360px sheet, so the
+   reference fields arrived cut to "Refe". The row wraps and every child may
+   shrink, which is what a sheet this narrow needs. */
 .zen-widget-picker {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--oct-space-2);
   margin: var(--oct-space-3) 0;
+}
+
+.zen-widget-picker > * {
+  min-width: 0;
 }
 
 .zen-add-picker {
@@ -250,6 +258,8 @@
   font-size: var(--oct-text-xs);
 }
 
+/* Clear of the bar at the bottom and the chrome band at the top: a panel that
+   ran under the bar hid its own last row and the controls beneath it. */
 .zen-surface__panel-anchor,
 .zen-surface__manual-panel {
   position: absolute;
@@ -262,6 +272,16 @@
   max-width: calc(100% - 32px);
   max-height: calc(100% - 180px);
   transform: translateX(-50%);
+  /* The card inside is what actually holds the rows, so it has to take the
+     anchor's height rather than growing past it; the thread picker ran under
+     the bar and hid its own last row. */
+  display: flex;
+}
+
+.zen-surface__panel-anchor > *,
+.zen-surface__manual-panel > * {
+  min-height: 0;
+  max-height: 100%;
 }
 
 /* ─── panels ───────────────────────────────────────────────────────────
@@ -278,6 +298,16 @@
   min-width: 0;
   min-inline-size: 0;
   max-width: 100%;
+}
+
+/* A panel is a page in a sheet, so its title is the page title (20px), not the
+   display heading the bare `h2` rule gives it. At 44px it was larger than any
+   title in Settings and the loudest thing on a focus surface. */
+.zen-panel .card-head h2 {
+  font-size: var(--oct-text-xl);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: var(--oct-tracking-tight);
+  line-height: var(--oct-leading-heading);
 }
 
 .zen-panel h2,
@@ -468,17 +498,6 @@
   max-width: calc(100% - 32px);
 }
 
-.zen-bar__ask {
-  display: flex;
-  min-width: 160px;
-  flex: 1;
-}
-
-.zen-bar__ask .zen-bar-ask {
-  width: 100%;
-  min-width: 0;
-}
-
 .zen-bar__button--deferred {
   opacity: var(--oct-disabled-opacity);
   cursor: not-allowed;
@@ -491,11 +510,6 @@
     flex-wrap: wrap;
     border-radius: var(--oct-radius-lg);
     max-width: 100%;
-  }
-
-  .zen-bar__ask {
-    min-width: 120px;
-    flex-basis: 100%;
   }
 
   .zen-surface__bar-anchor {
@@ -551,7 +565,10 @@
 
 .zen-appearance__preset-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* One per row. Two columns in a 360px sheet cut every name that says what
+     the background actually is ("Perspective dots light animated" arrived as
+     "ctive dots light anim"), and a name nobody can read is not a choice. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--oct-space-2);
 }
 
