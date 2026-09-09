@@ -105,6 +105,7 @@ export * from "./linkedThreadPolicy";
 export * from "./linkedThreadPromptPolicy";
 export * from "./linkedThreadAggregationPolicy";
 export * from "./zenPolicy";
+export * from "./zenWall";
 export * from "./zenFocusZonePolicy";
 export * from "./auditPolicy";
 export * from "./cursorAcpPolicy";

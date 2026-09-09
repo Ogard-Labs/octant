@@ -8,7 +8,11 @@ import {
   type PointerEvent,
   type ReactNode,
 } from "react";
-import { resolveAccessibilityFallbacks, resolveZenLiveCardActivity } from "@octant/domain";
+import {
+  planZenWall,
+  resolveAccessibilityFallbacks,
+  resolveZenLiveCardActivity,
+} from "@octant/domain";
 import type { ZenLiveCardActivity } from "@octant/domain";
 import type {
   ZenAssistantSnapshot,
@@ -20,6 +24,7 @@ import type {
   ZenSourceContext,
   ZenSpace,
   ZenSpaceId,
+  ZenSpaceLayout,
   ZenTimerAction,
   ZenThreadCatalogEntry,
   ZenThreadCatalogRef,
@@ -113,6 +118,8 @@ export interface ZenSurfaceProps {
   readonly onRemoveElement?: (elementId: ZenElementPayload["elementId"]) => void;
   readonly onUpdateElement: (element: ZenElementPayload) => void | Promise<void>;
   readonly onUpdateViewport: (viewport: ZenViewport) => void;
+  /** Switches the space between the wall and a hand-made arrangement. */
+  readonly onSetLayout?: (layout: ZenSpaceLayout) => void;
   readonly assistant?: ZenAssistantSnapshot | null;
   readonly assistantOpen?: boolean;
   readonly panelBusy?: boolean;
@@ -295,7 +302,28 @@ export function ZenSurface(props: ZenSurfaceProps) {
     () => [...props.space.elements].sort((a, b) => a.zIndex - b.zIndex),
     [props.space.elements],
   );
-  const { panX, panY, scale } = props.space.viewport;
+  // A wall places every card itself, from the count and the area it has, so
+  // two pins cannot land on each other and removing one closes the gap. It
+  // reads the space's own order rather than z-index: raising a card to work on
+  // it would otherwise move it across the wall (0106).
+  const wall = props.space.layout === "wall";
+  const laidOut = useMemo(() => {
+    if (!wall) return sorted;
+    const tiles = planZenWall(props.space.elements.length, surfaceSize, {
+      // The spaces pill floats over the top of the surface and the Navigator
+      // bar over the bottom; a wall that filled the whole area would put its
+      // first and last rows underneath them.
+      insetTop: ZEN_WALL_INSET_TOP,
+      insetBottom: props.barCollapsed ? ZEN_WALL_INSET_BOTTOM_COLLAPSED : ZEN_WALL_INSET_BOTTOM,
+    });
+    return props.space.elements.map((element, index) => {
+      const tile = tiles[index];
+      return tile === undefined ? element : { ...element, geometry: tile };
+    });
+  }, [props.barCollapsed, props.space.elements, sorted, surfaceSize, wall]);
+  // A wall fills the surface, so there is nothing to pan to and nothing off
+  // screen to zoom out for.
+  const { panX, panY, scale } = wall ? { panX: 0, panY: 0, scale: 1 } : props.space.viewport;
   const background = appearance.background;
   const forceOpaque = appearance.reducedTransparency || appearance.increasedContrast;
   const focusedElement = props.space.elements.find(
@@ -306,12 +334,18 @@ export function ZenSurface(props: ZenSurfaceProps) {
   const threadCardActivity = useMemo(() => {
     const focusedElementId = focusedElement?.elementId;
     const resolved = resolveZenLiveCardActivity({
-      elements: props.space.elements,
-      visibleRegion: computeVisibleRegion(props.space.viewport, surfaceSize),
+      // The laid-out geometry, not the stored one: on a wall the stored
+      // rectangles are whatever an earlier arrangement left behind, and a card
+      // would be judged off screen while it is plainly in front of the reader.
+      elements: laidOut,
+      visibleRegion: computeVisibleRegion(
+        wall ? { panX: 0, panY: 0, scale: 1 } : props.space.viewport,
+        surfaceSize,
+      ),
       ...(focusedElementId === undefined ? {} : { focusedElementId }),
     });
     return new Map(resolved.map((card) => [String(card.elementId), card]));
-  }, [focusedElement?.elementId, props.space.elements, props.space.viewport, surfaceSize]);
+  }, [focusedElement?.elementId, laidOut, props.space.viewport, surfaceSize, wall]);
 
   /**
    * The card's own reading of its own thread.
@@ -359,6 +393,10 @@ export function ZenSurface(props: ZenSurfaceProps) {
 
   function focusElement(element: ZenElementPayload): void {
     setFocusedId(element.elementId);
+    // Raising a card is how one stops hiding another. Nothing on a wall is
+    // behind anything, so focusing a card writes no z-index there; the wall
+    // reads the space's own order and would ignore the new one anyway.
+    if (wall) return;
     const raised = bringElementToFront(props.space.elements, element.elementId);
     const next = raised.find((el) => el.elementId === element.elementId);
     if (next !== undefined && next.zIndex !== element.zIndex) {
@@ -372,6 +410,10 @@ export function ZenSurface(props: ZenSurfaceProps) {
     kind: "move" | "resize",
   ): void {
     if (element.locked) return;
+    // A wall owns where every card sits. Dragging one would write a geometry
+    // the wall then ignores, so the card would snap back and the write would
+    // be a lie about what the reader did.
+    if (wall) return;
     event.preventDefault();
     event.stopPropagation();
     try {
@@ -393,6 +435,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
   }
 
   function beginPan(event: PointerEvent<HTMLElement>): void {
+    if (wall) return;
     if (event.target !== event.currentTarget) return;
     event.preventDefault();
     setInteraction({
@@ -474,6 +517,10 @@ export function ZenSurface(props: ZenSurfaceProps) {
     ) {
       return;
     }
+    // Nudge and resize move a card within an arrangement. On a wall they would
+    // write a geometry the wall ignores, so the arrows stay with the surface
+    // and Delete keeps working.
+    if (wall) return;
     event.preventDefault();
     const nextGeometry = clampGeometryToBounds(
       event.altKey
@@ -551,7 +598,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
           transformOrigin: "0 0",
         }}
       >
-        {sorted.map((element) => {
+        {laidOut.map((element) => {
           const threadCard = element.kind === "thread" ? resolveThreadCard(element) : undefined;
           const title =
             element.kind === "terminal"
@@ -699,17 +746,21 @@ export function ZenSurface(props: ZenSurfaceProps) {
                       "Unsupported Zen element"
                     )}
                   </div>
-                  <OctantButton
-                    aria-label={`Resize ${title}`}
-                    className="zen-el-grip window-no-drag"
-                    disabled={element.locked}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onPointerDown={(event) => beginElementInteraction(event, element, "resize")}
-                    size="icon"
-                    style={{ zIndex: 3 }}
-                    type="button"
-                    variant="ghost"
-                  />
+                  {/* A wall sizes its own cards, so it offers no grip to
+                      contradict it. */}
+                  {wall ? null : (
+                    <OctantButton
+                      aria-label={`Resize ${title}`}
+                      className="zen-el-grip window-no-drag"
+                      disabled={element.locked}
+                      onMouseDown={(event) => event.stopPropagation()}
+                      onPointerDown={(event) => beginElementInteraction(event, element, "resize")}
+                      size="icon"
+                      style={{ zIndex: 3 }}
+                      type="button"
+                      variant="ghost"
+                    />
+                  )}
                 </>
               )}
             </div>
@@ -721,55 +772,70 @@ export function ZenSurface(props: ZenSurfaceProps) {
         ? null
         : props.renderResearchDock?.({ dock: props.space.research })}
 
+      {/* On a wall there is nothing to pan to and nothing off screen to zoom
+          out for, so the cluster offers the one control that means something
+          there: leaving the wall for a hand-made arrangement. */}
       <div className="zen-bar zen-surface__controls window-no-drag">
         <OctantButton
-          aria-label="Zoom out"
-          onClick={() =>
-            props.onUpdateViewport({
-              ...props.space.viewport,
-              scale: Math.max(0.1, props.space.viewport.scale / 1.2),
-            })
-          }
+          onClick={() => props.onSetLayout?.(wall ? "arrange" : "wall")}
           size="sm"
           type="button"
           variant="ghost"
         >
-          −
+          {wall ? "Arrange" : "Tile"}
         </OctantButton>
-        <OctantButton
-          aria-label="Zoom in"
-          onClick={() =>
-            props.onUpdateViewport({
-              ...props.space.viewport,
-              scale: Math.min(5, props.space.viewport.scale * 1.2),
-            })
-          }
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          +
-        </OctantButton>
-        <OctantButton
-          onClick={() =>
-            props.onUpdateViewport(
-              computeZoomToFit(props.space.elements, { width: 1200, height: 800 }, 48),
-            )
-          }
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          Zoom to Fit
-        </OctantButton>
-        <OctantButton
-          onClick={() => props.onUpdateViewport({ panX: 0, panY: 0, scale: 1 })}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          Reset view
-        </OctantButton>
+        {wall ? null : (
+          <>
+            <OctantButton
+              aria-label="Zoom out"
+              onClick={() =>
+                props.onUpdateViewport({
+                  ...props.space.viewport,
+                  scale: Math.max(0.1, props.space.viewport.scale / 1.2),
+                })
+              }
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              −
+            </OctantButton>
+            <OctantButton
+              aria-label="Zoom in"
+              onClick={() =>
+                props.onUpdateViewport({
+                  ...props.space.viewport,
+                  scale: Math.min(5, props.space.viewport.scale * 1.2),
+                })
+              }
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              +
+            </OctantButton>
+            <OctantButton
+              onClick={() =>
+                props.onUpdateViewport(
+                  computeZoomToFit(props.space.elements, { width: 1200, height: 800 }, 48),
+                )
+              }
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Zoom to Fit
+            </OctantButton>
+            <OctantButton
+              onClick={() => props.onUpdateViewport({ panX: 0, panY: 0, scale: 1 })}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Reset view
+            </OctantButton>
+          </>
+        )}
       </div>
 
       {props.message === undefined ? null : (
@@ -1071,6 +1137,12 @@ type ResolvedZenBackground = {
 /* The theme's workspace ground. Used whenever no user choice paints the
    surface, so the safe fallback is the same ground every other surface
    stands on rather than a colour of Zen's own. */
+/* Room the wall leaves for the surface's own floating chrome: the spaces pill
+   above, and the Navigator bar (or its collapsed pill) below. */
+const ZEN_WALL_INSET_TOP = 56;
+const ZEN_WALL_INSET_BOTTOM = 88;
+const ZEN_WALL_INSET_BOTTOM_COLLAPSED = 64;
+
 const SYSTEM_GROUND = "var(--oct-bg)";
 
 /* The contract's default is a stored solid colour, not a "no choice"
