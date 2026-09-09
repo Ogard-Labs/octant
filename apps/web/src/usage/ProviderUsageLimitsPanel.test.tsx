@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -99,6 +99,104 @@ function snapshot(
 }
 
 describe("ProviderUsageLimitsPanel", () => {
+  it("expires a quota at its reset boundary instead of waiting another minute", async () => {
+    vi.useFakeTimers({ now: new Date("2026-08-23T12:00:00.000Z") });
+    try {
+      const original = snapshot();
+      const data = decodeProviderUsageLimitsSnapshot({
+        ...original,
+        entries: original.entries.map((entry) =>
+          entry.status !== "available"
+            ? entry
+            : {
+                ...entry,
+                limits: {
+                  ...entry.limits,
+                  rateLimitWindows: [
+                    {
+                      window: "five_hour",
+                      status: "allowed",
+                      utilization: 0.5,
+                      resetsAt: "2026-08-23T12:00:05.000Z",
+                      observedAt: "2026-08-23T12:00:00.000Z",
+                    },
+                  ],
+                },
+              },
+        ),
+      });
+      await act(async () => {
+        render(
+          <ProviderUsageLimitsPanel
+            client={{ list: async () => data, refresh: async () => data }}
+            instances={[provider]}
+          />,
+        );
+      });
+      expect(screen.getByRole("meter", { name: "5-hour window remaining" })).toBeVisible();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(
+        screen.queryByRole("meter", { name: "5-hour window remaining" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText("Awaiting updated limits")).toBeVisible();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("states an exhausted window without inventing a percentage", async () => {
+    const original = snapshot();
+    const data = decodeProviderUsageLimitsSnapshot({
+      ...original,
+      entries: original.entries.map((entry) =>
+        entry.status !== "available"
+          ? entry
+          : {
+              ...entry,
+              limits: {
+                ...entry.limits,
+                rateLimitWindows: [
+                  {
+                    window: "five_hour",
+                    status: "exhausted",
+                    observedAt: "2026-08-23T12:00:00.000Z",
+                  },
+                ],
+              },
+            },
+      ),
+    });
+    render(
+      <ProviderUsageLimitsPanel
+        client={{ list: async () => data, refresh: async () => data }}
+        instances={[provider]}
+      />,
+    );
+    expect(await screen.findByText("Limit reached")).toBeVisible();
+    expect(
+      screen.queryByRole("meter", { name: "5-hour window remaining" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not show another host's quota when a new client fails", async () => {
+    const first = { list: async () => snapshot(), refresh: async () => snapshot() };
+    const { rerender } = render(<ProviderUsageLimitsPanel client={first} instances={[provider]} />);
+    await screen.findByRole("meter", { name: "5-hour window remaining" });
+    const second = {
+      list: async () => {
+        throw new Error("offline");
+      },
+      refresh: async () => snapshot(),
+    };
+    rerender(<ProviderUsageLimitsPanel client={second} instances={[provider]} />);
+    expect(await screen.findByText("Provider limits are unavailable.")).toBeVisible();
+    expect(screen.queryByRole("meter")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Refresh provider limits" }));
+    expect(await screen.findByRole("meter", { name: "5-hour window remaining" })).toBeVisible();
+    expect(screen.queryByText("Provider limits are unavailable.")).not.toBeInTheDocument();
+  });
   beforeEach(() => {
     vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-23T12:00:00.000Z"));
   });

@@ -95,6 +95,7 @@ a structured handoff.
 
 ## Next steps
 
+- [Usage and limits](/advanced/usage-and-limits) for cross-app history and remaining capacity
 - [Providers and models](/advanced/providers) for selecting a model and limits
 - [Subagents](/advanced/subagents) for how child runs share context capacity
 - [Recovery and troubleshooting](/advanced/recovery) when a thread needs repair

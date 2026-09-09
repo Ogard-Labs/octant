@@ -1,6 +1,6 @@
 # 0102. Local provider usage history
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 

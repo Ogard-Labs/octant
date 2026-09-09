@@ -113,7 +113,7 @@ distilled successor of the earlier long-form design specifications.
 | [0100](0100-trusted-inline-task-approvals.md) | Task authority confirmations use a trusted inline surface | Accepted |
 
 | [0101](0101-browser-authority-across-modes.md) | Browser authority follows the thread across modes | Accepted |
-| [0102](0102-local-provider-usage-history.md) | Local provider usage history | Proposed |
+| [0102](0102-local-provider-usage-history.md) | Local provider usage history | Accepted |
 
 ## Adding an ADR
 

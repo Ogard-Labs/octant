@@ -1,15 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
-import type { LocalUsageHistoryRequest } from "@octant/contracts";
+import { decodeLocalUsageHistoryRequest } from "@octant/contracts";
 import {
   createLocalUsageHistoryClient,
   LocalUsageHistoryClientFailure,
 } from "./providerUsageHistoryClient";
 
-const request: LocalUsageHistoryRequest = {
+const request = decodeLocalUsageHistoryRequest({
   from: "2026-09-01T00:00:00.000Z",
   to: "2026-09-30T23:59:59.999Z",
   timeZone: "UTC",
-} as never;
+});
 
 function response(overrides: Record<string, unknown> = {}) {
   const totals = {
@@ -43,6 +43,42 @@ function response(overrides: Record<string, unknown> = {}) {
 }
 
 describe("LocalUsageHistoryClient", () => {
+  it("refuses remote history destinations before sending the window capability", () => {
+    const fetch = vi.fn();
+    expect(() =>
+      createLocalUsageHistoryClient({
+        baseUrl: "https://example.com",
+        fetch,
+        windowCapability: "local-capability",
+      }),
+    ).toThrow();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it("bounds a stalled history read and cancels its fetch", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi.fn(
+        (_url: Parameters<typeof globalThis.fetch>[0], options?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            options?.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+              once: true,
+            });
+          }),
+      );
+      const client = createLocalUsageHistoryClient({
+        baseUrl: "http://127.0.0.1:13773",
+        fetch,
+        windowCapability: "local-capability",
+      });
+      const checked = expect(client.load(request)).rejects.toBeInstanceOf(
+        LocalUsageHistoryClientFailure,
+      );
+      await vi.advanceTimersByTimeAsync(30000);
+      await checked;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("loads a typed local history response", async () => {
     const fetch = vi.fn(async () => Response.json(response()));
     const client = createLocalUsageHistoryClient({

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import type {
@@ -18,41 +18,86 @@ export function ProviderUsageLimitsPanel(props: {
   readonly client: ProviderUsageLimitsClient;
   readonly instances: ReadonlyArray<ProviderInstance>;
 }) {
-  const [snapshot, setSnapshot] = useState<ProviderUsageLimitsSnapshot>();
-  const [busy, setBusy] = useState(false);
+  const [reading, setReading] = useState<{
+    readonly client: ProviderUsageLimitsClient;
+    readonly snapshot?: ProviderUsageLimitsSnapshot;
+    readonly message?: string;
+    readonly busy: boolean;
+  }>();
+  const sequence = useRef(0);
+  const current = reading?.client === props.client ? reading : undefined;
+  const snapshot = current?.snapshot;
+  const message = current?.message;
+  const busy = current?.busy ?? true;
   const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(timer);
-  }, []);
-  const [message, setMessage] = useState<string>();
   const names = useMemo(
     () => new Map(props.instances.map((instance) => [String(instance.id), instance])),
     [props.instances],
   );
-
+  const load = useCallback(
+    async (refresh: boolean): Promise<void> => {
+      const request = ++sequence.current;
+      setReading((previous) => ({
+        client: props.client,
+        busy: true,
+        ...(refresh && previous?.client === props.client && previous.snapshot !== undefined
+          ? { snapshot: previous.snapshot }
+          : {}),
+      }));
+      try {
+        const next = await (refresh ? props.client.refresh() : props.client.list());
+        if (request !== sequence.current) return;
+        setNow(Date.now());
+        setReading({ client: props.client, snapshot: next, busy: false });
+      } catch {
+        if (request !== sequence.current) return;
+        setReading((previous) => ({
+          client: props.client,
+          busy: false,
+          ...(refresh && previous?.client === props.client && previous.snapshot !== undefined
+            ? { snapshot: previous.snapshot }
+            : {}),
+          message: refresh
+            ? "Provider limits could not be refreshed. Last successful values remain visible."
+            : "Provider limits are unavailable.",
+        }));
+      }
+    },
+    [props.client],
+  );
   useEffect(() => {
-    let active = true;
-    void props.client.list().then(
-      (value) => active && setSnapshot(value),
-      () => active && setMessage("Provider limits are unavailable."),
-    );
+    void load(false);
     return () => {
-      active = false;
+      sequence.current += 1;
     };
-  }, [props.client]);
-
-  async function refresh(): Promise<void> {
-    setBusy(true);
-    setMessage(undefined);
-    try {
-      setSnapshot(await props.client.refresh());
-    } catch {
-      setMessage("Provider limits could not be refreshed. Last successful values remain visible.");
-    } finally {
-      setBusy(false);
-    }
-  }
+  }, [load]);
+  useEffect(() => {
+    const resets =
+      snapshot?.entries
+        .flatMap((entry) => {
+          const limits =
+            entry.status === "available"
+              ? entry.limits
+              : entry.status === "failed"
+                ? entry.staleLimits
+                : undefined;
+          if (limits === undefined) return [];
+          return [
+            limits.requests,
+            limits.tokens,
+            limits.concurrency,
+            ...(limits.rateLimitWindows ?? []),
+          ].flatMap((bucket) =>
+            "resetsAt" in bucket && bucket.resetsAt !== undefined
+              ? [Date.parse(bucket.resetsAt)]
+              : [],
+          );
+        })
+        .filter((reset) => reset > now) ?? [];
+    const delay = Math.max(1, Math.min(60_000, ...resets.map((reset) => reset - Date.now())));
+    const timer = setTimeout(() => setNow(Date.now()), delay);
+    return () => clearTimeout(timer);
+  }, [snapshot, now]);
 
   return (
     <SurfaceSection
@@ -60,7 +105,7 @@ export function ProviderUsageLimitsPanel(props: {
         <OctantButton
           aria-label="Refresh provider limits"
           disabled={busy}
-          onClick={() => void refresh()}
+          onClick={() => void load(true)}
           size="sm"
           type="button"
           variant="ghost"
@@ -187,6 +232,14 @@ const DURATION_UNITS: Readonly<Record<string, string>> = { m: "minute", h: "hour
  * the length is what a reader recognizes, so it leads the label.
  */
 function windowLabel(window: string): string {
+  const separator = window.lastIndexOf(":");
+  if (separator >= 0) {
+    const scope = window.slice(0, separator);
+    const label = windowLabel(window.slice(separator + 1));
+    return scope === "account" || scope === "codex"
+      ? label
+      : `${scope.replaceAll("_", " ")} · ${label}`;
+  }
   const known = WINDOW_LABELS[window];
   if (known !== undefined) return known;
   const codex = /^(primary|secondary)(?:_(\d+)([mhd]))?$/.exec(window);
@@ -243,6 +296,11 @@ function LimitBuckets({
   const hasBuckets = buckets.some(([, bucket]) => bucket.status === "available");
   return (
     <div className="provider-limits__buckets">
+      {limits.quota === "exhausted" ? (
+        <p className="provider-limits__warning">
+          {limits.scope === "account" ? "Account limit reached" : "Provider limit reached"}
+        </p>
+      ) : null}
       {!hasBuckets && (limits.rateLimitWindows?.length ?? 0) === 0 ? (
         <p>No quota windows reported</p>
       ) : null}
@@ -311,7 +369,9 @@ function QuotaWindow(props: {
           {expired
             ? "Awaiting updated limits"
             : remaining === undefined
-              ? "Not reported"
+              ? props.status === "Exhausted"
+                ? "Limit reached"
+                : "Remaining capacity not reported"
               : `${remaining}% left`}
         </span>
         {props.resetsAt === undefined || expired ? null : (

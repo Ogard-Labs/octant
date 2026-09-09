@@ -29,42 +29,59 @@ export class LocalUsageHistoryClientFailure extends Error {
 export function createLocalUsageHistoryClient(
   options: LocalUsageHistoryClientOptions,
 ): LocalUsageHistoryClient {
+  const base = new URL(options.baseUrl);
+  if (
+    base.protocol !== "http:" ||
+    !["127.0.0.1", "localhost", "[::1]"].includes(base.hostname) ||
+    base.username !== "" ||
+    base.password !== ""
+  ) {
+    throw new Error("Local provider history requires a loopback HTTP destination.");
+  }
   const fetch = bindFetchPort(options.fetch);
   return {
     async load(request, signal) {
       const validated = decodeLocalUsageHistoryRequest(request);
-      let response: Response;
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      const timer = setTimeout(abort, 30_000);
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) abort();
       try {
-        response = await fetch(new URL("/api/usage/local-history", options.baseUrl), {
+        const response = await fetch(new URL("/api/usage/local-history", base), {
           method: "POST",
+          redirect: "error",
           headers: {
             "content-type": "application/json",
             "x-octant-window-capability": options.windowCapability,
           },
           body: JSON.stringify(validated),
-          ...(signal === undefined ? {} : { signal }),
+          signal: controller.signal,
         });
-      } catch {
-        throw new LocalUsageHistoryClientFailure(0, "Local provider usage history is unavailable.");
-      }
-      const body: unknown = await response.json().catch(() => ({}));
-      if (!response.ok)
-        throw new LocalUsageHistoryClientFailure(response.status, failureMessage(body));
-      try {
-        const decoded = decodeLocalUsageHistoryResponse(body);
-        if (
-          String(decoded.from) !== String(validated.from) ||
-          String(decoded.to) !== String(validated.to) ||
-          decoded.timeZone !== validated.timeZone
-        ) {
-          throw new Error("range-mismatch");
+        const body: unknown = await response.json().catch(() => ({}));
+        if (!response.ok)
+          throw new LocalUsageHistoryClientFailure(response.status, failureMessage(body));
+        try {
+          const decoded = decodeLocalUsageHistoryResponse(body);
+          if (
+            String(decoded.from) !== String(validated.from) ||
+            String(decoded.to) !== String(validated.to) ||
+            decoded.timeZone !== validated.timeZone
+          )
+            throw new Error("range-mismatch");
+          return decoded;
+        } catch {
+          throw new LocalUsageHistoryClientFailure(
+            response.status,
+            "Local provider usage history response is invalid or stale.",
+          );
         }
-        return decoded;
-      } catch {
-        throw new LocalUsageHistoryClientFailure(
-          response.status,
-          "Local provider usage history response is invalid or stale.",
-        );
+      } catch (error) {
+        if (error instanceof LocalUsageHistoryClientFailure) throw error;
+        throw new LocalUsageHistoryClientFailure(0, "Local provider usage history is unavailable.");
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", abort);
       }
     },
   };

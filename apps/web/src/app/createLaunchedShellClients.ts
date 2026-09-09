@@ -2,6 +2,7 @@ import {
   createAgentProfileClient,
   createAutomationClient,
   createUsageDashboardClient,
+  createLocalUsageHistoryClient,
   createRequestCoordinator,
   type AgentProfileClient,
   type AutomationClient,
@@ -128,6 +129,7 @@ export interface LaunchedShellClients {
     | undefined;
   readonly shipClient: ShipClient;
   readonly usageClient: ReturnType<typeof createUsageClient>;
+  readonly localUsageHistoryClient: ReturnType<typeof createLocalUsageHistoryClient> | undefined;
   readonly usageDashboardClient: ReturnType<typeof createUsageDashboardClient>;
   readonly workMutationClient: ReturnType<typeof createWorkMutationClient>;
   readonly workOverviewClient: ReturnType<typeof createWorkOverviewClient>;
@@ -206,6 +208,8 @@ export function createLaunchedShellClients(
     shipClient: options.shipClient ?? createShipClient(port),
     usageClient: createUsageClient(port),
     usageDashboardClient: createUsageDashboardClient(port),
+    localUsageHistoryClient:
+      providerUsageLimitsClient === undefined ? undefined : createLocalUsageHistoryClient(port),
     workMutationClient: createWorkMutationClient(port),
     workOverviewClient: createWorkOverviewClient(port),
     workRequestClient: createWorkRequestClient(port),

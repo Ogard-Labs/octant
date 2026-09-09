@@ -13,6 +13,7 @@ without over-trusting a surface that has not shipped.
 ## Providers, models, and context
 
 - [Providers and models](/advanced/providers) — add and manage provider instances, choose models, and change provider or model mid-thread.
+- [Usage and limits](/advanced/usage-and-limits) — local provider history, cost estimates, and remaining capacity.
 - [Context budgets and limits](/advanced/context-budgets) — how Octant plans each turn within provider context windows and what happens at the limits.
 - [Subagents](/advanced/subagents) — child agent runs, their hierarchy, isolation, and recovery.
 
