@@ -2943,7 +2943,7 @@ form > .work-composer-adapter__attachments {
   margin: 0;
   max-height: min(50vh, 28rem);
   overflow: auto;
-  font-family: inherit;
+  font-family: var(--oct-font-body);
   font-size: calc(13 * var(--oct-text-step));
   line-height: 1.45;
   white-space: pre-wrap;
