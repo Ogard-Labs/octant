@@ -496,6 +496,15 @@ each would write a position the wall ignores. Arrange, on the surface itself,
 is the exception: it restores hand placement and every card's stored geometry,
 which a wall never rewrites (0106).
 
+A card is a reading of one thread. Its head carries the thread's name in the
+interface face at the body size, and beside it how long ago that thread last
+moved; the editor face and the metadata ink are for code, paths, and
+identifiers, not for the one label that says which thread this is. A tiled card
+is flat, with its hairline and no shadow, because nothing on a wall floats over
+anything; an arranged card keeps its elevation. A card that is not streaming
+reads its host, mode, Project, and the model that answers, in that order. It
+does not print a stored ISO timestamp or a provider instance id.
+
 The app has three server-enforced modes—Chat, Work, and Code. Mode switching is
 available as a labeled selector, compact list, or icon presentation according
 to the user's setting. Code and Work keep separate Project View sets. The

@@ -40,6 +40,7 @@ import {
   UNSUPPORTED_NAVIGATOR_ASSISTANT,
   type NavigatorAssistantController,
 } from "../navigator/useNavigatorAssistant";
+import { relativeTimeLabel } from "../lib/relativeTime";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCard } from "../ui/base/OctantCard";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -552,6 +553,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
     <div
       aria-label="Zen workspace"
       className="zen-surface"
+      data-layout={wall ? "wall" : "arrange"}
       onKeyDown={handleSurfaceKeyDown}
       onPointerDown={beginPan}
       onPointerMove={handlePointerMove}
@@ -654,7 +656,17 @@ export function ZenSurface(props: ZenSurfaceProps) {
                 className="zen-el-head"
                 onPointerDown={(event) => beginElementInteraction(event, element, "move")}
               >
-                <span>{title}</span>
+                <span className="zen-el-title">{title}</span>
+                {/* How long ago this thread last moved, beside its name. A
+                    person supervising several cards reads that before
+                    anything in the body. */}
+                {threadCard?.entry === undefined ? null : (
+                  <span className="zen-el-state">
+                    <time dateTime={threadCard.entry.recentActivityAt}>
+                      {relativeTimeLabel(threadCard.entry.recentActivityAt)}
+                    </time>
+                  </span>
+                )}
                 <span className="zen-el-gap" />
                 <span
                   className="zen-el-actions window-no-drag"
