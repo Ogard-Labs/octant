@@ -711,6 +711,7 @@ describe("createPhase1RuntimeRegistries", () => {
             overlayOpacity: 100,
             vibrancyMode: "off",
           },
+          sidebarDestinations: { order: [], visibility: [] },
           environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
         },
       } as const;
@@ -921,6 +922,7 @@ function validSettingsPayload() {
         overlayOpacity: 100,
         vibrancyMode: "off",
       },
+      sidebarDestinations: { order: [], visibility: [] },
       environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
     },
   } as const;

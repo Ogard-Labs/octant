@@ -4,7 +4,12 @@ import {
   buildChatThreadNavigation,
   buildSidebarAppMenu,
   buildSidebarNavigation,
+  layoutSidebarDestinations,
+  moveSidebarDestination,
   type NavigationAvailability,
+  setSidebarDestinationVisibility,
+  sidebarDestinationOrder,
+  sidebarDestinationVisibility,
   type SidebarNavigationDescriptorId,
   type SidebarNavigationInput,
 } from "./navigationModel";
@@ -28,6 +33,182 @@ const availableBaseCapabilities = {
   createThread: "available",
   projects: "available",
 } as const;
+
+const codeCapabilities: SidebarNavigationInput = {
+  activeMode: "code",
+  createThread: "available",
+  inbox: "available",
+  projects: "available",
+  threadBoard: "available",
+  pullRequests: "available",
+  githubIssues: "available",
+  linearIssues: "available",
+  plugins: "available",
+  automationsEnabled: true,
+  agentsCenterEnabled: true,
+  artifactLibrary: "available",
+  imageLibrary: "available",
+};
+
+const untouched = { order: [], visibility: [] } as const;
+
+describe("layoutSidebarDestinations", () => {
+  it("keeps the default rows and menu when nobody has customized the sidebar", () => {
+    const layout = layoutSidebarDestinations({
+      activeMode: "code",
+      input: codeCapabilities,
+      customization: untouched,
+    });
+    expect(layout.rows).toEqual([
+      "new-code-thread",
+      "inbox",
+      "thread-board",
+      "github-issues",
+      "pull-requests",
+      "linear-issues",
+      "projects",
+    ]);
+    expect(layout.menu.map((descriptor) => descriptor.id)).toEqual([
+      "agents",
+      "automations",
+      "artifact-library",
+      "image-library",
+      "plugins",
+    ]);
+  });
+
+  it("removes a hidden primary destination from the rows", () => {
+    const layout = layoutSidebarDestinations({
+      activeMode: "code",
+      input: codeCapabilities,
+      customization: { order: [], visibility: [{ id: "inbox", visibility: "hidden" }] },
+    });
+    expect(layout.rows).toEqual([
+      "new-code-thread",
+      "thread-board",
+      "github-issues",
+      "pull-requests",
+      "linear-issues",
+      "projects",
+    ]);
+  });
+
+  it("promotes a menu destination to a row and stops repeating it in the menu", () => {
+    const layout = layoutSidebarDestinations({
+      activeMode: "code",
+      input: codeCapabilities,
+      customization: { order: [], visibility: [{ id: "automations", visibility: "shown" }] },
+    });
+    expect(layout.rows).toContain("automations");
+    expect(layout.menu.map((descriptor) => descriptor.id)).not.toContain("automations");
+  });
+
+  it("orders the rows by the customized order and appends unlisted rows in the default order", () => {
+    const layout = layoutSidebarDestinations({
+      activeMode: "code",
+      input: codeCapabilities,
+      customization: { order: ["board", "inbox"], visibility: [] },
+    });
+    expect(layout.rows.slice(0, 2)).toEqual(["thread-board", "inbox"]);
+    expect(layout.rows.slice(2)).toEqual([
+      "new-code-thread",
+      "github-issues",
+      "pull-requests",
+      "linear-issues",
+      "projects",
+    ]);
+  });
+
+  it("keeps an unavailable destination out of the rows even when it is set to show", () => {
+    const layout = layoutSidebarDestinations({
+      activeMode: "code",
+      input: { ...codeCapabilities, plugins: "unavailable", imageLibrary: "unavailable" },
+      customization: {
+        order: [],
+        visibility: [
+          { id: "plugins", visibility: "shown" },
+          { id: "image-library", visibility: "shown" },
+        ],
+      },
+    });
+    expect(layout.rows).not.toContain("plugins");
+    expect(layout.rows).not.toContain("image-library");
+    expect(layout.menu.map((descriptor) => descriptor.id)).not.toContain("plugins");
+  });
+
+  it("hides a destination from the menu too, because Don't show means don't show", () => {
+    const layout = layoutSidebarDestinations({
+      activeMode: "code",
+      input: codeCapabilities,
+      customization: { order: [], visibility: [{ id: "plugins", visibility: "hidden" }] },
+    });
+    expect(layout.menu.map((descriptor) => descriptor.id)).not.toContain("plugins");
+  });
+
+  it("never promotes Automations into Chat, where the center has no authority", () => {
+    const layout = layoutSidebarDestinations({
+      activeMode: "chat",
+      input: { ...codeCapabilities, activeMode: "chat", threadBoard: "unavailable" },
+      customization: { order: [], visibility: [{ id: "automations", visibility: "shown" }] },
+    });
+    expect(layout.rows).not.toContain("automations");
+  });
+
+  it("resolves the mode's thread creator so one destination names every mode's row", () => {
+    for (const [activeMode, descriptor] of [
+      ["chat", "new-chat"],
+      ["work", "new-work-thread"],
+      ["code", "new-code-thread"],
+    ] as const) {
+      const layout = layoutSidebarDestinations({
+        activeMode,
+        input: { ...codeCapabilities, activeMode },
+        customization: untouched,
+      });
+      expect(layout.rows[0]).toBe(descriptor);
+    }
+  });
+});
+
+describe("sidebar destination preference helpers", () => {
+  it("records only deviations from the default visibility", () => {
+    const hidden = setSidebarDestinationVisibility(untouched, "inbox", "hidden");
+    expect(hidden.visibility).toEqual([{ id: "inbox", visibility: "hidden" }]);
+    expect(setSidebarDestinationVisibility(hidden, "inbox", "shown").visibility).toEqual([]);
+
+    const promoted = setSidebarDestinationVisibility(untouched, "plugins", "shown");
+    expect(promoted.visibility).toEqual([{ id: "plugins", visibility: "shown" }]);
+    expect(setSidebarDestinationVisibility(promoted, "plugins", "menu").visibility).toEqual([]);
+  });
+
+  it("reports the effective visibility a reader of the sidebar sees", () => {
+    const customized = {
+      order: [],
+      visibility: [
+        { id: "inbox", visibility: "hidden" },
+        { id: "plugins", visibility: "shown" },
+      ],
+    } as const;
+    expect(sidebarDestinationVisibility(customized, "inbox")).toBe("hidden");
+    expect(sidebarDestinationVisibility(customized, "plugins")).toBe("shown");
+    expect(sidebarDestinationVisibility(customized, "automations")).toBe("menu");
+    expect(sidebarDestinationVisibility(untouched, "inbox")).toBe("shown");
+  });
+
+  it("swaps a destination with its neighbour and stores only the arrangement that differs", () => {
+    const moved = moveSidebarDestination(untouched, "inbox", "down");
+    expect(moved.order[0]).toBe("new-thread");
+    expect(moved.order.slice(1, 3)).toEqual(["board", "inbox"]);
+    const restored = moveSidebarDestination(moved, "inbox", "up");
+    expect(
+      sidebarDestinationOrder(restored)
+        .map((destination) => destination.id)
+        .slice(0, 3),
+    ).toEqual(["new-thread", "inbox", "board"]);
+    // Back at the untouched shell, nothing deviates from canonical order.
+    expect(restored.order).toEqual([]);
+  });
+});
 
 describe("buildSidebarNavigation", () => {
   it.each([

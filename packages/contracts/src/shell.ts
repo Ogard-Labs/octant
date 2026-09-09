@@ -139,6 +139,58 @@ export type SplitRatio = typeof SplitRatio.Type;
 export const ModeSwitcherPresentation = Schema.Literal("buttons", "dropdown");
 export type ModeSwitcherPresentation = typeof ModeSwitcherPresentation.Type;
 
+/**
+ * A destination the sidebar can offer, named for what the person using the
+ * shell wants rather than for the per-mode row that renders it: one
+ * "new-thread" destination covers the Chat, Work, and Code creators.
+ */
+export const SidebarDestinationId = Schema.Literal(
+  "new-thread",
+  "inbox",
+  "board",
+  "pull-requests",
+  "github-issues",
+  "linear-issues",
+  "projects",
+  "agents",
+  "automations",
+  "artifact-library",
+  "image-library",
+  "plugins",
+);
+export type SidebarDestinationId = typeof SidebarDestinationId.Type;
+
+export const SidebarDestinationVisibility = Schema.Literal("shown", "hidden");
+export type SidebarDestinationVisibility = typeof SidebarDestinationVisibility.Type;
+
+export const SidebarDestinationPreference = Schema.Struct({
+  id: SidebarDestinationId,
+  visibility: SidebarDestinationVisibility,
+}).annotations(strict);
+export type SidebarDestinationPreference = typeof SidebarDestinationPreference.Type;
+
+/**
+ * How the person reordered and hid sidebar destinations. `order` lists
+ * destinations in the requested row order; unlisted destinations follow the
+ * shell's canonical order. A visibility entry exists only where the person
+ * moved away from the default placement: primary rows show until hidden, and
+ * workspace destinations stay in the account menu until promoted.
+ */
+export const SidebarDestinationCustomization = Schema.Struct({
+  order: Schema.Array(SidebarDestinationId),
+  visibility: Schema.Array(SidebarDestinationPreference),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (customization) =>
+        new Set(customization.order).size === customization.order.length &&
+        new Set(customization.visibility.map((entry) => entry.id)).size ===
+          customization.visibility.length,
+    ),
+  );
+export type SidebarDestinationCustomization = typeof SidebarDestinationCustomization.Type;
+
 /** How the Code sidebar offers its saved project views: a dropdown or inline icon buttons. */
 export const ProjectViewSwitcherPresentation = Schema.Literal("dropdown", "inline");
 export type ProjectViewSwitcherPresentation = typeof ProjectViewSwitcherPresentation.Type;
@@ -307,6 +359,14 @@ export const ShellSettings = Schema.Struct({
   }),
   sidebarBackground: Schema.optionalWith(SidebarBackground, {
     default: () => DEFAULT_SIDEBAR_BACKGROUND,
+  }),
+  /**
+   * Which sidebar destinations are visible and in what order. A store
+   * persisted before customization shipped decodes to the untouched shell:
+   * default rows, workspace destinations in the account menu.
+   */
+  sidebarDestinations: Schema.optionalWith(SidebarDestinationCustomization, {
+    default: () => ({ order: [], visibility: [] }),
   }),
   environmentPresentationByMode: Schema.optionalWith(EnvironmentPresentationByMode, {
     default: () => DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE,
