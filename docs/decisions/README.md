@@ -116,6 +116,7 @@ distilled successor of the earlier long-form design specifications.
 | [0102](0102-local-provider-usage-history.md) | Local provider usage history | Accepted |
 | [0103](0103-a-window-capability-travels-only-over-tls-or-loopback.md) | A window capability travels only over TLS or loopback | Accepted |
 | [0104](0104-harness-delegated-approvals.md) | Harness-delegated approvals as a per-thread pass-through | Accepted |
+| [0105](0105-keyboard-focus-draws-one-neutral-edge.md) | Keyboard focus draws one neutral edge | Accepted |
 
 ## Adding an ADR
 

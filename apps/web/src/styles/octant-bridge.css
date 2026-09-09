@@ -119,7 +119,19 @@
 
   /* ─── focus and scrim ───────────────────────────────────────────────
      The focus role stays available to imported themes and accent tints, but
-     the application does not paint a focus halo around controls. */
+     it is never painted as the indicator: a themed focus colour would put a
+     coloured halo back around every control (0094).
+
+     The edge keyboard focus does paint is mixed from the foreground instead
+     (0105). Because the mix keeps its alpha, it composites against whatever
+     surface the control sits on and holds about 4.9:1 there in both schemes,
+     which a fixed hex could not do across the workspace, the sidebar, and the
+     control fill at once. */
+  --oct-focus-edge: color-mix(in srgb, var(--oct-fg) 62%, transparent);
+  /* A control filled with the accent is the one place the edge above lands on
+     its own colour and disappears, because the accent and the foreground are
+     the same ink. There it inverts to the accent's own foreground. */
+  --oct-focus-edge-on-accent: color-mix(in srgb, var(--octant-primary-foreground) 62%, transparent);
   --oct-focus-ring:
     0 0 0 1px var(--octant-workspace), 0 0 0 2px color-mix(in srgb, var(--oct-fg) 62%, transparent);
   /* The theme role is an opaque hex by contract, so the wash is mixed here:

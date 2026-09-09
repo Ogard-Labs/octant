@@ -428,12 +428,42 @@ h3,
 h4 {
   text-wrap: balance;
 }
-/* Focus remains keyboard-addressable without painting a halo around controls.
-   Selected and expanded states supply the visible cue where a control has a
-   state of its own. */
+/* Keyboard focus draws one neutral edge on every control, declared here and
+   nowhere else (0105). It is an outline, so it never moves layout and works on
+   a control that has no border of its own; it is inset, so a dense row or a
+   scrolling container cannot clip it. A pointer press does not match
+   :focus-visible, so clicking still paints nothing.
+
+   Selected, expanded, and checked fills remain state cues. They were the only
+   cue under 0094 and could not carry focus: the fill a ghost control receives
+   is a 1.23:1 step on the workspace, and four button variants had none. */
 :focus-visible {
+  outline: 1px solid var(--oct-focus-edge);
+  outline-offset: -1px;
+}
+
+/* A filled accent control inverts the edge so it stays visible on its own
+   fill: the primary button, a checked switch, a checked checkbox. This is the
+   same indicator in the same place, only inked to survive the surface under
+   it. Declared here rather than in the recipes because the global rule above
+   is unlayered and would otherwise win over a Tailwind focus utility. */
+[data-slot="button"][data-variant="default"]:focus-visible,
+[data-slot="switch"][data-checked]:focus-visible,
+.octant-checkbox:checked:focus-visible {
+  outline-color: var(--oct-focus-edge-on-accent);
+}
+
+/* A container that takes focus only to hold the keyboard shows no edge of its
+   own; the item inside it that the user is on shows one. */
+.octant-menu__positioner:focus-visible,
+.octant-menu__popup:focus-visible,
+.octant-dialog__popup:focus-visible,
+.octant-preview-card:focus-visible,
+.model-picker__listbox:focus-visible,
+.execution-context-picker__listbox:focus-visible,
+.settings-search-results:focus-visible,
+.zen-surface:focus-visible {
   outline: none;
-  box-shadow: none;
 }
 
 /* ─── layout primitives ─────────────────────────────────────────────── */
