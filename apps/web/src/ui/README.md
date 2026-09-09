@@ -20,8 +20,9 @@ them inside feature stylesheets.
 
 `ui/shadcn` contains the owned shadcn recipe implementations; import product
 primitives from `ui/base`, not from `ui/shadcn`, inside features. The recipes
-use the repository's Base UI interaction primitives while retaining shadcn's
-New York composition and semantic Tailwind variables.
+follow shadcn's Base UI-native style (`base-nova`), so they use the
+repository's Base UI interaction primitives and shadcn's semantic Tailwind
+variables without a hand-port from a Radix-era style.
 
 `bun run ui:check` fails closed on new `@base-ui/react` or `ui/shadcn` imports
 outside this directory, on raw `<button>`, `<input>`, `<select>`, `<textarea>`,
