@@ -119,10 +119,23 @@ html[data-octant-native-host="true"]
   right: calc(100% - var(--octant-rendered-sidebar-width));
 }
 
+/* The chrome shares the visual title row with the top drag strip, the pane
+   header, and whatever the workspace column paints under it; its controls
+   explicitly opt out of dragging and the unused rail stays draggable
+   underneath. The chrome must outrank every one of them outright — while it
+   merely tied the pane header, the header won on document order and covered
+   every control in this row, and at 4 it lost outright to the rail reader
+   layers (Board, Inbox, pull requests, issues, Archive), which take z-index 5
+   from a positioned parent that is not a stacking context. Pointer clicks on
+   the dock and bottom-panel toggles then landed on the reader, so the one
+   documented way back out of a reader was keyboard-only. Stay at top: 0 so
+   the compact row lines up with AppKit's default hiddenInset lights; a
+   downward shift was compensating for a custom trafficLightPosition that
+   enlarged the native overlay and ate the whole row. */
 .shell-frame > .window-chrome {
   position: relative;
   top: 0;
-  z-index: 4;
+  z-index: 7;
   display: flex;
   min-width: 0;
   height: var(--oct-title-rail-h);
@@ -133,18 +146,6 @@ html[data-octant-native-host="true"]
   background: transparent;
   border-bottom: 0;
   pointer-events: none;
-}
-
-/* Native controls share the visual title row with the top drag strip and the
-   pane header. They sit above both and explicitly opt out of dragging; the
-   unused rail remains draggable underneath. The chrome must outrank the pane
-   header outright — while the two merely tied, the header won on document
-   order and covered every control in this row. Stay at top: 0 so the compact
-   row lines up with AppKit's default hiddenInset lights; a downward shift was
-   compensating for a custom trafficLightPosition that enlarged the native
-   overlay and ate the whole row. */
-html[data-octant-native-host="true"] .shell-frame > .window-chrome {
-  z-index: 7;
 }
 
 .shell.shell-frame.shell--sidebar-collapsed {
