@@ -297,11 +297,10 @@ async function readLocalUsageHistoryImpl(
       removeFileRecords(sourceInstallationId, file);
       clearScanOffsetForFile(sourceInstallationId, file);
     }
-    if (
-      fileCursors.get(sourceInstallationId) !== undefined &&
-      deletedFiles.includes(fileCursors.get(sourceInstallationId)!)
-    )
+    const cursorFile = fileCursors.get(sourceInstallationId);
+    if (cursorFile !== undefined && deletedFiles.includes(cursorFile)) {
       fileCursors.delete(sourceInstallationId);
+    }
   }
   fileSeen.set(sourceInstallationId, seen);
   let truncated = collected.truncated;

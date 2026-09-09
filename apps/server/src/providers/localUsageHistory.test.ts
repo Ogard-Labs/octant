@@ -520,6 +520,10 @@ describe("local provider usage history", () => {
     expect(second.records.map((record) => record.sourceEventId)).toEqual(["first", "second"]);
     expect(second.coverage.status).toBe("ready");
     expect(second.coverage.hasMore).toBe(false);
+    const unchanged = await readLocalUsageHistory(options, request, parser as never);
+    expect(unchanged.records).toHaveLength(2);
+    expect(unchanged.coverage.scannedFileCount).toBe(0);
+    expect(unchanged.coverage.status).toBe("ready");
   });
 
   it("prioritizes the newest files when a bounded file-count window applies", async () => {
@@ -659,6 +663,36 @@ describe("local provider usage history", () => {
     expect(first.records).toHaveLength(1);
     expect(second.records.map((record) => record.sourceEventId)).toEqual(["first", "second"]);
     expect(second.coverage.status).toBe("ready");
+  });
+
+  it("resumes a trailing partial JSON record after the file is appended", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-history-partial-append-"));
+    const file = join(root, "events.jsonl");
+    const parser = ({ line }: { readonly line: string }) => {
+      const marker = JSON.parse(line).marker;
+      return {
+        sourceKind: "fixture",
+        sourceInstallationId: "fixture-install",
+        sourceSessionId: "fixture-session",
+        sourceEventId: marker,
+        providerKey: "fixture",
+        modelId: "fixture",
+        observedAt: "2026-09-09T12:00:00.000Z" as never,
+        inputTokens: 1,
+        outputTokens: 1,
+      };
+    };
+    await writeFile(file, JSON.stringify({ marker: "first" }));
+    const options = { sourceKind: "fixture" as never, providerKey: "fixture", root };
+    const first = await readLocalUsageHistory(options, request, parser as never);
+    appendFileSync(file, `\n{"marker":"second`);
+    const partial = await readLocalUsageHistory(options, request, parser as never);
+    expect(partial.records.map((record) => record.sourceEventId)).toEqual(["first"]);
+    expect(partial.coverage.hasMore).toBe(true);
+    appendFileSync(file, `"}`);
+    const complete = await readLocalUsageHistory(options, request, parser as never);
+    expect(complete.records.map((record) => record.sourceEventId)).toEqual(["first", "second"]);
+    expect(complete.coverage.hasMore).toBe(false);
   });
 
   it("reports partial coverage for malformed input and does not follow symlinks", async () => {
