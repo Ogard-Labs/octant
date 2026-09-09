@@ -612,20 +612,53 @@ describe("local provider usage history", () => {
         outputTokens: 1,
       };
     };
+    const stable = join(root, "stable.jsonl");
     await writeFile(file, JSON.stringify({ marker: "old" }));
-    const options = { sourceKind: "fixture" as never, providerKey: "fixture", root };
+    await writeFile(stable, JSON.stringify({ marker: "stable" }));
+    const options = { sourceKind: "fixture" as never, providerKey: "fixture", root, maxFiles: 2 };
     const first = await readLocalUsageHistory(options, request, parser as never);
-    expect(first.records.map((record) => record.sourceEventId)).toEqual(["old"]);
+    expect(first.records.map((record) => record.sourceEventId)).toEqual(
+      expect.arrayContaining(["old", "stable"]),
+    );
     await writeFile(file, "");
     const empty = await readLocalUsageHistory(options, request, parser as never);
-    expect(empty.records).toHaveLength(0);
+    expect(empty.records.map((record) => record.sourceEventId)).toEqual(["stable"]);
     expect(empty.coverage.status).toBe("partial");
     expect(empty.coverage.hasMore).toBe(false);
     await writeFile(file, JSON.stringify({ marker: "new" }));
     const second = await readLocalUsageHistory(options, request, parser as never);
-    expect(second.records.map((record) => record.sourceEventId)).toEqual(["new"]);
-    expect(second.coverage.status).toBe("partial");
+    expect(second.records.map((record) => record.sourceEventId)).toEqual(
+      expect.arrayContaining(["new", "stable"]),
+    );
+    expect(second.coverage.status).toBe("ready");
     expect(second.coverage.hasMore).toBe(false);
+  });
+
+  it("keeps cached records when a small append extends the file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-history-append-"));
+    const file = join(root, "events.jsonl");
+    const parser = ({ line }: { readonly line: string }) => {
+      const marker = JSON.parse(line).marker;
+      return {
+        sourceKind: "fixture",
+        sourceInstallationId: "fixture-install",
+        sourceSessionId: "fixture-session",
+        sourceEventId: marker,
+        providerKey: "fixture",
+        modelId: "fixture",
+        observedAt: "2026-09-09T12:00:00.000Z" as never,
+        inputTokens: 1,
+        outputTokens: 1,
+      };
+    };
+    await writeFile(file, JSON.stringify({ marker: "first" }));
+    const options = { sourceKind: "fixture" as never, providerKey: "fixture", root };
+    const first = await readLocalUsageHistory(options, request, parser as never);
+    appendFileSync(file, `\n${JSON.stringify({ marker: "second" })}`);
+    const second = await readLocalUsageHistory(options, request, parser as never);
+    expect(first.records).toHaveLength(1);
+    expect(second.records.map((record) => record.sourceEventId)).toEqual(["first", "second"]);
+    expect(second.coverage.status).toBe("ready");
   });
 
   it("reports partial coverage for malformed input and does not follow symlinks", async () => {

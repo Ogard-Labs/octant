@@ -32,6 +32,7 @@ const scanOffsets = new Map<
     readonly dev: number;
     readonly ino: number;
     readonly prefixRevision: string;
+    readonly prefixLength: number;
   }
 >();
 const fileIdentities = new Map<
@@ -42,12 +43,14 @@ const fileIdentities = new Map<
     readonly dev: number;
     readonly ino: number;
     readonly prefixRevision: string;
+    readonly prefixLength: number;
   }
 >();
 const fileCursors = new Map<string, string>();
 const fileSeen = new Map<string, Set<string>>();
 /** Bounded records let a later refresh aggregate chunks already scanned this process. */
 const recordCaches = new Map<string, Map<string, LocalUsageHistoryRecord>>();
+const recordOwners = new Map<string, Map<string, Set<string>>>();
 const recordCacheTruncated = new Set<string>();
 interface ActiveRead {
   readonly operation: Promise<LocalUsageHistoryReadResult>;
@@ -283,20 +286,27 @@ async function readLocalUsageHistoryImpl(
   const scanOrder = pendingFiles.concat(rotatedFiles.filter((file) => !pendingSet.has(file)));
   const selected = scanOrder.slice(0, maxFiles);
   const seen = fileSeen.get(sourceInstallationId) ?? new Set<string>();
-  let cacheInvalidated = [...seen].some((file) => !files.includes(file));
+  const deletedFiles = [...seen].filter((file) => !files.includes(file));
+  let cacheInvalidated = deletedFiles.length > 0;
   let parserInvalidated = false;
   if (cacheInvalidated) {
     parserInvalidated = true;
     options.onSourceInvalidated?.();
-    seen.clear();
-    fileCursors.delete(sourceInstallationId);
-    recordCaches.delete(sourceInstallationId);
-    recordCacheTruncated.delete(sourceInstallationId);
-    clearScanOffsets(sourceInstallationId);
+    for (const file of deletedFiles) {
+      seen.delete(file);
+      removeFileRecords(sourceInstallationId, file);
+      clearScanOffsetForFile(sourceInstallationId, file);
+    }
+    if (
+      fileCursors.get(sourceInstallationId) !== undefined &&
+      deletedFiles.includes(fileCursors.get(sourceInstallationId)!)
+    )
+      fileCursors.delete(sourceInstallationId);
   }
   fileSeen.set(sourceInstallationId, seen);
   let truncated = collected.truncated;
   const records: LocalUsageHistoryRecord[] = [];
+  const recordPaths = new Map<string, Set<string>>();
   const processedPaths = new Set<string>();
   let scannedFileCount = 0;
   let omittedRecordCount = collected.truncated ? 1 : 0;
@@ -325,8 +335,9 @@ async function readLocalUsageHistoryImpl(
         continue;
       }
       const cursorKey = `${sourceInstallationId}\0${resolvedFilePath}`;
-      const prefixRevision = await filePrefixRevision(handle, fileSize);
       const previous = scanOffsets.get(cursorKey) ?? fileIdentities.get(cursorKey);
+      const prefixLength = Math.min(previous?.size ?? fileSize, 4096);
+      const prefixRevision = await filePrefixRevision(handle, fileSize, prefixLength);
       const replaced =
         previous !== undefined &&
         (fileSize < previous.size ||
@@ -340,8 +351,7 @@ async function readLocalUsageHistoryImpl(
           options.onSourceInvalidated?.();
         }
         scanOffsets.delete(cursorKey);
-        recordCaches.delete(sourceInstallationId);
-        recordCacheTruncated.delete(sourceInstallationId);
+        removeFileRecords(sourceInstallationId, resolvedFilePath);
       }
       if (fileSize === 0) {
         processedFile = true;
@@ -351,6 +361,7 @@ async function readLocalUsageHistoryImpl(
           dev: fileStat.dev,
           ino: fileStat.ino,
           prefixRevision,
+          prefixLength,
         });
         continue;
       }
@@ -431,7 +442,12 @@ async function readLocalUsageHistoryImpl(
               omittedRecordCount += 1;
               continue;
             }
-            records.push(decodeLocalUsageHistoryRecord(record));
+            const decodedRecord = decodeLocalUsageHistoryRecord(record);
+            records.push(decodedRecord);
+            const decodedKey = recordKey(decodedRecord);
+            const paths = recordPaths.get(decodedKey) ?? new Set<string>();
+            paths.add(resolvedFilePath);
+            recordPaths.set(decodedKey, paths);
           } catch {
             omittedRecordCount += 1;
           }
@@ -449,6 +465,7 @@ async function readLocalUsageHistoryImpl(
           dev: fileStat.dev,
           ino: fileStat.ino,
           prefixRevision,
+          prefixLength,
         };
         fileIdentities.set(cursorKey, identity);
         if (nextOffset >= fileSize) scanOffsets.delete(cursorKey);
@@ -476,15 +493,22 @@ async function readLocalUsageHistoryImpl(
     key.startsWith(`${sourceInstallationId}\0`),
   );
   truncated = collected.truncated || hasPendingFiles || hasPendingChunks;
-  if (cacheInvalidated) {
-    truncated = true;
-    seen.clear();
-    for (const file of processedPaths) seen.add(file);
-  }
+  if (cacheInvalidated) truncated = true;
   const recordCache = recordCaches.get(sourceInstallationId) ?? new Map();
   recordCaches.set(sourceInstallationId, recordCache);
+  const owners = recordOwners.get(sourceInstallationId) ?? new Map<string, Set<string>>();
+  recordOwners.set(sourceInstallationId, owners);
   for (const record of records) {
-    recordCache.set(`${record.sourceSessionId}\0${record.sourceEventId}`, record);
+    const key = recordKey(record);
+    recordCache.set(key, record);
+    const paths = recordPaths.get(key);
+    if (paths !== undefined) {
+      for (const path of paths) {
+        const keys = owners.get(path) ?? new Set<string>();
+        keys.add(key);
+        owners.set(path, keys);
+      }
+    }
   }
   if (recordCache.size > cacheCapacity) {
     const newest = [...recordCache.entries()]
@@ -494,8 +518,13 @@ async function readLocalUsageHistoryImpl(
           leftKey.localeCompare(rightKey),
       )
       .slice(0, cacheCapacity);
+    const retained = new Set(newest.map(([key]) => key));
     recordCache.clear();
     for (const [key, record] of newest) recordCache.set(key, record);
+    for (const [path, keys] of owners) {
+      for (const key of keys) if (!retained.has(key)) keys.delete(key);
+      if (keys.size === 0) owners.delete(path);
+    }
     recordCacheTruncated.add(sourceInstallationId);
   }
   const from = Date.parse(String(request.from));
@@ -553,11 +582,35 @@ async function readLocalUsageHistoryImpl(
 async function filePrefixRevision(
   handle: Awaited<ReturnType<typeof open>>,
   fileSize: number,
+  prefixLength: number,
 ): Promise<string> {
-  const length = Math.min(fileSize, 4096);
+  const length = Math.min(fileSize, prefixLength);
   const buffer = Buffer.allocUnsafe(length);
   const result = await handle.read(buffer, 0, length, 0);
   return createHash("sha256").update(buffer.subarray(0, result.bytesRead)).digest("hex");
+}
+
+function recordKey(record: LocalUsageHistoryRecord): string {
+  return `${record.sourceSessionId}\0${record.sourceEventId}`;
+}
+
+function removeFileRecords(sourceInstallationId: string, filePath: string): void {
+  const owners = recordOwners.get(sourceInstallationId);
+  const cache = recordCaches.get(sourceInstallationId);
+  const keys = owners?.get(filePath);
+  if (keys === undefined) return;
+  owners?.delete(filePath);
+  for (const key of keys) {
+    const stillOwned = owners !== undefined && [...owners.values()].some((owned) => owned.has(key));
+    if (!stillOwned) cache?.delete(key);
+  }
+  if (owners?.size === 0) recordOwners.delete(sourceInstallationId);
+}
+
+function clearScanOffsetForFile(sourceInstallationId: string, filePath: string): void {
+  const key = `${sourceInstallationId}\0${filePath}`;
+  scanOffsets.delete(key);
+  fileIdentities.delete(key);
 }
 
 function clearScanOffsets(sourceInstallationId: string): void {
@@ -578,6 +631,7 @@ function trackSource(sourceInstallationId: string): void {
       fileSeen.delete(oldest);
       fileCursors.delete(oldest);
       recordCaches.delete(oldest);
+      recordOwners.delete(oldest);
       recordCacheTruncated.delete(oldest);
       const prefix = `${oldest}\0`;
       for (const key of scanOffsets.keys()) {
