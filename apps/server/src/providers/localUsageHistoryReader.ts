@@ -665,7 +665,11 @@ async function collectFiles(
   let truncated = false;
   let visitedDirectories = 0;
   const visit = async (directory: string): Promise<void> => {
-    if (files.length >= limit || visitedDirectories >= maxDirectories) {
+    if (files.length >= limit) {
+      truncated = true;
+      return;
+    }
+    if (visitedDirectories >= maxDirectories) {
       truncated = true;
       return;
     }
@@ -679,7 +683,7 @@ async function collectFiles(
       return;
     }
     for (const entry of entries) {
-      if (files.length >= limit || visitedDirectories >= maxDirectories) {
+      if (files.length >= limit) {
         truncated = true;
         return;
       }
