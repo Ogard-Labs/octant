@@ -370,10 +370,10 @@ function normalizeCodexServiceLimits(
       ? "exhausted"
       : result.ordinaryUsageAllowed === true
         ? "available"
-        : windows.length === 0
-          ? "unknown"
-          : reached
-            ? "exhausted"
+        : reached
+          ? "exhausted"
+          : windows.length === 0
+            ? "unknown"
             : "available";
   return decodeProviderServiceLimits({
     providerInstanceId,

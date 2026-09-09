@@ -524,6 +524,19 @@ describe("Codex driver probe and runtime lifecycle", () => {
     });
   });
 
+  it("retains an explicit account exhaustion state without inventing window buckets", async () => {
+    const f = fixture({
+      rateLimits: { rateLimitReachedType: "rate_limit_reached" },
+    });
+    const facts = makeCodexDriver(f.options({ idleLeaseMs: 0 })).contextFacts;
+    if (facts === undefined) throw new Error("Expected Codex context facts.");
+    const limits = await Effect.runPromise(
+      Effect.scoped(facts.observeServiceLimits({ instanceId })),
+    );
+    expect(limits).toMatchObject({ quota: "exhausted", confidence: "unknown" });
+    expect(limits.rateLimitWindows).toBeUndefined();
+  });
+
   it("cancels an in-flight account read and closes its runtime lease", async () => {
     const f = fixture({
       rateLimitsRead: () => new Promise<CodexRateLimitsReadResult>(() => undefined),
