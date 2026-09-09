@@ -290,16 +290,16 @@ async function readLocalUsageHistoryImpl(
     clearScanOffsets(sourceInstallationId);
   }
   fileSeen.set(sourceInstallationId, seen);
-  for (const file of selected) seen.add(file);
-  if (selected.length > 0) fileCursors.set(sourceInstallationId, selected[selected.length - 1]!);
-  let truncated = collected.truncated || files.some((file) => !seen.has(file));
+  let truncated = collected.truncated;
   const records: LocalUsageHistoryRecord[] = [];
+  const processedPaths = new Set<string>();
   let scannedFileCount = 0;
-  let omittedRecordCount = truncated ? 1 : 0;
+  let omittedRecordCount = collected.truncated ? 1 : 0;
   let scannedBytes = 0;
   let failed = collected.failed;
   for (const filePath of selected) {
     throwIfAborted(signal);
+    let processedFile = false;
     let handle: Awaited<ReturnType<typeof open>> | undefined;
     try {
       const resolvedFilePath = await realpath(filePath);
@@ -314,6 +314,7 @@ async function readLocalUsageHistoryImpl(
       if (!fileStat.isFile()) throw new Error("history path is not a regular file");
       const fileSize = fileStat.size;
       if (!Number.isSafeInteger(fileSize)) {
+        processedFile = true;
         omittedRecordCount += 1;
         failed = true;
         continue;
@@ -338,6 +339,7 @@ async function readLocalUsageHistoryImpl(
         recordCacheTruncated.delete(sourceInstallationId);
       }
       if (fileSize === 0) {
+        processedFile = true;
         fileIdentities.set(cursorKey, {
           offset: 0,
           size: 0,
@@ -381,6 +383,7 @@ async function readLocalUsageHistoryImpl(
       const sessionHint = sessionHintForPath(relativePath);
       let lineNumber = 0;
       let lineOffset = startOffset;
+      processedFile = true;
       const stream = createReadStream(resolvedFilePath, {
         encoding: "utf8",
         fd: handle.fd,
@@ -451,16 +454,27 @@ async function readLocalUsageHistoryImpl(
       }
     } catch (error) {
       if (signal?.aborted) throw error;
+      processedFile = true;
       omittedRecordCount += 1;
       failed = true;
     } finally {
+      if (processedFile) {
+        processedPaths.add(filePath);
+        seen.add(filePath);
+        fileCursors.set(sourceInstallationId, filePath);
+      }
       if (handle !== undefined) await handle.close().catch(() => undefined);
     }
   }
+  const hasPendingFiles = files.some((file) => !seen.has(file));
+  const hasPendingChunks = [...scanOffsets.keys()].some((key) =>
+    key.startsWith(`${sourceInstallationId}\0`),
+  );
+  truncated = collected.truncated || hasPendingFiles || hasPendingChunks;
   if (cacheInvalidated) {
     truncated = true;
     seen.clear();
-    for (const file of selected) seen.add(file);
+    for (const file of processedPaths) seen.add(file);
   }
   const recordCache = recordCaches.get(sourceInstallationId) ?? new Map();
   recordCaches.set(sourceInstallationId, recordCache);
@@ -489,12 +503,7 @@ async function readLocalUsageHistoryImpl(
   if (recordCacheTruncated.has(sourceInstallationId)) {
     truncated = true;
   }
-  const hasPendingFiles = files.some((file) => !seen.has(file));
-  const hasPendingChunks = [...scanOffsets.keys()].some((key) =>
-    key.startsWith(`${sourceInstallationId}\0`),
-  );
   const hasMore =
-    !failed &&
     !collected.truncated &&
     !recordCacheTruncated.has(sourceInstallationId) &&
     (hasPendingFiles || hasPendingChunks);

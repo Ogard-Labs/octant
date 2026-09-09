@@ -149,6 +149,31 @@ describe("local provider usage history", () => {
     expect(result.coverage.scannedFileCount).toBe(2);
   });
 
+  it("leaves unvisited files pending when the per-pass byte budget is exhausted", async () => {
+    const root = await codexFixtureRoot("octant-codex-byte-budget-");
+    const usage = (session: string) =>
+      JSON.stringify({
+        timestamp: "2026-09-09T10:00:00.000Z",
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          thread_id: session,
+          info: { last_token_usage: { input_tokens: 10, output_tokens: 3 } },
+        },
+      });
+    const body = (session: string) => `${usage(session)}\n${"x".repeat(300 * 1024)}\n`;
+    await writeFile(join(root, "sessions", "a.jsonl"), body("session-a"));
+    await writeFile(join(root, "sessions", "b.jsonl"), body("session-b"));
+    const options = { maxFiles: 1, maxTotalBytes: 350 * 1024 };
+    const source = createCodexLocalUsageHistorySource({ root, ...options });
+    const first = await Effect.runPromise(source.read(request));
+    expect(first.records).toHaveLength(1);
+    expect(first.coverage.hasMore).toBe(true);
+    const second = await Effect.runPromise(source.read(request));
+    expect(second.records).toHaveLength(2);
+    expect(second.coverage.hasMore).toBe(false);
+  });
+
   it("keeps no-identity Codex events distinct by timestamp and line position", async () => {
     const root = await codexFixtureRoot("octant-codex-no-identity-");
     const makeLine = (timestamp: string) =>
