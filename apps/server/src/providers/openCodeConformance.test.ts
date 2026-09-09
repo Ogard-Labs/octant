@@ -20,6 +20,20 @@ const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000202"
 const modelId = "anthropic/claude-sonnet" as ProviderModelId;
 const projectRoot = "/tmp/octant-conformance";
 
+async function withProcessPlatform<T>(
+  platform: NodeJS.Platform,
+  action: () => Promise<T>,
+): Promise<T> {
+  const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+  if (descriptor === undefined) throw new Error("Expected a process platform descriptor.");
+  Object.defineProperty(process, "platform", { ...descriptor, value: platform });
+  try {
+    return await action();
+  } finally {
+    Object.defineProperty(process, "platform", descriptor);
+  }
+}
+
 describe("OpenCode provider conformance", () => {
   it("passes the provider-neutral lifecycle, capability, resume, and cleanup harness", async () => {
     const source = new EventSourceFixture();
@@ -141,42 +155,44 @@ describe("OpenCode provider conformance", () => {
       },
       isReleased: () => released,
     });
-    const chatEvidence = await runProviderChatConformance({
-      driver,
-      probeInput: { instanceId },
-      acquireInput: { instanceId, projectRoot },
-      sessionStart: {
-        sessionId,
-        modelId,
-        executionPolicy: "approval-gated",
-        tools: [
-          {
-            name: "octant_web_research",
-            inputSchema: {
-              type: "object",
-              properties: { query: { type: "string" } },
-              required: ["query"],
+    const chatEvidence = await withProcessPlatform("darwin", () =>
+      runProviderChatConformance({
+        driver,
+        probeInput: { instanceId },
+        acquireInput: { instanceId, projectRoot },
+        sessionStart: {
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          tools: [
+            {
+              name: "octant_web_research",
+              inputSchema: {
+                type: "object",
+                properties: { query: { type: "string" } },
+                required: ["query"],
+              },
             },
-          },
-        ],
-      },
-      turn: {
-        sessionId,
-        prompt: "hello",
-        attachments: [],
-        tools: [
-          {
-            name: "octant_web_research",
-            inputSchema: {
-              type: "object",
-              properties: { query: { type: "string" } },
-              required: ["query"],
+          ],
+        },
+        turn: {
+          sessionId,
+          prompt: "hello",
+          attachments: [],
+          tools: [
+            {
+              name: "octant_web_research",
+              inputSchema: {
+                type: "object",
+                properties: { query: { type: "string" } },
+                required: ["query"],
+              },
             },
-          },
-        ],
-      },
-      isReleased: () => released,
-    });
+          ],
+        },
+        isReleased: () => released,
+      }),
+    );
     recordProviderConformanceEvidence("opencode", evidence);
     recordProviderChatConformanceEvidence("opencode", chatEvidence);
     expect(evidence).toEqual({

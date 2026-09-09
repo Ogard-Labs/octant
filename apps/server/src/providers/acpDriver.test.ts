@@ -234,6 +234,20 @@ function fixture(
   };
 }
 
+async function withProcessPlatform<T>(
+  platform: NodeJS.Platform,
+  action: () => Promise<T>,
+): Promise<T> {
+  const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+  if (descriptor === undefined) throw new Error("Expected a process platform descriptor.");
+  Object.defineProperty(process, "platform", { ...descriptor, value: platform });
+  try {
+    return await action();
+  } finally {
+    Object.defineProperty(process, "platform", descriptor);
+  }
+}
+
 async function collectTerminal(
   events: Stream.Stream<ProviderRuntimeEvent, ProviderFailure>,
 ): Promise<ReadonlyArray<ProviderRuntimeEvent>> {
@@ -386,8 +400,10 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       Effect.scoped(fixture(profile).driver.probe({ instanceId })),
     );
     expect(unsupported.capabilities.appManagedTools).toBe("unsupported");
-    const supported = await Effect.runPromise(
-      Effect.scoped(fixture(profile, { mcpHttp: true }).driver.probe({ instanceId })),
+    const supported = await withProcessPlatform("darwin", () =>
+      Effect.runPromise(
+        Effect.scoped(fixture(profile, { mcpHttp: true }).driver.probe({ instanceId })),
+      ),
     );
     expect(supported.capabilities.appManagedTools).toBe("supported");
   });
@@ -426,16 +442,23 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       },
     ] as const;
 
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
-          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated", tools });
-          expect(client.newSession).toHaveBeenCalledWith(projectRoot, [
-            expect.objectContaining({ type: "http", name: "octant-browser" }),
-          ]);
-          yield* connection.stop(sessionId);
-        }),
+    await withProcessPlatform("darwin", () =>
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({
+              sessionId,
+              modelId,
+              executionPolicy: "approval-gated",
+              tools,
+            });
+            expect(client.newSession).toHaveBeenCalledWith(projectRoot, [
+              expect.objectContaining({ type: "http", name: "octant-browser" }),
+            ]);
+            yield* connection.stop(sessionId);
+          }),
+        ),
       ),
     );
     expect(bridgeFactory).toHaveBeenCalledOnce();
@@ -459,27 +482,30 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     const tools = [
       { name: "octant_browser", inputSchema: { type: "object", properties: {} } },
     ] as const;
-    const refusal = await Effect.runPromise(
-      Effect.scoped(
-        Effect.flip(
-          Effect.gen(function* () {
-            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
-            yield* connection.start({
-              sessionId,
-              modelId,
-              executionPolicy: "approval-gated",
-              tools,
-            });
-          }),
+    const refusal = await withProcessPlatform("linux", () =>
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.flip(
+            Effect.gen(function* () {
+              const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+              yield* connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+                tools,
+              });
+            }),
+          ),
         ),
       ),
     );
     expect(refusal).toEqual({
       category: "unsupported",
-      message: "App-managed tools are unsupported by this ACP runtime.",
+      message: "App-managed tools are unsupported by this ACP runtime on this platform.",
     });
     expect(client.newSession).not.toHaveBeenCalled();
-    expect(bridgeClose).toHaveBeenCalledOnce();
+    expect(bridgeFactory).not.toHaveBeenCalled();
+    expect(bridgeClose).not.toHaveBeenCalled();
   });
 
   it("correlates an ACP MCP tool request through the provider SDK answer seam and cancels it", async () => {
@@ -514,43 +540,54 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     const tools = [
       { name: "octant_browser", inputSchema: { type: "object", properties: {} } },
     ] as const;
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
-          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated", tools });
-          if (execute === undefined)
-            throw new Error("ACP managed tool handler was not registered.");
-          const controller = new AbortController();
-          const result = execute("octant_browser", '{"operation":"read-page"}', controller.signal);
-          const stream = yield* connection.subscribe;
-          const requestFiber = yield* Effect.fork(
-            Stream.runCollect(
-              stream.pipe(
-                Stream.filter((event) => event.kind === "tool-request"),
-                Stream.take(1),
+    await withProcessPlatform("darwin", () =>
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({
+              sessionId,
+              modelId,
+              executionPolicy: "approval-gated",
+              tools,
+            });
+            if (execute === undefined)
+              throw new Error("ACP managed tool handler was not registered.");
+            const controller = new AbortController();
+            const result = execute(
+              "octant_browser",
+              '{"operation":"read-page"}',
+              controller.signal,
+            );
+            const stream = yield* connection.subscribe;
+            const requestFiber = yield* Effect.fork(
+              Stream.runCollect(
+                stream.pipe(
+                  Stream.filter((event) => event.kind === "tool-request"),
+                  Stream.take(1),
+                ),
               ),
-            ),
-          );
-          const requestEvents = yield* Fiber.join(requestFiber);
-          const requestEvent = Array.from(requestEvents)[0];
-          if (requestEvent?.kind !== "tool-request") throw new Error("Missing ACP tool request.");
-          const requestSignal = connection.toolRequestSignal?.({
-            sessionId,
-            requestId: requestEvent.requestId,
-          });
-          expect(requestSignal).toBeInstanceOf(AbortSignal);
-          expect(requestSignal).not.toBe(controller.signal);
-          controller.abort();
-          expect(requestSignal?.aborted).toBe(true);
-          yield* Effect.promise(() =>
-            expect(result).resolves.toEqual({
-              resultJson: '{"error":"tool-interrupted"}',
-              isError: true,
-            }),
-          );
-          yield* connection.stop(sessionId);
-        }),
+            );
+            const requestEvents = yield* Fiber.join(requestFiber);
+            const requestEvent = Array.from(requestEvents)[0];
+            if (requestEvent?.kind !== "tool-request") throw new Error("Missing ACP tool request.");
+            const requestSignal = connection.toolRequestSignal?.({
+              sessionId,
+              requestId: requestEvent.requestId,
+            });
+            expect(requestSignal).toBeInstanceOf(AbortSignal);
+            expect(requestSignal).not.toBe(controller.signal);
+            controller.abort();
+            expect(requestSignal?.aborted).toBe(true);
+            yield* Effect.promise(() =>
+              expect(result).resolves.toEqual({
+                resultJson: '{"error":"tool-interrupted"}',
+                isError: true,
+              }),
+            );
+            yield* connection.stop(sessionId);
+          }),
+        ),
       ),
     );
     expect(bridgeClose).toHaveBeenCalledOnce();
