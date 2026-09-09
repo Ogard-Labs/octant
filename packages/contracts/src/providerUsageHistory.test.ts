@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   decodeLocalUsageHistoryRecord,
   decodeLocalUsageHistoryResponse,
+  decodeLocalUsageHistoryRequest,
 } from "./providerUsageHistory";
 
 const record = {
@@ -23,6 +24,23 @@ describe("provider local usage history contracts", () => {
       outputTokens: 5,
     });
     expect(() => decodeLocalUsageHistoryRecord({ ...record, prompt: "secret" })).toThrow();
+  });
+
+  it("rejects inverted ranges and unknown timezones", () => {
+    expect(() =>
+      decodeLocalUsageHistoryRequest({
+        from: "2026-09-10T00:00:00.000Z",
+        to: "2026-09-09T00:00:00.000Z",
+        timeZone: "UTC",
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeLocalUsageHistoryRequest({
+        from: "2026-09-01T00:00:00.000Z",
+        to: "2026-09-09T00:00:00.000Z",
+        timeZone: "Not/AZone",
+      }),
+    ).toThrow();
   });
 
   it("requires host-computed totals and component coverage", () => {

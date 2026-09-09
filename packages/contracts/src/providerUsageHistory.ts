@@ -150,5 +150,16 @@ export type LocalUsageHistoryResponse = typeof LocalUsageHistoryResponse.Type;
 
 export const decodeLocalUsageHistoryRecord = Schema.decodeUnknownSync(LocalUsageHistoryRecord);
 export const decodeLocalUsageHistoryCoverage = Schema.decodeUnknownSync(LocalUsageHistoryCoverage);
-export const decodeLocalUsageHistoryRequest = Schema.decodeUnknownSync(LocalUsageHistoryRequest);
+export function decodeLocalUsageHistoryRequest(value: unknown): LocalUsageHistoryRequest {
+  const decoded = Schema.decodeUnknownSync(LocalUsageHistoryRequest)(value);
+  if (Date.parse(decoded.from) > Date.parse(decoded.to)) {
+    throw new Error("Local usage history range is inverted.");
+  }
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: decoded.timeZone }).format();
+  } catch {
+    throw new Error("Local usage history timezone is invalid.");
+  }
+  return decoded;
+}
 export const decodeLocalUsageHistoryResponse = Schema.decodeUnknownSync(LocalUsageHistoryResponse);

@@ -6,6 +6,7 @@ import { createInterface } from "node:readline";
 import {
   decodeLocalUsageHistoryRecord,
   decodeLocalUsageHistoryCoverage,
+  decodeLocalUsageHistoryRequest,
   type LocalUsageHistoryCoverage,
   type LocalUsageHistoryRecord,
   type LocalUsageHistoryRequest,
@@ -117,6 +118,7 @@ async function readLocalUsageHistoryImpl(
   parse: LocalUsageHistoryLineParser,
   signal?: AbortSignal,
 ): Promise<LocalUsageHistoryReadResult> {
+  decodeLocalUsageHistoryRequest(request);
   const maxFiles = boundedPositive(options.maxFiles ?? DEFAULT_MAX_FILES, DEFAULT_MAX_FILES);
   const maxTotalBytes = boundedPositive(
     options.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES,
@@ -206,7 +208,6 @@ async function readLocalUsageHistoryImpl(
         failed = true;
         continue;
       }
-      if (fileSize === 0) continue;
       const cursorKey = `${sourceInstallationId}\0${resolvedFilePath}`;
       const prefixRevision = await filePrefixRevision(handle, fileSize);
       const previous = scanOffsets.get(cursorKey) ?? fileIdentities.get(cursorKey);
@@ -221,6 +222,16 @@ async function readLocalUsageHistoryImpl(
         scanOffsets.delete(cursorKey);
         recordCaches.delete(sourceInstallationId);
         recordCacheTruncated.delete(sourceInstallationId);
+      }
+      if (fileSize === 0) {
+        fileIdentities.set(cursorKey, {
+          offset: 0,
+          size: 0,
+          dev: fileStat.dev,
+          ino: fileStat.ino,
+          prefixRevision,
+        });
+        continue;
       }
       const startOffset =
         previous === undefined ||

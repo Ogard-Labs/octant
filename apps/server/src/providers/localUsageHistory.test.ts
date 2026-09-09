@@ -450,6 +450,11 @@ describe("local provider usage history", () => {
     const options = { sourceKind: "fixture" as never, providerKey: "fixture", root };
     const first = await readLocalUsageHistory(options, request, parser as never);
     expect(first.records.map((record) => record.sourceEventId)).toEqual(["old"]);
+    await writeFile(file, "");
+    const empty = await readLocalUsageHistory(options, request, parser as never);
+    expect(empty.records).toHaveLength(0);
+    expect(empty.coverage.status).toBe("partial");
+    expect(empty.coverage.hasMore).toBe(false);
     await writeFile(file, JSON.stringify({ marker: "new" }));
     const second = await readLocalUsageHistory(options, request, parser as never);
     expect(second.records.map((record) => record.sourceEventId)).toEqual(["new"]);

@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import {
   decodeLocalUsageHistoryResponse,
+  decodeLocalUsageHistoryRequest,
   type LocalUsageHistoryCostTotals,
   type LocalUsageHistoryCoverage,
   type LocalUsageHistoryGroup,
@@ -81,6 +82,7 @@ export async function readLocalUsageHistoryDashboard(input: {
   readonly queryAt: string;
   readonly signal?: AbortSignal;
 }): Promise<LocalUsageHistoryResponse> {
+  decodeLocalUsageHistoryRequest(input.request);
   const results = await Promise.all(
     input.sources.map((source) =>
       Effect.runPromise(

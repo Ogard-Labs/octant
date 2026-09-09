@@ -62,8 +62,13 @@ export function createLocalUsageHistoryRouteHandler(
     } catch {
       return failure("Usage history request is invalid.", 400, origin);
     }
+    let decoded;
     try {
-      const decoded = decodeLocalUsageHistoryRequest(body);
+      decoded = decodeLocalUsageHistoryRequest(body);
+    } catch {
+      return failure("Usage history request range or timezone is invalid.", 400, origin);
+    }
+    try {
       const sources =
         typeof dependencies.sources === "function" ? dependencies.sources() : dependencies.sources;
       const response: LocalUsageHistoryResponse = await readLocalUsageHistoryDashboard({
