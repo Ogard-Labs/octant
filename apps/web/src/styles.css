@@ -1115,9 +1115,14 @@ h6 {
 }
 
 /* A Project name is a section header over its thread rows, not a row among
-   them: generous room above each header, none below, and no per-row seams. */
+   them: generous room above each header, none below, and no per-row seams.
+
+   2px was the same step the thread rows inside a Project use, so a sidebar of
+   several Projects read as one unbroken list and a Project header looked like
+   another thread. The step is the one below a section break, which keeps its
+   hairline, so the three levels stay ordered: rows, Projects, sections. */
 .project-block + .project-block {
-  margin-top: 2px;
+  margin-top: var(--oct-space-2);
 }
 
 /* Projects, then Chats: two flat groups parted by one hairline, never cards. */
