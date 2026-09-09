@@ -174,7 +174,7 @@ html[data-theme="dark"] .settings-view {
   margin-bottom: 0;
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
-  font-size: calc(13 * var(--oct-text-step));
+  font-size: var(--oct-text-sm);
   line-height: 1.45;
 }
 
@@ -351,7 +351,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   padding: 4px 8px;
   color: var(--octant-text-muted);
   font-family: var(--oct-font-display);
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-regular);
   letter-spacing: normal;
   text-transform: none;
@@ -619,7 +619,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   padding: 8px 10px;
   cursor: pointer;
   border-bottom: 1px solid var(--octant-border);
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
 }
 
 .settings-search-results__option:last-child {
@@ -641,7 +641,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .settings-search-results__section {
   color: var(--octant-text-muted);
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 .settings-search-results__scope {
@@ -655,7 +655,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-search-results__empty {
   margin: 0;
   color: var(--octant-text-muted);
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
 }
 
 .settings-view__content {
@@ -877,7 +877,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   padding: 0 0 8px;
   max-width: 64ch;
   color: var(--octant-text-secondary);
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   line-height: 1.45;
 }
 
@@ -906,7 +906,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .settings-card-section--open > .settings-fact-list dd {
   color: var(--octant-text-secondary);
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   text-align: end;
 }
 
@@ -917,7 +917,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   padding: 10px 0 0;
   max-width: 68ch;
   color: var(--octant-text-secondary);
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   line-height: 1.45;
 }
 
@@ -973,7 +973,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   gap: 6px;
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   line-height: 1.45;
   cursor: pointer;
   list-style: none;
@@ -1206,7 +1206,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   max-width: 62ch;
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   line-height: 1.4;
 }
 
@@ -1312,14 +1312,14 @@ textarea.settings-view__text-input {
   display: grid;
   gap: 3px;
   color: var(--oct-fg);
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   font-weight: 500;
 }
 
 .settings-view__setting-copy p {
   margin: 0;
   color: var(--oct-muted);
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   font-weight: 400;
   line-height: 1.4;
 }
@@ -1770,7 +1770,7 @@ textarea.settings-view__text-input {
 .settings-view__empty {
   margin: 0;
   color: var(--oct-muted);
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
 }
 
 @supports ((not (backdrop-filter: blur(1px))) and (not (-webkit-backdrop-filter: blur(1px)))) {
@@ -1882,7 +1882,7 @@ textarea.settings-view__text-input {
   margin: 0;
   max-width: 560px;
   color: var(--oct-muted);
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   line-height: 1.4;
 }
 
@@ -1910,7 +1910,7 @@ textarea.settings-view__text-input {
 
 .host-settings__field label {
   color: var(--oct-muted);
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
 }
 
 /* Settings > GitHub: open sections for account, capabilities, and
@@ -1920,7 +1920,7 @@ textarea.settings-view__text-input {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   color: var(--oct-fg);
 }
 
@@ -1937,7 +1937,7 @@ textarea.settings-view__text-input {
   margin: 0;
   max-width: 560px;
   color: var(--oct-muted);
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   line-height: 1.4;
 }
 
@@ -1975,7 +1975,7 @@ textarea.settings-view__text-input {
 .github-settings__capability-state {
   grid-column: 2;
   grid-row: 1 / -1;
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
 }
 
 .github-settings__capability-state--available {
@@ -2099,7 +2099,7 @@ textarea.settings-view__text-input {
   max-width: 64ch;
   padding: 4px 0 4px 18px;
   color: var(--octant-text-secondary);
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   line-height: 1.45;
 }
 
@@ -2123,7 +2123,7 @@ textarea.settings-view__text-input {
 .marketplace-fetch-settings__disclosure,
 .marketplace-fetch-settings__list {
   margin: 0;
-  font-size: calc(12 * var(--oct-text-step));
+  font-size: var(--oct-text-detail);
   color: var(--oct-muted);
 }
 
@@ -2227,7 +2227,7 @@ textarea.settings-view__text-input {
   grid-column: 1 / -1;
   margin: 0;
   color: var(--oct-muted);
-  font-size: calc(11 * var(--oct-text-step));
+  font-size: var(--oct-text-xs);
   line-height: 1.4;
 }
 
