@@ -42,6 +42,23 @@ export function SelectPopup({ className, ...props }: ComponentProps<typeof Selec
   );
 }
 
+export function SelectGroup(props: ComponentProps<typeof SelectPrimitive.Group>) {
+  return <SelectPrimitive.Group data-slot="select-group" {...props} />;
+}
+
+export function SelectGroupLabel({
+  className,
+  ...props
+}: ComponentProps<typeof SelectPrimitive.GroupLabel>) {
+  return (
+    <SelectPrimitive.GroupLabel
+      className={cn("px-2 py-1.5 text-xs font-medium text-muted-foreground", className)}
+      data-slot="select-group-label"
+      {...props}
+    />
+  );
+}
+
 export function SelectItem({
   className,
   children,
