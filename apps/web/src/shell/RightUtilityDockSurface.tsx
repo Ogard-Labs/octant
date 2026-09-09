@@ -199,5 +199,8 @@ function workMapDetail(surface: RightUtilityDockSurfaceId): string {
   if (surface === "plan") return "Inspect the current plan";
   if (surface === "side-chat") return "Ask about this thread";
   if (surface === "terminal") return "Open the repository shell";
+  if (surface === "tests") return "Run this checkout's tests";
+  // Every surface above names what it does; a row that says "Open this tool"
+  // beside twelve that mean something is a placeholder, not a description.
   return "Open this tool";
 }
