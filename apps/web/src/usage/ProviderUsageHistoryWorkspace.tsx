@@ -185,7 +185,7 @@ export function ProviderUsageHistoryWorkspace(props: {
             size="icon"
             onClick={() => setRevision((value) => value + 1)}
           >
-            <RefreshCw size={15} />
+            <RefreshCw size={16} />
           </OctantButton>
         </div>
       </header>
