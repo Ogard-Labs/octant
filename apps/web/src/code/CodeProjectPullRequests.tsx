@@ -16,6 +16,7 @@ import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
+import { relativeTimeLabel } from "../lib/relativeTime";
 
 export interface CodeProjectPullRequestsProps {
   readonly load: (query: CodeProjectPullRequestQuery) => Promise<CodeProjectPullRequestView>;
@@ -368,7 +369,9 @@ function ProjectGroup(props: {
                         <div className="code-project-pull-requests__details">
                           <span>{row.author}</span>
                           <span aria-hidden="true">·</span>
-                          <time dateTime={row.updatedAt}>{formatUpdatedAt(row.updatedAt)}</time>
+                          <time dateTime={row.updatedAt} title={formatUpdatedAt(row.updatedAt)}>
+                            {relativeTimeLabel(row.updatedAt)}
+                          </time>
                           <span aria-hidden="true">·</span>
                           <span className="code-project-pull-requests__branch">
                             {row.headBranch} → {row.baseBranch}
@@ -383,7 +386,7 @@ function ProjectGroup(props: {
                           />
                           <StatusChip
                             label={mergeabilityCopy(row.mergeability)}
-                            status={mergeabilityStatus(row.mergeability)}
+                            status={mergeabilityStatus(row)}
                           />
                         </div>
                         {row.linkedThreads.length === 0 ? null : (
@@ -416,7 +419,14 @@ function StatusChip(props: {
         : props.status === "negative"
           ? "destructive"
           : "secondary";
-  return <OctantBadge variant={variant}>{props.label}</OctantBadge>;
+  // The semantic state is on the element as well as in its colour, so a
+  // reader that is not looking at colour, and a test, can both tell which one
+  // fact on this row is the blocking one.
+  return (
+    <OctantBadge data-status={props.status} variant={variant}>
+      {props.label}
+    </OctantBadge>
+  );
 }
 
 function pullRequestMatches(row: CodeProjectPullRequestRow, query: string): boolean {
@@ -469,10 +479,29 @@ function backgroundRefreshCopy(
   return undefined;
 }
 
+/**
+ * What is holding this pull request up, if anything.
+ *
+ * Every fact used to carry its own colour, so one row could show a red
+ * "Checks failing", an amber "Review pending" and a green "Mergeable" at once
+ * and contradict itself at a glance. The facts all still show; only the one
+ * that actually blocks the merge is coloured, and the rest read as neutral.
+ */
+function blockingFact(
+  row: CodeProjectPullRequestRow,
+): "mergeability" | "checks" | "review" | undefined {
+  if (row.mergeability === "conflicting") return "mergeability";
+  if (row.checks === "failing") return "checks";
+  if (row.review === "changes-requested") return "review";
+  if (row.checks === "pending") return "checks";
+  if (row.review === "pending") return "review";
+  return undefined;
+}
+
 function checksStatus(
   row: CodeProjectPullRequestRow,
 ): "positive" | "warning" | "negative" | "neutral" {
-  if (row.checks === "passing") return "positive";
+  if (blockingFact(row) !== "checks") return "neutral";
   if (row.checks === "failing") return "negative";
   if (row.checks === "pending") return "warning";
   return "neutral";
@@ -481,7 +510,7 @@ function checksStatus(
 function reviewStatus(
   row: CodeProjectPullRequestRow,
 ): "positive" | "warning" | "negative" | "neutral" {
-  if (row.review === "approved") return "positive";
+  if (blockingFact(row) !== "review") return "neutral";
   if (row.review === "changes-requested") return "negative";
   if (row.review === "pending") return "warning";
   return "neutral";
@@ -493,11 +522,10 @@ function mergeabilityCopy(value: CodeProjectPullRequestRow["mergeability"]): str
   return "Mergeability unknown";
 }
 
-function mergeabilityStatus(
-  value: CodeProjectPullRequestRow["mergeability"],
-): "positive" | "negative" | "neutral" {
-  if (value === "mergeable") return "positive";
-  if (value === "conflicting") return "negative";
+function mergeabilityStatus(row: CodeProjectPullRequestRow): "positive" | "negative" | "neutral" {
+  if (row.mergeability === "conflicting") return "negative";
+  // Nothing blocks it, so this is the one row that may say so in colour.
+  if (row.mergeability === "mergeable" && blockingFact(row) === undefined) return "positive";
   return "neutral";
 }
 
@@ -531,7 +559,9 @@ function freshnessCopy(freshness: CodeProjectPullRequestFreshness): string {
   if (freshness.status === "fresh") {
     return freshness.lastSuccessfulRefreshAt === undefined
       ? "Snapshot is fresh."
-      : `Last successful refresh ${formatUpdatedAt(freshness.lastSuccessfulRefreshAt)}.`;
+      : // Seconds precision on "when did this last refresh" is detail nobody
+        // acts on; the exact time is a hover away on every row.
+        `Last successful refresh ${relativeTimeLabel(freshness.lastSuccessfulRefreshAt)}.`;
   }
   const reason =
     freshness.staleReason === "rate-limited"
@@ -578,6 +608,9 @@ function projectEmptyCopy(freshness: CodeProjectPullRequestFreshness): string {
 
 function reviewCopy(review: CodeProjectPullRequestRow["review"]): string {
   if (review === "changes-requested") return "changes requested";
+  // The raw value reads as "Review none", which is not a sentence about a
+  // pull request nobody has looked at yet.
+  if (review === "none") return "not started";
   return review;
 }
 
