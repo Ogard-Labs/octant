@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -279,7 +280,10 @@ export function ZenSurface(props: ZenSurfaceProps) {
     { readonly elementId: string; readonly geometry: ZenGeometry } | undefined
   >(undefined);
   const [previewViewport, setPreviewViewport] = useState<ZenViewport | undefined>(undefined);
-  const [manualPanel, setManualPanel] = useState<"widgets" | "add" | "appearance" | null>(null);
+  // "Add" and "Widgets" were two panels for one act, and both offered a way to
+  // pin a thread. One destination now holds everything a person can put on the
+  // wall.
+  const [manualPanel, setManualPanel] = useState<"add" | "appearance" | null>(null);
   const [timerMinutes, setTimerMinutes] = useState(DEFAULT_ZEN_TIMER_DURATION_MS / 60_000);
   const [referenceUrl, setReferenceUrl] = useState("");
   const [referenceLabel, setReferenceLabel] = useState("");
@@ -548,6 +552,37 @@ export function ZenSurface(props: ZenSurfaceProps) {
     event.preventDefault();
     props.onExit();
   }
+
+  // Escape closes what is open before it leaves Zen. Handled on the document
+  // because a panel holds focus inside itself, so the key never reaches the
+  // surface, and a person pressing Escape in the thread picker expects the
+  // picker to close, not the whole focus zone.
+  const closeTopPanel = useCallback((): boolean => {
+    if (manualPanel !== null) {
+      setManualPanel(null);
+      return true;
+    }
+    if (props.threadPickerOpen === true) {
+      props.onCloseThreadPicker?.();
+      return true;
+    }
+    if (props.assistantOpen === true) {
+      props.onCloseAssistant?.();
+      return true;
+    }
+    return false;
+  }, [manualPanel, props]);
+
+  useEffect(() => {
+    function onKeyDown(event: globalThis.KeyboardEvent): void {
+      if (event.key !== "Escape") return;
+      if (!closeTopPanel()) return;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [closeTopPanel]);
 
   return (
     <div
@@ -887,18 +922,12 @@ export function ZenSurface(props: ZenSurfaceProps) {
 
       {manualPanel === null ? null : (
         <OctantCard
-          aria-label={manualPanel === "appearance" ? "Zen appearance" : "Zen additions"}
+          aria-label={manualPanel === "appearance" ? "Zen appearance" : "Add to this space"}
           className="zen-panel zen-surface__manual-panel window-no-drag px-6"
           role="dialog"
         >
           <header className="card-head">
-            <h2>
-              {manualPanel === "appearance"
-                ? "Appearance"
-                : manualPanel === "widgets"
-                  ? "Widgets"
-                  : "Add"}
-            </h2>
+            <h2>{manualPanel === "appearance" ? "Appearance" : "Add"}</h2>
             <OctantButton onClick={() => setManualPanel(null)} type="button" variant="ghost">
               Close
             </OctantButton>
@@ -915,165 +944,163 @@ export function ZenSurface(props: ZenSurfaceProps) {
             />
           ) : (
             <>
-              {manualPanel === "add" ? (
-                <div className="zen-add-picker">
-                  <OctantButton
-                    onClick={() => props.onOpenThreads?.()}
-                    type="button"
-                    variant="secondary"
-                  >
-                    Pin a thread
-                  </OctantButton>
-                  <OctantButton
-                    aria-label="Add terminal"
-                    disabled={
-                      props.onAddTerminal === undefined ||
-                      focusedThreadContext?.threadKind !== "code" ||
-                      props.canAddTerminal?.(focusedThreadContext) === false
+              <p className="oct-section-label">Threads and tools</p>
+              <div className="zen-add-picker">
+                <OctantButton
+                  onClick={() => props.onOpenThreads?.()}
+                  type="button"
+                  variant="secondary"
+                >
+                  Pin a thread
+                </OctantButton>
+                <OctantButton
+                  aria-label="Add terminal"
+                  disabled={
+                    props.onAddTerminal === undefined ||
+                    focusedThreadContext?.threadKind !== "code" ||
+                    props.canAddTerminal?.(focusedThreadContext) === false
+                  }
+                  onClick={() => {
+                    if (focusedThreadContext?.threadKind !== "code") return;
+                    props.onAddTerminal?.(focusedThreadContext);
+                    setManualPanel(null);
+                  }}
+                  type="button"
+                  variant="secondary"
+                >
+                  Add terminal
+                </OctantButton>
+                <OctantButton
+                  aria-label="Add browser"
+                  disabled={
+                    props.onAddBrowser === undefined ||
+                    (focusedThreadContext?.threadKind !== "code" &&
+                      focusedThreadContext?.threadKind !== "work")
+                  }
+                  onClick={() => {
+                    if (
+                      focusedThreadContext?.threadKind !== "code" &&
+                      focusedThreadContext?.threadKind !== "work"
+                    ) {
+                      return;
                     }
+                    props.onAddBrowser?.(focusedThreadContext);
+                    setManualPanel(null);
+                  }}
+                  type="button"
+                  variant="secondary"
+                >
+                  Add browser
+                </OctantButton>
+                {focusedThreadContext === undefined ? (
+                  <p className="zen-add-picker__hint" role="status">
+                    Focus a thread card to add its terminal or browser.
+                  </p>
+                ) : focusedThreadContext.threadKind === "code" &&
+                  props.canAddTerminal?.(focusedThreadContext) === false ? (
+                  <p className="zen-add-picker__hint" role="status">
+                    This Code thread cannot add a terminal right now.
+                  </p>
+                ) : focusedThreadContext.threadKind === "code" ? (
+                  <p className="zen-add-picker__hint" role="status">
+                    Add terminal starts a dedicated shell for this Code thread.
+                  </p>
+                ) : null}
+              </div>
+              <p className="oct-section-label">Widgets</p>
+              <>
+                <div className="zen-widget-picker">
+                  <OctantButton
+                    aria-label="Add Notes"
+                    disabled={props.onCreateWidget === undefined}
                     onClick={() => {
-                      if (focusedThreadContext?.threadKind !== "code") return;
-                      props.onAddTerminal?.(focusedThreadContext);
+                      props.onCreateWidget?.("notes");
                       setManualPanel(null);
                     }}
                     type="button"
                     variant="secondary"
                   >
-                    Add terminal
+                    Notes
                   </OctantButton>
                   <OctantButton
-                    aria-label="Add browser"
-                    disabled={
-                      props.onAddBrowser === undefined ||
-                      (focusedThreadContext?.threadKind !== "code" &&
-                        focusedThreadContext?.threadKind !== "work")
-                    }
+                    aria-label="Add Checklist"
+                    disabled={props.onCreateWidget === undefined}
                     onClick={() => {
-                      if (
-                        focusedThreadContext?.threadKind !== "code" &&
-                        focusedThreadContext?.threadKind !== "work"
-                      ) {
-                        return;
-                      }
-                      props.onAddBrowser?.(focusedThreadContext);
+                      props.onCreateWidget?.("checklist");
                       setManualPanel(null);
                     }}
                     type="button"
                     variant="secondary"
                   >
-                    Add browser
+                    Checklist
                   </OctantButton>
-                  {focusedThreadContext === undefined ? (
-                    <p className="zen-add-picker__hint" role="status">
-                      Focus a thread card to add its terminal or browser.
-                    </p>
-                  ) : focusedThreadContext.threadKind === "code" &&
-                    props.canAddTerminal?.(focusedThreadContext) === false ? (
-                    <p className="zen-add-picker__hint" role="status">
-                      This Code thread cannot add a terminal right now.
-                    </p>
-                  ) : focusedThreadContext.threadKind === "code" ? (
-                    <p className="zen-add-picker__hint" role="status">
-                      Add terminal starts a dedicated shell for this Code thread.
-                    </p>
-                  ) : null}
+                  <label>
+                    Reference URL
+                    <OctantInput
+                      aria-label="Reference URL"
+                      onChange={(event) => setReferenceUrl(event.currentTarget.value)}
+                      type="url"
+                      value={referenceUrl}
+                    />
+                  </label>
+                  <label>
+                    Reference label
+                    <OctantInput
+                      aria-label="Reference label"
+                      onChange={(event) => setReferenceLabel(event.currentTarget.value)}
+                      type="text"
+                      value={referenceLabel}
+                    />
+                  </label>
+                  <OctantButton
+                    aria-label="Add Reference"
+                    disabled={
+                      props.onCreateReference === undefined || referenceUrl.trim().length === 0
+                    }
+                    onClick={() => {
+                      props.onCreateReference?.(
+                        referenceUrl.trim(),
+                        referenceLabel.trim().length === 0 ? undefined : referenceLabel.trim(),
+                      );
+                      setReferenceUrl("");
+                      setReferenceLabel("");
+                      setManualPanel(null);
+                    }}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Reference
+                  </OctantButton>
                 </div>
-              ) : null}
-              {manualPanel === "widgets" ? (
-                <>
-                  <div className="zen-widget-picker">
-                    <OctantButton
-                      aria-label="Add Notes"
-                      disabled={props.onCreateWidget === undefined}
-                      onClick={() => {
-                        props.onCreateWidget?.("notes");
-                        setManualPanel(null);
-                      }}
-                      type="button"
-                      variant="secondary"
-                    >
-                      Notes
-                    </OctantButton>
-                    <OctantButton
-                      aria-label="Add Checklist"
-                      disabled={props.onCreateWidget === undefined}
-                      onClick={() => {
-                        props.onCreateWidget?.("checklist");
-                        setManualPanel(null);
-                      }}
-                      type="button"
-                      variant="secondary"
-                    >
-                      Checklist
-                    </OctantButton>
-                    <label>
-                      Reference URL
-                      <OctantInput
-                        aria-label="Reference URL"
-                        onChange={(event) => setReferenceUrl(event.currentTarget.value)}
-                        type="url"
-                        value={referenceUrl}
-                      />
-                    </label>
-                    <label>
-                      Reference label
-                      <OctantInput
-                        aria-label="Reference label"
-                        onChange={(event) => setReferenceLabel(event.currentTarget.value)}
-                        type="text"
-                        value={referenceLabel}
-                      />
-                    </label>
-                    <OctantButton
-                      aria-label="Add Reference"
-                      disabled={
-                        props.onCreateReference === undefined || referenceUrl.trim().length === 0
-                      }
-                      onClick={() => {
-                        props.onCreateReference?.(
-                          referenceUrl.trim(),
-                          referenceLabel.trim().length === 0 ? undefined : referenceLabel.trim(),
-                        );
-                        setReferenceUrl("");
-                        setReferenceLabel("");
-                        setManualPanel(null);
-                      }}
-                      type="button"
-                      variant="secondary"
-                    >
-                      Reference
-                    </OctantButton>
-                  </div>
-                  <div className="zen-panel__timer-create">
-                    <label>
-                      Timer duration in minutes
-                      <OctantInput
-                        aria-label="Timer duration in minutes"
-                        max="480"
-                        min="1"
-                        onChange={(event) => setTimerMinutes(Number(event.currentTarget.value))}
-                        type="number"
-                        value={timerMinutes}
-                      />
-                    </label>
-                    <OctantButton
-                      aria-label="Add timer"
-                      disabled={
-                        !Number.isInteger(timerMinutes) || timerMinutes < 1 || timerMinutes > 480
-                      }
-                      onClick={() => {
-                        props.onAddTimer?.(timerMinutes * 60 * 1000);
-                        setManualPanel(null);
-                      }}
-                      type="button"
-                      variant="secondary"
-                    >
-                      Add timer
-                    </OctantButton>
-                  </div>
-                  <p>Notes, Checklists, and Timers stay local to this Zen space.</p>
-                </>
-              ) : null}
+                <div className="zen-panel__timer-create">
+                  <label>
+                    Timer duration in minutes
+                    <OctantInput
+                      aria-label="Timer duration in minutes"
+                      max="480"
+                      min="1"
+                      onChange={(event) => setTimerMinutes(Number(event.currentTarget.value))}
+                      type="number"
+                      value={timerMinutes}
+                    />
+                  </label>
+                  <OctantButton
+                    aria-label="Add timer"
+                    disabled={
+                      !Number.isInteger(timerMinutes) || timerMinutes < 1 || timerMinutes > 480
+                    }
+                    onClick={() => {
+                      props.onAddTimer?.(timerMinutes * 60 * 1000);
+                      setManualPanel(null);
+                    }}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Add timer
+                  </OctantButton>
+                </div>
+                <p>Notes, Checklists, and Timers stay local to this Zen space.</p>
+              </>
             </>
           )}
         </OctantCard>
@@ -1082,29 +1109,15 @@ export function ZenSurface(props: ZenSurfaceProps) {
       <div className="zen-surface__bar-anchor window-no-drag">
         <ZenBar
           collapsed={props.barCollapsed}
-          onAskNavigatorAssistant={(prompt) => {
-            void (async () => {
-              // Opening binds this window's assistant surface to the
-              // conversation, so the turn waits for it rather than racing it.
-              await props.onOpenAssistant?.();
-              await navigatorAssistant.send(prompt);
-            })();
-          }}
           onExit={props.onExit}
           onExpand={props.onExpandBar}
           onHide={props.onHideBar}
           {...(props.onOpenAssistant === undefined
             ? {}
-            : { onOpenActivity: props.onOpenAssistant })}
+            : { onOpenNavigator: props.onOpenAssistant })}
           onOpenAdd={() => setManualPanel("add")}
           onOpenAppearance={() => setManualPanel("appearance")}
           onOpenThreads={() => props.onOpenThreads?.()}
-          onOpenWidgets={() => setManualPanel("widgets")}
-          providerLabel={
-            props.assistant?.provider === null || props.assistant?.provider === undefined
-              ? "Navigator"
-              : `${props.assistant.provider.providerLabel} · ${props.assistant.provider.modelLabel}`
-          }
         />
       </div>
     </div>

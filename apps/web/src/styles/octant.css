@@ -5727,24 +5727,6 @@ input.switch:checked::after {
   margin-inline: var(--oct-space-1);
   background: var(--oct-border);
 }
-.zen-bar-ask {
-  min-width: 200px;
-  height: var(--oct-control-height-sm);
-  padding-inline: var(--oct-space-3);
-  border: 0;
-  border-radius: var(--oct-radius-pill);
-  background: var(--oct-fg-soft);
-  color: var(--oct-fg);
-  font-family: var(--oct-font-transcript);
-  font-size: var(--oct-text-sm);
-}
-.zen-bar-model {
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  color: var(--oct-meta);
-  padding-inline: var(--oct-space-2);
-  white-space: nowrap;
-}
 /* collapsed to a pill — the bar's own minimised state */
 .zen-pill {
   position: absolute;

@@ -701,7 +701,10 @@ export function useZenController(options: UseZenControllerOptions) {
         if (mounted.current) {
           setSpace(result.space);
           setThreadPickerOpen(false);
-          setMessage(`Pinned ${result.entry.title} from ${result.entry.projectLabel}.`);
+          // No arrival notice: the card that just appeared says the same
+          // thing, and the notice landed on top of it. The message region is
+          // for problems a person has to know about.
+          setMessage(undefined);
         }
       } catch (error) {
         if (!mounted.current) return;

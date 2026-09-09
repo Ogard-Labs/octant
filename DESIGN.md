@@ -505,6 +505,15 @@ anything; an arranged card keeps its elevation. A card that is not streaming
 reads its host, mode, Project, and the model that answers, in that order. It
 does not print a stored ISO timestamp or a provider instance id.
 
+Zen's own chrome is one bar and one sheet. The bar carries four destinations
+and the way out: Threads, Add, Navigator, Appearance, Exit Zen. Asking the
+Navigator lives in the Navigator panel, which has the field and shows the
+answer. Putting something on the wall is one destination, not two. A panel is a
+page in a sheet, so its title is the page title, it stops above the bar, and its
+rows follow the Settings recipe. Escape closes the open panel and only leaves
+Zen when none is open. Pinning shows no notice: the card that arrives says the
+same thing, and the notice landed on top of it.
+
 The app has three server-enforced modes—Chat, Work, and Code. Mode switching is
 available as a labeled selector, compact list, or icon presentation according
 to the user's setting. Code and Work keep separate Project View sets. The

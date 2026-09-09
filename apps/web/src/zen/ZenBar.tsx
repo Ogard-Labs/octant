@@ -1,26 +1,32 @@
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantInput } from "../ui/base/OctantInput";
 
 export interface ZenBarProps {
   readonly collapsed: boolean;
-  readonly onAskNavigatorAssistant?: (prompt: string) => void;
   readonly onExit: () => void;
   readonly onExpand?: () => void;
   readonly onHide?: () => void;
-  readonly onOpenActivity?: () => void;
   readonly onOpenAdd?: () => void;
   readonly onOpenAppearance?: () => void;
+  readonly onOpenNavigator?: () => void;
   readonly onOpenThreads?: () => void;
-  readonly onOpenWidgets?: () => void;
-  readonly providerLabel?: string;
 }
 
+/**
+ * The one bar a focus surface carries.
+ *
+ * It held nine text controls, a model label, and a prompt field, which is more
+ * chrome than the surface it sits on. Four destinations are left, each one a
+ * place to go rather than a thing to read: what to put on the wall, what is
+ * already on it, how it looks, and the Navigator. The prompt field went with
+ * Navigator, whose own panel has the same field and shows the answer; keeping
+ * both meant asking in one place and reading in another.
+ */
 export function ZenBar(props: ZenBarProps) {
   if (props.collapsed) {
     return (
       <div className="zen-pill window-no-drag" role="group" aria-label="Zen pill">
         <OctantButton onClick={props.onExpand} size="sm" type="button" variant="ghost">
-          Show Navigator Bar
+          Show Navigator bar
         </OctantButton>
         <OctantButton onClick={props.onExit} size="sm" type="button" variant="secondary">
           Exit Zen
@@ -32,42 +38,20 @@ export function ZenBar(props: ZenBarProps) {
   return (
     <div className="zen-bar window-no-drag" role="toolbar" aria-label="Navigator Bar">
       <OctantButton onClick={props.onHide} size="sm" type="button" variant="ghost">
-        Hide Navigator Bar
+        Hide Navigator bar
       </OctantButton>
-      <span className="zen-bar-model" aria-label="Navigator model">
-        {props.providerLabel ?? "Navigator"}
-      </span>
-      <label className="zen-bar__ask">
-        <span className="visually-hidden">Ask Navigator</span>
-        <OctantInput
-          aria-label="Ask Navigator"
-          className="zen-bar-ask"
-          onKeyDown={(event) => {
-            if (event.key !== "Enter") return;
-            const value = event.currentTarget.value.trim();
-            if (value.length === 0) return;
-            props.onAskNavigatorAssistant?.(value);
-            event.currentTarget.value = "";
-          }}
-          placeholder="Ask Navigator…"
-          type="text"
-        />
-      </label>
+      <span className="zen-bar-sep" aria-hidden="true" />
       <DeferredControl
         label="Threads"
         {...(props.onOpenThreads === undefined ? {} : { onClick: props.onOpenThreads })}
-      />
-      <DeferredControl
-        label="Widgets"
-        {...(props.onOpenWidgets === undefined ? {} : { onClick: props.onOpenWidgets })}
       />
       <DeferredControl
         label="Add"
         {...(props.onOpenAdd === undefined ? {} : { onClick: props.onOpenAdd })}
       />
       <DeferredControl
-        label="Activity"
-        {...(props.onOpenActivity === undefined ? {} : { onClick: props.onOpenActivity })}
+        label="Navigator"
+        {...(props.onOpenNavigator === undefined ? {} : { onClick: props.onOpenNavigator })}
       />
       <DeferredControl
         label="Appearance"
@@ -91,7 +75,7 @@ function DeferredControl(props: { readonly label: string; readonly onClick?: () 
         props.onClick?.();
       }}
       size="sm"
-      title={props.onClick === undefined ? `${props.label} is unavailable` : props.label}
+      title={props.label}
       type="button"
       variant="ghost"
     >
