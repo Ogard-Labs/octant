@@ -580,8 +580,13 @@ modelId }`, and the model picker is provider-first. Discovery can find
 - **Credentials.** API keys live in the host credential store — macOS Keychain
   on macOS, freedesktop Secret Service on Linux — and are reached only
   through the host's loopback credential broker by opaque UUID reference.
-  Provider OAuth and subscription login are delegated to the provider's own
-  runtime; Octant never stores, refreshes, or journals those tokens. Secrets
+  Provider OAuth has two postures ([0111](decisions/0111-host-driven-provider-oauth.md)).
+  **Delegated** (`delegated-oauth`, including CLI `subscription`): login stays
+  on the provider's own runtime; Octant never stores, refreshes, or journals
+  those tokens. **Host-driven** (`subscription-oauth`, direct HTTP drivers):
+  the host runs PKCE and/or device flow; the 0054 broker holds refresh and
+  access material as opaque refs — never journaled, logged, exported, or
+  renderer-visible. Secrets
   Octant holds for an integration use the same host credential path: the host
   keeps an opaque reference; plugins, the renderer, the journal, and diagnostics
   never receive raw token material. Broker URLs and tokens are stripped from
