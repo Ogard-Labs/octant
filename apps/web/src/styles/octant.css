@@ -436,6 +436,12 @@ h4 {
 :focus-visible {
   outline: none;
 }
+input:focus-visible:not([type="checkbox"], [type="radio"]),
+textarea:focus-visible,
+[role="combobox"]:focus-visible {
+  background-color: var(--octant-control-hover);
+  color: var(--octant-text-primary);
+}
 :where(
   button,
   a,

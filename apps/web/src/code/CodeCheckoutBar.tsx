@@ -14,6 +14,11 @@ import { OctantButton } from "../ui/base/OctantButton";
 export function CodeCheckoutBar(props: { readonly onCreatePullRequest?: () => void }) {
   const checkout = useCodeCheckout();
   if (checkout === undefined) return null;
+  const repositoryName =
+    checkout.repositoryRoot
+      .replace(/[\\/]+$/, "")
+      .split(/[\\/]/)
+      .at(-1) || checkout.repositoryRoot;
   const branch =
     checkout.branch.kind === "named"
       ? checkout.branch.name
@@ -26,8 +31,11 @@ export function CodeCheckoutBar(props: { readonly onCreatePullRequest?: () => vo
   return (
     <div aria-label="Checkout" className="code-checkout-bar">
       <span className="code-checkout-bar__identity">
-        <span className="code-checkout-bar__project" title={checkout.projectName}>
-          {checkout.projectName}
+        <span
+          className="code-checkout-bar__project"
+          title={`${checkout.projectName} · ${checkout.repositoryRoot}`}
+        >
+          {repositoryName}
         </span>
         <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
         <span className="code-checkout-bar__branch" title={branch}>

@@ -7,7 +7,11 @@ import {
 } from "@octant/contracts";
 import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import type { ShellSettings } from "@octant/contracts/shell";
-import { listImageSourceEligibleInstances, resolveImageCustomSources } from "@octant/domain";
+import {
+  isImageProfileDriverKind,
+  listImageSourceEligibleInstances,
+  resolveImageCustomSources,
+} from "@octant/domain";
 import { useState, type ReactNode } from "react";
 import type { ProviderController } from "../providers/useProviderController";
 import { ProviderCreateForm } from "../providers/ProviderSettingsConfiguration";
@@ -46,6 +50,12 @@ function sourceKey(source: {
 export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewProps) {
   const instances = props.providerSnapshot?.instances ?? [];
   const eligible = listImageSourceEligibleInstances(instances);
+  const eligibleIds = new Set(eligible.map((instance) => String(instance.id)));
+  const hasImageProvider = instances.some(
+    (instance) =>
+      instance.enabled &&
+      (eligibleIds.has(String(instance.id)) || isImageProfileDriverKind(instance.driverKind)),
+  );
   const resolved = resolveImageCustomSources(props.settings.customSources, instances);
   const atLimit = props.settings.customSources.length >= IMAGE_GENERATION_MAX_CUSTOM_SOURCES;
 
@@ -63,10 +73,10 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
       className="image-generation-settings"
       id="settings-image-generation"
     >
-      {eligible.length === 0 ? (
+      {!hasImageProvider ? (
         <p className="settings-state settings-state--empty" role="status">
-          Image generation needs an enabled OpenAI-compatible HTTP provider. Add one below, then
-          choose its model as a custom image source.
+          No image providers are enabled. Add one below, or enable an existing provider in Providers
+          &amp; Models.
         </p>
       ) : null}
       {imageProviderForm === null ? null : (
@@ -95,11 +105,17 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
               Saved profiles in Image generator choose defaults for a generation, such as the model,
               size, and quality.
             </p>
-            {resolved.length === 0 ? (
+            {eligible.length === 0 ? (
+              <p className="provider-settings__field-guidance" role="status">
+                To add a custom source, connect an OpenAI-compatible HTTP provider in Providers
+                &amp; Models.
+              </p>
+            ) : null}
+            {resolved.length === 0 && eligible.length > 0 ? (
               <p className="provider-settings__field-guidance" role="status">
                 No custom image sources are configured.
               </p>
-            ) : (
+            ) : resolved.length === 0 ? null : (
               <ul className="image-generation-settings__sources">
                 {resolved.map((resolution, index) => {
                   const source = props.settings.customSources[index];
@@ -135,7 +151,7 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
                 Up to {IMAGE_GENERATION_MAX_CUSTOM_SOURCES} custom image sources are supported.
                 Remove one to add another.
               </p>
-            ) : (
+            ) : eligible.length === 0 ? null : (
               <CustomImageSourceForm
                 eligible={eligible}
                 existing={props.settings.customSources}

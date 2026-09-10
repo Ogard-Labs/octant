@@ -51,9 +51,9 @@ describe("ProviderCreateForm presentation limits", () => {
 
     await user.click(screen.getByLabelText("Provider type"));
     expect(screen.getAllByText("OpenAI Image").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("Gemini Image")).toBeVisible();
-    expect(screen.getByText("Black Forest Labs Image")).toBeVisible();
-    expect(screen.getByText("Ideogram Image")).toBeVisible();
+    expect(await screen.findByRole("option", { name: "Gemini Image" })).toBeVisible();
+    expect(await screen.findByRole("option", { name: "Black Forest Labs Image" })).toBeVisible();
+    expect(await screen.findByRole("option", { name: "Ideogram Image" })).toBeVisible();
     expect(screen.queryByText("OpenCode CLI")).not.toBeInTheDocument();
     expect(screen.queryByText("OpenAI-compatible HTTP")).not.toBeInTheDocument();
   });

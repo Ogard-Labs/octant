@@ -263,7 +263,6 @@ html[data-octant-native-host="true"]
 .open-in-menu__trigger:focus-visible,
 .open-in-menu__trigger[data-popup-open] {
   color: var(--oct-fg);
-  border-color: var(--oct-border-strong);
   background: var(--oct-fg-soft);
 }
 
@@ -297,7 +296,6 @@ html[data-octant-native-host="true"]
 .window-chrome__new-thread:focus-visible {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
-  border-color: var(--oct-border-strong);
 }
 
 .window-chrome__button:hover,
@@ -2115,7 +2113,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-composer-choice__option-label {
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-text-xs);
   font-weight: 500;
 }
 

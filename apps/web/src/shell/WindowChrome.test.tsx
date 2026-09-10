@@ -429,7 +429,8 @@ describe("WindowChrome", () => {
       "--octant-text-muted: var(--octant-text-muted-high-contrast) !important;",
     );
     expect(increasedContrast).toContain("border-color: var(--octant-border-strong);");
-    expect(increasedContrast).toContain("box-shadow: inset 0 0 0 1px var(--octant-border-strong);");
+    expect(increasedContrast).toContain("background: var(--octant-control-hover);");
+    expect(increasedContrast).not.toContain("box-shadow: inset 0 0 0 1px");
   });
 
   it("overrides inline theme text tokens for OS Increased Contrast", () => {
@@ -501,7 +502,7 @@ describe("WindowChrome", () => {
     expect(styles).toContain(".shell--material-translucent.shell-frame > .sidebar");
     expect(styles).toContain(".environment-git-group dl,");
     expect(cssRule('.project-row[data-active="true"]', 1)).toContain(
-      "box-shadow: inset 0 0 0 1px var(--octant-border-strong);",
+      "background: var(--octant-control-hover);",
     );
     expect(cssRule('.workspace-pane[data-active="true"] .workspace-pane__header')).toContain(
       "box-shadow: none;",
@@ -519,7 +520,7 @@ describe("WindowChrome", () => {
       "padding-left: var(--octant-window-chrome-leading-width",
     );
     expect(cssRule('.workspace-pane[data-active="true"]')).toContain(
-      "box-shadow: inset 0 0 0 1px var(--octant-border-strong);",
+      "background: var(--octant-control-hover);",
     );
     expect(cssRule('.workspace-pane[data-active="true"]')).not.toMatch(/accent|purple/i);
     expect(atRuleBlock("@media (prefers-contrast: more)")).toContain(".workspace-pane__header");

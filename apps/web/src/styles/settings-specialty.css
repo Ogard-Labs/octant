@@ -83,7 +83,16 @@
 
 .settings-view .provider-settings__manual {
   display: grid;
+  justify-items: start;
   gap: 14px;
+}
+
+.settings-view
+  .image-generation-settings__provider-form
+  .provider-settings__manual
+  > [data-slot="button"] {
+  width: auto;
+  justify-self: start;
 }
 
 .settings-view .provider-settings__manual-body {
@@ -91,6 +100,10 @@
   gap: 16px;
   padding: 16px 0 0;
   border-top: 1px solid var(--oct-hairline);
+}
+
+.settings-view .image-generation-settings__provider-form .provider-settings__manual-body {
+  width: 100%;
 }
 
 .settings-view .provider-settings__create-heading {

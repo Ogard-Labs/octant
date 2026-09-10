@@ -56,10 +56,11 @@ describe("ImageGenerationSettingsView", () => {
     render(
       <ImageGenerationSettingsView onSettingsChange={vi.fn()} settings={{ customSources: [] }} />,
     );
+    expect(screen.getByText(/No image providers are enabled/)).toBeVisible();
     expect(
-      screen.getByText(/Image generation needs an enabled OpenAI-compatible HTTP provider/),
+      screen.getByText(/To add a custom source, connect an OpenAI-compatible HTTP provider/),
     ).toBeVisible();
-    expect(screen.getByRole("button", { name: "Add image source" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Add image source" })).not.toBeInTheDocument();
   });
 
   it("explains the difference between image sources and saved profiles", () => {
@@ -70,6 +71,28 @@ describe("ImageGenerationSettingsView", () => {
       screen.getByText(/Connect an OpenAI-compatible image API's provider and model/),
     ).toBeVisible();
     expect(screen.getByText(/Saved profiles in Image generator/)).toBeVisible();
+  });
+
+  it("does not claim a custom HTTP provider is required when a dedicated image provider is ready", () => {
+    const snapshot = providerSnapshot();
+    render(
+      <ImageGenerationSettingsView
+        onSettingsChange={vi.fn()}
+        providerSnapshot={{
+          ...snapshot,
+          instances: snapshot.instances.filter(
+            (instance) => instance.driverKind === "openai-image",
+          ),
+        }}
+        settings={{ customSources: [] }}
+      />,
+    );
+
+    expect(screen.queryByText(/No image providers are enabled/)).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/To add a custom source, connect an OpenAI-compatible HTTP provider/),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Add image source" })).not.toBeInTheDocument();
   });
 
   it("adds a custom image source through one shell settings patch", async () => {
@@ -165,13 +188,7 @@ describe("ImageGenerationSettingsView", () => {
         },
       ],
     };
-    render(
-      <ImageGenerationSettingsView
-        onSettingsChange={vi.fn()}
-        providerSnapshot={providerSnapshot()}
-        settings={settings}
-      />,
-    );
+    render(<ImageGenerationSettingsView onSettingsChange={vi.fn()} settings={settings} />);
     expect(
       screen.getByText('"Stale" is unavailable: The chosen provider no longer exists.'),
     ).toBeVisible();

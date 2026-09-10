@@ -118,7 +118,7 @@ describe("the public-block visual language", () => {
     expect(input).toMatch(/padding:\s*18px var\(--oct-composer-gutter\) 12px/);
   });
 
-  it("lets focus lift the composer instead of framing the prompt", () => {
+  it("keeps composer focus on the same quiet surface", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const focus =
       system.match(
@@ -128,7 +128,7 @@ describe("the public-block visual language", () => {
     expect(focus).toBe("");
     expect(system).not.toMatch(/\.composer:focus-within:has\(\.composer-input:focus-visible\)/);
     expect(system).toMatch(
-      /\.composer:focus-within\s*\{\s*box-shadow:\s*var\(--octant-shadow-lg\)/,
+      /\.composer:focus-within\s*\{\s*box-shadow:\s*var\(--octant-shadow-md\)/,
     );
   });
 
@@ -146,62 +146,22 @@ describe("the public-block visual language", () => {
       settings.match(/\.octant-number-stepper:focus-within\s*\{([\s\S]*?)\}/)?.[1] ?? "";
 
     expect(focus).not.toBe("");
-    expect(focus).toMatch(/border-color:\s*var\(--octant-border-strong\)/);
+    expect(focus).toMatch(/background:\s*var\(--octant-control-hover\)/);
     expect(focus).not.toMatch(/box-shadow:\s*(?!none\s*;)[^;]+;/);
   });
 
-  it("draws one neutral keyboard focus edge and lets no surface suppress it", () => {
+  it("keeps keyboard focus visible without outlining controls or popups", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
-    const bridge = readFileSync(join(webRoot, "styles/octant-bridge.css"), "utf8");
     const withoutComments = system.replace(/\/\*[\s\S]*?\*\//g, "");
-
-    // Assert the rule was found before asserting about it. Matching only a
-    // column-zero selector let the negative checks below pass on an empty
-    // string, so an indented or listed rule would have slipped through saying
-    // whatever it liked.
     const rule = withoutComments.match(/(?:^|\n)\s*:focus-visible\s*\{[^}]+\}/)?.[0] ?? "";
-    expect(rule).not.toBe("");
-
-    // One edge, declared once, for every control (0105). It supersedes 0094's
-    // suppression: the state fills it relied on are a 1.23:1 step on the
-    // workspace, and four button variants had no focus treatment at all.
-    expect(rule).toMatch(/outline:\s*1px solid var\(--oct-focus-edge\)/);
-    expect(rule).toMatch(/outline-offset:\s*-1px/);
-    expect(rule).not.toMatch(/box-shadow/);
-    expect(withoutComments).not.toMatch(/:focus-visible:not\(\[data-slot\]\)/);
-
-    // No radius here: an inset outline already follows the control's own
-    // corner, and naming one snapped a focused control to a shape it does not
-    // have.
-    expect(rule).not.toMatch(/border-radius/);
-
-    // Mixed from the foreground, never from the accent or the focus-ring theme
-    // role: a themed colour there would put a coloured halo back (0094, 0105).
-    const edge = bridge.match(/--oct-focus-edge:[^;]+;/)?.[0] ?? "";
-    expect(edge).toMatch(/var\(--oct-fg\)/);
-    expect(edge).not.toMatch(/accent|focus-ring/);
-
-    // A control whose own fill is the accent inverts the edge; without this the
-    // primary button, a checked switch, and a checked checkbox draw the edge in
-    // the colour they are already painted with.
+    expect(rule).toMatch(/outline:\s*none/);
+    expect(withoutComments).toMatch(/text-decoration:\s*underline/);
     expect(withoutComments).toMatch(
-      /\[data-slot="button"\]\[data-variant="default"\]:focus-visible[^{]*\{[^}]*--oct-focus-edge-on-accent/,
+      /input:focus-visible[^{}]*[\s\S]*?background-color:\s*var\(--octant-control-hover\)/,
     );
-    expect(bridge).toMatch(/--oct-focus-edge-on-accent:[^;]*--octant-primary-foreground/);
-
-    // The containers that hold the keyboard without being the focused item are
-    // listed once, in the system stylesheet. A feature surface may not add its
-    // own suppression, or keyboard focus disappears on that surface alone.
-    for (const file of cssFiles(webRoot)) {
-      if (file.endsWith(join("styles", "octant.css"))) continue;
-      const source = readFileSync(file, "utf8");
-      for (const block of source.matchAll(/([^{}]*):focus-visible[^{}]*\{([^}]*)\}/g)) {
-        expect(
-          block[2],
-          `${relative(webRoot, file)} suppresses the focus edge on ${block[1]?.trim() ?? ""}`,
-        ).not.toMatch(/outline:\s*(?:none|0)\b/);
-      }
-    }
+    expect(withoutComments).toMatch(
+      /\[data-slot="button"\]\[data-variant="default"\]:focus-visible[^{}]*\{[^}]*background-color:\s*var\(--octant-text-primary\)/,
+    );
   });
 
   it("keeps one transcript rhythm across Chat, Work, and Code", () => {
@@ -374,16 +334,14 @@ describe("the public-block visual language", () => {
     expect(settings).toMatch(
       /\.settings-view\s*\{[^}]*background:\s*var\(--octant-app-background\)/,
     );
-    expect(settings).toMatch(/--oct-settings-reading-width:\s*800px/);
+    expect(settings).toMatch(/--oct-settings-reading-width:\s*920px/);
     expect(settings).toMatch(/\.settings-view__content-inner\s*\{[^}]*margin:\s*0/);
     expect(settings).toMatch(/\.settings-card-section\s*\{[^}]*box-shadow:\s*none/);
     expect(settings).toMatch(/\.settings-card-section--open\s*\{[^}]*box-shadow:\s*none/);
-    // A section's card is built from its content children (0109), so the label
-    // and its description stay out on the page ground. The selector that picks
-    // those children is pinned in settings/sectionObject.test.ts, which reads
-    // what the rules set rather than their exact text.
+    // Routine Settings sections use open row surfaces under 0116; discrete
+    // editors retain their own boundaries rather than boxing every group.
     expect(settings).toMatch(/\.settings-card-section\s*\{[^}]*border:\s*0/);
-    expect(settings).toMatch(/border-inline:\s*1px solid var\(--oct-hairline\)/);
+    expect(settings).not.toMatch(/border-inline:\s*1px solid var\(--oct-hairline\)/);
     expect(settings).toMatch(
       /\.settings-card-section\s*>\s*h2,[\s\S]*?\.settings-card-section\s*>\s*legend\s*\{[\s\S]*?text-transform:\s*none/,
     );

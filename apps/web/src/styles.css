@@ -2952,7 +2952,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .project-dialog select:focus-visible,
 .project-dialog textarea:focus-visible,
 .project-overview__name:focus-visible {
-  border-color: var(--oct-accent-fg);
+  background: var(--octant-control-hover);
 }
 
 /* The caption above the folder chooser. It is a paragraph rather than a label
@@ -2992,7 +2992,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .project-dialog__folder:focus-visible {
-  border-color: var(--oct-accent-fg);
+  background: var(--octant-control-hover);
 }
 
 .project-dialog__folder:disabled {
@@ -5847,6 +5847,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   .project-row[data-active="true"],
   .workspace-pane[data-active="true"] {
     box-shadow: none;
+    background: var(--octant-control-hover);
   }
 
   .environment-git-group dl,
