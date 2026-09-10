@@ -274,7 +274,27 @@ describe("Chat routes", () => {
       route(request(`/api/chat/threads/${threadId}/events?afterSequence=41`)),
     );
     expect(frames).toEqual([frame42, frame43]);
-    expect(subscribe).toHaveBeenCalledWith(threadId, 41, expect.any(AbortSignal));
+    expect(subscribe).toHaveBeenCalledWith(threadId, 41, expect.any(AbortSignal), {
+      contents: false,
+    });
+  });
+
+  it("passes on a subscriber's request for delta bodies and refuses any other value", async () => {
+    const subscribe = vi.fn(async function* () {
+      yield frame42;
+    });
+    const route = routeFixture({ subscribe });
+    await collectFrames(
+      route(request(`/api/chat/threads/${threadId}/events?afterSequence=41&contents=1`)),
+    );
+    expect(subscribe).toHaveBeenCalledWith(threadId, 41, expect.any(AbortSignal), {
+      contents: true,
+    });
+
+    const refused = await route(
+      request(`/api/chat/threads/${threadId}/events?afterSequence=41&contents=yes`),
+    );
+    expect(refused?.status).toBe(400);
   });
 
   it("holds an idle events stream open and continues from its cursor after the next commit", async () => {

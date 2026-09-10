@@ -13,6 +13,7 @@ import {
   type ZenSpaceId,
 } from "@octant/contracts/zen";
 import type { AggregateVersion } from "@octant/contracts/events";
+import type { ResolvedAppBackground } from "@octant/domain";
 import { decodeWindowId } from "@octant/contracts/shell";
 import type { NavigatorAssistantController } from "../navigator/useNavigatorAssistant";
 import { ZenSurface } from "./ZenSurface";
@@ -45,6 +46,19 @@ const ASSISTANT_SNAPSHOT: ZenAssistantSnapshot = {
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+/** The application ground as Settings › Appearance › Background resolved it. */
+const APP_GROUND: ResolvedAppBackground = {
+  kind: "theme",
+  backgroundId: null,
+  animated: false,
+  patternOpacity: 0.55,
+  patternSpeed: 1,
+  patternIntensity: 0.6,
+  photoOpacity: 0.42,
+  scope: "everywhere",
+  coversSidebar: false,
+};
 
 function makeSpace(
   elements: ZenElementPayload[] = [],
@@ -188,6 +202,124 @@ describe("ZenSurface", () => {
       backgroundSize: "contain",
     });
     expect(surface.querySelector(".zen-surface__overlay")).not.toBeNull();
+  });
+
+  it("stands on the application's own ground, under the cards and under the dimmer", () => {
+    // jsdom has no WebGL: the cloud degrades to nothing, and the ground it
+    // would have been drawn on is what this asserts.
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const space = {
+      ...makeSpace(),
+      appearance: {
+        ...DEFAULT_ZEN_APPEARANCE,
+        background: { kind: "theme" as const },
+        dimming: 30,
+      },
+    };
+    const { container } = render(
+      <ZenSurface
+        appBackground={APP_GROUND}
+        appBackgroundFetcher={async () => new Blob()}
+        barCollapsed={false}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        space={space}
+      />,
+    );
+    const ground = container.querySelector("[data-octant-app-backdrop]");
+    expect(ground?.getAttribute("data-octant-app-backdrop")).toBe("theme");
+    // Zen fills the window edge to edge and has no composer to mask away, so
+    // it asks for its own placement rather than borrowing the shell's mask.
+    expect(ground?.getAttribute("data-placement")).toBe("zen");
+    // The ground is the floor: the cards pan and zoom above it, and the
+    // space's own dimmer lies over it exactly as over any other ground.
+    expect(ground?.closest(".zen-surface__canvas")).toBeNull();
+    expect(container.querySelector(".zen-surface__overlay")).not.toBeNull();
+    vi.restoreAllMocks();
+  });
+
+  it("shows no ground in Zen when the application ground is off", () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const space = {
+      ...makeSpace(),
+      appearance: { ...DEFAULT_ZEN_APPEARANCE, background: { kind: "theme" as const } },
+    };
+    const { container } = render(
+      <ZenSurface
+        // What Increased contrast resolves the application ground to. Zen
+        // draws the resolved value rather than deciding again, so the setting
+        // that clears the ground everywhere else clears it here too.
+        appBackground={{ ...APP_GROUND, kind: "none", animated: false }}
+        appBackgroundFetcher={async () => new Blob()}
+        barCollapsed={false}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        space={space}
+      />,
+    );
+    expect(container.querySelector("[data-octant-app-backdrop]")).toBeNull();
+    expect(screen.getByRole("application", { name: "Zen workspace" })).toHaveStyle({
+      backgroundColor: "var(--oct-bg)",
+    });
+    vi.restoreAllMocks();
+  });
+
+  it("holds the application ground still in a space that asked for reduced motion", () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const space = {
+      ...makeSpace(),
+      appearance: {
+        ...DEFAULT_ZEN_APPEARANCE,
+        background: { kind: "theme" as const },
+        reducedMotion: true,
+      },
+    };
+    const { container } = render(
+      <ZenSurface
+        appBackground={{ ...APP_GROUND, animated: true }}
+        appBackgroundFetcher={async () => new Blob()}
+        barCollapsed={false}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        space={space}
+      />,
+    );
+    expect(
+      container.querySelector("[data-octant-app-backdrop]")?.getAttribute("data-animated"),
+    ).toBe("false");
+    vi.restoreAllMocks();
+  });
+
+  it("offers the application ground beside Zen's own backgrounds", () => {
+    const onUpdateAppearance = vi.fn();
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateAppearance={onUpdateAppearance}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        space={makeSpace()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
+    fireEvent.click(screen.getByRole("button", { name: "App background" }));
+    expect(onUpdateAppearance).toHaveBeenCalledWith({
+      dimming: 0,
+      elementOpacity: 1,
+      background: { kind: "theme" },
+    });
   });
 
   it("lets the appearance panel choose a built-in, a custom gradient, and a local image", async () => {
