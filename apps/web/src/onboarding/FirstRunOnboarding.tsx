@@ -29,6 +29,13 @@ import {
   type WorkspaceChoices,
 } from "./firstRunStepModel";
 import type { FirstRunOnboardingController } from "./useFirstRunOnboardingController";
+// The blocks this surface is built from — the section object, the group, the
+// row — are defined in this sheet, and it ships with Settings, a lazy route
+// first run never reaches. Without it the same class names picked up the
+// design system's older reading of them, so a first-run row and a Settings row
+// were two different objects wearing one name. First run is itself lazy, so
+// nothing else pays for the import.
+import "../styles/settings.css";
 import "./first-run.css";
 
 export interface FirstRunChatDefault {
