@@ -49,7 +49,10 @@ implementation backlog this design gates; nothing here weakens an existing contr
 ## Assets
 
 - The bound Work project root and Code repository root (filesystem contents and integrity).
-- Provider credentials and OAuth sessions (Keychain material; never journaled, never rendered).
+- Provider credentials and OAuth sessions (Keychain / secret-store material as
+  opaque broker refs; never journaled, never rendered). Delegated provider-runtime
+  OAuth stays out of Octant storage (0005); host-driven `subscription-oauth`
+  refresh and access live only as 0054 broker refs (0111).
 - Host identity keys, remote device credentials, and pairing secrets.
 - The append-only event journal: integrity of recorded tool calls, approvals, and authority
   transitions, and the guarantee that no secret or instruction-laundering content enters it as
@@ -338,6 +341,20 @@ window, or approves an action class the host policy reserves for the local user.
   coordinates, provider credentials, or a bound-root write scope wider than their declared and
   approved capability; their sandbox profile is derived from declared capabilities the same way
   thread tools derive from authority.
+
+### Consumer subscription OAuth delta (0111)
+
+Design only. Host-driven `subscription-oauth` for direct HTTP drivers. Distinct from directory ID /
+cloud-IAM in [`enterprise-provider-identity.md`](../enterprise-provider-identity.md). No new trust
+boundary moves credentials into `apps/server` or the renderer.
+
+| ID  | Delta                              | Control                                                                                                                                                                                                                             |
+| --- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| O1  | Long-lived refresh tokens          | Broker-only opaque refs; never journaled, logged, exported, or renderer-visible. Host-local revoke invalidates Octant refs only — it does not revoke the IdP token. Residual risk is a still-valid refresh token until the IdP does |
+| O2  | Confused-deputy spend              | Existing mode, Project, and approval gates stay in front; a remote principal cannot start the OAuth flow or rotate broker material (0013)                                                                                           |
+| O3  | Account or tenant binding on probe | Instance config carries the expected binding; `subscription-oauth` `ProviderDriver.probe` reports `incompatible` on mismatch                                                                                                        |
+| O4  | Refresh-token reuse / rotation     | Single-flight refresh with rotation safety; `refresh_token_reused` is terminal and invalidates the stored family; network and 5xx are transient                                                                                     |
+| O5  | First-party `client_id` and ToS    | Explicit user acknowledgment before any first-party-client-ID flow; Octant originator / client metadata; API-key path always offered                                                                                                |
 
 ## Journal Audit Events
 
