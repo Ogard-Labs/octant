@@ -12,6 +12,8 @@ import {
   Folder,
   FolderOpen,
   FolderGit,
+  GitBranch,
+  GitPullRequest,
   Layers,
   ListFilter,
   ListTree,
@@ -37,6 +39,7 @@ import {
   OctantMenuCheckboxItem,
   OctantMenuGroup,
   OctantMenuGroupLabel,
+  OctantMenuItem as OctantMenuActionItem,
   OctantMenuPopup,
   OctantMenuPortal,
   OctantMenuPositioner,
@@ -83,6 +86,17 @@ import {
   type ProjectViewMode,
 } from "../code/codeProjectViewModel";
 import {
+  SIDEBAR_ROW_PROPERTIES_FOR_VIEW,
+  SIDEBAR_ROW_PROPERTY_LABELS,
+  SidebarRowPropertiesContext,
+  readSidebarRowProperties,
+  sidebarRowPropertiesAll,
+  useSidebarRowProperties,
+  writeSidebarRowProperties,
+  type SidebarRowPropertyView,
+  type SidebarRowPropertyVisibility,
+} from "../shell/sidebarRowProperties";
+import {
   buildSidebarActivityView,
   matchesSidebarSearch,
   readActivityViewEnabled,
@@ -98,6 +112,8 @@ import {
   ProjectThreadRows,
   ProjectThreadStatus,
   ThreadStatusMark,
+  threadRowAge,
+  threadRowShortAge,
 } from "./ProjectThreadList";
 import type { ThreadRowActions } from "./ThreadRowMenu";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
@@ -275,6 +291,15 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   const [activityView, setActivityView] = useState(() =>
     readActivityViewEnabled(undefined, globalThis, activityMode),
   );
+  // Both views' choices are held at once: the tree and the feed can reach the
+  // same render — the rested shelves keep tree rows below the feed — so one
+  // "current view" record would hand those shelves the feed's answer.
+  const [rowProperties, setRowProperties] = useState<
+    Readonly<Record<SidebarRowPropertyView, SidebarRowPropertyVisibility>>
+  >(() => ({
+    projects: readSidebarRowProperties("projects"),
+    activity: readSidebarRowProperties("activity"),
+  }));
   const searchQuery = props.searchQuery ?? "";
   const searching = searchQuery.trim() !== "";
   // Snoozed and completed threads leave the Project groups for their own
@@ -399,6 +424,14 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     setActivityView(readActivityViewEnabled(undefined, globalThis, activityMode));
   }, [activityMode]);
 
+  function persistRowProperties(
+    view: SidebarRowPropertyView,
+    next: SidebarRowPropertyVisibility,
+  ): void {
+    setRowProperties((current) => ({ ...current, [view]: next }));
+    writeSidebarRowProperties(view, next);
+  }
+
   function toggleActivityView() {
     setActivityView((current) => {
       const next = !current;
@@ -520,176 +553,192 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     );
   }
 
+  const rowPropertyView: SidebarRowPropertyView = activityView ? "activity" : "projects";
+
   return (
-    <nav aria-label="Projects" className="project-nav window-no-drag">
-      {props.projectViewsEnabled === true && projectViewState !== undefined ? (
-        <CodeProjectViewSwitcher
-          onCreate={() => setProjectViewEditor({ mode: "create" })}
-          onDelete={(viewId) =>
-            persistProjectViewState(deleteCodeProjectView(projectViewState, viewId))
-          }
-          onEdit={(viewId) => setProjectViewEditor({ mode: "edit", viewId })}
-          onSelect={(viewId) =>
-            persistProjectViewState(selectCodeProjectView(projectViewState, viewId))
-          }
-          filters={currentFilters ?? normalizeProjectViewFilters(undefined)}
-          onFiltersChange={persistProjectViewFilters}
-          environmentOptions={
-            props.projectViewEnvironmentOptions ?? [{ id: "local", name: "Local" }]
-          }
-          presentation={props.projectViewSwitcherPresentation ?? "dropdown"}
-          projectCountFor={(viewId) =>
-            visibleCodeProjects(
-              props.projects.map((project) => ({ ...project, id: String(project.id) })),
-              { ...projectViewState, activeViewId: viewId },
-            ).length
-          }
-          state={projectViewState}
-        />
-      ) : null}
-      {projectViewEditor === undefined || projectViewState === undefined ? null : (
-        <CodeProjectViewEditorDialog
-          mode={projectViewEditor.mode}
-          onClose={() => setProjectViewEditor(undefined)}
-          onSave={(input) => {
-            persistProjectViewState(
-              projectViewEditor.mode === "create"
-                ? createCodeProjectView(projectViewState, input)
-                : updateCodeProjectView(projectViewState, input),
-            );
-            setProjectViewEditor(undefined);
-          }}
-          projects={props.projects}
-          {...(editingView === undefined ? {} : { view: editingView })}
-        />
-      )}
-      {nestThreads ? (
-        <ActivityViewToggle enabled={activityView} onToggle={toggleActivityView} />
-      ) : null}
-      {props.threadStatus === "loading" || props.threadStatus === "unavailable" ? (
-        <ProjectThreadStatus
-          {...(props.threadErrorMessage === undefined
-            ? {}
-            : { errorMessage: props.threadErrorMessage })}
-          {...(props.onRetryThreads === undefined ? {} : { onRetry: props.onRetryThreads })}
-          status={props.threadStatus}
-        />
-      ) : null}
-      {showFilteredThreadsEmpty ? (
-        <p className="project-nav__empty" role="status">
-          {FILTERED_THREADS_EMPTY_MESSAGE}
-        </p>
-      ) : null}
-      {showFilteredThreadsEmpty ? null : nestThreads && activityView ? (
-        <ActivityThreadList
-          {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
-          {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
-          {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
-          {...(filteringThreads && threadsReady
-            ? { emptyLabel: FILTERED_THREADS_EMPTY_MESSAGE }
-            : {})}
-          groups={activity.groups}
-          onSelectThread={props.onSelectThread!}
-        />
-      ) : (
-        <>
-          {viewGrouping === "project"
-            ? [
-                renderProjectGroup("Pinned", pinned),
-                renderProjectGroup("Projects", ordinary, { allowAdd: true }),
-              ]
-            : groupedViewProjects.map((group) => renderProjectGroup(group.label, group.projects))}
-          {unfiled.length > 0 && props.onSelectThread !== undefined ? (
-            <section aria-label={unfiledLabel} className="project-section project-section--unfiled">
-              <h2 className="sidebar-section">{unfiledLabel}</h2>
-              <div className="project-threads">
-                <ProjectThreadRows
-                  {...(props.threadActions === undefined ? {} : { actions: props.threadActions })}
-                  {...(props.activeThreadId === undefined
-                    ? {}
-                    : { activeThreadId: props.activeThreadId })}
-                  {...(props.onRenameThread === undefined
-                    ? {}
-                    : { onRenameThread: props.onRenameThread })}
-                  collapsedLimit={SIDEBAR_THREAD_LIMIT}
-                  onSelectThread={props.onSelectThread}
-                  projectNameForThread={projectNameForThread}
-                  threads={unfiled}
-                />
-              </div>
-            </section>
-          ) : null}
-        </>
-      )}
-      {onSelectThread === undefined
-        ? null
-        : (
-            [
-              { label: "Snoozed", threads: snoozedThreads },
-              { label: "Completed", threads: completedThreads },
-            ] as const
-          ).map((shelf) =>
-            shelf.threads.length === 0 ? null : (
-              <details
-                className="project-archive project-shelf"
-                data-shelf={shelf.label.toLowerCase()}
-                key={shelf.label}
-                open={
-                  props.activeThreadId !== undefined &&
-                  shelf.threads.some(
-                    (thread) => (thread.navigationId ?? thread.threadId) === props.activeThreadId,
-                  )
-                    ? true
-                    : undefined
-                }
+    <SidebarRowPropertiesContext.Provider value={rowProperties.projects}>
+      <nav aria-label="Projects" className="project-nav window-no-drag">
+        {props.projectViewsEnabled === true && projectViewState !== undefined ? (
+          <CodeProjectViewSwitcher
+            onCreate={() => setProjectViewEditor({ mode: "create" })}
+            onDelete={(viewId) =>
+              persistProjectViewState(deleteCodeProjectView(projectViewState, viewId))
+            }
+            onEdit={(viewId) => setProjectViewEditor({ mode: "edit", viewId })}
+            onSelect={(viewId) =>
+              persistProjectViewState(selectCodeProjectView(projectViewState, viewId))
+            }
+            filters={currentFilters ?? normalizeProjectViewFilters(undefined)}
+            onFiltersChange={persistProjectViewFilters}
+            onRowPropertiesChange={(next) => persistRowProperties(rowPropertyView, next)}
+            rowProperties={rowProperties[rowPropertyView]}
+            rowPropertyView={rowPropertyView}
+            environmentOptions={
+              props.projectViewEnvironmentOptions ?? [{ id: "local", name: "Local" }]
+            }
+            presentation={props.projectViewSwitcherPresentation ?? "dropdown"}
+            projectCountFor={(viewId) =>
+              visibleCodeProjects(
+                props.projects.map((project) => ({ ...project, id: String(project.id) })),
+                { ...projectViewState, activeViewId: viewId },
+              ).length
+            }
+            state={projectViewState}
+          />
+        ) : null}
+        {projectViewEditor === undefined || projectViewState === undefined ? null : (
+          <CodeProjectViewEditorDialog
+            mode={projectViewEditor.mode}
+            onClose={() => setProjectViewEditor(undefined)}
+            onSave={(input) => {
+              persistProjectViewState(
+                projectViewEditor.mode === "create"
+                  ? createCodeProjectView(projectViewState, input)
+                  : updateCodeProjectView(projectViewState, input),
+              );
+              setProjectViewEditor(undefined);
+            }}
+            projects={props.projects}
+            {...(editingView === undefined ? {} : { view: editingView })}
+          />
+        )}
+        {nestThreads ? (
+          <ActivityViewToggle enabled={activityView} onToggle={toggleActivityView} />
+        ) : null}
+        {props.threadStatus === "loading" || props.threadStatus === "unavailable" ? (
+          <ProjectThreadStatus
+            {...(props.threadErrorMessage === undefined
+              ? {}
+              : { errorMessage: props.threadErrorMessage })}
+            {...(props.onRetryThreads === undefined ? {} : { onRetry: props.onRetryThreads })}
+            status={props.threadStatus}
+          />
+        ) : null}
+        {showFilteredThreadsEmpty ? (
+          <p className="project-nav__empty" role="status">
+            {FILTERED_THREADS_EMPTY_MESSAGE}
+          </p>
+        ) : null}
+        {showFilteredThreadsEmpty ? null : nestThreads && activityView ? (
+          <SidebarRowPropertiesContext.Provider value={rowProperties.activity}>
+            <ActivityThreadList
+              {...(props.activeThreadId === undefined
+                ? {}
+                : { activeThreadId: props.activeThreadId })}
+              {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
+              {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
+              {...(filteringThreads && threadsReady
+                ? { emptyLabel: FILTERED_THREADS_EMPTY_MESSAGE }
+                : {})}
+              groups={activity.groups}
+              onSelectThread={props.onSelectThread!}
+            />
+          </SidebarRowPropertiesContext.Provider>
+        ) : (
+          <>
+            {viewGrouping === "project"
+              ? [
+                  renderProjectGroup("Pinned", pinned),
+                  renderProjectGroup("Projects", ordinary, { allowAdd: true }),
+                ]
+              : groupedViewProjects.map((group) => renderProjectGroup(group.label, group.projects))}
+            {unfiled.length > 0 && props.onSelectThread !== undefined ? (
+              <section
+                aria-label={unfiledLabel}
+                className="project-section project-section--unfiled"
               >
-                <summary>
-                  {shelf.label} <span>{shelf.threads.length}</span>
-                </summary>
+                <h2 className="sidebar-section">{unfiledLabel}</h2>
                 <div className="project-threads">
                   <ProjectThreadRows
                     {...(props.threadActions === undefined ? {} : { actions: props.threadActions })}
                     {...(props.activeThreadId === undefined
                       ? {}
                       : { activeThreadId: props.activeThreadId })}
-                    {...(props.openThreadIds === undefined
-                      ? {}
-                      : { openThreadIds: props.openThreadIds })}
                     {...(props.onRenameThread === undefined
                       ? {}
                       : { onRenameThread: props.onRenameThread })}
                     collapsedLimit={SIDEBAR_THREAD_LIMIT}
-                    onSelectThread={onSelectThread}
+                    onSelectThread={props.onSelectThread}
                     projectNameForThread={projectNameForThread}
-                    threads={shelf.threads}
+                    threads={unfiled}
                   />
                 </div>
-              </details>
-            ),
-          )}
-      {(currentFilters === undefined || currentFilters.lifecycle === "active") &&
-      props.archivedProjects.length > 0 ? (
-        <details className="project-archive">
-          <summary>
-            Archive <span>{props.archivedProjects.length}</span>
-          </summary>
-          {props.archivedProjects.map((project) => (
-            <div className="project-row project-row--archived" key={project.id}>
-              <span className="project-row__archived-name">{project.name}</span>
-              <OctantButton
-                aria-label={`Restore ${project.name}`}
-                className="project-row__action window-no-drag"
-                onClick={() => props.onRestore(project.id)}
-                type="button"
-                variant="ghost"
-              >
-                Restore
-              </OctantButton>
-            </div>
-          ))}
-        </details>
-      ) : null}
-    </nav>
+              </section>
+            ) : null}
+          </>
+        )}
+        {onSelectThread === undefined
+          ? null
+          : (
+              [
+                { label: "Snoozed", threads: snoozedThreads },
+                { label: "Completed", threads: completedThreads },
+              ] as const
+            ).map((shelf) =>
+              shelf.threads.length === 0 ? null : (
+                <details
+                  className="project-archive project-shelf"
+                  data-shelf={shelf.label.toLowerCase()}
+                  key={shelf.label}
+                  open={
+                    props.activeThreadId !== undefined &&
+                    shelf.threads.some(
+                      (thread) => (thread.navigationId ?? thread.threadId) === props.activeThreadId,
+                    )
+                      ? true
+                      : undefined
+                  }
+                >
+                  <summary>
+                    {shelf.label} <span>{shelf.threads.length}</span>
+                  </summary>
+                  <div className="project-threads">
+                    <ProjectThreadRows
+                      {...(props.threadActions === undefined
+                        ? {}
+                        : { actions: props.threadActions })}
+                      {...(props.activeThreadId === undefined
+                        ? {}
+                        : { activeThreadId: props.activeThreadId })}
+                      {...(props.openThreadIds === undefined
+                        ? {}
+                        : { openThreadIds: props.openThreadIds })}
+                      {...(props.onRenameThread === undefined
+                        ? {}
+                        : { onRenameThread: props.onRenameThread })}
+                      collapsedLimit={SIDEBAR_THREAD_LIMIT}
+                      onSelectThread={onSelectThread}
+                      projectNameForThread={projectNameForThread}
+                      threads={shelf.threads}
+                    />
+                  </div>
+                </details>
+              ),
+            )}
+        {(currentFilters === undefined || currentFilters.lifecycle === "active") &&
+        props.archivedProjects.length > 0 ? (
+          <details className="project-archive">
+            <summary>
+              Archive <span>{props.archivedProjects.length}</span>
+            </summary>
+            {props.archivedProjects.map((project) => (
+              <div className="project-row project-row--archived" key={project.id}>
+                <span className="project-row__archived-name">{project.name}</span>
+                <OctantButton
+                  aria-label={`Restore ${project.name}`}
+                  className="project-row__action window-no-drag"
+                  onClick={() => props.onRestore(project.id)}
+                  type="button"
+                  variant="ghost"
+                >
+                  Restore
+                </OctantButton>
+              </div>
+            ))}
+          </details>
+        ) : null}
+      </nav>
+    </SidebarRowPropertiesContext.Provider>
   );
 }
 
@@ -1036,7 +1085,11 @@ function ActivityThreadButton(props: {
   readonly onSelectThread: (threadId: string) => void;
   readonly thread: SidebarActivityThread;
 }) {
+  const shows = useSidebarRowProperties();
   const selected = props.activeThreadId === props.thread.navigationId;
+  const pullRequest = shows.pullRequest ? props.thread.pullRequests?.items[0] : undefined;
+  const checkout = shows.branch ? props.thread.checkoutChip : undefined;
+  const age = shows.lastUpdated ? threadRowShortAge(props.thread.updatedAt) : undefined;
   return (
     <OctantButton
       aria-current={selected ? "page" : undefined}
@@ -1048,15 +1101,55 @@ function ActivityThreadButton(props: {
       variant="ghost"
     >
       <span className="sidebar-navigation__thread-copy">
-        <span className="sidebar-navigation__thread-title">{props.thread.title}</span>
-        <span className="sidebar-navigation__thread-project">{props.thread.projectName}</span>
+        <span className="sidebar-navigation__thread-headline">
+          <span className="sidebar-navigation__thread-title">{props.thread.title}</span>
+          {pullRequest === undefined ? null : (
+            <span className="sidebar-navigation__thread-pr">
+              #{String(pullRequest.identity.number)}
+            </span>
+          )}
+        </span>
+        {shows.project ? (
+          <span className="sidebar-navigation__thread-project">{props.thread.projectName}</span>
+        ) : null}
+        {checkout === undefined ? null : (
+          <span className="sidebar-navigation__thread-checkout" title={checkout.label}>
+            <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
+            <span className="sidebar-navigation__thread-checkout-label">{checkout.label}</span>
+          </span>
+        )}
       </span>
-      <ThreadStatusMark
-        activity={props.thread.activity}
-        unread={props.thread.unread}
-        woke={props.thread.woke}
-        followUp={props.thread.followUp}
-      />
+      {pullRequest === undefined ? null : (
+        <span
+          aria-label={`Pull request #${String(pullRequest.identity.number)} · ${pullRequest.state}`}
+          className="sidebar-navigation__thread-pr-mark"
+          data-state={pullRequest.state}
+          role="img"
+          title={`Pull request #${String(pullRequest.identity.number)} · ${pullRequest.state}`}
+        >
+          <GitPullRequest aria-hidden="true" size={12} strokeWidth={1.8} />
+        </span>
+      )}
+      {/* As in the Project tree, a rested row keeps its wake time even when
+          Last updated is hidden. */}
+      {props.thread.wakeLabel !== undefined ? (
+        <span className="sidebar-navigation__thread-age">{props.thread.wakeLabel}</span>
+      ) : age === undefined ? null : (
+        <span
+          className="sidebar-navigation__thread-age"
+          title={threadRowAge(props.thread.updatedAt)}
+        >
+          {age}
+        </span>
+      )}
+      {shows.status ? (
+        <ThreadStatusMark
+          activity={props.thread.activity}
+          unread={props.thread.unread}
+          woke={props.thread.woke}
+          followUp={props.thread.followUp}
+        />
+      ) : null}
     </OctantButton>
   );
 }
@@ -1068,6 +1161,9 @@ function CodeProjectViewSwitcher(props: {
   readonly onSelect: (viewId: string) => void;
   readonly filters: ProjectViewFilters;
   readonly onFiltersChange: (filters: ProjectViewFilters) => void;
+  readonly rowProperties: SidebarRowPropertyVisibility;
+  readonly rowPropertyView: SidebarRowPropertyView;
+  readonly onRowPropertiesChange: (properties: SidebarRowPropertyVisibility) => void;
   readonly environmentOptions: ReadonlyArray<ProjectViewEnvironment>;
   readonly presentation: ProjectViewSwitcherPresentation;
   readonly projectCountFor: (viewId: string) => number;
@@ -1171,6 +1267,9 @@ function CodeProjectViewSwitcher(props: {
         environmentOptions={props.environmentOptions}
         filters={props.filters}
         onChange={props.onFiltersChange}
+        onRowPropertiesChange={props.onRowPropertiesChange}
+        rowProperties={props.rowProperties}
+        rowPropertyView={props.rowPropertyView}
       />
     </div>
   );
@@ -1256,10 +1355,18 @@ const PROJECT_VIEW_ACTIVITY_OPTIONS = [
   { id: "custom", label: "Custom range" },
 ] as const;
 
+const SIDEBAR_ROW_PROPERTY_VIEW_LABELS: Readonly<Record<SidebarRowPropertyView, string>> = {
+  projects: "Shown on Projects rows",
+  activity: "Shown on Activity rows",
+};
+
 function ProjectViewFilterMenu(props: {
   readonly environmentOptions: ReadonlyArray<ProjectViewEnvironment>;
   readonly filters: ProjectViewFilters;
   readonly onChange: (filters: ProjectViewFilters) => void;
+  readonly onRowPropertiesChange: (properties: SidebarRowPropertyVisibility) => void;
+  readonly rowProperties: SidebarRowPropertyVisibility;
+  readonly rowPropertyView: SidebarRowPropertyView;
 }) {
   const activityRangeErrorId = useId();
   const options = useMemo(() => {
@@ -1382,6 +1489,12 @@ function ProjectViewFilterMenu(props: {
               />
             </OctantMenuGroup>
             <OctantMenuSeparator />
+            <SidebarRowPropertyMenu
+              onChange={props.onRowPropertiesChange}
+              view={props.rowPropertyView}
+              visibility={props.rowProperties}
+            />
+            <OctantMenuSeparator />
             <OctantMenuSub>
               <OctantMenuSubTrigger>Activity</OctantMenuSubTrigger>
               <OctantMenuSubPopup>
@@ -1466,6 +1579,52 @@ function ProjectViewFilterMenu(props: {
         </OctantMenuPositioner>
       </OctantMenuPortal>
     </OctantMenuRoot>
+  );
+}
+
+/**
+ * Which properties the rows of the view you are looking at carry.
+ *
+ * The submenu edits one view at a time, the one on screen, and says which in
+ * its own label: turning Pull request off in the Activity feed leaves the
+ * Project tree exactly as it was.
+ */
+function SidebarRowPropertyMenu(props: {
+  readonly onChange: (properties: SidebarRowPropertyVisibility) => void;
+  readonly view: SidebarRowPropertyView;
+  readonly visibility: SidebarRowPropertyVisibility;
+}) {
+  const supported = SIDEBAR_ROW_PROPERTIES_FOR_VIEW[props.view];
+  const anyShown = supported.some((property) => props.visibility[property]);
+  return (
+    <OctantMenuSub>
+      <OctantMenuSubTrigger>Property visibility</OctantMenuSubTrigger>
+      <OctantMenuSubPopup>
+        <OctantMenuGroup>
+          <OctantMenuGroupLabel>
+            {SIDEBAR_ROW_PROPERTY_VIEW_LABELS[props.view]}
+          </OctantMenuGroupLabel>
+          {supported.map((property) => (
+            <OctantMenuCheckboxItem
+              checked={props.visibility[property]}
+              key={property}
+              onCheckedChange={(checked) =>
+                props.onChange({ ...props.visibility, [property]: checked })
+              }
+            >
+              {SIDEBAR_ROW_PROPERTY_LABELS[property]}
+            </OctantMenuCheckboxItem>
+          ))}
+        </OctantMenuGroup>
+        <OctantMenuSeparator />
+        <OctantMenuActionItem
+          closeOnClick={false}
+          onClick={() => props.onChange(sidebarRowPropertiesAll(props.view, !anyShown))}
+        >
+          {anyShown ? "Hide all" : "Show all"}
+        </OctantMenuActionItem>
+      </OctantMenuSubPopup>
+    </OctantMenuSub>
   );
 }
 
