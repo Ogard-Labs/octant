@@ -714,6 +714,9 @@ mechanisms are:
   and records the posture the turn ran under. Compatible harnesses may
   answer those prompts themselves when the thread opts in
   (`docs/decisions/0104`); categories and confinement stay Octant's.
+  The native harness may swap a configured reviewer onto eligible shell
+  and network prompts when a host setting is on
+  (`docs/decisions/0110`); that path is Proposed and does not yet run.
 - **Sandbox.** Provider CLIs, Git, terminals, test runners, and extension
   executables launch through one shared confinement port. On macOS that is
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap
