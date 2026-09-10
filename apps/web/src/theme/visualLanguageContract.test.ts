@@ -378,7 +378,7 @@ describe("the public-block visual language", () => {
     expect(settings).toMatch(/\.settings-view__content-inner\s*\{[^}]*margin:\s*0/);
     expect(settings).toMatch(/\.settings-card-section\s*\{[^}]*box-shadow:\s*none/);
     expect(settings).toMatch(/\.settings-card-section--open\s*\{[^}]*box-shadow:\s*none/);
-    // A section's card is built from its content children (0108), so the label
+    // A section's card is built from its content children (0109), so the label
     // and its description stay out on the page ground. The selector that picks
     // those children is pinned in settings/sectionObject.test.ts, which reads
     // what the rules set rather than their exact text.

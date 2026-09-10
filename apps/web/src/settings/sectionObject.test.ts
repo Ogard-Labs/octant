@@ -6,7 +6,7 @@ const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "
 
 /**
  * Rules whose selector mentions `.settings-card-section`, as bodies. The card
- * is assembled from its content children (0108), and the selectors that pick
+ * is assembled from its content children (0109), and the selectors that pick
  * those children have been reshaped several times to cover a second heading
  * level and each panel's own description class. Asserting on what the rules
  * *set* rather than on their exact text keeps this honest without pinning a
