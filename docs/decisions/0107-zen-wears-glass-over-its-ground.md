@@ -37,9 +37,14 @@ condition, and Zen is the case that shows the difference.
 Glass belongs where a person has put an atmospheric ground behind the work.
 That is the phone and Zen, and nowhere else.
 
-Zen's cards, orbit bar, pills, and panels take the `--oct-glass-*` ladder.
-The rest of the desktop keeps its hairline-and-no-shadow elevation, because
-nothing there sits over a ground.
+Zen's cards, orbit bar, and pills take the `--oct-glass-*` ladder. The rest of
+the desktop keeps its hairline-and-no-shadow elevation, because nothing there
+sits over a ground.
+
+Zen's panels are the one surface this decision authorises but does not yet
+reach. They ride the OctantCard adapter, and a feature rule may not repaint a
+shared control (0046), so a panel stays opaque until that adapter gains a glass
+variant. That variant is its own change; this record is what authorises it.
 
 Zen does not get a second palette. The glass tint, its stroke, and its
 highlight are theme roles like every other colour in the app, and
@@ -77,7 +82,9 @@ floating surface, exactly as they do on the phone.
 - The scoping comments in `apps/web/src/styles/octant.css` and the mobile note
   in `DESIGN.md` no longer say "the phone and nowhere else". They name the
   condition instead, and list both surfaces that meet it.
-- A Zen surface added later inherits the material by sitting inside the Zen
-  scope, rather than by opting in.
+- The material is applied by naming each Zen surface, not by scope, because a
+  Zen surface can be a shared control that a feature rule may not repaint. A
+  surface added later takes the material by being named here and in
+  `octant.css`, or by asking its adapter for a glass variant.
 - Increased contrast keeps its existing behaviour: it turns the ground off,
   which leaves the glass with nothing to blur and the opaque floor beneath it.
