@@ -1871,7 +1871,11 @@ function makeConnection(
             return Effect.fail(failure("protocol", "App tool answer is no longer active."));
           }
           state.pendingAppTools.delete(input.requestId);
-          pending.answer.resolve({ resultJson: input.resultJson, isError: input.isError });
+          pending.answer.resolve({
+            resultJson: input.resultJson,
+            isError: input.isError,
+            ...(input.images === undefined ? {} : { images: input.images }),
+          });
           return Effect.void;
         }),
     };

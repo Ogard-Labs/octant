@@ -1,3 +1,15 @@
+import {
+  createDesktopComputerUsePort,
+  type DesktopComputerUsePort,
+} from "./computerUse/desktopComputerUsePort";
+import {
+  createComputerUseToolService,
+  type ComputerUseToolService,
+} from "./computerUse/computerUseToolService";
+import {
+  decodeComputerUseOwner,
+  type ComputerUseOwner,
+} from "@octant/contracts/computer-use-plugin";
 import type { RepositoryIdentityObservation } from "./code/repositoryIdentity";
 import { IMAGE_LIBRARY_SCOPE_ID } from "@octant/contracts";
 import { createHash, randomUUID } from "node:crypto";
@@ -251,12 +263,9 @@ import {
 import { createCodeOperationApprovalRouteHandler } from "./codeOperationApprovalRoutes";
 import {
   createComputerUseRuntime,
-  reportComputerUseDestination,
   type ComputerUseNativeAdapter,
   type ComputerUseRuntime,
 } from "./computerUse/computerUseRuntime";
-import { detectMacOsScreen } from "./computerUse/computerUseDestination";
-import { createMacOsComputerUseAdapter } from "./computerUse/macOsComputerUseAdapter";
 import { createNodeComputerUseProcessPort } from "./computerUse/nodeComputerUseProcessPort";
 import { createComputerUseValidationEvidenceRecorder } from "./computerUse/computerUseValidationEvidence";
 import { createComputerUseRouteHandler } from "./computerUseRoutes";
@@ -912,6 +921,7 @@ export interface StartOctantServerOptions {
   readonly codeService?: CodeRouteService;
   readonly codeOperationRuntime?: CodeOperationRuntime;
   readonly computerUseRuntime?: ComputerUseRuntime;
+  readonly computerUseDesktop?: DesktopComputerUsePort;
   readonly computerUseAdapter?: ComputerUseNativeAdapter;
   readonly githubAuthenticationPort?: GhAuthenticationPort;
   readonly ghExecutable?: string;
@@ -1545,6 +1555,7 @@ export function startOctantServer(
     };
     let productFeedbackService: ProductFeedbackService;
     let activeComputerUseRuntime: ComputerUseRuntime | undefined;
+    let activeComputerUseTools: ComputerUseToolService | undefined;
     let workRequestRuntime: WorkRequestRuntime | undefined;
     let revokeShellWindow: ((windowId: WindowId) => void) | undefined;
     const windowAuthorityStore = new WindowAuthorityStore(
@@ -1557,6 +1568,7 @@ export function startOctantServer(
         activeCodeService?.revokeWindow?.(windowId);
         void browserAutomationService?.revokeWindow(windowId);
         void activeComputerUseRuntime?.revokeWindow(windowId);
+        void activeComputerUseTools?.revokeWindow(windowId);
       },
       {
         clampNow: processAuthorityNow,
@@ -2136,23 +2148,117 @@ export function startOctantServer(
     const computerUseProcess = createNodeComputerUseProcessPort({
       receiptDirectory: join(persistence.dataDirectory, "computer-use", "runtime-receipts"),
     });
-    const computerUseDestination =
-      options.computerUseAdapter === undefined
-        ? reportComputerUseDestination({
-            platform: process.platform,
-            ...(process.platform === "darwin" ? { hasScreen: detectMacOsScreen() } : {}),
+    const computerUseDesktop =
+      options.computerUseDesktop ?? createDesktopComputerUsePort(process.env);
+    const computerUseTools =
+      computerUseDesktop === undefined
+        ? undefined
+        : createComputerUseToolService({
+            desktop: computerUseDesktop,
+            settings: () =>
+              (persistence.readShellSettings()?.settings ?? defaultShellSettings()).computerUse,
+            authority: (owner) =>
+              browserAuthority.resolve(decodeBrowserThreadId(owner.threadId), owner.mode),
+            ownerIsCurrent: (owner) => {
+              const current =
+                owner.mode === "chat"
+                  ? persistence.readChatThread(decodeChatThreadId(owner.threadId))
+                  : owner.mode === "code"
+                    ? persistence.readCodeThread(decodeCodeThreadId(owner.threadId))
+                    : workThreadProjection.read(decodeWorkThreadId(owner.threadId));
+              return (
+                current?.lifecycle === "active" &&
+                String(current.providerInstanceId) === String(owner.providerInstanceId) &&
+                String(current.modelId) === String(owner.modelId) &&
+                !(
+                  "executionPolicy" in current &&
+                  current.executionPolicy === "plan" &&
+                  owner.executionPolicy !== "plan"
+                ) &&
+                browserAuthority.canAccessWindow(
+                  owner.windowId,
+                  decodeBrowserThreadId(owner.threadId),
+                  owner.mode,
+                )
+              );
+            },
+            toolConstraints: (owner) =>
+              owner.mode === "code"
+                ? (persistence.readCodeThread(decodeCodeThreadId(owner.threadId))
+                    ?.toolConstraints ?? [])
+                : [],
+            externalContentIngested: (owner) =>
+              readThreadExternalContentTaint(persistence.connection, owner.threadId)
+                .externalContentIngested,
+            threadTitle: (owner) =>
+              (owner.mode === "chat"
+                ? persistence.readChatThread(decodeChatThreadId(owner.threadId))?.title
+                : owner.mode === "code"
+                  ? persistence.readCodeThread(decodeCodeThreadId(owner.threadId))?.title
+                  : workThreadProjection.read(decodeWorkThreadId(owner.threadId))?.title) ??
+              "this task",
+            record: (() => {
+              const recorder = createComputerUseValidationEvidenceRecorder({
+                eventStore: validationEventStore,
+                uuid: randomUUID,
+                clock: () => new Date().toISOString(),
+              });
+              return async (event) => {
+                await recorder.record(event);
+                machineChangeFeed.publish(["computer-use"]);
+              };
+            })(),
+          });
+    activeComputerUseTools = computerUseTools;
+    const computerToolsFor = (owner: ComputerUseOwner, selection: unknown) => {
+      const model = providerRuntimeRegistry
+        .observedState(owner.providerInstanceId)
+        ?.models.find((candidate) => String(candidate.id) === String(owner.modelId));
+      const tools = computerUseTools?.toolSet(
+        owner,
+        selection,
+        model?.inputModalities.includes("image") === true,
+      );
+      return tools === undefined
+        ? undefined
+        : taintAppManagedToolResults({
+            tools,
+            threadId: owner.threadId,
+            recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+            uuid: randomUUID,
+          });
+    };
+    let lastComputerSettings = "";
+    let computerSettingsTail = Promise.resolve();
+    const syncComputerUseSettings = () => {
+      const settings = (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+        .computerUse;
+      const encoded = JSON.stringify(settings);
+      if (encoded !== lastComputerSettings) {
+        lastComputerSettings = encoded;
+        computerSettingsTail = computerSettingsTail
+          .then(async () => {
+            await computerUseDesktop?.configure(settings);
           })
-        : { status: "available" as const, kind: "macos-host" as const };
-    const computerUseAdapter =
-      options.computerUseAdapter ??
-      (computerUseDestination.status === "available"
-        ? createMacOsComputerUseAdapter({ process: computerUseProcess })
-        : undefined);
+          .catch(() => undefined);
+      }
+      void computerUseTools?.sweep().catch(() => undefined);
+    };
+    const stopComputerSettingsWatch = persistence.journal.subscribeCommitted(() =>
+      queueMicrotask(syncComputerUseSettings),
+    );
+    syncComputerUseSettings();
     const computerUseRuntime =
       options.computerUseRuntime ??
+      computerUseTools?.runtime ??
       createComputerUseRuntime({
-        ...(computerUseAdapter === undefined ? {} : { adapter: computerUseAdapter }),
-        destination: computerUseDestination,
+        ...(options.computerUseAdapter === undefined
+          ? {}
+          : { adapter: options.computerUseAdapter }),
+        destination:
+          options.computerUseAdapter === undefined
+            ? { status: "unavailable", kind: "no-destination" }
+            : { status: "available", kind: "macos-host" },
         evidence: createComputerUseValidationEvidenceRecorder({
           eventStore: validationEventStore,
           uuid: randomUUID,
@@ -3367,6 +3473,18 @@ export function startOctantServer(
       });
       const rootProbePath = decodeCodeRelativePath("package.json");
       codeOperationRuntime = createCodeOperationRuntime({
+        computerUseTools: ({ windowId, thread, selection }) =>
+          computerToolsFor(
+            decodeComputerUseOwner({
+              windowId,
+              threadId: thread.id,
+              mode: "code",
+              providerInstanceId: thread.providerInstanceId,
+              modelId: thread.modelId,
+              executionPolicy: thread.executionPolicy,
+            }),
+            selection,
+          ),
         terminalProcessPort,
         repositoryTestProcessPort,
         scaffoldProcess: {
@@ -4215,6 +4333,18 @@ export function startOctantServer(
     });
     let imageJobService!: ImageJobService;
     const chatService = new ChatService({
+      resolveComputerUseTools: ({ windowId, thread, selection }) =>
+        computerToolsFor(
+          decodeComputerUseOwner({
+            windowId,
+            threadId: thread.id,
+            mode: "chat",
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+            executionPolicy: "approval-gated",
+          }),
+          selection,
+        ),
       persistence,
       issueContext: githubIssueContextService,
       linearIssueContext: linearIssueContextService,
@@ -4663,7 +4793,21 @@ export function startOctantServer(
               uuid: randomUUID,
             });
         if (native === undefined && browser === undefined) return undefined;
-        return combineAppManagedToolSets(native, browser);
+        const computer =
+          input.computerUseSelection === undefined
+            ? undefined
+            : computerToolsFor(
+                decodeComputerUseOwner({
+                  windowId: input.windowId,
+                  threadId: input.thread.id,
+                  mode: "work",
+                  providerInstanceId: input.thread.providerInstanceId,
+                  modelId: input.thread.modelId,
+                  executionPolicy: "approval-gated",
+                }),
+                input.computerUseSelection,
+              );
+        return combineAppManagedToolSets(native, browser, computer);
       },
       nativeHarness: nativeHarnessHooks,
       turnFileObserver: new WorkTurnFileObserver(),
@@ -7225,7 +7369,9 @@ export function startOctantServer(
           }
           browserToolApprovalService?.close();
           try {
-            await computerUseRuntime.close();
+            stopComputerSettingsWatch();
+            if (computerUseTools !== undefined) await computerUseTools.close();
+            else await computerUseRuntime.close();
           } catch (error) {
             shutdownFailure ??= error;
           }

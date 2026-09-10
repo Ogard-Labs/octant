@@ -196,6 +196,11 @@ export class ChatTurnRunner {
     const timeoutMs = this.#timeoutMs;
 
     return Effect.gen(function* () {
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(async () => {
+          await input.appManagedTools?.close?.();
+        }).pipe(Effect.catchAllCause(() => Effect.logWarning("App-managed tool cleanup failed."))),
+      );
       let currentAttempt = input.attempt;
       let actualInputTokens = 0;
       let actualOutputTokens = 0;
@@ -655,6 +660,7 @@ export class ChatTurnRunner {
                     sessionId: input.attempt.providerSessionId,
                     requestId: event.requestId,
                     resultJson: boundedToolResultJson(execution.result),
+                    ...(execution.images === undefined ? {} : { images: execution.images }),
                     isError: execution.isError === true,
                   });
                   return;

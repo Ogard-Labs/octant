@@ -1,3 +1,5 @@
+import { ComputerUseMention, useComputerUseMention } from "../../computerUse/ComputerUseMention";
+import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
 import type { CodeCheckoutId, CodeRepositoryId } from "@octant/contracts/code";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
@@ -150,6 +152,7 @@ export interface CodeComposerSuggestion {
 }
 
 export interface CodeComposerSubmitInput {
+  readonly computerUseSelection?: ExtensionSelection;
   readonly prompt: string;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly permissionPersistence: PermissionPersistence;
@@ -183,6 +186,12 @@ const LAST_RESORT_BASE_BRANCH = "development";
 
 export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const [prompt, setPrompt] = useState("");
+  const computer = useComputerUseMention({
+    textarea: () => textareaRef.current,
+    draft: prompt,
+    onDraftChange: setPrompt,
+    scopeKey: "code-draft",
+  });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composerIdRef = useRef(globalThis.crypto.randomUUID());
   useEffect(() => {
@@ -437,11 +446,13 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     if (!canSubmit) return;
     setSubmitting(true);
     const staged = images.filesForSend();
+    const computerUseSelection = computer.selection;
     void threadMentions
       .resolveForSend()
       .then(async (threadMentionIds) => {
         const created = await props.onCreateThread({
           prompt: trimmed,
+          ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
           executionPolicy,
           permissionPersistence,
           deliveryTarget: {
@@ -460,13 +471,17 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           ...(staged.length === 0 ? {} : { images: staged }),
           ...(threadMentionIds.length === 0 ? {} : { threadMentionIds }),
         });
-        if (created !== false) images.clearAfterAccepted();
+        if (created !== false) {
+          images.clearAfterAccepted();
+          computer.consume(computerUseSelection);
+        }
         return created;
       })
       .finally(() => {
         setSubmitting(false);
       });
   }, [
+    computer,
     canSubmit,
     trimmed,
     executionPolicy,
@@ -494,6 +509,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (computer.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -570,6 +586,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           <ThreadComposer
             chips={
               <>
+                <ComputerUseMention controller={computer} surface="chips" />
                 <ThreadMentionChips
                   chips={threadMentions.chips}
                   onRemove={(threadId) => threadMentions.composer?.onRemoveChip(threadId)}
@@ -581,11 +598,16 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             input={
               <OctantTextarea
                 aria-label="First message"
+                aria-autocomplete="list"
+                aria-expanded={computer.open}
+                aria-controls={computer.open ? computer.listId : undefined}
+                aria-activedescendant={computer.open ? `${computer.listId}-computer` : undefined}
                 autoFocus
                 className="composer-input"
                 disabled={props.creating}
                 onChange={(event) => {
                   setPrompt(event.target.value);
+                  computer.sync(event.target.value, event.currentTarget.selectionStart);
                   mention.sync(event.target.value, event.currentTarget.selectionStart);
                 }}
                 onClick={(event) =>
@@ -605,7 +627,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               />
             }
             typeahead={
-              mention.open ? (
+              computer.open ? (
+                <ComputerUseMention controller={computer} surface="typeahead" />
+              ) : mention.open ? (
                 <ThreadMentionTypeahead
                   activeIndex={mention.activeIndex}
                   {...(threadMentions.composer?.busy === undefined
