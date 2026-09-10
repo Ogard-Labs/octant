@@ -39,11 +39,12 @@ must be decided before implementation, not tuned after.
   lead's in-flight turn, inject a redirect the lead must read before its next
   turn, and pause the run for the user. It never executes tools, edits files,
   or grants approvals — supervision carries no side-effect authority. This
-  constrains the advisor only: the lead writes within its own run, and
-  delegated children keep writing inside their own isolated worktrees per 0012. The advisor
-  reviews compact turn digests and boundary artifacts (an approved plan, a
-  diff about to be committed), not full transcripts, and the lead may consult
-  it on demand as a second opinion. Every intervention is journaled.
+  constrains the advisor only: the lead writes within its own run,
+  delegated children keep writing inside their own isolated worktrees per
+  0012, and model-reviewed approvals are a separate `reviewer` role in 0110. The advisor reviews compact turn digests and boundary artifacts
+  (an approved plan, a diff about to be committed), not full transcripts,
+  and the lead may consult it on demand as a second opinion. Every
+  intervention is journaled.
 - At turn end the lead may attach up to three structured follow-up
   suggestions, each with a title, a standalone prompt, and a target: continue
   in this thread, a new thread, or a new thread on its own worktree. Surfaces
@@ -80,3 +81,4 @@ must be decided before implementation, not tuned after.
 - 0025 Long-running goal loops
 - 0066 Native harness model role slots
 - 0069 Native harness context overflow (amends overflow and summarization)
+- 0110 Native harness model-reviewed approvals (separate `reviewer` role)
