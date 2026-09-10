@@ -150,7 +150,7 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
                   return <Fragment key={`ungrouped-${index}`}>{items}</Fragment>;
                 }
                 return (
-                  <SelectGroup key={segment.group}>
+                  <SelectGroup key={`${segment.group}-${index}`}>
                     <SelectGroupLabel>{segment.group}</SelectGroupLabel>
                     {items}
                   </SelectGroup>
