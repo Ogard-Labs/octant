@@ -259,7 +259,15 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
           );
         }
         const afterSequenceParam = url.searchParams.get("afterSequence");
-        if (afterSequenceParam === null || url.searchParams.size !== 1) {
+        // `contents=1` asks for the body behind each streamed delta on its
+        // frame. It is opt-in because a client that decodes frames strictly
+        // would refuse a field it does not know.
+        const contentsParam = url.searchParams.get("contents");
+        if (
+          afterSequenceParam === null ||
+          url.searchParams.size !== (contentsParam === null ? 1 : 2) ||
+          (contentsParam !== null && contentsParam !== "1")
+        ) {
           return failureResponse(
             { category: "invalid", message: "Chat replay cursor is invalid." },
             400,
@@ -278,7 +286,10 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
         }
         return ndjsonStreamResponse(
           {
-            frames: (cursor, signal) => dependencies.service.subscribe(threadId, cursor, signal),
+            frames: (cursor, signal) =>
+              dependencies.service.subscribe(threadId, cursor, signal, {
+                contents: contentsParam === "1",
+              }),
             afterSequence,
             ...(dependencies.waitForThreadChange === undefined
               ? {}
