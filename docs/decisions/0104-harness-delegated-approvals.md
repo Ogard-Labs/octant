@@ -74,3 +74,4 @@ mode through, so the capability is invisible to the user.
 
 - 0009 Sandbox confinement, approvals, and Plan mode
 - 0018 Auto-accept edits as a fourth access posture
+- 0110 Native harness model-reviewed approvals (native path; this record is external)

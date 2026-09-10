@@ -91,3 +91,4 @@ approval categories that stay independent of which provider is running.
 - 0005 Provider SDK contract
 - 0011 Extensions and skills activation ladder
 - 0012 Mixed-provider subagents
+- 0110 Native harness model-reviewed approvals (scoped exception)
