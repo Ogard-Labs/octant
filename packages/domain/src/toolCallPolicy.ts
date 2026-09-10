@@ -273,6 +273,7 @@ export function resolveNetworkEgressPolicy(input: {
  */
 function profileToolIdForCapability(capabilityId: string): string {
   if (capabilityId === "browser-automation") return "octant_browser";
+  if (capabilityId === "computer-use") return "octant_computer";
   return nativeHarnessToolNameForCapability(capabilityId) ?? capabilityId;
 }
 

@@ -1,3 +1,5 @@
+import { ComputerUseMention, useComputerUseMention } from "../computerUse/ComputerUseMention";
+import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { decodeGithubIssueContextRequest } from "@octant/contracts";
 import type { RepositoryIssueRow } from "../github/readIssuesAcrossRepositories";
 import type { OctantMode } from "@octant/contracts/modes";
@@ -135,6 +137,7 @@ export interface DraftThreadWorkspaceProps {
     threadMentionIds?: ReadonlyArray<MentionableThreadId>,
     issueContext?: GithubIssueContextRequest,
     linearIssueContext?: LinearIssueContextRequest,
+    computerUseSelection?: ExtensionSelection,
   ) => boolean | void | Promise<boolean | void>;
   readonly onCreateCodeThread?: (
     input: CodeComposerSubmitInput,
@@ -611,6 +614,17 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             }
             // Carry the outcome the user confirmed in the composer so the
             // fallback path never re-derives or auto-confirms a suggestion.
+            if (submitted.computerUseSelection !== undefined)
+              return props.onCreateThread(
+                submitted.prompt,
+                selectedProjectId,
+                submitted.deliveryTarget.outcomeKind,
+                submitted.images,
+                submitted.threadMentionIds,
+                issueContext,
+                linearIssueContext,
+                submitted.computerUseSelection,
+              );
             return issueContext === undefined && linearIssueContext === undefined
               ? props.onCreateThread(
                   submitted.prompt,
@@ -663,10 +677,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(props.windowCapability === undefined
             ? {}
             : { windowCapability: props.windowCapability })}
-          onCreateThread={(prompt, images, threadMentionIds) =>
-            issueContext === undefined && linearIssueContext === undefined
-              ? props.onCreateThread(prompt, selectedProjectId, undefined, images, threadMentionIds)
-              : props.onCreateThread(
+          onCreateThread={(prompt, images, threadMentionIds, computerUseSelection) =>
+            computerUseSelection !== undefined
+              ? props.onCreateThread(
                   prompt,
                   selectedProjectId,
                   undefined,
@@ -674,7 +687,25 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                   threadMentionIds,
                   issueContext,
                   linearIssueContext,
+                  computerUseSelection,
                 )
+              : issueContext === undefined && linearIssueContext === undefined
+                ? props.onCreateThread(
+                    prompt,
+                    selectedProjectId,
+                    undefined,
+                    images,
+                    threadMentionIds,
+                  )
+                : props.onCreateThread(
+                    prompt,
+                    selectedProjectId,
+                    undefined,
+                    images,
+                    threadMentionIds,
+                    issueContext,
+                    linearIssueContext,
+                  )
           }
           onCancel={props.onCancel}
           {...(props.onCancelFirstTurn === undefined
@@ -691,12 +722,31 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
 
   const presentation = draftThreadModePresentation(props.mode);
   const [prompt, setPrompt] = useState("");
+  const computer = useComputerUseMention({
+    textarea: () => textareaRef.current,
+    draft: prompt,
+    onDraftChange: setPrompt,
+    scopeKey: "chat-draft",
+  });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const trimmed = prompt.trim();
   const canSubmit = trimmed.length > 0 && !props.creating;
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
+    if (computer.selection !== undefined) {
+      void props.onCreateThread(
+        trimmed,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        issueContext,
+        linearIssueContext,
+        computer.selection,
+      );
+      return;
+    }
     if (issueContext === undefined && linearIssueContext === undefined) {
       void props.onCreateThread(trimmed);
       return;
@@ -710,9 +760,10 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
       issueContext,
       linearIssueContext,
     );
-  }, [canSubmit, issueContext, linearIssueContext, props, trimmed]);
+  }, [canSubmit, computer.selection, issueContext, linearIssueContext, props, trimmed]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (computer.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       submit();
@@ -738,6 +789,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         <div className="draft-thread__composer composer-stack">
           {createFromControl}
           <ThreadComposer
+            chips={<ComputerUseMention controller={computer} surface="chips" />}
+            typeahead={<ComputerUseMention controller={computer} surface="typeahead" />}
             footer={
               <div className="composer-tray">
                 <DraftContextStrip
@@ -755,10 +808,17 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             input={
               <OctantTextarea
                 aria-label="First message"
+                aria-autocomplete="list"
+                aria-expanded={computer.open}
+                aria-controls={computer.open ? computer.listId : undefined}
+                aria-activedescendant={computer.open ? `${computer.listId}-computer` : undefined}
                 autoFocus
                 className="composer-input"
                 disabled={props.creating}
-                onChange={(event) => setPrompt(event.target.value)}
+                onChange={(event) => {
+                  setPrompt(event.target.value);
+                  computer.sync(event.target.value, event.currentTarget.selectionStart);
+                }}
                 onKeyDown={handleKeyDown}
                 placeholder={presentation.composerPlaceholder}
                 ref={textareaRef}

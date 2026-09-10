@@ -28,6 +28,7 @@ export function taintAppManagedToolResults(
 ): AppManagedToolSet {
   return {
     definitions: input.tools.definitions,
+    ...(input.tools.close === undefined ? {} : { close: input.tools.close }),
     execute: async (call) => {
       const outcome = await input.tools.execute(call);
       if (outcome.isError === true) return outcome;

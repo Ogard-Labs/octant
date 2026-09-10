@@ -1,12 +1,17 @@
-import type { ProviderToolDefinition } from "@octant/contracts";
+import type { ProviderToolDefinition, ProviderToolImage } from "@octant/contracts";
 
 export interface AppManagedToolSet {
   readonly definitions: ReadonlyArray<ProviderToolDefinition>;
+  readonly close?: () => Promise<void>;
   readonly execute: (input: {
     readonly name: string;
     readonly inputJson: string;
     readonly signal?: AbortSignal;
-  }) => Promise<{ readonly result: unknown; readonly isError?: boolean }>;
+  }) => Promise<{
+    readonly result: unknown;
+    readonly isError?: boolean;
+    readonly images?: ReadonlyArray<ProviderToolImage>;
+  }>;
 }
 
 /**
@@ -18,8 +23,13 @@ export function combineAppManagedToolSets(
   ...sets: ReadonlyArray<AppManagedToolSet | undefined>
 ): AppManagedToolSet {
   const present = sets.filter((set): set is AppManagedToolSet => set !== undefined);
+  let closing: Promise<void> | undefined;
   return {
     definitions: present.flatMap((set) => set.definitions),
+    close: () => {
+      closing ??= Promise.all(present.map((set) => set.close?.())).then(() => undefined);
+      return closing;
+    },
     execute: async (input) => {
       const owner = present.find((set) =>
         set.definitions.some((definition) => definition.name === input.name),

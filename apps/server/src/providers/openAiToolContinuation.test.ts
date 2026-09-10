@@ -27,6 +27,34 @@ function failureOf(throwable: () => unknown): ProviderFailure {
 }
 
 describe("encodeResponsesToolResults", () => {
+  it("keeps every tool answer paired before sending its image observations", () => {
+    const answers: ReadonlyArray<ProviderToolAnswer> = [
+      { ...answer("call_picture", "{}"), images: [{ mimeType: "image/png", data: "AAAA" }] },
+      answer("call_other", "{}"),
+    ];
+    expect(encodeResponsesToolResults(answers)).toEqual([
+      { type: "function_call_output", call_id: "call_picture", output: "{}" },
+      { type: "function_call_output", call_id: "call_other", output: "{}" },
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: expect.stringContaining("untrusted observations") },
+          { type: "input_image", image_url: "data:image/png;base64,AAAA" },
+        ],
+      },
+    ]);
+    expect(encodeChatCompletionsToolResults(answers)).toEqual([
+      { role: "tool", tool_call_id: "call_picture", content: "{}" },
+      { role: "tool", tool_call_id: "call_other", content: "{}" },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: expect.stringContaining("untrusted observations") },
+          { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+        ],
+      },
+    ]);
+  });
   it("encodes a single tool answer as a function_call_output input item", () => {
     const items = encodeResponsesToolResults([answer("call_abc", '{"ok":true}')]);
     expect(items).toEqual<EncodedResponsesInputItem[]>([
@@ -44,8 +72,8 @@ describe("encodeResponsesToolResults", () => {
       answer("call_two", '{"b":2}'),
     ]);
     expect(items).toHaveLength(2);
-    expect(items[0]!.call_id).toBe("call_one");
-    expect(items[1]!.call_id).toBe("call_two");
+    expect(items[0]).toMatchObject({ call_id: "call_one" });
+    expect(items[1]).toMatchObject({ call_id: "call_two" });
   });
 
   it("encodes an empty answer list as an empty array", () => {
@@ -95,8 +123,8 @@ describe("encodeChatCompletionsToolResults", () => {
       answer("call_two", '{"b":2}'),
     ]);
     expect(messages).toHaveLength(2);
-    expect(messages[0]!.tool_call_id).toBe("call_one");
-    expect(messages[1]!.tool_call_id).toBe("call_two");
+    expect(messages[0]).toMatchObject({ tool_call_id: "call_one" });
+    expect(messages[1]).toMatchObject({ tool_call_id: "call_two" });
   });
 
   it("encodes an empty answer list as an empty array", () => {

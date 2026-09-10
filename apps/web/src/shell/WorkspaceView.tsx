@@ -334,6 +334,7 @@ export interface WorkspaceViewProps {
     threadMentionIds?: ReadonlyArray<import("@octant/contracts").MentionableThreadId>,
     issueContext?: import("@octant/contracts").GithubIssueContextRequest,
     linearIssueContext?: import("@octant/contracts").LinearIssueContextRequest,
+    computerUseSelection?: import("@octant/contracts/extensions").ExtensionSelection,
   ) => boolean | void | Promise<boolean | void>;
   readonly githubPluginEnabled?: boolean;
   readonly linearClient?: import("@octant/client-runtime/integration-client").IntegrationClient;
@@ -1088,6 +1089,7 @@ function renderNonCodeTab(
           threadMentionIds,
           issueContext,
           linearIssueContext,
+          computerUseSelection,
         ) => {
           // Returning quietly here made a wired-up composer look dead: the user
           // pressed Create thread and nothing happened anywhere. A missing
@@ -1104,6 +1106,9 @@ function renderNonCodeTab(
             threadMentionIds,
             issueContext,
             linearIssueContext,
+            ...(computerUseSelection === undefined
+              ? ([] as const)
+              : ([computerUseSelection] as const)),
           );
         }}
         {...(props.onCreateProject === undefined ? {} : { onCreateProject: props.onCreateProject })}

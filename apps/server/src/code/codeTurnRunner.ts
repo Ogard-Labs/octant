@@ -165,6 +165,11 @@ export class CodeTurnRunner {
     const timeoutMs = this.#timeoutMs;
 
     return Effect.gen(function* () {
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(async () => {
+          await input.appManagedTools?.close?.();
+        }).pipe(Effect.catchAllCause(() => Effect.logWarning("App-managed tool cleanup failed."))),
+      );
       let outcome: CodeTurnOutcome | undefined;
       let handledEvents = 0;
       let unresolvedReconciliation = false;
@@ -354,6 +359,7 @@ export class CodeTurnRunner {
                         } catch {
                           return {
                             result: { error: "tool-execution-failed" },
+                            images: [],
                             isError: true,
                           } as const;
                         }
@@ -373,6 +379,7 @@ export class CodeTurnRunner {
                       requestId: sanitizedEvent.requestId,
                       resultJson: answer.resultJson,
                       isError: answer.isError,
+                      ...(execution.images === undefined ? {} : { images: execution.images }),
                     });
                     yield* input.persistEvent({
                       ...normalized,
