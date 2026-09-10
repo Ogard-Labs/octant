@@ -47,4 +47,20 @@ describe("useExtensionDraftSelections", () => {
     await Promise.resolve();
     expect(screen.getByLabelText("Receipts")).toHaveTextContent("");
   });
+
+  it("does not resurrect a removed receipt when its lookup completes", async () => {
+    const snapshot = deferred<never>();
+    const client = {
+      snapshot: vi.fn(() => snapshot.promise),
+      effectiveState: vi.fn(),
+    } as unknown as ExtensionClient;
+    render(<Harness client={client} projectId={null} />);
+    const input = screen.getByLabelText("Draft");
+    fireEvent.change(input, { target: { value: "$review" } });
+    screen.getByRole("button", { name: "Resolve" }).click();
+    screen.getByRole("button", { name: "Clear" }).click();
+    snapshot.resolve({ sequence: 1, skills: [] } as never);
+    await Promise.resolve();
+    expect(screen.getByLabelText("Receipts")).toHaveTextContent("");
+  });
 });
