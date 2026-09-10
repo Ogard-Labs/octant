@@ -17,8 +17,10 @@ rejection reasons, and journaled route receipts.
 ## Decision
 
 - Model routing is configured by **slot**, not by job. Built-in slots are
-  `default`, `plan`, `slow`, `task`, `smol`, `vision`, and `advisor`; users may
-  define custom slots. Every model call the harness makes names a slot.
+  `default`, `plan`, `slow`, `task`, `smol`, `vision`, `advisor`, and
+  `reviewer`; users may define custom slots. Every model call the harness
+  makes names a slot. The `reviewer` slot is owned by 0110 and is not the
+  Reviewer job.
 - A slot is an ordered candidate list built on the multi-model pool contract.
   Each entry names a provider instance, a model id, and an optional reasoning
   level. The first entry is the primary; the rest are fallbacks. Slot
@@ -29,8 +31,9 @@ rejection reasons, and journaled route receipts.
 - Jobs resolve to slots through an editable mapping. Defaults: Lead and
   Implementer to `default`, Planner to `plan`, Reviewer to `slow`, Explorer and
   Researcher to `task`, titles, summaries, and compaction to `smol`, image
-  understanding to `vision`, supervision to `advisor`. New jobs reuse existing
-  slots rather than growing the configuration.
+  understanding to `vision`, supervision to `advisor`, model-reviewed
+  approvals to `reviewer` (0110). New jobs reuse existing slots rather than
+  growing the configuration.
 - Configuration is server-authoritative: one host default plus optional
   per-Project overrides, editable from Settings and the CLI, journaled like
   other settings. Project overrides follow 0012's clamp rules — they may
@@ -79,3 +82,4 @@ capacity scheduling — are unchanged.
 - 0012 Mixed-provider subagents (one rule superseded, see above)
 - 0067 Native harness turn loop, advisor, and follow-up suggestions
 - 0069 Native harness context overflow
+- 0110 Native harness model-reviewed approvals (`reviewer` slot)
