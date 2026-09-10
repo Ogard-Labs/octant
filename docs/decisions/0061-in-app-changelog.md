@@ -1,14 +1,13 @@
 # 0061. In-app changelog rides the update path
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
-People need to see what changed when a build lands on their machine. The
-roadmap holds an in-app changelog in the later ring until a design exists.
-Without one it is too easy to invent a second HTTPS path for "release notes",
-which would leak IP traffic under a friendlier name than telemetry, or to bolt
-a marketing page onto first run where it does not belong.
+People need to see what changed when a build lands on their machine. Without a
+design it is too easy to invent a second HTTPS path for "release notes", which
+would leak IP traffic under a friendlier name than telemetry, or to bolt a
+marketing page onto first run where it does not belong.
 
 0034 already defines the only desktop host-initiated update network: a signed
 feed check the person can turn off, minimum disclosure, and no ride-along
@@ -50,7 +49,6 @@ feed, and how it fails when checking is off, before any renderer work starts.
 
 ### Non-goals
 
-- Implementing UI, feed schema fields, or packaging hooks in this change.
 - A fetched full changelog, release blog, or marketing site inside the app.
 - Push, toast spam, or first-run interruption for release notes.
 - Telemetry that someone opened What's new.
@@ -60,15 +58,14 @@ feed, and how it fails when checking is off, before any renderer work starts.
 
 ## Consequences
 
-- Feed schema work, when implementation is promoted from later, extends the
-  signed document under 0034 rather than adding a notes URL. Packaging must
-  embed the local changelog beside the binary the same way other release
-  metadata already ships.
+- Short offered-update notes travel in the signed feed document under 0034
+  rather than a notes URL. Packaging embeds the local changelog beside the
+  binary the same way other release metadata already ships.
 - Privacy copy next to Settings → General → Updates stays accurate: checking off
   still means no update-service contact, and What's new for the installed build
   does not create an exception.
-- Implementation is blocked until this record is accepted and the later-ring
-  parent is promoted. Until then the app has no in-app changelog surface.
+- The desktop What's new surface is the update UI and Settings → General →
+  Updates. First-run stays out of it.
 
 ## Related
 

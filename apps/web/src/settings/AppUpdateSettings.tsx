@@ -8,8 +8,13 @@ import { useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
-import type { AppUpdateInstallOutcome, OctantHostBridge } from "../shell/hostBridge";
+import type {
+  AppUpdateInstallOutcome,
+  BundledWhatsNewView,
+  OctantHostBridge,
+} from "../shell/hostBridge";
 import { SettingRow } from "./primitives";
+import { WhatsNewDialog } from "./WhatsNewDialog";
 
 export interface AppUpdateSettingsProps {
   readonly hostBridge?: OctantHostBridge;
@@ -23,9 +28,9 @@ export interface AppUpdateSettingsProps {
 /**
  * Check for, download, and apply an update — and say what a check discloses.
  *
- * Three rows of the Updates group: the version with its check, the release
- * ring, and automatic checks. What a check sends sits behind a disclosure
- * under those rows rather than in a policy document nobody opens: the person
+ * Updates group: the version with its check and What's new, the release ring,
+ * and automatic checks. What a check sends sits behind a disclosure under
+ * those rows rather than in a policy document nobody opens: the person
  * deciding whether to leave automatic checks on is the person who should be
  * able to read it.
  */
@@ -35,6 +40,8 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
   const [busy, setBusy] = useState(false);
   const [waiting, setWaiting] = useState<Extract<AppUpdateInstallOutcome, { kind: "wait" }>>();
   const [failure, setFailure] = useState<string>();
+  const [whatsNewOpen, setWhatsNewOpen] = useState(false);
+  const [whatsNew, setWhatsNew] = useState<BundledWhatsNewView>();
 
   useEffect(() => {
     if (bridge?.subscribeAppUpdateState === undefined) return;
@@ -49,6 +56,8 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
   const install = bridge?.installAppUpdate;
   const setAutomatic = bridge?.setAutomaticAppUpdateChecks;
   const setRing = bridge?.setAppUpdateRing;
+  const readWhatsNew = bridge?.readBundledWhatsNew;
+  const acknowledgeWhatsNew = bridge?.acknowledgeWhatsNew;
   if (check === undefined || download === undefined || install === undefined) {
     return (
       <SettingRow
@@ -81,6 +90,25 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
   }
 
   const status = state?.status ?? "idle";
+  const offeredNotes =
+    status === "available" && state?.available?.notes !== undefined && state.available.notes !== ""
+      ? state.available.notes
+      : undefined;
+
+  function openWhatsNew(): void {
+    if (readWhatsNew === undefined) return;
+    setWhatsNew(undefined);
+    setWhatsNewOpen(true);
+    void readWhatsNew()
+      .then((document) => {
+        setWhatsNew(document);
+        void acknowledgeWhatsNew?.();
+      })
+      .catch(() => {
+        setWhatsNew({ kind: "empty", version: state?.currentVersion ?? "", showAfterApply: false });
+      });
+  }
+
   const notice =
     status === "downloading"
       ? "Downloading. Octant will not replace itself until you relaunch it."
@@ -113,6 +141,11 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
         settingId="app-updates"
       >
         <div className="app-update__actions">
+          {readWhatsNew === undefined ? null : (
+            <OctantButton onClick={openWhatsNew} size="sm" type="button" variant="secondary">
+              What's new
+            </OctantButton>
+          )}
           <OctantButton
             disabled={busy || status === "checking" || status === "downloading"}
             onClick={() => void run(check)}
@@ -161,6 +194,12 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
           ) : null}
         </div>
       </SettingRow>
+
+      {offeredNotes === undefined ? null : (
+        <p className="app-update__offer-notes" role="note">
+          {offeredNotes}
+        </p>
+      )}
 
       <SettingRow
         description="Stable is the released build; Preview is a nightly build of what has been merged and takes effect at the next check."
@@ -221,8 +260,18 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
             ))}
           </ul>
           <p>Nothing else travels with it — no account, no Project, no thread, no usage.</p>
+          <p>
+            What's new for the build you are running is a file inside the app; opening it does not
+            contact the update service.
+          </p>
         </div>
       </details>
+
+      <WhatsNewDialog
+        document={whatsNew}
+        onClose={() => setWhatsNewOpen(false)}
+        open={whatsNewOpen}
+      />
     </>
   );
 }

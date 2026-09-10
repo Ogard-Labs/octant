@@ -68,7 +68,7 @@ distilled successor of the earlier long-form design specifications.
 | [0058](0058-cross-platform-desktop.md)                                       | One desktop app across macOS, Linux, and Windows                                            | Proposed           |
 | [0059](0059-multi-host-federation.md)                                        | Multi-host federation completes without new host authority                                  | Accepted           |
 | [0060](0060-usage-spend-ceilings.md)                                         | Usage spend ceilings                                                                        | Proposed           |
-| [0061](0061-in-app-changelog.md)                                             | In-app changelog rides the update path                                                      | Proposed           |
+| [0061](0061-in-app-changelog.md)                                             | In-app changelog rides the update path                                                      | Accepted           |
 | [0062](0062-simulator-frame-input-transport.md)                              | Simulator frame input rides the Apple workbench channel                                     | Accepted           |
 | [0063](0063-agent-to-agent-messaging.md)                                     | Agent-to-agent messaging authority                                                          | Proposed           |
 | [0064](0064-pull-request-observation-cadence.md)                             | Opt-in background refresh of the pull-request snapshot                                      | Accepted           |

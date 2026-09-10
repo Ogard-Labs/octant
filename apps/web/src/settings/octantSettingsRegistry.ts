@@ -46,7 +46,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Updates",
           scope: "app",
           keywords:
-            "update updates upgrade version release automatic check download install relaunch privacy signed notarized",
+            "update updates upgrade version release automatic check download install relaunch privacy signed notarized what's new notes",
         },
         {
           id: settingId("completed-thread-archive"),
