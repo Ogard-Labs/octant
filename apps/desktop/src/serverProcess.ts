@@ -24,6 +24,8 @@ export async function assertAutomaticHostStartupEnabled(
 interface ServerSpawnSpecOptions {
   readonly browserBrokerToken: string;
   readonly browserBrokerUrl: string;
+  readonly computerUseBrokerToken?: string;
+  readonly computerUseBrokerUrl?: string;
   readonly codeFileHelperPath?: string;
   readonly credentialBrokerToken?: string;
   readonly credentialBrokerUrl?: string;
@@ -64,10 +66,19 @@ export function resolvePackagedServerPath(
 }
 
 export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
+  const inherited = { ...options.env };
+  delete inherited.OCTANT_COMPUTER_USE_BROKER_URL;
+  delete inherited.OCTANT_COMPUTER_USE_BROKER_TOKEN;
   const env = {
-    ...options.env,
+    ...inherited,
     OCTANT_BROWSER_BROKER_TOKEN: options.browserBrokerToken,
     OCTANT_BROWSER_BROKER_URL: options.browserBrokerUrl,
+    ...(options.computerUseBrokerUrl === undefined || options.computerUseBrokerToken === undefined
+      ? {}
+      : {
+          OCTANT_COMPUTER_USE_BROKER_URL: options.computerUseBrokerUrl,
+          OCTANT_COMPUTER_USE_BROKER_TOKEN: options.computerUseBrokerToken,
+        }),
     ...(options.codeFileHelperPath === undefined
       ? {}
       : { OCTANT_CODE_FILE_HELPER_PATH: options.codeFileHelperPath }),

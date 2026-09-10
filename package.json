@@ -57,7 +57,8 @@
     "bench:harness": "bun scripts/harness-benchmark.ts",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
-    "verify": "bun run paths:check && bun run wiring:check && bun run ui:check && bun run decisions:check && bun run fmt:check && bun run lint && bun run typecheck && bun run test && bun run build"
+    "verify": "bun run paths:check && bun run wiring:check && bun run ui:check && bun run decisions:check && bun run fmt:check && bun run lint && bun run typecheck && bun run test && bun run build",
+    "computer-use:prepare": "bun scripts/prepare-computer-use-driver.ts"
   },
   "devDependencies": {
     "@types/node": "catalog:",

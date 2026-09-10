@@ -22,6 +22,7 @@ import { MentionableThreadId } from "./threadMention";
 import { NavigatorAssistantSettings } from "./navigatorAssistant";
 import { VoiceSettings } from "./speech";
 import { ImageGenerationSettings } from "./imageGeneration";
+import { ComputerUseSettings } from "./computerUseSettings";
 import { DEFAULT_AVATAR_ACCENT, DEFAULT_USER_AVATAR, UserProfile } from "./userProfile";
 import { SidebarBackground, DEFAULT_SIDEBAR_BACKGROUND } from "./theme";
 
@@ -322,6 +323,9 @@ export const ShellSettings = Schema.Struct({
    * release notes describe.
    */
   automaticUpdateChecks: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  computerUse: Schema.optionalWith(ComputerUseSettings, {
+    default: () => ({ enabled: true, automaticUpdates: true }),
+  }),
   /**
    * Whether Skills & Extensions marketplace search, inspect, and install may
    * contact skills.sh, the npm registry, or GitHub for catalog packages. Off

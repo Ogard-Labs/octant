@@ -33,7 +33,9 @@ export function ComputerUseLifecyclePane(props: ComputerUseLifecyclePaneProps) {
           <p>This approval is bound to this host, Project, thread, provider, action, and client.</p>
           <div>
             <OctantButton disabled={props.busy} onClick={props.onApprove} type="button">
-              Approve once
+              {props.view.pendingApproval.scope === "application-session"
+                ? "Allow app for 5 minutes"
+                : "Approve once"}
             </OctantButton>
             <OctantButton
               disabled={props.busy}

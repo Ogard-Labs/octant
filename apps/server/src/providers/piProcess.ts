@@ -200,7 +200,9 @@ export default function octantManagedTools(pi: ExtensionAPI) {
             throw new Error("Octant tool bridge returned an invalid result.");
           }
           if (result.isError) throw new Error(result.resultJson);
-          return { content: [{ type: "text", text: result.resultJson }], details: {} };
+          const images = result.images === undefined ? [] : result.images;
+          if (!Array.isArray(images) || images.length > 4 || images.some((image) => !isRecord(image) || !["image/png", "image/jpeg"].includes(String(image.mimeType)) || typeof image.data !== "string" || image.data.length > 2097152)) throw new Error("Octant tool images are invalid.");
+          return { content: [{ type: "text", text: result.resultJson }, ...images.map((image) => ({ type: "image", data: image.data, mimeType: image.mimeType }))], details: {} };
         },
       });
     }
