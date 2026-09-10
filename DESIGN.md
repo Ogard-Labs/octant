@@ -124,7 +124,7 @@ Surface (reading measure 880px, or wide for boards)
 ```
 
 Leaving a reader route is always the ghost "Back to workspace" control in the
-header. Settings is the same shell with an 800px measure and its own
+header. Settings is the same shell with a 920px measure and its own
 navigation rail; the rail names each group of pages with a quiet label and
 draws no hairline between groups. Rows in Settings are `SettingRow`; rows everywhere else are
 `surface-row`. Both draw the same hairline.
@@ -556,15 +556,14 @@ row’s leading edge. Search is a compact in-place filter for the current mode's
 threads, with a command-style overlay available for broader actions.
 
 Settings is a grouped form page. The shared resizable navigation rail and
-search remain fixed while one centred, bounded 800px reading column scrolls.
-A 32–56px workspace gutter protects the content at narrower widths. The page
+search remain fixed while one centred, bounded 920px reading column scrolls.
+A 32–64px workspace gutter protects the content at narrower widths. The page
 title, quiet section captions, and primary field labels have distinct roles;
-sections follow a consistent 32px rhythm. Navigation groups use quiet separators
-rather than competing labels. A section is an object (0109): the content
-beneath the label forms the child-built card (hairline ring over the surface
-fill), while the label and its one-line description remain outside the card
-on the page ground. Rows inside the card are divisions of it separated by
-hairlines.
+sections follow a consistent 28px rhythm. Navigation groups use quiet separators
+rather than competing labels. A section is an open object: its content is one
+hairline-separated row list on the page ground, while the label and its one-line
+description remain outside the list. Discrete editors and protected actions may
+retain a bounded surface when their hierarchy requires it.
 Everything inside takes the section's inset, including content that is not a
 row. A section keeps `overflow: visible`, because its rows hold menus and
 popovers that have to escape it. Keybindings have their own destination and raw
