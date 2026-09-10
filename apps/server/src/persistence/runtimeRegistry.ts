@@ -119,6 +119,11 @@ import {
   SpendCeilingRaised,
   SpendCeilingCleared,
   SpendCeilingOverrunRecorded,
+  AGENT_MESSAGE_EVENT_NAMES,
+  AgentMessageSent,
+  AgentMessageDelivered,
+  AgentMessageRefused,
+  AgentMessageAcknowledged,
 } from "@octant/contracts";
 import {
   REMOTE_ACCESS_EVENT_NAMES,
@@ -302,6 +307,10 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
     .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)
     .register(AGENT_RUN_SETTINGS_UPDATED, 1, AgentRunPolicySettings)
+    .register(AGENT_MESSAGE_EVENT_NAMES.sent, 1, AgentMessageSent)
+    .register(AGENT_MESSAGE_EVENT_NAMES.delivered, 1, AgentMessageDelivered)
+    .register(AGENT_MESSAGE_EVENT_NAMES.refused, 1, AgentMessageRefused)
+    .register(AGENT_MESSAGE_EVENT_NAMES.acknowledged, 1, AgentMessageAcknowledged)
     .register("automation-notification-preferences-updated@1", 1, AutomationNotificationPreferences)
     .register(
       "automation-notification-delivery-recorded@1",

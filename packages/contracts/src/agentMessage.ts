@@ -110,3 +110,4 @@ export const decodeAgentMessageSent = Schema.decodeUnknownSync(AgentMessageSent)
 export const decodeAgentMessageDelivered = Schema.decodeUnknownSync(AgentMessageDelivered);
 export const decodeAgentMessageRefused = Schema.decodeUnknownSync(AgentMessageRefused);
 export const decodeAgentMessageAcknowledged = Schema.decodeUnknownSync(AgentMessageAcknowledged);
+export const decodeAgentMessageEndpointId = Schema.decodeUnknownSync(AgentMessageEndpointId);

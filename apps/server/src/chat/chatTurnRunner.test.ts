@@ -1327,7 +1327,6 @@ describe("ChatTurnRunner", () => {
               digest: "a".repeat(64),
               byteLength: 4,
             }),
-          persistCitation: () => Effect.succeed(citationId),
         }),
       ),
     );

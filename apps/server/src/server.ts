@@ -562,6 +562,16 @@ import {
 } from "./browser/browserAppManagedTools";
 import { BrowserToolApprovalService } from "./browser/browserToolApprovalService";
 import { ExternalContentIngestionStore } from "./context/externalContentIngestionStore";
+import {
+  AgentMessageProjection,
+  hydrateAgentMessageProjectionFromJournal,
+} from "./agentMessage/agentMessageProjection";
+import { AgentMessageBodyStore } from "./agentMessage/agentMessageBodyStore";
+import {
+  AgentMessageService,
+  type AgentMessageEndpointResolver,
+} from "./agentMessage/agentMessageService";
+import { createAgentMessageTools } from "./agentMessage/agentMessageTools";
 import { readThreadExternalContentTaint } from "./context/externalContentTaintProjection";
 import { createNativeHarnessAuthority } from "./harness/nativeHarnessAuthority";
 import {
@@ -2031,6 +2041,69 @@ export function startOctantServer(
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    // Agent-to-agent messaging (decision 0063): the host owns admission,
+    // clamping, journaling, and delivery. The endpoint resolver is composed
+    // lazily from the thread authorities declared later in this startup; a
+    // send runs only inside a live turn, well after they exist.
+    const agentMessageProjection = new AgentMessageProjection();
+    const agentMessageBodyStore = new AgentMessageBodyStore(
+      join(persistence.dataDirectory, "agent-messages"),
+    );
+    const resolveAgentMessageEndpoint: AgentMessageEndpointResolver = (threadId) => {
+      const chat = persistence.readChatThread(threadId as never);
+      if (chat !== undefined) {
+        return { mode: "chat", terminal: chat.lifecycle !== "active" };
+      }
+      const code = persistence.readCodeThread(threadId as never);
+      if (code !== undefined) {
+        return { mode: "code", terminal: code.lifecycle !== "active" };
+      }
+      const work = workThreadProjection.list().find((thread) => String(thread.id) === threadId);
+      if (work !== undefined) {
+        return { mode: "work", terminal: work.lifecycle !== "active" };
+      }
+      const run = persistence.agentRunProjection.getById(threadId as never);
+      if (run !== undefined) {
+        // A run speaks for its parent thread's mode, and a message to a run
+        // lands on the hierarchy edge 0012 already owns.
+        const runTerminal =
+          run.lifecycleStatus === "completed" ||
+          run.lifecycleStatus === "failed" ||
+          run.lifecycleStatus === "cancelled" ||
+          run.lifecycleStatus === "interrupted";
+        const parentChat = persistence.readChatThread(String(run.parentThreadId) as never);
+        if (parentChat !== undefined) {
+          return {
+            mode: "chat",
+            terminal: runTerminal || parentChat.lifecycle !== "active",
+          };
+        }
+        const parentCode = persistence.readCodeThread(String(run.parentThreadId) as never);
+        if (parentCode !== undefined) {
+          return {
+            mode: "code",
+            terminal: runTerminal || parentCode.lifecycle !== "active",
+          };
+        }
+        return { mode: "chat", terminal: runTerminal };
+      }
+      return undefined;
+    };
+    const agentMessageService = new AgentMessageService({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      projection: agentMessageProjection,
+      bodyStore: agentMessageBodyStore,
+      resolveEndpoint: resolveAgentMessageEndpoint,
+      recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+      // The admitting principal on a local host is the host user, whose Open
+      // scope covers every mode. A remote window's narrower Open scope is a
+      // 0013 federation concern and stays out of this seam.
+      openModes: ["chat", "work", "code"],
     });
     const githubReadToolService = new GithubReadToolService({
       catalogue: githubCatalogueService,
@@ -3698,6 +3771,11 @@ export function startOctantServer(
           githubReadToolSetIfEffective(githubExtensionSnapshot.read(), () =>
             githubReadToolService.createToolSet({ windowId, thread, readThread }),
           ),
+        agentMessages: ({ thread }) =>
+          createAgentMessageTools({
+            service: agentMessageService,
+            senderThreadId: String(thread.id),
+          }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         readThreadExternalContentTaint: (threadId) =>
           readThreadExternalContentTaint(persistence.connection, String(threadId)),
@@ -4751,6 +4829,20 @@ export function startOctantServer(
         mintPaneId: () => decodePaneId(randomUUID()),
         mintNodeId: () => decodeLayoutNodeId(randomUUID()),
       },
+    );
+    requireJournalHydration(
+      hydrateAgentMessageProjectionFromJournal({
+        replay: (cursor) =>
+          persistence.journal.replayAggregateType({
+            ...Schema.decodeUnknownSync(ReplayCursor)({
+              afterSequence: cursor.afterSequence,
+              limit: cursor.limit,
+            }),
+            aggregateType: cursor.aggregateType ?? "agent-message",
+          }),
+        projection: agentMessageProjection,
+      }),
+      "Agent message",
     );
     const workArtifactProjection = new WorkArtifactProjection();
     requireJournalHydration(
@@ -7160,6 +7252,7 @@ export function startOctantServer(
       },
       purgeThreadArtifacts: async ({ mode, threadId }) => {
         if (mode === "chat") await chatAttachmentStore.purgeThread(threadId as never);
+        await agentMessageService.purgeThread(threadId);
         try {
           await generatedImageStore.purgeScope(decodeImageGenerationScopeId(String(threadId)));
         } catch {
