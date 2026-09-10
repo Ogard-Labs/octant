@@ -46,8 +46,11 @@ export function FirstRunModelStep(props: FirstRunModelStepProps) {
     <div className="first-run__step">
       <p className="first-run__intro">{props.intro}</p>
 
+      {/* A step with nothing to choose still has something to say, so it says
+          it in the callout the wizard's other notices use rather than as loose
+          text on the panel ground. */}
       {empty ? (
-        <div className="first-run__empty" role="status">
+        <div className="first-run__empty callout" role="status">
           <p className="first-run__intro">
             {listed
               ? "No provider on this Mac offered a model, so there is nothing to choose from yet."
