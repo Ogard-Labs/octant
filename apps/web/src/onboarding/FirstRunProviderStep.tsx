@@ -95,31 +95,41 @@ export const FirstRunProviderStep = forwardRef<HTMLButtonElement, FirstRunProvid
           Settings; you can turn it off later. Other detected CLIs stay off until you enable them.
         </p>
 
-        <section aria-labelledby="first-run-readiness-title" className="setgroup">
-          <h3 className="setgroup-head" id="first-run-readiness-title">
-            Provider readiness
-          </h3>
-          <p className="first-run__summary" data-overall={readiness.overall} role="status">
+        {/* The verdict is the section's own second line, not a row: it speaks
+            for the whole list rather than for one provider in it. */}
+        <section
+          aria-label="Provider readiness"
+          className="settings-card-section settings-card-section--open"
+        >
+          <h2>Provider readiness</h2>
+          <p
+            className="settings-section-note first-run__summary"
+            data-overall={readiness.overall}
+            role="status"
+          >
             <SummaryIcon size={16} />
             <span className="first-run__summary-headline">{readiness.headline}</span>
             <span className="first-run__summary-detail">{readiness.detail}</span>
           </p>
 
           {readiness.providers.length > 0 ? (
-            <ul className="first-run__providers" role="list">
+            <ul className="setgroup first-run__providers" role="list">
               {readiness.providers.map((provider) => {
                 const Icon = PROVIDER_ICONS[provider.state];
                 return (
                   <li
-                    className="first-run__provider"
+                    className="setrow first-run__provider"
                     data-state={provider.state}
                     key={String(provider.instanceId)}
                   >
-                    <Icon size={16} />
-                    <span className="first-run__provider-name">{provider.displayName}</span>
-                    <span className="first-run__provider-label">{provider.label}</span>
-                    {props.onSetProviderEnabled === undefined ? null : (
-                      <span className="first-run__provider-switch">
+                    <span className="setrow-label">
+                      <Icon size={16} />
+                      {provider.displayName}
+                    </span>
+                    <p className="setrow-hint">{provider.detail}</p>
+                    <div className="setrow-control">
+                      <span className="first-run__provider-state">{provider.label}</span>
+                      {props.onSetProviderEnabled === undefined ? null : (
                         <OctantSwitch
                           checked={provider.state !== "disabled"}
                           label={`Enable ${provider.displayName}`}
@@ -127,9 +137,8 @@ export const FirstRunProviderStep = forwardRef<HTMLButtonElement, FirstRunProvid
                             props.onSetProviderEnabled?.(provider.instanceId, enabled)
                           }
                         />
-                      </span>
-                    )}
-                    <span className="first-run__provider-detail">{provider.detail}</span>
+                      )}
+                    </div>
                   </li>
                 );
               })}

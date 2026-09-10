@@ -10,7 +10,7 @@ import type {
 import type { ProjectId } from "@octant/contracts/projects";
 import type { UserProfile } from "@octant/contracts/user-profile";
 import { buildModelPickerGroups, type PickerGroup } from "@octant/domain";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -330,6 +330,23 @@ describe("FirstRunOnboarding", () => {
     // be turned off would say otherwise.
     expect(screen.queryByRole("switch", { name: /Code/ })).toBeNull();
     expect(screen.getByRole("note")).toHaveTextContent(/Hiding Chat or Work never deletes/);
+  });
+
+  it("asks its answers in the same section object and rows Settings uses", async () => {
+    const user = userEvent.setup();
+    mount();
+
+    await user.click(screen.getByRole("button", { name: /Workspace/ }));
+
+    const section = screen.getByRole("region", { name: "Workspace defaults" });
+    expect(section).toHaveClass("settings-card-section");
+    // Four answers, each asked in the row Settings asks a setting in.
+    expect(within(section).getAllByTestId("setting-row")).toHaveLength(4);
+    // The guarantee reads as the section's own line rather than as a fifth
+    // row: it speaks for the whole group, not for one answer in it.
+    const group = section.querySelector(".setgroup");
+    expect(group).not.toBeNull();
+    expect(group).not.toContainElement(screen.getByRole("note"));
   });
 
   it("does not claim a colour scheme while appearance settings are still loading", async () => {
