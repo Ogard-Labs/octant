@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import {
   decodeCodeOperationCommand,
   decodeCodeOperationResult,
@@ -2208,7 +2209,11 @@ export class CodeOperationService {
         "unavailable",
         "Provider prompt evidence is unavailable.",
       );
-    if (command.extensionSelections?.some((selection) => selection.kind === "skill")) {
+    if (
+      command.extensionSelections?.some(
+        (selection) => !isBrowserUseSelection(selection),
+      )
+    ) {
       return this.#failed(
         command.operationId,
         "unavailable",

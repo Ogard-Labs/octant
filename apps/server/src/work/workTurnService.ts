@@ -713,7 +713,7 @@ export class WorkTurnService {
     // dropping the instruction the person chose. Host-owned Browser selections
     // remain valid because Browser is already composed through app-managed
     // tools above.
-    if (input.command.extensionSelections?.some((selection) => selection.kind === "skill")) {
+    if (input.command.extensionSelections?.some((selection) => !isBrowserUseSelection(selection))) {
       this.#persistUpdate(current, {
         status: "failed",
         failure: {
