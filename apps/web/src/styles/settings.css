@@ -797,23 +797,49 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   display: grid;
   gap: 0;
   overflow: visible;
-  border: 1px solid var(--oct-hairline);
-  border-radius: var(--oct-radius-lg);
-  background: var(--oct-surface);
+  border: 0;
+  background: transparent;
   box-shadow: none;
 }
 
+/* The card is built from the section's content children rather than from the
+   section itself, so the label and its one-line description stay out on the
+   page ground where they read as the section's title rather than as its first
+   row. Sides and fill on every content child; the first closes the top and
+   the last closes the bottom. */
+.settings-card-section > h2 ~ *:not(.settings-section-note) {
+  border-inline: 1px solid var(--oct-hairline);
+  background: var(--oct-surface);
+}
+
+.settings-card-section > h2 + *:not(.settings-section-note),
+.settings-card-section > .settings-section-note + * {
+  border-top: 1px solid var(--oct-hairline);
+  border-start-start-radius: var(--oct-radius-lg);
+  border-start-end-radius: var(--oct-radius-lg);
+}
+
+.settings-card-section > h2 ~ *:last-child:not(.settings-section-note) {
+  border-bottom: 1px solid var(--oct-hairline);
+  border-end-start-radius: var(--oct-radius-lg);
+  border-end-end-radius: var(--oct-radius-lg);
+}
+
+/* Every section carries `--open`, so this may not undo the section's own edge:
+   at equal specificity the later rule wins, and flattening here silently
+   un-carded all seventeen destinations. */
 .settings-card-section--open {
   overflow: visible;
-  background: transparent;
-  border-radius: 0;
   box-shadow: none;
 }
 
-.settings-card-section.settings-card-section--open > h2,
+.settings-card-section.settings-card-section--open > h2 {
+  padding: 0 2px 10px;
+}
+
 .settings-card-section.settings-card-section--open > summary,
 .settings-card-section.settings-card-section--open > legend {
-  padding: 10px 0 8px;
+  padding: 14px var(--oct-space-5) 12px;
 }
 
 .settings-card-section--open > .setgroup {
@@ -823,10 +849,10 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 /* The section draws an edge now, so everything inside keeps the inset that
    holds text and controls off it. These rules used to zero that inset, back
    when the rows sat on the open page and had nothing to clear. */
-.settings-card-section > *,
+.settings-card-section > h2 ~ *:not(.settings-section-note),
 .settings-card-section > .setgroup > *,
 .settings-card-section > .provider-settings__form > * {
-  padding-inline: var(--oct-space-4);
+  padding-inline: var(--oct-space-5);
 }
 
 /* A wrapper passes the inset through to the rows it holds rather than adding
@@ -933,11 +959,12 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   padding: 0;
 }
 
-/* One sentence under the label, in the detail role. It draws no rule; the
-   first row underneath owns the hairline. */
+/* One sentence under the label, in the detail role. It belongs to the label
+   above it rather than to the rows below, so it sits inside the section's
+   inset and the header's rule closes under it. */
 .settings-card-section--open > .settings-section-note {
   margin: 0;
-  padding: 0 0 8px;
+  padding: 0 2px 12px;
   max-width: 64ch;
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-detail);
@@ -1140,22 +1167,8 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 /* The section's label is its first line, inside the edge it names, so a label
    and the rows it governs read as one thing. */
-.settings-card-section > h2,
-.settings-card-section > .settings-section-head,
 .settings-card-section > summary,
 .settings-card-section > legend {
-  border-bottom: 1px solid var(--oct-hairline);
-}
-
-/* A section's one-line description belongs to the label above it, not to the
-   rows below. The rule closes the header once, under whichever of the two
-   comes last, so the description does not read as a row of its own. */
-.settings-card-section > h2:has(+ p) {
-  border-bottom: 0;
-}
-
-.settings-card-section > h2 + p {
-  padding-bottom: 10px;
   border-bottom: 1px solid var(--oct-hairline);
 }
 
@@ -1166,13 +1179,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-}
-
-/* The group's own edge already holds the rows in; a row keeps only the inset
-   that stops a switch or a focus ring touching it. */
-.setgroup > .setrow,
-.setgroup > .settings-view__setting {
-  padding-inline: var(--oct-space-4);
 }
 
 .settings-view .provider-settings {
@@ -1260,7 +1266,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .setrow {
   column-gap: 24px;
-  padding: 14px 0;
+  padding: 16px 0;
   font-family: var(--oct-font-display);
 }
 

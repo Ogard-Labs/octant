@@ -377,8 +377,11 @@ describe("the public-block visual language", () => {
     expect(settings).toMatch(/--oct-settings-reading-width:\s*800px/);
     expect(settings).toMatch(/\.settings-view__content-inner\s*\{[^}]*margin:\s*0/);
     expect(settings).toMatch(/\.settings-card-section\s*\{[^}]*box-shadow:\s*none/);
+    expect(settings).toMatch(/\.settings-card-section--open\s*\{[^}]*box-shadow:\s*none/);
+    // A section's card is built from its content children (0108), so the label
+    // and its description stay out on the page ground.
     expect(settings).toMatch(
-      /\.settings-card-section--open\s*\{[^}]*background:\s*transparent[^}]*box-shadow:\s*none/,
+      /\.settings-card-section > h2 ~ \*:not\(\.settings-section-note\)\s*\{[^}]*background:\s*var\(--oct-surface\)/,
     );
     expect(settings).toMatch(
       /\.settings-card-section\s*>\s*h2,[\s\S]*?\.settings-card-section\s*>\s*legend\s*\{[\s\S]*?text-transform:\s*none/,

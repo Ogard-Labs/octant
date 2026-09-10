@@ -726,14 +726,17 @@ describe("SettingsView", () => {
     expect(styles).toMatch(
       /\.settings-view\s*\{[\s\S]*background:\s*var\(--octant-app-background\)/,
     );
-    // A section is an object (0109): the card recipe's hairline ring over the
-    // surface fill, and no shadow, because it sits in the page rather than
-    // floating above it (0090). It used to be drawn flat on the page ground,
-    // which left nothing to see a section by.
+    // A section is an object (0109): the card is built from the section's
+    // content children, over the surface fill and inside a hairline, with no
+    // shadow because it sits in the page rather than floating above it (0090).
+    // The label and its description stay out on the page ground. It used to be
+    // drawn wholly flat, which left nothing to see a section by.
     expect(styles).toMatch(
-      /\.settings-card-section\s*\{[^}]*border:\s*1px solid var\(--oct-hairline\)/,
+      /\.settings-card-section > h2 ~ \*:not\(\.settings-section-note\)\s*\{[^}]*border-inline:\s*1px solid var\(--oct-hairline\)/,
     );
-    expect(styles).toMatch(/\.settings-card-section\s*\{[^}]*background:\s*var\(--oct-surface\)/);
+    expect(styles).toMatch(
+      /\.settings-card-section > h2 ~ \*:not\(\.settings-section-note\)\s*\{[^}]*background:\s*var\(--oct-surface\)/,
+    );
     expect(styles).toMatch(/\.settings-card-section\s*\{[^}]*box-shadow:\s*none/);
     expect(styles).toMatch(/\.settings-card-section--open\s*\{[\s\S]*box-shadow:\s*none/);
     expect(styles).toContain("border-radius: var(--oct-radius-md)");
