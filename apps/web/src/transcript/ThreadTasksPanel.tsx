@@ -62,7 +62,7 @@ export function ThreadTasksPanel(props: ThreadTasksPanelProps) {
         <HeaderIcon
           aria-hidden="true"
           className="thread-tasks__header-icon"
-          size={13}
+          size={14}
           strokeWidth={1.8}
         />
         <span>
