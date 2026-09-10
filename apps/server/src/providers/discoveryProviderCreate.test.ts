@@ -36,6 +36,24 @@ describe("createProviderFromDiscoveryCandidate", () => {
     });
   });
 
+  it("creates an enabled claude provider command for first-run auto-register", () => {
+    vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000903");
+
+    const result = createProviderFromDiscoveryCandidate(
+      makeCandidate({
+        driverKind: "claude",
+        displayName: "Claude Code",
+        binaryPath: "/opt/homebrew/bin/claude",
+      }),
+      { enabled: true },
+    );
+
+    expect(result.command).toMatchObject({
+      kind: "create-claude-provider",
+      enabled: true,
+    });
+  });
+
   it("creates an enabled claude provider command for connect", () => {
     vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000902");
 

@@ -2,6 +2,7 @@ import type {
   DiscoveryCandidate,
   DiscoveryCommand,
   DiscoverySnapshot,
+  FirstRunOnboardingStatus,
   ProviderDriverKind,
 } from "@octant/contracts";
 import { isImageProfileDriverKind } from "./providerPolicy";
@@ -109,6 +110,46 @@ export function selectPreferredCandidate(
   candidates: ReadonlyArray<DiscoveryCandidate>,
 ): DiscoveryCandidate | undefined {
   return candidates[0];
+}
+
+/**
+ * Driver kinds first run may create enabled when a scan is eligible.
+ * Every other auto-detected runtime stays disabled until the user switches it
+ * on. This list is the product default, not a readiness ranking.
+ */
+const FIRST_RUN_ENABLED_DRIVER_KINDS: ReadonlySet<ProviderDriverKind> = new Set([
+  "claude",
+  "codex",
+]);
+
+/**
+ * Whether this scan may create Claude Code or Codex CLI enabled.
+ *
+ * Eligibility is a one-shot host fact: first-run onboarding still pending,
+ * and no provider instance of any driver has been recorded yet. An empty
+ * registry after completed or skipped onboarding must not reopen this
+ * policy, and a pending host that already recorded a provider choice must
+ * not enable a later detection. Callers decide this once per scan so both
+ * supported defaults can enable together.
+ */
+export function isFirstRunDiscoveryEnablementEligible(input: {
+  readonly firstRunOnboarding: FirstRunOnboardingStatus;
+  readonly existingInstanceCount: number;
+}): boolean {
+  return input.firstRunOnboarding === "pending" && input.existingInstanceCount === 0;
+}
+
+/**
+ * Initial enabled state for an auto-registered discovery candidate.
+ *
+ * Enabled is independent of candidate readiness: detection does not assert
+ * authentication, reachability, or compatibility.
+ */
+export function initialEnabledForDiscovery(input: {
+  readonly driverKind: ProviderDriverKind;
+  readonly firstRunEnablementEligible: boolean;
+}): boolean {
+  return input.firstRunEnablementEligible && FIRST_RUN_ENABLED_DRIVER_KINDS.has(input.driverKind);
 }
 
 export function shouldAutoRegisterCandidate(input: {
