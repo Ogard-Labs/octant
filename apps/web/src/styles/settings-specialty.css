@@ -1,0 +1,391 @@
+/* Specialty Settings share the same quiet graphite workbench as the core
+   preference pages. These rules deliberately style existing feature markup;
+   they do not add a second component or state model for any page. */
+
+.settings-view .provider-settings,
+.settings-view .image-generation-settings,
+.settings-view #settings-voice,
+.settings-view #settings-navigator-assistant,
+.settings-view #settings-computer-use,
+.settings-view .execution-profile-workflow--settings,
+.settings-view .agent-run-settings-panel,
+.settings-view #settings-harness,
+.settings-view .extensions-settings,
+.settings-view .host-settings,
+.settings-view #settings-usage,
+.settings-view #settings-github,
+.settings-view #settings-linear,
+.settings-view #settings-advanced {
+  display: grid;
+  min-width: 0;
+  gap: 28px;
+  color: var(--octant-text-primary);
+}
+
+/* A status line should explain the next action without becoming another card. */
+.settings-view .provider-settings__hint,
+.settings-view .provider-settings__field-guidance,
+.settings-view .settings-section-line,
+.settings-view .settings-section-note,
+.settings-view .image-generation-settings > .settings-state,
+.settings-view .agent-run-settings-panel__message,
+.settings-view .native-harness-panel__message,
+.settings-view .native-harness-panel__empty,
+.settings-view .extensions-settings__state,
+.settings-view .host-settings__note,
+.settings-view .linear-settings__note,
+.settings-view .github-settings__note {
+  max-width: 68ch;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+  line-height: 1.45;
+}
+
+.settings-view .provider-settings__hint,
+.settings-view .image-generation-settings > .settings-state,
+.settings-view .provider-settings__field-guidance,
+.settings-view .agent-run-settings-panel__message,
+.settings-view .native-harness-panel__message,
+.settings-view .native-harness-panel__empty,
+.settings-view .extensions-settings__state {
+  margin: 0;
+}
+
+.settings-view .settings-card-section.settings-card-section--open {
+  min-width: 0;
+}
+
+/* Providers and image sources */
+.settings-view .provider-settings__message-slot {
+  margin: 0;
+}
+
+.settings-view .provider-settings__message-slot .provider-settings__alert,
+.settings-view .provider-settings__alert,
+.settings-view .settings-state--error {
+  border-color: color-mix(in oklab, var(--oct-danger) 45%, transparent);
+  background: color-mix(in oklab, var(--oct-danger) 9%, transparent);
+  border-radius: var(--oct-radius-sm);
+}
+
+.settings-view .provider-list .settings-section-head {
+  min-height: 40px;
+}
+
+.settings-view .provider-list .provlist {
+  min-width: 0;
+}
+
+.settings-view .provider-settings__foot {
+  padding: 16px 0 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.settings-view .provider-settings__manual {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-view .provider-settings__manual-body {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-lg);
+  background: var(--oct-surface-muted);
+}
+
+.settings-view .provider-settings__create-heading {
+  display: grid;
+  gap: 4px;
+}
+
+.settings-view .provider-settings__create-heading h3 {
+  margin: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+}
+
+.settings-view .provider-settings__create {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-view .provider-settings__create > label,
+.settings-view .image-generation-settings__provider-form label {
+  display: grid;
+  gap: 5px;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+}
+
+.settings-view .image-generation-settings__providers {
+  gap: 0;
+}
+
+.settings-view .image-generation-settings__provider-form {
+  padding-top: 4px;
+}
+
+.settings-view .image-generation-settings__sources > li {
+  align-items: center;
+  gap: 16px;
+  min-height: 44px;
+  padding: 8px 0;
+}
+
+.settings-view .image-generation-settings__sources > li > .provider-settings__field-guidance {
+  flex: 1;
+}
+
+/* Voice, Navigator, and Computer use use the same row rhythm. */
+.settings-view #settings-voice > .settings-card-section,
+.settings-view #settings-navigator-assistant > .settings-card-section,
+.settings-view #settings-computer-use > .settings-card-section {
+  gap: 0;
+}
+
+.settings-view #settings-voice .setrow,
+.settings-view #settings-navigator-assistant .setrow,
+.settings-view #settings-computer-use .setrow {
+  min-width: 0;
+}
+
+.settings-view #settings-computer-use > .provider-settings__field-guidance:last-child {
+  padding-top: 0;
+}
+
+.settings-view .voice-settings__form {
+  max-width: 620px;
+  gap: 12px;
+}
+
+.settings-view .voice-settings__form .settings-view__actions,
+.settings-view .host-settings__controls,
+.settings-view .github-settings__controls,
+.settings-view .linear-settings__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-view .settings-view__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-view #settings-navigator-assistant .setrow-control {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-view #settings-navigator-assistant .settings-view__effective-note {
+  max-width: 56ch;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+  line-height: 1.45;
+}
+
+/* Execution profiles and agent policy */
+.settings-view .execution-profile-workflow--settings {
+  gap: 28px;
+}
+
+.settings-view .execution-profile-workflow--settings .settings-card-section {
+  gap: 0;
+}
+
+.settings-view .execution-profile-workflow--settings .execution-profile-workflow__profiles {
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.settings-view .execution-profile-workflow--settings .execution-profile-workflow__profile {
+  min-height: 44px;
+  padding: 10px 0;
+  border-top: 0;
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+.settings-view .agent-run-settings-panel__error,
+.settings-view .execution-profile-workflow__alert {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklab, var(--oct-danger) 45%, transparent);
+  border-radius: var(--oct-radius-sm);
+  background: color-mix(in oklab, var(--oct-danger) 9%, transparent);
+  color: var(--octant-danger-text);
+}
+
+/* Harness routes and jobs are lists; each route gets a line instead of a
+   nested tile so the model role stays easy to scan. */
+.settings-view #settings-harness .native-harness-panel {
+  display: grid;
+  gap: 0;
+}
+
+.settings-view #settings-harness .native-harness-panel > .settings-card-section {
+  gap: 0;
+}
+
+.settings-view .native-harness-slots,
+.settings-view .native-harness-jobs {
+  gap: 0;
+  margin: 0;
+}
+
+.settings-view .native-harness-slot,
+.settings-view .native-harness-job {
+  min-height: 44px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+.settings-view .native-harness-slot:first-child,
+.settings-view .native-harness-job:first-child {
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.settings-view .native-harness-card {
+  margin: 0;
+  padding: 14px 0;
+  border: 0;
+  border-top: 1px solid var(--oct-hairline);
+  border-radius: 0;
+  background: transparent;
+}
+
+/* Skills and Extensions: cards are bounded only by row rules; the explicit
+   review block retains a quiet surface because it is an action checkpoint. */
+.settings-view .extensions-settings {
+  gap: 28px;
+}
+
+.settings-view .extensions-settings__section {
+  gap: 0;
+}
+
+.settings-view .extensions-settings__body {
+  gap: 0;
+  padding: 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.settings-view .extensions-settings__cards .extcard {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--oct-hairline);
+  border-radius: 0;
+  background: transparent;
+}
+
+.settings-view .extensions-settings__component {
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface-muted);
+}
+
+/* Host, integrations, and usage use the same fact/list grammar. */
+.settings-view .host-settings,
+.settings-view .github-settings,
+.settings-view .linear-settings,
+.settings-view .settings-usage-stack {
+  gap: 28px;
+}
+
+.settings-view .host-settings > .settings-panel,
+.settings-view .linear-settings > .settings-panel {
+  gap: 0;
+}
+
+.settings-view .host-settings__capabilities {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--oct-hairline);
+  list-style: none;
+}
+
+.settings-view .github-settings__capabilities {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.settings-view .github-settings__capabilities > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 16px;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+.settings-view .github-settings__capabilities > li > .github-settings__note {
+  grid-column: 1 / -1;
+}
+
+.settings-view .usage-dashboard,
+.settings-view .provider-usage-history-workspace {
+  gap: 20px;
+}
+
+.settings-view .usage-dashboard__filters {
+  padding: 12px 0;
+  border-top: 1px solid var(--oct-hairline);
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+.settings-view .usage-totals {
+  gap: 20px 36px;
+  padding: 4px 0 8px;
+}
+
+.settings-view .usage-dashboard__section {
+  gap: 0;
+}
+
+.settings-view .usage-dashboard__section-header {
+  padding: 10px 0 8px;
+}
+
+@media (max-width: 720px) {
+  .settings-view .settings-section-head,
+  .settings-view .settings-section-head__actions,
+  .settings-view .github-settings__controls,
+  .settings-view .linear-settings__controls,
+  .settings-view .host-settings__controls {
+    align-items: flex-start;
+  }
+
+  .settings-view .image-generation-settings__sources > li {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .settings-view .image-generation-settings__sources > li > button {
+    align-self: flex-start;
+  }
+
+  .settings-view .github-settings__capabilities > li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-view .github-settings__capabilities > li > .github-settings__capability-state {
+    grid-column: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-view .settings-specialty,
+  .settings-view .settings-specialty * {
+    transition: none !important;
+  }
+}

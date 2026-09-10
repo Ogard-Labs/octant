@@ -560,6 +560,9 @@ function ActiveSectionContent({
           {...(props.providerController?.snapshot === undefined
             ? {}
             : { providerSnapshot: props.providerController.snapshot })}
+          {...(props.providerController === undefined
+            ? {}
+            : { providerController: props.providerController })}
           settings={props.settings.imageGeneration}
         />
       );
