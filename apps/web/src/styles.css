@@ -1039,9 +1039,12 @@ h6 {
   gap: 2px;
 }
 
+/* The feed row holds the title line plus whichever properties the view is
+   currently showing beneath it, so the rows are counted rather than fixed at
+   two; the button's own min-height still keeps a one-line row from collapsing. */
 .activity-nav__thread .sidebar-navigation__thread-copy {
   flex: 1 1 auto;
-  grid-template-rows: minmax(20px, auto) minmax(16px, auto);
+  grid-auto-rows: minmax(16px, auto);
   gap: 2px;
 }
 

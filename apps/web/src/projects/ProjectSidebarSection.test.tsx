@@ -1657,3 +1657,168 @@ describe("snoozed and completed shelves", () => {
     );
   });
 });
+
+describe("ProjectSidebarSection row property visibility", () => {
+  const codeThread = {
+    checkoutChip: { checkoutKind: "managed-worktree", label: "feature/sidebar" },
+    projectId: String(codeProjectA.id),
+    pullRequests: {
+      items: [
+        {
+          identity: {
+            projectId: codeProjectA.id,
+            repositoryOwner: "octant",
+            repositoryName: "octant",
+            number: 12,
+          },
+          title: "Sidebar pull request 12",
+          state: "open",
+          checks: "passing",
+          review: "approved",
+          mergeability: "mergeable",
+          freshness: "fresh",
+          readyToMerge: true,
+        },
+      ],
+      hiddenCount: 0,
+    },
+    threadId: "thread-a",
+    title: "Planning",
+    updatedAt: new Date(Date.now() - 2 * 60 * 60_000).toISOString(),
+  } as const;
+
+  function renderSidebar() {
+    return render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={vi.fn()}
+        projectViewsEnabled
+        projects={[codeProjectA]}
+        threads={[codeThread]}
+      />,
+    );
+  }
+
+  async function openPropertyMenu(user: ReturnType<typeof userEvent.setup>) {
+    const trigger = screen.getByRole("button", { name: /Project view filters/ });
+    trigger.focus();
+    await user.keyboard("{ArrowDown}");
+    await user.click(await screen.findByRole("menuitem", { name: "Property visibility" }));
+  }
+
+  it("hides a property in the view it was hidden in and leaves the other view alone", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+
+    try {
+      const view = renderSidebar();
+
+      const projectRow = screen.getByRole("button", { name: /Planning/ });
+      expect(within(projectRow).getByText("#12")).toBeVisible();
+      expect(within(projectRow).getByText("feature/sidebar")).toBeVisible();
+
+      await openPropertyMenu(user);
+      expect(await screen.findByText("Shown on Projects rows")).toBeVisible();
+      fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Pull request" }));
+      await user.keyboard("{Escape}{Escape}");
+
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12"),
+        ).toBeNull(),
+      );
+
+      // The Activity feed never agreed to hide anything, and its own defaults
+      // are untouched by the Project tree's choice.
+      await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+      const activityRow = screen.getByRole("button", { name: /Planning/ });
+      expect(within(activityRow).getByText("octant")).toBeVisible();
+      expect(within(activityRow).queryByText("#12")).toBeNull();
+
+      await openPropertyMenu(user);
+      expect(await screen.findByText("Shown on Activity rows")).toBeVisible();
+      fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Pull request" }));
+      await user.keyboard("{Escape}{Escape}");
+
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole("button", { name: /Planning/ })).getByText("#12"),
+        ).toBeVisible(),
+      );
+
+      // Back in the Project tree the pull request is still hidden: showing it
+      // in the feed said nothing about the tree.
+      await user.click(screen.getByRole("button", { name: "Turn off activity view" }));
+      expect(
+        within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12"),
+      ).toBeNull();
+      view.unmount();
+    } finally {
+      window.localStorage.clear();
+    }
+  });
+
+  it("still hides the property after the renderer is thrown away and built again", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+
+    try {
+      const first = renderSidebar();
+      await openPropertyMenu(user);
+      fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Branch" }));
+      await user.keyboard("{Escape}{Escape}");
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole("button", { name: /Planning/ })).queryByText("feature/sidebar"),
+        ).toBeNull(),
+      );
+      first.unmount();
+
+      renderSidebar();
+
+      expect(
+        within(screen.getByRole("button", { name: /Planning/ })).queryByText("feature/sidebar"),
+      ).toBeNull();
+      expect(
+        within(screen.getByRole("button", { name: /Planning/ })).getByText("#12"),
+      ).toBeVisible();
+    } finally {
+      window.localStorage.clear();
+    }
+  });
+
+  it("clears and restores every property the view can carry in one action", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+
+    try {
+      renderSidebar();
+      await openPropertyMenu(user);
+      fireEvent.click(await screen.findByRole("menuitem", { name: "Hide all" }));
+
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12"),
+        ).toBeNull(),
+      );
+      const stripped = screen.getByRole("button", { name: /Planning/ });
+      expect(within(stripped).queryByText("feature/sidebar")).toBeNull();
+      expect(within(stripped).queryByText("2h")).toBeNull();
+
+      fireEvent.click(await screen.findByRole("menuitem", { name: "Show all" }));
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole("button", { name: /Planning/ })).getByText("#12"),
+        ).toBeVisible(),
+      );
+    } finally {
+      window.localStorage.clear();
+    }
+  });
+});

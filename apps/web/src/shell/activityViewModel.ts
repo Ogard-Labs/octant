@@ -1,6 +1,8 @@
+import type { ThreadBoardPullRequestSummaries } from "@octant/contracts";
 import {
   threadRowActivity,
   type ChatThreadNavigationItem,
+  type ThreadCheckoutChip,
   type ThreadRowActivity,
 } from "./navigationModel";
 
@@ -41,6 +43,15 @@ export interface SidebarActivityProject {
 
 export interface SidebarActivityThread {
   readonly activity: ThreadRowActivity;
+  /**
+   * The row properties the Activity feed can show beside the Project name.
+   * They are carried whether or not the view currently shows them, because
+   * which of them a row wears is a per-view display choice, not a fact about
+   * the thread.
+   */
+  readonly checkoutChip?: ThreadCheckoutChip;
+  readonly pullRequests?: ThreadBoardPullRequestSummaries;
+  readonly wakeLabel?: string;
   readonly unread: boolean;
   readonly followUp: boolean;
   readonly woke: boolean;
@@ -179,6 +190,9 @@ function toActivityThread(
   const activity = threadRowActivity(thread);
   return {
     activity,
+    ...(thread.checkoutChip === undefined ? {} : { checkoutChip: thread.checkoutChip }),
+    ...(thread.pullRequests === undefined ? {} : { pullRequests: thread.pullRequests }),
+    ...(thread.wakeLabel === undefined ? {} : { wakeLabel: thread.wakeLabel }),
     unread: activity === "unread" || thread.unread === true,
     followUp: thread.followUp === true,
     woke: thread.woke === true,
