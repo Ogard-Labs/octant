@@ -14,7 +14,7 @@ import {
   resolveAccessibilityFallbacks,
   resolveZenLiveCardActivity,
 } from "@octant/domain";
-import type { ZenLiveCardActivity } from "@octant/domain";
+import type { ResolvedAppBackground, ZenLiveCardActivity } from "@octant/domain";
 import type {
   ZenAssistantSnapshot,
   ZenAppearance,
@@ -45,6 +45,7 @@ import { relativeTimeLabel } from "../lib/relativeTime";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCard } from "../ui/base/OctantCard";
 import { OctantInput } from "../ui/base/OctantInput";
+import { AppBackdrop, type BackgroundImageFetcher } from "../theme/AppBackdrop";
 import { ZenAppearancePanel } from "./ZenAppearancePanel";
 import { ZenBar } from "./ZenBar";
 import { ZenAssistant } from "./ZenAssistant";
@@ -88,6 +89,15 @@ export interface ZenSurfaceProps {
   readonly onCreateWidget?: (kind: "notes" | "checklist") => void;
   readonly onCreateReference?: (url: string, label?: string) => void;
   readonly onUploadBackground?: (file: File) => void;
+  /**
+   * The application's own ground, already resolved against the theme and the
+   * accessibility settings. A space whose background is `theme` stands on
+   * this one rather than on a ground of Zen's own; without it, such a space
+   * shows the plain workspace ground.
+   */
+  readonly appBackground?: ResolvedAppBackground;
+  /** Reads an application-ground photo through the window's own authority. */
+  readonly appBackgroundFetcher?: BackgroundImageFetcher;
   readonly backgroundImageUrl?: string;
   readonly backgroundStatus?: "ready" | "loading" | "unavailable";
   readonly onSaveNotes?: (
@@ -391,6 +401,25 @@ export function ZenSurface(props: ZenSurfaceProps) {
   }
 
   const resolvedBackground = resolveZenBackgroundStyle(background, props.backgroundImageUrl);
+  /**
+   * The application ground as this space should show it.
+   *
+   * The value arrives already resolved against the theme and the app's own
+   * accessibility settings, and Zen draws that rather than deciding again —
+   * so Increased contrast, which resolves the ground to `none`, clears it
+   * here exactly as it does under the shell. Zen resolves the same two
+   * preferences for its own surface as well, and honours whichever reading
+   * asks for less, rather than drifting a cloud a space was told to hold
+   * still.
+   */
+  const appGround =
+    !resolvedBackground.appGround || props.appBackground === undefined
+      ? undefined
+      : appearance.increasedContrast
+        ? undefined
+        : appearance.reducedMotion
+          ? { ...props.appBackground, animated: false }
+          : props.appBackground;
   const overlay = Math.max(
     appearance.dimming,
     background.kind === "image" || background.kind === "builtin" ? background.overlay : 0,
@@ -600,6 +629,9 @@ export function ZenSurface(props: ZenSurfaceProps) {
       tabIndex={0}
     >
       {resolvedBackground.systemGround ? <div aria-hidden="true" className="zen-ground" /> : null}
+      {appGround === undefined || props.appBackgroundFetcher === undefined ? null : (
+        <AppBackdrop fetcher={props.appBackgroundFetcher} placement="zen" resolved={appGround} />
+      )}
       <div className="zen-surface__titlebar window-drag-region" aria-hidden="true" />
       {props.focusZone === null || props.focusZone === undefined ? null : (
         <div className="zen-surface__spaces-anchor window-no-drag">
@@ -925,6 +957,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
           aria-label={manualPanel === "appearance" ? "Zen appearance" : "Add to this space"}
           className="zen-panel zen-surface__manual-panel window-no-drag px-6"
           role="dialog"
+          variant="glass"
         >
           <header className="card-head">
             <h2>{manualPanel === "appearance" ? "Appearance" : "Add"}</h2>
@@ -1157,6 +1190,12 @@ type ResolvedZenBackground = {
    * colour or imagery it would read as the app's texture on their choice.
    */
   readonly systemGround: boolean;
+  /**
+   * True when the space stands on the application's ground. The cloud is
+   * drawn by the app's own backdrop over the theme's workspace colour, so
+   * the dot grid stays off: two textures on one floor read as neither.
+   */
+  readonly appGround: boolean;
 };
 
 /* The theme's workspace ground. Used whenever no user choice paints the
@@ -1179,11 +1218,19 @@ function resolveZenBackgroundStyle(
   background: ZenAppearance["background"],
   uploadedImageUrl?: string,
 ): ResolvedZenBackground {
+  if (background.kind === "theme") {
+    // The colour under the cloud is the theme's own workspace ground, the
+    // same one the shell draws the cloud over, so a space configured this way
+    // reads as the application rather than as a Zen colour that happens to
+    // match it. What the cloud shows is the app's Background setting; nothing
+    // about it is decided here.
+    return { style: { backgroundColor: SYSTEM_GROUND }, systemGround: false, appGround: true };
+  }
   if (background.kind === "solid") {
     if (background.color === DEFAULT_GROUND_COLOR) {
-      return { style: { backgroundColor: SYSTEM_GROUND }, systemGround: true };
+      return { style: { backgroundColor: SYSTEM_GROUND }, systemGround: true, appGround: false };
     }
-    return { style: { backgroundColor: background.color }, systemGround: false };
+    return { style: { backgroundColor: background.color }, systemGround: false, appGround: false };
   }
   if (background.kind === "gradient") {
     const style = background.style ?? "linear";
@@ -1194,6 +1241,7 @@ function resolveZenBackgroundStyle(
           backgroundImage: `radial-gradient(circle at 50% 40%, ${background.from}, ${background.to})`,
         },
         systemGround: false,
+        appGround: false,
       };
     }
     if (style === "conic") {
@@ -1203,6 +1251,7 @@ function resolveZenBackgroundStyle(
           backgroundImage: `conic-gradient(from ${background.angle}deg, ${background.from}, ${background.to}, ${background.from})`,
         },
         systemGround: false,
+        appGround: false,
       };
     }
     return {
@@ -1211,6 +1260,7 @@ function resolveZenBackgroundStyle(
         backgroundImage: `linear-gradient(${background.angle}deg, ${background.from}, ${background.to})`,
       },
       systemGround: false,
+      appGround: false,
     };
   }
   if (background.kind === "builtin") {
@@ -1218,16 +1268,18 @@ function resolveZenBackgroundStyle(
     return {
       style: mediaBackgroundStyle(preset.src, background.fill ?? "cover"),
       systemGround: false,
+      appGround: false,
     };
   }
   if (uploadedImageUrl === undefined) {
     // The chosen image is not readable here, so the surface stands on the
     // system ground until it is — the status line says which case this is.
-    return { style: { backgroundColor: SYSTEM_GROUND }, systemGround: true };
+    return { style: { backgroundColor: SYSTEM_GROUND }, systemGround: true, appGround: false };
   }
   return {
     style: mediaBackgroundStyle(uploadedImageUrl, background.fill ?? "cover"),
     systemGround: false,
+    appGround: false,
   };
 }
 

@@ -2833,6 +2833,27 @@ describe("useCodeController", () => {
     ]);
   });
 
+  it("answers a refused snooze with the host's reason, even when the refusal only reloads the list", async () => {
+    const execute = vi.fn(async () => {
+      // A stale version reloads the bootstrap and reports nothing else, so
+      // this is the refusal a sidebar row used to swallow whole.
+      throw { category: "stale", message: "Code state changed; reload and retry." };
+    });
+    const client = fakeClient({ execute });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let outcome: Awaited<ReturnType<typeof result.current.snoozeThread>> | undefined;
+    await act(async () => {
+      outcome = await result.current.snoozeThread(ids.thread, "2026-09-08T09:00:00.000Z");
+    });
+
+    expect(outcome).toEqual({
+      status: "refused",
+      message: "Code state changed; reload and retry.",
+    });
+  });
+
   it("marks a manual follow-up with a strictly newer trigger sequence", async () => {
     const executeFollowUp = vi.fn(async () => ({ kind: "follow-up-updated" }) as never);
     const client = fakeClient({
