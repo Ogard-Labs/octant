@@ -63,7 +63,35 @@ export interface FirstRunReadinessInput {
   readonly providerStatus: "loading" | "ready" | "disconnected";
   readonly instances: ReadonlyArray<ProviderInstance>;
   readonly observedByInstance: ReadonlyMap<ProviderInstanceId, ProviderObservedState>;
-  readonly discoverySnapshot?: DiscoverySnapshot;
+  /**
+   * What the host's search of this Mac has produced so far. Required, because
+   * an empty registry means "nothing is configured" only once that search has
+   * answered; before then it means the search has not run yet (`BOOT-02`).
+   */
+  readonly discovery: FirstRunDiscoveryInput;
+}
+
+export interface FirstRunDiscoveryInput {
+  readonly scanning: boolean;
+  readonly snapshot?: DiscoverySnapshot;
+  readonly message?: string;
+}
+
+/**
+ * How far the host has got in searching this Mac for installed providers.
+ *
+ * `searched` is deliberately narrow: only a scan that ran to completion has
+ * answered. A cancelled, partial, or failed scan looked at some of this Mac
+ * and stopped, so it cannot support a claim about what is not installed.
+ */
+export type FirstRunDiscoveryProgress = "unsearched" | "scanning" | "searched";
+
+export function describeFirstRunDiscoveryProgress(
+  input: FirstRunDiscoveryInput,
+): FirstRunDiscoveryProgress {
+  if (input.scanning) return "scanning";
+  if (input.message !== undefined) return "unsearched";
+  return input.snapshot?.status === "completed" ? "searched" : "unsearched";
 }
 
 const LABELS: Record<FirstRunProviderState, string> = {
@@ -173,7 +201,7 @@ export function summarizeFirstRunReadiness(
   const configuredDriverKinds = new Set<string>(
     input.instances.map((instance) => instance.driverKind),
   );
-  const detectedCount = (input.discoverySnapshot?.candidates ?? []).filter(
+  const detectedCount = (input.discovery.snapshot?.candidates ?? []).filter(
     (candidate) => !configuredDriverKinds.has(candidate.driverKind),
   ).length;
   const base = { providers, readyCount, usableCount, detectedCount } as const;
@@ -210,6 +238,22 @@ export function summarizeFirstRunReadiness(
     };
   }
   if (providers.length === 0) {
+    // Discovery, not the registry, is what knows whether this Mac has a
+    // provider on it. Until it has answered, an empty registry is a missing
+    // answer, and first run names it as one rather than converting it into
+    // "nothing is configured" (`BOOT-02`).
+    const progress = describeFirstRunDiscoveryProgress(input.discovery);
+    if (progress !== "searched") {
+      return {
+        ...base,
+        overall: "checking",
+        headline: "Octant has not finished checking this Mac",
+        detail:
+          progress === "scanning"
+            ? "The search for installed providers is still running. Octant claims nothing about this Mac until it finishes."
+            : "The search for installed providers has not completed, so Octant cannot say whether one is installed. Check this Mac again to finish it.",
+      };
+    }
     return {
       ...base,
       overall: "none-configured",
@@ -237,12 +281,6 @@ export interface FirstRunDiscoveryNotice {
   readonly retryable: boolean;
 }
 
-export interface FirstRunDiscoveryInput {
-  readonly scanning: boolean;
-  readonly snapshot?: DiscoverySnapshot;
-  readonly message?: string;
-}
-
 /**
  * Report an incomplete provider scan honestly.
  *
@@ -250,10 +288,21 @@ export interface FirstRunDiscoveryInput {
  * presenting that list silently would imply the Mac was fully searched. Each
  * incomplete outcome is named and offered a retry so the user can act on it
  * (`BOOT-02`); none of them changes what the host will let a provider do.
+ *
+ * A running scan is reported first, because the outcome of the scan it
+ * replaces is no longer what is happening: leaving the retried outcome up for
+ * the whole retry, beside a disabled retry button, reads as a fresh finding.
  */
 export function describeDiscoveryNotice(
   input: FirstRunDiscoveryInput,
 ): FirstRunDiscoveryNotice | undefined {
+  if (input.scanning) {
+    return {
+      tone: "info",
+      message: "Checking this Mac for installed providers…",
+      retryable: false,
+    };
+  }
   if (input.message !== undefined) {
     return { tone: "attention", message: input.message, retryable: true };
   }
@@ -269,13 +318,6 @@ export function describeDiscoveryNotice(
       tone: "attention",
       message: `${reason} ${snapshot.message ?? "Some installed providers may be missing from this list."}`,
       retryable: true,
-    };
-  }
-  if (input.scanning) {
-    return {
-      tone: "info",
-      message: "Checking this Mac for installed providers…",
-      retryable: false,
     };
   }
   return undefined;

@@ -1,4 +1,4 @@
-import type { ProviderInstance, ProviderInstanceId } from "@octant/contracts";
+import type { DiscoverySnapshot, ProviderInstance, ProviderInstanceId } from "@octant/contracts";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -13,12 +13,20 @@ const instance = {
   enabled: true,
 } as ProviderInstance;
 
+// A scan that ran to completion: only then may the surface claim this Mac has
+// no provider on it.
+const searchedThisMac = {
+  scanning: false,
+  snapshot: { status: "completed", candidates: [] } as unknown as DiscoverySnapshot,
+} as const;
+
 function mount(overrides: Partial<FirstRunProviderStepProps> = {}) {
   const props: FirstRunProviderStepProps = {
     readiness: summarizeFirstRunReadiness({
       providerStatus: "ready",
       instances: [instance],
       observedByInstance: new Map(),
+      discovery: searchedThisMac,
     }),
     onOpenProviderSettings: vi.fn(),
     onRescan: vi.fn(),
@@ -46,6 +54,7 @@ describe("FirstRunProviderStep", () => {
         providerStatus: "disconnected",
         instances: [],
         observedByInstance: new Map(),
+        discovery: searchedThisMac,
       }),
     });
 
@@ -65,6 +74,7 @@ describe("FirstRunProviderStep", () => {
         providerStatus: "loading",
         instances: [instance],
         observedByInstance: new Map(),
+        discovery: searchedThisMac,
       }),
     });
 
@@ -79,11 +89,29 @@ describe("FirstRunProviderStep", () => {
         providerStatus: "ready",
         instances: [],
         observedByInstance: new Map(),
+        discovery: searchedThisMac,
       }),
     });
 
     expect(screen.getByRole("status")).toHaveTextContent("No provider is configured");
     expect(screen.queryByText(/No provider is ready, so Chat cannot answer yet/)).toBeNull();
+  });
+
+  it("does not tell a first-run user nothing is configured while this Mac is still being scanned", () => {
+    mount({
+      readiness: summarizeFirstRunReadiness({
+        providerStatus: "ready",
+        instances: [],
+        observedByInstance: new Map(),
+        discovery: { scanning: true },
+      }),
+      scanning: true,
+    });
+
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("Octant has not finished checking this Mac");
+    expect(status).not.toHaveTextContent("No provider is configured");
+    expect(status).toHaveAttribute("data-overall", "checking");
   });
 
   it("surfaces an incomplete scan as an actionable alert", () => {
