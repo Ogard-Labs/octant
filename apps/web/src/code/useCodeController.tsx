@@ -59,6 +59,11 @@ import { createReadCursorStore, type ReadCursorStore } from "../threads/readCurs
 export type CodeControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
 export type CodeTurnStatus = "idle" | "sending" | "running" | "waiting" | "failed";
 
+/** What completing, reopening, snoozing, or waking a thread answered. */
+export type CodeThreadRestOutcome =
+  | { readonly status: "ok" }
+  | { readonly status: "refused"; readonly message: string };
+
 /**
  * A question the running provider turn asked the user and is blocked on:
  * either a yes/no approval for a tool it wants to run, or free-form input.
@@ -1786,19 +1791,30 @@ export function useCodeController(options: CodeControllerOptions) {
   /**
    * Complete, reopen, snooze, and wake all carry the version the renderer
    * last saw, like archiving. Whether completing or snoozing would hide work
-   * in flight is the host's call; a refusal comes back as an ordinary failure.
+   * in flight is the host's call, so the answer is a value the caller must
+   * handle: these run from a sidebar row, where nothing else reports a
+   * failure. The controller's own error line is read only while Code is
+   * disconnected, and a stale version reloads the list without a word, so a
+   * refusal that is not returned here reaches the person as a click that did
+   * nothing.
    */
   const restCommand = useCallback(
     async (
       threadId: CodeThreadId,
       command: (expectedVersion: CodeThread["version"]) => CodeCommand,
-    ): Promise<boolean> => {
+    ): Promise<CodeThreadRestOutcome> => {
       const thread = bootstrapRef.current?.threads.find(
         (candidate) => String(candidate.id) === String(threadId),
       );
-      if (thread === undefined) return false;
+      if (thread === undefined) {
+        return { status: "refused", message: "This thread is no longer in the list." };
+      }
       const result = await execute(command(thread.version));
-      return result !== undefined;
+      if (result !== undefined) return { status: "ok" };
+      return {
+        status: "refused",
+        message: lastExecuteError.current?.message ?? "The host could not change this thread.",
+      };
     },
     [execute],
   );

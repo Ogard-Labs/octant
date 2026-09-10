@@ -321,7 +321,11 @@ import { ComposerContextMeterShortcut } from "./context/ComposerContextMeter";
 import { ComposerContextMeterProvider } from "./context/composerContextMeterScope";
 import { useContextController } from "./context/useContextController";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
-import { createCodeReadCursorStore, useCodeController } from "./code/useCodeController";
+import {
+  createCodeReadCursorStore,
+  useCodeController,
+  type CodeThreadRestOutcome,
+} from "./code/useCodeController";
 import { useContinueCards } from "./code/useContinueCards";
 import {
   CodeThreadControllerSlots,
@@ -3305,16 +3309,27 @@ function LaunchedShell(
     );
   }
 
+  // A rest command runs from a sidebar row, which has nowhere of its own to
+  // report a refusal, so its answer reads where thread notices already appear
+  // — the same line Work's rest commands use. Without it the row simply stays
+  // where it was and the click reads as nothing at all.
+  const noteCodeThreadRest = (outcome: CodeThreadRestOutcome): void => {
+    if (outcome.status === "refused") setThreadExportNotice(outcome.message);
+  };
   const codeThreadRowActions: ThreadRowActions = {
     ...(exportCodeThread === undefined ? {} : { onExportThread: exportCodeThread }),
     ...(handOffCodeThread === undefined ? {} : { onHandOffThread: handOffCodeThread }),
     onArchiveThread: (threadId) => void codeController.archiveThread(decodeCodeThreadId(threadId)),
     onCompleteThread: (threadId) =>
-      void codeController.completeThread(decodeCodeThreadId(threadId)),
-    onReopenThread: (threadId) => void codeController.reopenThread(decodeCodeThreadId(threadId)),
+      void codeController.completeThread(decodeCodeThreadId(threadId)).then(noteCodeThreadRest),
+    onReopenThread: (threadId) =>
+      void codeController.reopenThread(decodeCodeThreadId(threadId)).then(noteCodeThreadRest),
     onSnoozeThread: (threadId, until) =>
-      void codeController.snoozeThread(decodeCodeThreadId(threadId), until),
-    onWakeThread: (threadId) => void codeController.wakeThread(decodeCodeThreadId(threadId)),
+      void codeController
+        .snoozeThread(decodeCodeThreadId(threadId), until)
+        .then(noteCodeThreadRest),
+    onWakeThread: (threadId) =>
+      void codeController.wakeThread(decodeCodeThreadId(threadId)).then(noteCodeThreadRest),
     onCompleteFollowUp: (threadId) =>
       void codeController.completeFollowUp(decodeCodeThreadId(threadId)),
     onMarkFollowUp: (threadId) => void codeController.markFollowUp(decodeCodeThreadId(threadId)),
