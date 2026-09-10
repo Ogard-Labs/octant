@@ -267,6 +267,44 @@ describe("ChatTranscript", () => {
     expect(screen.queryByText("world")).not.toBeInTheDocument();
   });
 
+  it("shows the provider's task list under the attempt it belongs to", () => {
+    const current = viewFixture();
+    const completed = current.turns[0]!.attempts[1]!;
+    render(
+      <ChatTranscript
+        view={viewFixture({
+          turns: [
+            {
+              ...current.turns[0]!,
+              attempts: [
+                current.turns[0]!.attempts[0]!,
+                {
+                  ...completed,
+                  tasks: [
+                    {
+                      taskId: "task-1",
+                      state: "completed",
+                      summary: "Watch CI on the branch head",
+                    },
+                    { taskId: "task-2", state: "pending", summary: "Commit the evidence" },
+                  ],
+                },
+              ],
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("region", { name: "Agent tasks" })).toBeVisible();
+    expect(screen.getByText("1 of 2 tasks completed")).toBeVisible();
+  });
+
+  it("shows no task list for an attempt whose provider reported none", () => {
+    render(<ChatTranscript view={viewFixture()} />);
+    expect(screen.queryByRole("region", { name: "Agent tasks" })).not.toBeInTheDocument();
+  });
+
   it("renders safe structured assistant content without interpreting raw HTML", () => {
     const current = viewFixture();
     const completed = current.turns[0]!.attempts[1]!;

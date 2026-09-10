@@ -1,4 +1,5 @@
 import type { CodeOperationEvent } from "@octant/contracts";
+import type { ThreadTaskProgress } from "../transcript/ThreadTasksPanel";
 
 /**
  * What a running turn is doing, beyond the message it is writing.
@@ -46,13 +47,6 @@ export interface CodeTurnActivity {
 }
 
 export type TaskActivityRow = Extract<CodeActivityRow, { kind: "task" }>;
-
-/** The live task list a thread's Tasks panel shows, from the turn it came out of. */
-export interface ThreadTaskProgress {
-  readonly tasks: ReadonlyArray<TaskActivityRow>;
-  /** Whether the turn that journaled these rows is still writing. */
-  readonly running: boolean;
-}
 
 /**
  * The latest turn that journaled provider task progress, with whether it is

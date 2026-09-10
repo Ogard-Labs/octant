@@ -1,6 +1,19 @@
 import { Check, Circle, CircleX, Clock3, LoaderCircle } from "lucide-react";
 import type { ReactNode } from "react";
-import type { TaskActivityRow, ThreadTaskProgress } from "./transcriptActivity";
+
+/** One task in an agent's restated work plan, with the provider's own wording. */
+export interface ThreadTaskRow {
+  readonly id: string;
+  readonly state: "pending" | "running" | "waiting" | "completed" | "failed";
+  readonly summary: string;
+}
+
+/** The live task list a thread's Tasks panel shows, from the turn it came out of. */
+export interface ThreadTaskProgress {
+  readonly tasks: ReadonlyArray<ThreadTaskRow>;
+  /** Whether the turn that journaled these rows is still writing. */
+  readonly running: boolean;
+}
 
 export interface ThreadTasksPanelProps {
   readonly tasks: ThreadTaskProgress;
@@ -10,7 +23,7 @@ export interface ThreadTasksPanelProps {
  * The mark for one task's state: the same vocabulary the transcript's own rows
  * use, so a running task spins the way a running tool does.
  */
-function taskIcon(state: TaskActivityRow["state"]): ReactNode {
+function taskIcon(state: ThreadTaskRow["state"]): ReactNode {
   switch (state) {
     case "running":
       return <LoaderCircle aria-hidden="true" size={12} strokeWidth={1.8} />;

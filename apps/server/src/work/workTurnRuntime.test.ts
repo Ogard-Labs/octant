@@ -7,6 +7,7 @@ import {
   decodeProviderInstanceId,
   decodeStartWorkThreadTurnCommand,
   type ProviderRuntimeEvent,
+  type ThreadTaskProgressList,
   CorrelationId,
   UtcTimestamp,
 } from "@octant/contracts";
@@ -107,6 +108,98 @@ describe("WorkTurnRuntime", () => {
     expect(JSON.stringify(acquireInputs[0])).not.toMatch(/shell|worktree|pullRequest|checkoutId/);
     expect(deltas).toEqual(["Hello from Work"]);
     expect(outcome).toEqual({ kind: "completed", response: "Hello from Work" });
+  });
+
+  it("hands the provider's restated task list to the service whenever it moves", async () => {
+    const updates: ThreadTaskProgressList[] = [];
+    const events: ProviderRuntimeEvent[] = [
+      {
+        instanceId: ids.provider,
+        sequence: 1,
+        correlationId: decodeCorrelationId(String(ids.project)),
+        occurredAt: decodeTimestamp("2026-08-11T12:00:00.000Z"),
+        kind: "task-progress",
+        sessionId: ids.session as never,
+        taskId: "task-1",
+        status: "in-progress",
+        summary: "Read the brief",
+      },
+      {
+        instanceId: ids.provider,
+        sequence: 2,
+        correlationId: decodeCorrelationId(String(ids.project)),
+        occurredAt: decodeTimestamp("2026-08-11T12:00:01.000Z"),
+        kind: "task-progress",
+        sessionId: ids.session as never,
+        taskId: "task-1",
+        status: "completed",
+        summary: "Read the brief",
+      },
+      {
+        instanceId: ids.provider,
+        sequence: 3,
+        correlationId: decodeCorrelationId(String(ids.project)),
+        occurredAt: decodeTimestamp("2026-08-11T12:00:02.000Z"),
+        kind: "text-delta",
+        sessionId: ids.session as never,
+        text: "Read it.",
+      },
+      {
+        instanceId: ids.provider,
+        sequence: 4,
+        correlationId: decodeCorrelationId(String(ids.project)),
+        occurredAt: decodeTimestamp("2026-08-11T12:00:03.000Z"),
+        kind: "completed",
+        sessionId: ids.session as never,
+      },
+    ];
+    const driver: ProviderDriver = {
+      kind: "openai-compatible",
+      probe: () => Effect.die("unused"),
+      acquire: () =>
+        Effect.succeed({
+          subscribe: Effect.succeed(Stream.fromIterable(events)),
+          start: () => Effect.void,
+          send: () => Effect.void,
+          resume: () => Effect.void,
+          interrupt: () => Effect.void,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: () => Effect.void,
+        } as never),
+    };
+    const command = decodeStartWorkThreadTurnCommand({
+      kind: "start-work-thread-turn",
+      requestId: ids.request,
+      threadId: ids.thread,
+      turnId: ids.turn,
+      prompt: "Summarize the brief",
+      authority: decodeWorkTurnAuthority({
+        hostId: "local",
+        projectId: ids.project,
+        bindingRevisionId: ids.binding,
+        workingDirectory: ".",
+        confinementPosture: "project-root-confined",
+        providerInstanceId: ids.provider,
+        modelId: "gpt-5",
+      }),
+    });
+
+    const outcome = await new WorkTurnRuntime().run({
+      command,
+      providerSessionId: ids.session as never,
+      projectRoot: "/tmp/work-project",
+      driver,
+      signal: new AbortController().signal,
+      onTasks: (tasks) => updates.push(tasks),
+    });
+
+    expect(outcome).toEqual({ kind: "completed", response: "Read it." });
+    expect(updates).toEqual([
+      [{ taskId: "task-1", state: "running", summary: "Read the brief" }],
+      [{ taskId: "task-1", state: "completed", summary: "Read the brief" }],
+    ]);
   });
 
   it("keeps the idle window open while an app-managed action is executing", async () => {

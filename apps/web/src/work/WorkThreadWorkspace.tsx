@@ -92,6 +92,7 @@ import {
   waitUntilDocumentVisible,
 } from "../polling/documentVisibility";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
+import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import {
   TurnHeader,
   TurnTime,
@@ -147,6 +148,12 @@ type WorkTranscriptRow =
       readonly kind: "files";
       readonly key: string;
       readonly wrote: NonNullable<WorkTurnState["wroteFiles"]>;
+    }
+  | {
+      readonly kind: "tasks";
+      readonly key: string;
+      readonly turn: WorkTurnState;
+      readonly tasks: NonNullable<WorkTurnState["tasks"]>;
     }
   | { readonly kind: "status"; readonly key: "status"; readonly text: string }
   | {
@@ -262,6 +269,14 @@ function applyWorkTurnStreamFrame(
     if (index === -1) return [...turns, frame.turn];
     const next = turns.slice();
     next[index] = frame.turn;
+    return next;
+  }
+  if (frame.kind === "turn-tasks") {
+    if (index === -1) return turns;
+    const current = turns[index];
+    if (current === undefined) return turns;
+    const next = turns.slice();
+    next[index] = { ...current, tasks: frame.tasks };
     return next;
   }
   if (index === -1) return turns;
@@ -468,6 +483,17 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         });
       }
       if (!headPlaced) rows.push(head);
+      // The provider's restated task list lands where the turn it belongs to
+      // ends, so the transcript reads as what was said and then what it is
+      // working through.
+      if (turn.tasks !== undefined && turn.tasks.length > 0) {
+        rows.push({
+          kind: "tasks",
+          key: `${String(turn.requestId)}-${String(turnIndex)}-tasks`,
+          turn,
+          tasks: turn.tasks,
+        });
+      }
       // The files land after the turn that produced them, so the transcript
       // reads as what was said and then what came out of it.
       if (turn.wroteFiles !== undefined) {
@@ -1228,6 +1254,20 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   </p>
                 ) : null}
               </section>
+            );
+          }
+          if (row.kind === "tasks") {
+            return (
+              <ThreadTasksPanel
+                tasks={{
+                  running: row.turn.status === "accepted" || row.turn.status === "running",
+                  tasks: row.tasks.map((task) => ({
+                    id: task.taskId,
+                    state: task.state,
+                    summary: task.summary,
+                  })),
+                }}
+              />
             );
           }
           if (row.kind === "request") {

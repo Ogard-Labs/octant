@@ -18,6 +18,7 @@ import {
   type ProviderResumeCursor,
   type ProviderRuntimeEvent,
   type ProviderServiceLimits,
+  upsertThreadTaskProgress,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { transitionChatAttempt } from "@octant/domain/chat-policy";
@@ -714,6 +715,22 @@ export class ChatTurnRunner {
                     citationIds: [...currentAttempt.citationIds, citationId],
                     updatedAt: updatedAt(),
                   };
+                  yield* input.persistAttempt(currentAttempt);
+                  return;
+                }
+                if (event.kind === "task-progress") {
+                  // Providers restate the whole plan as it moves; the attempt
+                  // carries the latest list so a replayed attempt-updated is
+                  // the full state, not a delta another event may never heal.
+                  // The runtime vocabulary says "in-progress"; the persisted
+                  // one says "running" — the transcript's own word.
+                  const nextTasks = upsertThreadTaskProgress(currentAttempt.tasks, {
+                    taskId: event.taskId,
+                    state: event.status === "in-progress" ? "running" : event.status,
+                    summary: event.summary,
+                  });
+                  if (nextTasks === currentAttempt.tasks) return;
+                  currentAttempt = { ...currentAttempt, tasks: nextTasks, updatedAt: updatedAt() };
                   yield* input.persistAttempt(currentAttempt);
                   return;
                 }

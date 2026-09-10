@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { ThreadTasksPanel } from "./ThreadTasksPanel";
-
 describe("ThreadTasksPanel", () => {
   it("counts the finished tasks out loud and keeps the rest in order", () => {
     render(
@@ -9,9 +8,9 @@ describe("ThreadTasksPanel", () => {
         tasks={{
           running: true,
           tasks: [
-            { kind: "task", id: "t1", state: "completed", summary: "Watch CI on the branch head" },
-            { kind: "task", id: "t2", state: "running", summary: "Triage the review findings" },
-            { kind: "task", id: "t3", state: "pending", summary: "Commit the captured evidence" },
+            { id: "t1", state: "completed", summary: "Watch CI on the branch head" },
+            { id: "t2", state: "running", summary: "Triage the review findings" },
+            { id: "t3", state: "pending", summary: "Commit the captured evidence" },
           ],
         }}
       />,
@@ -30,7 +29,7 @@ describe("ThreadTasksPanel", () => {
       <ThreadTasksPanel
         tasks={{
           running: true,
-          tasks: [{ kind: "task", id: "t1", state: "waiting", summary: "Apply the edit" }],
+          tasks: [{ id: "t1", state: "waiting", summary: "Apply the edit" }],
         }}
       />,
     );
@@ -42,7 +41,7 @@ describe("ThreadTasksPanel", () => {
       <ThreadTasksPanel
         tasks={{
           running: false,
-          tasks: [{ kind: "task", id: "t1", state: "pending", summary: "Update the body" }],
+          tasks: [{ id: "t1", state: "pending", summary: "Update the body" }],
         }}
       />,
     );

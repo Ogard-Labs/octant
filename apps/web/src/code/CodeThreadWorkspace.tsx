@@ -70,8 +70,8 @@ import {
 import { useThreadMentions } from "../chat/useThreadMentions";
 import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
 import { CodeTranscriptRow } from "./CodeTranscriptRow";
-import { ThreadTasksPanel } from "./ThreadTasksPanel";
 import { liveTaskProgress } from "./transcriptActivity";
+import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import { providerLimitWindowLabel } from "../providers/providerLimitWindow";
 import { TurnHeader, TurnTime, type TurnHeaderOutcome } from "../transcript/TurnHeader";

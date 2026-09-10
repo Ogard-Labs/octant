@@ -11,6 +11,8 @@ import {
   type WorkTurnFailure,
   type WorkTurnRequestId,
   type WorkTurnState,
+  upsertThreadTaskProgress,
+  type ThreadTaskProgressList,
 } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Effect, Fiber, Scope, Stream } from "effect";
@@ -46,6 +48,8 @@ export interface WorkTurnRuntimePort {
     readonly context?: ReadonlyArray<ProviderContextBlock>;
     readonly appManagedTools?: AppManagedToolSet;
     readonly onDelta?: (response: string) => void;
+    /** The provider's restated task list, whole, whenever it moves. */
+    readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
   }): Promise<WorkTurnRuntimeOutcome>;
 }
 
@@ -76,6 +80,8 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
     readonly context?: ReadonlyArray<ProviderContextBlock>;
     readonly appManagedTools?: AppManagedToolSet;
     readonly onDelta?: (response: string) => void;
+    /** The provider's restated task list, whole, whenever it moves. */
+    readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
   }): Promise<WorkTurnRuntimeOutcome> {
     try {
       if (input.signal.aborted) return { kind: "cancelled" };
@@ -120,6 +126,8 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       readonly context?: ReadonlyArray<ProviderContextBlock>;
       readonly appManagedTools?: AppManagedToolSet;
       readonly onDelta?: (response: string) => void;
+      /** The provider's restated task list, whole, whenever it moves. */
+      readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
     },
     idle: IdleTimeout,
   ): Effect.Effect<WorkTurnRuntimeOutcome, ProviderFailure, Scope.Scope> {
@@ -164,6 +172,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       }
       let handledEvents = 0;
       let response = "";
+      let tasks: ThreadTaskProgressList | undefined;
       let terminal: ProviderRuntimeEvent | undefined;
       const answeredToolRequestIds = new Set<string>();
       const events = yield* subscribeThenSend({
@@ -180,6 +189,16 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                 if (event.kind === "text-delta") {
                   response = appendBoundedResponse(response, event.text);
                   input.onDelta?.(response);
+                }
+                if (event.kind === "task-progress") {
+                  const next = upsertThreadTaskProgress(tasks, {
+                    taskId: event.taskId,
+                    state: event.status === "in-progress" ? "running" : event.status,
+                    summary: event.summary,
+                  });
+                  if (next === tasks) return;
+                  tasks = next;
+                  input.onTasks?.(next);
                 }
                 if (event.kind === "tool-request") {
                   if (answeredToolRequestIds.has(event.requestId)) return;
