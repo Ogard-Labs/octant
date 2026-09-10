@@ -142,6 +142,25 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
         </>
       ) : null}
 
+      {/* Not one of the pictures below: it is the ground the rest of Octant
+          already stands on, and it carries no dials of its own, so it sits
+          above them and says where its settings live. */}
+      <fieldset className="zen-appearance__app-ground">
+        <legend>Application ground</legend>
+        <OctantButton
+          aria-pressed={background.kind === "theme"}
+          onClick={() => commit({ kind: "theme" })}
+          type="button"
+          variant="secondary"
+        >
+          App background
+        </OctantButton>
+        <p className="zen-appearance__note">
+          Follows Settings › Appearance › Background — the theme&rsquo;s dither cloud or your photo,
+          with the dials you set there.
+        </p>
+      </fieldset>
+
       <fieldset className="zen-appearance__presets">
         <legend>Built-in backgrounds</legend>
         {(["landscape", "forest", "wood", "abstract"] as const).map((group) => (

@@ -13,7 +13,7 @@ import { activeChatTurns } from "@octant/domain/chat-policy";
 import type { PickerGroup } from "@octant/domain";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import { TurnHeader, TurnTime, turnWorkedFor } from "../transcript/TurnHeader";
-import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { memo, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
@@ -341,7 +341,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   onRetryAttempt={props.onRetryAttempt}
                   previousAttempt={turn.attempts[index - 1]}
                   providerGroups={props.providerGroups}
-                  citations={citationsByAttempt.get(String(attempt.id)) ?? []}
+                  citations={citationsByAttempt.get(String(attempt.id)) ?? NO_CITATIONS}
                 />
               ))}
             </TurnActionMenu>
@@ -460,7 +460,11 @@ function RouteReceipt(props: { readonly decision: ChatTurnRouteDecision }) {
   );
 }
 
-function AttemptBlock(props: {
+// One shared empty list, so a reply without citations does not hand the
+// memoized block a fresh array on every render of the transcript.
+const NO_CITATIONS: ChatThreadView["citations"] = [];
+
+const AttemptBlock = memo(function AttemptBlock(props: {
   readonly attempt: ChatAttempt;
   readonly citations: ChatThreadView["citations"];
   readonly contentById: ReadonlyMap<string, ChatContentBody>;
@@ -536,7 +540,7 @@ function AttemptBlock(props: {
       </article>
     </>
   );
-}
+});
 
 /**
  * Finished assistant prose that offers "Add to chat" when the user selects
