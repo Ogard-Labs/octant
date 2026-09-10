@@ -177,3 +177,29 @@ describe("useComposerThreadDraft", () => {
     expect(result.current.caretIndex).toBe(3);
   });
 });
+
+describe("useComposerThreadDraft subscriptions", () => {
+  it("leaves the Code composer alone while the user types in Chat", () => {
+    const store = createComposerThreadDraftStore(memoryStorage());
+    const chat = renderHook(() =>
+      useComposerThreadDraft({ mode: "chat", store, threadId: chatThread }),
+    );
+    let codeRenders = 0;
+    const code = renderHook(() => {
+      codeRenders += 1;
+      return useComposerThreadDraft({ mode: "code", store, threadId: codeThread });
+    });
+    const rendersBeforeTyping = codeRenders;
+
+    act(() => chat.result.current.setDraft("h", 1));
+    act(() => chat.result.current.setDraft("he", 2));
+    act(() => chat.result.current.setDraft("hey", 3));
+
+    expect(chat.result.current.text).toBe("hey");
+    expect(codeRenders).toBe(rendersBeforeTyping);
+
+    act(() => code.result.current.setDraft("now me", 6));
+    expect(code.result.current.text).toBe("now me");
+    expect(codeRenders).toBeGreaterThan(rendersBeforeTyping);
+  });
+});

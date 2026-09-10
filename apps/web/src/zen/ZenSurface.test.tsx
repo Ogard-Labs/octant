@@ -1,17 +1,19 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import type { ZenAssistantSnapshot, ZenElementPayload, ZenSpace } from "@octant/contracts/zen";
 import {
   DEFAULT_ZEN_APPEARANCE,
   DEFAULT_ZEN_VIEWPORT,
+  ZEN_BUILTIN_BACKGROUNDS,
   type ZenElementId,
   type ZenSpaceId,
 } from "@octant/contracts/zen";
 import type { AggregateVersion } from "@octant/contracts/events";
+import type { ResolvedAppBackground } from "@octant/domain";
 import { decodeWindowId } from "@octant/contracts/shell";
 import type { NavigatorAssistantController } from "../navigator/useNavigatorAssistant";
 import { ZenSurface } from "./ZenSurface";
@@ -44,6 +46,19 @@ const ASSISTANT_SNAPSHOT: ZenAssistantSnapshot = {
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+/** The application ground as Settings › Appearance › Background resolved it. */
+const APP_GROUND: ResolvedAppBackground = {
+  kind: "theme",
+  backgroundId: null,
+  animated: false,
+  patternOpacity: 0.55,
+  patternSpeed: 1,
+  patternIntensity: 0.6,
+  photoOpacity: 0.42,
+  scope: "everywhere",
+  coversSidebar: false,
+};
 
 function makeSpace(
   elements: ZenElementPayload[] = [],
@@ -189,6 +204,124 @@ describe("ZenSurface", () => {
     expect(surface.querySelector(".zen-surface__overlay")).not.toBeNull();
   });
 
+  it("stands on the application's own ground, under the cards and under the dimmer", () => {
+    // jsdom has no WebGL: the cloud degrades to nothing, and the ground it
+    // would have been drawn on is what this asserts.
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const space = {
+      ...makeSpace(),
+      appearance: {
+        ...DEFAULT_ZEN_APPEARANCE,
+        background: { kind: "theme" as const },
+        dimming: 30,
+      },
+    };
+    const { container } = render(
+      <ZenSurface
+        appBackground={APP_GROUND}
+        appBackgroundFetcher={async () => new Blob()}
+        barCollapsed={false}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        space={space}
+      />,
+    );
+    const ground = container.querySelector("[data-octant-app-backdrop]");
+    expect(ground?.getAttribute("data-octant-app-backdrop")).toBe("theme");
+    // Zen fills the window edge to edge and has no composer to mask away, so
+    // it asks for its own placement rather than borrowing the shell's mask.
+    expect(ground?.getAttribute("data-placement")).toBe("zen");
+    // The ground is the floor: the cards pan and zoom above it, and the
+    // space's own dimmer lies over it exactly as over any other ground.
+    expect(ground?.closest(".zen-surface__canvas")).toBeNull();
+    expect(container.querySelector(".zen-surface__overlay")).not.toBeNull();
+    vi.restoreAllMocks();
+  });
+
+  it("shows no ground in Zen when the application ground is off", () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const space = {
+      ...makeSpace(),
+      appearance: { ...DEFAULT_ZEN_APPEARANCE, background: { kind: "theme" as const } },
+    };
+    const { container } = render(
+      <ZenSurface
+        // What Increased contrast resolves the application ground to. Zen
+        // draws the resolved value rather than deciding again, so the setting
+        // that clears the ground everywhere else clears it here too.
+        appBackground={{ ...APP_GROUND, kind: "none", animated: false }}
+        appBackgroundFetcher={async () => new Blob()}
+        barCollapsed={false}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        space={space}
+      />,
+    );
+    expect(container.querySelector("[data-octant-app-backdrop]")).toBeNull();
+    expect(screen.getByRole("application", { name: "Zen workspace" })).toHaveStyle({
+      backgroundColor: "var(--oct-bg)",
+    });
+    vi.restoreAllMocks();
+  });
+
+  it("holds the application ground still in a space that asked for reduced motion", () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const space = {
+      ...makeSpace(),
+      appearance: {
+        ...DEFAULT_ZEN_APPEARANCE,
+        background: { kind: "theme" as const },
+        reducedMotion: true,
+      },
+    };
+    const { container } = render(
+      <ZenSurface
+        appBackground={{ ...APP_GROUND, animated: true }}
+        appBackgroundFetcher={async () => new Blob()}
+        barCollapsed={false}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        space={space}
+      />,
+    );
+    expect(
+      container.querySelector("[data-octant-app-backdrop]")?.getAttribute("data-animated"),
+    ).toBe("false");
+    vi.restoreAllMocks();
+  });
+
+  it("offers the application ground beside Zen's own backgrounds", () => {
+    const onUpdateAppearance = vi.fn();
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateAppearance={onUpdateAppearance}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        space={makeSpace()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
+    fireEvent.click(screen.getByRole("button", { name: "App background" }));
+    expect(onUpdateAppearance).toHaveBeenCalledWith({
+      dimming: 0,
+      elementOpacity: 1,
+      background: { kind: "theme" },
+    });
+  });
+
   it("lets the appearance panel choose a built-in, a custom gradient, and a local image", async () => {
     const user = userEvent.setup();
     const onUpdateAppearance = vi.fn();
@@ -245,19 +378,19 @@ describe("ZenSurface", () => {
     );
   });
 
-  it("keeps the appearance dialog and preset labels inside a narrow Zen surface", () => {
+  it("keeps the appearance dialog and every preset's name inside a narrow Zen surface", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/zen.css"), "utf8");
     expect(styles).toMatch(
       /\.zen-surface__manual-panel\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*calc\(100% - 32px\);/s,
     );
-    // One preset per row. Two columns in a 360px sheet cut every name that
-    // says what the background is, and a name nobody can read is not a choice.
+    // A background is chosen by its picture, so several fit across a narrow
+    // sheet and the name under each wraps rather than truncating. Truncation
+    // was what the one-per-row grid existed to avoid; wrapping avoids it
+    // without spending a whole row on every preset.
     expect(styles).toMatch(
-      /\.zen-appearance__preset-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s,
+      /\.zen-appearance__preset-grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fill, minmax\(92px, 1fr\)\);/s,
     );
-    expect(styles).toMatch(
-      /\.zen-appearance__preset-grid > \[data-slot="button"\]\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s,
-    );
+    expect(styles).toMatch(/\.zen-appearance__preset-name\s*\{[^}]*white-space:\s*normal;/s);
 
     render(
       <ZenSurface
@@ -274,9 +407,14 @@ describe("ZenSurface", () => {
     fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
     const dialog = screen.getByRole("dialog", { name: "Zen appearance" });
     expect(dialog.querySelector(".zen-appearance__preset-grid")).not.toBeNull();
-    expect(
-      dialog.querySelectorAll('.zen-appearance__preset-grid > [data-slot="button"]').length,
-    ).toBeGreaterThan(0);
+    // A name nobody can read is not a choice: every built-in is still offered
+    // by its full title, whatever the visible label had room to show.
+    expect(dialog.querySelectorAll(".zen-appearance__preset")).toHaveLength(
+      ZEN_BUILTIN_BACKGROUNDS.length,
+    );
+    for (const preset of ZEN_BUILTIN_BACKGROUNDS) {
+      expect(within(dialog).getByRole("button", { name: preset.title })).toBeVisible();
+    }
   });
 
   it("forces readable opaque elements when transparency is reduced", () => {

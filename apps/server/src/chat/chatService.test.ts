@@ -7004,3 +7004,50 @@ describe("completing and snoozing a Chat thread", () => {
     expect(service.read(thread.id).thread.lifecycle).toBe("archived");
   });
 });
+
+describe("ChatService streamed delta bodies", () => {
+  it("puts the body a delta appended on its frame, and only for subscribers that asked", async () => {
+    const { service } = openFixture();
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Streaming bodies",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sent = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Hello",
+    });
+    if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.outcome === "completed",
+    );
+
+    const asked = [];
+    for await (const frame of service.subscribe(created.thread.id, 0, undefined, {
+      contents: true,
+    })) {
+      asked.push(frame);
+    }
+    const streaming = asked.filter(
+      (frame) =>
+        frame.event.kind === "attempt-updated" && frame.event.attempt.outcome === "streaming",
+    );
+    expect(streaming.map((frame) => frame.contents?.map((content) => content.body))).toEqual([
+      ["Fixture response"],
+    ]);
+    const settled = asked.filter(
+      (frame) =>
+        frame.event.kind === "attempt-updated" && frame.event.attempt.outcome === "completed",
+    );
+    expect(settled.length).toBeGreaterThan(0);
+    expect(settled.every((frame) => frame.contents === undefined)).toBe(true);
+
+    const plain = [];
+    for await (const frame of service.subscribe(created.thread.id, 0)) plain.push(frame);
+    expect(plain.length).toBe(asked.length);
+    expect(plain.every((frame) => frame.contents === undefined)).toBe(true);
+  });
+});

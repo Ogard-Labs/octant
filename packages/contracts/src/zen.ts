@@ -467,7 +467,7 @@ export type ZenRecipePreview = typeof ZenRecipePreview.Type;
 
 // ── Background & appearance ──────────────────────────────────────────────────
 
-export const ZenBackgroundKind = Schema.Literal("solid", "gradient", "image", "builtin");
+export const ZenBackgroundKind = Schema.Literal("solid", "gradient", "image", "builtin", "theme");
 export type ZenBackgroundKind = typeof ZenBackgroundKind.Type;
 
 export const ZenBackgroundFill = Schema.Literal("cover", "contain", "tile");
@@ -697,6 +697,18 @@ export const ZenBackground = Schema.Union(
     presetId: ZenBuiltinBackgroundId,
     overlay: Schema.Int.pipe(Schema.between(0, 90)),
     fill: Schema.optionalWith(ZenBackgroundFill, { default: () => "cover" as const }),
+  }).annotations(strict),
+  /**
+   * The application's own ground, as the person configured it in Settings.
+   *
+   * It carries no dials: what the ground shows, how strong it is, and whether
+   * it moves are the app's Background setting, read where the surface is
+   * drawn. A space that copied those values here could come to disagree with
+   * the app it borrows the ground from. The space's own dimming still lies
+   * over it, as it does over every other Zen ground.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("theme"),
   }).annotations(strict),
 );
 export type ZenBackground = typeof ZenBackground.Type;

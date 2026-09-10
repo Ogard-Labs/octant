@@ -253,7 +253,11 @@ import { useProviderBootstrap } from "./providers/useProviderBootstrap";
 import { hasSelectableProviderModels } from "./providers/providerBootstrapPolicy";
 import { useArchivedChatThreadSearch } from "./chat/useArchivedChatThreadSearch";
 import { useChatTranscriptSearch } from "./chat/useChatTranscriptSearch";
-import { createChatReadCursorStore, useChatController } from "./chat/useChatController";
+import {
+  createChatReadCursorStore,
+  useChatController,
+  type ChatThreadRestOutcome,
+} from "./chat/useChatController";
 import {
   autoConfigureChatDefaults,
   chatDefaultModelCommand,
@@ -321,7 +325,11 @@ import { ComposerContextMeterShortcut } from "./context/ComposerContextMeter";
 import { ComposerContextMeterProvider } from "./context/composerContextMeterScope";
 import { useContextController } from "./context/useContextController";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
-import { createCodeReadCursorStore, useCodeController } from "./code/useCodeController";
+import {
+  createCodeReadCursorStore,
+  useCodeController,
+  type CodeThreadRestOutcome,
+} from "./code/useCodeController";
 import { useContinueCards } from "./code/useContinueCards";
 import {
   CodeThreadControllerSlots,
@@ -3305,16 +3313,27 @@ function LaunchedShell(
     );
   }
 
+  // A rest command runs from a sidebar row, which has nowhere of its own to
+  // report a refusal, so its answer reads where thread notices already appear
+  // — the same line Work's rest commands use. Without it the row simply stays
+  // where it was and the click reads as nothing at all.
+  const noteCodeThreadRest = (outcome: CodeThreadRestOutcome): void => {
+    if (outcome.status === "refused") setThreadExportNotice(outcome.message);
+  };
   const codeThreadRowActions: ThreadRowActions = {
     ...(exportCodeThread === undefined ? {} : { onExportThread: exportCodeThread }),
     ...(handOffCodeThread === undefined ? {} : { onHandOffThread: handOffCodeThread }),
     onArchiveThread: (threadId) => void codeController.archiveThread(decodeCodeThreadId(threadId)),
     onCompleteThread: (threadId) =>
-      void codeController.completeThread(decodeCodeThreadId(threadId)),
-    onReopenThread: (threadId) => void codeController.reopenThread(decodeCodeThreadId(threadId)),
+      void codeController.completeThread(decodeCodeThreadId(threadId)).then(noteCodeThreadRest),
+    onReopenThread: (threadId) =>
+      void codeController.reopenThread(decodeCodeThreadId(threadId)).then(noteCodeThreadRest),
     onSnoozeThread: (threadId, until) =>
-      void codeController.snoozeThread(decodeCodeThreadId(threadId), until),
-    onWakeThread: (threadId) => void codeController.wakeThread(decodeCodeThreadId(threadId)),
+      void codeController
+        .snoozeThread(decodeCodeThreadId(threadId), until)
+        .then(noteCodeThreadRest),
+    onWakeThread: (threadId) =>
+      void codeController.wakeThread(decodeCodeThreadId(threadId)).then(noteCodeThreadRest),
     onCompleteFollowUp: (threadId) =>
       void codeController.completeFollowUp(decodeCodeThreadId(threadId)),
     onMarkFollowUp: (threadId) => void codeController.markFollowUp(decodeCodeThreadId(threadId)),
@@ -3335,15 +3354,22 @@ function LaunchedShell(
   // What a Chat thread row offers on right-click. List pin is a Code-only
   // mark; pane placement is the window's split tree, so Chat and Work get
   // that without a list pin they cannot honor.
+  const noteChatThreadRest = (outcome: ChatThreadRestOutcome): void => {
+    if (outcome.status === "refused") setThreadExportNotice(outcome.message);
+  };
   const chatThreadRowActions: ThreadRowActions = {
     ...(exportChatThread === undefined ? {} : { onExportThread: exportChatThread }),
     ...(handOffChatThread === undefined ? {} : { onHandOffThread: handOffChatThread }),
     onCompleteThread: (threadId) =>
-      void chatController.completeThread(decodeChatThreadId(threadId)),
-    onReopenThread: (threadId) => void chatController.reopenThread(decodeChatThreadId(threadId)),
+      void chatController.completeThread(decodeChatThreadId(threadId)).then(noteChatThreadRest),
+    onReopenThread: (threadId) =>
+      void chatController.reopenThread(decodeChatThreadId(threadId)).then(noteChatThreadRest),
     onSnoozeThread: (threadId, until) =>
-      void chatController.snoozeThread(decodeChatThreadId(threadId), until),
-    onWakeThread: (threadId) => void chatController.wakeThread(decodeChatThreadId(threadId)),
+      void chatController
+        .snoozeThread(decodeChatThreadId(threadId), until)
+        .then(noteChatThreadRest),
+    onWakeThread: (threadId) =>
+      void chatController.wakeThread(decodeChatThreadId(threadId)).then(noteChatThreadRest),
     onMarkThreadRead: (threadId) => chatController.markThreadRead(decodeChatThreadId(threadId)),
     onMarkThreadUnread: (threadId) => chatReadCursorStore.unmark(decodeChatThreadId(threadId)),
     onPinInPane: pinChatThreadInPane,
@@ -4671,6 +4697,10 @@ function LaunchedShell(
             }
           >
             <ZenSurface
+              {...(resolvedAppBackground === undefined
+                ? {}
+                : { appBackground: resolvedAppBackground })}
+              appBackgroundFetcher={sidebarBackgroundFetcher}
               assistant={zen.assistant}
               focusZone={zen.focusZone}
               renderTerminal={({ element, activity }) => {
