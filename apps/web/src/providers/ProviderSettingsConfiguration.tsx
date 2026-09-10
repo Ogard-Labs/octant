@@ -116,9 +116,9 @@ export function ProviderCreateForm(
 ) {
   const [creating, setCreating] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
-  const [providerType, setProviderType] = useState<ProviderCreateProviderType>(
-    props.initialProviderType ?? "opencode",
-  );
+  const initialProviderType =
+    props.initialProviderType ?? props.allowedProviderTypes?.[0] ?? "opencode";
+  const [providerType, setProviderType] = useState<ProviderCreateProviderType>(initialProviderType);
   const [claudeAuthentication, setClaudeAuthentication] =
     useState<ClaudeAuthentication>("subscription");
   const [vibeAuthentication, setVibeAuthentication] =
