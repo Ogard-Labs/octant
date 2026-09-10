@@ -12,6 +12,10 @@ Today Octant authenticates providers two ways ([0005](decisions/0005-provider-sd
    ([0054](decisions/0054-headless-host-credential-store.md)). The renderer never
    sees the secret.
 
+Consumer subscription OAuth on direct HTTP drivers is a different record
+([0111](decisions/0111-host-driven-provider-oauth.md)); this note remains
+directory ID and cloud-IAM only.
+
 Enterprise buyers also need directory ID/OAuth (for example Entra) and
 cloud-IAM-signed calls to model endpoints (for example Bedrock with IAM). Those
 are not API keys and not the provider CLI's own login. This note says how they
