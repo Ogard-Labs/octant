@@ -1,10 +1,12 @@
 import { decodeCodeThread } from "@octant/contracts";
+import { ChatClientFailure, type ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import {
+  chatShellBootstrap,
   chats,
   client,
   codeShellBootstrap,
@@ -35,6 +37,21 @@ describe("thread rest from the sidebar", () => {
         projectWindowCapability={projectWindowCapability}
         providerClient={providers()}
         shellClient={client(codeShellBootstrap())}
+      />
+    );
+  }
+
+  /* Chat mode with no thread open, which is how a sidebar row is used. */
+  function chatShell(chatClient: ChatClient) {
+    return (
+      <App
+        chatClient={chatClient}
+        codeClient={codes()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(chatShellBootstrap())}
       />
     );
   }
@@ -96,5 +113,36 @@ describe("thread rest from the sidebar", () => {
     const shelf = (await screen.findByText("Snoozed")).closest("details");
     expect(shelf).toHaveAttribute("data-shelf", "snoozed");
     expect(within(shelf!).getByRole("button", { name: /Controller foundation/ })).toBeVisible();
+  });
+
+  it("says why the host refused to snooze a Chat thread from its sidebar row", async () => {
+    const chatApi: ChatClient = {
+      ...chats(),
+      execute: vi.fn(async () => {
+        throw new ChatClientFailure({
+          category: "invalid",
+          message: "This thread is waiting on you.",
+        });
+      }),
+    };
+    render(chatShell(chatApi));
+
+    // A Chat row carries no inline gutter — it offers neither pinning nor
+    // archiving — so its rest commands are reached by right-click, the row's
+    // own menu.
+    const row = within(await screen.findByRole("navigation", { name: "Projects" })).getByRole(
+      "button",
+      { name: /Older chat/ },
+    );
+    await userEvent.pointer({ target: row, keys: "[MouseRight]" });
+    await userEvent.hover(await screen.findByRole("menuitem", { name: "Snooze" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: /^Tomorrow/ }));
+
+    await waitFor(() =>
+      expect(chatApi.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "snooze-chat-thread" }),
+      ),
+    );
+    expect(await screen.findByText("This thread is waiting on you.")).toBeVisible();
   });
 });
