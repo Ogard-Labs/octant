@@ -506,6 +506,15 @@
   );
 }
 
+/* Under a Zen space the ground is the floor of the window, not a wash behind
+   a page: there is no composer to clear and no transcript reading through it,
+   because Zen's cards carry their own glass (0107). So it takes no mask, and
+   it stays at level 0 under the space's dimmer and its canvas rather than
+   dropping behind the surface the way the shell's does. */
+.app-backdrop[data-placement="zen"] {
+  z-index: 0;
+}
+
 .app-backdrop__photo,
 .app-backdrop__pattern {
   position: absolute;

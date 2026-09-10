@@ -674,6 +674,42 @@ describe("useChatController", () => {
     expect(execute.mock.calls[1]?.[0]).toMatchObject({ until: "2026-09-08T09:00:00.000Z" });
   });
 
+  it("answers a refused snooze with the host's reason without disturbing the open thread", async () => {
+    const execute = vi.fn(async () => {
+      throw new ChatClientFailure({
+        category: "invalid",
+        message: "This thread is waiting on you.",
+      });
+    });
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      thread: vi.fn(async () => threadView(1)),
+      subscribe: vi.fn(async function* () {}),
+      execute,
+    });
+    // Research is open; the row being snoozed is Planning, which is not.
+    const { result } = renderHook(() =>
+      useChatController({
+        activeThreadId: otherThreadId,
+        client,
+        serverUrl: "http://127.0.0.1",
+        windowCapability: capability,
+      }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let outcome: Awaited<ReturnType<typeof result.current.snoozeThread>> | undefined;
+    await act(async () => {
+      outcome = await result.current.snoozeThread(threadId, "2026-09-08T09:00:00.000Z");
+    });
+
+    expect(outcome).toEqual({
+      status: "refused",
+      message: "This thread is waiting on you.",
+    });
+    expect(result.current.errorMessage).toBeUndefined();
+  });
+
   it("subscribes after the authoritative snapshot cursor and refetches on stream gaps", async () => {
     let snapshotSequence = 1;
     const subscribe = vi
@@ -1939,3 +1975,91 @@ function createMockClient(
     ...overrides,
   };
 }
+
+describe("useChatController streaming", () => {
+  it("grows a streaming reply from its frame without re-reading the thread", async () => {
+    const turnId = "00000000-0000-4000-8000-000000000901";
+    const body = (contentId: string, text: string) => ({
+      contentId,
+      role: "assistant" as const,
+      body: text,
+      digest: "b".repeat(64),
+      byteLength: text.length,
+    });
+    const reference = (content: ReturnType<typeof body>) => ({
+      contentId: content.contentId,
+      digest: content.digest,
+      byteLength: content.byteLength,
+    });
+    const prompt = body("00000000-0000-4000-8000-000000000902", "?");
+    const hello = body("00000000-0000-4000-8000-000000000911", "Hello");
+    const world = body("00000000-0000-4000-8000-000000000912", ", world");
+    const attempt = (responses: ReadonlyArray<ReturnType<typeof body>>) => ({
+      id: "00000000-0000-4000-8000-000000000903",
+      turnId,
+      threadId,
+      providerInstanceId: "10000000-0000-4000-8000-000000000001",
+      providerSessionId: "00000000-0000-4000-8000-000000000904",
+      modelId: "model-a",
+      contextManifestId: "00000000-0000-4000-8000-000000000905",
+      outcome: "streaming" as const,
+      responseRefs: responses.map(reference),
+      citationIds: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+    const snapshot = decodeChatThreadView({
+      ...threadView(1),
+      turns: [
+        {
+          id: turnId,
+          threadId,
+          sequence: 1,
+          userMessageRef: reference(prompt),
+          attachmentIds: [],
+          attempts: [attempt([hello])],
+          createdAt: now,
+        },
+      ],
+      contents: [prompt, hello],
+    });
+    const thread = vi.fn(async () => snapshot);
+    const subscribe = vi
+      .fn()
+      .mockImplementationOnce(async function* () {
+        yield decodeChatEventFrame({
+          threadId,
+          sequence: 2,
+          event: { kind: "attempt-updated", attempt: attempt([hello, world]) },
+          contents: [world],
+        });
+      })
+      .mockImplementation(async function* (_threadId, _cursor, signal: AbortSignal) {
+        await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve()));
+      });
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      thread,
+      subscribe,
+    });
+    const { result, unmount } = renderHook(() =>
+      useChatController({
+        activeThreadId: threadId,
+        client,
+        reconnectDelayMs: 0,
+        serverUrl: "http://127.0.0.1",
+        windowCapability: capability,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.activeView?.lastSequence).toBe(2));
+    expect(result.current.activeView?.contents.map((content) => content.body)).toEqual([
+      "?",
+      "Hello",
+      ", world",
+    ]);
+    expect(result.current.activeView?.turns[0]?.attempts[0]?.responseRefs).toHaveLength(2);
+    expect(thread).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+});

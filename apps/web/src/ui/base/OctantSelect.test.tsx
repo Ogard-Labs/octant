@@ -89,4 +89,30 @@ describe("OctantSelectField", () => {
       "Automatic",
     );
   });
+
+  it("renders every occurrence of a group that appears in nonconsecutive segments", async () => {
+    const user = userEvent.setup();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(
+      <OctantSelectField
+        aria-label="Model"
+        options={[
+          { id: "a", group: "Recent", label: "A" },
+          { id: "b", group: "Other", label: "B" },
+          { id: "c", group: "Recent", label: "C" },
+        ]}
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Model" }));
+    expect(await screen.findByRole("option", { name: "A" })).toBeVisible();
+    expect(await screen.findAllByText("Recent")).toHaveLength(2);
+    expect(screen.getByRole("option", { name: "B" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "C" })).toBeVisible();
+    expect(consoleError).not.toHaveBeenCalledWith(
+      expect.stringMatching(/same key/i),
+      expect.anything(),
+    );
+    consoleError.mockRestore();
+  });
 });

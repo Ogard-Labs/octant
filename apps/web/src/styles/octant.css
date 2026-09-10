@@ -320,13 +320,15 @@
      material — translucent glass over an atmospheric ground — its own
      radii, and a touch target that sets the floor for everything.
 
-     Glass earns its place on the phone and nowhere else. On desktop this
-     system draws elevation as a hairline ring and no shadow, because a
-     dense information surface wants edges, not depth. A phone shows one
-     thing at a time over a photographic ground, and there translucency
-     is what tells you a panel is floating rather than painted on. Both
-     are correct for their surface; neither should be exported to the
-     other.
+     Glass earns its place wherever a person has put an atmospheric
+     ground behind the work, which is the phone and Zen (0107). Elsewhere
+     on desktop this system draws elevation as a hairline ring and no
+     shadow, because a dense information surface wants edges, not depth.
+     A phone shows one thing at a time over a photographic ground, and a
+     Zen space shows several over one; in both, translucency is what
+     tells you a panel is floating rather than painted on. Both are
+     correct for their surface; neither should be exported to a surface
+     that has no ground.
 
      Five thicknesses, matching the app's own recipes. Blur radius and
      fill opacity move together — a thicker glass is both more opaque and
@@ -5525,6 +5527,10 @@ input.switch:checked::after {
   background-size: 22px 22px;
 }
 
+/* A card is glass over the person's ground (0107). It carries a
+   transcript, so it takes the thick step of the ladder: a thicker glass is
+   both more opaque and more diffuse, which is what keeps running text
+   readable as the panel carries more weight. */
 .zen-el {
   position: absolute;
   left: calc(var(--x, 0) * 1px);
@@ -5533,7 +5539,7 @@ input.switch:checked::after {
   z-index: var(--z, 1);
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--oct-border);
+  border: 1px solid var(--oct-glass-stroke);
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   box-shadow: var(--oct-elev-raised);
@@ -5551,8 +5557,11 @@ input.switch:checked::after {
   gap: var(--oct-space-2);
   min-height: 34px;
   padding-inline: var(--oct-space-3);
-  border-bottom: 1px solid var(--oct-border-soft);
-  background: var(--oct-surface-warm);
+  border-bottom: 1px solid var(--oct-glass-stroke);
+  /* The head is a band on the same pane of glass, not a second pane: it
+     reads as a lighter pour of the card's own tint rather than as an opaque
+     strip laid on top of it. */
+  background: var(--oct-glass-thin);
   cursor: grab;
   /* The card's name is the one label that says which thread this is. It was
      set in the editor face at the metadata size in the muted ink, which is
@@ -5720,7 +5729,7 @@ input.switch:checked::after {
   align-items: center;
   gap: var(--oct-space-2);
   padding: var(--oct-space-2);
-  border: 1px solid var(--oct-border);
+  border: 1px solid var(--oct-glass-stroke-strong);
   border-radius: var(--oct-radius-pill);
   background: var(--oct-surface);
   box-shadow: var(--oct-elev-raised);
@@ -5729,7 +5738,7 @@ input.switch:checked::after {
   width: 1px;
   align-self: stretch;
   margin-inline: var(--oct-space-1);
-  background: var(--oct-border);
+  background: var(--oct-glass-stroke-strong);
 }
 /* collapsed to a pill — the bar's own minimised state */
 .zen-pill {
@@ -5742,10 +5751,105 @@ input.switch:checked::after {
   align-items: center;
   gap: var(--oct-space-1);
   padding: var(--oct-space-1);
-  border: 1px solid var(--oct-border);
+  border: 1px solid var(--oct-glass-stroke-strong);
   border-radius: var(--oct-radius-pill);
   background: var(--oct-surface);
   box-shadow: var(--oct-elev-raised);
+}
+
+/* ─── the material ────────────────────────────────────────────────────
+   Zen is the desktop's one surface with a ground behind it, so it is the
+   one that wears glass (0107). Every Zen rule above paints an opaque fill
+   and this block pours the tint over it, in that order: the blur is the
+   whole point, and where the engine cannot draw one the text would land
+   on the person's photograph directly.
+
+   Thickness follows how much text a surface carries. A card holds a
+   transcript and takes the thick step; the floating chrome takes the
+   chrome step. The head is a lighter pour of the card's own tint rather
+   than a second pane, so a card reads as one piece of glass.
+
+   Every glass surface pours its tint over the floor, in that order, so
+   the person's dimming dial is never the only thing standing between
+   body text and a photograph. Measured against a pure white ground in
+   the dark theme with dimming at zero, the tint alone leaves ink at
+   2.97:1; over the floor it reads 8.36:1. A dark ground is unaffected —
+   the floor is already darker than what is behind it — so the material
+   loses nothing where the reference grounds actually sit. */
+/* A card that asked for the glass variant (0107). The recipe hands over an
+   unpainted section and names the material; the fill, the fallback, and both
+   opt-outs live here with the surfaces that already wear it, so the ladder
+   keeps one definition. A panel carries running text — sliders, labels, a
+   picker — so it takes the same thick step a card does. */
+[data-slot="card"][data-variant="glass"] {
+  background: var(--oct-surface);
+  box-shadow: 0 0 0 1px var(--oct-glass-stroke);
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .zen-el {
+    /* Two layers: the tint is an image over the floor's colour, because the
+       `background` shorthand takes only one <color> and silently drops the
+       whole declaration when given two. */
+    background-color: var(--oct-glass-floor);
+    background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
+    backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
+    -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
+  }
+  .zen-bar,
+  .zen-pill {
+    background-color: var(--oct-glass-floor);
+    background-image: linear-gradient(var(--oct-glass-chrome), var(--oct-glass-chrome));
+    backdrop-filter: blur(var(--oct-glass-blur-chrome)) saturate(150%);
+    -webkit-backdrop-filter: blur(var(--oct-glass-blur-chrome)) saturate(150%);
+  }
+  [data-slot="card"][data-variant="glass"] {
+    background-color: var(--oct-glass-floor);
+    background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
+    backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
+    -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
+  }
+}
+
+/* Reduced transparency, as an app setting or an OS preference, takes the
+   material back off. The ground stays; the panels over it go solid. */
+html[data-octant-reduced-transparency="true"] .zen-el,
+html[data-octant-reduced-transparency="true"] .zen-bar,
+html[data-octant-reduced-transparency="true"] .zen-pill,
+html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="glass"] {
+  border-color: var(--oct-border);
+  background: var(--oct-surface);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+html[data-octant-reduced-transparency="true"] .zen-el-head {
+  border-bottom-color: var(--oct-border-soft);
+  background: var(--oct-surface-warm);
+}
+/* The glass ring is a translucent ink meant to catch a ground through it.
+   Over an opaque fill it nearly disappears, so the card takes the ordinary
+   hairline back. */
+html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="glass"] {
+  box-shadow: 0 0 0 1px var(--oct-border);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .zen-el,
+  .zen-bar,
+  .zen-pill,
+  [data-slot="card"][data-variant="glass"] {
+    border-color: var(--oct-border);
+    background: var(--oct-surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .zen-el-head {
+    border-bottom-color: var(--oct-border-soft);
+    background: var(--oct-surface-warm);
+  }
+  [data-slot="card"][data-variant="glass"] {
+    box-shadow: 0 0 0 1px var(--oct-border);
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -7659,9 +7763,10 @@ input.switch:checked::after {
    atmospheric ground — that the desktop deliberately does not use.
 
    Everything here is scoped to .phone so the glass layer cannot leak
-   into a desktop screen by accident. Drop a component out of .phone and
-   it loses its material rather than quietly bringing a blur onto a
-   surface that was designed flat.
+   into a flat desktop screen by accident. Drop a component out of .phone
+   and it loses its material rather than quietly bringing a blur onto a
+   surface that was designed flat. Zen carries the same material under
+   its own scope, for the same reason (0107).
    ══════════════════════════════════════════════════════════════════════ */
 
 /* ─── device ──────────────────────────────────────────────────────────
