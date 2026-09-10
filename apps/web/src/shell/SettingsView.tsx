@@ -73,7 +73,7 @@ import { VoiceSettingsView } from "../settings/VoiceSettingsView";
 import { ImageGenerationSettingsView } from "../settings/ImageGenerationSettingsView";
 import { ComputerUseSettingsView } from "../settings/ComputerUseSettingsView";
 import { UserProfileSettingsView } from "../profile/UserProfileSettingsView";
-import { SettingRow } from "../settings/primitives";
+import { SettingRow, SettingsSection } from "../settings/primitives";
 import {
   AppBackgroundSettings,
   type BackgroundImageLibrary,
@@ -839,8 +839,7 @@ function CompletedThreadArchiveSelect(props: {
 function GeneralSection({ focusedSetting, props }: SectionProps) {
   return (
     <section aria-label="General" className="settings-section-stack" id="settings-general">
-      <div className="settings-card-section settings-card-section--open">
-        <h2>Available modes</h2>
+      <SettingsSection title="Available modes">
         <div className="setgroup">
           <SettingRow
             description="Show Chat in the mode switcher. Existing threads stay stored when hidden."
@@ -869,18 +868,16 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             />
           </SettingRow>
         </div>
-      </div>
+      </SettingsSection>
       {/* Your name, picture and avatar colour: identity, not an advanced
           option, so it is not worth a click to reach. The collapsed summary
           used to preview the display name; the row it opens onto says it. */}
-      <section className="settings-card-section settings-card-section--open">
-        <h2>Profile</h2>
+      <SettingsSection title="Profile">
         <div className="setgroup">
           <SettingRow
             description="How you are shown inside Octant. There is no account behind this, and none of it is required."
             focused={focusedSetting === settingId("user-profile")}
             label="Your profile"
-            labelledBySection
             scope="app"
             settingId="user-profile"
           >
@@ -890,12 +887,11 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             />
           </SettingRow>
         </div>
-      </section>
-      <div className="settings-card-section settings-card-section--open">
-        <h2>Updates</h2>
-        <p className="settings-section-note">
-          Octant updates itself only when you ask it to, and never while work is running.
-        </p>
+      </SettingsSection>
+      <SettingsSection
+        description="Octant updates itself only when you ask it to, and never while work is running."
+        title="Updates"
+      >
         <div className="setgroup">
           <AppUpdateSettings
             automaticChecks={props.settings.automaticUpdateChecks}
@@ -907,9 +903,8 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             onReleaseRingChange={(ring) => props.onSettingsChange({ releaseRing: ring })}
           />
         </div>
-      </div>
-      <div className="settings-card-section settings-card-section--open">
-        <h2>Threads</h2>
+      </SettingsSection>
+      <SettingsSection title="Threads">
         <div className="setgroup">
           <SettingRow
             description="A completed thread rests in its shelf, then moves to the archive. Archiving keeps everything."
@@ -926,9 +921,8 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             />
           </SettingRow>
         </div>
-      </div>
-      <div className="settings-card-section settings-card-section--open">
-        <h2>Marketplace</h2>
+      </SettingsSection>
+      <SettingsSection title="Marketplace">
         <div className="setgroup">
           <SettingRow
             description="Skill and extension catalog search contacts third-party registries only when you ask."
@@ -946,7 +940,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           </SettingRow>
         </div>
         <MarketplaceFetchDisclosure />
-      </div>
+      </SettingsSection>
     </section>
   );
 }
@@ -954,8 +948,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
 function KeybindingsSection({ focusedSetting }: Pick<SectionProps, "focusedSetting">) {
   return (
     <section aria-label="Keybindings" className="settings-section-stack" id="settings-keybindings">
-      <div className="settings-card-section settings-card-section--open">
-        <h2>Keyboard shortcuts</h2>
+      <SettingsSection title="Keyboard shortcuts">
         <div className="setgroup">
           <SettingRow
             description="Click a shortcut, then press the replacement chord. Changes take effect immediately."
@@ -968,7 +961,7 @@ function KeybindingsSection({ focusedSetting }: Pick<SectionProps, "focusedSetti
             <KeybindingSettings />
           </SettingRow>
         </div>
-      </div>
+      </SettingsSection>
     </section>
   );
 }
