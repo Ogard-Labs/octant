@@ -577,6 +577,26 @@
   margin: var(--oct-space-3) 0 0;
 }
 
+/* One choice and the sentence that says where it is configured. It stands
+   apart from the picture grid below because it is not a picture: what it
+   shows is whatever the application ground is set to. */
+.zen-appearance__app-ground {
+  display: grid;
+  justify-items: start;
+  gap: var(--oct-space-2);
+  border: 0;
+  min-width: 0;
+  min-inline-size: 0;
+  padding: 0;
+  margin: var(--oct-space-3) 0 0;
+}
+
+.zen-appearance__note {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
 .zen-appearance__group,
 .zen-appearance__preset-grid {
   min-width: 0;
