@@ -118,7 +118,11 @@ describe("thread utility dock content", () => {
       />,
     );
 
-    expect(await screen.findByRole("heading", { name: "Files is unavailable" })).toBeVisible();
+    // The Files pane is lazy-loaded; a cold module transform can exceed the
+    // query library's one-second default in the full renderer suite.
+    expect(
+      await screen.findByRole("heading", { name: "Files is unavailable" }, { timeout: 5_000 }),
+    ).toBeVisible();
     expect(screen.getByText("Files opens from a Code thread.")).toBeVisible();
   });
 

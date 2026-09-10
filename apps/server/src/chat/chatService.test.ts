@@ -1075,7 +1075,7 @@ describe("ChatService", () => {
     expect(fakeDriver.acquireInputs).toHaveLength(0);
   });
 
-  it("fails closed when a persisted Browser selection is resumed without a window capability", async () => {
+  it("refuses a Browser-selected Chat turn without a window capability", async () => {
     const { service, fakeDriver } = openFixture({
       resolveAppManagedTools: () => ({
         definitions: [{ name: "octant_browser", inputSchema: { type: "object", properties: {} } }],
@@ -1085,7 +1085,7 @@ describe("ChatService", () => {
     const created = await service.execute({
       kind: "create-chat-thread",
       hostId: "local",
-      title: "Resume Browser selection",
+      title: "Missing Browser window",
     });
     if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
     await expect(
@@ -1094,10 +1094,9 @@ describe("ChatService", () => {
         threadId: created.thread.id,
         expectedVersion: created.thread.version,
         prompt: "Continue this",
-        extensionSelections: [browserUseSelection("chat-resume-browser")],
+        extensionSelections: [browserUseSelection("chat-browser-without-window")],
       }),
     ).rejects.toMatchObject({ failure: { category: "unavailable" } });
-    expect(fakeDriver.resumeInputs).toHaveLength(0);
     expect(fakeDriver.acquireInputs).toHaveLength(0);
   });
 
