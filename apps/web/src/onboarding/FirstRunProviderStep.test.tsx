@@ -30,6 +30,14 @@ function mount(overrides: Partial<FirstRunProviderStepProps> = {}) {
 }
 
 describe("FirstRunProviderStep", () => {
+  it("says first run enables a detected Claude Code or Codex CLI and leaves other CLIs off", () => {
+    mount();
+
+    expect(screen.getByText(/If Claude Code or Codex CLI is already installed/)).toBeVisible();
+    expect(screen.getByText(/you can turn it off later/)).toBeVisible();
+    expect(screen.getByText(/Other detected CLIs stay off until you enable them/)).toBeVisible();
+  });
+
   it("states each provider's status in words and never implies an unverified provider works", () => {
     mount();
 
