@@ -1,4 +1,5 @@
 import type { ProviderToolDefinition } from "@octant/provider-sdk/driver";
+import type { ProviderToolImage } from "@octant/contracts/providers";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   CallToolRequestSchema,
@@ -10,6 +11,7 @@ import {
 export interface ManagedToolAnswer {
   readonly resultJson: string;
   readonly isError: boolean;
+  readonly images?: ReadonlyArray<ProviderToolImage>;
 }
 
 export interface ManagedToolCallContext {
@@ -45,7 +47,13 @@ export function createManagedMcpTools(
       metadata === undefined
         ? await execute(request.params.name, inputJson, extra.signal)
         : await execute(request.params.name, inputJson, extra.signal, { metadata });
-    return { content: [{ type: "text", text: answer.resultJson }], isError: answer.isError };
+    return {
+      content: [
+        { type: "text", text: answer.resultJson },
+        ...(answer.images ?? []).map((image) => ({ type: "image" as const, ...image })),
+      ],
+      isError: answer.isError,
+    };
   });
   return { kind: "ready", server };
 }

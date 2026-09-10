@@ -1,3 +1,4 @@
+import { chatCompletionsToolImages } from "./openAiToolEncoding";
 import { randomUUID } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 import {
@@ -485,6 +486,7 @@ function answerToolEffect(
       toolCallId: answer.requestId,
       resultJson: answer.resultJson,
       isError: answer.isError,
+      ...(answer.images === undefined ? {} : { images: answer.images }),
     })),
   });
   return Effect.tryPromise({
@@ -1038,11 +1040,14 @@ function assertTurnRequestConstructable(
   const messages = [
     ...history.flatMap((entry): Record<string, unknown>[] => {
       if (entry.toolResults !== undefined) {
-        return entry.toolResults.map((result) => ({
-          role: "tool",
-          tool_call_id: result.toolCallId,
-          content: result.resultJson,
-        }));
+        return [
+          ...entry.toolResults.map((result) => ({
+            role: "tool",
+            tool_call_id: result.toolCallId,
+            content: result.resultJson,
+          })),
+          ...chatCompletionsToolImages(entry.toolResults),
+        ];
       }
       return [
         entry.toolCalls === undefined

@@ -856,7 +856,11 @@ function makeConnection(
                 failure("protocol", "Pi app-managed tool request is not pending."),
               );
             }
-            pending.resolve({ resultJson: input.resultJson, isError: input.isError });
+            pending.resolve({
+              resultJson: input.resultJson,
+              isError: input.isError,
+              ...(input.images === undefined ? {} : { images: input.images }),
+            });
             return Effect.void;
           }),
         ),

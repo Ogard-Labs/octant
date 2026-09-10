@@ -791,7 +791,11 @@ function makeConnection(
         const controller = new AbortController();
         const finish = (answer: ManagedToolAnswer) => {
           signal.removeEventListener("abort", cancel);
-          resolve({ resultJson: answer.resultJson, isError: answer.isError });
+          resolve({
+            resultJson: answer.resultJson,
+            isError: answer.isError,
+            ...(answer.images === undefined ? {} : { images: answer.images }),
+          });
         };
         const cancel = () => {
           if (!state.pendingToolAnswers.delete(requestId)) return;
@@ -1217,7 +1221,11 @@ function makeConnection(
               return Effect.fail(fail("protocol", "Provider tool request is not pending."));
             }
             state.pendingToolAnswers.delete(input.requestId);
-            resolve.resolve({ resultJson: input.resultJson, isError: input.isError });
+            resolve.resolve({
+              resultJson: input.resultJson,
+              isError: input.isError,
+              ...(input.images === undefined ? {} : { images: input.images }),
+            });
             return Effect.void;
           }),
         ),

@@ -122,3 +122,5 @@ export * from "./codeProjectPullRequests";
 export * from "./canvasShareSnapshot";
 export * from "./canvasShareAccessLog";
 export * from "./canvasBoard";
+
+export * from "./computerUsePlugin";

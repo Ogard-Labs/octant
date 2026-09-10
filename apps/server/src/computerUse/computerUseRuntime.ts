@@ -54,6 +54,7 @@ export interface ComputerUsePendingApproval {
   readonly actionId: string;
   readonly expiresAt: string;
   readonly summary: string;
+  readonly scope?: "application-session";
 }
 
 export type ComputerUseRuntimeView = ComputerUseSessionView;
@@ -75,7 +76,7 @@ export interface ComputerUseNativeAdapter {
     request: ComputerUseActionRequest,
     observation: ComputerUseNativeObservation,
     signal: AbortSignal,
-  ) => Promise<{ readonly reference: string }>;
+  ) => Promise<{ readonly reference: string } | { readonly refused: string }>;
   readonly cleanup: (sessionId: string) => Promise<boolean>;
 }
 
@@ -146,6 +147,8 @@ export function createComputerUseRuntime(_options: {
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly approvalTtlMs?: number;
+  readonly approvalScope?: "application-session";
+  readonly approvalSummary?: (request: ComputerUseActionRequest) => string;
 }): ComputerUseRuntime {
   const options = _options;
   const approvalTtlMs = options.approvalTtlMs ?? 60_000;
@@ -296,7 +299,17 @@ export function createComputerUseRuntime(_options: {
       }
       await append(session, "action-started", "Visible host action started.");
       if (session.controller.signal.aborted) return await finishAborted(session);
-      await adapter.execute(session.request, session.observation, session.controller.signal);
+      const action = await adapter.execute(
+        session.request,
+        session.observation,
+        session.controller.signal,
+      );
+      if ("refused" in action) {
+        session.state = "failed";
+        await append(session, "session-failed", "The host refused the computer-use action.");
+        await cleanup(session);
+        return view(session);
+      }
       if (session.controller.signal.aborted) return await finishAborted(session);
       session.state = "completed";
       await append(session, "action-completed", "Visible host action completed.");
@@ -446,7 +459,12 @@ export function createComputerUseRuntime(_options: {
         approvalId,
         actionId: input.request.actionId,
         expiresAt: new Date(Date.parse(options.clock()) + approvalTtlMs).toISOString(),
-        summary: `${input.request.kind} in ${session.observation.targetApp}`,
+        summary:
+          options.approvalSummary?.(input.request) ??
+          (options.approvalScope === "application-session"
+            ? `Allow control of ${session.observation.targetApp} for this task for 5 minutes.`
+            : `${input.request.kind} in ${session.observation.targetApp}`),
+        ...(options.approvalScope === undefined ? {} : { scope: options.approvalScope }),
       };
       await append(session, "approval-requested", "One-time approval is required.");
       return view(session);

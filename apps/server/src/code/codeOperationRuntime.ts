@@ -130,6 +130,11 @@ interface ProcessTestPort {
 }
 
 export interface CodeOperationRuntimeOptions {
+  readonly computerUseTools?: (input: {
+    readonly windowId: WindowId;
+    readonly thread: CodeThread;
+    readonly selection: import("@octant/contracts/extensions").ExtensionSelection;
+  }) => AppManagedToolSet | undefined;
   readonly persistence: RuntimePersistence;
   readonly windowAccess: {
     readonly canAccessProject: CodeOperationAuthorityPort["canAccessProject"];
@@ -1124,6 +1129,7 @@ function persistenceLabel(value: "current-session" | "project-default"): string 
 }
 
 interface ActiveTurn {
+  readonly computerUseSelection?: import("@octant/contracts/extensions").ExtensionSelection;
   readonly windowId: WindowId;
   readonly thread: CodeThread;
   readonly operationId: CodeOperationId;
@@ -1226,6 +1232,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return turnState("failed");
     const driver = await this.#options.resolveProviderDriver(input.thread);
     if (driver === undefined) return turnState("failed");
+    if (
+      command.computerUseSelection !== undefined &&
+      (this.#options.supportsAppManagedTools?.(input.thread) !== true ||
+        this.#options.computerUseTools?.({
+          windowId: input.windowId,
+          thread: input.thread,
+          selection: command.computerUseSelection,
+        }) === undefined)
+    )
+      return turnState("failed");
     const secrets: string[] = [];
     for (const credential of root.credentialReferences) {
       const value = await this.#options.credentialResolver.resolve(credential.reference);
@@ -1233,6 +1249,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       if (value.length > 0) secrets.push(value);
     }
     const active: ActiveTurn = {
+      ...(command.computerUseSelection === undefined
+        ? {}
+        : { computerUseSelection: command.computerUseSelection }),
       windowId: input.windowId,
       thread: input.thread,
       operationId: command.operationId,
@@ -1559,6 +1578,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           this.#options.supportsAppManagedTools?.(active.thread) === true
             ? {
                 appManagedTools: combineAppManagedToolSets(
+                  active.computerUseSelection === undefined
+                    ? undefined
+                    : this.#options.computerUseTools?.({
+                        windowId: active.windowId,
+                        thread: active.thread,
+                        selection: active.computerUseSelection,
+                      }),
                   createCodeAppManagedTools({
                     windowId: active.windowId,
                     thread: active.thread,

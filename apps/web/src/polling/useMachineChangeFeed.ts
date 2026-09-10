@@ -3,6 +3,7 @@ import type { MachineChangeTopic } from "@octant/contracts/machine-changes";
 import { useEffect, useState } from "react";
 
 export interface MachineChangeRevisions {
+  readonly computerUse: number;
   readonly chatNavigation: number;
   readonly workNavigation: number;
   readonly codeNavigation: number;
@@ -11,6 +12,7 @@ export interface MachineChangeRevisions {
 }
 
 const INITIAL_REVISIONS: MachineChangeRevisions = {
+  computerUse: 0,
   chatNavigation: 0,
   workNavigation: 0,
   codeNavigation: 0,
@@ -47,7 +49,14 @@ async function consumeMachineChanges(
         cursor = frame.sequence;
         changed(
           frame.kind === "snapshot-required"
-            ? ["projects", "chat-navigation", "work-navigation", "code-navigation", "extensions"]
+            ? [
+                "projects",
+                "chat-navigation",
+                "work-navigation",
+                "code-navigation",
+                "extensions",
+                "computer-use",
+              ]
             : frame.topics,
         );
       }
@@ -66,6 +75,7 @@ function advanceRevisions(
 ): MachineChangeRevisions {
   const changed = new Set(topics);
   return {
+    computerUse: current.computerUse + Number(changed.has("computer-use")),
     chatNavigation: current.chatNavigation + Number(changed.has("chat-navigation")),
     workNavigation: current.workNavigation + Number(changed.has("work-navigation")),
     codeNavigation: current.codeNavigation + Number(changed.has("code-navigation")),

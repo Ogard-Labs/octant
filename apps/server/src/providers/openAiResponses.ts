@@ -3,11 +3,13 @@ import {
   type ProviderFailure,
   type ProviderToolAnswer,
   type ProviderToolDefinition,
+  type ProviderToolImage,
 } from "@octant/contracts";
 import { Effect } from "effect";
 import { type OpenAiCompatibleEndpoint, requestGeneration } from "./openAiCompatibleEndpoint";
 import { decodeSse } from "./openAiCompatibleSse";
 import {
+  responsesToolImages,
   encodeResponsesTools,
   encodeResponsesToolResults,
   normalizeToolName,
@@ -18,6 +20,7 @@ export interface ProtocolToolResult {
   readonly toolCallId: string;
   readonly resultJson: string;
   readonly isError: boolean;
+  readonly images?: ReadonlyArray<ProviderToolImage>;
 }
 
 export interface ProtocolHistoryMessage {
@@ -171,11 +174,14 @@ async function runResponsesTurn(
           // would place a gap between the prior function_call and its
           // matching output, which Responses providers reject.
           if (entry.toolResults !== undefined && entry.toolCalls === undefined) {
-            return entry.toolResults.map((result) => ({
-              type: "function_call_output" as const,
-              call_id: result.toolCallId,
-              output: result.resultJson,
-            }));
+            return [
+              ...entry.toolResults.map((result) => ({
+                type: "function_call_output" as const,
+                call_id: result.toolCallId,
+                output: result.resultJson,
+              })),
+              ...responsesToolImages(entry.toolResults),
+            ];
           }
           return [
             { role: entry.role, content: entry.text },
@@ -194,6 +200,7 @@ async function runResponsesTurn(
                   call_id: result.toolCallId,
                   output: result.resultJson,
                 }))),
+            ...responsesToolImages(entry.toolResults ?? []),
           ];
         }),
         ...(includeUserPrompt ? [{ role: "user" as const, content: input.prompt }] : []),

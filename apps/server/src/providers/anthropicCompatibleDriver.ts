@@ -375,6 +375,7 @@ function answerToolEffect(
       toolCallId: answer.requestId,
       resultJson: answer.resultJson,
       isError: answer.isError,
+      ...(answer.images === undefined ? {} : { images: answer.images }),
     })),
   });
   return Effect.tryPromise({

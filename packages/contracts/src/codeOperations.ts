@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { ExtensionSelection } from "./extensions";
 import { AppleActionRequest } from "./appleToolchain";
 import {
   CodeAttachmentId,
@@ -561,6 +562,7 @@ const StartProviderTurn = Schema.Struct({
   ...OperationScope,
   sessionId: ProviderSessionId,
   prompt: CodeEvidenceReference,
+  computerUseSelection: Schema.optional(ExtensionSelection),
   /**
    * `#thread` mentions this turn points at. Ids only: the host
    * re-derives the sender's Open authority over each thread and reads its

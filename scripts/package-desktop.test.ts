@@ -175,6 +175,9 @@ describe("desktop packaging boundary", () => {
     expect(REQUIRED_DARWIN_HELPER_FILES).toEqual([
       "Octant.app/Contents/Resources/native/octant-keychain-helper",
       "Octant.app/Contents/Resources/native/octant-code-file-helper",
+      "Octant.app/Contents/Resources/native/cua-driver",
+      "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
+      "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
     ]);
     expect(REQUIRED_PACKAGED_FILES).toEqual([
       ...REQUIRED_STAGED_PACKAGED_FILES,

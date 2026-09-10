@@ -154,6 +154,7 @@ export function defaultShellSettings(): ShellSettings {
     environmentPresentationByMode: defaultEnvironmentPresentationByMode(),
     firstRunOnboarding: "pending",
     automaticUpdateChecks: true,
+    computerUse: { enabled: true, automaticUpdates: true },
     marketplaceFetchesEnabled: true,
     completedThreadArchiveAfterDays: DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS,
     openInApplications: [...DEFAULT_OPEN_IN_APPLICATIONS],

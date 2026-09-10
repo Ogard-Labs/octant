@@ -94,6 +94,47 @@ function makeLinearClient(
 }
 
 describe("DraftThreadWorkspace", () => {
+  it.each(["chat", "work", "code"] as const)(
+    "carries a selected Computer plugin into the first %s message",
+    async (mode) => {
+      const descriptor = Object.getOwnPropertyDescriptor(window, "octantHost");
+      Object.defineProperty(window, "octantHost", {
+        configurable: true,
+        value: { getComputerUseStatus: async () => ({ supported: true }) },
+      });
+      try {
+        const user = userEvent.setup();
+        const onCreateThread = vi.fn();
+        render(
+          <DraftThreadWorkspace
+            {...baseProps}
+            mode={mode}
+            projects={projects}
+            onCreateThread={onCreateThread}
+          />,
+        );
+        await user.type(screen.getByRole("textbox", { name: "First message" }), "Use @Com");
+        await user.keyboard("{Enter}");
+        expect(screen.getByRole("button", { name: "Remove Computer" })).toBeVisible();
+        if (mode !== "chat") {
+          await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
+          await user.click(
+            screen.getByRole("option", { name: mode === "work" ? /Knowledge/ : /Octant/ }),
+          );
+        }
+        await user.click(screen.getByRole("button", { name: "Create thread" }));
+        expect(onCreateThread).toHaveBeenCalledOnce();
+        expect(onCreateThread.mock.calls[0]?.[0]).toBe("Use");
+        expect(onCreateThread.mock.calls[0]?.[7]).toMatchObject({
+          kind: "plugin",
+          componentId: "computer",
+        });
+      } finally {
+        if (descriptor === undefined) Reflect.deleteProperty(window, "octantHost");
+        else Object.defineProperty(window, "octantHost", descriptor);
+      }
+    },
+  );
   it("keeps new Chat context below the prompt with model controls inside the composer", () => {
     const { container } = render(<DraftThreadWorkspace {...baseProps} />);
     const composer = container.querySelector(".composer");

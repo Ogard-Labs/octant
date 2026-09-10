@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { DESKTOP_PRELOAD_FILENAME } from "../apps/desktop/src/runtimePaths";
 import { buildCodeFileHelper } from "./build-code-file-helper";
 import { buildKeychainHelper } from "./build-keychain-helper";
+import { prepareComputerUseDriver } from "./prepare-computer-use-driver";
 import {
   requireSigned,
   resolveSigningCredentials,
@@ -201,6 +202,9 @@ export const REQUIRED_DARWIN_PTY_HELPER_FILE =
 export const REQUIRED_DARWIN_HELPER_FILES = [
   "Octant.app/Contents/Resources/native/octant-keychain-helper",
   "Octant.app/Contents/Resources/native/octant-code-file-helper",
+  "Octant.app/Contents/Resources/native/cua-driver",
+  "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
+  "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
 ] as const;
 
 /** Full darwin-arm64 checklist (staged payload + PTY helper + Keychain/code-file helpers). */
@@ -213,12 +217,16 @@ export const REQUIRED_PACKAGED_FILES = [
 export const PACKAGED_EXECUTABLE_FILES = [
   "native/octant-keychain-helper",
   "native/octant-code-file-helper",
+  "native/cua-driver",
   "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
 ] as const;
 export const PACKAGED_LINUX_EXECUTABLE_FILES = [] as const;
 export const PACKAGED_ARM64_FILES = [
   "native/octant-keychain-helper",
   "native/octant-code-file-helper",
+  "native/cua-driver",
+  "app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
+  "app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
   "app/apps/server/node_modules/node-pty/build/Release/pty.node",
   "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
 ] as const;
@@ -252,6 +260,9 @@ export const REQUIRED_CODE_WEB_ASSET_PATTERNS = [
 ] as const;
 
 const ALLOWED_DARWIN_NATIVE_PAYLOADS = new Set([
+  "Octant.app/Contents/Resources/native/cua-driver",
+  "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
+  "Octant.app/Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
   "Octant.app/Contents/Resources/native/octant-keychain-helper",
   "Octant.app/Contents/Resources/native/octant-code-file-helper",
   "Octant.app/Contents/Resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
@@ -613,6 +624,13 @@ export async function stageDesktopRuntime(
 
   await stageExternalRuntimePackages(repositoryRoot, stageRoot);
   await stageExternalRuntimePackages(repositoryRoot, stageRoot, ["effect"], "desktop");
+  if (target.platform === "darwin")
+    await stageExternalRuntimePackages(
+      repositoryRoot,
+      stageRoot,
+      ["@trycua/cua-driver", "@trycua/cua-driver-darwin-arm64"],
+      "desktop",
+    );
   await rebuild(createNativeRebuildOptions(stageRoot, target));
   await pruneUnusedNativePayloads(stageRoot);
   await stripNativeDebugMetadata(
@@ -739,6 +757,7 @@ async function packageDarwinDesktop(
   await rm(packagerRoot, { recursive: true, force: true });
 
   const nativeResources = join(finalApp, "Contents/Resources/native");
+  await prepareComputerUseDriver(repositoryRoot, join(nativeResources, "cua-driver"));
   const keychainHelper = join(nativeResources, "octant-keychain-helper");
   await buildKeychainHelper(
     resolve(repositoryRoot, "apps/desktop/native/keychain-helper/OctantKeychainHelper.swift"),
