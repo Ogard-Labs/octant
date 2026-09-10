@@ -781,12 +781,25 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 }
 
 /* All preference sections share an open layout, including expanded editors. */
+/* A settings section is an object (0109). Flat rows on the page ground left a
+   reader nothing to see a section by: where one ended and the next began had
+   to be inferred from a gap between two equally quiet labels, and nothing led
+   the eye across a row from its name to its control.
+
+   The object is the section, not the group inside it. Several sections carry
+   rows that never sit in a `.setgroup` — GitHub's account state, the host
+   facts — and drawing an edge round only the ones that do reads worse than
+   drawing none: one boxed row floating among flat ones.
+
+   `overflow` stays visible: rows hold menus, popovers and comboboxes that
+   have to escape the box. */
 .settings-card-section {
   display: grid;
   gap: 0;
   overflow: visible;
-  background: transparent;
-  border-radius: 0;
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-lg);
+  background: var(--oct-surface);
   box-shadow: none;
 }
 
@@ -807,7 +820,19 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   overflow: visible;
 }
 
-.settings-card-section--open > .setgroup > .setrow {
+/* The section draws an edge now, so everything inside keeps the inset that
+   holds text and controls off it. These rules used to zero that inset, back
+   when the rows sat on the open page and had nothing to clear. */
+.settings-card-section > *,
+.settings-card-section > .setgroup > *,
+.settings-card-section > .provider-settings__form > * {
+  padding-inline: var(--oct-space-4);
+}
+
+/* A wrapper passes the inset through to the rows it holds rather than adding
+   a second one. */
+.settings-card-section > .setgroup,
+.settings-card-section > .provider-settings__form {
   padding-inline: 0;
 }
 
@@ -1113,6 +1138,28 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   border-top: 0;
 }
 
+/* The section's label is its first line, inside the edge it names, so a label
+   and the rows it governs read as one thing. */
+.settings-card-section > h2,
+.settings-card-section > .settings-section-head,
+.settings-card-section > summary,
+.settings-card-section > legend {
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+/* A section's one-line description belongs to the label above it, not to the
+   rows below. The rule closes the header once, under whichever of the two
+   comes last, so the description does not read as a row of its own. */
+.settings-card-section > h2:has(+ p) {
+  border-bottom: 0;
+}
+
+.settings-card-section > h2 + p {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+/* The group is a division of the section now, not an object of its own. */
 .setgroup {
   overflow: visible;
   border: 0;
@@ -1121,12 +1168,11 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   box-shadow: none;
 }
 
-.settings-card-section > .setgroup,
-.settings-card-section > .provider-settings__form,
-.settings-panel .setgroup {
-  background: transparent;
-  border-radius: 0;
-  box-shadow: none;
+/* The group's own edge already holds the rows in; a row keeps only the inset
+   that stops a switch or a focus ring touching it. */
+.setgroup > .setrow,
+.setgroup > .settings-view__setting {
+  padding-inline: var(--oct-space-4);
 }
 
 .settings-view .provider-settings {

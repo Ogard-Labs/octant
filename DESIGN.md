@@ -406,7 +406,7 @@ then the title) on the page ground, never a raised card: a card with a title
 and a sentence reads as a finished empty state.
 
 Navigation panes stay compact hairline rails. Routine form layouts stay open
-and unshadowed; setup objects, discrete settings objects, and cards use the
+and unshadowed; setup objects, settings sections (0109), and cards use the
 card recipe (`OctantCard`), which draws a hairline ring rather than a shadow —
 a card sits in the page, and shadow is reserved for something that floats
 above it (0090). Welcome composers keep their raised frame.
@@ -550,10 +550,15 @@ search remain fixed while one centred, bounded 800px reading column scrolls.
 A 32–56px workspace gutter protects the content at narrower widths. The page
 title, quiet section captions, and primary field labels have distinct roles;
 sections follow a consistent 32px rhythm. Navigation groups use quiet separators
-rather than competing labels. Routine related rows stay open on the application
-ground with hairline separators. Keybindings have their own destination and raw
-JSON stays behind an advanced disclosure. Inline profile and provider editors
-share the flat page ground and aligned row edges (0096). Ready providers open
+rather than competing labels. A section is an object (0109): it draws the card
+recipe's hairline ring over the surface fill, its label is the first line
+inside that edge, and its rows are divisions of it separated by hairlines.
+Everything inside takes the section's inset, including content that is not a
+row. A section keeps `overflow: visible`, because its rows hold menus and
+popovers that have to escape it. Keybindings have their own destination and raw
+JSON stays behind an advanced disclosure. Inline profile and provider editors keep
+their aligned row edges (0096), now measured from the section's inset rather
+than the page's. Ready providers open
 onto a bounded model list with search, shown counts, and shared visibility
 switches. Routine connection diagnostics and capabilities use a separate
 disclosure; setup and authentication guidance remains visible. Install reviews, visual
