@@ -720,13 +720,20 @@ describe("SettingsView", () => {
     expect(styles).toMatch(/\.settings-scheme__card\s*\{[^}]*height:\s*auto;/);
   });
 
-  it("keeps preference sections and inline editors on the flat page ground", () => {
+  it("draws every preference section as an object on the page ground", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 
     expect(styles).toMatch(
       /\.settings-view\s*\{[\s\S]*background:\s*var\(--octant-app-background\)/,
     );
-    expect(styles).toMatch(/\.settings-card-section\s*\{[^}]*background:\s*transparent/);
+    // A section is an object (0109): the card is built from the section's
+    // content children, over the surface fill and inside a hairline, with no
+    // shadow because it sits in the page rather than floating above it (0090).
+    // The label and its description stay out on the page ground. It used to be
+    // drawn wholly flat, which left nothing to see a section by.
+    expect(styles).toMatch(/\.settings-card-section\s*\{[^}]*border:\s*0/);
+    expect(styles).toMatch(/border-inline:\s*1px solid var\(--oct-hairline\)/);
+    expect(styles).toMatch(/border-start-start-radius:\s*var\(--oct-radius-lg\)/);
     expect(styles).toMatch(/\.settings-card-section\s*\{[^}]*box-shadow:\s*none/);
     expect(styles).toMatch(/\.settings-card-section--open\s*\{[\s\S]*box-shadow:\s*none/);
     expect(styles).toContain("border-radius: var(--oct-radius-md)");
