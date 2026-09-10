@@ -1,3 +1,5 @@
+import { useComputerUseEnabled } from "../computerUse/ComputerUseMention";
+import { computerUseSelection } from "@octant/plugin-host/computer-use";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ChatThread } from "@octant/contracts/chat";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
@@ -22,6 +24,7 @@ export function useExtensionDraftSelections(options: {
   readonly providerFamily?: ExtensionProviderFamily;
   readonly thread?: ChatThread;
 }) {
+  const computerEnabled = useComputerUseEnabled();
   const [receipts, setReceipts] = useState<ReadonlyArray<ChatComposerExtensionSelection>>([]);
 
   const clear = useCallback(() => setReceipts([]), []);
@@ -31,6 +34,23 @@ export function useExtensionDraftSelections(options: {
   const resolveReference = useCallback(
     async (draft: string): Promise<boolean> => {
       const reference = draft.trim();
+      if (reference.toLowerCase() === "@computer") {
+        if (!computerEnabled) {
+          setReceipts((current) =>
+            upsertReceipt(current, blockedReceipt("@Computer", "plugin-disabled")),
+          );
+          return true;
+        }
+        setReceipts((current) =>
+          upsertReceipt(current, {
+            reference: "@Computer",
+            label: "Computer",
+            selection: computerUseSelection(crypto.randomUUID()),
+            status: { kind: "selected" },
+          }),
+        );
+        return true;
+      }
       if (parseComposerReference(reference).kind === "plain-text") return false;
       const thread = options.thread;
       if (
@@ -93,7 +113,7 @@ export function useExtensionDraftSelections(options: {
         return true;
       }
     },
-    [options.client, options.providerFamily, options.thread],
+    [computerEnabled, options.client, options.providerFamily, options.thread],
   );
 
   const remove = useCallback(

@@ -178,6 +178,7 @@ export const ComputerUsePendingApproval = Schema.Struct({
   actionId: ToolActionId,
   expiresAt: UtcTimestamp,
   summary: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  scope: Schema.optional(Schema.Literal("application-session")),
 }).annotations(strict);
 export type ComputerUsePendingApproval = typeof ComputerUsePendingApproval.Type;
 

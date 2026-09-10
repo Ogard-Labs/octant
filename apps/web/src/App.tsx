@@ -1,3 +1,4 @@
+import { ComputerUseEnabledContext } from "./computerUse/ComputerUseMention";
 import { UsageNamesProvider } from "./usage/UsageName";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
@@ -4073,6 +4074,9 @@ function LaunchedShell(
         threadId: created.thread.id,
         checkoutId,
         prompt: input.prompt,
+        ...(input.computerUseSelection === undefined
+          ? {}
+          : { computerUseSelection: input.computerUseSelection }),
         ...(input.threadMentionIds === undefined || input.threadMentionIds.length === 0
           ? {}
           : { threadMentionIds: input.threadMentionIds }),
@@ -4117,6 +4121,7 @@ function LaunchedShell(
     threadMentionIds?: ReadonlyArray<import("@octant/contracts").MentionableThreadId>,
     issueContext?: import("@octant/contracts").GithubIssueContextRequest,
     linearIssueContext?: import("@octant/contracts").LinearIssueContextRequest,
+    computerUseSelection?: import("@octant/contracts/extensions").ExtensionSelection,
   ): Promise<boolean | void> {
     setDraftCreating(true);
     setDraftError(undefined);
@@ -4168,6 +4173,9 @@ function LaunchedShell(
         const sendOutcome = chatController
           .execute({
             kind: "send-chat-turn",
+            ...(computerUseSelection === undefined
+              ? {}
+              : { extensionSelections: [computerUseSelection] }),
             threadId: thread.id,
             expectedVersion: thread.version,
             prompt,
@@ -4304,6 +4312,7 @@ function LaunchedShell(
           threadId: created.thread.id,
           checkoutId: created.thread.checkoutId,
           prompt,
+          ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
         });
         if (!firstTurnStarted) {
           setDraftError(
@@ -4378,6 +4387,7 @@ function LaunchedShell(
         const attachmentIds = await stageWorkImages(created.thread.id, images ?? []);
         const started = await workTurnClient.startFirstTurn({
           kind: "start-work-thread-turn",
+          ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
           requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
           threadId: created.thread.id,
           turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
@@ -6022,6 +6032,7 @@ function LaunchedShell(
         />
       </ShellFrame>
       <ComputerUseActivitySurface
+        changeRevision={machineChanges.computerUse}
         client={computerUseClient}
         excludedSessions={visibleComputerUseSessions}
       />
@@ -6029,28 +6040,30 @@ function LaunchedShell(
   );
 
   return (
-    <SpeechCapabilityProvider
-      client={speechClient}
-      instances={providerController.snapshot?.instances ?? NO_PROVIDER_INSTANCES}
-      settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
-    >
-      <OctantCommandProvider commands={octantCommands}>
-        {/* Held here rather than with any Code pane: a thread's controller has to
+    <ComputerUseEnabledContext.Provider value={controller.settings?.computerUse.enabled === true}>
+      <SpeechCapabilityProvider
+        client={speechClient}
+        instances={providerController.snapshot?.instances ?? NO_PROVIDER_INSTANCES}
+        settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
+      >
+        <OctantCommandProvider commands={octantCommands}>
+          {/* Held here rather than with any Code pane: a thread's controller has to
         outlive the surfaces reading it, so closing a diff tab never tears down
         the turn that thread is running. */}
-        <CodeThreadControllerSlots
-          client={codeClient}
-          readCursorStore={codeReadCursorStore}
-          registry={codeThreadControllers}
-          threadIds={openCodeThreadIds}
-        />
-        <TrackerReferenceProvider ports={trackerReferencePorts}>
-          <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
-            <ProjectThreadsProvider value={projectThreadsAccess}>{shell}</ProjectThreadsProvider>
-          </SidebarThreadDragContext.Provider>
-        </TrackerReferenceProvider>
-      </OctantCommandProvider>
-    </SpeechCapabilityProvider>
+          <CodeThreadControllerSlots
+            client={codeClient}
+            readCursorStore={codeReadCursorStore}
+            registry={codeThreadControllers}
+            threadIds={openCodeThreadIds}
+          />
+          <TrackerReferenceProvider ports={trackerReferencePorts}>
+            <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
+              <ProjectThreadsProvider value={projectThreadsAccess}>{shell}</ProjectThreadsProvider>
+            </SidebarThreadDragContext.Provider>
+          </TrackerReferenceProvider>
+        </OctantCommandProvider>
+      </SpeechCapabilityProvider>
+    </ComputerUseEnabledContext.Provider>
   );
 }
 

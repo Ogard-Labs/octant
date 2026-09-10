@@ -1,3 +1,4 @@
+import { chatCompletionsToolImages } from "./openAiToolEncoding";
 import {
   decodeProviderFailure,
   type ProviderFailure,
@@ -144,11 +145,14 @@ function requestBody(input: ChatCompletionsTurnInput, streaming: boolean): Recor
     messages: [
       ...input.history.flatMap((entry): Record<string, unknown>[] => {
         if (entry.toolResults !== undefined) {
-          return entry.toolResults.map((result) => ({
-            role: "tool",
-            tool_call_id: result.toolCallId,
-            content: result.resultJson,
-          }));
+          return [
+            ...entry.toolResults.map((result) => ({
+              role: "tool",
+              tool_call_id: result.toolCallId,
+              content: result.resultJson,
+            })),
+            ...chatCompletionsToolImages(entry.toolResults),
+          ];
         }
         return [
           entry.toolCalls === undefined

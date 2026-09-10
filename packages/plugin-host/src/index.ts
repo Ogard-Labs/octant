@@ -8,3 +8,5 @@ export * from "./composer";
 export * from "./model";
 export * from "./skills";
 export * as agentPlugins from "./agentPlugins";
+
+export * from "./computerUsePlugin";

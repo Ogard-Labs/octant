@@ -6,7 +6,8 @@
     ".": "./src/index.ts",
     "./manifest": "./src/manifest.ts",
     "./contributions": "./src/contributions.ts",
-    "./integration": "./src/integration.ts"
+    "./integration": "./src/integration.ts",
+    "./computer-use": "./src/computerUse.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

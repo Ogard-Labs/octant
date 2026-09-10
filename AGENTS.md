@@ -61,7 +61,7 @@ Read the record that owns your change before editing, not all of them:
 | Apple build and validation                                     | `docs/decisions/0014`                                                                                                                    |
 | Simulator frame input transport                                | `docs/decisions/0062`                                                                                                                    |
 | Signed updates and in-app changelog                            | `docs/decisions/0034`, `docs/decisions/0061`                                                                                             |
-| Computer-use destinations                                      | `docs/decisions/0053`                                                                                                                    |
+| Computer-use destinations                                      | `docs/decisions/0053`, `docs/decisions/0113`                                                                                             |
 | Shell, navigation, workspace layout                            | `docs/decisions/0015`, `docs/decisions/0041`–`docs/decisions/0045`, `docs/decisions/0077`                                                |
 | Components and theme                                           | `docs/decisions/0016`, `docs/decisions/0046`                                                                                             |
 | Visual language (Settings, first-run, welcome, palette)        | `docs/decisions/0070`, `docs/decisions/0072`, `docs/decisions/0073`, `docs/decisions/0091`                                               |
