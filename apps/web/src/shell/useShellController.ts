@@ -1135,6 +1135,17 @@ function createWorkspaceMutation(
         title: `New ${modeLabel(mode)} thread`,
         ...(intent.projectId === undefined ? {} : { projectId: intent.projectId }),
       };
+      // Starting a task in another Project is the person choosing to work
+      // there, so the window moves with them, exactly as it does when they
+      // open an existing thread from that Project. Without this branch the
+      // draft was the one path that answered "open it in a new window", which
+      // is a refusal of something they had just asked for.
+      if (isDifferentProject(latest.workspace, mode, intent.projectId)) {
+        return {
+          operation: { kind: "switch-project-surface", mode, surface },
+          message: `New ${modeLabel(mode)} thread draft opened.`,
+        };
+      }
       const existing = findVisibleSurfacePane(layout, surface);
       return {
         operation: {

@@ -68,19 +68,20 @@ Antialiased, `text-rendering: optimizeLegibility`, no synthetic bold.
 
 ### Scale
 
-Eight sizes at the default 13px setting. Everything scales together with the
-Appearance interface size; nothing is authored at 11.5 or 12.5.
+Eight sizes at the default 14px setting. Everything scales together with the
+Appearance interface size; nothing is authored at 11.5 or 12.5, and nothing
+essential sits under 12px at the default.
 
 | Role          | Size | Weight | Colour          | Where                                                     |
 | ------------- | ---- | ------ | --------------- | --------------------------------------------------------- |
 | Hero          | 28   | 500    | primary         | Welcome question only (`oct-title--hero`)                 |
 | Title         | 20   | 600    | primary         | One per page (`oct-title`)                                |
-| Section label | 13   | 500    | secondary       | Group heading over a hairline (`oct-section-label`)       |
-| Row label     | 13   | 500    | primary         | Setting, list row, menu option (`oct-row-label`)          |
-| Body          | 13   | 400    | primary         | Transcript, paragraphs, controls                          |
-| Detail        | 12   | 400    | secondary       | Subtitle, row description, menu detail (`oct-row-detail`) |
-| Meta          | 11   | 400    | muted           | Timestamps, counts, hints (`oct-meta`)                    |
-| Identifier    | 12   | 400    | secondary, mono | Paths, branches, ids (`oct-meta--mono`)                   |
+| Section label | 14   | 500    | secondary       | Group heading over a hairline (`oct-section-label`)       |
+| Row label     | 14   | 500    | primary         | Setting, list row, menu option (`oct-row-label`)          |
+| Body          | 14   | 400    | primary         | Transcript, paragraphs, controls                          |
+| Detail        | 13   | 400    | secondary       | Subtitle, row description, menu detail (`oct-row-detail`) |
+| Meta          | 12   | 400    | muted           | Timestamps, counts, hints (`oct-meta`)                    |
+| Identifier    | 13   | 400    | secondary, mono | Paths, branches, ids (`oct-meta--mono`)                   |
 
 Titles and the hero use `--oct-tracking-tight` (-0.025em); section labels use
 `--oct-tracking-snug`; body and detail use none. Line heights: 1.2 title,
@@ -252,31 +253,31 @@ fallback; `Dark` and `Light` are the same values pinned to one mode.
 
 ### Semantic roles
 
-| Role                   | CSS variable                                        | Dark      | Light       | Use                                               |
-| ---------------------- | --------------------------------------------------- | --------- | ----------- | ------------------------------------------------- |
-| Application background | `--octant-app-background`                           | `#151515` | `#fafaf9`   | Page ground: welcome, lists, Settings             |
-| Chrome                 | `--octant-chrome`                                   | `#151515` | `#fafaf9`   | Title bars and shell chrome                       |
-| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#fafaf9`   | Navigation surface, on the page ground            |
-| Workspace              | `--octant-workspace`                                | `#1a1a1a` | `#ffffff`   | Reading surface: transcript, editor               |
-| Floating               | `--octant-floating` / `--octant-surface-raised`     | `#232323` | `#fdfdfc`   | Menus, popovers, dialogs                          |
-| Card                   | `--octant-card` (derived)                           | floating  | workspace   | Raised objects: composer, setup, profiles         |
-| Tray                   | `--octant-tray` (derived)                           | workspace | control mix | The rear context card behind the composer         |
-| Control                | `--octant-control` / `--octant-surface-muted`       | `#2b2b2b` | `#f0f0ef`   | Quiet control fill, secondary buttons             |
-| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#333333` | `#e8e8e6`   | Hover and highlighted rows                        |
-| Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#dfdfdd`   | Pressed state                                     |
-| Border                 | `--octant-border`                                   | `#303030` | `#e0e0de`   | Hairline separation                               |
-| Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb`   | Input and outline-button edges                    |
-| Strong divider         | `--octant-divider-strong`                           | `#808080` | `#6f6f6d`   | Rare structural divider                           |
-| Primary text           | `--octant-text-primary`                             | `#f0f0f0` | `#1b1b1b`   | Body and control text                             |
-| Secondary text         | `--octant-text-secondary`                           | `#a9a9a9` | `#4f4f4f`   | Supporting copy                                   |
-| Muted text             | `--octant-text-muted`                               | `#8a8a8a` | `#6b6b6b`   | Metadata and hints; not for essential text        |
-| Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff`   | Text on primary fill                              |
-| Focus role             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96`   | Theme compatibility and accent tints              |
-| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#ebebea`   | Selected rows and active controls                 |
-| Accent fill            | `--octant-accent`                                   | `#f0f0f0` | `#1b1b1b`   | One primary action or active mark                 |
-| Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff`   | Text on accent fill                               |
-| Accent text            | `--octant-accent-text`                              | `#f0f0f0` | `#1b1b1b`   | Accent used as text; normal-text contrast         |
-| Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000`   | Opaque by contract; the bridge mixes it to a wash |
+| Role                   | CSS variable                                        | Dark      | Light       | Use                                                |
+| ---------------------- | --------------------------------------------------- | --------- | ----------- | -------------------------------------------------- |
+| Application background | `--octant-app-background`                           | `#151515` | `#fafaf9`   | Page ground: welcome, lists, Settings              |
+| Chrome                 | `--octant-chrome`                                   | `#151515` | `#fafaf9`   | Title bars and shell chrome                        |
+| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#fafaf9`   | Navigation surface, on the page ground             |
+| Workspace              | `--octant-workspace`                                | `#1a1a1a` | `#ffffff`   | Reading surface: transcript, editor                |
+| Floating               | `--octant-floating` / `--octant-surface-raised`     | `#232323` | `#fdfdfc`   | Menus, popovers, dialogs                           |
+| Card                   | `--octant-card` (derived)                           | floating  | workspace   | Raised objects: composer, setup, profiles          |
+| Tray                   | `--octant-tray` (derived)                           | workspace | control mix | The rear context card behind the composer          |
+| Control                | `--octant-control` / `--octant-surface-muted`       | `#2b2b2b` | `#f0f0ef`   | Quiet control fill, secondary buttons              |
+| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#333333` | `#e8e8e6`   | Hover and highlighted rows                         |
+| Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#dfdfdd`   | Pressed state                                      |
+| Border                 | `--octant-border`                                   | `#303030` | `#e0e0de`   | Hairline separation                                |
+| Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb`   | Input and outline-button edges                     |
+| Strong divider         | `--octant-divider-strong`                           | `#808080` | `#6f6f6d`   | Rare structural divider                            |
+| Primary text           | `--octant-text-primary`                             | `#f0f0f0` | `#1b1b1b`   | Body and control text                              |
+| Secondary text         | `--octant-text-secondary`                           | `#a9a9a9` | `#4f4f4f`   | Supporting copy                                    |
+| Muted text             | `--octant-text-muted`                               | `#949494` | `#666666`   | Metadata and hints at 12px; AA on the control fill |
+| Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff`   | Text on primary fill                               |
+| Focus role             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96`   | Theme compatibility and accent tints               |
+| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#ebebea`   | Selected rows and active controls                  |
+| Accent fill            | `--octant-accent`                                   | `#f0f0f0` | `#1b1b1b`   | One primary action or active mark                  |
+| Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff`   | Text on accent fill                                |
+| Accent text            | `--octant-accent-text`                              | `#f0f0f0` | `#1b1b1b`   | Accent used as text; normal-text contrast          |
+| Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000`   | Opaque by contract; the bridge mixes it to a wash  |
 
 The ladder is deliberate: in dark the page is near-black, the sidebar a step
 darker, the reading surface a step lighter, and cards lift one more step. In light the sidebar and the page share one near-white ground and the
@@ -321,7 +322,7 @@ Typography has distinct jobs:
 | ---------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | Interface  | `'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif` | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
 | Display    | inherits Interface                                                                       | Wordmark, section headings, selected navigation labels                             |
-| Transcript | inherits Interface                                                                       | Long-running conversation and composer; readable at 13–16px                        |
+| Transcript | inherits Interface                                                                       | Long-running conversation and composer; readable at 13–16px, 14px by default       |
 | Editor     | `'JetBrains Mono', 'SF Mono', Menlo, monospace`                                          | Code, diffs, paths, identifiers, aligned technical values                          |
 | Terminal   | JetBrains/SF Mono, Nerd Font fallbacks, monospace                                        | Terminal output and prompt glyphs                                                  |
 
@@ -346,9 +347,11 @@ branches, identifiers, or serialized theme source.
 
 Static type tokens in `octant.css` are:
 
-- `--oct-text-xs: 11px`, `--oct-text-detail: 12px`, `--oct-text-sm: 13px`,
-  `--oct-text-base: 14px`, each multiplied by `--oct-text-step` so the
-  Appearance interface size moves the whole ladder.
+- `--oct-text-xs: 12px`, `--oct-text-detail: 13px`, `--oct-text-sm: 14px`,
+  `--oct-text-base: 15px`, each multiplied by `--oct-text-step` so the
+  Appearance interface size moves the whole ladder. Feature CSS reads these
+  tokens; it does not author `calc(N * var(--oct-text-step))`, so the 12px
+  floor for meta text is one definition.
 - `--oct-text-lg: 17px`, `--oct-text-xl: 20px`, `--oct-text-2xl: 26px`,
   `--oct-text-3xl: 36px`, `--oct-text-4xl: 72px`.
 - Body leading `1.5`, snug `1.3`, heading `1.14`, tight `1.1`, code `1.7`.
@@ -360,9 +363,9 @@ Static type tokens in `octant.css` are:
   headings use restrained negative tracking.
 
 Transcript settings are explicit and centered on the body size: Small is
-12px, Medium 13px, Large 16px; Narrow is 680px, Medium 800px, Wide 1040px. A
+13px, Medium 14px, Large 16px; Narrow is 680px, Medium 800px, Wide 1040px. A
 fresh install reads Medium and Narrow, so a question, its reply, and the
-composer under them all read at 13px. The column uses
+composer under them all read at 14px, never under the chrome around them. The column uses
 `width: min(100% - 40px, measure)` with automatic horizontal margins. Welcome composers share a 768px maximum so
 Chat, Work, and Code start from the same prompt geometry independently of the
 reading-width preference. Canvas documents use a 62ch measure.
@@ -485,6 +488,35 @@ their own pane headers and lifecycle controls. Capability-gated toggles for
 Open in, Environment, bottom panel, and right dock remain window chrome. Zen
 remains in the bottom-left identity menu.
 
+Zen arranges itself. A space tiles its cards from their number and the room it
+has, leaving the spaces pill and the Navigator bar their own edges, so two pins
+never land on each other, removing a card closes the gap, and resizing the
+window re-tiles rather than stranding the arrangement. The column count follows
+the card count and drops when the area is too narrow for a readable measure; a
+short last row spreads across the full width instead of leaving one card beside
+dead space. A wall offers no drag, resize grip, nudge, pan, or zoom, because
+each would write a position the wall ignores. Arrange, on the surface itself,
+is the exception: it restores hand placement and every card's stored geometry,
+which a wall never rewrites (0106).
+
+A card is a reading of one thread. Its head carries the thread's name in the
+interface face at the body size, and beside it how long ago that thread last
+moved; the editor face and the metadata ink are for code, paths, and
+identifiers, not for the one label that says which thread this is. A tiled card
+is flat, with its hairline and no shadow, because nothing on a wall floats over
+anything; an arranged card keeps its elevation. A card that is not streaming
+reads its host, mode, Project, and the model that answers, in that order. It
+does not print a stored ISO timestamp or a provider instance id.
+
+Zen's own chrome is one bar and one sheet. The bar carries four destinations
+and the way out: Threads, Add, Navigator, Appearance, Exit Zen. Asking the
+Navigator lives in the Navigator panel, which has the field and shows the
+answer. Putting something on the wall is one destination, not two. A panel is a
+page in a sheet, so its title is the page title, it stops above the bar, and its
+rows follow the Settings recipe. Escape closes the open panel and only leaves
+Zen when none is open. Pinning shows no notice: the card that arrives says the
+same thing, and the notice landed on top of it.
+
 The app has three server-enforced modes—Chat, Work, and Code. Mode switching is
 available as a labeled selector, compact list, or icon presentation according
 to the user's setting. Code and Work keep separate Project View sets. The
@@ -571,6 +603,12 @@ step use `OctantToggleGroup`. Answers still write through to the settings that
 own them.
 
 The right dock follows the active pane and never leaks another pane's content.
+The dock and the bottom panel both step aside while a reader route (Board,
+Inbox, pull requests, issues, Archive) holds the pane: a reader is a page about
+many threads and shows none of them, so one thread's tools do not keep a
+quarter of the viewport there. Both keep their tabs and their height and return
+with the thread, and their toggle leaves the reader rather than closing a
+region that was only stepped aside.
 On wide windows it may use at most 38 percent of the viewport, preserving a
 560px primary workspace; the bottom panel may use at most 38 percent of the
 viewport height while preserving 320px for the primary workspace. It can host

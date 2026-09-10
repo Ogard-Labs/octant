@@ -74,7 +74,11 @@ afterEach(() => {
 describe("Zen timer projection", () => {
   it("safely migrates a legacy running boolean to paused during replay", () => {
     const store = openStore();
-    const legacy = createZenSpace(windowId, LOCAL_HOST_ID);
+    // A V1 snapshot is a record of bytes written before `layout` existed, and
+    // the legacy schema is strict, so the fixture drops what a space of that
+    // era could not have carried. Stripping it here is what keeps this a test
+    // of replay rather than of today's shape.
+    const { layout: _unusedLayout, ...legacy } = createZenSpace(windowId, LOCAL_HOST_ID);
     store.journal.append({
       aggregate: { aggregateType: "zen-space", aggregateId: legacy.spaceId as never },
       expectedVersion: 0,

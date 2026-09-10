@@ -1,8 +1,13 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { decodeLocalUsageHistoryResponse, type LocalUsageHistoryResponse } from "@octant/contracts";
 import { ProviderUsageHistoryWorkspace } from "./ProviderUsageHistoryWorkspace";
+
+/** The view opens on cost, so a token assertion asks for tokens first. */
+async function showTokens(): Promise<void> {
+  fireEvent.click(await screen.findByRole("button", { name: "Tokens" }));
+}
 
 function history(): LocalUsageHistoryResponse {
   const totals = {
@@ -67,6 +72,7 @@ describe("Local provider usage history", () => {
       })
       .mockResolvedValue(complete);
     render(<ProviderUsageHistoryWorkspace client={{ load }} />);
+    await showTokens();
     expect(await screen.findByRole("heading", { name: "2.4K" })).toBeVisible();
     expect(load).toHaveBeenCalledTimes(2);
   });
@@ -87,6 +93,7 @@ describe("Local provider usage history", () => {
     expect(
       await screen.findByText("Import failed. Partial readings are shown; see source coverage."),
     ).toBeVisible();
+    await showTokens();
     expect(screen.getByRole("heading", { name: "1.2K" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Refresh provider history" })).toBeEnabled();
   });
@@ -131,6 +138,7 @@ describe("Local provider usage history", () => {
   });
   it("shows processed tokens and separates API estimates from unpriced activity", async () => {
     render(<ProviderUsageHistoryWorkspace client={{ load: async () => history() }} />);
+    await showTokens();
     expect(await screen.findByRole("heading", { name: "1.2K" })).toBeVisible();
     expect(screen.getByRole("table", { name: "Usage by model" })).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Cost" }));
@@ -151,6 +159,7 @@ describe("Local provider usage history", () => {
     const load = vi.fn().mockReturnValueOnce(first).mockResolvedValue(history());
     render(<ProviderUsageHistoryWorkspace client={{ load }} />);
     await userEvent.click(screen.getByRole("button", { name: "7 days" }));
+    await showTokens();
     expect(await screen.findByRole("heading", { name: "1.2K" })).toBeVisible();
     const obsolete = history();
     resolveFirst?.({ ...obsolete, totals: { ...obsolete.totals, totalTokens: 999999 } });
@@ -167,6 +176,7 @@ describe("Local provider usage history", () => {
         }}
       />,
     );
+    await showTokens();
     await screen.findByRole("heading", { name: "1.2K" });
     await userEvent.click(screen.getByRole("button", { name: "Cost" }));
     expect(screen.getByRole("heading", { name: "Unavailable" })).toBeVisible();

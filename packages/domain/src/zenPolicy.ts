@@ -1,6 +1,7 @@
 import {
   ZenSpace,
   ZenSpaceId,
+  type ZenSpaceLayout,
   ZenElementId,
   ZenElementPayload,
   ZenCommand,
@@ -306,6 +307,7 @@ export function createZenSpace(
     appearance: appearance ?? DEFAULT_ZEN_APPEARANCE,
     active: true,
     barCollapsed: false,
+    layout: "wall",
     assistant: null,
     research: null,
     createdAt: now,
@@ -748,6 +750,7 @@ export function setPresentation(
   presentation: {
     readonly active?: boolean | undefined;
     readonly barCollapsed?: boolean | undefined;
+    readonly layout?: ZenSpaceLayout | undefined;
   },
   expectedVersion: number,
 ): ZenSpace {
@@ -755,8 +758,12 @@ export function setPresentation(
     reject("stale-version", `Expected version ${expectedVersion} but space is at ${space.version}`);
   }
 
-  if (typeof presentation.active !== "boolean" && typeof presentation.barCollapsed !== "boolean") {
-    reject("invalid-presentation", "set-presentation must include active or barCollapsed");
+  if (
+    typeof presentation.active !== "boolean" &&
+    typeof presentation.barCollapsed !== "boolean" &&
+    presentation.layout === undefined
+  ) {
+    reject("invalid-presentation", "set-presentation must include active, barCollapsed, or layout");
   }
 
   const now = utcNow();
@@ -768,6 +775,9 @@ export function setPresentation(
     ...(typeof presentation.barCollapsed === "boolean"
       ? { barCollapsed: presentation.barCollapsed }
       : {}),
+    // Switching to a wall leaves every card's stored geometry untouched, so
+    // going back to `arrange` finds the arrangement exactly as it was.
+    ...(presentation.layout === undefined ? {} : { layout: presentation.layout }),
     updatedAt: now,
   };
 }

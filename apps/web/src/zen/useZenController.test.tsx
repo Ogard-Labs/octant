@@ -41,6 +41,7 @@ function makeSpace(overrides: Partial<ZenSpace> = {}): ZenSpace {
     appearance: DEFAULT_ZEN_APPEARANCE,
     active: false,
     barCollapsed: false,
+    layout: "arrange",
     assistant: null,
     research: null,
     createdAt: "2026-07-26T12:00:00.000Z" as ZenSpace["createdAt"],

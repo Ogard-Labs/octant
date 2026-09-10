@@ -35,6 +35,32 @@ const entry = decodeZenThreadCatalogEntry({
 });
 
 describe("ZenThreadPicker", () => {
+  it("dates a thread in a way a person reads, and drops the provider instance id", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-28T15:00:00.000Z"));
+    try {
+      render(
+        <ZenThreadPicker
+          entries={[entry]}
+          onPin={vi.fn()}
+          onClose={vi.fn()}
+          onQueryChange={vi.fn()}
+          query=""
+        />,
+      );
+
+      expect(screen.getByText(/3h ago/)).toBeVisible();
+      // The stored ISO string and the instance UUID were the first two things
+      // the reader met in Zen, and neither says anything they can act on.
+      expect(screen.queryByText(/2026-07-28T12:00:00\.000Z/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/00000000-0000-4000-8000-000000000003/)).not.toBeInTheDocument();
+      // The model that answers is a real identifier and stays.
+      expect(screen.getByText(/model-local/)).toBeVisible();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows source identity and pins the exact catalog reference", () => {
     const onPin = vi.fn();
     const onQueryChange = vi.fn();

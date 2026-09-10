@@ -52,7 +52,7 @@
 }
 .provider-history__summary h3 {
   margin: 0 0 var(--oct-space-1);
-  font-size: calc(36 * var(--oct-text-step));
+  font-size: var(--oct-text-3xl);
   font-weight: var(--oct-weight-medium);
   letter-spacing: -0.025em;
   font-variant-numeric: tabular-nums;

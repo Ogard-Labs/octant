@@ -13,8 +13,7 @@
   },
   "important": {
     "apps/web/src/styles.css": 4,
-    "apps/web/src/styles/octant.css": 1,
-    "apps/web/src/styles/settings.css": 4
+    "apps/web/src/styles/octant.css": 1
   },
   "heavy-weight": {
     "apps/web/src/styles.css": 6,
@@ -31,7 +30,7 @@
     "apps/web/src/context/context.css": 6,
     "apps/web/src/onboarding/first-run.css": 3,
     "apps/web/src/profile/profile.css": 8,
-    "apps/web/src/styles.css": 151,
+    "apps/web/src/styles.css": 149,
     "apps/web/src/styles/artifacts.css": 10,
     "apps/web/src/styles/automation.css": 23,
     "apps/web/src/styles/canvas.css": 4,
@@ -41,7 +40,7 @@
     "apps/web/src/styles/dock.css": 8,
     "apps/web/src/styles/github.css": 11,
     "apps/web/src/styles/inbox.css": 3,
-    "apps/web/src/styles/octant.css": 49,
+    "apps/web/src/styles/octant.css": 45,
     "apps/web/src/styles/palette.css": 1,
     "apps/web/src/styles/polish.css": 2,
     "apps/web/src/styles/remote-shell.css": 1,
