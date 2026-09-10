@@ -29,6 +29,14 @@ export function codeThreadActivity(thread: {
  * already carries, for Chat, Work, and Code alike. A thread waiting on the
  * person, and a turn ending after a mid-turn snooze, both wake the row early;
  * a follow-up mark does not, or a marked thread could never be snoozed at all.
+ *
+ * `awaitingInput` is the host's own live signal and nothing else. Code's
+ * "waiting" and "interrupted" lifecycle values used to count here too, but
+ * they are durable resting states rather than a hand raised since the snooze:
+ * the host stores the snooze without consulting them, so reading them here
+ * cancelled that snooze on the next render and the row never reached the
+ * Snoozed shelf. The status dot still names those states; where the row rests
+ * is the person's choice.
  */
 export function threadRest(
   thread: {
@@ -39,16 +47,13 @@ export function threadRest(
     readonly executing?: boolean | undefined;
     /** A row that already carries its status dot says "working" while a turn runs. */
     readonly activity?: ThreadRowActivity | undefined;
-    /** Code keeps two legacy lifecycle values that mean the thread waits on the person. */
-    readonly lifecycle?: "active" | "waiting" | "interrupted" | "archived" | undefined;
   },
   input: { readonly now: Date; readonly awaitingInput: boolean },
 ): Pick<ChatThreadNavigationItem, "shelf" | "woke" | "wakeLabel"> {
   const signals = {
     now: input.now.toISOString(),
     executing: thread.executing === true || thread.activity === "working",
-    awaitingInput:
-      input.awaitingInput || thread.lifecycle === "waiting" || thread.lifecycle === "interrupted",
+    awaitingInput: input.awaitingInput,
   };
   const shelf = threadShelf(thread, signals);
   return {
