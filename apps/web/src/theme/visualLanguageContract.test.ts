@@ -379,10 +379,11 @@ describe("the public-block visual language", () => {
     expect(settings).toMatch(/\.settings-card-section\s*\{[^}]*box-shadow:\s*none/);
     expect(settings).toMatch(/\.settings-card-section--open\s*\{[^}]*box-shadow:\s*none/);
     // A section's card is built from its content children (0108), so the label
-    // and its description stay out on the page ground.
-    expect(settings).toMatch(
-      /\.settings-card-section > h2 ~ \*:not\(\.settings-section-note\)\s*\{[^}]*background:\s*var\(--oct-surface\)/,
-    );
+    // and its description stay out on the page ground. The selector that picks
+    // those children is pinned in settings/sectionObject.test.ts, which reads
+    // what the rules set rather than their exact text.
+    expect(settings).toMatch(/\.settings-card-section\s*\{[^}]*border:\s*0/);
+    expect(settings).toMatch(/border-inline:\s*1px solid var\(--oct-hairline\)/);
     expect(settings).toMatch(
       /\.settings-card-section\s*>\s*h2,[\s\S]*?\.settings-card-section\s*>\s*legend\s*\{[\s\S]*?text-transform:\s*none/,
     );

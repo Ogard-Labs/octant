@@ -807,19 +807,34 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
    page ground where they read as the section's title rather than as its first
    row. Sides and fill on every content child; the first closes the top and
    the last closes the bottom. */
-.settings-card-section > h2 ~ *:not(.settings-section-note) {
+/* What the card holds: everything after a label except another label, and
+   except the one sentence directly under a label, which belongs to it.
+   Sections name their own description class (`settings-section-note`, the
+   harness's `native-harness-panel__lead`), so the rule reads the position
+   rather than the name. */
+.settings-card-section > :is(h2, h3) ~ *:not(:is(h2, h3), .settings-section-note, :is(h2, h3) + p) {
   border-inline: 1px solid var(--oct-hairline);
   background: var(--oct-surface);
 }
 
-.settings-card-section > h2 + *:not(.settings-section-note),
-.settings-card-section > .settings-section-note + * {
+/* A card opens under each label, so a section that asks two questions — the
+   harness names both its model slots and its jobs — gets a card for each
+   rather than one long box with a heading stranded inside it. */
+.settings-card-section > :is(h2, h3) + *:not(:is(h2, h3), .settings-section-note, p),
+.settings-card-section > :is(.settings-section-note, :is(h2, h3) + p) + *:not(:is(h2, h3)) {
   border-top: 1px solid var(--oct-hairline);
   border-start-start-radius: var(--oct-radius-lg);
   border-start-end-radius: var(--oct-radius-lg);
 }
 
-.settings-card-section > h2 ~ *:last-child:not(.settings-section-note) {
+/* And closes at the last row before the next label, or at the last row there
+   is. */
+.settings-card-section
+  > :is(h2, h3)
+  ~ *:not(:is(h2, h3), .settings-section-note, :is(h2, h3) + p):has(+ :is(h2, h3)),
+.settings-card-section
+  > :is(h2, h3)
+  ~ *:last-child:not(:is(h2, h3), .settings-section-note, :is(h2, h3) + p) {
   border-bottom: 1px solid var(--oct-hairline);
   border-end-start-radius: var(--oct-radius-lg);
   border-end-end-radius: var(--oct-radius-lg);
@@ -833,8 +848,15 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   box-shadow: none;
 }
 
-.settings-card-section.settings-card-section--open > h2 {
+.settings-card-section.settings-card-section--open > :is(h2, h3),
+.settings-card-section > :is(h2, h3) + p {
   padding: 0 2px 10px;
+}
+
+/* A label that follows a card is the next question, not a caption on the one
+   above it. */
+.settings-card-section > * + :is(h2, h3) {
+  padding-top: var(--oct-space-6);
 }
 
 .settings-card-section.settings-card-section--open > summary,
@@ -849,7 +871,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 /* The section draws an edge now, so everything inside keeps the inset that
    holds text and controls off it. These rules used to zero that inset, back
    when the rows sat on the open page and had nothing to clear. */
-.settings-card-section > h2 ~ *:not(.settings-section-note),
+.settings-card-section > :is(h2, h3) ~ *:not(:is(h2, h3), .settings-section-note, :is(h2, h3) + p),
 .settings-card-section > .setgroup > *,
 .settings-card-section > .provider-settings__form > * {
   padding-inline: var(--oct-space-5);
