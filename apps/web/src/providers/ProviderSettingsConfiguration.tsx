@@ -107,6 +107,8 @@ export interface ProviderCreateFormPresentationProps {
   readonly initialProviderType?: ProviderCreateProviderType;
   readonly allowedProviderTypes?: ReadonlyArray<ProviderCreateProviderType>;
   readonly triggerLabel?: string;
+  readonly heading?: string;
+  readonly hint?: string;
 }
 
 export function ProviderCreateForm(
@@ -149,10 +151,10 @@ export function ProviderCreateForm(
       {manualOpen ? (
         <div className="provider-settings__manual-body">
           <div className="provider-settings__create-heading">
-            <h3>Custom endpoint or binary</h3>
+            <h3>{props.heading ?? "Custom endpoint or binary"}</h3>
             <p className="provider-settings__hint">
-              Installed runtimes are detected automatically. Use this only for a custom HTTP
-              endpoint or an unusual executable location.
+              {props.hint ??
+                "Installed runtimes are detected automatically. Use this only for a custom HTTP endpoint or an unusual executable location."}
             </p>
           </div>
           <form

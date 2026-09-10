@@ -102,6 +102,7 @@ import { OpenInApplicationSettings } from "../settings/OpenInApplicationSettings
 import { ProviderUsageLimitsPanel } from "../usage/ProviderUsageLimitsPanel";
 import type { OctantHostBridge } from "./hostBridge";
 import "../styles/settings.css";
+import "../styles/settings-specialty.css";
 import "../styles/extensions-settings.css";
 
 export interface SettingsViewProps {

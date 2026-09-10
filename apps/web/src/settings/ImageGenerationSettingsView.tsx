@@ -15,7 +15,6 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { SettingRow } from "./primitives";
-import "../styles/settings-specialty.css";
 
 // Matches ImageGenerationCustomSource.label's Schema.maxLength(120): reject
 // here so a too-long label never reaches the replace-settings command that
