@@ -5776,6 +5776,16 @@ input.switch:checked::after {
    2.97:1; over the floor it reads 8.36:1. A dark ground is unaffected —
    the floor is already darker than what is behind it — so the material
    loses nothing where the reference grounds actually sit. */
+/* A card that asked for the glass variant (0107). The recipe hands over an
+   unpainted section and names the material; the fill, the fallback, and both
+   opt-outs live here with the surfaces that already wear it, so the ladder
+   keeps one definition. A panel carries running text — sliders, labels, a
+   picker — so it takes the same thick step a card does. */
+[data-slot="card"][data-variant="glass"] {
+  background: var(--oct-surface);
+  box-shadow: 0 0 0 1px var(--oct-glass-stroke);
+}
+
 @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
   .zen-el {
     /* Two layers: the tint is an image over the floor's colour, because the
@@ -5793,13 +5803,20 @@ input.switch:checked::after {
     backdrop-filter: blur(var(--oct-glass-blur-chrome)) saturate(150%);
     -webkit-backdrop-filter: blur(var(--oct-glass-blur-chrome)) saturate(150%);
   }
+  [data-slot="card"][data-variant="glass"] {
+    background-color: var(--oct-glass-floor);
+    background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
+    backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
+    -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
+  }
 }
 
 /* Reduced transparency, as an app setting or an OS preference, takes the
    material back off. The ground stays; the panels over it go solid. */
 html[data-octant-reduced-transparency="true"] .zen-el,
 html[data-octant-reduced-transparency="true"] .zen-bar,
-html[data-octant-reduced-transparency="true"] .zen-pill {
+html[data-octant-reduced-transparency="true"] .zen-pill,
+html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="glass"] {
   border-color: var(--oct-border);
   background: var(--oct-surface);
   backdrop-filter: none;
@@ -5809,11 +5826,18 @@ html[data-octant-reduced-transparency="true"] .zen-el-head {
   border-bottom-color: var(--oct-border-soft);
   background: var(--oct-surface-warm);
 }
+/* The glass ring is a translucent ink meant to catch a ground through it.
+   Over an opaque fill it nearly disappears, so the card takes the ordinary
+   hairline back. */
+html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="glass"] {
+  box-shadow: 0 0 0 1px var(--oct-border);
+}
 
 @media (prefers-reduced-transparency: reduce) {
   .zen-el,
   .zen-bar,
-  .zen-pill {
+  .zen-pill,
+  [data-slot="card"][data-variant="glass"] {
     border-color: var(--oct-border);
     background: var(--oct-surface);
     backdrop-filter: none;
@@ -5822,6 +5846,9 @@ html[data-octant-reduced-transparency="true"] .zen-el-head {
   .zen-el-head {
     border-bottom-color: var(--oct-border-soft);
     background: var(--oct-surface-warm);
+  }
+  [data-slot="card"][data-variant="glass"] {
+    box-shadow: 0 0 0 1px var(--oct-border);
   }
 }
 
