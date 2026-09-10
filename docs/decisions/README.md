@@ -122,6 +122,7 @@ distilled successor of the earlier long-form design specifications.
 | [0108](0108-a-zen-space-may-stand-on-the-application-ground.md) | A Zen space may stand on the application ground | Accepted |
 | [0109](0109-a-settings-section-is-an-object.md) | A settings section is an object | Accepted |
 | [0110](0110-model-reviewed-approvals.md) | Native harness model-reviewed approvals as a reviewer swap | Proposed |
+| [0111](0111-host-driven-provider-oauth.md) | Host-driven provider OAuth auth kind and broker | Proposed |
 
 ## Adding an ADR
 
