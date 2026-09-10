@@ -1,10 +1,23 @@
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import type { ComputerUseProcessPort } from "./macOsComputerUseAdapter";
 import {
   persistProcessReceipt,
   reconcileProcessReceipts,
   type OwnedProcessReceiptHandle,
 } from "../process/nodeOwnedProcessReceipt";
+
+export interface ComputerUseProcessPort {
+  readonly run: (input: {
+    readonly executable: string;
+    readonly arguments: ReadonlyArray<string>;
+    readonly stdin?: string;
+    readonly signal: AbortSignal;
+  }) => Promise<{
+    readonly exitCode: number;
+    readonly stdout: string;
+    readonly stderr: string;
+  }>;
+  readonly reconcile?: () => Promise<void>;
+}
 
 const MAX_OUTPUT_BYTES = 64 * 1024;
 

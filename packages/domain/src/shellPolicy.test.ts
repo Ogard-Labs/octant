@@ -183,6 +183,7 @@ describe("shell settings policy", () => {
       voice: {},
       // Image generation starts with no custom OpenAI-compatible sources.
       imageGeneration: { customSources: [] },
+      computerUse: { enabled: true, automaticUpdates: true },
       // The host has not been told who is using it, so the profile carries no
       // name and no address — only the accent the initials avatar falls back to.
       userProfile: { accent: "indigo", avatar: { kind: "initials" } },

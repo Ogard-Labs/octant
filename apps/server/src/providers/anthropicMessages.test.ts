@@ -5,7 +5,7 @@ import {
   makeAnthropicCompatibleEndpoint,
   type AnthropicCompatibleFetch,
 } from "./anthropicCompatibleEndpoint";
-import { sendAnthropicMessagesTurn } from "./anthropicMessages";
+import { sendAnthropicMessagesTurn, buildAnthropicMessagesBody } from "./anthropicMessages";
 
 const instanceId = "anthropic-messages-test" as never;
 
@@ -47,6 +47,50 @@ function fixture(response: Response): AnthropicCompatibleFetch {
 }
 
 describe("sendAnthropicMessagesTurn", () => {
+  it("keeps screenshots inside their tool result when replaying observations", () => {
+    const body = buildAnthropicMessagesBody({
+      modelId: "fixture-model",
+      prompt: "",
+      history: [
+        {
+          role: "assistant",
+          text: "",
+          toolCalls: [{ toolCallId: "picture", toolName: "octant_computer", argumentsJson: "{}" }],
+        },
+        {
+          role: "user",
+          text: "",
+          toolResults: [
+            {
+              toolCallId: "picture",
+              resultJson: "{}",
+              isError: false,
+              images: [{ mimeType: "image/png", data: "AAAA" }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(body.messages).toEqual([
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "picture", name: "octant_computer", input: {} }],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "picture",
+            content: [
+              { type: "text", text: "{}" },
+              { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+            ],
+          },
+        ],
+      },
+    ]);
+  });
   it("sends max_tokens in the Messages request body", async () => {
     const { fetch, read } = captureRequest(
       fixture(
