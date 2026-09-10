@@ -66,7 +66,9 @@ describe("ImageGenerationSettingsView", () => {
     render(
       <ImageGenerationSettingsView onSettingsChange={vi.fn()} settings={{ customSources: [] }} />,
     );
-    expect(screen.getByText(/Sources connect a provider and image model/)).toBeVisible();
+    expect(
+      screen.getByText(/Connect an OpenAI-compatible image API's provider and model/),
+    ).toBeVisible();
     expect(screen.getByText(/Saved profiles in Image generator/)).toBeVisible();
   });
 
