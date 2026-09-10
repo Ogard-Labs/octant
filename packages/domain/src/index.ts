@@ -101,6 +101,7 @@ export * from "./agentRunConversationPolicy";
 export * from "./agentRunWorkspacePolicy";
 export * from "./agentRunAuthorityCeiling";
 export * from "./agentRunLiveGrant";
+export * from "./agentMessagePolicy";
 export * from "./automationPolicy";
 export * from "./linkedThreadPolicy";
 export * from "./linkedThreadPromptPolicy";
