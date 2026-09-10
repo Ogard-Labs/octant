@@ -21,6 +21,10 @@ function repository() {
   git(root, "init", "-b", "main");
   git(root, "config", "user.name", "Octant Test");
   git(root, "config", "user.email", "test@octant.local");
+  // Host signing/fsmonitor must not leak into fixture commits; 102 signed
+  // commits miss the unit timeout on a managed Git identity.
+  git(root, "config", "commit.gpgsign", "false");
+  git(root, "config", "core.fsmonitor", "false");
   return root;
 }
 function commit(root: string, subject: string) {
