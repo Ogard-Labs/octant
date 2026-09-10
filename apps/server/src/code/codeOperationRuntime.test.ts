@@ -557,9 +557,29 @@ describe("CodeOperationRuntime", () => {
   it("adds fixed Browser guidance when the task explicitly selects Browser", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const provider = providerConnection(queue);
+    const authority = decodeToolActionAuthority({
+      hostId: "90000000-0000-4000-8000-000000000010",
+      mode: "code",
+      projectId: thread().projectId,
+      rootId: "90000000-0000-4000-8000-000000000009",
+      worktreeId: checkoutId,
+      providerInstanceId: thread().providerInstanceId,
+      extension: { kind: "core" },
+    });
+    const browserSnapshot = decodeBrowserAutomationSnapshot({
+      status: "ready",
+      threadId,
+      evidence: [],
+    });
     const fixture = runtimeFixture({
       provider: providerDriver(provider),
-      browserAutomation: {} as never,
+      browserAutomation: {
+        resolveAuthority: () => authority,
+        inspectThread: () => browserSnapshot,
+        create: async () => browserSnapshot,
+        act: async () => browserSnapshot,
+        releaseThread: async () => browserSnapshot,
+      },
     });
     try {
       await fixture.runtime.execute(windowId, {

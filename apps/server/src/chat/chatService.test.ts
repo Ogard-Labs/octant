@@ -35,6 +35,7 @@ import {
 } from "@octant/contracts";
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import { browserUseSelection } from "@octant/plugin-host/browser-use";
+import { decodeExtensionSelection } from "@octant/contracts/extensions";
 import {
   decodeContentSha256,
   decodePreviewContextSelectionId,
@@ -1003,14 +1004,16 @@ describe("ChatService", () => {
       { windowId: browserWindow },
     );
     expect(sent).toMatchObject({ kind: "turn-created" });
-    const browserEntries = planTurn.mock.calls.at(-1)?.[0].entries.filter((entry) =>
-      String(entry.source.referenceId).includes("app:browser"),
-    );
+    const browserEntries = planTurn.mock.calls
+      .at(-1)?.[0]
+      .entries.filter((entry) => String(entry.source.referenceId).includes("app:browser"));
     expect(browserEntries).toHaveLength(1);
     expect(browserEntries?.[0]?.posture).toBe("required");
-    expect((planTurn.mock.calls.at(-1)?.[0].entries ?? []).some((entry) =>
-      String(entry.label).includes("user selected Octant's built-in Browser"),
-    )).toBe(true);
+    expect(
+      (planTurn.mock.calls.at(-1)?.[0].entries ?? []).some((entry) =>
+        String(entry.label).includes("user selected Octant's built-in Browser"),
+      ),
+    ).toBe(true);
   });
 
   it("refuses an invalid Browser receipt before provider acquisition", async () => {
@@ -1035,7 +1038,12 @@ describe("ChatService", () => {
           threadId: created.thread.id,
           expectedVersion: created.thread.version,
           prompt: "Open the docs",
-          extensionSelections: [{ ...selection, catalogEpoch: "sha256:invalid" as never }],
+          extensionSelections: [
+            decodeExtensionSelection({
+              ...selection,
+              catalogEpoch: `sha256:${"f".repeat(64)}`,
+            }),
+          ],
         },
         { windowId: browserWindow },
       ),
@@ -1065,6 +1073,51 @@ describe("ChatService", () => {
       ),
     ).rejects.toMatchObject({ failure: { category: "unavailable" } });
     expect(fakeDriver.acquireInputs).toHaveLength(0);
+  });
+
+  it("fails closed when a persisted Browser selection is resumed without a window capability", async () => {
+    const browserWindow = decodeWindowId("84000000-0000-4000-8000-000000000013");
+    const { service, fakeDriver } = openFixture({
+      turnOutcome: "interrupted",
+      resolveAppManagedTools: () => ({
+        definitions: [{ name: "octant_browser", inputSchema: { type: "object", properties: {} } }],
+        execute: async () => ({ result: {} }),
+      }),
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Resume Browser selection",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sent = await service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Continue this",
+        extensionSelections: [browserUseSelection("chat-resume-browser")],
+      },
+      { windowId: browserWindow },
+    );
+    if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.outcome === "interrupted",
+    );
+    const interrupted = service.read(created.thread.id);
+    const attempt = interrupted.turns[0]!.attempts[0]!;
+    const resumed = await service.execute({
+      kind: "resume-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: interrupted.thread.version,
+      turnId: sent.turn.id,
+      attemptId: attempt.id,
+    });
+    expect(resumed).toMatchObject({ kind: "attempt-updated" });
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "failed",
+    );
+    expect(fakeDriver.resumeInputs).toHaveLength(0);
   });
 
   it("honors a pre-admitted thread id for linked Chat creation", async () => {
