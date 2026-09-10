@@ -269,7 +269,11 @@ export function createComputerUseToolService(options: {
           result ?? refused("not-approved", "Computer use was denied, expired, or interrupted.")
         );
       }
-      if (requiresApproval) grants.set(grantKey, Date.now() + 5 * 60_000);
+      if (requiresApproval) {
+        const approved = view.events.find((event) => event.kind === "approval-approved");
+        if (approved !== undefined)
+          grants.set(grantKey, Date.parse(approved.occurredAt) + 5 * 60_000);
+      }
       if (result.kind === "observation") {
         if (observations.size >= 256) observations.clear();
         observations.set(String(result.observationId), { owner, appId });

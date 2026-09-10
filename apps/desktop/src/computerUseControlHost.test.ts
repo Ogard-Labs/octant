@@ -25,6 +25,8 @@ function fixture(protectedField = false, additionalElements = 0) {
           : name === "get_window_state"
             ? {
                 snapshot_id: `s${String(++snapshot).padStart(8, "0")}`,
+                screenshot_width: 100,
+                screenshot_height: 100,
                 elements: [
                   { element_index: 0, role: "AXWindow", label: "Fixture" },
                   {
@@ -55,7 +57,7 @@ function fixture(protectedField = false, additionalElements = 0) {
             : { ok: true };
     return {
       text: "",
-      images: [],
+      images: [{ mimeType: "image/png", dataBase64: "AAAA" }],
       structuredJson: JSON.stringify(data),
       rawJson: "{}",
       isError: false,
@@ -90,6 +92,14 @@ describe("Thread-owned computer control", () => {
       if (result.kind === "observation") {
         expect(result.elements.length).toBeLessThanOrEqual(256);
         expect(result.truncated).toBe(true);
+        expect(
+          await host.execute(owner, {
+            operation: "click",
+            observationId: result.observationId,
+            x: 10,
+            y: 10,
+          }),
+        ).toMatchObject({ kind: "refused", reason: "incomplete-observation" });
       }
     } finally {
       await host.close();

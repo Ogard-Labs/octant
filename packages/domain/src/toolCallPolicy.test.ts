@@ -216,7 +216,7 @@ describe("resolveToolCall fail-closed order", () => {
     });
   });
 
-  it("3. denies chat mode for filesystem/shell-class tools at mode-policy", () => {
+  it("allows approved host computer use in virtual Chat", () => {
     const decision = resolveToolCall(
       baseInput({
         capability: decodeToolActionCapability({ id: "computer-use", version: 1 }),
@@ -230,11 +230,7 @@ describe("resolveToolCall fail-closed order", () => {
         },
       }),
     );
-    expect(decision).toMatchObject({
-      kind: "deny",
-      step: "mode-policy",
-      reason: "mode-capability-denied",
-    });
+    expect(decision.kind).toBe("allow");
   });
 
   it("4. denies when the provider does not support app-managed tools", () => {

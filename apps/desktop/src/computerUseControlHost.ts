@@ -15,6 +15,8 @@ interface ObservedWindow {
   readonly windowId: number;
   readonly snapshotId: string;
   readonly elements: ReadonlyArray<Record<string, unknown>>;
+  readonly truncated: boolean;
+  readonly hasProtectedFields: boolean;
   readonly imageWidth?: number;
   readonly imageHeight?: number;
 }
@@ -184,6 +186,10 @@ export function createComputerUseControlHost(options: {
           const scopedElements = windowElements(response.data.elements.filter(record));
           const projected = boundedElements(scopedElements);
           const elements = projected.map((item) => item.source);
+          const truncated =
+            elements.length < scopedElements.length ||
+            response.data.elements_complete === false ||
+            response.data.truncated === true;
           const imageWidth =
             response.images.length > 0 &&
             typeof response.data.screenshot_width === "number" &&
@@ -206,6 +212,8 @@ export function createComputerUseControlHost(options: {
             windowId,
             snapshotId: response.data.snapshot_id,
             elements,
+            truncated,
+            hasProtectedFields: scopedElements.some(isProtected),
             ...(imageWidth === undefined || imageHeight === undefined
               ? {}
               : { imageWidth, imageHeight }),
@@ -224,10 +232,7 @@ export function createComputerUseControlHost(options: {
               ? {}
               : { imageWidth, imageHeight }),
             elements: projected.map((item) => item.value),
-            truncated:
-              elements.length < scopedElements.length ||
-              response.data.elements_complete === false ||
-              response.data.truncated === true,
+            truncated,
             ...(image === undefined || image.dataBase64.length > 2_097_152
               ? {}
               : { image: { mimeType: image.mimeType, data: image.dataBase64 } }),
@@ -294,6 +299,11 @@ export function createComputerUseControlHost(options: {
         if (before === undefined) return refused("window-owned", "Another task owns this window.");
         let element: Record<string, unknown> | undefined;
         if (command.operation === "click" && "x" in command) {
+          if (before.observation.truncated)
+            return refused(
+              "incomplete-observation",
+              "Use an observed accessibility element when the window observation is truncated.",
+            );
           if (
             old.imageWidth === undefined ||
             old.imageHeight === undefined ||
@@ -306,7 +316,7 @@ export function createComputerUseControlHost(options: {
               "invalid-image-position",
               "Use a position inside the latest returned window screenshot.",
             );
-          if (before.observation.elements.some(isProtected))
+          if (before.observation.hasProtectedFields)
             return refused(
               "protected-field",
               "Use an observed accessibility element rather than a pixel click while protected fields are present.",

@@ -1178,14 +1178,14 @@ async function copyBuiltDirectory(
   await copyRuntimeDirectory(source, resolve(stageRoot, repositoryPath));
 }
 
-async function stageExternalRuntimePackages(
+export async function stageExternalRuntimePackages(
   repositoryRoot: string,
   stageRoot: string,
   packageNames: ReadonlyArray<string> = EXTERNAL_RUNTIME_PACKAGES,
   application: "desktop" | "server" = "server",
 ): Promise<void> {
   const destinationNodeModules = resolve(stageRoot, `apps/${application}/node_modules`);
-  const rootRequire = createRequire(resolve(repositoryRoot, "apps/server/package.json"));
+  const rootRequire = createRequire(resolve(repositoryRoot, `apps/${application}/package.json`));
   const stagedVersions = new Map<string, string>();
   for (const packageName of packageNames) {
     await stageExternalPackage(packageName, rootRequire, destinationNodeModules, stagedVersions);
@@ -1242,7 +1242,12 @@ async function stageExternalPackage(
 }
 
 function isSdkBundledExecutablePackage(packageName: string): boolean {
-  return packageName.startsWith("@anthropic-ai/claude-agent-sdk-");
+  // Cua uses @ubjs/node's JavaScript library resolver with its own N-API
+  // runtime; the optional generic @ubjs native backends are never loaded.
+  return (
+    packageName.startsWith("@anthropic-ai/claude-agent-sdk-") ||
+    packageName.startsWith("@ubjs/node-")
+  );
 }
 
 async function resolvePackageManifest(
@@ -1279,7 +1284,12 @@ async function copyRuntimeDirectory(source: string, destination: string): Promis
   await cp(source, destination, {
     recursive: true,
     dereference: true,
-    filter: (path) => !isForbiddenPath(relative(source, path)),
+    // Dependencies are resolved from their manifests and staged once below the
+    // app. Copying a package-manager's nested tree duplicates native binaries
+    // outside the locations verified and signed by this pipeline.
+    filter: (path) =>
+      !relative(source, path).split(sep).includes("node_modules") &&
+      !isForbiddenPath(relative(source, path)),
   });
 }
 

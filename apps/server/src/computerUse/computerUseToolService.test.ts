@@ -70,6 +70,59 @@ function fixture() {
 }
 
 describe("Computer use through a provider tool", () => {
+  it("expires an app grant from approval time even when the first action is slow", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const approvedAt = Date.now();
+    const f = fixture();
+    const command = {
+      name: "octant_computer",
+      inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+    };
+    try {
+      const first = f.tools.execute(command);
+      await vi.waitFor(() =>
+        expect(f.service.runtime.list(owner.windowId)[0]?.pendingApproval).toBeDefined(),
+      );
+      const view = f.service.runtime.list(owner.windowId)[0];
+      if (view?.pendingApproval === undefined) throw new Error("Expected approval.");
+      f.execute.mockImplementationOnce(async () => {
+        vi.setSystemTime(approvedAt + 120_000);
+        return decodeComputerControlResult({
+          kind: "windows",
+          appId: "com.example.Fixture",
+          windows: [],
+        });
+      });
+      await f.service.runtime.decide({
+        ownerWindowId: owner.windowId,
+        threadId: owner.threadId,
+        authority,
+        sessionId: view.sessionId,
+        actionId: view.pendingApproval.actionId,
+        approvalId: view.pendingApproval.approvalId,
+        decision: "approved",
+      });
+      await first;
+      vi.setSystemTime(approvedAt + 301_000);
+      const second = f.tools.execute(command);
+      try {
+        await vi.waitFor(() =>
+          expect(
+            f.service.runtime
+              .list(owner.windowId)
+              .some((session) => session.pendingApproval !== undefined),
+          ).toBe(true),
+        );
+        expect(f.execute).toHaveBeenCalledOnce();
+      } finally {
+        await f.tools.close?.();
+        await second;
+      }
+    } finally {
+      await f.service.close();
+      vi.useRealTimers();
+    }
+  });
   it("revokes a pending app approval when the tool session closes", async () => {
     const f = fixture();
     try {

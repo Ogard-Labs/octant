@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { readFile, mkdtemp, mkdir, writeFile, access, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { DESKTOP_PRELOAD_FILENAME } from "../apps/desktop/src/runtimePaths";
 import {
@@ -50,11 +51,47 @@ import {
   validateLinuxNativePayloadAllowlist,
   validateNativePayloadAllowlist,
   waitForChildExit,
+  stageExternalRuntimePackages,
 } from "./package-desktop";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 
 describe("desktop packaging boundary", () => {
+  it("stages native SDK dependencies once at their signed runtime location", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "octant-package-dependencies-"));
+    try {
+      const app = resolve(root, "apps/desktop");
+      const sdk = resolve(app, "node_modules/fixture-sdk");
+      const native = resolve(sdk, "node_modules/fixture-native");
+      await mkdir(native, { recursive: true });
+      await writeFile(resolve(app, "package.json"), "{}");
+      await writeFile(
+        resolve(sdk, "package.json"),
+        JSON.stringify({
+          name: "fixture-sdk",
+          version: "1.0.0",
+          dependencies: { "fixture-native": "1.0.0" },
+        }),
+      );
+      await writeFile(
+        resolve(native, "package.json"),
+        JSON.stringify({ name: "fixture-native", version: "1.0.0" }),
+      );
+      await writeFile(resolve(native, "binding.node"), "fixture payload");
+      await stageExternalRuntimePackages(root, resolve(root, "stage"), ["fixture-sdk"], "desktop");
+      expect(
+        await readFile(
+          resolve(root, "stage/apps/desktop/node_modules/fixture-native/binding.node"),
+          "utf8",
+        ),
+      ).toBe("fixture payload");
+      await expect(
+        access(resolve(root, "stage/apps/desktop/node_modules/fixture-sdk/node_modules")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it("defaults the Apple Silicon packager options, and can target Linux x64 AppImage packaging", () => {
     // The version is not cosmetic: the updater compares it against the feed,
     // and a build that cannot say which version it is cannot refuse a
@@ -197,6 +234,9 @@ describe("desktop packaging boundary", () => {
     expect(PACKAGED_ARM64_FILES).toEqual([
       "native/octant-keychain-helper",
       "native/octant-code-file-helper",
+      "native/cua-driver",
+      "app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
+      "app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
       "app/apps/server/node_modules/node-pty/build/Release/pty.node",
       "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
     ]);
