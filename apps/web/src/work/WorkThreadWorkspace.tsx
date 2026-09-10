@@ -349,14 +349,14 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     mode: "work",
     projectId: props.initialThread?.projectId ?? null,
     threadId: props.initialThread?.id ?? props.threadId,
-    providerFamily,
+    ...(providerFamily === undefined ? {} : { providerFamily }),
   });
   const browser = useBrowserUseMention({
     textarea: () => textareaRef.current,
     draft: composerDraft.text,
     onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
     scopeKey: String(props.threadId),
-    available: props.browserAvailable,
+    ...(props.browserAvailable === undefined ? {} : { available: props.browserAvailable }),
     onChoose: () => void extensionDraft.resolveReference("@browser"),
   });
   const slash = useComposerSlashCommands({
@@ -437,6 +437,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const canSubmit =
     trimmed.length > 0 &&
     !creating &&
+    !slash.resolving &&
     !completionLocked &&
     steered.pending === undefined &&
     projectId !== undefined &&

@@ -169,7 +169,7 @@ export function ComputerUseMention({
   surface,
 }: {
   readonly controller: ReturnType<typeof useComputerUseMention>;
-  readonly surface?: "chips" | "typeahead";
+  readonly surface?: "chips" | "typeahead" | undefined;
 }) {
   return <ApplicationMention controller={controller} kind="computer" surface={surface} />;
 }
@@ -179,7 +179,7 @@ export function BrowserUseMention({
   surface,
 }: {
   readonly controller: ReturnType<typeof useBrowserUseMention>;
-  readonly surface?: "chips" | "typeahead";
+  readonly surface?: "chips" | "typeahead" | undefined;
 }) {
   return <ApplicationMention controller={controller} kind="browser" surface={surface} />;
 }
@@ -191,13 +191,13 @@ function ApplicationMention({
 }: {
   readonly controller: {
     readonly open: boolean;
-    readonly selection?: ExtensionSelection;
+    readonly selection?: ExtensionSelection | undefined;
     readonly choose: () => void;
     readonly clear: () => void;
     readonly listId: string;
   };
   readonly kind: "computer" | "browser";
-  readonly surface?: "chips" | "typeahead";
+  readonly surface?: "chips" | "typeahead" | undefined;
 }) {
   const label = kind === "computer" ? "Computer" : "Browser";
   const detail = kind === "computer" ? "Computer use" : "Built-in browser";

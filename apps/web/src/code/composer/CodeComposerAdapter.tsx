@@ -218,18 +218,19 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     onDraftChange: setPrompt,
     scopeKey: "code-draft",
   });
+  const selectedFamily = selectedProviderFamily(props.providerGroups, props.selectedProviderInstanceId);
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "code",
     projectId: props.projectId ?? null,
-    providerFamily: selectedProviderFamily(props.providerGroups, props.selectedProviderInstanceId),
+    ...(selectedFamily === undefined ? {} : { providerFamily: selectedFamily }),
   });
   const browser = useBrowserUseMention({
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,
     scopeKey: "code-draft",
-    available: props.browserAvailable,
+    ...(props.browserAvailable === undefined ? {} : { available: props.browserAvailable }),
     onChoose: () => void extensionDraft.resolveReference("@browser"),
   });
   const slash = useComposerSlashCommands({
@@ -410,7 +411,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // cannot start until one is chosen.
   const [submitting, setSubmitting] = useState(false);
   const canSubmit =
-    trimmed.length > 0 && !props.creating && !submitting && props.projectId !== undefined;
+    trimmed.length > 0 &&
+    !props.creating &&
+    !submitting &&
+    !slash.resolving &&
+    props.projectId !== undefined;
 
   // Server-authoritative ref catalog for the branch selector, fetched lazily
   // the first time the selector opens.

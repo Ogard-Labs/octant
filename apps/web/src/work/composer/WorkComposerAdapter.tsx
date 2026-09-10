@@ -95,18 +95,19 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     onDraftChange: setPrompt,
     scopeKey: "work-draft",
   });
+  const selectedFamily = selectedProviderFamily(props.providerGroups, props.selectedProviderInstanceId);
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "work",
     projectId: props.projectId ?? null,
-    providerFamily: selectedProviderFamily(props.providerGroups, props.selectedProviderInstanceId),
+    ...(selectedFamily === undefined ? {} : { providerFamily: selectedFamily }),
   });
   const browser = useBrowserUseMention({
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,
     scopeKey: "work-draft",
-    available: props.browserAvailable,
+    ...(props.browserAvailable === undefined ? {} : { available: props.browserAvailable }),
     onChoose: () => void extensionDraft.resolveReference("@browser"),
   });
   const slash = useComposerSlashCommands({
@@ -141,7 +142,8 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   // cannot start until one is chosen. Blocking here is what makes the
   // Project control a requirement rather than a suggestion.
   const [submitting, setSubmitting] = useState(false);
-  const canSubmit = trimmed.length > 0 && !props.creating && !submitting && hasFolder;
+  const canSubmit =
+    trimmed.length > 0 && !props.creating && !submitting && !slash.resolving && hasFolder;
 
   const submit = useCallback(() => {
     if (!canSubmit) return;

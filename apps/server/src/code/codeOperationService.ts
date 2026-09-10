@@ -2208,6 +2208,13 @@ export class CodeOperationService {
         "unavailable",
         "Provider prompt evidence is unavailable.",
       );
+    if (command.extensionSelections?.some((selection) => selection.kind === "skill")) {
+      return this.#failed(
+        command.operationId,
+        "unavailable",
+        "Selected skill context is unavailable for Code on this host.",
+      );
+    }
     const supportsImages = this.#options.supportsAttachments?.(thread) === true;
     // Notes the user pointed at the running product ride with the next turn
     // they send. They are quoted as evidence beside the prompt, never folded

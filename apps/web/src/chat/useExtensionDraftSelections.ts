@@ -20,7 +20,7 @@ import {
 import { buildSkillCatalog, filterSkillCatalogForScope } from "@octant/plugin-host";
 import { parseComposerReference } from "@octant/plugin-host/composer";
 import { sourceQualifiedSkillId } from "@octant/plugin-host/model";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Schema } from "effect";
 import type { ComposerExtensionSelection } from "../composer/composerExtensionSelection";
 
@@ -34,26 +34,38 @@ export function useExtensionDraftSelections(options: {
 }) {
   const computerEnabled = useComputerUseEnabled();
   const [receipts, setReceipts] = useState<ReadonlyArray<ComposerExtensionSelection>>([]);
+  const resolutionGeneration = useRef(0);
 
   const mode = options.mode ?? "chat";
   const projectId = options.thread?.projectId ?? options.projectId ?? null;
   const threadId = options.thread?.id ?? options.threadId ?? null;
 
-  const clear = useCallback(() => setReceipts([]), []);
+  const clear = useCallback(() => {
+    resolutionGeneration.current += 1;
+    setReceipts([]);
+  }, []);
 
-  useEffect(clear, [clear, mode, options.providerFamily, projectId, threadId]);
+  useEffect(() => {
+    resolutionGeneration.current += 1;
+    setReceipts([]);
+  }, [mode, options.providerFamily, projectId, threadId]);
 
   const resolveReference = useCallback(
     async (draft: string): Promise<boolean> => {
       const reference = draft.trim();
+      const generation = resolutionGeneration.current;
+      const commit = (update: (current: ReadonlyArray<ComposerExtensionSelection>) => ReadonlyArray<ComposerExtensionSelection>) => {
+        if (resolutionGeneration.current !== generation) return;
+        setReceipts(update);
+      };
       if (reference.toLowerCase() === "@computer") {
         if (!computerEnabled) {
-          setReceipts((current) =>
+          commit((current) =>
             upsertReceipt(current, blockedReceipt("@Computer", "plugin-disabled")),
           );
           return true;
         }
-        setReceipts((current) =>
+        commit((current) =>
           upsertReceipt(current, {
             reference: "@Computer",
             label: "Computer",
@@ -64,7 +76,7 @@ export function useExtensionDraftSelections(options: {
         return true;
       }
       if (reference.toLowerCase() === "@browser") {
-        setReceipts((current) =>
+        commit((current) =>
           upsertReceipt(current, {
             reference: "@Browser",
             label: "Browser",
@@ -75,26 +87,32 @@ export function useExtensionDraftSelections(options: {
         return true;
       }
       if (parseComposerReference(reference).kind === "plain-text") return false;
-      if (
-        options.client === undefined ||
-        options.providerFamily === undefined
-      ) {
-        setReceipts((current) => upsertReceipt(current, blockedReceipt(reference, "unavailable")));
+      if (options.client === undefined || options.providerFamily === undefined) {
+        commit((current) => upsertReceipt(current, blockedReceipt(reference, "unavailable")));
         return true;
       }
       try {
+        const scopedProjectId = decodeScopeUuid(projectId);
+        const scopedThreadId = decodeScopeUuid(threadId);
+        if (
+          (projectId !== null && scopedProjectId === null) ||
+          (threadId !== null && scopedThreadId === null)
+        ) {
+          commit((current) => upsertReceipt(current, blockedReceipt(reference, "invalid-scope")));
+          return true;
+        }
         let snapshot = await options.client.snapshot();
         const scope = Schema.decodeUnknownSync(ExtensionActivationScopeSchema)({
           hostId: LOCAL_HOST_ID,
           mode,
-          projectId: decodeScopeUuid(projectId),
-          threadId: decodeScopeUuid(threadId),
+          projectId: scopedProjectId,
+          threadId: scopedThreadId,
           providerFamily: options.providerFamily,
         });
         const effective = await options.client.effectiveState({ scope });
         if (snapshot.sequence !== effective.sequence) snapshot = await options.client.snapshot();
         if (snapshot.sequence !== effective.sequence || effective.stale) {
-          setReceipts((current) =>
+          commit((current) =>
             upsertReceipt(current, blockedReceipt(reference, "stale-catalog-epoch")),
           );
           return true;
@@ -106,7 +124,7 @@ export function useExtensionDraftSelections(options: {
         );
         if (result.kind === "plain-text") return false;
         if (result.kind === "selected") {
-          setReceipts((current) =>
+          commit((current) =>
             upsertReceipt(current, {
               reference,
               label: result.label,
@@ -116,7 +134,7 @@ export function useExtensionDraftSelections(options: {
           );
           return true;
         }
-        setReceipts((current) =>
+        commit((current) =>
           upsertReceipt(
             current,
             blockedReceipt(
@@ -129,7 +147,7 @@ export function useExtensionDraftSelections(options: {
         );
         return true;
       } catch {
-        setReceipts((current) => upsertReceipt(current, blockedReceipt(reference, "unavailable")));
+        commit((current) => upsertReceipt(current, blockedReceipt(reference, "unavailable")));
         return true;
       }
     },
@@ -137,13 +155,18 @@ export function useExtensionDraftSelections(options: {
   );
 
   const remove = useCallback(
-    (reference: string) =>
-      setReceipts((current) => current.filter((receipt) => receipt.reference !== reference)),
+    (reference: string) => {
+      resolutionGeneration.current += 1;
+      setReceipts((current) => current.filter((receipt) => receipt.reference !== reference));
+    },
     [],
   );
 
   const restore = useCallback(
-    (next: ReadonlyArray<ComposerExtensionSelection>) => setReceipts([...next]),
+    (next: ReadonlyArray<ComposerExtensionSelection>) => {
+      resolutionGeneration.current += 1;
+      setReceipts([...next]);
+    },
     [],
   );
 

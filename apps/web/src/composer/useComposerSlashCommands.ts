@@ -21,6 +21,7 @@ export function useComposerSlashCommands(input: {
   );
   const [token, setToken] = useState<ReturnType<typeof parseSlashCommandToken>>();
   const [activeIndex, setActiveIndex] = useState(0);
+  const [resolving, setResolving] = useState(false);
   const matches = token === undefined ? [] : filterOctantCommands(commands, token.query);
   const open = token !== undefined && commands.length > 0;
   const active = open ? matches[activeIndex] : undefined;
@@ -35,10 +36,24 @@ export function useComposerSlashCommands(input: {
     input.onDraftChange(applied.draft, applied.caretIndex);
     setToken(undefined);
     setActiveIndex(0);
-    if (command.action.kind === "run") command.action.run();
-    else void input.onResolveExtensionReference?.(command.action.reference);
+    if (command.action.kind === "run") {
+      command.action.run();
+      return;
+    }
+    setResolving(true);
+    const pending = input.onResolveExtensionReference?.(command.action.reference);
+    if (pending === undefined) {
+      setResolving(false);
+      return;
+    }
+    void pending.finally(() => setResolving(false));
   };
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    if (event.nativeEvent.isComposing) return false;
+    if (resolving) {
+      event.preventDefault();
+      return true;
+    }
     if (open && matches.length > 0) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
@@ -63,7 +78,7 @@ export function useComposerSlashCommands(input: {
     }
     return false;
   };
-  return { active, activeIndex, choose, handleKeyDown, listId, matches, open, sync };
+  return { active, activeIndex, choose, handleKeyDown, listId, matches, open, resolving, sync };
 }
 
 export function ComposerSlashTypeahead(props: {

@@ -32,6 +32,9 @@ export const BROWSER_USE_PLUGIN = decodeExtensionPackageManifest({
   ],
 });
 
+export const BROWSER_SELECTION_GUIDANCE =
+  "The user selected Octant's built-in Browser for this task. Use the octant_browser tool for web pages; do not launch an external browser or use shell networking. Browser origin approval is still required at the first action that needs it.";
+
 export function browserUseSelection(reference: string): ExtensionSelection {
   return decodeExtensionSelection({
     kind: "plugin",
@@ -50,5 +53,18 @@ export function isBrowserUseSelection(selection: ExtensionSelection): boolean {
     selection.kind === "plugin" &&
     (String(selection.extensionId) === String(BROWSER_USE_PLUGIN.extensionId) ||
       String(selection.packageId) === String(BROWSER_USE_PLUGIN.packageId))
+  );
+}
+
+/** Validate every pinned field before a Browser selection reaches a provider. */
+export function validateBrowserUseSelection(selection: ExtensionSelection): boolean {
+  return (
+    selection.kind === "plugin" &&
+    String(selection.extensionId) === String(BROWSER_USE_PLUGIN.extensionId) &&
+    String(selection.packageId) === String(BROWSER_USE_PLUGIN.packageId) &&
+    String(selection.componentId) === "browser" &&
+    String(selection.packageVersion) === String(BROWSER_USE_PLUGIN.version) &&
+    String(selection.packageDigest) === String(BROWSER_USE_PLUGIN.digest) &&
+    String(selection.catalogEpoch) === String(BROWSER_USE_PLUGIN.digest)
   );
 }

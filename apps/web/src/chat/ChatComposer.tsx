@@ -7,6 +7,7 @@ import {
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import {
   useId,
+  useCallback,
   useLayoutEffect,
   useRef,
   useState,
@@ -199,13 +200,28 @@ export type ChatComposerThreadMentions = ThreadMentions;
 export type ChatComposerExtensionSelection = ComposerExtensionSelection;
 
 export function ChatComposer(props: ChatComposerProps) {
+  const messageRef = useRef<HTMLTextAreaElement>(null);
+  const [extensionResolving, setExtensionResolving] = useState(false);
+  const resolveExtensionReference = useCallback(
+    async (reference: string): Promise<boolean> => {
+      const resolver = props.onResolveExtensionReference;
+      if (resolver === undefined) return false;
+      setExtensionResolving(true);
+      try {
+        return await resolver(reference);
+      } finally {
+        setExtensionResolving(false);
+      }
+    },
+    [props.onResolveExtensionReference],
+  );
   const computer = useComputerUseMention({
     textarea: () => messageRef.current,
     draft: props.draft,
     onDraftChange: props.onDraftChange,
     scopeKey: String(props.caretRestoreKey ?? "chat-draft"),
     onChoose: () => {
-      void props.onResolveExtensionReference?.("@computer");
+      void resolveExtensionReference("@computer");
     },
   });
   const browser = useBrowserUseMention({
@@ -213,9 +229,9 @@ export function ChatComposer(props: ChatComposerProps) {
     draft: props.draft,
     onDraftChange: props.onDraftChange,
     scopeKey: String(props.caretRestoreKey ?? "chat-draft"),
-    available: props.browserAvailable,
+    ...(props.browserAvailable === undefined ? {} : { available: props.browserAvailable }),
     onChoose: () => {
-      void props.onResolveExtensionReference?.("@browser");
+      void resolveExtensionReference("@browser");
     },
   });
   const statusId = useId();
@@ -226,7 +242,6 @@ export function ChatComposer(props: ChatComposerProps) {
   const commandListId = useId();
   const attachment = props.attachment ?? { kind: "supported" as const };
   const imageAttachment = props.imageAttachment ?? attachment;
-  const messageRef = useRef<HTMLTextAreaElement>(null);
   const mentionCandidates = props.threadMentions?.candidates ?? [];
   const mention = useThreadMentionTypeahead({
     mentions: props.threadMentions,
@@ -258,7 +273,11 @@ export function ChatComposer(props: ChatComposerProps) {
   const [sendPending, setSendPending] = useState(false);
   const [attachmentNotice, setAttachmentNotice] = useState<string>();
   const [sendError, setSendError] = useState<string | undefined>(undefined);
-  const sendDisabledReason = sendPending ? "Sending message…" : baseSendDisabledReason;
+  const sendDisabledReason = extensionResolving
+    ? "Resolving selected extension…"
+    : sendPending
+      ? "Sending message…"
+      : baseSendDisabledReason;
   const stopDisabledReason =
     props.stopDisabledReason ??
     (props.isSending && props.onStop === undefined
@@ -390,7 +409,7 @@ export function ChatComposer(props: ChatComposerProps) {
       command.action.run();
       return;
     }
-    void props.onResolveExtensionReference?.(command.action.reference);
+    void resolveExtensionReference(command.action.reference);
   }
 
   function onDraftKeyUp(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -427,9 +446,13 @@ export function ChatComposer(props: ChatComposerProps) {
       return;
     }
     if (mention.handleKeyDown(event)) return;
+    if (extensionResolving) {
+      event.preventDefault();
+      return;
+    }
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
-    if (await props.onResolveExtensionReference?.(props.draft)) return;
+    if (await resolveExtensionReference(props.draft)) return;
     send();
   }
 

@@ -266,7 +266,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     mode: "code",
     projectId: view?.thread.projectId ?? null,
     threadId: view === undefined ? props.threadId : view.thread.id,
-    providerFamily,
+    ...(providerFamily === undefined ? {} : { providerFamily }),
   });
   const browser = useBrowserUseMention({
     textarea: () => textareaRef.current,
@@ -277,7 +277,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       props.controller.setPendingDraft?.(next);
     },
     scopeKey: String(props.threadId),
-    available: props.browserAvailable,
+    ...(props.browserAvailable === undefined ? {} : { available: props.browserAvailable }),
     onChoose: () => void extensionDraft.resolveReference("@browser"),
     onSelectionEdited: () => {
       draftRevisionRef.current += 1;
@@ -534,7 +534,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // A running turn never blocks the composer: the host admits one turn per
   // thread, so a message sent during one is held by the surface and sent the
   // moment that turn stops, without the user having to manage it.
-  const canSend = trimmed.length > 0 && !attachments.busy && steered.pending === undefined;
+  const canSend =
+    trimmed.length > 0 && !attachments.busy && !slash.resolving && steered.pending === undefined;
   const providerGroups = props.providerGroups ?? [];
   const messages = props.controller.conversation;
   // A message sent while a turn was running is already the user's message. It

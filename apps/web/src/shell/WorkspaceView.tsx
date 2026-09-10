@@ -780,8 +780,6 @@ function renderCodeTab(
             })}
         tab={tab}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-        {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
-        browserAvailable={props.browserAutomationClient !== undefined}
         {...(props.codeProviderGroups === undefined && props.draftProviderGroups === undefined
           ? {}
           : { providerGroups: props.codeProviderGroups ?? props.draftProviderGroups })}

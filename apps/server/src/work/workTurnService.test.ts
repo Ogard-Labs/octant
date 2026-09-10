@@ -16,6 +16,7 @@ import {
 import { Effect, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import { browserUseSelection } from "@octant/plugin-host/browser-use";
 import { WorkAttachmentStore } from "./workAttachmentStore";
 import { WorkTurnProjection } from "./workTurnProjection";
 import {
@@ -85,7 +86,7 @@ describe("WorkTurnService", () => {
           skillId: `agents-skills-directory:project:review:sha256:${"a".repeat(64)}`,
           packageDigest: `sha256:${"a".repeat(64)}`,
           catalogEpoch: `sha256:${"b".repeat(64)}`,
-          origin: { kind: "draft", reference: "$review" },
+          origin: { kind: "draft", reference: "review" },
         },
       ],
     });
@@ -99,6 +100,28 @@ describe("WorkTurnService", () => {
         failure: {
           category: "unavailable",
           message: "Selected skill context is unavailable for Work on this host.",
+        },
+      },
+    });
+    expect(fixture.acquireInputs).toHaveLength(0);
+  });
+
+  it("refuses Browser when the selected Work provider exposes no Browser tool", async () => {
+    const fixture = serviceFixture();
+    const result = await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      extensionSelections: [browserUseSelection("work-test")],
+    });
+    expect(result.kind).toBe("accepted");
+    await fixture.waitForIdle();
+    const lookup = await fixture.service.lookupFirstTurn(ids.window, ids.request);
+    expect(lookup).toMatchObject({
+      kind: "accepted",
+      turn: {
+        status: "failed",
+        failure: {
+          category: "unsupported",
+          message: "The selected Browser is unavailable for this provider or task.",
         },
       },
     });
