@@ -70,6 +70,8 @@ import {
 import { useThreadMentions } from "../chat/useThreadMentions";
 import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
 import { CodeTranscriptRow } from "./CodeTranscriptRow";
+import { ThreadTasksPanel } from "./ThreadTasksPanel";
+import { liveTaskProgress } from "./transcriptActivity";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import { providerLimitWindowLabel } from "../providers/providerLimitWindow";
 import { TurnHeader, TurnTime, type TurnHeaderOutcome } from "../transcript/TurnHeader";
@@ -545,6 +547,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     trimmed.length > 0 && !attachments.busy && !slash.resolving && steered.pending === undefined;
   const providerGroups = props.providerGroups ?? [];
   const messages = props.controller.conversation;
+  const liveTasks = liveTaskProgress(
+    messages.flatMap((message) => {
+      if (message.role !== "assistant" || message.operationId === undefined) return [];
+      const activity = props.controller.turnActivity.get(String(message.operationId));
+      if (activity === undefined) return [];
+      return [{ activity, running: message.status === "incomplete" }];
+    }),
+  );
   // A message sent while a turn was running is already the user's message. It
   // belongs at the end of the transcript, where every other sent message is,
   // rather than parked in the composer waiting to be administered. It sits
@@ -1300,6 +1310,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           {...(pendingMessage === null ? {} : { trail: pendingMessage })}
         />
       )}
+
+      {liveTasks === undefined ? null : <ThreadTasksPanel tasks={liveTasks} />}
 
       <InlineThreadPlan {...(changedFiles === undefined ? {} : { changedFiles })} />
 
