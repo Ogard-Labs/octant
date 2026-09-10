@@ -617,6 +617,13 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   border-top: 1px solid var(--oct-hairline);
 }
 
+/* An unbroken model ID in the status text otherwise forces the row wider than
+   its container and pushes Remove out of view instead of wrapping. */
+.image-generation-settings__sources > li > .provider-settings__field-guidance {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .setrow-control > .settings-view__setting {
   display: grid;
   grid-template-columns: 1fr;
