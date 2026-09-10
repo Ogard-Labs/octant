@@ -40,7 +40,7 @@ Read the record that owns your change before editing, not all of them:
 | Thread export of transcript, evidence, provenance              | `docs/decisions/0036`                                                                                                                    |
 | Modes, Projects, thread authority, checkout binding            | `docs/decisions/0003`, `docs/decisions/0017`                                                                                             |
 | Package layering and dependency direction                      | `docs/decisions/0004`                                                                                                                    |
-| Provider drivers, capabilities, registry, harness              | `docs/decisions/0005`–`docs/decisions/0007`, `docs/decisions/0055`                                                                       |
+| Provider drivers, capabilities, registry, harness              | `docs/decisions/0005`–`docs/decisions/0007`, `docs/decisions/0055`, `docs/decisions/0111`                                                |
 | Native harness loop, role slots, advisor, follow-ups, overflow | `docs/decisions/0066`, `docs/decisions/0067`, `docs/decisions/0069`, `docs/decisions/0110`                                               |
 | Image generation jobs, adapters, and artifacts                 | `docs/decisions/0055`, `docs/decisions/0056`                                                                                             |
 | Work folder listing and what a turn changed                    | `docs/decisions/0083`                                                                                                                    |
