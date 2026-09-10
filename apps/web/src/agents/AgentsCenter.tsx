@@ -1,7 +1,9 @@
 import type { AgentRunCenterSummary } from "@octant/contracts";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
+import type { AgentMessageClient } from "@octant/client-runtime/agent-message-client";
 import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
+import { AgentMessagingFactsRow } from "./AgentMessagingFactsRow";
 import { ShellState } from "../shell/ShellState";
 import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantBadge } from "../ui/base/OctantBadge";
@@ -28,6 +30,8 @@ import {
 
 export interface AgentsCenterProps {
   readonly client: AgentRunClient;
+  /** The host's agent-messaging bounds facts, when this host admits messaging. */
+  readonly messagingClient?: AgentMessageClient;
   readonly onOpenThread?: (target: AgentsCenterThreadTarget & { readonly title: string }) => void;
   readonly onClose?: () => void;
   readonly narrow?: boolean;
@@ -65,6 +69,9 @@ export function AgentsCenter(props: AgentsCenterProps) {
         title="Agents"
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
       />
+      {props.messagingClient === undefined ? null : (
+        <AgentMessagingFactsRow client={props.messagingClient} />
+      )}
 
       {controller.notice === undefined ? null : (
         <div className="agents-center__notice" role="status">

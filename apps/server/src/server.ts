@@ -330,6 +330,7 @@ import {
   createInMemoryCapacityPort,
 } from "./agentRun/agentRunOrchestrationService";
 import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceService";
+import { createAgentMessageRouteHandler } from "./agentMessage/agentMessageRoutes";
 import { createAgentRunRouteHandler } from "./agentRun/agentRunRoutes";
 import {
   createAgentRunChildWorktreePort,
@@ -2625,6 +2626,10 @@ export function startOctantServer(
         if (thread === undefined || thread.lifecycle !== "active") return false;
         return String(context.projectId) === String(thread.projectId);
       },
+    });
+    const agentMessageRoutes = createAgentMessageRouteHandler({
+      windowAuthorityStore,
+      projection: agentMessageProjection,
     });
     const projectBindingRoutes = createProjectBindingRouteHandler({
       desktopBridgeSecret: options.desktopBridgeSecret,
@@ -7096,6 +7101,7 @@ export function startOctantServer(
       (await goalLoopRoutes(request)) ??
       (await planRoutes(request)) ??
       (await workResearchRoutes(request)) ??
+      (await agentMessageRoutes(request)) ??
       (await themeRoutes(request));
 
     const dispatchMeasuredProductRoutes = async (

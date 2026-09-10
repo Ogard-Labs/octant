@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { CorrelationId } from "./events";
+import { CorrelationId, UtcTimestamp } from "./events";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -111,3 +111,39 @@ export const decodeAgentMessageDelivered = Schema.decodeUnknownSync(AgentMessage
 export const decodeAgentMessageRefused = Schema.decodeUnknownSync(AgentMessageRefused);
 export const decodeAgentMessageAcknowledged = Schema.decodeUnknownSync(AgentMessageAcknowledged);
 export const decodeAgentMessageEndpointId = Schema.decodeUnknownSync(AgentMessageEndpointId);
+
+const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
+
+/** One message in the messaging bounds view: a status, never a body. */
+export const AgentMessageStatusSummary = Schema.Struct({
+  messageId: AgentMessageId,
+  senderThreadId: AgentMessageEndpointId,
+  recipientThreadId: AgentMessageEndpointId,
+  state: Schema.Literal("in-flight", "delivered", "refused", "acknowledged"),
+  refuseReason: Schema.optional(AgentMessageRefuseReason),
+  occurredAt: UtcTimestamp,
+}).annotations(strict);
+export type AgentMessageStatusSummary = typeof AgentMessageStatusSummary.Type;
+
+export const MAX_AGENT_MESSAGE_STATUS_SUMMARIES = 20;
+
+/**
+ * The host's messaging facts, in the bounds the policy admits: how many
+ * messages are open in flight against the per-sender cap, and the most recent
+ * statuses. Refuse reasons are values here so a stranded message is a fact a
+ * renderer can state, never a silent gap.
+ */
+export const AgentMessageMessagingFacts = Schema.Struct({
+  openInFlight: NonNegativeInt,
+  maxOpenInFlightPerSender: NonNegativeInt,
+  delivered: NonNegativeInt,
+  refused: NonNegativeInt,
+  recent: Schema.Array(AgentMessageStatusSummary).pipe(
+    Schema.maxItems(MAX_AGENT_MESSAGE_STATUS_SUMMARIES),
+  ),
+}).annotations(strict);
+export type AgentMessageMessagingFacts = typeof AgentMessageMessagingFacts.Type;
+
+export const decodeAgentMessageMessagingFacts = Schema.decodeUnknownSync(
+  AgentMessageMessagingFacts,
+);

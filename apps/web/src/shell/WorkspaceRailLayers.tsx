@@ -1,6 +1,7 @@
 import type { AutomationClient } from "@octant/client-runtime";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
+import type { AgentMessageClient } from "@octant/client-runtime/agent-message-client";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type {
   CodeProjectPullRequestRow,
@@ -139,6 +140,8 @@ export interface WorkspaceRailLayersProps {
   ) => void;
   readonly agentsCenterVisible: boolean;
   readonly agentRunClient: AgentRunClient;
+  /** The host's agent-messaging facts client, when the surface has one. */
+  readonly agentMessageClient?: AgentMessageClient;
   readonly projectNames: ReadonlyMap<string, string>;
   readonly onCloseAgentsCenter: () => void;
   readonly onOpenAgentsThread: (
@@ -355,6 +358,9 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
           <LazyRailSurface label="Agents Center">
             <AgentsCenter
               client={props.agentRunClient}
+              {...(props.agentMessageClient === undefined
+                ? {}
+                : { messagingClient: props.agentMessageClient })}
               narrow={props.isNarrow}
               onClose={props.onCloseAgentsCenter}
               onOpenThread={props.onOpenAgentsThread}

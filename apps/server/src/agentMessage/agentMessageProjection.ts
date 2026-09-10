@@ -36,6 +36,8 @@ export interface AgentMessageRecord {
   readonly bodyReference: AgentMessageBodyReference;
   readonly state: AgentMessageState;
   readonly refuseReason?: AgentMessageRefuseReason;
+  /** When the record last moved. */
+  readonly occurredAt?: string;
 }
 
 /**
@@ -70,6 +72,7 @@ export class AgentMessageProjection {
         ...(sent.recipientRunId === undefined ? {} : { recipientRunId: sent.recipientRunId }),
         bodyReference: sent.bodyReference,
         state: "in-flight",
+        occurredAt: sent.occurredAt,
       });
       return;
     }
@@ -79,7 +82,11 @@ export class AgentMessageProjection {
       // A refusal is final: admission never creates an irrevocable delivery
       // right, so a late delivered event cannot un-refuse a message.
       if (current === undefined || current.state !== "in-flight") return;
-      this.#byMessage.set(String(delivered.messageId), { ...current, state: "delivered" });
+      this.#byMessage.set(String(delivered.messageId), {
+        ...current,
+        state: "delivered",
+        occurredAt: delivered.occurredAt,
+      });
       return;
     }
     if (event.kind === "message-refused") {
@@ -91,13 +98,18 @@ export class AgentMessageProjection {
         ...current,
         state: "refused",
         refuseReason: refused.refuseReason,
+        occurredAt: refused.occurredAt,
       });
       return;
     }
     const acknowledged = decodeAgentMessageAcknowledged(event);
     const current = this.#byMessage.get(String(acknowledged.messageId));
     if (current === undefined || current.state !== "delivered") return;
-    this.#byMessage.set(String(acknowledged.messageId), { ...current, state: "acknowledged" });
+    this.#byMessage.set(String(acknowledged.messageId), {
+      ...current,
+      state: "acknowledged",
+      occurredAt: acknowledged.occurredAt,
+    });
   }
 
   lookup(messageId: string): AgentMessageRecord | undefined {
@@ -112,6 +124,56 @@ export class AgentMessageProjection {
       }
     }
     return count;
+  }
+
+  /**
+   * The host's messaging facts for the bounds view: statuses only, never
+   * bodies, newest first, bounded to what the view states.
+   */
+  messagingFacts(
+    maxOpenInFlightPerSender: number,
+    limit = 20,
+  ): {
+    readonly openInFlight: number;
+    readonly maxOpenInFlightPerSender: number;
+    readonly delivered: number;
+    readonly refused: number;
+    readonly recent: ReadonlyArray<{
+      readonly messageId: string;
+      readonly senderThreadId: string;
+      readonly recipientThreadId: string;
+      readonly state: AgentMessageState;
+      readonly refuseReason?: AgentMessageRefuseReason;
+      readonly occurredAt?: string;
+    }>;
+  } {
+    let openInFlight = 0;
+    let delivered = 0;
+    let refused = 0;
+    const records = [...this.#byMessage.values()];
+    for (const record of records) {
+      if (record.state === "in-flight") openInFlight += 1;
+      else if (record.state === "delivered" || record.state === "acknowledged") delivered += 1;
+      else if (record.state === "refused") refused += 1;
+    }
+    const withTime = records.filter((record) => record.state !== "in-flight");
+    // In-flight messages carry no occurredAt of their own beyond the send; the
+    // most recent statuses are the settled ones the bounds view can state.
+    const recent = withTime.slice(-limit).reverse();
+    return {
+      openInFlight,
+      maxOpenInFlightPerSender,
+      delivered,
+      refused,
+      recent: recent.map((record) => ({
+        messageId: String(record.messageId),
+        senderThreadId: String(record.senderThreadId),
+        recipientThreadId: String(record.recipientThreadId),
+        state: record.state,
+        ...(record.refuseReason === undefined ? {} : { refuseReason: record.refuseReason }),
+        ...(record.occurredAt === undefined ? {} : { occurredAt: record.occurredAt }),
+      })),
+    };
   }
 
   /**
