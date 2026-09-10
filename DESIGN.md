@@ -550,9 +550,11 @@ search remain fixed while one centred, bounded 800px reading column scrolls.
 A 32–56px workspace gutter protects the content at narrower widths. The page
 title, quiet section captions, and primary field labels have distinct roles;
 sections follow a consistent 32px rhythm. Navigation groups use quiet separators
-rather than competing labels. A section is an object (0109): it draws the card
-recipe's hairline ring over the surface fill, its label is the first line
-inside that edge, and its rows are divisions of it separated by hairlines.
+rather than competing labels. A section is an object (0109): the content
+beneath the label forms the child-built card (hairline ring over the surface
+fill), while the label and its one-line description remain outside the card
+on the page ground. Rows inside the card are divisions of it separated by
+hairlines.
 Everything inside takes the section's inset, including content that is not a
 row. A section keeps `overflow: visible`, because its rows hold menus and
 popovers that have to escape it. Keybindings have their own destination and raw

@@ -26,10 +26,11 @@ cleaner and easier to read and adjust.
 
 ## Decision
 
-A settings section is an object. It draws its own edge — the same hairline
-ring `OctantCard` uses (0090), over the surface fill — and its label is the
-first line inside that edge, so a label and the rows it governs are one
-thing rather than two things a gap apart.
+A settings section is an object. The content beneath the section label forms
+the child-built card: the same hairline ring `OctantCard` uses (0090), over
+the surface fill. The label and its one-line description remain outside that
+card on the page ground, so they read as the section's title rather than as
+its first row.
 
 **The object is the section, not the group inside it.** Several sections
 carry rows that never sit in a `.setgroup`: GitHub's account state, the host

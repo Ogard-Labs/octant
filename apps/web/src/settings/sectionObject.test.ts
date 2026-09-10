@@ -23,8 +23,24 @@ function sectionRules(): ReadonlyArray<string> {
   return bodies;
 }
 
+function ruleBodiesMatching(selectorNeedle: string): ReadonlyArray<string> {
+  const bodies: string[] = [];
+  const pattern = /([^{}]*\.settings-card-section[^{}]*)\{([^}]*)\}/g;
+  for (const match of styles.matchAll(pattern)) {
+    const selector = match[1] ?? "";
+    if (selector.includes("@")) continue;
+    if (!selector.includes(selectorNeedle)) continue;
+    bodies.push(match[2] ?? "");
+  }
+  return bodies;
+}
+
 function someRuleSets(declaration: RegExp): boolean {
   return sectionRules().some((body) => declaration.test(body));
+}
+
+function contentChildRuleSets(): ReadonlyArray<string> {
+  return ruleBodiesMatching(".settings-section-head");
 }
 
 function rule(selector: string): string {
@@ -42,8 +58,11 @@ describe("a settings section", () => {
   });
 
   it("builds the card out of its content children", () => {
-    expect(someRuleSets(/border-inline:\s*1px solid var\(--oct-hairline\)/)).toBe(true);
-    expect(someRuleSets(/background:\s*var\(--oct-surface\)/)).toBe(true);
+    const bodies = contentChildRuleSets();
+    expect(
+      bodies.some((body) => /border-inline:\s*1px solid var\(--oct-hairline\)/.test(body)),
+    ).toBe(true);
+    expect(bodies.some((body) => /background:\s*var\(--oct-surface\)/.test(body))).toBe(true);
   });
 
   it("closes that card at the top and the bottom, rounded", () => {
