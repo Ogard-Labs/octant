@@ -11,7 +11,10 @@ import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useExtensionDraftSelections } from "../../chat/useExtensionDraftSelections";
-import { useComposerSlashCommands, ComposerSlashTypeahead } from "../../composer/useComposerSlashCommands";
+import {
+  useComposerSlashCommands,
+  ComposerSlashTypeahead,
+} from "../../composer/useComposerSlashCommands";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import type { CreateHostViewScope, PickerGroup } from "@octant/domain";
@@ -95,7 +98,10 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     onDraftChange: setPrompt,
     scopeKey: "work-draft",
   });
-  const selectedFamily = selectedProviderFamily(props.providerGroups, props.selectedProviderInstanceId);
+  const selectedFamily = selectedProviderFamily(
+    props.providerGroups,
+    props.selectedProviderInstanceId,
+  );
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "work",
@@ -111,6 +117,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     onChoose: () => void extensionDraft.resolveReference("@browser"),
   });
   const slash = useComposerSlashCommands({
+    textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,
     onResolveExtensionReference: extensionDraft.resolveReference,
@@ -296,8 +303,24 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 aria-label="First message"
                 aria-autocomplete="list"
                 aria-expanded={computer.open || browser.open || slash.open}
-                aria-controls={computer.open ? computer.listId : browser.open ? browser.listId : slash.open ? slash.listId : undefined}
-                aria-activedescendant={computer.open ? `${computer.listId}-computer` : browser.open ? `${browser.listId}-browser` : slash.active === undefined ? undefined : `${slash.listId}-${slash.active.id}`}
+                aria-controls={
+                  computer.open
+                    ? computer.listId
+                    : browser.open
+                      ? browser.listId
+                      : slash.open
+                        ? slash.listId
+                        : undefined
+                }
+                aria-activedescendant={
+                  computer.open
+                    ? `${computer.listId}-computer`
+                    : browser.open
+                      ? `${browser.listId}-browser`
+                      : slash.active === undefined
+                        ? undefined
+                        : `${slash.listId}-${slash.active.id}`
+                }
                 autoFocus
                 className="composer-input"
                 disabled={props.creating}

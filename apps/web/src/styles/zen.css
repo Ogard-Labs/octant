@@ -656,12 +656,8 @@
   font-size: var(--oct-text-xs);
 }
 
-/* The chosen one, marked on the picture rather than on the control, so the
-   ring reads against whatever the thumbnail happens to be. Neutral, not the
-   accent: this says "this is the one", not "this has focus" (0105). */
-.zen-appearance__preset[aria-pressed="true"] .zen-appearance__thumb {
-  outline: 2px solid var(--oct-fg);
-  outline-offset: 2px;
+.zen-appearance__preset[aria-pressed="true"] .zen-appearance__preset-name::before {
+  content: "✓ ";
 }
 
 .zen-appearance__custom {

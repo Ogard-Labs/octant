@@ -1301,17 +1301,22 @@ textarea.settings-view__text-input {
 }
 
 .settings-view__preset-swatch {
+  position: relative;
   min-width: 28px;
   min-height: 28px;
   padding: 0;
   border: 1px solid color-mix(in oklab, var(--oct-fg) 26%, transparent);
 }
 
-/* Selection is carried by `aria-checked` in the markup; the accent ring is
-   reinforcement and is independent of the quiet focus treatment. */
-.settings-view__preset-swatch[aria-checked="true"] {
-  outline: 2px solid var(--oct-accent-fg);
-  outline-offset: 2px;
+.settings-view__selection-mark {
+  position: absolute;
+  inset: 4px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
 }
 
 .settings-view__setting-copy {
@@ -1380,22 +1385,13 @@ textarea.settings-view__text-input {
   overflow: hidden;
   white-space: normal;
   text-align: center;
-  background: var(--oct-surface);
-  border: 1px solid transparent;
   border-radius: var(--oct-radius-md);
   cursor: pointer;
-  transition: border-color var(--oct-motion-fast) var(--oct-ease-standard);
+  transition: background-color var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
-.settings-scheme__card:hover {
-  border-color: var(--oct-hairline);
-}
-
-/* One 1px ring says which scheme is chosen. A border plus a shadow ring drew
-   the same edge twice. */
-.settings-scheme__card[aria-checked="true"] {
-  border-color: var(--oct-fg);
-  box-shadow: none;
+.settings-scheme__card[aria-checked="true"] .settings-scheme__label::before {
+  content: "✓ ";
 }
 
 .settings-scheme__preview {

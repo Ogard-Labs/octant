@@ -891,7 +891,8 @@ export class CodeOperationService {
                   modelId: scope.thread.modelId,
                   sessionId: command.sessionId,
                   prompt: command.prompt,
-                  ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
+                  ...(command.extensionSelections === undefined ||
+                  command.extensionSelections.length === 0
                     ? {}
                     : { extensionSelections: command.extensionSelections }),
                   executionPolicy: turnThread.executionPolicy,
@@ -2209,11 +2210,7 @@ export class CodeOperationService {
         "unavailable",
         "Provider prompt evidence is unavailable.",
       );
-    if (
-      command.extensionSelections?.some(
-        (selection) => !isBrowserUseSelection(selection),
-      )
-    ) {
+    if (command.extensionSelections?.some((selection) => !isBrowserUseSelection(selection))) {
       return this.#failed(
         command.operationId,
         "unavailable",
@@ -2574,8 +2571,9 @@ function sameConversationStart(
     event.sessionId === command.sessionId &&
     event.prompt.contentId === command.prompt.contentId &&
     event.prompt.digest === command.prompt.digest &&
-    event.prompt.byteLength === command.prompt.byteLength
-    && JSON.stringify(event.extensionSelections ?? []) === JSON.stringify(command.extensionSelections ?? [])
+    event.prompt.byteLength === command.prompt.byteLength &&
+    JSON.stringify(event.extensionSelections ?? []) ===
+      JSON.stringify(command.extensionSelections ?? [])
   );
 }
 

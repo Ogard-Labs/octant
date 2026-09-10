@@ -3135,7 +3135,10 @@ export class ChatService {
     }
     const computer = selections.filter(isComputerUseSelection);
     const browser = selections.filter(isBrowserUseSelection);
-    if (browser.length > 1 || browser.some((selection) => !validateBrowserUseSelection(selection))) {
+    if (
+      browser.length > 1 ||
+      browser.some((selection) => !validateBrowserUseSelection(selection))
+    ) {
       throw new ChatServiceError({
         category: "unavailable",
         message: "Browser selection is invalid or stale.",
@@ -3145,8 +3148,9 @@ export class ChatService {
       const browserTools =
         windowId === undefined
           ? undefined
-          : this.#resolveAppManagedTools?.({ windowId, thread })
-              ?.definitions.some((definition) => definition.name === "octant_browser") === true;
+          : this.#resolveAppManagedTools?.({ windowId, thread })?.definitions.some(
+              (definition) => definition.name === "octant_browser",
+            ) === true;
       if (!browserTools) {
         throw new ChatServiceError({
           category: "unavailable",

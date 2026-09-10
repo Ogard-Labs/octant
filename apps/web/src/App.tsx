@@ -4184,8 +4184,7 @@ function LaunchedShell(
           thread = changed.thread;
         }
         const draftExtensionSelections =
-          extensionSelections ??
-          (computerUseSelection === undefined ? [] : [computerUseSelection]);
+          extensionSelections ?? (computerUseSelection === undefined ? [] : [computerUseSelection]);
         const sendOutcome = chatController
           .execute({
             kind: "send-chat-turn",

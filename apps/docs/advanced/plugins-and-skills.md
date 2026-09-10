@@ -176,6 +176,13 @@ explicit with **`$skill-name`** in the composer, or `@plugin-name/skill-name`
 for a plugin-contributed skill. Unambiguous discovery must hold; an
 ambiguous unqualified invocation opens a chooser or fails closed.
 
+Type `/` in a Chat, Work, or Code composer to find commands and enabled skills.
+Choosing a skill creates a visible selection that can be removed before sending;
+it does not enable a disabled skill. Chat resolves selected skill content through
+the extension service. Work and Code currently refuse skill selections before
+starting the provider because their skill-content resolver is not connected.
+The draft remains available when that refusal occurs.
+
 ## Core Apple independence
 
 An extension with a `trusted-extension` authority is **denied** core Apple

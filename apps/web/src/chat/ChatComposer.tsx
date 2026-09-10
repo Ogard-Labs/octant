@@ -392,7 +392,7 @@ export function ChatComposer(props: ChatComposerProps) {
    * receipt. Neither branch performs the action itself.
    */
   function chooseCommand(command: OctantCommand) {
-    if (commandToken === undefined) return;
+    if (commandToken === undefined || extensionResolving) return;
     const applied = applySlashCommandToken(props.draft, commandToken);
     props.onDraftChange(applied.draft, applied.caretIndex);
     rememberCaret(applied.caretIndex);
@@ -419,6 +419,7 @@ export function ChatComposer(props: ChatComposerProps) {
   }
 
   async function onDraftKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.nativeEvent.isComposing) return;
     if (computer.handleKeyDown(event)) return;
     if (browser.handleKeyDown(event)) return;
     if (commandOpen && commandMatches.length > 0) {
@@ -447,7 +448,7 @@ export function ChatComposer(props: ChatComposerProps) {
     }
     if (mention.handleKeyDown(event)) return;
     if (extensionResolving) {
-      event.preventDefault();
+      if (event.key === "Enter" && !event.shiftKey) event.preventDefault();
       return;
     }
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;

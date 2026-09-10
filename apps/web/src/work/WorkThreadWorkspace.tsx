@@ -103,7 +103,10 @@ import { ExtensionProviderFamily as ExtensionProviderFamilySchema } from "@octan
 import { Schema } from "effect";
 import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections";
 import type { ComposerExtensionSelection } from "../composer/composerExtensionSelection";
-import { ComposerSlashTypeahead, useComposerSlashCommands } from "../composer/useComposerSlashCommands";
+import {
+  ComposerSlashTypeahead,
+  useComposerSlashCommands,
+} from "../composer/useComposerSlashCommands";
 
 /**
  * A message the user sent while a turn was still running.
@@ -327,6 +330,8 @@ async function waitForWorkStreamReconnect(signal: AbortSignal, delayMs: number):
 }
 
 export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
+  const [projectId, setProjectId] = useState<ProjectId | undefined>(props.initialThread?.projectId);
+  const [thread, setThread] = useState<WorkThread | undefined>(props.initialThread);
   const composerDraft = useComposerThreadDraft({
     mode: "work",
     threadId: String(props.threadId),
@@ -340,15 +345,12 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
     onSelectionEdited: () => composerDraft.setDraft(composerDraft.text),
   });
-  const providerFamily = providerGroupsForThread(
-    props.providerGroups,
-    props.initialThread?.providerInstanceId,
-  );
+  const providerFamily = providerGroupsForThread(props.providerGroups, thread?.providerInstanceId);
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "work",
-    projectId: props.initialThread?.projectId ?? null,
-    threadId: props.initialThread?.id ?? props.threadId,
+    projectId: thread?.projectId ?? projectId ?? null,
+    threadId: thread?.id ?? props.threadId,
     ...(providerFamily === undefined ? {} : { providerFamily }),
   });
   const browser = useBrowserUseMention({
@@ -360,12 +362,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     onChoose: () => void extensionDraft.resolveReference("@browser"),
   });
   const slash = useComposerSlashCommands({
+    textarea: () => textareaRef.current,
     draft: composerDraft.text,
     onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
     onResolveExtensionReference: extensionDraft.resolveReference,
   });
-  const [projectId, setProjectId] = useState<ProjectId | undefined>(props.initialThread?.projectId);
-  const [thread, setThread] = useState<WorkThread | undefined>(props.initialThread);
   const [turns, setTurns] = useState<ReadonlyArray<WorkTurnState>>([]);
   const [pendingRequests, setPendingRequests] = useState<ReadonlyArray<WorkRequest>>([]);
   const [browserApprovals, setBrowserApprovals] = useState<ReadonlyArray<BrowserToolApproval>>([]);
@@ -1366,8 +1367,24 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             aria-label="Work prompt"
             aria-autocomplete="list"
             aria-expanded={computer.open || browser.open || slash.open}
-            aria-controls={computer.open ? computer.listId : browser.open ? browser.listId : slash.open ? slash.listId : undefined}
-            aria-activedescendant={computer.open ? `${computer.listId}-computer` : browser.open ? `${browser.listId}-browser` : slash.active === undefined ? undefined : `${slash.listId}-${slash.active.id}`}
+            aria-controls={
+              computer.open
+                ? computer.listId
+                : browser.open
+                  ? browser.listId
+                  : slash.open
+                    ? slash.listId
+                    : undefined
+            }
+            aria-activedescendant={
+              computer.open
+                ? `${computer.listId}-computer`
+                : browser.open
+                  ? `${browser.listId}-browser`
+                  : slash.active === undefined
+                    ? undefined
+                    : `${slash.listId}-${slash.active.id}`
+            }
             autoFocus
             className="composer-input"
             disabled={

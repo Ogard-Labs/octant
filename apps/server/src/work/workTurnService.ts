@@ -690,7 +690,9 @@ export class WorkTurnService {
       return;
     }
     if (browserSelections.length > 0) {
-      if (!appManagedTools?.definitions.some((definition) => definition.name === "octant_browser")) {
+      if (
+        !appManagedTools?.definitions.some((definition) => definition.name === "octant_browser")
+      ) {
         this.#persistUpdate(current, {
           status: "failed",
           failure: {
@@ -702,10 +704,7 @@ export class WorkTurnService {
       }
       input = {
         ...input,
-        context: [
-          ...input.context,
-          { kind: "instructions", text: BROWSER_SELECTION_GUIDANCE },
-        ],
+        context: [...input.context, { kind: "instructions", text: BROWSER_SELECTION_GUIDANCE }],
       };
     }
     // Work does not yet have an approved skill-material resolver. Refuse an

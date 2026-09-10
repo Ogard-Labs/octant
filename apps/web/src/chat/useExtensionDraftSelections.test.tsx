@@ -1,66 +1,103 @@
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
-import { fireEvent, render, screen } from "@testing-library/react";
+import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
+import { ExtensionProviderFamily } from "@octant/contracts/extensions";
+import { Schema } from "effect";
+import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { useState } from "react";
 import { useExtensionDraftSelections } from "./useExtensionDraftSelections";
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
-    resolve = next;
-  });
-  return { promise, resolve };
+const projectA = "70000000-0000-4000-8000-000000000001";
+const projectB = "70000000-0000-4000-8000-000000000002";
+const providerFamily = Schema.decodeUnknownSync(ExtensionProviderFamily)("codex");
+
+function pendingClient() {
+  const snapshot = Promise.withResolvers<ExtensionSnapshot>();
+  return {
+    snapshot,
+    client: {
+      snapshot: vi.fn(() => snapshot.promise),
+      effectiveState: vi.fn<ExtensionClient["effectiveState"]>(),
+    },
+  };
 }
 
-function Harness(props: { readonly projectId: string | null; readonly client: ExtensionClient }) {
-  const [draft, setDraft] = useState("");
-  const selections = useExtensionDraftSelections({
-    client: props.client,
-    mode: "code",
-    projectId: props.projectId,
-    providerFamily: "openai-compatible" as never,
-  });
-  return (
-    <>
-      <button onClick={() => void selections.resolveReference(draft)}>Resolve</button>
-      <input aria-label="Draft" onChange={(event) => setDraft(event.target.value)} value={draft} />
-      <output aria-label="Receipts">{selections.receipts.map((entry) => entry.reference).join(",")}</output>
-      <button onClick={() => selections.clear()}>Clear</button>
-    </>
-  );
-}
-
-describe("useExtensionDraftSelections", () => {
-  it("does not commit a resolver result after the scope is cleared", async () => {
-    const snapshot = deferred<never>();
-    const client = {
-      snapshot: vi.fn(() => snapshot.promise),
-      effectiveState: vi.fn(),
-    } as unknown as ExtensionClient;
-    const { rerender } = render(<Harness client={client} projectId={null} />);
-    const input = screen.getByLabelText("Draft");
-    const resolve = screen.getByRole("button", { name: "Resolve" });
-    fireEvent.change(input, { target: { value: "$review" } });
-    resolve.click();
-    rerender(<Harness client={client} projectId={"70000000-0000-4000-8000-000000000001"} />);
-    snapshot.resolve({ sequence: 1, skills: [] } as never);
-    await Promise.resolve();
-    expect(screen.getByLabelText("Receipts")).toHaveTextContent("");
+describe("draft extension selections", () => {
+  it("ignores a completed lookup after the Project changes", async () => {
+    const { snapshot, client } = pendingClient();
+    const { result, rerender } = renderHook(
+      ({ projectId }) =>
+        useExtensionDraftSelections({ client, mode: "code", projectId, providerFamily }),
+      { initialProps: { projectId: projectA } },
+    );
+    const pending = result.current.resolveReference("$review");
+    rerender({ projectId: projectB });
+    await act(async () => {
+      snapshot.reject(new Error("Unavailable"));
+      await pending;
+    });
+    expect(result.current.receipts).toEqual([]);
   });
 
-  it("does not resurrect a removed receipt when its lookup completes", async () => {
-    const snapshot = deferred<never>();
-    const client = {
-      snapshot: vi.fn(() => snapshot.promise),
-      effectiveState: vi.fn(),
-    } as unknown as ExtensionClient;
-    render(<Harness client={client} projectId={null} />);
-    const input = screen.getByLabelText("Draft");
-    fireEvent.change(input, { target: { value: "$review" } });
-    screen.getByRole("button", { name: "Resolve" }).click();
-    screen.getByRole("button", { name: "Clear" }).click();
-    snapshot.resolve({ sequence: 1, skills: [] } as never);
-    await Promise.resolve();
-    expect(screen.getByLabelText("Receipts")).toHaveTextContent("");
+  it("does not resurrect cleared selections when their lookup finishes", async () => {
+    const { snapshot, client } = pendingClient();
+    const { result } = renderHook(() =>
+      useExtensionDraftSelections({
+        client,
+        mode: "code",
+        projectId: projectA,
+        providerFamily,
+      }),
+    );
+    const pending = result.current.resolveReference("$review");
+    act(() => result.current.clear());
+    await act(async () => {
+      snapshot.reject(new Error("Unavailable"));
+      await pending;
+    });
+    expect(result.current.receipts).toEqual([]);
+  });
+
+  it("restores a refused selection to its original Project without replacing the active draft", async () => {
+    const { client } = pendingClient();
+    const { result, rerender } = renderHook(
+      ({ projectId }) =>
+        useExtensionDraftSelections({ client, mode: "code", projectId, providerFamily }),
+      { initialProps: { projectId: projectA } },
+    );
+    await act(async () => {
+      await result.current.resolveReference("@Browser");
+    });
+    const original = result.current.receipts;
+    const restoreOriginal = result.current.restore;
+    act(() => result.current.clear());
+    rerender({ projectId: projectB });
+    await act(async () => {
+      await result.current.resolveReference("@Browser");
+    });
+    const active = result.current.receipts;
+    act(() => restoreOriginal(original));
+    expect(result.current.receipts).toEqual(active);
+    rerender({ projectId: projectA });
+    expect(result.current.receipts).toEqual(original);
+  });
+
+  it("refuses an invalid Project identity without querying a broader scope", async () => {
+    const { client } = pendingClient();
+    const { result } = renderHook(() =>
+      useExtensionDraftSelections({
+        client,
+        mode: "code",
+        projectId: "invalid",
+        providerFamily,
+      }),
+    );
+    await act(async () => {
+      await result.current.resolveReference("$review");
+    });
+    expect(client.snapshot).not.toHaveBeenCalled();
+    expect(client.effectiveState).not.toHaveBeenCalled();
+    expect(result.current.receipts).toMatchObject([
+      { status: { kind: "blocked", reason: "invalid-scope" } },
+    ]);
   });
 });

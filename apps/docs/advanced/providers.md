@@ -92,8 +92,10 @@ profiles:
   `/openai/v1/`; API-key only)
 - **Ollama** local HTTP (loopback origin only)
 
-Image generation profiles are also provider instances, added from the same
-manual form:
+Image generation profiles are also provider instances. Open **Settings → Image
+generation → Add image provider** to choose a provider, enter its API key, and
+set its model allowlist. The same profiles are available from the manual form
+in **Providers & Models**:
 
 - **OpenAI Image** (`gpt-image-2` and related GPT Image models as suggestions)
 - **Gemini Image** (Gemini 3.1 image models as suggestions, with

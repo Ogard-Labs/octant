@@ -17,15 +17,18 @@ import {
   resolveDraftExtensionReference,
   type ExtensionAddressingCatalog,
 } from "@octant/plugin-host/addressing";
-import { buildSkillCatalog, filterSkillCatalogForScope } from "@octant/plugin-host";
+import { buildSkillCatalog, filterSkillCatalogForScope } from "@octant/plugin-host/skills";
 import { parseComposerReference } from "@octant/plugin-host/composer";
 import { sourceQualifiedSkillId } from "@octant/plugin-host/model";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Schema } from "effect";
 import type { ComposerExtensionSelection } from "../composer/composerExtensionSelection";
 
+type DraftSelectionClient = Pick<ExtensionClient, "snapshot" | "effectiveState">;
+const NO_RECEIPTS: ReadonlyArray<ComposerExtensionSelection> = [];
+
 export function useExtensionDraftSelections(options: {
-  readonly client?: ExtensionClient;
+  readonly client?: DraftSelectionClient;
   readonly providerFamily?: ExtensionProviderFamily;
   readonly thread?: ChatThread;
   readonly mode?: OctantMode;
@@ -33,30 +36,66 @@ export function useExtensionDraftSelections(options: {
   readonly threadId?: string | null;
 }) {
   const computerEnabled = useComputerUseEnabled();
-  const [receipts, setReceipts] = useState<ReadonlyArray<ComposerExtensionSelection>>([]);
-  const resolutionGeneration = useRef(0);
-
   const mode = options.mode ?? "chat";
   const projectId = options.thread?.projectId ?? options.projectId ?? null;
   const threadId = options.thread?.id ?? options.threadId ?? null;
+  const scopeKey = JSON.stringify([mode, options.providerFamily, projectId, threadId]);
+  const generations = useRef(new Map<string, number>());
+  const activeScope = useRef({ key: scopeKey, client: options.client });
+  if (activeScope.current.key !== scopeKey || activeScope.current.client !== options.client) {
+    const previous = activeScope.current.key;
+    generations.current.set(previous, (generations.current.get(previous) ?? 0) + 1);
+    activeScope.current = { key: scopeKey, client: options.client };
+  }
+  const [state, setState] = useState<{
+    readonly client: DraftSelectionClient | undefined;
+    readonly byScope: ReadonlyMap<string, ReadonlyArray<ComposerExtensionSelection>>;
+  }>(() => ({ client: options.client, byScope: new Map() }));
+  const receipts =
+    state.client === options.client ? (state.byScope.get(scopeKey) ?? NO_RECEIPTS) : NO_RECEIPTS;
 
+  // A refused send may restore after the user has opened another Project.
+  // Keep that receipt with its original draft, never over the current one.
+  const updateReceipts = useCallback(
+    (
+      update: (
+        current: ReadonlyArray<ComposerExtensionSelection>,
+      ) => ReadonlyArray<ComposerExtensionSelection>,
+    ) => {
+      if (activeScope.current.client !== options.client) return;
+      setState((current) => {
+        if (activeScope.current.client !== options.client) return current;
+        const byScope = new Map(current.client === options.client ? current.byScope : undefined);
+        const next = update(byScope.get(scopeKey) ?? NO_RECEIPTS);
+        if (next.length === 0) byScope.delete(scopeKey);
+        else byScope.set(scopeKey, next);
+        return { client: options.client, byScope };
+      });
+    },
+    [options.client, scopeKey],
+  );
+  const invalidate = useCallback(() => {
+    generations.current.set(scopeKey, (generations.current.get(scopeKey) ?? 0) + 1);
+  }, [scopeKey]);
   const clear = useCallback(() => {
-    resolutionGeneration.current += 1;
-    setReceipts([]);
-  }, []);
-
-  useEffect(() => {
-    resolutionGeneration.current += 1;
-    setReceipts([]);
-  }, [mode, options.providerFamily, projectId, threadId]);
+    invalidate();
+    updateReceipts(() => NO_RECEIPTS);
+  }, [invalidate, updateReceipts]);
 
   const resolveReference = useCallback(
     async (draft: string): Promise<boolean> => {
       const reference = draft.trim();
-      const generation = resolutionGeneration.current;
-      const commit = (update: (current: ReadonlyArray<ComposerExtensionSelection>) => ReadonlyArray<ComposerExtensionSelection>) => {
-        if (resolutionGeneration.current !== generation) return;
-        setReceipts(update);
+      const generation = generations.current.get(scopeKey) ?? 0;
+      const isCurrent = () =>
+        activeScope.current.key === scopeKey &&
+        activeScope.current.client === options.client &&
+        (generations.current.get(scopeKey) ?? 0) === generation;
+      const commit = (
+        update: (
+          current: ReadonlyArray<ComposerExtensionSelection>,
+        ) => ReadonlyArray<ComposerExtensionSelection>,
+      ) => {
+        if (isCurrent()) updateReceipts((current) => (isCurrent() ? update(current) : current));
       };
       if (reference.toLowerCase() === "@computer") {
         if (!computerEnabled) {
@@ -151,23 +190,32 @@ export function useExtensionDraftSelections(options: {
         return true;
       }
     },
-    [computerEnabled, mode, options.client, options.providerFamily, projectId, threadId],
+    [
+      computerEnabled,
+      mode,
+      options.client,
+      options.providerFamily,
+      projectId,
+      threadId,
+      scopeKey,
+      updateReceipts,
+    ],
   );
 
   const remove = useCallback(
     (reference: string) => {
-      resolutionGeneration.current += 1;
-      setReceipts((current) => current.filter((receipt) => receipt.reference !== reference));
+      invalidate();
+      updateReceipts((current) => current.filter((receipt) => receipt.reference !== reference));
     },
-    [],
+    [invalidate, updateReceipts],
   );
 
   const restore = useCallback(
     (next: ReadonlyArray<ComposerExtensionSelection>) => {
-      resolutionGeneration.current += 1;
-      setReceipts([...next]);
+      invalidate();
+      updateReceipts(() => [...next]);
     },
-    [],
+    [invalidate, updateReceipts],
   );
 
   return { clear, receipts, remove, resolveReference, restore };
@@ -185,7 +233,11 @@ function decodeScopeUuid(value: string | null): string | null {
 function addressingCatalog(
   snapshot: ExtensionSnapshot,
   effective: ExtensionEffectiveSnapshot,
-  scope: { readonly mode: OctantMode; readonly projectId: string | null; readonly threadId: string | null },
+  scope: {
+    readonly mode: OctantMode;
+    readonly projectId: string | null;
+    readonly threadId: string | null;
+  },
 ): ExtensionAddressingCatalog {
   const installedSkills = new Map<
     SourceQualifiedSkillId,
@@ -223,10 +275,11 @@ function addressingCatalog(
             },
           ],
     ),
-    skills: filterSkillCatalogForScope(
-      buildSkillCatalog(snapshot.skills ?? []),
-      { mode: scope.mode, projectId: scope.projectId, threadRef: scope.threadId ?? "draft" },
-    ).skills.map((record) => ({
+    skills: filterSkillCatalogForScope(buildSkillCatalog(snapshot.skills ?? []), {
+      mode: scope.mode,
+      projectId: scope.projectId,
+      threadRef: scope.threadId ?? "draft",
+    }).skills.map((record) => ({
       skillId: record.skill.qualifiedId,
       name: record.skill.name,
       label: record.displayName,
@@ -234,7 +287,7 @@ function addressingCatalog(
       packageDigest: record.skill.digest,
       effectiveState:
         installedSkills.get(record.skill.qualifiedId)?.effectiveState ?? record.effectiveState,
-      })),
+    })),
   };
 }
 

@@ -371,6 +371,11 @@ function PhotoChoice(props: {
       variant="ghost"
     >
       {url === null ? null : <img alt="" src={url} />}
+      {props.checked ? (
+        <span aria-hidden="true" className="settings-view__selection-mark">
+          ✓
+        </span>
+      ) : null}
     </OctantButton>
   );
 }

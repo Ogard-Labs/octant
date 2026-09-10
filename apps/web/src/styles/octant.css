@@ -1311,8 +1311,7 @@ input.switch:checked::after {
   color: var(--oct-accent-fg);
 }
 .sheet td[aria-selected="true"] {
-  outline: 1.5px solid var(--oct-accent-fg);
-  outline-offset: -1.5px;
+  background: var(--oct-fg-soft);
 }
 
 /* ─── viewer chrome ───────────────────────────────────────────────────
@@ -5137,8 +5136,6 @@ input.switch:checked::after {
 }
 .cblock[aria-selected="true"] {
   background: var(--oct-fg-soft);
-  outline: 1px solid var(--oct-accent-fg);
-  outline-offset: -1px;
 }
 .cblock[aria-selected="true"] .cblock-gutter,
 .cblock[aria-selected="true"] .cblock-kind {
@@ -6003,11 +6000,9 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
 }
-/* the whole panel while the stream is re-establishing. Dashed, because
-   the rows may be stale and the user should not trust them yet. */
+/* Tint stale rows while the stream is re-establishing. */
 .runtree.is-reconnecting {
-  outline: 1px dashed var(--oct-warn-fg);
-  outline-offset: -1px;
+  background: var(--oct-warn-soft);
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -8672,12 +8667,11 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   border: 0;
 }
 
-/* The row a context menu was opened on. It reads as held rather than
-   selected — an outline, not a fill — because the row's real selected state
-   may well be somewhere else, and two fills would compete. */
+/* Keep the context-menu target visible while the menu owns keyboard focus. */
 .is-context-target {
-  outline: 1px solid var(--oct-accent-fg);
-  outline-offset: -1px;
+  background: var(--oct-fg-soft);
+  text-decoration: underline;
+  text-underline-offset: 3px;
   border-radius: var(--oct-radius-sm);
 }
 

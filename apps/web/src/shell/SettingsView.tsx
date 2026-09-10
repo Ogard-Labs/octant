@@ -1517,7 +1517,13 @@ function SidebarBackgroundSettings({
                   style={{ background: preset.cssBackground }}
                   type="button"
                   variant="ghost"
-                />
+                >
+                  {selected ? (
+                    <span aria-hidden="true" className="settings-view__selection-mark">
+                      ✓
+                    </span>
+                  ) : null}
+                </OctantButton>
               );
             })}
           </div>

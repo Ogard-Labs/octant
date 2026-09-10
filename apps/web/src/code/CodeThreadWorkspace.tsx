@@ -90,7 +90,10 @@ import type { ComposerExtensionSelection } from "../composer/composerExtensionSe
 import { ExtensionProviderFamily as ExtensionProviderFamilySchema } from "@octant/contracts/extensions";
 import { Schema } from "effect";
 import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections";
-import { ComposerSlashTypeahead, useComposerSlashCommands } from "../composer/useComposerSlashCommands";
+import {
+  ComposerSlashTypeahead,
+  useComposerSlashCommands,
+} from "../composer/useComposerSlashCommands";
 
 export type CodeAttachmentClient = Pick<
   CodeClient,
@@ -260,7 +263,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       draftRevisionRef.current += 1;
     },
   });
-  const providerFamily = providerGroupsForThread(props.providerGroups, view?.thread.providerInstanceId);
+  const providerFamily = providerGroupsForThread(
+    props.providerGroups,
+    view?.thread.providerInstanceId,
+  );
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "code",
@@ -284,6 +290,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     },
   });
   const slash = useComposerSlashCommands({
+    textarea: () => textareaRef.current,
     draft,
     onDraftChange: (next) => {
       draftRevisionRef.current += 1;
@@ -693,7 +700,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         ...(message.computerUseSelection === undefined
           ? ([] as const)
           : ([message.computerUseSelection] as const)),
-        ...(message.extensionSelections.length === 0 ? ([] as const) : ([message.extensionSelections] as const)),
+        ...(message.extensionSelections.length === 0
+          ? ([] as const)
+          : ([message.extensionSelections] as const)),
       );
       if (sent) {
         // The detached images belong to this message only. Keep any images
@@ -1482,7 +1491,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         ? pathMentionListId
                         : undefined
             }
-            aria-expanded={computer.open || browser.open || slash.open || mention.open || pathMentionOpen}
+            aria-expanded={
+              computer.open || browser.open || slash.open || mention.open || pathMentionOpen
+            }
             className="composer-input window-no-drag"
             id={`code-thread-composer-${String(thread.id)}`}
             onChange={(event) => {

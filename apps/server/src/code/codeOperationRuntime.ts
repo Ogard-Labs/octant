@@ -1167,7 +1167,9 @@ function persistenceLabel(value: "current-session" | "project-default"): string 
 
 interface ActiveTurn {
   readonly computerUseSelection?: import("@octant/contracts/extensions").ExtensionSelection;
-  readonly extensionSelections?: ReadonlyArray<import("@octant/contracts/extensions").ExtensionSelection>;
+  readonly extensionSelections?: ReadonlyArray<
+    import("@octant/contracts/extensions").ExtensionSelection
+  >;
   readonly windowId: WindowId;
   readonly thread: CodeThread;
   readonly operationId: CodeOperationId;
@@ -1581,11 +1583,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     };
     const harnessContext = this.#options.nativeHarness?.contextFor(harnessScope) ?? [];
     this.#options.nativeHarness?.turnStarted(harnessScope);
-    const browserSelected =
-      active.extensionSelections?.some(isBrowserUseSelection) === true;
+    const browserSelected = active.extensionSelections?.some(isBrowserUseSelection) === true;
     const fullContext = [
       ...harnessContext,
-      ...(browserSelected ? [{ kind: "instructions" as const, text: BROWSER_SELECTION_GUIDANCE }] : []),
+      ...(browserSelected
+        ? [{ kind: "instructions" as const, text: BROWSER_SELECTION_GUIDANCE }]
+        : []),
       ...(context ?? []),
     ];
     const harnessAutoReviewEnabled = this.#resolveHarnessAutoReview(active.thread);

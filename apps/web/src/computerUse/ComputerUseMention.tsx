@@ -36,7 +36,8 @@ export function useComputerUseMention(input: {
     kind: "computer",
     label: "Computer",
     available:
-      typeof window !== "undefined" && typeof window.octantHost?.getComputerUseStatus === "function",
+      typeof window !== "undefined" &&
+      typeof window.octantHost?.getComputerUseStatus === "function",
   });
 }
 
@@ -67,7 +68,11 @@ function useApplicationMention(
     readonly onSelectionEdited?: () => void;
     readonly textarea?: () => HTMLTextAreaElement | null;
   },
-  app: { readonly kind: "computer" | "browser"; readonly label: string; readonly available: boolean },
+  app: {
+    readonly kind: "computer" | "browser";
+    readonly label: string;
+    readonly available: boolean;
+  },
 ) {
   const listId = useId();
   const [token, setToken] = useState<Token>();

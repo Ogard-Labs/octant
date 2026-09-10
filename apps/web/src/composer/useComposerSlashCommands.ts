@@ -1,4 +1,4 @@
-import { createElement, useId, useState, type KeyboardEvent } from "react";
+import { createElement, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Slash } from "lucide-react";
 import {
   applySlashCommandToken,
@@ -14,6 +14,7 @@ export function useComposerSlashCommands(input: {
   readonly draft: string;
   readonly onDraftChange: (draft: string, caret?: number) => void;
   readonly onResolveExtensionReference?: (reference: string) => Promise<boolean>;
+  readonly textarea?: () => HTMLTextAreaElement | null;
 }) {
   const listId = useId();
   const commands = useOctantCommands().filter(
@@ -22,8 +23,11 @@ export function useComposerSlashCommands(input: {
   const [token, setToken] = useState<ReturnType<typeof parseSlashCommandToken>>();
   const [activeIndex, setActiveIndex] = useState(0);
   const [resolving, setResolving] = useState(false);
+  const pendingResolution = useRef(false);
   const matches = token === undefined ? [] : filterOctantCommands(commands, token.query);
-  const open = token !== undefined && commands.length > 0;
+  const tokenIsCurrent =
+    token !== undefined && input.draft.slice(token.start, token.end) === `/${token.query}`;
+  const open = tokenIsCurrent && commands.length > 0;
   const active = open ? matches[activeIndex] : undefined;
 
   const sync = (draft: string, caret: number | null) => {
@@ -31,28 +35,44 @@ export function useComposerSlashCommands(input: {
     setActiveIndex(0);
   };
   const choose = (command: OctantCommand) => {
-    if (token === undefined) return;
+    if (token === undefined || !tokenIsCurrent || pendingResolution.current) return;
     const applied = applySlashCommandToken(input.draft, token);
     input.onDraftChange(applied.draft, applied.caretIndex);
     setToken(undefined);
     setActiveIndex(0);
+    queueMicrotask(() => {
+      const textarea = input.textarea?.();
+      if (textarea?.isConnected !== true) return;
+      textarea.focus();
+      textarea.setSelectionRange(applied.caretIndex, applied.caretIndex);
+    });
     if (command.action.kind === "run") {
       command.action.run();
       return;
     }
     setResolving(true);
+    pendingResolution.current = true;
     const pending = input.onResolveExtensionReference?.(command.action.reference);
     if (pending === undefined) {
       setResolving(false);
+      pendingResolution.current = false;
       return;
     }
-    void pending.finally(() => setResolving(false));
+    void pending
+      .catch(() => false)
+      .finally(() => {
+        pendingResolution.current = false;
+        setResolving(false);
+      });
   };
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
     if (event.nativeEvent.isComposing) return false;
     if (resolving) {
-      event.preventDefault();
-      return true;
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        return true;
+      }
+      return false;
     }
     if (open && matches.length > 0) {
       if (event.key === "ArrowDown") {

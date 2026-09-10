@@ -17,7 +17,11 @@ export const BROWSER_USE_PLUGIN = decodeExtensionPackageManifest({
   source: { kind: "bundled", sourceRef: "app:browser" },
   provenance: { publisher: "Octant", reviewed: true },
   license: { kind: "spdx", identifier: "MIT" },
-  compatibility: { platforms: ["macos", "linux", "windows"], modes: ["chat", "work", "code"], providerFamilies: [] },
+  compatibility: {
+    platforms: ["macos", "linux", "windows"],
+    modes: ["chat", "work", "code"],
+    providerFamilies: [],
+  },
   declaredCapabilities: ["browser"],
   primaryComponentId: "browser",
   components: [

@@ -607,8 +607,12 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ? {}
             : { windowCapability: props.windowCapability })}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-          {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
-          {...(props.browserAvailable === undefined ? {} : { browserAvailable: props.browserAvailable })}
+          {...(props.extensionClient === undefined
+            ? {}
+            : { extensionClient: props.extensionClient })}
+          {...(props.browserAvailable === undefined
+            ? {}
+            : { browserAvailable: props.browserAvailable })}
           onCreateThread={(input) => {
             const submitted = {
               ...input,
@@ -632,7 +636,10 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                 submitted.computerUseSelection,
                 submitted.extensionSelections,
               );
-            if (submitted.extensionSelections !== undefined && submitted.extensionSelections.length > 0)
+            if (
+              submitted.extensionSelections !== undefined &&
+              submitted.extensionSelections.length > 0
+            )
               return props.onCreateThread(
                 submitted.prompt,
                 selectedProjectId,
@@ -696,9 +703,19 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(props.windowCapability === undefined
             ? {}
             : { windowCapability: props.windowCapability })}
-          {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
-          {...(props.browserAvailable === undefined ? {} : { browserAvailable: props.browserAvailable })}
-          onCreateThread={(prompt, images, threadMentionIds, computerUseSelection, extensionSelections) =>
+          {...(props.extensionClient === undefined
+            ? {}
+            : { extensionClient: props.extensionClient })}
+          {...(props.browserAvailable === undefined
+            ? {}
+            : { browserAvailable: props.browserAvailable })}
+          onCreateThread={(
+            prompt,
+            images,
+            threadMentionIds,
+            computerUseSelection,
+            extensionSelections,
+          ) =>
             computerUseSelection !== undefined
               ? props.onCreateThread(
                   prompt,
@@ -723,23 +740,23 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                     undefined,
                     extensionSelections,
                   )
-              : issueContext === undefined && linearIssueContext === undefined
-                ? props.onCreateThread(
-                    prompt,
-                    selectedProjectId,
-                    undefined,
-                    images,
-                    threadMentionIds,
-                  )
-                : props.onCreateThread(
-                    prompt,
-                    selectedProjectId,
-                    undefined,
-                    images,
-                    threadMentionIds,
-                    issueContext,
-                    linearIssueContext,
-                  )
+                : issueContext === undefined && linearIssueContext === undefined
+                  ? props.onCreateThread(
+                      prompt,
+                      selectedProjectId,
+                      undefined,
+                      images,
+                      threadMentionIds,
+                    )
+                  : props.onCreateThread(
+                      prompt,
+                      selectedProjectId,
+                      undefined,
+                      images,
+                      threadMentionIds,
+                      issueContext,
+                      linearIssueContext,
+                    )
           }
           onCancel={props.onCancel}
           {...(props.onCancelFirstTurn === undefined

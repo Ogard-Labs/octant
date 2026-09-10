@@ -23,6 +23,9 @@ identify the active checkout.
   or bright border changes. This partially supersedes 0105's neutral focus
   edge; keyboard operation, visible focus, and shared recipe ownership remain.
   A menu container does not draw a focus frame around its contents.
+- Selected controls and context-menu targets use fills, check marks, or text
+  emphasis instead of highlighting borders. Preview thumbnails retain their
+  content while a check mark identifies the selected appearance.
 - This partially supersedes only 0098's fixed, empty feedback lane. Its shared
   frame, separate attached checkout strip, input growth, and ownership rules
   remain in force. A notice may now change the composer's height.

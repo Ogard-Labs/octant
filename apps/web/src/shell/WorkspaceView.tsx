@@ -1123,7 +1123,9 @@ function renderNonCodeTab(
             ...(computerUseSelection === undefined
               ? ([] as const)
               : ([computerUseSelection] as const)),
-            ...(extensionSelections === undefined ? ([] as const) : ([extensionSelections] as const)),
+            ...(extensionSelections === undefined
+              ? ([] as const)
+              : ([extensionSelections] as const)),
           );
         }}
         {...(props.onCreateProject === undefined ? {} : { onCreateProject: props.onCreateProject })}
@@ -1317,7 +1319,9 @@ function renderNonCodeTab(
                 {...(props.projectWindowCapability === undefined
                   ? {}
                   : { windowCapability: props.projectWindowCapability })}
-                {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+                {...(props.extensionClient === undefined
+                  ? {}
+                  : { extensionClient: props.extensionClient })}
                 browserAvailable={props.browserAutomationClient !== undefined}
                 {...(props.onOpenCanvasReference === undefined
                   ? {}
