@@ -1,4 +1,5 @@
 import type {
+  DiscoverySnapshot,
   ProviderInstance,
   ProviderInstanceId,
   ProviderModel,
@@ -118,6 +119,13 @@ const defaultWorkspace = {
   modeSwitcher: "buttons",
 } as const;
 
+// A scan that ran to completion: only then may the surface claim this Mac has
+// no provider on it.
+const searchedThisMac = {
+  scanning: false,
+  snapshot: { status: "completed", candidates: [] } as unknown as DiscoverySnapshot,
+} as const;
+
 function mount(overrides: Partial<FirstRunOnboardingProps> = {}) {
   const props: FirstRunOnboardingProps = {
     controller: controller(),
@@ -125,6 +133,7 @@ function mount(overrides: Partial<FirstRunOnboardingProps> = {}) {
       providerStatus: "ready",
       instances: [instance],
       observedByInstance: new Map(),
+      discovery: searchedThisMac,
     }),
     onOpenProviderSettings: vi.fn(),
     onRescan: vi.fn(),
@@ -206,6 +215,7 @@ function readyHandoff(): Partial<FirstRunOnboardingProps> {
       providerStatus: "ready",
       instances: [instance],
       observedByInstance: new Map([[instanceId, readyObserved()]]),
+      discovery: searchedThisMac,
     }),
   };
 }
@@ -707,6 +717,7 @@ describe("FirstRunOnboarding", () => {
             providerStatus: "ready",
             instances: [instance],
             observedByInstance: new Map(),
+            discovery: searchedThisMac,
           })}
           scanning={false}
           workspace={defaultWorkspace}
@@ -765,6 +776,7 @@ describe("FirstRunOnboarding", () => {
               providerStatus: "ready",
               instances: [instance],
               observedByInstance: new Map(),
+              discovery: searchedThisMac,
             })}
             scanning={false}
             workspace={defaultWorkspace}
