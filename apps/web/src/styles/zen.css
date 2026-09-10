@@ -307,6 +307,19 @@
   overscroll-behavior: contain;
 }
 
+/* A panel scrolls; its rows do not compress. The panel is a flex column
+   inside a height-capped anchor, and as flex items its rows carried the
+   default `flex-shrink: 1`, so a sheet with more content than room squashed
+   every one of them below its own height — the head to 8px of the 28 it
+   needs, the background grid to 496px of 1634. The rows overflow visibly, so
+   each was drawn over the row beneath it: the Custom fill and Local
+   background labels landed on top of the background pictures. Hold each row
+   at its content height and let the panel's own `overflow: auto` do the
+   scrolling it was already asking for. */
+.zen-panel > * {
+  flex-shrink: 0;
+}
+
 .zen-panel fieldset {
   min-width: 0;
   min-inline-size: 0;
@@ -576,21 +589,69 @@
   color: var(--oct-muted);
 }
 
+/* A background picker shows backgrounds. Twenty names stacked one per row
+   made a sheet taller than the window that could still only tell you what a
+   preset is called; the picture tells you what it looks like, and three fit
+   across the same width a single name needed. */
 .zen-appearance__preset-grid {
   display: grid;
-  /* One per row. Two columns in a 360px sheet cut every name that says what
-     the background actually is ("Perspective dots light animated" arrived as
-     "ctive dots light anim"), and a name nobody can read is not a choice. */
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
   gap: var(--oct-space-2);
 }
 
-.zen-appearance__preset-grid > [data-slot="button"] {
+.zen-appearance__preset-grid > .zen-appearance__preset {
+  display: grid;
+  height: auto;
   min-width: 0;
-  max-width: 100%;
+  min-height: 0;
+  gap: 4px;
+  padding: 4px;
+  justify-items: stretch;
+  text-align: left;
+}
+
+.zen-appearance__thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  border-radius: var(--oct-radius-sm);
+  object-fit: cover;
+}
+
+/* The name still carries the choice for a screen reader and for anyone who
+   cannot tell two dark landscapes apart at 104px, so it wraps rather than
+   truncating: two lines is the longest any built-in title runs. */
+.zen-appearance__preset-name {
+  display: -webkit-box;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: var(--oct-text-xs);
+  line-height: 1.3;
+  white-space: normal;
+}
+
+.zen-appearance__preset-motion {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+/* The chosen one, marked on the picture rather than on the control, so the
+   ring reads against whatever the thumbnail happens to be. Neutral, not the
+   accent: this says "this is the one", not "this has focus" (0105). */
+.zen-appearance__preset[aria-pressed="true"] .zen-appearance__thumb {
+  outline: 2px solid var(--oct-fg);
+  outline-offset: 2px;
+}
+
+.zen-appearance__custom {
+  margin-top: var(--oct-space-3);
+}
+
+.zen-appearance__custom > summary {
+  cursor: pointer;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
 }
 
 /*

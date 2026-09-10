@@ -21,6 +21,15 @@ export interface ZenAppearancePanelProps {
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
+/**
+ * The badge under a tile is the one place a background says it moves, so a
+ * title that already ends in "animated" drops it rather than saying it twice
+ * ("Perspective dots animated" beside a badge reading Animated).
+ */
+function presetName(title: string): string {
+  return title.replace(/\s+animated$/i, "");
+}
+
 export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
   const background = props.appearance.background;
   const [solidColor, setSolidColor] = useState(
@@ -141,7 +150,13 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
             <div className="zen-appearance__preset-grid">
               {groups[group].map((preset) => (
                 <OctantButton
+                  /* The tile's two visible texts are separate elements, so the
+                     computed name ran them together ("Perspective dotsAnimated").
+                     The preset's own title already reads as a sentence and
+                     already says when it moves, so it is the label. */
+                  aria-label={preset.title}
                   aria-pressed={background.kind === "builtin" && background.presetId === preset.id}
+                  className="zen-appearance__preset"
                   key={preset.id}
                   onClick={() => {
                     commit({
@@ -152,14 +167,21 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
                     });
                   }}
                   type="button"
-                  variant="secondary"
+                  variant="ghost"
                 >
-                  {/* Several built-in titles already end in "animated", and
-                      appending the suffix to those said it twice and pushed
-                      the name past the chip. */}
-                  {preset.motion === "animated" && !preset.title.toLowerCase().includes("animated")
-                    ? `${preset.title} (animated)`
-                    : preset.title}
+                  {/* An animated preset is a moving WebP. The picker shows its
+                      still frame instead, so choosing a background does not set
+                      eight of them playing at once behind the sheet. */}
+                  <img
+                    alt=""
+                    className="zen-appearance__thumb"
+                    loading="lazy"
+                    src={"stillSrc" in preset ? preset.stillSrc : preset.src}
+                  />
+                  <span className="zen-appearance__preset-name">{presetName(preset.title)}</span>
+                  {preset.motion === "animated" ? (
+                    <span className="zen-appearance__preset-motion">Animated</span>
+                  ) : null}
                 </OctantButton>
               ))}
             </div>
@@ -167,8 +189,11 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
         ))}
       </fieldset>
 
-      <fieldset>
-        <legend>Custom fill</legend>
+      {/* Six controls that only matter to someone mixing their own colour.
+          Open they doubled the sheet's height and pushed the built-in
+          pictures off the bottom of it. */}
+      <details className="zen-appearance__custom">
+        <summary>Custom fill</summary>
         <label>
           Solid color
           <OctantInput
@@ -245,7 +270,7 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
         >
           Apply custom gradient
         </OctantButton>
-      </fieldset>
+      </details>
 
       <label>
         Local Zen background
