@@ -31,6 +31,7 @@ import { describePullRequestSummary } from "../threadBoard/ThreadBoardPullReques
 import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import { pullRequestKey, threadRowPullRequestDestinations } from "./threadRowPullRequests";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
+import { useSidebarRowProperties } from "../shell/sidebarRowProperties";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { ThreadRenameField } from "./ThreadRenameField";
 import { type ThreadRowActions, ThreadRowMenu, threadRowMenuIsEmpty } from "./ThreadRowMenu";
@@ -166,7 +167,7 @@ function threadRowStates(thread: ChatThreadNavigationItem): ReadonlyArray<string
  * The row's own age: the shortest true reading, because the row has one word
  * of room at its edge and the card beside it spells the rest out.
  */
-function threadRowShortAge(updatedAt: string | undefined): string | undefined {
+export function threadRowShortAge(updatedAt: string | undefined): string | undefined {
   if (updatedAt === undefined) return undefined;
   const date = new Date(updatedAt);
   if (Number.isNaN(date.getTime())) return undefined;
@@ -180,7 +181,7 @@ function threadRowShortAge(updatedAt: string | undefined): string | undefined {
   return date.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
 }
 
-function threadRowAge(updatedAt: string | undefined): string | undefined {
+export function threadRowAge(updatedAt: string | undefined): string | undefined {
   if (updatedAt === undefined) return undefined;
   const date = new Date(updatedAt);
   if (Number.isNaN(date.getTime())) return undefined;
@@ -707,6 +708,7 @@ interface ProjectThreadRowProps {
 
 const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowProps) {
   const drag = useContext(SidebarThreadDragContext);
+  const shows = useSidebarRowProperties();
   const rowId = props.thread.navigationId ?? props.thread.threadId;
   const projectName = props.projectNameForThread?.(props.thread);
   const hasMenu = !threadRowMenuIsEmpty(props.actions);
@@ -754,8 +756,9 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
       />
     );
   }
-  const rowPullRequest = props.thread.pullRequests?.items[0];
-  const rowAge = threadRowShortAge(props.thread.updatedAt);
+  const rowPullRequest = shows.pullRequest ? props.thread.pullRequests?.items[0] : undefined;
+  const rowCheckout = shows.branch ? props.thread.checkoutChip : undefined;
+  const rowAge = shows.lastUpdated ? threadRowShortAge(props.thread.updatedAt) : undefined;
   const row = (
     <OctantButton
       aria-current={props.activeThreadId === rowId ? "page" : undefined}
@@ -809,15 +812,10 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
             </span>
           )}
         </span>
-        {props.thread.checkoutChip === undefined ? null : (
-          <span
-            className="sidebar-navigation__thread-checkout"
-            title={props.thread.checkoutChip.label}
-          >
+        {rowCheckout === undefined ? null : (
+          <span className="sidebar-navigation__thread-checkout" title={rowCheckout.label}>
             <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
-            <span className="sidebar-navigation__thread-checkout-label">
-              {props.thread.checkoutChip.label}
-            </span>
+            <span className="sidebar-navigation__thread-checkout-label">{rowCheckout.label}</span>
           </span>
         )}
       </span>
@@ -834,7 +832,9 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
       )}
       {/* A snoozed row says when it comes back, not when it was last touched;
           a row whose snooze ended says so until it is opened, because it
-          reappears where it was rather than at the top. */}
+          reappears where it was rather than at the top. Hiding Last updated
+          hides the timestamp, never the wake time: a rested thread that never
+          says when it returns reads as one that is simply gone. */}
       {props.thread.wakeLabel !== undefined ? (
         <span
           className="sidebar-navigation__thread-age"
@@ -850,12 +850,14 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
           {rowAge}
         </span>
       )}
-      <ThreadStatusMark
-        activity={activity}
-        unread={unread}
-        woke={props.thread.woke === true}
-        followUp={props.thread.followUp === true}
-      />
+      {shows.status ? (
+        <ThreadStatusMark
+          activity={activity}
+          unread={unread}
+          woke={props.thread.woke === true}
+          followUp={props.thread.followUp === true}
+        />
+      ) : null}
     </OctantButton>
   );
   const wrappedRow = (
