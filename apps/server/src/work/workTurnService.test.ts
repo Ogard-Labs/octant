@@ -128,6 +128,32 @@ describe("WorkTurnService", () => {
     expect(fixture.acquireInputs).toHaveLength(0);
   });
 
+  it("forwards fixed Browser guidance when Work exposes Browser", async () => {
+    const contexts: Array<ReadonlyArray<{ readonly kind: string; readonly text: string }>> = [];
+    const fixture = serviceFixture({
+      resolveAppManagedTools: () => ({
+        definitions: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+        execute: async () => ({ result: {} }),
+      }),
+      turnRuntime: {
+        run: async (input) => {
+          contexts.push(input.context ?? []);
+          return { kind: "completed", response: "Provider reply" };
+        },
+      },
+    });
+    const result = await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      extensionSelections: [browserUseSelection("work-browser-guidance")],
+    });
+    expect(result.kind).toBe("accepted");
+    await fixture.waitForIdle();
+    expect(contexts.flat()).toContainEqual({
+      kind: "instructions",
+      text: expect.stringContaining("Octant's built-in Browser"),
+    });
+  });
+
   it("preserves draft semantics by rejecting a stale binding without creating a turn", async () => {
     const fixture = serviceFixture({
       project: {
@@ -548,6 +574,7 @@ function serviceFixture(
     readonly supportsAttachments?: () => boolean;
     readonly safeInputBudgetTokens?: number;
     readonly resolveFileMentionContext?: WorkTurnServiceDependencies["resolveFileMentionContext"];
+    readonly resolveAppManagedTools?: WorkTurnServiceDependencies["resolveAppManagedTools"];
     readonly spendCeiling?: WorkTurnServiceDependencies["spendCeiling"];
   } = {},
 ) {
@@ -685,6 +712,9 @@ function serviceFixture(
     ...(options.resolveFileMentionContext === undefined
       ? {}
       : { resolveFileMentionContext: options.resolveFileMentionContext }),
+    ...(options.resolveAppManagedTools === undefined
+      ? {}
+      : { resolveAppManagedTools: options.resolveAppManagedTools }),
     ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
     uuid: (() => {
       let n = 0;

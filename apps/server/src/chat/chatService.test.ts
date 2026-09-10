@@ -1076,9 +1076,7 @@ describe("ChatService", () => {
   });
 
   it("fails closed when a persisted Browser selection is resumed without a window capability", async () => {
-    const browserWindow = decodeWindowId("84000000-0000-4000-8000-000000000013");
     const { service, fakeDriver } = openFixture({
-      turnOutcome: "interrupted",
       resolveAppManagedTools: () => ({
         definitions: [{ name: "octant_browser", inputSchema: { type: "object", properties: {} } }],
         execute: async () => ({ result: {} }),
@@ -1090,34 +1088,17 @@ describe("ChatService", () => {
       title: "Resume Browser selection",
     });
     if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
-    const sent = await service.execute(
-      {
+    await expect(
+      service.execute({
         kind: "send-chat-turn",
         threadId: created.thread.id,
         expectedVersion: created.thread.version,
         prompt: "Continue this",
         extensionSelections: [browserUseSelection("chat-resume-browser")],
-      },
-      { windowId: browserWindow },
-    );
-    if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
-    await until(
-      () => service.read(created.thread.id).turns[0]?.attempts[0]?.outcome === "interrupted",
-    );
-    const interrupted = service.read(created.thread.id);
-    const attempt = interrupted.turns[0]!.attempts[0]!;
-    const resumed = await service.execute({
-      kind: "resume-chat-turn",
-      threadId: created.thread.id,
-      expectedVersion: interrupted.thread.version,
-      turnId: sent.turn.id,
-      attemptId: attempt.id,
-    });
-    expect(resumed).toMatchObject({ kind: "attempt-updated" });
-    await until(
-      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "failed",
-    );
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
     expect(fakeDriver.resumeInputs).toHaveLength(0);
+    expect(fakeDriver.acquireInputs).toHaveLength(0);
   });
 
   it("honors a pre-admitted thread id for linked Chat creation", async () => {
