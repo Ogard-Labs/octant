@@ -165,13 +165,16 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     defaultDark: "#a9a9a9",
   },
   {
+    // Muted carries the 12px meta layer (timestamps, counts, chips), so it is
+    // held to normal-text contrast, and on the control fill as well as the
+    // workspace: the earlier #8a8a8a read at 4.10:1 on the dark control.
     id: "text-muted",
     displayName: "Muted text",
     category: "text",
     contrastTarget: "workspace",
-    contrastLevel: "large-text",
-    defaultLight: "#6b6b6b",
-    defaultDark: "#8a8a8a",
+    contrastLevel: "normal-text",
+    defaultLight: "#666666",
+    defaultDark: "#949494",
   },
   {
     // Primary actions invert against the monochrome accent in each mode.

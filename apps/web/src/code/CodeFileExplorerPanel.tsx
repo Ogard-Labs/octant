@@ -77,23 +77,28 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
       ) : null}
 
       {controller.status === "error" ? (
+        // The one sentence, and nothing under it. Rendering the tree as well
+        // put a live filter field and "No matching repository files" beneath
+        // an explanation that there are no files to match.
         <p className="code-file-explorer__error" role="alert">
           {controller.errorMessage ?? "Repository files are unavailable."}
         </p>
-      ) : null}
+      ) : (
+        <>
+          {controller.truncated ? (
+            <p className="code-file-explorer__status" role="status">
+              Octant listed part of this repository. The file tree is incomplete.
+            </p>
+          ) : null}
 
-      {controller.truncated ? (
-        <p className="code-file-explorer__status" role="status">
-          Octant listed part of this repository. The file tree is incomplete.
-        </p>
-      ) : null}
-
-      <CodeFileExplorer
-        loading={controller.status === "loading"}
-        entries={controller.entries}
-        onOpenFile={props.onOpenFile}
-        {...(props.selectedPath === undefined ? {} : { selectedPath: props.selectedPath })}
-      />
+          <CodeFileExplorer
+            loading={controller.status === "loading"}
+            entries={controller.entries}
+            onOpenFile={props.onOpenFile}
+            {...(props.selectedPath === undefined ? {} : { selectedPath: props.selectedPath })}
+          />
+        </>
+      )}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -8,7 +9,11 @@ import {
   type PointerEvent,
   type ReactNode,
 } from "react";
-import { resolveAccessibilityFallbacks, resolveZenLiveCardActivity } from "@octant/domain";
+import {
+  planZenWall,
+  resolveAccessibilityFallbacks,
+  resolveZenLiveCardActivity,
+} from "@octant/domain";
 import type { ZenLiveCardActivity } from "@octant/domain";
 import type {
   ZenAssistantSnapshot,
@@ -20,6 +25,7 @@ import type {
   ZenSourceContext,
   ZenSpace,
   ZenSpaceId,
+  ZenSpaceLayout,
   ZenTimerAction,
   ZenThreadCatalogEntry,
   ZenThreadCatalogRef,
@@ -35,6 +41,7 @@ import {
   UNSUPPORTED_NAVIGATOR_ASSISTANT,
   type NavigatorAssistantController,
 } from "../navigator/useNavigatorAssistant";
+import { relativeTimeLabel } from "../lib/relativeTime";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCard } from "../ui/base/OctantCard";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -113,6 +120,8 @@ export interface ZenSurfaceProps {
   readonly onRemoveElement?: (elementId: ZenElementPayload["elementId"]) => void;
   readonly onUpdateElement: (element: ZenElementPayload) => void | Promise<void>;
   readonly onUpdateViewport: (viewport: ZenViewport) => void;
+  /** Switches the space between the wall and a hand-made arrangement. */
+  readonly onSetLayout?: (layout: ZenSpaceLayout) => void;
   readonly assistant?: ZenAssistantSnapshot | null;
   readonly assistantOpen?: boolean;
   readonly panelBusy?: boolean;
@@ -271,7 +280,10 @@ export function ZenSurface(props: ZenSurfaceProps) {
     { readonly elementId: string; readonly geometry: ZenGeometry } | undefined
   >(undefined);
   const [previewViewport, setPreviewViewport] = useState<ZenViewport | undefined>(undefined);
-  const [manualPanel, setManualPanel] = useState<"widgets" | "add" | "appearance" | null>(null);
+  // "Add" and "Widgets" were two panels for one act, and both offered a way to
+  // pin a thread. One destination now holds everything a person can put on the
+  // wall.
+  const [manualPanel, setManualPanel] = useState<"add" | "appearance" | null>(null);
   const [timerMinutes, setTimerMinutes] = useState(DEFAULT_ZEN_TIMER_DURATION_MS / 60_000);
   const [referenceUrl, setReferenceUrl] = useState("");
   const [referenceLabel, setReferenceLabel] = useState("");
@@ -295,7 +307,28 @@ export function ZenSurface(props: ZenSurfaceProps) {
     () => [...props.space.elements].sort((a, b) => a.zIndex - b.zIndex),
     [props.space.elements],
   );
-  const { panX, panY, scale } = props.space.viewport;
+  // A wall places every card itself, from the count and the area it has, so
+  // two pins cannot land on each other and removing one closes the gap. It
+  // reads the space's own order rather than z-index: raising a card to work on
+  // it would otherwise move it across the wall (0106).
+  const wall = props.space.layout === "wall";
+  const laidOut = useMemo(() => {
+    if (!wall) return sorted;
+    const tiles = planZenWall(props.space.elements.length, surfaceSize, {
+      // The spaces pill floats over the top of the surface and the Navigator
+      // bar over the bottom; a wall that filled the whole area would put its
+      // first and last rows underneath them.
+      insetTop: ZEN_WALL_INSET_TOP,
+      insetBottom: props.barCollapsed ? ZEN_WALL_INSET_BOTTOM_COLLAPSED : ZEN_WALL_INSET_BOTTOM,
+    });
+    return props.space.elements.map((element, index) => {
+      const tile = tiles[index];
+      return tile === undefined ? element : { ...element, geometry: tile };
+    });
+  }, [props.barCollapsed, props.space.elements, sorted, surfaceSize, wall]);
+  // A wall fills the surface, so there is nothing to pan to and nothing off
+  // screen to zoom out for.
+  const { panX, panY, scale } = wall ? { panX: 0, panY: 0, scale: 1 } : props.space.viewport;
   const background = appearance.background;
   const forceOpaque = appearance.reducedTransparency || appearance.increasedContrast;
   const focusedElement = props.space.elements.find(
@@ -306,12 +339,18 @@ export function ZenSurface(props: ZenSurfaceProps) {
   const threadCardActivity = useMemo(() => {
     const focusedElementId = focusedElement?.elementId;
     const resolved = resolveZenLiveCardActivity({
-      elements: props.space.elements,
-      visibleRegion: computeVisibleRegion(props.space.viewport, surfaceSize),
+      // The laid-out geometry, not the stored one: on a wall the stored
+      // rectangles are whatever an earlier arrangement left behind, and a card
+      // would be judged off screen while it is plainly in front of the reader.
+      elements: laidOut,
+      visibleRegion: computeVisibleRegion(
+        wall ? { panX: 0, panY: 0, scale: 1 } : props.space.viewport,
+        surfaceSize,
+      ),
       ...(focusedElementId === undefined ? {} : { focusedElementId }),
     });
     return new Map(resolved.map((card) => [String(card.elementId), card]));
-  }, [focusedElement?.elementId, props.space.elements, props.space.viewport, surfaceSize]);
+  }, [focusedElement?.elementId, laidOut, props.space.viewport, surfaceSize, wall]);
 
   /**
    * The card's own reading of its own thread.
@@ -359,6 +398,10 @@ export function ZenSurface(props: ZenSurfaceProps) {
 
   function focusElement(element: ZenElementPayload): void {
     setFocusedId(element.elementId);
+    // Raising a card is how one stops hiding another. Nothing on a wall is
+    // behind anything, so focusing a card writes no z-index there; the wall
+    // reads the space's own order and would ignore the new one anyway.
+    if (wall) return;
     const raised = bringElementToFront(props.space.elements, element.elementId);
     const next = raised.find((el) => el.elementId === element.elementId);
     if (next !== undefined && next.zIndex !== element.zIndex) {
@@ -372,6 +415,10 @@ export function ZenSurface(props: ZenSurfaceProps) {
     kind: "move" | "resize",
   ): void {
     if (element.locked) return;
+    // A wall owns where every card sits. Dragging one would write a geometry
+    // the wall then ignores, so the card would snap back and the write would
+    // be a lie about what the reader did.
+    if (wall) return;
     event.preventDefault();
     event.stopPropagation();
     try {
@@ -393,6 +440,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
   }
 
   function beginPan(event: PointerEvent<HTMLElement>): void {
+    if (wall) return;
     if (event.target !== event.currentTarget) return;
     event.preventDefault();
     setInteraction({
@@ -474,6 +522,10 @@ export function ZenSurface(props: ZenSurfaceProps) {
     ) {
       return;
     }
+    // Nudge and resize move a card within an arrangement. On a wall they would
+    // write a geometry the wall ignores, so the arrows stay with the surface
+    // and Delete keeps working.
+    if (wall) return;
     event.preventDefault();
     const nextGeometry = clampGeometryToBounds(
       event.altKey
@@ -501,10 +553,42 @@ export function ZenSurface(props: ZenSurfaceProps) {
     props.onExit();
   }
 
+  // Escape closes what is open before it leaves Zen. Handled on the document
+  // because a panel holds focus inside itself, so the key never reaches the
+  // surface, and a person pressing Escape in the thread picker expects the
+  // picker to close, not the whole focus zone.
+  const closeTopPanel = useCallback((): boolean => {
+    if (manualPanel !== null) {
+      setManualPanel(null);
+      return true;
+    }
+    if (props.threadPickerOpen === true) {
+      props.onCloseThreadPicker?.();
+      return true;
+    }
+    if (props.assistantOpen === true) {
+      props.onCloseAssistant?.();
+      return true;
+    }
+    return false;
+  }, [manualPanel, props]);
+
+  useEffect(() => {
+    function onKeyDown(event: globalThis.KeyboardEvent): void {
+      if (event.key !== "Escape") return;
+      if (!closeTopPanel()) return;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [closeTopPanel]);
+
   return (
     <div
       aria-label="Zen workspace"
       className="zen-surface"
+      data-layout={wall ? "wall" : "arrange"}
       onKeyDown={handleSurfaceKeyDown}
       onPointerDown={beginPan}
       onPointerMove={handlePointerMove}
@@ -516,7 +600,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
       tabIndex={0}
     >
       {resolvedBackground.systemGround ? <div aria-hidden="true" className="zen-ground" /> : null}
-      <div className="zen-surface__traffic-light-safe window-drag-region" aria-hidden="true" />
+      <div className="zen-surface__titlebar window-drag-region" aria-hidden="true" />
       {props.focusZone === null || props.focusZone === undefined ? null : (
         <div className="zen-surface__spaces-anchor window-no-drag">
           <ZenSpaceSwitcher
@@ -551,7 +635,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
           transformOrigin: "0 0",
         }}
       >
-        {sorted.map((element) => {
+        {laidOut.map((element) => {
           const threadCard = element.kind === "thread" ? resolveThreadCard(element) : undefined;
           const title =
             element.kind === "terminal"
@@ -607,7 +691,17 @@ export function ZenSurface(props: ZenSurfaceProps) {
                 className="zen-el-head"
                 onPointerDown={(event) => beginElementInteraction(event, element, "move")}
               >
-                <span>{title}</span>
+                <span className="zen-el-title">{title}</span>
+                {/* How long ago this thread last moved, beside its name. A
+                    person supervising several cards reads that before
+                    anything in the body. */}
+                {threadCard?.entry === undefined ? null : (
+                  <span className="zen-el-state">
+                    <time dateTime={threadCard.entry.recentActivityAt}>
+                      {relativeTimeLabel(threadCard.entry.recentActivityAt)}
+                    </time>
+                  </span>
+                )}
                 <span className="zen-el-gap" />
                 <span
                   className="zen-el-actions window-no-drag"
@@ -699,17 +793,21 @@ export function ZenSurface(props: ZenSurfaceProps) {
                       "Unsupported Zen element"
                     )}
                   </div>
-                  <OctantButton
-                    aria-label={`Resize ${title}`}
-                    className="zen-el-grip window-no-drag"
-                    disabled={element.locked}
-                    onMouseDown={(event) => event.stopPropagation()}
-                    onPointerDown={(event) => beginElementInteraction(event, element, "resize")}
-                    size="icon"
-                    style={{ zIndex: 3 }}
-                    type="button"
-                    variant="ghost"
-                  />
+                  {/* A wall sizes its own cards, so it offers no grip to
+                      contradict it. */}
+                  {wall ? null : (
+                    <OctantButton
+                      aria-label={`Resize ${title}`}
+                      className="zen-el-grip window-no-drag"
+                      disabled={element.locked}
+                      onMouseDown={(event) => event.stopPropagation()}
+                      onPointerDown={(event) => beginElementInteraction(event, element, "resize")}
+                      size="icon"
+                      style={{ zIndex: 3 }}
+                      type="button"
+                      variant="ghost"
+                    />
+                  )}
                 </>
               )}
             </div>
@@ -721,55 +819,70 @@ export function ZenSurface(props: ZenSurfaceProps) {
         ? null
         : props.renderResearchDock?.({ dock: props.space.research })}
 
+      {/* On a wall there is nothing to pan to and nothing off screen to zoom
+          out for, so the cluster offers the one control that means something
+          there: leaving the wall for a hand-made arrangement. */}
       <div className="zen-bar zen-surface__controls window-no-drag">
         <OctantButton
-          aria-label="Zoom out"
-          onClick={() =>
-            props.onUpdateViewport({
-              ...props.space.viewport,
-              scale: Math.max(0.1, props.space.viewport.scale / 1.2),
-            })
-          }
+          onClick={() => props.onSetLayout?.(wall ? "arrange" : "wall")}
           size="sm"
           type="button"
           variant="ghost"
         >
-          −
+          {wall ? "Arrange" : "Tile"}
         </OctantButton>
-        <OctantButton
-          aria-label="Zoom in"
-          onClick={() =>
-            props.onUpdateViewport({
-              ...props.space.viewport,
-              scale: Math.min(5, props.space.viewport.scale * 1.2),
-            })
-          }
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          +
-        </OctantButton>
-        <OctantButton
-          onClick={() =>
-            props.onUpdateViewport(
-              computeZoomToFit(props.space.elements, { width: 1200, height: 800 }, 48),
-            )
-          }
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          Zoom to Fit
-        </OctantButton>
-        <OctantButton
-          onClick={() => props.onUpdateViewport({ panX: 0, panY: 0, scale: 1 })}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          Reset view
-        </OctantButton>
+        {wall ? null : (
+          <>
+            <OctantButton
+              aria-label="Zoom out"
+              onClick={() =>
+                props.onUpdateViewport({
+                  ...props.space.viewport,
+                  scale: Math.max(0.1, props.space.viewport.scale / 1.2),
+                })
+              }
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              −
+            </OctantButton>
+            <OctantButton
+              aria-label="Zoom in"
+              onClick={() =>
+                props.onUpdateViewport({
+                  ...props.space.viewport,
+                  scale: Math.min(5, props.space.viewport.scale * 1.2),
+                })
+              }
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              +
+            </OctantButton>
+            <OctantButton
+              onClick={() =>
+                props.onUpdateViewport(
+                  computeZoomToFit(props.space.elements, { width: 1200, height: 800 }, 48),
+                )
+              }
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Zoom to Fit
+            </OctantButton>
+            <OctantButton
+              onClick={() => props.onUpdateViewport({ panX: 0, panY: 0, scale: 1 })}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Reset view
+            </OctantButton>
+          </>
+        )}
       </div>
 
       {props.message === undefined ? null : (
@@ -809,18 +922,12 @@ export function ZenSurface(props: ZenSurfaceProps) {
 
       {manualPanel === null ? null : (
         <OctantCard
-          aria-label={manualPanel === "appearance" ? "Zen appearance" : "Zen additions"}
+          aria-label={manualPanel === "appearance" ? "Zen appearance" : "Add to this space"}
           className="zen-panel zen-surface__manual-panel window-no-drag px-6"
           role="dialog"
         >
           <header className="card-head">
-            <h2>
-              {manualPanel === "appearance"
-                ? "Appearance"
-                : manualPanel === "widgets"
-                  ? "Widgets"
-                  : "Add"}
-            </h2>
+            <h2>{manualPanel === "appearance" ? "Appearance" : "Add"}</h2>
             <OctantButton onClick={() => setManualPanel(null)} type="button" variant="ghost">
               Close
             </OctantButton>
@@ -837,165 +944,163 @@ export function ZenSurface(props: ZenSurfaceProps) {
             />
           ) : (
             <>
-              {manualPanel === "add" ? (
-                <div className="zen-add-picker">
-                  <OctantButton
-                    onClick={() => props.onOpenThreads?.()}
-                    type="button"
-                    variant="secondary"
-                  >
-                    Pin a thread
-                  </OctantButton>
-                  <OctantButton
-                    aria-label="Add terminal"
-                    disabled={
-                      props.onAddTerminal === undefined ||
-                      focusedThreadContext?.threadKind !== "code" ||
-                      props.canAddTerminal?.(focusedThreadContext) === false
+              <p className="oct-section-label">Threads and tools</p>
+              <div className="zen-add-picker">
+                <OctantButton
+                  onClick={() => props.onOpenThreads?.()}
+                  type="button"
+                  variant="secondary"
+                >
+                  Pin a thread
+                </OctantButton>
+                <OctantButton
+                  aria-label="Add terminal"
+                  disabled={
+                    props.onAddTerminal === undefined ||
+                    focusedThreadContext?.threadKind !== "code" ||
+                    props.canAddTerminal?.(focusedThreadContext) === false
+                  }
+                  onClick={() => {
+                    if (focusedThreadContext?.threadKind !== "code") return;
+                    props.onAddTerminal?.(focusedThreadContext);
+                    setManualPanel(null);
+                  }}
+                  type="button"
+                  variant="secondary"
+                >
+                  Add terminal
+                </OctantButton>
+                <OctantButton
+                  aria-label="Add browser"
+                  disabled={
+                    props.onAddBrowser === undefined ||
+                    (focusedThreadContext?.threadKind !== "code" &&
+                      focusedThreadContext?.threadKind !== "work")
+                  }
+                  onClick={() => {
+                    if (
+                      focusedThreadContext?.threadKind !== "code" &&
+                      focusedThreadContext?.threadKind !== "work"
+                    ) {
+                      return;
                     }
+                    props.onAddBrowser?.(focusedThreadContext);
+                    setManualPanel(null);
+                  }}
+                  type="button"
+                  variant="secondary"
+                >
+                  Add browser
+                </OctantButton>
+                {focusedThreadContext === undefined ? (
+                  <p className="zen-add-picker__hint" role="status">
+                    Focus a thread card to add its terminal or browser.
+                  </p>
+                ) : focusedThreadContext.threadKind === "code" &&
+                  props.canAddTerminal?.(focusedThreadContext) === false ? (
+                  <p className="zen-add-picker__hint" role="status">
+                    This Code thread cannot add a terminal right now.
+                  </p>
+                ) : focusedThreadContext.threadKind === "code" ? (
+                  <p className="zen-add-picker__hint" role="status">
+                    Add terminal starts a dedicated shell for this Code thread.
+                  </p>
+                ) : null}
+              </div>
+              <p className="oct-section-label">Widgets</p>
+              <>
+                <div className="zen-widget-picker">
+                  <OctantButton
+                    aria-label="Add Notes"
+                    disabled={props.onCreateWidget === undefined}
                     onClick={() => {
-                      if (focusedThreadContext?.threadKind !== "code") return;
-                      props.onAddTerminal?.(focusedThreadContext);
+                      props.onCreateWidget?.("notes");
                       setManualPanel(null);
                     }}
                     type="button"
                     variant="secondary"
                   >
-                    Add terminal
+                    Notes
                   </OctantButton>
                   <OctantButton
-                    aria-label="Add browser"
-                    disabled={
-                      props.onAddBrowser === undefined ||
-                      (focusedThreadContext?.threadKind !== "code" &&
-                        focusedThreadContext?.threadKind !== "work")
-                    }
+                    aria-label="Add Checklist"
+                    disabled={props.onCreateWidget === undefined}
                     onClick={() => {
-                      if (
-                        focusedThreadContext?.threadKind !== "code" &&
-                        focusedThreadContext?.threadKind !== "work"
-                      ) {
-                        return;
-                      }
-                      props.onAddBrowser?.(focusedThreadContext);
+                      props.onCreateWidget?.("checklist");
                       setManualPanel(null);
                     }}
                     type="button"
                     variant="secondary"
                   >
-                    Add browser
+                    Checklist
                   </OctantButton>
-                  {focusedThreadContext === undefined ? (
-                    <p className="zen-add-picker__hint" role="status">
-                      Focus a thread card to add its terminal or browser.
-                    </p>
-                  ) : focusedThreadContext.threadKind === "code" &&
-                    props.canAddTerminal?.(focusedThreadContext) === false ? (
-                    <p className="zen-add-picker__hint" role="status">
-                      This Code thread cannot add a terminal right now.
-                    </p>
-                  ) : focusedThreadContext.threadKind === "code" ? (
-                    <p className="zen-add-picker__hint" role="status">
-                      Add terminal starts a dedicated shell for this Code thread.
-                    </p>
-                  ) : null}
+                  <label>
+                    Reference URL
+                    <OctantInput
+                      aria-label="Reference URL"
+                      onChange={(event) => setReferenceUrl(event.currentTarget.value)}
+                      type="url"
+                      value={referenceUrl}
+                    />
+                  </label>
+                  <label>
+                    Reference label
+                    <OctantInput
+                      aria-label="Reference label"
+                      onChange={(event) => setReferenceLabel(event.currentTarget.value)}
+                      type="text"
+                      value={referenceLabel}
+                    />
+                  </label>
+                  <OctantButton
+                    aria-label="Add Reference"
+                    disabled={
+                      props.onCreateReference === undefined || referenceUrl.trim().length === 0
+                    }
+                    onClick={() => {
+                      props.onCreateReference?.(
+                        referenceUrl.trim(),
+                        referenceLabel.trim().length === 0 ? undefined : referenceLabel.trim(),
+                      );
+                      setReferenceUrl("");
+                      setReferenceLabel("");
+                      setManualPanel(null);
+                    }}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Reference
+                  </OctantButton>
                 </div>
-              ) : null}
-              {manualPanel === "widgets" ? (
-                <>
-                  <div className="zen-widget-picker">
-                    <OctantButton
-                      aria-label="Add Notes"
-                      disabled={props.onCreateWidget === undefined}
-                      onClick={() => {
-                        props.onCreateWidget?.("notes");
-                        setManualPanel(null);
-                      }}
-                      type="button"
-                      variant="secondary"
-                    >
-                      Notes
-                    </OctantButton>
-                    <OctantButton
-                      aria-label="Add Checklist"
-                      disabled={props.onCreateWidget === undefined}
-                      onClick={() => {
-                        props.onCreateWidget?.("checklist");
-                        setManualPanel(null);
-                      }}
-                      type="button"
-                      variant="secondary"
-                    >
-                      Checklist
-                    </OctantButton>
-                    <label>
-                      Reference URL
-                      <OctantInput
-                        aria-label="Reference URL"
-                        onChange={(event) => setReferenceUrl(event.currentTarget.value)}
-                        type="url"
-                        value={referenceUrl}
-                      />
-                    </label>
-                    <label>
-                      Reference label
-                      <OctantInput
-                        aria-label="Reference label"
-                        onChange={(event) => setReferenceLabel(event.currentTarget.value)}
-                        type="text"
-                        value={referenceLabel}
-                      />
-                    </label>
-                    <OctantButton
-                      aria-label="Add Reference"
-                      disabled={
-                        props.onCreateReference === undefined || referenceUrl.trim().length === 0
-                      }
-                      onClick={() => {
-                        props.onCreateReference?.(
-                          referenceUrl.trim(),
-                          referenceLabel.trim().length === 0 ? undefined : referenceLabel.trim(),
-                        );
-                        setReferenceUrl("");
-                        setReferenceLabel("");
-                        setManualPanel(null);
-                      }}
-                      type="button"
-                      variant="secondary"
-                    >
-                      Reference
-                    </OctantButton>
-                  </div>
-                  <div className="zen-panel__timer-create">
-                    <label>
-                      Timer duration in minutes
-                      <OctantInput
-                        aria-label="Timer duration in minutes"
-                        max="480"
-                        min="1"
-                        onChange={(event) => setTimerMinutes(Number(event.currentTarget.value))}
-                        type="number"
-                        value={timerMinutes}
-                      />
-                    </label>
-                    <OctantButton
-                      aria-label="Add timer"
-                      disabled={
-                        !Number.isInteger(timerMinutes) || timerMinutes < 1 || timerMinutes > 480
-                      }
-                      onClick={() => {
-                        props.onAddTimer?.(timerMinutes * 60 * 1000);
-                        setManualPanel(null);
-                      }}
-                      type="button"
-                      variant="secondary"
-                    >
-                      Add timer
-                    </OctantButton>
-                  </div>
-                  <p>Notes, Checklists, and Timers stay local to this Zen space.</p>
-                </>
-              ) : null}
+                <div className="zen-panel__timer-create">
+                  <label>
+                    Timer duration in minutes
+                    <OctantInput
+                      aria-label="Timer duration in minutes"
+                      max="480"
+                      min="1"
+                      onChange={(event) => setTimerMinutes(Number(event.currentTarget.value))}
+                      type="number"
+                      value={timerMinutes}
+                    />
+                  </label>
+                  <OctantButton
+                    aria-label="Add timer"
+                    disabled={
+                      !Number.isInteger(timerMinutes) || timerMinutes < 1 || timerMinutes > 480
+                    }
+                    onClick={() => {
+                      props.onAddTimer?.(timerMinutes * 60 * 1000);
+                      setManualPanel(null);
+                    }}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Add timer
+                  </OctantButton>
+                </div>
+                <p>Notes, Checklists, and Timers stay local to this Zen space.</p>
+              </>
             </>
           )}
         </OctantCard>
@@ -1004,29 +1109,15 @@ export function ZenSurface(props: ZenSurfaceProps) {
       <div className="zen-surface__bar-anchor window-no-drag">
         <ZenBar
           collapsed={props.barCollapsed}
-          onAskNavigatorAssistant={(prompt) => {
-            void (async () => {
-              // Opening binds this window's assistant surface to the
-              // conversation, so the turn waits for it rather than racing it.
-              await props.onOpenAssistant?.();
-              await navigatorAssistant.send(prompt);
-            })();
-          }}
           onExit={props.onExit}
           onExpand={props.onExpandBar}
           onHide={props.onHideBar}
           {...(props.onOpenAssistant === undefined
             ? {}
-            : { onOpenActivity: props.onOpenAssistant })}
+            : { onOpenNavigator: props.onOpenAssistant })}
           onOpenAdd={() => setManualPanel("add")}
           onOpenAppearance={() => setManualPanel("appearance")}
           onOpenThreads={() => props.onOpenThreads?.()}
-          onOpenWidgets={() => setManualPanel("widgets")}
-          providerLabel={
-            props.assistant?.provider === null || props.assistant?.provider === undefined
-              ? "Navigator"
-              : `${props.assistant.provider.providerLabel} · ${props.assistant.provider.modelLabel}`
-          }
         />
       </div>
     </div>
@@ -1071,6 +1162,12 @@ type ResolvedZenBackground = {
 /* The theme's workspace ground. Used whenever no user choice paints the
    surface, so the safe fallback is the same ground every other surface
    stands on rather than a colour of Zen's own. */
+/* Room the wall leaves for the surface's own floating chrome: the spaces pill
+   above, and the Navigator bar (or its collapsed pill) below. */
+const ZEN_WALL_INSET_TOP = 56;
+const ZEN_WALL_INSET_BOTTOM = 88;
+const ZEN_WALL_INSET_BOTTOM_COLLAPSED = 64;
+
 const SYSTEM_GROUND = "var(--oct-bg)";
 
 /* The contract's default is a stored solid colour, not a "no choice"

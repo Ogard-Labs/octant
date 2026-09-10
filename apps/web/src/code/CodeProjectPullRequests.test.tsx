@@ -112,6 +112,41 @@ describe("CodeProjectPullRequests", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
+  it("colours only what is blocking a pull request, and dates it in words", async () => {
+    // The clock is pinned so "3h ago" is stable, but time still advances, or
+    // every `findBy` in this file waits on a clock that never moves.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-08-22T10:00:00.000Z"));
+    try {
+      const blocked = view();
+      const rows = blocked.rows.map((existing) => ({
+        ...existing,
+        checks: "failing" as const,
+        review: "pending" as const,
+        mergeability: "mergeable" as const,
+      }));
+      renderWorkspace({ load: vi.fn(async () => ({ ...blocked, rows })) });
+
+      // Red "Checks failing" beside a green "Mergeable" told the reader two
+      // opposite things about one row. Failing checks are what blocks it, so
+      // that is the only fact wearing a colour.
+      const failing = await screen.findByText("Checks failing");
+      const mergeable = screen.getByText("Mergeable");
+      const pending = screen.getByText("Review pending");
+      expect(failing.closest("[data-status]")).toHaveAttribute("data-status", "negative");
+      expect(mergeable.closest("[data-status]")).toHaveAttribute("data-status", "neutral");
+      expect(pending.closest("[data-status]")).toHaveAttribute("data-status", "neutral");
+
+      // "22.8.2026, 09:00:00" is a fact nobody reads; the exact time stays on
+      // the element for anyone who wants it.
+      const when = screen.getByText("3h ago");
+      expect(when.tagName).toBe("TIME");
+      expect(when).toHaveAttribute("title");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("guides setup instead of offering refresh and search before a Code Project exists", async () => {
     renderWorkspace({
       load: vi.fn(async () => view({ projects: [], rows: [] })),

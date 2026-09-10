@@ -3,6 +3,18 @@ import { describe, expect, it, vi } from "vitest";
 import { Surface, SurfaceEmpty, SurfaceHeader, SurfaceSection } from "./SurfaceHeader";
 
 describe("Surface", () => {
+  it("says an empty column is empty more quietly than an empty page", () => {
+    const { rerender } = render(<SurfaceEmpty title="No threads" />);
+    // A page with nothing on it: the sentence is the only thing to read.
+    expect(screen.getByText("No threads")).toHaveClass("oct-row-label");
+
+    rerender(<SurfaceEmpty title="No threads" tone="lane" />);
+    // One empty column beside full ones: the same sentence in the same ink
+    // shouted louder than the real cards next to it.
+    expect(screen.getByText("No threads")).toHaveClass("oct-meta");
+    expect(screen.getByRole("status")).toHaveAttribute("data-tone", "lane");
+  });
+
   it("names every reader route with one landmark, one title, and one way back", () => {
     const onBack = vi.fn();
     render(

@@ -81,7 +81,6 @@ export function ThemeAppearanceEditor(props: {
                     <span className="settings-scheme__preview-content">
                       <span />
                       <span />
-                      <span className="settings-scheme__preview-dot" />
                     </span>
                   </span>
                   <span className="settings-scheme__preview-pane settings-scheme__preview-pane--dark">
@@ -89,7 +88,6 @@ export function ThemeAppearanceEditor(props: {
                     <span className="settings-scheme__preview-content">
                       <span />
                       <span />
-                      <span className="settings-scheme__preview-dot" />
                     </span>
                   </span>
                 </span>

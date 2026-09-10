@@ -3,7 +3,6 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type {
   CodeBoardCard,
-  CodeBoardView,
   GithubCatalogueReadRequest,
   GithubCatalogueReadResponse,
 } from "@octant/contracts";
@@ -147,20 +146,16 @@ describe("CodeHome", () => {
       if (request.kind === "issues") return openIssues;
       throw new Error(`unexpected ${request.kind}`);
     });
-    const board: CodeBoardView = {
-      version: 1,
-      query: { version: 1 },
-      cards: [
-        card({}),
-        card({
-          threadId: "10000000-0000-4000-8000-000000000002" as never,
-          title: "Open PRs merge order",
-          executing: true,
-          lastMeaningfulActivityAt: "2026-08-06T02:00:00.000Z" as never,
-        }),
-      ],
-      generatedAt: "2026-08-06T03:00:00.000Z",
-    } as unknown as CodeBoardView;
+    // Continue is handed the threads its owner already read, newest first.
+    const continueCards = [
+      card({
+        threadId: "10000000-0000-4000-8000-000000000002" as never,
+        title: "Open PRs merge order",
+        executing: true,
+        lastMeaningfulActivityAt: "2026-08-06T02:00:00.000Z" as never,
+      }),
+      card({}),
+    ];
 
     render(
       <CodeHome
@@ -176,7 +171,7 @@ describe("CodeHome", () => {
             } as never,
           ],
         })}
-        loadBoard={async () => board}
+        continueCards={{ kind: "ready", cards: continueCards }}
         loadOpenLinearIssues={async () => ({
           rows: [
             {
@@ -321,38 +316,6 @@ describe("CodeHome", () => {
     for (const read of issueReads) expect(read).toMatchObject({ assignee: "none" });
   });
 
-  it("reads the board once while its loader keeps its identity across rerenders", async () => {
-    const loadBoard = vi.fn(
-      async () =>
-        ({
-          version: 1,
-          query: { version: 1 },
-          cards: [card({})],
-          generatedAt: "2026-08-06T03:00:00.000Z",
-        }) as unknown as CodeBoardView,
-    );
-    const props = {
-      loadAssignedLinearIssues: async () => ({ rows: [] }),
-      loadBoard,
-      onOpenThread: vi.fn(),
-      onPickGithub: vi.fn(),
-      onPickIssue: vi.fn(),
-      onPickLinear: vi.fn(),
-      projectNames: new Map([["20000000-0000-4000-8000-000000000001", "Octant"]]),
-      providerLabels: new Map([["40000000-0000-4000-8000-000000000001", "Claude Code"]]),
-    };
-
-    const view = render(<CodeHome {...props} />);
-    await screen.findByRole("region", { name: "Continue" });
-    expect(loadBoard).toHaveBeenCalledTimes(1);
-
-    // A rerender the board has nothing to do with must not re-query it. The
-    // shell renders on every streamed turn chunk.
-    view.rerender(<CodeHome {...props} />);
-    view.rerender(<CodeHome {...props} />);
-    await waitFor(() => expect(loadBoard).toHaveBeenCalledTimes(1));
-  });
-
   it("says you are caught up when nothing is assigned and hides sections without a source", async () => {
     const client = githubClient(async (request) => {
       if (request.kind === "assigned-work") {
@@ -374,53 +337,48 @@ describe("CodeHome", () => {
   });
 
   it("marks an open pull request's checks on its chip and keeps merged and closed quiet", async () => {
-    const board: CodeBoardView = {
-      version: 1,
-      query: { version: 1 },
-      cards: [
-        card({
-          title: "Failing checks",
-          linkedPullRequest: {
-            kind: "linked",
-            freshness: { status: "fresh" },
-            number: 12,
-            url: "https://github.com/octant/app/pull/12",
-            baseRepository: "octant/app",
-            baseBranch: "main",
-            headBranch: "octant/checks",
-            state: "open",
-            matchesDeliveryBranch: true,
-          } as never,
-          checks: { freshness: { status: "fresh" }, state: "failing" } as never,
-        }),
-        card({
-          threadId: "10000000-0000-4000-8000-000000000002" as never,
-          title: "Pending checks",
-          linkedPullRequest: {
-            kind: "linked",
-            freshness: { status: "fresh" },
-            number: 13,
-            url: "https://github.com/octant/app/pull/13",
-            baseRepository: "octant/app",
-            baseBranch: "main",
-            headBranch: "octant/pending",
-            state: "open",
-            matchesDeliveryBranch: true,
-          } as never,
-          checks: { freshness: { status: "fresh" }, state: "pending" } as never,
-        }),
-        card({
-          threadId: "10000000-0000-4000-8000-000000000003" as never,
-          title: "Merged with a failing run",
-          checks: { freshness: { status: "fresh" }, state: "failing" } as never,
-        }),
-      ],
-      generatedAt: "2026-08-06T03:00:00.000Z",
-    } as unknown as CodeBoardView;
+    const continueCards = [
+      card({
+        title: "Failing checks",
+        linkedPullRequest: {
+          kind: "linked",
+          freshness: { status: "fresh" },
+          number: 12,
+          url: "https://github.com/octant/app/pull/12",
+          baseRepository: "octant/app",
+          baseBranch: "main",
+          headBranch: "octant/checks",
+          state: "open",
+          matchesDeliveryBranch: true,
+        } as never,
+        checks: { freshness: { status: "fresh" }, state: "failing" } as never,
+      }),
+      card({
+        threadId: "10000000-0000-4000-8000-000000000002" as never,
+        title: "Pending checks",
+        linkedPullRequest: {
+          kind: "linked",
+          freshness: { status: "fresh" },
+          number: 13,
+          url: "https://github.com/octant/app/pull/13",
+          baseRepository: "octant/app",
+          baseBranch: "main",
+          headBranch: "octant/pending",
+          state: "open",
+          matchesDeliveryBranch: true,
+        } as never,
+        checks: { freshness: { status: "fresh" }, state: "pending" } as never,
+      }),
+      card({
+        threadId: "10000000-0000-4000-8000-000000000003" as never,
+        title: "Merged with a failing run",
+        checks: { freshness: { status: "fresh" }, state: "failing" } as never,
+      }),
+    ];
 
     render(
       <CodeHome
-        loadBoard={async () => board}
+        continueCards={{ kind: "ready", cards: continueCards }}
         onOpenThread={vi.fn()}
         onPickGithub={vi.fn()}
         onPickIssue={vi.fn()}

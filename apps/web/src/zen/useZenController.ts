@@ -15,6 +15,7 @@ import type {
   ZenThreadContinuationTarget,
   ZenTimerAction,
   ZenViewport,
+  ZenSpaceLayout,
 } from "@octant/contracts/zen";
 import { MAX_ZEN_BACKGROUND_BYTES } from "@octant/contracts/zen";
 import { cycleZenSpace } from "@octant/domain";
@@ -105,7 +106,11 @@ export function useZenController(options: UseZenControllerOptions) {
   const presentationSpace = useRef<ZenSpace | null>(null);
   const presentationQueue = useRef<
     Array<{
-      readonly next: { readonly active?: boolean; readonly barCollapsed?: boolean };
+      readonly next: {
+        readonly active?: boolean;
+        readonly barCollapsed?: boolean;
+        readonly layout?: ZenSpaceLayout;
+      };
       readonly exitGate?: boolean;
     }>
   >([]);
@@ -159,7 +164,11 @@ export function useZenController(options: UseZenControllerOptions) {
 
   const applyPresentation = useCallback(
     async (
-      next: { readonly active?: boolean; readonly barCollapsed?: boolean },
+      next: {
+        readonly active?: boolean;
+        readonly barCollapsed?: boolean;
+        readonly layout?: ZenSpaceLayout;
+      },
       exitGate: boolean = false,
     ) => {
       const previousSpace = presentationSpace.current;
@@ -177,6 +186,7 @@ export function useZenController(options: UseZenControllerOptions) {
         version: (previousSpace.version + 1) as ZenSpace["version"],
         ...(typeof next.active === "boolean" ? { active: next.active } : {}),
         ...(typeof next.barCollapsed === "boolean" ? { barCollapsed: next.barCollapsed } : {}),
+        ...(next.layout === undefined ? {} : { layout: next.layout }),
       };
 
       markActive(optimistic.active);
@@ -206,6 +216,7 @@ export function useZenController(options: UseZenControllerOptions) {
           expectedVersion: previousSpace.version,
           ...(typeof next.active === "boolean" ? { active: next.active } : {}),
           ...(typeof next.barCollapsed === "boolean" ? { barCollapsed: next.barCollapsed } : {}),
+          ...(next.layout === undefined ? {} : { layout: next.layout }),
         });
         if ("result" in result && result.result === "mutation" && mounted.current) {
           // Reordered or late responses must not overwrite a newer optimistic/server state.
@@ -312,7 +323,11 @@ export function useZenController(options: UseZenControllerOptions) {
 
   const setPresentation = useCallback(
     async (
-      next: { readonly active?: boolean; readonly barCollapsed?: boolean },
+      next: {
+        readonly active?: boolean;
+        readonly barCollapsed?: boolean;
+        readonly layout?: ZenSpaceLayout;
+      },
       options: { readonly exitGate?: boolean } = {},
     ) => {
       presentationQueue.current.push({
@@ -686,7 +701,10 @@ export function useZenController(options: UseZenControllerOptions) {
         if (mounted.current) {
           setSpace(result.space);
           setThreadPickerOpen(false);
-          setMessage(`Pinned ${result.entry.title} from ${result.entry.projectLabel}.`);
+          // No arrival notice: the card that just appeared says the same
+          // thing, and the notice landed on top of it. The message region is
+          // for problems a person has to know about.
+          setMessage(undefined);
         }
       } catch (error) {
         if (!mounted.current) return;
@@ -1388,6 +1406,18 @@ export function useZenController(options: UseZenControllerOptions) {
     [runWidgetCommand, space],
   );
 
+  // Switching between the wall and a hand-made arrangement is a presentation
+  // change like collapsing the bar, not a change to any card: the geometry a
+  // card stores is left exactly as it was, so leaving the wall finds the
+  // arrangement again (0106).
+  const setLayout = useCallback(
+    (next: ZenSpaceLayout) => {
+      if (presentationSpace.current === null) return;
+      void setPresentation({ layout: next });
+    },
+    [setPresentation],
+  );
+
   const setBarCollapsed = useCallback(
     (next: boolean) => {
       if (presentationSpace.current === null) {
@@ -1451,6 +1481,7 @@ export function useZenController(options: UseZenControllerOptions) {
     busy,
     barCollapsed,
     setBarCollapsed,
+    setLayout,
     recoveryNeeded,
     message,
     enterZen,

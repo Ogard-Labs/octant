@@ -158,6 +158,25 @@ describe("the right sidebar surface", () => {
     expect(screen.getByRole("heading", { name: "Browser is unavailable" })).toBeVisible();
   });
 
+  it("says what Tests does, like every other tool row", () => {
+    render(
+      <RightUtilityDockSurface
+        launchableSurfaces={[{ ...browser, id: "tests" as never, label: "Tests" }]}
+        onCloseTab={vi.fn()}
+        onOpenTab={vi.fn()}
+        onSelectSurface={vi.fn()}
+        resolution={{ kind: "closed", reason: "no-surface" }}
+        tabs={[]}
+      />,
+    );
+
+    // "Tests: Open this tool" beside twelve rows that each name what they do
+    // reads as a row nobody finished.
+    const row = screen.getByRole("button", { name: "Tests" });
+    expect(row).toHaveTextContent("Run this checkout's tests");
+    expect(row).not.toHaveTextContent("Open this tool");
+  });
+
   it("uses a generic detail for an unknown launchable tool", () => {
     render(
       <RightUtilityDockSurface

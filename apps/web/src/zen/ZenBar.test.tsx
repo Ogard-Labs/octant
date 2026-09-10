@@ -1,29 +1,39 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { ZenBar } from "./ZenBar";
 
 describe("ZenBar", () => {
-  it("exposes Navigator Bar controls and Exit Zen", () => {
+  it("carries four destinations and the way out, and nothing else", () => {
     const onExit = vi.fn();
     const onHide = vi.fn();
     render(
       <ZenBar
         collapsed={false}
-        onAskNavigatorAssistant={() => undefined}
         onExit={onExit}
         onHide={onHide}
-        onOpenAppearance={() => undefined}
-        onOpenActivity={() => undefined}
         onOpenAdd={() => undefined}
+        onOpenAppearance={() => undefined}
+        onOpenNavigator={() => undefined}
         onOpenThreads={() => undefined}
-        onOpenWidgets={() => undefined}
       />,
     );
 
-    expect(screen.getByRole("toolbar", { name: "Navigator Bar" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Exit Zen" }));
+    const bar = screen.getByRole("toolbar", { name: "Navigator Bar" });
+    // The bar held nine controls, a model label, and a prompt field, on a
+    // surface whose whole point is that there is little on it.
+    expect(
+      within(bar)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Hide Navigator bar", "Threads", "Add", "Navigator", "Appearance", "Exit Zen"]);
+    // Asking lives in the Navigator panel, which has the same field and shows
+    // the answer; the bar's copy meant asking in one place and reading in
+    // another.
+    expect(within(bar).queryByRole("textbox")).not.toBeInTheDocument();
+
+    fireEvent.click(within(bar).getByRole("button", { name: "Exit Zen" }));
     expect(onExit).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole("button", { name: "Hide Navigator Bar" }));
+    fireEvent.click(within(bar).getByRole("button", { name: "Hide Navigator bar" }));
     expect(onHide).toHaveBeenCalledOnce();
   });
 
@@ -33,28 +43,24 @@ describe("ZenBar", () => {
     render(<ZenBar collapsed onExit={onExit} onExpand={onExpand} />);
 
     expect(screen.queryByRole("toolbar", { name: "Navigator Bar" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Show Navigator Bar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show Navigator bar" }));
     expect(onExpand).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "Exit Zen" }));
     expect(onExit).toHaveBeenCalledOnce();
   });
 
-  it("enables manual capability controls when handlers are available", () => {
+  it("marks a destination this window cannot reach rather than hiding it", () => {
     render(
       <ZenBar
         collapsed={false}
-        onAskNavigatorAssistant={() => undefined}
         onExit={() => undefined}
         onHide={() => undefined}
-        onOpenAppearance={() => undefined}
-        onOpenActivity={() => undefined}
         onOpenAdd={() => undefined}
         onOpenThreads={() => undefined}
-        onOpenWidgets={() => undefined}
       />,
     );
 
     expect(screen.getByRole("button", { name: "Threads" })).not.toHaveAttribute("aria-disabled");
-    expect(screen.getByRole("button", { name: "Widgets" })).not.toHaveAttribute("aria-disabled");
+    expect(screen.getByRole("button", { name: "Appearance" })).toHaveAttribute("aria-disabled");
   });
 });

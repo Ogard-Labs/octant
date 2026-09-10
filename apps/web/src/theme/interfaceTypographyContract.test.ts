@@ -146,7 +146,7 @@ describe("interface typography contract", () => {
       (candidate) => candidate.selector.trim() === ".create-from-issue__hint",
     );
     expect(block, ".create-from-issue__hint must have a typography rule").toBeDefined();
-    expect(block?.declarations).toMatch(/font-size:\s*calc\([^;]*--oct-text-step/);
+    expect(block?.declarations).toMatch(/font-size:\s*var\(--oct-text-(?:xs|detail|sm)\)/);
     expect(block?.declarations).not.toMatch(/font-size:\s*\d+px/);
     expect(block?.declarations).not.toMatch(/font-size:\s*[\d.]+rem/);
   });

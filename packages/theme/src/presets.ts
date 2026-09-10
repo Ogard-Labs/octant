@@ -64,7 +64,7 @@ const LIGHT_OCTANT_TOKENS: Readonly<Record<string, string>> = {
   "divider-strong": "#8c8b86",
   "text-primary": "#26251e",
   "text-secondary": "#61605a",
-  "text-muted": "#74726d",
+  "text-muted": "#64625d",
   "primary-foreground": "#14130f",
   "focus-ring": "#8a6218",
   selection: "#d9d8d4",
@@ -88,9 +88,9 @@ const DARK_OCTANT_TOKENS: Readonly<Record<string, string>> = {
   "divider-strong": "#787773",
   "text-primary": "#f2f1ed",
   "text-secondary": "#959490",
-  // 4.8:1 on the workspace. The earlier #787773 read at 4.1:1, under the AA
-  // line for the small meta text this role is used for.
-  "text-muted": "#84837e",
+  // 4.8:1 on the control fill, the darkest ground meta text sits on. The
+  // earlier #84837e cleared the workspace but read at 4.2:1 on the control.
+  "text-muted": "#8e8d88",
   "primary-foreground": "#14130f",
   "focus-ring": "#d9a441",
   selection: "#353430",
