@@ -25,6 +25,7 @@ import {
 } from "@octant/contracts";
 import { Effect, Queue, Stream } from "effect";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
+import { browserUseSelection } from "@octant/plugin-host/browser-use";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
@@ -552,6 +553,39 @@ describe("CodeOperationRuntime", () => {
       }
     },
   );
+
+  it("adds fixed Browser guidance when the task explicitly selects Browser", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(provider),
+      browserAutomation: {} as never,
+    });
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(74),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+        extensionSelections: [browserUseSelection("code-browser-guidance")],
+      });
+      await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+      expect(provider.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          context: expect.arrayContaining([
+            expect.objectContaining({
+              kind: "instructions",
+              text: expect.stringContaining("Octant's built-in Browser"),
+            }),
+          ]),
+        }),
+      );
+    } finally {
+      fixture.close();
+    }
+  });
 
   it("runs a provider turn asynchronously and owns exact input, approval, and cancellation", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());

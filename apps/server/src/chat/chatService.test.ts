@@ -15,6 +15,7 @@ import {
   decodeContextSummaryId,
   decodeProviderInstanceId,
   decodeProviderSessionId,
+  decodeWindowId,
   decodeProviderObservedState,
   decodeProviderServiceLimits,
   type AggregateVersion,
@@ -33,6 +34,7 @@ import {
   type ChatThread,
 } from "@octant/contracts";
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
+import { browserUseSelection } from "@octant/plugin-host/browser-use";
 import {
   decodeContentSha256,
   decodePreviewContextSelectionId,
@@ -975,6 +977,96 @@ function genericChatStream(text: string): Response {
 }
 
 describe("ChatService", () => {
+  it("forwards fixed Browser guidance when the selected provider exposes Browser", async () => {
+    const browserWindow = decodeWindowId("84000000-0000-4000-8000-000000000010");
+    const { service, contextHarness } = openFixture({
+      resolveAppManagedTools: () => ({
+        definitions: [{ name: "octant_browser", inputSchema: { type: "object", properties: {} } }],
+        execute: async () => ({ result: {} }),
+      }),
+    });
+    const planTurn = vi.spyOn(contextHarness, "planTurn");
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Browser guidance",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sent = await service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Open the docs",
+        extensionSelections: [browserUseSelection("chat-browser-guidance")],
+      },
+      { windowId: browserWindow },
+    );
+    expect(sent).toMatchObject({ kind: "turn-created" });
+    const browserEntries = planTurn.mock.calls.at(-1)?.[0].entries.filter((entry) =>
+      String(entry.source.referenceId).includes("app:browser"),
+    );
+    expect(browserEntries).toHaveLength(1);
+    expect(browserEntries?.[0]?.posture).toBe("required");
+    expect((planTurn.mock.calls.at(-1)?.[0].entries ?? []).some((entry) =>
+      String(entry.label).includes("user selected Octant's built-in Browser"),
+    )).toBe(true);
+  });
+
+  it("refuses an invalid Browser receipt before provider acquisition", async () => {
+    const browserWindow = decodeWindowId("84000000-0000-4000-8000-000000000011");
+    const { service, fakeDriver } = openFixture({
+      resolveAppManagedTools: () => ({
+        definitions: [{ name: "octant_browser", inputSchema: {} }],
+        execute: async () => ({ result: {} }),
+      }),
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Invalid Browser guidance",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const selection = browserUseSelection("chat-invalid-browser");
+    await expect(
+      service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Open the docs",
+          extensionSelections: [{ ...selection, catalogEpoch: "sha256:invalid" as never }],
+        },
+        { windowId: browserWindow },
+      ),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    expect(fakeDriver.acquireInputs).toHaveLength(0);
+  });
+
+  it("refuses Browser when the selected Chat provider exposes no Browser tool", async () => {
+    const browserWindow = decodeWindowId("84000000-0000-4000-8000-000000000012");
+    const { service, fakeDriver } = openFixture();
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Unsupported Browser guidance",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    await expect(
+      service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Open the docs",
+          extensionSelections: [browserUseSelection("chat-unsupported-browser")],
+        },
+        { windowId: browserWindow },
+      ),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    expect(fakeDriver.acquireInputs).toHaveLength(0);
+  });
+
   it("honors a pre-admitted thread id for linked Chat creation", async () => {
     const { service } = openFixture();
     const threadId = "84000000-0000-4000-8000-000000000099" as ChatThreadId;
