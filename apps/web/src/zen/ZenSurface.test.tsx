@@ -1,13 +1,14 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import type { ZenAssistantSnapshot, ZenElementPayload, ZenSpace } from "@octant/contracts/zen";
 import {
   DEFAULT_ZEN_APPEARANCE,
   DEFAULT_ZEN_VIEWPORT,
+  ZEN_BUILTIN_BACKGROUNDS,
   type ZenElementId,
   type ZenSpaceId,
 } from "@octant/contracts/zen";
@@ -245,19 +246,19 @@ describe("ZenSurface", () => {
     );
   });
 
-  it("keeps the appearance dialog and preset labels inside a narrow Zen surface", () => {
+  it("keeps the appearance dialog and every preset's name inside a narrow Zen surface", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/zen.css"), "utf8");
     expect(styles).toMatch(
       /\.zen-surface__manual-panel\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*calc\(100% - 32px\);/s,
     );
-    // One preset per row. Two columns in a 360px sheet cut every name that
-    // says what the background is, and a name nobody can read is not a choice.
+    // A background is chosen by its picture, so several fit across a narrow
+    // sheet and the name under each wraps rather than truncating. Truncation
+    // was what the one-per-row grid existed to avoid; wrapping avoids it
+    // without spending a whole row on every preset.
     expect(styles).toMatch(
-      /\.zen-appearance__preset-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s,
+      /\.zen-appearance__preset-grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fill, minmax\(92px, 1fr\)\);/s,
     );
-    expect(styles).toMatch(
-      /\.zen-appearance__preset-grid > \[data-slot="button"\]\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s,
-    );
+    expect(styles).toMatch(/\.zen-appearance__preset-name\s*\{[^}]*white-space:\s*normal;/s);
 
     render(
       <ZenSurface
@@ -274,9 +275,14 @@ describe("ZenSurface", () => {
     fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
     const dialog = screen.getByRole("dialog", { name: "Zen appearance" });
     expect(dialog.querySelector(".zen-appearance__preset-grid")).not.toBeNull();
-    expect(
-      dialog.querySelectorAll('.zen-appearance__preset-grid > [data-slot="button"]').length,
-    ).toBeGreaterThan(0);
+    // A name nobody can read is not a choice: every built-in is still offered
+    // by its full title, whatever the visible label had room to show.
+    expect(dialog.querySelectorAll(".zen-appearance__preset")).toHaveLength(
+      ZEN_BUILTIN_BACKGROUNDS.length,
+    );
+    for (const preset of ZEN_BUILTIN_BACKGROUNDS) {
+      expect(within(dialog).getByRole("button", { name: preset.title })).toBeVisible();
+    }
   });
 
   it("forces readable opaque elements when transparency is reduced", () => {
