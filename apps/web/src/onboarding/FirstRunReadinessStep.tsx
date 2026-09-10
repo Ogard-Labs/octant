@@ -1,6 +1,7 @@
 import type { OctantMode } from "@octant/contracts/modes";
 import { enabledModes } from "@octant/domain/mode-policy";
 import { Check, CircleDashed } from "lucide-react";
+import { SettingRow } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import type { FirstRunHandoff, FirstRunHandoffSetupTarget } from "./firstRunHandoffModel";
@@ -42,62 +43,76 @@ export function FirstRunReadinessStep(props: FirstRunReadinessStepProps) {
       </p>
 
       {modes.length > 1 ? (
-        <div className="setgroup">
-          <div className="setgroup-head">Mode</div>
-          <div className="first-run__choices">
-            <OctantToggleGroup<OctantMode>
-              aria-label="First thread mode"
-              onValueChange={(value) => {
-                const selected = value[0];
-                if (selected !== undefined) props.onSelectMode(selected);
-              }}
-              role="radiogroup"
-              value={[props.selectedMode]}
+        <section aria-label="Mode" className="settings-card-section settings-card-section--open">
+          <h2>Mode</h2>
+          <div className="setgroup">
+            <SettingRow
+              description="The mode this first thread starts in."
+              label="First thread"
+              scope="app"
+              settingId="first-run-thread-mode"
             >
-              {modes.map((mode) => (
-                <OctantToggleGroupItem
-                  aria-checked={props.selectedMode === mode}
-                  key={mode}
-                  role="radio"
-                  value={mode}
-                >
-                  {MODE_COPY[mode]}
-                </OctantToggleGroupItem>
-              ))}
-            </OctantToggleGroup>
+              <OctantToggleGroup<OctantMode>
+                aria-label="First thread mode"
+                onValueChange={(value) => {
+                  const selected = value[0];
+                  if (selected !== undefined) props.onSelectMode(selected);
+                }}
+                role="radiogroup"
+                value={[props.selectedMode]}
+              >
+                {modes.map((mode) => (
+                  <OctantToggleGroupItem
+                    aria-checked={props.selectedMode === mode}
+                    key={mode}
+                    role="radio"
+                    value={mode}
+                  >
+                    {MODE_COPY[mode]}
+                  </OctantToggleGroupItem>
+                ))}
+              </OctantToggleGroup>
+            </SettingRow>
           </div>
-        </div>
+        </section>
       ) : null}
 
-      <section aria-labelledby="first-run-handoff-title" className="setgroup">
-        <h3 className="setgroup-head" id="first-run-handoff-title">
-          Ready to start
-        </h3>
-        <ul className="first-run__providers" role="list">
+      <section
+        aria-label="Ready to start"
+        className="settings-card-section settings-card-section--open"
+      >
+        <h2>Ready to start</h2>
+        <ul className="setgroup first-run__providers" role="list">
           {props.handoff.facts.map((fact) => {
             const Icon = fact.ready ? Check : CircleDashed;
             const target = setupTarget(fact.id, props.selectedMode);
             return (
               <li
-                className="first-run__provider"
+                className="setrow first-run__provider"
                 data-state={fact.ready ? "ready" : "missing"}
                 key={fact.id}
               >
-                <Icon size={16} />
-                {fact.ready || target === undefined ? (
-                  <span className="first-run__provider-name">{fact.label}</span>
-                ) : (
-                  <OctantButton
-                    className="first-run__provider-name first-run__fact-action"
-                    onClick={() => props.onSetup(target)}
-                    type="button"
-                    variant="ghost"
-                  >
-                    {fact.label}
-                  </OctantButton>
-                )}
-                <span className="first-run__provider-label">{fact.ready ? "Ready" : "Needed"}</span>
-                <span className="first-run__provider-detail">{fact.detail}</span>
+                <span className="setrow-label">
+                  <Icon size={16} />
+                  {fact.ready || target === undefined ? (
+                    fact.label
+                  ) : (
+                    <OctantButton
+                      className="first-run__fact-action"
+                      onClick={() => props.onSetup(target)}
+                      type="button"
+                      variant="ghost"
+                    >
+                      {fact.label}
+                    </OctantButton>
+                  )}
+                </span>
+                <p className="setrow-hint">{fact.detail}</p>
+                <div className="setrow-control">
+                  <span className="first-run__provider-state">
+                    {fact.ready ? "Ready" : "Needed"}
+                  </span>
+                </div>
               </li>
             );
           })}
