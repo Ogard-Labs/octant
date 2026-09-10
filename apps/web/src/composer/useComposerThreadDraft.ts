@@ -45,7 +45,15 @@ export function useComposerThreadDraft(options: {
   const mode = options.mode;
   const threadIdRef = useRef(options.threadId);
   threadIdRef.current = options.threadId;
-  useSyncExternalStore(store.subscribe, store.getListenVersion, store.getListenVersion);
+  // Subscribe to this thread's draft, not the whole store: the store notifies
+  // every listener on every keystroke, and each mode's controller holds one of
+  // these, so typing in Chat re-rendered the Code and Work composers too.
+  const threadId = options.threadId;
+  const readDraftVersion = useCallback(
+    () => `${String(store.revision(mode, threadId))}:${store.persistError() ?? ""}`,
+    [mode, store, threadId],
+  );
+  useSyncExternalStore(store.subscribe, readDraftVersion, readDraftVersion);
   const snapshot = store.getSnapshot();
   const current = snapshot.get(composerDraftRecordKey(mode, options.threadId));
 
