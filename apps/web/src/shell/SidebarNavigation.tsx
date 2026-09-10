@@ -5,6 +5,7 @@ import {
   GitFork,
   GitPullRequest,
   Inbox,
+  ImagePlus,
   ListTodo,
   Puzzle,
   SquarePen,
@@ -102,6 +103,8 @@ function navigationIcon(id: SidebarNavigationDescriptorId) {
       return Inbox;
     case "artifact-library":
       return FileStack;
+    case "image-library":
+      return ImagePlus;
     case "thread-board":
       return Columns3;
     case "pull-requests":

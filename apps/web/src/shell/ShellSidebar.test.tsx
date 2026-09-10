@@ -590,6 +590,38 @@ describe("ShellSidebar", () => {
     expect(screen.queryByRole("menuitem", { name: "Automations" })).not.toBeInTheDocument();
   });
 
+  it("renders an available Image generator promoted from the account menu", async () => {
+    const user = userEvent.setup();
+    const imageLibrary = vi.fn();
+    render(
+      <ShellSidebar
+        codeNavigation={{
+          actions: { "new-code-thread": vi.fn(), "image-library": imageLibrary },
+        }}
+        imageLibraryAvailable
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={null}
+        settings={{
+          ...defaultShellSettings(),
+          sidebarDestinations: {
+            order: [],
+            visibility: [{ id: "image-library", visibility: "shown" }],
+          },
+        }}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Image generator" }));
+    expect(imageLibrary).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
+    await screen.findByRole("menuitem", { name: "Settings" });
+    expect(screen.queryByRole("menuitem", { name: "Image generator" })).not.toBeInTheDocument();
+  });
+
   it("renders the rows in the customized order", () => {
     render(
       <ShellSidebar
