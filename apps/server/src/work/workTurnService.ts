@@ -165,6 +165,7 @@ export interface WorkTurnServiceDependencies {
     readonly thread: WorkThread;
     readonly projectRoot: string;
     readonly windowId: WindowId;
+    readonly computerUseSelection?: import("@octant/contracts/extensions").ExtensionSelection;
   }) => AppManagedToolSet | undefined;
   /** The harness around a turn: stable instructions in front, the reply observed after. */
   /**
@@ -623,7 +624,24 @@ export class WorkTurnService {
             thread: input.thread,
             projectRoot: input.projectRoot,
             windowId: input.windowId,
+            ...(input.command.computerUseSelection === undefined
+              ? {}
+              : { computerUseSelection: input.command.computerUseSelection }),
           });
+    if (
+      input.command.computerUseSelection !== undefined &&
+      !appManagedTools?.definitions.some((definition) => definition.name === "octant_computer")
+    ) {
+      this.#persistUpdate(current, {
+        status: "failed",
+        failure: {
+          category: "unsupported",
+          message:
+            "Computer use is unavailable for this provider or task. Check Computer use in Settings.",
+        },
+      });
+      return;
+    }
     const harnessScope: NativeHarnessTurnScope | undefined =
       input.thread === undefined
         ? undefined

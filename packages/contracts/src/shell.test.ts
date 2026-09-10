@@ -75,6 +75,7 @@ const settings = {
   navigatorAssistant: {},
   voice: {},
   imageGeneration: { customSources: [] },
+  computerUse: { enabled: true, automaticUpdates: true },
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
 

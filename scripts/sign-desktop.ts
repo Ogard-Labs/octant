@@ -21,6 +21,8 @@ export const ENTITLEMENTS_PATH = "apps/desktop/resources/entitlements.plist";
 export const SIGNING_ORDER = [
   "Contents/Resources/native/octant-keychain-helper",
   "Contents/Resources/native/octant-code-file-helper",
+  "Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/libcua_driver_sdk.dylib",
+  "Contents/Resources/app/apps/desktop/node_modules/@trycua/cua-driver-darwin-arm64/cua_driver_node_runtime.node",
   "Contents/Resources/app/apps/server/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
   "Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/pty.node",
   "Contents/Resources/app/apps/server/node_modules/node-pty/build/Release/spawn-helper",

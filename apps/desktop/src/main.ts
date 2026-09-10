@@ -1,3 +1,9 @@
+import { startComputerUseBroker, type ComputerUseBroker } from "./computerUseBroker";
+import {
+  createComputerUseDesktopService,
+  type ComputerUseDesktopService,
+} from "./computerUseDesktopService";
+import { CUA_DRIVER_FILENAME } from "./runtimePaths";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
@@ -173,6 +179,10 @@ const IPC_CHANNELS = {
   appUpdateDownload: "octant:app-update:download",
   appUpdateInstall: "octant:app-update:install",
   appUpdateAutomatic: "octant:app-update:automatic",
+  computerUseStatus: "octant:computer-use:status",
+  computerUsePermissions: "octant:computer-use:permissions",
+  computerUsePermissionSettings: "octant:computer-use:permission-settings",
+  computerUseCheckUpdates: "octant:computer-use:check-updates",
   appUpdateRing: "octant:app-update:ring",
   codeDeepLink: "octant:code:deep-link",
   close: "octant:window:close",
@@ -959,6 +969,8 @@ app.setPath("userData", desktopDataDirectory);
 let server: ChildProcess | undefined;
 let credentialBroker: CredentialBroker | undefined;
 let browserRuntimeBroker: BrowserRuntimeBroker | undefined;
+let computerUseBroker: ComputerUseBroker | undefined;
+let computerUseService: ComputerUseDesktopService | undefined;
 let browserSurfaceHost: ReturnTypeOfBrowserSurfaceHost | undefined;
 let appUpdateService: ReturnType<typeof createAppUpdateService> | undefined;
 let credentialBackend: DesktopCredentialBackend | undefined;
@@ -1446,6 +1458,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
   // before spawning the managed server, which must bind that same port.
   await portReservation.close();
   let startingBrowserBroker: BrowserRuntimeBroker | undefined;
+  let startingComputerBroker: ComputerUseBroker | undefined;
   try {
     const instanceId = randomUUID();
     browserSurfaceHost ??= createBrowserSurfaceHost({
@@ -1457,6 +1470,20 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     });
     const nextBrowserRuntimeBroker = await startBrowserRuntimeBroker(browserSurfaceHost);
     startingBrowserBroker = nextBrowserRuntimeBroker;
+    const nextComputerService = createComputerUseDesktopService({
+      bundledPath: resolveDesktopNativeHelperPath(
+        {
+          packaged: app.isPackaged,
+          resourcesPath: process.resourcesPath,
+          moduleUrl: import.meta.url,
+        },
+        CUA_DRIVER_FILENAME,
+      ),
+      dataDirectory: desktopDataDirectory,
+      isWindowAvailable: (windowId) => desktopWindows.hasWindowId(windowId),
+    });
+    const nextComputerBroker = await startComputerUseBroker(nextComputerService);
+    startingComputerBroker = nextComputerBroker;
     const resources = await startManagedServerResources({
       startBroker: () => startDesktopCredentialBroker(),
       startServer: (broker) => {
@@ -1468,6 +1495,8 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
         const spec = serverSpawnSpec({
           browserBrokerToken: nextBrowserRuntimeBroker.token,
           browserBrokerUrl: nextBrowserRuntimeBroker.url,
+          computerUseBrokerUrl: nextComputerBroker.url,
+          computerUseBrokerToken: nextComputerBroker.token,
           ...(process.platform === "darwin" && existsSync(codeFileHelperPath)
             ? { codeFileHelperPath }
             : {}),
@@ -1493,6 +1522,8 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     });
     credentialBroker = resources.broker;
     browserRuntimeBroker = nextBrowserRuntimeBroker;
+    computerUseBroker = nextComputerBroker;
+    computerUseService = nextComputerService;
     server = resources.server;
     serverInstanceId = instanceId;
     activeServerUrl = serverUrl;
@@ -1524,6 +1555,9 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
         shutdownServer: shutdownManagedServer,
       });
       await nextBrowserRuntimeBroker.close();
+      await nextComputerBroker.close();
+      computerUseBroker = undefined;
+      computerUseService = undefined;
       desktopBridgeSecret = winningAttachment.bridgeSecret;
       serverInstanceId = attached.instanceId;
       activeServerUrl = attached.url;
@@ -1538,6 +1572,9 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
     const child = server;
     const broker = credentialBroker;
     const browserBroker = browserRuntimeBroker ?? startingBrowserBroker;
+    const computerBroker = computerUseBroker ?? startingComputerBroker;
+    computerUseBroker = undefined;
+    computerUseService = undefined;
     server = undefined;
     credentialBroker = undefined;
     browserRuntimeBroker = undefined;
@@ -1549,6 +1586,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       shutdownServer: shutdownManagedServer,
     }).catch(() => undefined);
     await browserBroker?.close().catch(() => undefined);
+    await computerBroker?.close().catch(() => undefined);
     throw error;
   }
 }
@@ -1563,6 +1601,9 @@ async function stopDesktopOwnedHost(host: LocalHostDescriptor): Promise<void> {
   const child = server;
   const broker = credentialBroker;
   const browserBroker = browserRuntimeBroker;
+  const computerBroker = computerUseBroker;
+  computerUseBroker = undefined;
+  computerUseService = undefined;
   server = undefined;
   credentialBroker = undefined;
   browserRuntimeBroker = undefined;
@@ -1574,6 +1615,7 @@ async function stopDesktopOwnedHost(host: LocalHostDescriptor): Promise<void> {
     shutdownServer: shutdownManagedServer,
   });
   await browserBroker?.close();
+  await computerBroker?.close();
 }
 
 const hostLifecycle = createHostLifecycleController({
@@ -2677,6 +2719,39 @@ function installIpcHandlers(): void {
       { windowId: context.windowId, threadId: request.threadId },
       request.command,
     );
+  });
+  ipcMain.handle(IPC_CHANNELS.computerUseStatus, async (event) => {
+    ownedTopLevelWindowContext(event);
+    if (computerUseService === undefined)
+      return {
+        supported: false,
+        enabled: false,
+        automaticUpdates: false,
+        permissions: { accessibility: false, screenRecording: false },
+        driver: "unavailable",
+        activeSessions: 0,
+        update: "idle",
+        message: "Computer use requires a host owned by this Octant desktop app.",
+      };
+    return computerUseService.status();
+  });
+  ipcMain.handle(IPC_CHANNELS.computerUsePermissions, async (event) => {
+    ownedTopLevelWindowContext(event);
+    if (computerUseService === undefined)
+      throw new Error("Computer use is unavailable for this host.");
+    return computerUseService.requestPermissions();
+  });
+  ipcMain.handle(IPC_CHANNELS.computerUsePermissionSettings, async (event) => {
+    ownedTopLevelWindowContext(event);
+    if (computerUseService === undefined)
+      throw new Error("Computer use is unavailable for this host.");
+    await computerUseService.openPermissionSettings();
+  });
+  ipcMain.handle(IPC_CHANNELS.computerUseCheckUpdates, async (event) => {
+    ownedTopLevelWindowContext(event);
+    if (computerUseService === undefined)
+      throw new Error("Computer use is unavailable for this host.");
+    return computerUseService.checkUpdates();
   });
   ipcMain.handle(IPC_CHANNELS.appUpdateCheck, async (event) => {
     ownedTopLevelWindowContext(event);

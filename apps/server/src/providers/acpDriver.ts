@@ -1094,7 +1094,11 @@ function makeConnection(
             }
             state.pendingToolAnswers.delete(input.requestId);
             pending.controller.abort();
-            pending.resolve({ resultJson: input.resultJson, isError: input.isError });
+            pending.resolve({
+              resultJson: input.resultJson,
+              isError: input.isError,
+              ...(input.images === undefined ? {} : { images: input.images }),
+            });
             return Effect.void;
           }),
         ),

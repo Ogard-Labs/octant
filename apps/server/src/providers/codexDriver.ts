@@ -1196,7 +1196,13 @@ function makeConnection(
                 providerRequestId: pending.providerRequestId,
                 result: {
                   success: !input.isError,
-                  contentItems: [{ type: "inputText", text: input.resultJson }],
+                  contentItems: [
+                    { type: "inputText", text: input.resultJson },
+                    ...(input.images ?? []).map((image) => ({
+                      type: "inputImage" as const,
+                      imageUrl: `data:${image.mimeType};base64,${image.data}`,
+                    })),
+                  ],
                 },
               }),
             ).pipe(

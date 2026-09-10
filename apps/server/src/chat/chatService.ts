@@ -1,3 +1,5 @@
+import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
+import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { createHash } from "node:crypto";
 import {
   ActorId,
@@ -481,6 +483,11 @@ export interface ChatServiceOptions {
     readonly coordinationDepth?: number;
   }) => AppManagedToolSet | undefined;
   readonly resolveExtensionSelectionContext?: ChatExtensionSelectionContextResolver;
+  readonly resolveComputerUseTools?: (input: {
+    readonly thread: ChatThread;
+    readonly windowId: WindowId;
+    readonly selection: ExtensionSelection;
+  }) => AppManagedToolSet | undefined;
   /**
    * The native harness around a turn on a provider it drives: stable
    * instructions in front of the context, and the completed reply observed
@@ -681,6 +688,7 @@ export class ChatService {
   readonly #resolveAppManagedTools?: ChatServiceOptions["resolveAppManagedTools"];
   readonly #nativeHarness?: ChatServiceOptions["nativeHarness"];
   readonly #resolveExtensionSelectionContext?: ChatExtensionSelectionContextResolver;
+  readonly #resolveComputerUseTools?: ChatServiceOptions["resolveComputerUseTools"];
   readonly #hiddenThreadIds: () => ReadonlySet<string>;
   readonly #resolveSideChatSourceContext?: ChatServiceOptions["resolveSideChatSourceContext"];
   readonly #resolveThreadMentionContext?: ChatServiceOptions["resolveThreadMentionContext"];
@@ -723,6 +731,8 @@ export class ChatService {
     if (options.resolveExtensionSelectionContext !== undefined) {
       this.#resolveExtensionSelectionContext = options.resolveExtensionSelectionContext;
     }
+    if (options.resolveComputerUseTools !== undefined)
+      this.#resolveComputerUseTools = options.resolveComputerUseTools;
     if (options.contextMaintenanceTimeoutMs !== undefined) {
       this.#contextMaintenanceTimeoutMs = options.contextMaintenanceTimeoutMs;
     }
@@ -3113,18 +3123,40 @@ export class ChatService {
     if (selections === undefined || selections.length === 0) {
       return { selections: [], entries: [] };
     }
-    if (this.#resolveExtensionSelectionContext === undefined) {
+    const computer = selections.filter(isComputerUseSelection);
+    const other = selections.filter((selection) => !isComputerUseSelection(selection));
+    const computerTools =
+      computer.length === 1 && computer[0] !== undefined && windowId !== undefined
+        ? this.#resolveComputerUseTools?.({ thread, windowId, selection: computer[0] })
+        : undefined;
+    if (computer.length > 0 && computerTools === undefined)
+      throw new ChatServiceError({
+        category: "unavailable",
+        message: "Computer use is unavailable for this task. Check Computer use in Settings.",
+      });
+    if (other.length > 0 && this.#resolveExtensionSelectionContext === undefined) {
       throw new ChatServiceError({
         category: "unavailable",
         message: "Selected extension context is unavailable.",
       });
     }
-    return await this.#resolveExtensionSelectionContext({
-      phase,
-      thread,
+    const resolved =
+      other.length === 0 || this.#resolveExtensionSelectionContext === undefined
+        ? { selections: other, entries: [] }
+        : await this.#resolveExtensionSelectionContext({
+            phase,
+            thread,
+            selections: other,
+            ...(windowId === undefined ? {} : { windowId }),
+          });
+    const externalTools = "toolSet" in resolved ? resolved.toolSet : undefined;
+    return {
       selections,
-      ...(windowId === undefined ? {} : { windowId }),
-    });
+      entries: resolved.entries,
+      ...(externalTools === undefined && computerTools === undefined
+        ? {}
+        : { toolSet: combineAppManagedToolSets(externalTools, computerTools) }),
+    };
   }
 
   #mergeToolSets(
@@ -3158,6 +3190,9 @@ export class ChatService {
     );
     return {
       definitions,
+      close: async () => {
+        await Promise.all([appManaged?.close?.(), extension?.close?.()]);
+      },
       execute: (input) => {
         if (extension !== undefined && extensionNames.has(input.name)) {
           return extension.execute(input);

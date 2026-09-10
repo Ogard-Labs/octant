@@ -1,3 +1,5 @@
+import { ComputerUseMention, useComputerUseMention } from "../../computerUse/ComputerUseMention";
+import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
@@ -56,6 +58,7 @@ export interface WorkComposerAdapterProps {
     prompt: string,
     images?: ReadonlyArray<File>,
     threadMentionIds?: ReadonlyArray<MentionableThreadId>,
+    computerUseSelection?: ExtensionSelection,
   ) => boolean | void | Promise<boolean | void>;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
@@ -73,6 +76,12 @@ export interface WorkComposerAdapterProps {
 
 export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   const [prompt, setPrompt] = useState("");
+  const computer = useComputerUseMention({
+    textarea: () => textareaRef.current,
+    draft: prompt,
+    onDraftChange: setPrompt,
+    scopeKey: "work-draft",
+  });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionListId = "work-new-thread-mentions";
   const images = useWorkComposerImages();
@@ -106,17 +115,28 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     if (!canSubmit) return;
     setSubmitting(true);
     const staged = images.filesForSend();
+    const computerUseSelection = computer.selection;
     void threadMentions
       .resolveForSend()
       .then(async (threadMentionIds) => {
-        const created = await props.onCreateThread(trimmed, staged, threadMentionIds);
-        if (created !== false) images.clearAfterAccepted();
+        const created = await props.onCreateThread(
+          trimmed,
+          staged,
+          threadMentionIds,
+          ...(computerUseSelection === undefined
+            ? ([] as const)
+            : ([computerUseSelection] as const)),
+        );
+        if (created !== false) {
+          images.clearAfterAccepted();
+          computer.consume(computerUseSelection);
+        }
         return created;
       })
       .finally(() => {
         setSubmitting(false);
       });
-  }, [canSubmit, images, props, threadMentions, trimmed]);
+  }, [canSubmit, computer, images, props, threadMentions, trimmed]);
 
   function attachFromTransfer(items: DataTransfer | null): boolean {
     if (items === null) return false;
@@ -134,6 +154,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (computer.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -199,6 +220,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
           <ThreadComposer
             chips={
               <>
+                <ComputerUseMention controller={computer} surface="chips" />
                 <ThreadMentionChips
                   chips={threadMentions.chips}
                   onRemove={(threadId) => threadMentions.composer?.onRemoveChip(threadId)}
@@ -210,11 +232,16 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
             input={
               <OctantTextarea
                 aria-label="First message"
+                aria-autocomplete="list"
+                aria-expanded={computer.open}
+                aria-controls={computer.open ? computer.listId : undefined}
+                aria-activedescendant={computer.open ? `${computer.listId}-computer` : undefined}
                 autoFocus
                 className="composer-input"
                 disabled={props.creating}
                 onChange={(event) => {
                   setPrompt(event.target.value);
+                  computer.sync(event.target.value, event.currentTarget.selectionStart);
                   mention.sync(event.target.value, event.currentTarget.selectionStart);
                 }}
                 onClick={(event) =>
@@ -235,7 +262,9 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
               />
             }
             typeahead={
-              mention.open ? (
+              computer.open ? (
+                <ComputerUseMention controller={computer} surface="typeahead" />
+              ) : mention.open ? (
                 <ThreadMentionTypeahead
                   activeIndex={mention.activeIndex}
                   {...(threadMentions.composer?.busy === undefined
