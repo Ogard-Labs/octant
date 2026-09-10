@@ -4697,6 +4697,10 @@ function LaunchedShell(
             }
           >
             <ZenSurface
+              {...(resolvedAppBackground === undefined
+                ? {}
+                : { appBackground: resolvedAppBackground })}
+              appBackgroundFetcher={sidebarBackgroundFetcher}
               assistant={zen.assistant}
               focusZone={zen.focusZone}
               renderTerminal={({ element, activity }) => {

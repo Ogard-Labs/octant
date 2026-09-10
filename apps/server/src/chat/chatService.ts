@@ -34,6 +34,7 @@ import {
   MAX_CHAT_NAVIGATION_THREADS,
   MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH,
   type ChatCommandResult,
+  type ChatContentBody,
   type ChatContentReference,
   type ChatEventFrame,
   type ChatFailure,
@@ -142,6 +143,7 @@ import {
   reapsStaleProviderSession,
   THREAD_MENTION_UNREADABLE_CONTEXT,
 } from "@octant/domain";
+import { resolveChatMessageParts } from "@octant/domain/chat-message-parts";
 import { Schema } from "effect";
 import { Effect } from "effect";
 import {
@@ -650,6 +652,11 @@ function hasAttemptInFlight(view: ChatThreadView | undefined): boolean {
       .flatMap((turn) => turn.attempts)
       .some((attempt) => attempt.outcome === "queued" || attempt.outcome === "streaming") === true
   );
+}
+
+export interface ChatSubscribeOptions {
+  /** Put the body behind each streamed delta on its `attempt-updated` frame. */
+  readonly contents?: boolean;
 }
 
 export class ChatService {
@@ -1235,6 +1242,7 @@ export class ChatService {
     threadId: ChatThreadId,
     afterSequence: number,
     signal?: AbortSignal,
+    options?: ChatSubscribeOptions,
   ): AsyncGenerator<ChatEventFrame, number> {
     this.#assertReadableThread(threadId);
     let cursor = afterSequence;
@@ -1246,7 +1254,7 @@ export class ChatService {
       for (const envelope of events) {
         cursor = envelope.globalSequence;
         if (!CHAT_EVENT_NAMES.has(envelope.eventName)) continue;
-        const frame = this.#toEventFrame(threadId, envelope);
+        const frame = this.#toEventFrame(threadId, envelope, options?.contents === true);
         if (frame === undefined) continue;
         yield frame;
       }
@@ -4383,6 +4391,7 @@ export class ChatService {
       readonly eventName: string;
       readonly payload: unknown;
     },
+    withContents: boolean,
   ): ChatEventFrame | undefined {
     try {
       const event = decodeChatPublicEvent(envelope.payload);
@@ -4441,14 +4450,47 @@ export class ChatService {
       ) {
         return undefined;
       }
+      const contents =
+        withContents && event.kind === "attempt-updated"
+          ? this.#appendedContent(event.attempt)
+          : undefined;
       return decodeChatEventFrame({
         threadId,
         sequence: envelope.globalSequence,
         event,
+        ...(contents === undefined ? {} : { contents }),
       });
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * The body behind the attempt's last response reference, which is the one a
+   * streaming delta just appended. Only that one rides the frame: the earlier
+   * references reached the subscriber in the snapshot it read before it
+   * subscribed, and a subscriber that still lacks a body re-reads the thread.
+   * A settled attempt appends nothing, and settling can change more than the
+   * attempt, so a subscriber re-reads the thread on that frame anyway.
+   */
+  #appendedContent(attempt: ChatAttempt): ReadonlyArray<ChatContentBody> | undefined {
+    if (attempt.outcome !== "queued" && attempt.outcome !== "streaming") return undefined;
+    const reference = attempt.responseRefs.at(-1);
+    if (reference === undefined) return undefined;
+    const content = this.#persistence.readChatContent(String(reference.contentId));
+    if (content === undefined || String(content.threadId) !== String(attempt.threadId)) {
+      return undefined;
+    }
+    return [
+      decodeChatContentBody({
+        contentId: content.contentId,
+        role: content.role,
+        body: content.body,
+        digest: content.digest,
+        byteLength: content.byteLength,
+        parts: [...resolveChatMessageParts({ role: content.role, body: content.body })],
+      }),
+    ];
   }
 
   #requireActiveThread(threadId: ChatThreadId): ChatThread {

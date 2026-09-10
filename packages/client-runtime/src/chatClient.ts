@@ -168,6 +168,9 @@ export function createChatClient(options: ChatClientOptions): ChatClient {
         options.baseUrl,
       );
       url.searchParams.set("afterSequence", String(afterSequence));
+      // Ask for the body behind each streamed delta so the thread view can
+      // grow in place instead of re-reading the whole thread per frame.
+      url.searchParams.set("contents", "1");
       return parseNdjsonFrames(
         requestRaw(fetch, url.toString(), { method: "GET", headers, signal }),
         threadId,

@@ -109,6 +109,13 @@ and card opacity stay adjustable. Uploads remain local PNG, JPEG, WebP, or
 GIF. Animated presets and custom animated uploads fall back to a still frame
 under **Reduced Motion**. Built-in loops use animated WebP.
 
+**App background**, above the built-in pictures, stands the space on the same
+ground as the rest of Octant: whatever **Background** is set to in Settings ›
+Appearance, with the dials you set there. It carries none of its own, so
+changing the cloud once changes every space that uses it. **Background
+opacity** still dims it, Reduced motion still holds it still, and Increased
+contrast still turns it off.
+
 ### Handing the theme to a project
 
 Appearance offers two exports beside **Export theme JSON**, which writes

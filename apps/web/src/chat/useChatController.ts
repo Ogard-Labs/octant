@@ -25,6 +25,7 @@ import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { MentionableThreadId } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
+import { applyChatAttemptFrame } from "./chatStreamFrames";
 import type { ComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
 import { buildChatThreadNavigation, type ChatThreadNavigationItem } from "../shell/navigationModel";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
@@ -181,6 +182,10 @@ export function useChatController(options: ChatControllerOptions) {
   // the other window's. Queued writes check this and stand down instead.
   const settingsConflicts = useRef(0);
   const [activeView, setActiveView] = useState<ChatThreadView | undefined>(undefined);
+  // The stream loop grows the view from consecutive frames faster than React
+  // re-renders, so it reads the latest view here rather than from state: two
+  // frames applied to the same rendered view would lose the first one's text.
+  const activeViewRef = useRef<ChatThreadView | undefined>(undefined);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
   const [settingsMessage, setSettingsMessage] = useState<string | undefined>(undefined);
   const composerDraft = useComposerThreadDraft({
@@ -362,6 +367,7 @@ export function useChatController(options: ChatControllerOptions) {
       recordSequence(view.thread.id, view.lastSequence);
       recordFollowUp(view.thread.id, view.followUp?.state === "open");
       recordUpdatedAt(view.thread.id, view.thread.updatedAt);
+      activeViewRef.current = view;
       setActiveView(view);
       if (markRead) readCursorStore.markDeferred(view.thread.id, view.lastSequence);
     },
@@ -488,6 +494,17 @@ export function useChatController(options: ChatControllerOptions) {
                 if (frame.event.kind === "follow-up-updated") {
                   recordFollowUp(threadId, frame.event.followUp.state === "open");
                 }
+                // A streaming delta grows the view in place. Anything the
+                // frame cannot settle on its own re-reads the thread, which
+                // is what every frame did before frames carried their body.
+                const grown = applyChatAttemptFrame(activeViewRef.current, frame);
+                if (grown !== undefined) {
+                  activeViewRef.current = grown;
+                  setActiveView(grown);
+                  readCursorStore.markDeferred(threadId, frame.sequence);
+                  cursor = frame.sequence;
+                  continue;
+                }
                 const refreshed = await client.thread(threadId);
                 if (!mounted.current || request !== threadGeneration.current || signal.aborted) {
                   return;
@@ -516,7 +533,14 @@ export function useChatController(options: ChatControllerOptions) {
         setErrorMessage(failureMessage(error));
       }
     },
-    [applyAuthoritativeView, client, reconnectDelayMs, recordFollowUp, recordSequence],
+    [
+      applyAuthoritativeView,
+      client,
+      readCursorStore,
+      reconnectDelayMs,
+      recordFollowUp,
+      recordSequence,
+    ],
   );
 
   useEffect(() => {
