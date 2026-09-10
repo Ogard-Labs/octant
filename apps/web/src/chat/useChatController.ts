@@ -32,6 +32,11 @@ import { createReadCursorStore, type ReadCursorStore } from "../threads/readCurs
 
 export type ChatControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
 
+/** What completing, reopening, snoozing, or waking a thread answered. */
+export type ChatThreadRestOutcome =
+  | { readonly status: "ok" }
+  | { readonly status: "refused"; readonly message: string };
+
 /**
  * The longest a dropped stream waits before trying the host again. Long enough
  * that a machine asleep for hours is not asking every quarter second, short
@@ -211,6 +216,11 @@ export function useChatController(options: ChatControllerOptions) {
   const pendingSubmissionIds = useRef(new Map<string, ChatSubmissionId>());
   const bootstrapped = useRef(false);
   const composerDraftRef = useRef(composerDraft);
+  // Why a ref and not the error line: `execute` deliberately says nothing on
+  // screen about a command aimed at a thread that is not open, and reloads a
+  // stale one without a word. Both are still refusals the caller may need to
+  // report, so the reason is kept here where recording it disturbs nothing.
+  const lastExecuteError = useRef<string | undefined>(undefined);
   composerDraftRef.current = composerDraft;
   const knownDraftThreads = useRef<ReadonlySet<string> | undefined>(undefined);
 
@@ -631,6 +641,7 @@ export function useChatController(options: ChatControllerOptions) {
   async function execute(command: ChatCommand): Promise<ChatCommandResult | undefined> {
     const commandThreadId = "threadId" in command ? String(command.threadId) : undefined;
     setErrorMessage(undefined);
+    lastExecuteError.current = undefined;
     if (command.kind === "update-chat-settings") setSettingsMessage(undefined);
     try {
       const result = await client.execute(command);
@@ -671,10 +682,14 @@ export function useChatController(options: ChatControllerOptions) {
       return result;
     } catch (error) {
       if (!mounted.current) return undefined;
+      lastExecuteError.current = failureMessage(error);
       if (
         commandThreadId !== undefined &&
         String(activeThreadIdRef.current ?? "") !== commandThreadId
       ) {
+        // A command for another thread must not disturb the open one, so
+        // nothing here is shown or reloaded. The reason is still recorded
+        // above, for a caller that has somewhere of its own to report it.
         return undefined;
       }
       if (failureCategory(error) === "stale") {
@@ -845,21 +860,31 @@ export function useChatController(options: ChatControllerOptions) {
    * read from the host first: the navigation read keeps a row's rest current
    * but not its version, so a change made in another window would otherwise
    * make the next command stale. Whether completing or snoozing would hide
-   * work in flight is the host's call; a refusal comes back as an ordinary
-   * failure.
+   * work in flight is the host's call, so the answer is a value the caller
+   * must handle: these run from a sidebar row, where nothing else reports a
+   * failure. The controller's own error line is read only while Chat is
+   * disconnected, and a command for a thread that is not open sets no line at
+   * all, so a refusal that is not returned here reaches the person as a click
+   * that did nothing.
    */
   const restCommand = useCallback(
     async (
       threadId: ChatThreadId,
       command: (expectedVersion: ChatThread["version"]) => ChatCommand,
-    ): Promise<boolean> => {
+    ): Promise<ChatThreadRestOutcome> => {
       const listed = bootstrap?.threads.find(
         (candidate) => String(candidate.id) === String(threadId),
       );
-      if (listed === undefined) return false;
+      if (listed === undefined) {
+        return { status: "refused", message: "This thread is no longer in the list." };
+      }
       const current = await client.thread(threadId).catch(() => undefined);
       const result = await execute(command(current?.thread.version ?? listed.version));
-      return result !== undefined;
+      if (result !== undefined) return { status: "ok" };
+      return {
+        status: "refused",
+        message: lastExecuteError.current ?? "The host could not change this thread.",
+      };
     },
     [bootstrap, client, execute],
   );

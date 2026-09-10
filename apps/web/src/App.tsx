@@ -253,7 +253,11 @@ import { useProviderBootstrap } from "./providers/useProviderBootstrap";
 import { hasSelectableProviderModels } from "./providers/providerBootstrapPolicy";
 import { useArchivedChatThreadSearch } from "./chat/useArchivedChatThreadSearch";
 import { useChatTranscriptSearch } from "./chat/useChatTranscriptSearch";
-import { createChatReadCursorStore, useChatController } from "./chat/useChatController";
+import {
+  createChatReadCursorStore,
+  useChatController,
+  type ChatThreadRestOutcome,
+} from "./chat/useChatController";
 import {
   autoConfigureChatDefaults,
   chatDefaultModelCommand,
@@ -3350,15 +3354,22 @@ function LaunchedShell(
   // What a Chat thread row offers on right-click. List pin is a Code-only
   // mark; pane placement is the window's split tree, so Chat and Work get
   // that without a list pin they cannot honor.
+  const noteChatThreadRest = (outcome: ChatThreadRestOutcome): void => {
+    if (outcome.status === "refused") setThreadExportNotice(outcome.message);
+  };
   const chatThreadRowActions: ThreadRowActions = {
     ...(exportChatThread === undefined ? {} : { onExportThread: exportChatThread }),
     ...(handOffChatThread === undefined ? {} : { onHandOffThread: handOffChatThread }),
     onCompleteThread: (threadId) =>
-      void chatController.completeThread(decodeChatThreadId(threadId)),
-    onReopenThread: (threadId) => void chatController.reopenThread(decodeChatThreadId(threadId)),
+      void chatController.completeThread(decodeChatThreadId(threadId)).then(noteChatThreadRest),
+    onReopenThread: (threadId) =>
+      void chatController.reopenThread(decodeChatThreadId(threadId)).then(noteChatThreadRest),
     onSnoozeThread: (threadId, until) =>
-      void chatController.snoozeThread(decodeChatThreadId(threadId), until),
-    onWakeThread: (threadId) => void chatController.wakeThread(decodeChatThreadId(threadId)),
+      void chatController
+        .snoozeThread(decodeChatThreadId(threadId), until)
+        .then(noteChatThreadRest),
+    onWakeThread: (threadId) =>
+      void chatController.wakeThread(decodeChatThreadId(threadId)).then(noteChatThreadRest),
     onMarkThreadRead: (threadId) => chatController.markThreadRead(decodeChatThreadId(threadId)),
     onMarkThreadUnread: (threadId) => chatReadCursorStore.unmark(decodeChatThreadId(threadId)),
     onPinInPane: pinChatThreadInPane,

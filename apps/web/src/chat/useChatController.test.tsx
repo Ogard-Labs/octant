@@ -674,6 +674,42 @@ describe("useChatController", () => {
     expect(execute.mock.calls[1]?.[0]).toMatchObject({ until: "2026-09-08T09:00:00.000Z" });
   });
 
+  it("answers a refused snooze with the host's reason without disturbing the open thread", async () => {
+    const execute = vi.fn(async () => {
+      throw new ChatClientFailure({
+        category: "invalid",
+        message: "This thread is waiting on you.",
+      });
+    });
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      thread: vi.fn(async () => threadView(1)),
+      subscribe: vi.fn(async function* () {}),
+      execute,
+    });
+    // Research is open; the row being snoozed is Planning, which is not.
+    const { result } = renderHook(() =>
+      useChatController({
+        activeThreadId: otherThreadId,
+        client,
+        serverUrl: "http://127.0.0.1",
+        windowCapability: capability,
+      }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let outcome: Awaited<ReturnType<typeof result.current.snoozeThread>> | undefined;
+    await act(async () => {
+      outcome = await result.current.snoozeThread(threadId, "2026-09-08T09:00:00.000Z");
+    });
+
+    expect(outcome).toEqual({
+      status: "refused",
+      message: "This thread is waiting on you.",
+    });
+    expect(result.current.errorMessage).toBeUndefined();
+  });
+
   it("subscribes after the authoritative snapshot cursor and refetches on stream gaps", async () => {
     let snapshotSequence = 1;
     const subscribe = vi
