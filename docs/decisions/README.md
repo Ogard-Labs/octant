@@ -123,6 +123,7 @@ distilled successor of the earlier long-form design specifications.
 | [0109](0109-a-settings-section-is-an-object.md) | A settings section is an object | Accepted |
 | [0110](0110-model-reviewed-approvals.md) | Native harness model-reviewed approvals as a reviewer swap | Proposed |
 | [0111](0111-host-driven-provider-oauth.md) | Host-driven provider OAuth auth kind and broker | Proposed |
+| [0112](0112-first-run-claude-codex-enablement.md) | First-run Claude Code and Codex CLI enablement | Accepted |
 
 ## Adding an ADR
 

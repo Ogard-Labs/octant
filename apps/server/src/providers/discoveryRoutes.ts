@@ -5,6 +5,7 @@ import {
   type DiscoveryCommand,
   type DiscoveryCandidate,
   type DiscoverySnapshot,
+  type FirstRunOnboardingStatus,
   type ProviderInstance,
   type ProviderInstanceId,
 } from "@octant/contracts";
@@ -26,10 +27,14 @@ export interface DiscoveryRouteDependencies {
     windowId: string,
   ) => Promise<{ instanceId: string }>;
   readonly listInstances?: (windowId: string) => Promise<ReadonlyArray<ProviderInstance>>;
-  readonly createDisabled?: (
+  readonly createFromDiscovery?: (
     candidate: DiscoveryCandidate,
     windowId: string,
+    options: { readonly enabled: boolean },
   ) => Promise<{ instanceId: ProviderInstanceId }>;
+  readonly readFirstRunOnboarding?: () =>
+    | FirstRunOnboardingStatus
+    | Promise<FirstRunOnboardingStatus>;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
 }
@@ -130,12 +135,16 @@ export function createDiscoveryRouteHandler(dependencies: DiscoveryRouteDependen
     try {
       if (isScan) {
         let snapshot = await dependencies.discoveryService.scan();
-        if (dependencies.listInstances !== undefined && dependencies.createDisabled !== undefined) {
+        const listInstances = dependencies.listInstances;
+        const createFromDiscovery = dependencies.createFromDiscovery;
+        if (listInstances !== undefined && createFromDiscovery !== undefined) {
           const result = await autoRegisterPreferredCandidates({
             snapshot,
-            listInstances: () => dependencies.listInstances!(windowId),
-            createDisabled: async (candidate) =>
-              (await dependencies.createDisabled!(candidate, windowId)).instanceId,
+            listInstances: () => listInstances(windowId),
+            createFromDiscovery: async (candidate, options) =>
+              (await createFromDiscovery(candidate, windowId, options)).instanceId,
+            // Missing onboarding is fail-closed: never enable from an unwired host.
+            firstRunOnboarding: (await dependencies.readFirstRunOnboarding?.()) ?? "completed",
           });
           snapshot = result.snapshot;
         }

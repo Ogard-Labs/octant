@@ -21,7 +21,16 @@ surface closes. Skip does not mark the host ready or start a thread.
 ## Configure a provider
 
 Octant is provider-neutral. No core capability requires a specific provider.
-From first run, **Set up a provider** opens Settings on the Providers section:
+
+If Claude Code (`claude`) or Codex CLI (`codex`) is already installed, first
+run enables the detected instance so a thread can start without visiting
+Settings. Both are enabled when both are found. You can turn either off later;
+later scans, restarts, and upgrades do not turn it back on. Other detected
+CLIs still appear off until you enable them. Enabled is not ready: an
+unauthenticated CLI still reports that it needs setup.
+
+When nothing usable is already on, **Set up a provider** opens Settings on
+the Providers section:
 
 1. Create a new provider instance (for example, OpenCode, Codex, Claude, or an
    OpenAI-compatible endpoint).
