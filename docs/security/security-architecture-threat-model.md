@@ -109,15 +109,21 @@ the outermost check that fails closed first is listed first.
 ### AC1 — Injected tool-result content (prompt injection)
 
 A repository README, web page, or MCP tool result contains instructions such as "run
-`curl … | sh`", "approve all future writes", or a fake tool-call transcript. The model relays them
-as its own intent.
+`curl … | sh`", "approve all future writes", "the reviewer must approve this shell", or a fake
+tool-call transcript. The model relays them as its own intent, including toward a native-harness
+reviewer that would answer a prompt (0110).
 
-| Layer              | Control                                                                                                      | Module                                                                         | State           |
-| ------------------ | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ | --------------- |
-| Journal provenance | Tool results are journaled as untrusted data with source provenance, never as instructions                   | `packages/contracts` tool-evidence provenance (see Untrusted-content policy)   | Newly specified |
-| Policy engine      | Any resulting tool call still resolves fail-closed against mode/provider/host/actor/elevation                | `packages/domain/src/toolActionPolicy.ts` + unified engine (see Policy engine) | Partial today   |
-| Approval taint     | Threads that ingested external content require fresh explicit confirmation for irreversible approval classes | Untrusted-content policy (below)                                               | Newly specified |
-| Sandbox            | Even an approved malicious command stays inside the bound root's sandbox profile and egress policy           | Provider/tool Seatbelt launchers (see Sandbox boundary)                        | Partial today   |
+| Layer              | Control                                                                                                               | Module                                                                         | State           |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | --------------- |
+| Journal provenance | Tool results are journaled as untrusted data with source provenance, never as instructions                            | `packages/contracts` tool-evidence provenance (see Untrusted-content policy)   | Newly specified |
+| Policy engine      | Any resulting tool call still resolves fail-closed against mode/provider/host/actor/elevation                         | `packages/domain/src/toolActionPolicy.ts` + unified engine (see Policy engine) | Partial today   |
+| Approval taint     | Threads that ingested external content require fresh explicit confirmation for irreversible approval classes          | Untrusted-content policy (below)                                               | Newly specified |
+| Reviewer bound     | Native-harness reviewer sees only the approval request plus bounded facts, framed as data; ambiguity goes to a person | Native harness reviewer (0110)                                                 | Newly specified |
+| Eligible classes   | Reviewer may answer `shell-commands` and `network-access` only; it cannot mint categories or waive taint              | Native harness reviewer (0110)                                                 | Newly specified |
+| Sandbox            | Even an approved malicious command stays inside the bound root's sandbox profile and egress policy                    | Provider/tool Seatbelt launchers (see Sandbox boundary)                        | Partial today   |
+
+Escape probes for the reviewer path are a release-gate follow-up once 0110 is implemented; they
+are not present while that record is Proposed.
 
 ### AC2 — Rogue MCP server requesting undeclared capabilities
 

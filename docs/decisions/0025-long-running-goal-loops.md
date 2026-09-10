@@ -83,3 +83,4 @@ composes into it rather than having to be unpicked.
 - 0009 Sandbox confinement, approvals, and Plan mode
 - 0012 Mixed-provider subagents and agent runs
 - 0020 Checkpoints and restore by forking
+- 0110 Native harness model-reviewed approvals (loops still suspend)
