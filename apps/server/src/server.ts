@@ -3114,11 +3114,14 @@ export function startOctantServer(
       packagedProviderSmokeControl: options.packagedProviderSmokeControl === true,
     });
     const discoveryService = makeDiscoveryService({ hostId: LOCAL_HOST_ID });
-    const createDisabledProviderFromDiscovery = async (
+    const createProviderFromDiscovery = async (
       candidate: DiscoveryCandidate,
       windowId: string,
+      options: { readonly enabled: boolean },
     ) => {
-      const { command } = createProviderFromDiscoveryCandidate(candidate, { enabled: false });
+      const { command } = createProviderFromDiscoveryCandidate(candidate, {
+        enabled: options.enabled,
+      });
       const result = await providerService.execute(windowId as never, command);
       if (result.kind !== "provider-created") {
         throw new Error("Provider discovery auto-register did not create a provider instance.");
@@ -3130,7 +3133,9 @@ export function startOctantServer(
       windowAuthorityStore,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       listInstances: async () => persistence.readProviderInstances(),
-      createDisabled: createDisabledProviderFromDiscovery,
+      createFromDiscovery: createProviderFromDiscovery,
+      readFirstRunOnboarding: () =>
+        persistence.readShellSettings()?.settings.firstRunOnboarding ?? "pending",
       onConnect: async (command, windowId) => {
         const { command: providerCommand } = createProviderFromDiscoveryCandidate(command, {
           enabled: true,

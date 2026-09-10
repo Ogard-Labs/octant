@@ -126,16 +126,17 @@ describe("discoveryRoutes", () => {
     expect(body.snapshot.candidates[0].driverKind).toBe("codex");
   });
 
-  it("auto-registers one disabled provider per discovered family after scan", async () => {
+  it("auto-registers one first-run Codex CLI instance enabled per discovered family after scan", async () => {
     const listInstances = vi.fn(async () => []);
-    const createDisabled = vi.fn(async () => ({
+    const createFromDiscovery = vi.fn(async () => ({
       instanceId: decodeProviderInstanceId("00000000-0000-4000-8000-000000000902"),
     }));
     const handler = createDiscoveryRouteHandler({
       discoveryService: makeFakeDiscoveryService(duplicateFamilySnapshot),
       windowAuthorityStore: makeFakeWindowAuthorityStore(),
       listInstances,
-      createDisabled,
+      createFromDiscovery,
+      readFirstRunOnboarding: () => "pending",
     });
 
     const result = await handler(makeRequest("/api/providers/discovery/scan"));
@@ -146,12 +147,47 @@ describe("discoveryRoutes", () => {
     expect(body.snapshot.autoRegisteredInstanceIds).toEqual([
       "00000000-0000-4000-8000-000000000902",
     ]);
-    expect(createDisabled).toHaveBeenCalledTimes(1);
-    expect(createDisabled).toHaveBeenCalledWith(
+    expect(createFromDiscovery).toHaveBeenCalledTimes(1);
+    expect(createFromDiscovery).toHaveBeenCalledWith(
       expect.objectContaining({ binaryPath: "/usr/local/bin/codex" }),
       "test-window-id",
+      { enabled: true },
     );
     expect(listInstances).toHaveBeenCalledWith("test-window-id");
+  });
+
+  it("auto-registers a detected Claude Code instance disabled after first run has been answered", async () => {
+    const createFromDiscovery = vi.fn(async () => ({
+      instanceId: decodeProviderInstanceId("00000000-0000-4000-8000-000000000903"),
+    }));
+    const handler = createDiscoveryRouteHandler({
+      discoveryService: makeFakeDiscoveryService({
+        ...fakeSnapshot,
+        candidates: [
+          {
+            ...fakeSnapshot.candidates[0]!,
+            driverKind: "claude",
+            displayName: "Claude Code",
+            binaryPath: "/usr/local/bin/claude",
+            pathSummary: "/usr/local/bin/claude",
+          },
+        ],
+      }),
+      windowAuthorityStore: makeFakeWindowAuthorityStore(),
+      listInstances: async () => [],
+      createFromDiscovery,
+      readFirstRunOnboarding: () => "completed",
+    });
+
+    const result = await handler(makeRequest("/api/providers/discovery/scan"));
+
+    expect(result).toBeDefined();
+    expect(result!.status).toBe(200);
+    expect(createFromDiscovery).toHaveBeenCalledWith(
+      expect.objectContaining({ driverKind: "claude" }),
+      "test-window-id",
+      { enabled: false },
+    );
   });
 
   it("rejects connect without onConnect handler", async () => {

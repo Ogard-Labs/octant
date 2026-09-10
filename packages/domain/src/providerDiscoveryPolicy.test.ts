@@ -9,6 +9,8 @@ import {
   isUnclassifiedDriverKind,
   selectPreferredCandidate,
   shouldAutoRegisterCandidate,
+  isFirstRunDiscoveryEnablementEligible,
+  initialEnabledForDiscovery,
 } from "./providerDiscoveryPolicy";
 import type { DiscoveryCandidate, DiscoverySnapshot } from "@octant/contracts";
 
@@ -114,6 +116,59 @@ describe("selectPreferredCandidate", () => {
       }),
     ]);
     expect(preferred?.binaryPath).toBe("/opt/homebrew/bin/codex");
+  });
+});
+
+describe("first-run discovery enablement", () => {
+  it("allows first-run enablement only while onboarding is pending and no provider choice is recorded", () => {
+    expect(
+      isFirstRunDiscoveryEnablementEligible({
+        firstRunOnboarding: "pending",
+        existingInstanceCount: 0,
+      }),
+    ).toBe(true);
+    expect(
+      isFirstRunDiscoveryEnablementEligible({
+        firstRunOnboarding: "pending",
+        existingInstanceCount: 1,
+      }),
+    ).toBe(false);
+    expect(
+      isFirstRunDiscoveryEnablementEligible({
+        firstRunOnboarding: "completed",
+        existingInstanceCount: 0,
+      }),
+    ).toBe(false);
+    expect(
+      isFirstRunDiscoveryEnablementEligible({
+        firstRunOnboarding: "skipped",
+        existingInstanceCount: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("enables only Claude Code and Codex CLI when the scan is first-run eligible", () => {
+    expect(
+      initialEnabledForDiscovery({ driverKind: "claude", firstRunEnablementEligible: true }),
+    ).toBe(true);
+    expect(
+      initialEnabledForDiscovery({ driverKind: "codex", firstRunEnablementEligible: true }),
+    ).toBe(true);
+    expect(
+      initialEnabledForDiscovery({ driverKind: "opencode", firstRunEnablementEligible: true }),
+    ).toBe(false);
+    expect(
+      initialEnabledForDiscovery({ driverKind: "grok", firstRunEnablementEligible: true }),
+    ).toBe(false);
+  });
+
+  it("keeps every driver disabled when the host is not first-run eligible", () => {
+    expect(
+      initialEnabledForDiscovery({ driverKind: "claude", firstRunEnablementEligible: false }),
+    ).toBe(false);
+    expect(
+      initialEnabledForDiscovery({ driverKind: "codex", firstRunEnablementEligible: false }),
+    ).toBe(false);
   });
 });
 
