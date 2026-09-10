@@ -2355,3 +2355,224 @@ textarea.settings-view__text-input {
   width: 100%;
   justify-content: space-between;
 }
+
+/* ─── Settings refresh ───────────────────────────────────────────────
+   Settings is an operating surface, so its visual hierarchy comes from one
+   reading column, quiet section labels, and a single hairline between rows.
+   The earlier card selectors are kept above for compatibility with older
+   contributions; these final rules make the current open-section grammar
+   deterministic for every page, including plugin-owned sections. */
+.settings-view {
+  --oct-settings-gutter: clamp(32px, 5vw, 64px);
+  --oct-settings-reading-width: 920px;
+  --oct-settings-control: 180px;
+  --oct-settings-control-height: 32px;
+}
+
+.settings-view__content-inner {
+  max-width: calc(
+    var(--oct-settings-reading-width) + var(--oct-settings-gutter) + var(--oct-settings-gutter)
+  );
+  padding: 48px var(--oct-settings-gutter) 72px;
+}
+
+.settings-view__header {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 36px;
+}
+
+.settings-view__header .oct-title {
+  margin: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-xl);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: var(--oct-tracking-tight);
+  line-height: 1.2;
+}
+
+.settings-view__header .oct-subtitle {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-sm);
+  line-height: 1.45;
+}
+
+.settings-section-stack {
+  display: grid;
+  gap: 28px;
+}
+
+/* The section label is outside the row list. Every child after it is reset to
+   the page ground so old card recipes cannot produce nested boxes or double
+   borders when a specialty surface uses this shared class. */
+.settings-card-section.settings-card-section--open
+  > *:not(h2, h3, summary, legend, .settings-section-head, .settings-section-note) {
+  padding-inline: 0;
+  border-inline: 0;
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+  border-end-start-radius: 0;
+  border-end-end-radius: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.settings-card-section.settings-card-section--open > h2,
+.settings-card-section.settings-card-section--open > h3,
+.settings-card-section.settings-card-section--open > summary,
+.settings-card-section.settings-card-section--open > legend,
+.settings-card-section.settings-card-section--open > .settings-section-head {
+  min-height: 0;
+  padding: 0 0 10px;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-medium);
+  line-height: 1.35;
+}
+
+.settings-card-section.settings-card-section--open > .settings-section-note {
+  max-width: 68ch;
+  padding: 0 0 12px;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+  line-height: 1.45;
+}
+
+.settings-view .settings-card-section.settings-card-section--open > .setgroup,
+.settings-view .settings-card-section.settings-card-section--open > .settings-fact-list,
+.settings-view .settings-card-section.settings-card-section--open > .provlist,
+.settings-view .settings-card-section.settings-card-section--open > .settings-view__theme-group {
+  padding: 0;
+  border: 0;
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+  border-end-start-radius: 0;
+  border-end-end-radius: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.settings-card-section.settings-card-section--open > .setgroup > .setrow,
+.settings-card-section.settings-card-section--open > .settings-fact-list > .settings-fact-list__row,
+.settings-card-section.settings-card-section--open > .provlist > .provrow,
+.settings-card-section.settings-card-section--open
+  > .settings-view__theme-group
+  > .settings-view__field {
+  min-height: 44px;
+  padding: 12px 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.settings-card-section.settings-card-section--open > .setgroup > .setrow:first-child,
+.settings-card-section.settings-card-section--open
+  > .settings-fact-list
+  > .settings-fact-list__row:first-child,
+.settings-card-section.settings-card-section--open > .provlist > .provrow:first-child,
+.settings-card-section.settings-card-section--open
+  > .settings-view__theme-group
+  > .settings-view__field:first-of-type {
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.settings-card-section.settings-card-section--open > .setgroup > .setgroup-head + .setrow,
+.settings-card-section.settings-card-section--open > .setgroup > .setgroup-note + .setrow {
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.settings-card-section.settings-card-section--open .setrow-label {
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  line-height: 1.35;
+}
+
+.settings-card-section.settings-card-section--open .setrow-hint {
+  margin: 3px 0 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+  line-height: 1.45;
+}
+
+.settings-card-section.settings-card-section--open .setrow-control {
+  align-self: center;
+}
+
+.settings-card-section.settings-card-section--open .settings-view__field,
+.settings-card-section.settings-card-section--open .settings-view__toggle {
+  min-height: 44px;
+}
+
+.settings-card-section.settings-card-section--open .settings-view__field > span:first-child,
+.settings-card-section.settings-card-section--open .settings-view__toggle > span:first-child {
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.settings-card-section.settings-card-section--open .settings-view__select,
+.settings-card-section.settings-card-section--open .settings-font-picker,
+.settings-card-section.settings-card-section--open .octant-number-stepper {
+  width: var(--oct-settings-control);
+}
+
+/* `:has()` in the legacy card edge rule has higher specificity than the
+   ordinary reset above. Repeat the logical corner reset at the same boundary
+   with one extra class so the open grammar cannot inherit rounded card edges. */
+.settings-view .settings-card-section.settings-card-section--open > .setgroup.setgroup,
+.settings-view
+  .settings-card-section.settings-card-section--open
+  > .settings-disclosure.settings-disclosure {
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+  border-end-start-radius: 0;
+  border-end-end-radius: 0;
+}
+
+.settings-view__empty,
+.settings-state {
+  max-width: 68ch;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+  line-height: 1.45;
+}
+
+.settings-state--error,
+.settings-view__error {
+  padding: 10px 12px;
+  color: var(--octant-danger-text);
+  background: var(--octant-surface-muted);
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+@media (max-width: 680px) {
+  .settings-view__content-inner {
+    padding: 32px 28px 56px;
+  }
+
+  .settings-card-section.settings-card-section--open .setrow {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 4px;
+  }
+
+  .settings-card-section.settings-card-section--open .setrow-control {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
+    margin-top: 8px;
+  }
+
+  .settings-card-section.settings-card-section--open .setrow-control > * {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 420px) {
+  .settings-view__content-inner {
+    padding-inline: 20px;
+  }
+}

@@ -9,6 +9,7 @@ import {
   SettingsDisclosure,
   SettingsFactList,
   SettingsPanel,
+  SettingsSection,
   SettingsState,
 } from "./primitives";
 
@@ -104,6 +105,25 @@ describe("SettingRow", () => {
 });
 
 describe("shared Settings surfaces", () => {
+  it("keeps a section title and note outside its open row content", () => {
+    render(
+      <SettingsSection description="Defaults for new threads." title="Thread defaults">
+        <div className="setgroup">
+          <SettingRow settingId="thread-default" label="Access" scope="mode">
+            <button type="button">Ask</button>
+          </SettingRow>
+        </div>
+      </SettingsSection>,
+    );
+
+    const section = screen.getByRole("region", { name: "Thread defaults" });
+    expect(section).toHaveClass("settings-card-section", "settings-card-section--open");
+    expect(within(section).getByText("Defaults for new threads.")).toHaveClass(
+      "settings-section-note",
+    );
+    expect(within(section).getByTestId("setting-row")).toBeInTheDocument();
+  });
+
   it("renders one quiet panel hierarchy", () => {
     render(
       <SettingsPanel title="Identity" description="Facts reported by this host.">

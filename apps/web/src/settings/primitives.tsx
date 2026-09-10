@@ -139,6 +139,42 @@ export function SettingGroup({ label, description, children }: SettingGroupProps
   );
 }
 
+export interface SettingsSectionProps {
+  readonly title: string;
+  readonly description?: ReactNode;
+  readonly children: ReactNode;
+  readonly id?: string;
+  readonly className?: string;
+}
+
+/**
+ * Shared open section grammar for Settings pages. The section owns its title
+ * and optional note; callers provide rows, facts, or a specialist editor in
+ * the body without adding another card shell.
+ */
+export function SettingsSection({
+  title,
+  description,
+  children,
+  id,
+  className,
+}: SettingsSectionProps) {
+  const titleId = useId();
+  return (
+    <section
+      aria-labelledby={titleId}
+      className={`settings-card-section settings-card-section--open${
+        className === undefined ? "" : ` ${className}`
+      }`}
+      {...(id === undefined ? {} : { id })}
+    >
+      <h2 id={titleId}>{title}</h2>
+      {description === undefined ? null : <p className="settings-section-note">{description}</p>}
+      {children}
+    </section>
+  );
+}
+
 export function SettingsPanel(props: {
   readonly title: string;
   readonly description?: ReactNode;
