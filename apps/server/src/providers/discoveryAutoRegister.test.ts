@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   DiscoveryCandidate,
   DiscoverySnapshot,
+  FirstRunOnboardingStatus,
   ProviderInstance,
   ProviderInstanceId,
 } from "@octant/contracts";
@@ -42,25 +43,12 @@ function makeInstance(
   } = {},
 ): ProviderInstance {
   const driverKind = input.driverKind ?? "codex";
-  const binaryPath =
-    input.binaryPath ??
-    (driverKind === "claude" ? "/opt/homebrew/bin/claude" : "/opt/homebrew/bin/codex");
-  const configuration =
-    driverKind === "claude"
-      ? {
-          kind: "claude-agent-sdk",
-          binaryPath,
-          authentication: "subscription",
-        }
-      : {
-          kind: "codex-cli",
-          binaryPath,
-        };
+  const binaryPath = input.binaryPath ?? defaultBinaryPath(driverKind);
   return {
     id: (input.id ?? "00000000-0000-4000-8000-000000000901") as ProviderInstance["id"],
-    displayName: driverKind === "claude" ? "Claude CLI" : "Codex CLI",
+    displayName: displayNameFor(driverKind),
     driverKind,
-    configuration,
+    configuration: configurationFor(driverKind, binaryPath),
     enabled: input.enabled ?? false,
     environmentPolicy: "inherit-host",
     version: 1,
@@ -69,14 +57,103 @@ function makeInstance(
   } as unknown as ProviderInstance;
 }
 
-describe("autoRegisterPreferredCandidates", () => {
-  it("creates one disabled instance for the preferred candidate in a driver family", async () => {
-    const createDisabled = vi.fn(async () => {
-      return "00000000-0000-4000-8000-000000000911" as ProviderInstanceId;
-    });
+function defaultBinaryPath(driverKind: DiscoveryCandidate["driverKind"]): string {
+  switch (driverKind) {
+    case "claude":
+      return "/opt/homebrew/bin/claude";
+    case "opencode":
+      return "/opt/homebrew/bin/opencode";
+    case "grok":
+      return "/opt/homebrew/bin/grok";
+    default:
+      return "/opt/homebrew/bin/codex";
+  }
+}
 
-    const result = await autoRegisterPreferredCandidates({
-      snapshot: makeSnapshot([
+function displayNameFor(driverKind: DiscoveryCandidate["driverKind"]): string {
+  switch (driverKind) {
+    case "claude":
+      return "Claude Code";
+    case "opencode":
+      return "OpenCode CLI";
+    case "grok":
+      return "Grok";
+    default:
+      return "Codex CLI";
+  }
+}
+
+function configurationFor(
+  driverKind: DiscoveryCandidate["driverKind"],
+  binaryPath: string,
+): ProviderInstance["configuration"] {
+  switch (driverKind) {
+    case "claude":
+      return {
+        kind: "claude-agent-sdk",
+        binaryPath,
+        authentication: "subscription",
+      } as ProviderInstance["configuration"];
+    case "opencode":
+      return { kind: "opencode-cli", binaryPath } as ProviderInstance["configuration"];
+    case "grok":
+      return {
+        kind: "grok-acp",
+        binaryPath,
+        authentication: "subscription",
+      } as ProviderInstance["configuration"];
+    default:
+      return { kind: "codex-cli", binaryPath } as ProviderInstance["configuration"];
+  }
+}
+
+function claudeCandidate(overrides: Partial<DiscoveryCandidate> = {}): DiscoveryCandidate {
+  return makeCandidate({
+    driverKind: "claude",
+    displayName: "Claude Code",
+    binaryPath: "/opt/homebrew/bin/claude",
+    pathSummary: "/opt/homebrew/bin/claude",
+    ...overrides,
+  });
+}
+
+function opencodeCandidate(): DiscoveryCandidate {
+  return makeCandidate({
+    driverKind: "opencode",
+    displayName: "OpenCode CLI",
+    binaryPath: "/opt/homebrew/bin/opencode",
+    pathSummary: "/opt/homebrew/bin/opencode",
+  });
+}
+
+async function autoRegister(input: {
+  readonly candidates?: ReadonlyArray<DiscoveryCandidate>;
+  readonly snapshot?: DiscoverySnapshot;
+  readonly instances?: ReadonlyArray<ProviderInstance>;
+  readonly listInstances?: () => Promise<ReadonlyArray<ProviderInstance>>;
+  readonly createFromDiscovery?: (
+    candidate: DiscoveryCandidate,
+    options: { readonly enabled: boolean },
+  ) => Promise<ProviderInstanceId>;
+  readonly firstRunOnboarding?: FirstRunOnboardingStatus;
+}) {
+  const createFromDiscovery = vi.fn(
+    input.createFromDiscovery ??
+      (async () => "00000000-0000-4000-8000-000000000911" as ProviderInstanceId),
+  );
+  const result = await autoRegisterPreferredCandidates({
+    snapshot: input.snapshot ?? makeSnapshot(input.candidates ?? [makeCandidate()]),
+    listInstances: input.listInstances ?? (async () => input.instances ?? []),
+    createFromDiscovery,
+    firstRunOnboarding: input.firstRunOnboarding ?? "pending",
+  });
+  return { result, createFromDiscovery };
+}
+
+describe("autoRegisterPreferredCandidates", () => {
+  it("creates one instance for the preferred candidate in a driver family", async () => {
+    const { result, createFromDiscovery } = await autoRegister({
+      candidates: [
         makeCandidate({
           binaryPath: "/opt/homebrew/bin/codex",
           pathSummary: "/opt/homebrew/bin/codex",
@@ -85,104 +162,264 @@ describe("autoRegisterPreferredCandidates", () => {
           binaryPath: "/usr/local/bin/codex",
           pathSummary: "/usr/local/bin/codex",
         }),
-      ]),
-      listInstances: async () => [],
-      createDisabled,
+      ],
     });
 
-    expect(createDisabled).toHaveBeenCalledTimes(1);
-    expect(createDisabled).toHaveBeenCalledWith(
+    expect(createFromDiscovery).toHaveBeenCalledTimes(1);
+    expect(createFromDiscovery).toHaveBeenCalledWith(
       expect.objectContaining({ binaryPath: "/opt/homebrew/bin/codex" }),
+      { enabled: true },
     );
     expect(result.createdIds).toEqual(["00000000-0000-4000-8000-000000000911"]);
     expect(result.snapshot.autoRegisteredInstanceIds).toEqual(result.createdIds);
   });
 
-  it("skips auto-register on a second scan after the family was already created", async () => {
-    const configured: ProviderInstance[] = [];
-    const snapshot = makeSnapshot([makeCandidate()]);
-    const createDisabled = vi.fn(async (candidate: DiscoveryCandidate) => {
-      const createdId = "00000000-0000-4000-8000-000000000912";
-      configured.push(
-        makeInstance({
-          id: createdId,
-          driverKind: candidate.driverKind,
-          binaryPath: candidate.binaryPath,
-          enabled: false,
-        }),
-      );
-      return createdId as ProviderInstanceId;
+  it("creates a detected Claude Code instance enabled on first run", async () => {
+    const { createFromDiscovery } = await autoRegister({
+      candidates: [claudeCandidate()],
     });
 
-    const first = await autoRegisterPreferredCandidates({
-      snapshot,
-      listInstances: async () => configured,
-      createDisabled,
-    });
-    const second = await autoRegisterPreferredCandidates({
-      snapshot,
-      listInstances: async () => configured,
-      createDisabled,
-    });
-
-    expect(first.createdIds).toEqual(["00000000-0000-4000-8000-000000000912"]);
-    expect(second.createdIds).toEqual([]);
-    expect(second.snapshot.autoRegisteredInstanceIds).toEqual([]);
-    expect(createDisabled).toHaveBeenCalledTimes(1);
+    expect(createFromDiscovery).toHaveBeenCalledTimes(1);
+    expect(createFromDiscovery).toHaveBeenCalledWith(
+      expect.objectContaining({ driverKind: "claude" }),
+      { enabled: true },
+    );
   });
 
-  it("skips auto-register when the driver family already has an instance", async () => {
-    const createDisabled = vi.fn(async () => {
-      return "00000000-0000-4000-8000-000000000913" as ProviderInstanceId;
+  it("creates a detected Codex CLI instance enabled on first run", async () => {
+    const { createFromDiscovery } = await autoRegister({
+      candidates: [makeCandidate()],
     });
 
-    const result = await autoRegisterPreferredCandidates({
-      snapshot: makeSnapshot([
-        makeCandidate({
-          driverKind: "claude",
-          displayName: "Claude CLI",
-          binaryPath: "/opt/homebrew/bin/claude",
-          pathSummary: "/opt/homebrew/bin/claude",
-        }),
+    expect(createFromDiscovery).toHaveBeenCalledTimes(1);
+    expect(createFromDiscovery).toHaveBeenCalledWith(
+      expect.objectContaining({ driverKind: "codex" }),
+      { enabled: true },
+    );
+  });
+
+  it("creates both Claude Code and Codex CLI enabled when first run detects both", async () => {
+    const created: Array<{ driverKind: string; enabled: boolean }> = [];
+    const { result, createFromDiscovery } = await autoRegister({
+      candidates: [makeCandidate(), claudeCandidate()],
+      createFromDiscovery: async (candidate, options) => {
+        created.push({ driverKind: candidate.driverKind, enabled: options.enabled });
+        return `00000000-0000-4000-8000-00000000092${created.length}` as ProviderInstanceId;
+      },
+    });
+
+    expect(createFromDiscovery).toHaveBeenCalledTimes(2);
+    expect(created).toEqual(
+      expect.arrayContaining([
+        { driverKind: "claude", enabled: true },
+        { driverKind: "codex", enabled: true },
       ]),
-      listInstances: async () => [
+    );
+    expect(result.createdIds).toHaveLength(2);
+  });
+
+  it("creates only the detected OpenCode runtime disabled when Claude Code and Codex CLI are absent", async () => {
+    const { createFromDiscovery } = await autoRegister({
+      candidates: [opencodeCandidate()],
+    });
+
+    expect(createFromDiscovery).toHaveBeenCalledTimes(1);
+    expect(createFromDiscovery).toHaveBeenCalledWith(
+      expect.objectContaining({ driverKind: "opencode" }),
+      { enabled: false },
+    );
+    expect(createFromDiscovery).not.toHaveBeenCalledWith(
+      expect.objectContaining({ driverKind: "claude" }),
+      expect.anything(),
+    );
+    expect(createFromDiscovery).not.toHaveBeenCalledWith(
+      expect.objectContaining({ driverKind: "codex" }),
+      expect.anything(),
+    );
+  });
+
+  it("leaves a non-default detected runtime off on first run", async () => {
+    const created: Array<{ driverKind: string; enabled: boolean }> = [];
+    await autoRegister({
+      candidates: [claudeCandidate(), opencodeCandidate()],
+      createFromDiscovery: async (candidate, options) => {
+        created.push({ driverKind: candidate.driverKind, enabled: options.enabled });
+        return `00000000-0000-4000-8000-00000000093${created.length}` as ProviderInstanceId;
+      },
+    });
+
+    expect(created).toEqual(
+      expect.arrayContaining([
+        { driverKind: "claude", enabled: true },
+        { driverKind: "opencode", enabled: false },
+      ]),
+    );
+  });
+
+  it("does not create or re-enable a user-disabled Claude Code instance on rediscovery", async () => {
+    const { result, createFromDiscovery } = await autoRegister({
+      candidates: [claudeCandidate()],
+      instances: [
         makeInstance({
           driverKind: "claude",
           binaryPath: "/usr/local/bin/claude",
           enabled: false,
         }),
       ],
-      createDisabled,
     });
 
-    expect(createDisabled).not.toHaveBeenCalled();
+    expect(createFromDiscovery).not.toHaveBeenCalled();
+    expect(result.createdIds).toEqual([]);
+    expect(result.snapshot.autoRegisteredInstanceIds).toEqual([]);
+  });
+
+  it("creates a newly detected Claude Code instance disabled after first run has been answered", async () => {
+    const { createFromDiscovery } = await autoRegister({
+      candidates: [claudeCandidate()],
+      firstRunOnboarding: "completed",
+    });
+
+    expect(createFromDiscovery).toHaveBeenCalledTimes(1);
+    expect(createFromDiscovery).toHaveBeenCalledWith(
+      expect.objectContaining({ driverKind: "claude" }),
+      { enabled: false },
+    );
+  });
+
+  it("creates a newly detected Claude Code instance disabled when the host already recorded a provider choice", async () => {
+    const { createFromDiscovery } = await autoRegister({
+      candidates: [claudeCandidate()],
+      instances: [makeInstance({ driverKind: "grok", enabled: false })],
+      firstRunOnboarding: "pending",
+    });
+
+    expect(createFromDiscovery).toHaveBeenCalledTimes(1);
+    expect(createFromDiscovery).toHaveBeenCalledWith(
+      expect.objectContaining({ driverKind: "claude" }),
+      { enabled: false },
+    );
+  });
+
+  it("creates an unauthenticated Claude Code instance enabled without treating detection as ready", async () => {
+    const { createFromDiscovery } = await autoRegister({
+      candidates: [claudeCandidate({ readiness: "unauthenticated" })],
+    });
+
+    expect(createFromDiscovery).toHaveBeenCalledTimes(1);
+    expect(createFromDiscovery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        driverKind: "claude",
+        readiness: "unauthenticated",
+      }),
+      { enabled: true },
+    );
+  });
+
+  it("skips auto-register on a second scan after the family was already created", async () => {
+    const configured: ProviderInstance[] = [];
+    const snapshot = makeSnapshot([makeCandidate()]);
+    const createFromDiscovery = vi.fn(async (candidate: DiscoveryCandidate) => {
+      const createdId = "00000000-0000-4000-8000-000000000912" as ProviderInstanceId;
+      configured.push(
+        makeInstance({
+          id: createdId,
+          driverKind: candidate.driverKind,
+          binaryPath: candidate.binaryPath,
+          enabled: true,
+        }),
+      );
+      return createdId;
+    });
+
+    const first = await autoRegisterPreferredCandidates({
+      snapshot,
+      listInstances: async () => configured,
+      createFromDiscovery,
+      firstRunOnboarding: "pending",
+    });
+    const second = await autoRegisterPreferredCandidates({
+      snapshot,
+      listInstances: async () => configured,
+      createFromDiscovery,
+      firstRunOnboarding: "pending",
+    });
+
+    expect(first.createdIds).toEqual(["00000000-0000-4000-8000-000000000912"]);
+    expect(second.createdIds).toEqual([]);
+    expect(second.snapshot.autoRegisteredInstanceIds).toEqual([]);
+    expect(createFromDiscovery).toHaveBeenCalledTimes(1);
+    expect(createFromDiscovery).toHaveBeenCalledWith(expect.anything(), { enabled: true });
+  });
+
+  it("registers each family only once when overlapping first-run scans detect the same runtime", async () => {
+    const configured: ProviderInstance[] = [];
+    const snapshot = makeSnapshot([claudeCandidate()]);
+    const createFromDiscovery = vi.fn(async (candidate: DiscoveryCandidate) => {
+      const createdId =
+        `00000000-0000-4000-8000-00000000094${configured.length + 1}` as ProviderInstanceId;
+      configured.push(
+        makeInstance({
+          id: createdId,
+          driverKind: candidate.driverKind,
+          binaryPath: candidate.binaryPath,
+          enabled: true,
+        }),
+      );
+      return createdId;
+    });
+
+    const [first, second] = await Promise.all([
+      autoRegisterPreferredCandidates({
+        snapshot,
+        listInstances: async () => configured,
+        createFromDiscovery,
+        firstRunOnboarding: "pending",
+      }),
+      autoRegisterPreferredCandidates({
+        snapshot,
+        listInstances: async () => configured,
+        createFromDiscovery,
+        firstRunOnboarding: "pending",
+      }),
+    ]);
+
+    expect(createFromDiscovery).toHaveBeenCalledTimes(1);
+    expect([...first.createdIds, ...second.createdIds]).toEqual([
+      "00000000-0000-4000-8000-000000000941",
+    ]);
+  });
+
+  it("skips auto-register when the driver family already has an instance", async () => {
+    const { result, createFromDiscovery } = await autoRegister({
+      candidates: [claudeCandidate()],
+      instances: [
+        makeInstance({
+          driverKind: "claude",
+          binaryPath: "/usr/local/bin/claude",
+          enabled: false,
+        }),
+      ],
+    });
+
+    expect(createFromDiscovery).not.toHaveBeenCalled();
     expect(result.createdIds).toEqual([]);
     expect(result.snapshot.autoRegisteredInstanceIds).toEqual([]);
   });
 
   it("keeps discovered candidates usable when one family cannot be auto-registered", async () => {
-    const createDisabled = vi.fn(async (candidate: DiscoveryCandidate) => {
+    const createFromDiscovery = vi.fn(async (candidate: DiscoveryCandidate) => {
       if (candidate.driverKind === "codex") {
         throw new Error("provider create rejected");
       }
       return "00000000-0000-4000-8000-000000000915" as ProviderInstanceId;
     });
 
-    const result = await autoRegisterPreferredCandidates({
-      snapshot: makeSnapshot([
-        makeCandidate(),
-        makeCandidate({
-          driverKind: "claude",
-          displayName: "Claude Code",
-          binaryPath: "/opt/homebrew/bin/claude",
-          pathSummary: "/opt/homebrew/bin/claude",
-        }),
-      ]),
-      listInstances: async () => [],
-      createDisabled,
+    const { result } = await autoRegister({
+      candidates: [makeCandidate(), claudeCandidate()],
+      createFromDiscovery,
     });
 
-    expect(createDisabled).toHaveBeenCalledTimes(2);
+    expect(createFromDiscovery).toHaveBeenCalledTimes(2);
     expect(result.createdIds).toEqual(["00000000-0000-4000-8000-000000000915"]);
     expect(result.snapshot.candidates).toHaveLength(2);
     expect(result.snapshot.autoRegisteredInstanceIds).toEqual(result.createdIds);
@@ -190,18 +427,19 @@ describe("autoRegisterPreferredCandidates", () => {
 
   it("skips cancelled empty scans without listing or creating instances", async () => {
     const listInstances = vi.fn(async () => []);
-    const createDisabled = vi.fn(async () => {
+    const createFromDiscovery = vi.fn(async () => {
       return "00000000-0000-4000-8000-000000000914" as ProviderInstanceId;
     });
 
     const result = await autoRegisterPreferredCandidates({
       snapshot: makeSnapshot([], { status: "cancelled" }),
       listInstances,
-      createDisabled,
+      createFromDiscovery,
+      firstRunOnboarding: "pending",
     });
 
     expect(listInstances).not.toHaveBeenCalled();
-    expect(createDisabled).not.toHaveBeenCalled();
+    expect(createFromDiscovery).not.toHaveBeenCalled();
     expect(result.createdIds).toEqual([]);
     expect(result.snapshot.autoRegisteredInstanceIds).toEqual([]);
   });
