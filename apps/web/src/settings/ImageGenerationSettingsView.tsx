@@ -156,6 +156,8 @@ function ImageProviderCreateForm(props: { readonly controller: ProviderControlle
       allowedProviderTypes={["openai-image", "gemini-native-image", "bfl-image", "ideogram-image"]}
       busy={controller.busy}
       credentialManagementAvailable={controller.credentialManagementAvailable}
+      heading="Connect an image provider"
+      hint="Use an OpenAI, Gemini, Black Forest Labs, or Ideogram image API. Credentials stay in the host's secure store."
       initialProviderType="openai-image"
       onCreate={controller.create}
       onCreateAnthropicCompatible={controller.createAnthropicCompatible}

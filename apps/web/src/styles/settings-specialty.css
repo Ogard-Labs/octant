@@ -92,7 +92,7 @@
   padding: 16px;
   border: 1px solid var(--oct-hairline);
   border-radius: var(--oct-radius-lg);
-  background: var(--oct-surface-muted);
+  background: var(--oct-surface-warm);
 }
 
 .settings-view .provider-settings__create-heading {
@@ -283,7 +283,7 @@
 
 .settings-view .extensions-settings__component {
   border-radius: var(--oct-radius-sm);
-  background: var(--oct-surface-muted);
+  background: var(--oct-surface-warm);
 }
 
 /* Host, integrations, and usage use the same fact/list grammar. */
