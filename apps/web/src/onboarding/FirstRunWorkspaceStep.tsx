@@ -1,4 +1,4 @@
-import { OctantSelectField } from "../ui/base/OctantSelect";
+import { SettingRow } from "../settings/primitives";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import type { WorkspaceChoices } from "./firstRunStepModel";
@@ -22,13 +22,15 @@ const SCHEMES = [
  *
  * These are the choices a new user forms an opinion about within the first
  * minute and would otherwise have to go hunting for. Each writes through to
- * the same setting Settings owns, so nothing here is a first-run-only copy.
+ * the same setting Settings owns, so nothing here is a first-run-only copy —
+ * including the row it is asked in, which is the `SettingRow` inside the
+ * section object Settings draws.
  *
  * Code is deliberately absent from the mode switches: it is always available,
  * and offering a switch that cannot be turned off would imply otherwise.
  * Turning Chat or Work off hides the mode; it never deletes anything, and the
- * step says so, because a switch labelled only "Enable Work" reads to a new
- * user like a choice about whether their work will exist.
+ * section's note says so, because a switch labelled only "Enable Work" reads
+ * to a new user like a choice about whether their work will exist.
  */
 export function FirstRunWorkspaceStep(props: FirstRunWorkspaceStepProps) {
   const { choices } = props;
@@ -40,11 +42,24 @@ export function FirstRunWorkspaceStep(props: FirstRunWorkspaceStepProps) {
         Choose the defaults you want to see on first launch. They remain available in Settings.
       </p>
 
-      <div aria-label="Workspace defaults" className="setgroup" role="group">
-        <div className="setgroup-head">Workspace defaults</div>
-        <div className="setrow">
-          <span className="setrow-label">Colour scheme</span>
-          <div className="setrow-control">
+      <section
+        aria-label="Workspace defaults"
+        className="settings-card-section settings-card-section--open"
+      >
+        <h2>Workspace defaults</h2>
+        {/* The guarantee belongs to the label, not below the rows: as a
+            trailing paragraph it read as one more row of the group, which is
+            the one thing it is not. */}
+        <p className="settings-section-note" role="note">
+          Code is always available. Hiding Chat or Work never deletes its threads or data.
+        </p>
+        <div className="setgroup">
+          <SettingRow
+            description="Follow this Mac, or hold Octant to light or dark."
+            label="Colour scheme"
+            scope="app"
+            settingId="first-run-colour-scheme"
+          >
             {schemeUnknown ? (
               <span className="first-run__loading-value" role="status">
                 Loading…
@@ -71,49 +86,56 @@ export function FirstRunWorkspaceStep(props: FirstRunWorkspaceStepProps) {
                 ))}
               </OctantToggleGroup>
             )}
-          </div>
-        </div>
-        <div className="setrow">
-          <span className="setrow-label">Chat</span>
-          <div className="setrow-control">
+          </SettingRow>
+          <SettingRow
+            description="Show Chat in the mode switcher."
+            label="Chat"
+            scope="app"
+            settingId="first-run-enable-chat"
+          >
             <OctantSwitch
               checked={choices.chatEnabled}
+              describedBy="first-run-enable-chat-description"
               label="Enable Chat"
               onCheckedChange={props.onToggleChat}
             />
-          </div>
-        </div>
-        <div className="setrow">
-          <span className="setrow-label">Work</span>
-          <div className="setrow-control">
+          </SettingRow>
+          <SettingRow
+            description="Show Work in the mode switcher."
+            label="Work"
+            scope="app"
+            settingId="first-run-enable-work"
+          >
             <OctantSwitch
               checked={choices.workEnabled}
+              describedBy="first-run-enable-work-description"
               label="Enable Work"
               onCheckedChange={props.onToggleWork}
             />
-          </div>
-        </div>
-        <div className="setrow">
-          <label className="setrow-label" htmlFor="first-run-mode-switcher">
-            Mode switcher
-          </label>
-          <div className="setrow-control">
-            <OctantSelectField
+          </SettingRow>
+          <SettingRow
+            description="How the sidebar offers Chat, Work, and Code."
+            label="Mode switcher"
+            scope="app"
+            settingId="first-run-mode-switcher"
+          >
+            {/* The segmented control Settings asks this in. A dropdown made
+                one question of four look like a different kind of question,
+                and put a fourth control edge under the three above it. */}
+            <OctantToggleGroup<WorkspaceChoices["modeSwitcher"]>
               aria-label="Mode switcher"
-              id="first-run-mode-switcher"
-              onValueChange={(value) => props.onSelectModeSwitcher(value as "buttons" | "dropdown")}
-              options={[
-                { id: "buttons", label: "Compact buttons" },
-                { id: "dropdown", label: "Dropdown" },
-              ]}
-              value={choices.modeSwitcher}
-            />
-          </div>
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected !== undefined) props.onSelectModeSwitcher(selected);
+              }}
+              value={[choices.modeSwitcher]}
+            >
+              <OctantToggleGroupItem value="buttons">Buttons</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="dropdown">Dropdown</OctantToggleGroupItem>
+            </OctantToggleGroup>
+          </SettingRow>
         </div>
-        <p className="first-run__caveat" role="note">
-          Code is always available. Hiding Chat or Work never deletes its threads or data.
-        </p>
-      </div>
+      </section>
     </div>
   );
 }
