@@ -13,6 +13,35 @@ const definition = {
 };
 
 describe("Session-owned app tools", () => {
+  it("returns a computer observation image as image content instead of embedding base64 in text", async () => {
+    const picture = {
+      mimeType: "image/png" as const,
+      data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=",
+    };
+    const managed = createManagedMcpTools([definition], async () => ({
+      resultJson: '{"kind":"observation"}',
+      isError: false,
+      images: [picture],
+    }));
+    if (managed.kind !== "ready") throw new Error("Expected valid tools.");
+    const client = new Client({ name: "vision-agent", version: "1" });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    await managed.server.connect(serverTransport);
+    await client.connect(clientTransport);
+    try {
+      expect(
+        await client.callTool({ name: "octant_browser", arguments: { operation: "screenshot" } }),
+      ).toMatchObject({
+        content: [
+          { type: "text", text: '{"kind":"observation"}' },
+          { type: "image", ...picture },
+        ],
+      });
+    } finally {
+      await client.close();
+      await managed.server.close();
+    }
+  });
   it("lists the offered tools and returns the app's answer to an exact named call", async () => {
     const execute = vi.fn(async () => ({
       resultJson: '{"heading":"Example Domain"}',

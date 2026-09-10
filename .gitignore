@@ -2,6 +2,7 @@
 .octant/
 .agent-worktrees/
 .turbo/
+.computer-use-driver/
 coverage/
 dist/
 node_modules/

@@ -1,3 +1,5 @@
+import { ComputerUseMention, useComputerUseMention } from "../computerUse/ComputerUseMention";
+import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import {
   decodeWorkAttachmentId,
@@ -100,6 +102,7 @@ import { providerModelLabel } from "../providers/providerModelLabel";
  * message is refused so the sent message never borrows a later draft.
  */
 interface WorkSteeredMessage {
+  readonly computerUseSelection?: ExtensionSelection;
   readonly id: string;
   readonly originRestore: (message: WorkSteeredMessage) => void;
   readonly threadKey: string;
@@ -315,6 +318,13 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     ...(props.draftStore === undefined ? {} : { store: props.draftStore }),
   });
   const prompt = composerDraft.text;
+  const computer = useComputerUseMention({
+    textarea: () => textareaRef.current,
+    draft: prompt,
+    scopeKey: String(props.threadId),
+    onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
+    onSelectionEdited: () => composerDraft.setDraft(composerDraft.text),
+  });
   const [projectId, setProjectId] = useState<ProjectId | undefined>(props.initialThread?.projectId);
   const [thread, setThread] = useState<WorkThread | undefined>(props.initialThread);
   const [turns, setTurns] = useState<ReadonlyArray<WorkTurnState>>([]);
@@ -753,6 +763,8 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       ) {
         return false;
       }
+      const computerUseSelection =
+        message === undefined ? computer.selection : message.computerUseSelection;
       const promptText = (message?.prompt ?? composerDraft.text).trim();
       if (promptText.length === 0) return false;
       const sendingThreadId = String(thread.id);
@@ -787,6 +799,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         }
         const started = await props.turnClient.startFirstTurn({
           kind: "start-work-thread-turn",
+          ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
           requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
           threadId: props.threadId,
           turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
@@ -824,6 +837,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             ? current
             : [...current, started.turn],
         );
+        computer.consume(computerUseSelection);
         textareaRef.current?.focus();
         return true;
       } catch {
@@ -835,6 +849,8 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       }
     },
     [
+      computer.selection,
+      computer.consume,
       composerDraft,
       fileMentions,
       images,
@@ -865,6 +881,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       images.restore(message.images);
       threadMentions.restore(message.threadMentionChips);
       fileMentions.restore(message.fileMentionPaths);
+      computer.restore(message.computerUseSelection);
     },
     [composerDraft, fileMentions, images, threadMentions],
   );
@@ -878,6 +895,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       if (!canSubmit) return;
       const threadMentionChips = [...threadMentions.chips];
       const steeredMessage: WorkSteeredMessage = {
+        ...(computer.selection === undefined ? {} : { computerUseSelection: computer.selection }),
         id: globalThis.crypto.randomUUID(),
         originRestore: restoreWorkMessage,
         threadKey: String(props.threadId),
@@ -889,6 +907,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         draftRevision: composerDraft.revisionFor(String(props.threadId)),
       };
       if (!steered.steer(steeredMessage)) return;
+      computer.consume(steeredMessage.computerUseSelection);
       // Detach this message's context before the user can start a second draft;
       // a refused send restores it through the same public hook APIs.
       images.takeForSend();
@@ -930,6 +949,8 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       setCreating(false);
     }
   }, [
+    computer.selection,
+    computer.consume,
     canSubmit,
     composerDraft,
     projectId,
@@ -997,6 +1018,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   }, [props.threadId]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (computer.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
     if (fileMentions.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
@@ -1011,6 +1033,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   }
 
   function syncMentions(value: string, caret: number | null) {
+    computer.sync(value, caret);
     mention.sync(value, caret);
     fileMentions.sync(value, caret);
   }
@@ -1240,6 +1263,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         className="thread-composer thread-column"
         chips={
           <>
+            <ComputerUseMention controller={computer} surface="chips" />
             <ThreadMentionChips
               chips={threadMentions.chips}
               onRemove={(mentionedThreadId) =>
@@ -1258,6 +1282,10 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         input={
           <OctantTextarea
             aria-label="Work prompt"
+            aria-autocomplete="list"
+            aria-expanded={computer.open}
+            aria-controls={computer.open ? computer.listId : undefined}
+            aria-activedescendant={computer.open ? `${computer.listId}-computer` : undefined}
             autoFocus
             className="composer-input"
             disabled={
@@ -1296,30 +1324,34 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           />
         }
         typeahead={
-          <>
-            {mention.open ? (
-              <ThreadMentionTypeahead
-                activeIndex={mention.activeIndex}
-                {...(threadMentions.composer?.busy === undefined
-                  ? {}
-                  : { busy: threadMentions.composer.busy })}
-                candidates={threadMentions.composer?.candidates ?? []}
-                listId={mentionListId}
-                onChoose={mention.choose}
-                onHover={mention.setActiveIndex}
-              />
-            ) : null}
-            {fileMentionOpen ? (
-              <PathMentionTypeahead
-                activeIndex={fileMentions.activeIndex}
-                busy={fileMentions.busy}
-                candidates={fileMentions.candidates}
-                listId={fileMentionListId}
-                onChoose={fileMentions.choose}
-                onHover={fileMentions.setActiveIndex}
-              />
-            ) : null}
-          </>
+          computer.open ? (
+            <ComputerUseMention controller={computer} surface="typeahead" />
+          ) : (
+            <>
+              {mention.open ? (
+                <ThreadMentionTypeahead
+                  activeIndex={mention.activeIndex}
+                  {...(threadMentions.composer?.busy === undefined
+                    ? {}
+                    : { busy: threadMentions.composer.busy })}
+                  candidates={threadMentions.composer?.candidates ?? []}
+                  listId={mentionListId}
+                  onChoose={mention.choose}
+                  onHover={mention.setActiveIndex}
+                />
+              ) : null}
+              {fileMentionOpen ? (
+                <PathMentionTypeahead
+                  activeIndex={fileMentions.activeIndex}
+                  busy={fileMentions.busy}
+                  candidates={fileMentions.candidates}
+                  listId={fileMentionListId}
+                  onChoose={fileMentions.choose}
+                  onHover={fileMentions.setActiveIndex}
+                />
+              ) : null}
+            </>
+          )
         }
         row={{
           leading: (

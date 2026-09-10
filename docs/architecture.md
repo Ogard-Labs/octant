@@ -698,6 +698,25 @@ prompt, schema, tool, route, model, or capability.
   absent and refuses actions as a value rather than throwing. See
   [decisions/0053-computer-use-destinations.md](decisions/0053-computer-use-destinations.md).
 
+**Computer use plugin.** The bundled Computer component is selected through
+`@Computer` in Chat, Work, and Code. The server validates the structured
+selection and supplies `octant_computer` through the provider's existing
+app-managed tool transport. The public plugin capability is bound to one
+task, window, provider, model, and access posture. Each application needs a
+five-minute approval; stop, cancellation, changed authority, or disable revokes
+control. Observations carry window and element identities, with screenshots
+for image-capable models. Application content remains untrusted.
+
+On Apple Silicon macOS, Electron main owns the official CuaDriver SDK and its
+private embedded child. The authenticated loopback broker is available only
+to Octant's host process; its credentials never enter provider children.
+Settings exposes plugin enablement, macOS permission setup, the driver version,
+and update controls. The app bundles a pinned, publisher-verified driver and
+checks upstream daily by default. Verified updates stage privately, activate
+only while idle, and retain the previous version if startup fails. The driver
+never uses a standalone CuaDriver installation. See
+[decisions/0113-computer-use-plugin-and-driver-updates.md](decisions/0113-computer-use-plugin-and-driver-updates.md).
+
 The path from this extensions model to a general plugin host — first-party
 features as toggleable plugins, renderer contribution points, integration and
 board plugin kinds — is recorded in

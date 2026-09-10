@@ -75,19 +75,46 @@ check. Oh My Pi remains unavailable where its driver is probe-only.
 
 ## Computer use
 
-Computer use is its own host-owned macOS surface, not the Apple workbench's
-Simulator interaction path. When a session is active it renders the
+Computer use is a bundled plugin for the Apple Silicon macOS desktop app.
+Choose **Computer** from the `@` picker in a Chat, Work, or Code composer, then
+describe what to do. The selected Computer chip gives a supported provider
+the `octant_computer` tool and instructions for using it. Ordinary text that
+mentions a computer does not enable the tool.
+
+Open **Settings → Computer use** to enable the plugin, set up Accessibility
+and Screen Recording permissions, and check the installed CuaDriver version.
+macOS may require you to relaunch Octant after changing permissions. Each task
+asks before accessing an application; **Allow app for 5 minutes** grants that
+task temporary access. Plan mode, remote clients, unavailable permissions,
+and unsupported provider transports refuse control.
+
+The agent lists applications and windows, observes a chosen window, and uses
+its numbered controls to click, type, navigate, or scroll in the background.
+Image-capable models also receive screenshots and can use window-image
+coordinates where supported. Each action returns a new observation to verify
+the result. Protected fields and macOS permission controls remain for you to
+operate. Use **Stop computer use** or disable the plugin to revoke access.
+
+Octant bundles its own CuaDriver, including the native SDK, and does not require
+a separate installation. **Automatic updates** is enabled by default: Octant
+checks upstream daily, verifies the publisher, checksum, architecture, and
+driver compatibility, then upgrades after computer-use tasks finish. If the
+replacement cannot start, Octant retains the previous verified driver. You
+can turn automatic checks off or use **Check for updates** in Settings.
+Checks send no task content or identifiers.
+
+When a session is active it renders the
 **Computer use** lifecycle pane (eyebrow **Host-controlled computer use**)
 and, for the owning Work or Code thread, a **Computer Use** activity
 preview.
 
-Application allowlists, sensitive-field protection, and scoped one-time
-approvals bound to host, Project, thread, provider, action, and client
-govern every action before any effect.
+Application allowlists, sensitive-field protection, and scoped approvals
+bound to the task's authority govern every action before any effect.
 
 The lifecycle pane exposes:
 
-- **Approve once** and **Deny** while a one-time approval is pending
+- **Allow app for 5 minutes** and **Deny** while plugin access is pending
+- **Approve once** for other one-time host actions
 - Visible **Stop computer use** while the session is waiting for approval,
   running, or stopping (the thread activity preview labels the same stop
   **Stop Computer Use**)

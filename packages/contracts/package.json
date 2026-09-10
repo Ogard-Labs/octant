@@ -105,7 +105,8 @@
     "./code-project-pull-requests": "./src/codeProjectPullRequests.ts",
     "./canvas-share-snapshot": "./src/canvasShareSnapshot.ts",
     "./canvas-share-access-log": "./src/canvasShareAccessLog.ts",
-    "./canvas-board": "./src/canvasBoard.ts"
+    "./canvas-board": "./src/canvasBoard.ts",
+    "./computer-use-plugin": "./src/computerUsePlugin.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

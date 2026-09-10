@@ -124,6 +124,7 @@ distilled successor of the earlier long-form design specifications.
 | [0110](0110-model-reviewed-approvals.md) | Native harness model-reviewed approvals as a reviewer swap | Proposed |
 | [0111](0111-host-driven-provider-oauth.md) | Host-driven provider OAuth auth kind and broker | Proposed |
 | [0112](0112-first-run-claude-codex-enablement.md) | First-run Claude Code and Codex CLI enablement | Accepted |
+| [0113](0113-computer-use-plugin-and-driver-updates.md) | Computer use is a bundled plugin with a managed driver | Accepted |
 
 ## Adding an ADR
 

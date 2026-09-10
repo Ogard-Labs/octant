@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { ExtensionSelection } from "./extensions";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { BindingRevisionId, ProjectId } from "./projects";
@@ -195,6 +196,7 @@ export const StartWorkThreadTurnCommand = Schema.Struct({
   threadId: WorkThreadId,
   turnId: WorkTurnId,
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
+  computerUseSelection: Schema.optional(ExtensionSelection),
   authority: WorkTurnAuthority,
   /**
    * Images already staged for this thread. Ids only: the host reads the bytes

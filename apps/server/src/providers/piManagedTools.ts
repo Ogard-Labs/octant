@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { ProviderToolDefinition } from "@octant/contracts";
+import type { ProviderToolDefinition, ProviderToolImage } from "@octant/contracts";
 
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
 const MAX_TOOL_JSON_BYTES = 64 * 1024;
@@ -21,6 +21,7 @@ export interface PiManagedToolCall {
 export interface PiManagedToolAnswer {
   readonly resultJson: string;
   readonly isError: boolean;
+  readonly images?: ReadonlyArray<ProviderToolImage>;
 }
 
 export interface PiManagedToolsBridge {
@@ -165,6 +166,7 @@ export async function createPiManagedToolsBridge(
         responseJson(response, 200, {
           resultJson: answer.resultJson,
           isError: answer.isError,
+          ...(answer.images === undefined ? {} : { images: answer.images }),
         });
       } catch {
         settled = true;

@@ -20,6 +20,7 @@ describe("SettingsSectionId", () => {
       "navigator-assistant",
       "voice",
       "image-generation",
+      "computer-use",
       "providers",
       "profiles",
       "agents",

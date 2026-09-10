@@ -19,6 +19,10 @@ export const IPC_CHANNELS = {
   appUpdateDownload: "octant:app-update:download",
   appUpdateInstall: "octant:app-update:install",
   appUpdateAutomatic: "octant:app-update:automatic",
+  computerUseStatus: "octant:computer-use:status",
+  computerUsePermissions: "octant:computer-use:permissions",
+  computerUsePermissionSettings: "octant:computer-use:permission-settings",
+  computerUseCheckUpdates: "octant:computer-use:check-updates",
   appUpdateRing: "octant:app-update:ring",
   appUpdateWhatsNew: "octant:app-update:whats-new",
   appUpdateWhatsNewAck: "octant:app-update:whats-new-ack",
@@ -348,6 +352,10 @@ export interface AttentionNotificationBridgeRequest {
 }
 
 export interface OctantHostBridge {
+  readonly getComputerUseStatus: () => Promise<unknown>;
+  readonly requestComputerUsePermissions: () => Promise<unknown>;
+  readonly openComputerUsePermissionSettings: () => Promise<void>;
+  readonly checkComputerUseUpdates: () => Promise<unknown>;
   readonly notifyAttention: (request: AttentionNotificationBridgeRequest) => Promise<void>;
   readonly setAttentionBadge: (count: number) => Promise<void>;
   readonly attachBrowserSurface: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;
@@ -535,6 +543,12 @@ export function createHostBridge(
       }
       return decodeBrowserSurfaceState(await ipc.invoke(IPC_CHANNELS.browserSurfaceTab, request));
     },
+    getComputerUseStatus: () => ipc.invoke(IPC_CHANNELS.computerUseStatus),
+    requestComputerUsePermissions: () => ipc.invoke(IPC_CHANNELS.computerUsePermissions),
+    openComputerUsePermissionSettings: async () => {
+      await ipc.invoke(IPC_CHANNELS.computerUsePermissionSettings);
+    },
+    checkComputerUseUpdates: () => ipc.invoke(IPC_CHANNELS.computerUseCheckUpdates),
     checkForAppUpdate: async () =>
       decodeAppUpdateState(await ipc.invoke(IPC_CHANNELS.appUpdateCheck)),
     downloadAppUpdate: async () =>
