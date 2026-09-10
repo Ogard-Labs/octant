@@ -33,7 +33,7 @@ export function ZenAssistant(props: ZenAssistantProps) {
   const recipePreview = props.snapshot?.recipePreview;
 
   return (
-    <OctantCard className="zen-panel zen-assistant px-6" role="dialog">
+    <OctantCard className="zen-panel zen-assistant px-6" role="dialog" variant="glass">
       <NavigatorPanel
         controller={props.controller}
         onClose={props.onClose}

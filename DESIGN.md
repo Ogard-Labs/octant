@@ -874,9 +874,12 @@ When adding or touching UI:
 - Feature styles position product surfaces; adapters paint shared controls.
   When migrating an old control, remove the replaced paint rules rather than
   keeping a parallel recipe.
-- Mobile visual tokens and glass surfaces are intentionally separate from the
-  desktop renderer. Do not copy mobile atmosphere or phone radii into desktop
-  panes.
+- Glass is the material for a surface with a ground behind it: the phone, and
+  Zen on the desktop (0107). Its tint, stroke, and highlight are theme roles
+  like every other colour; what those two surfaces get is a different
+  material, not a second palette. Do not copy mobile atmosphere or phone radii
+  into a flat desktop pane, and do not bring a blur onto a pane that has no
+  ground under it.
 
 ## Evidence inspected
 

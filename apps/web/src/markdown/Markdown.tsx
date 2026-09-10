@@ -1,4 +1,4 @@
-import { Children, createContext, isValidElement, useContext, type ReactNode } from "react";
+import { Children, createContext, isValidElement, memo, useContext, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CodeBlock } from "../transcript/CodeBlock";
@@ -37,15 +37,20 @@ const TextTransform = createContext<MarkdownTextTransform | undefined>(undefined
  * Raw HTML is not rendered: `react-markdown` ignores it unless a rehype plugin
  * puts it back, and none is added here. That matters because most of what this
  * renders is model output.
+ *
+ * Memoized on its props because `react-markdown` parses `body` on every
+ * render, and a streaming reply re-renders every earlier reply in the thread
+ * once per text delta. `body` compares by value, so a finished reply keeps its
+ * parse as long as the caller hands it a stable `transformText`.
  */
-export function Markdown(props: MarkdownProps) {
+export const Markdown = memo(function Markdown(props: MarkdownProps) {
   return (
     <div className={props.className}>
       <TextTransform value={props.transformText}>
         <ReactMarkdown
           components={components}
           skipHtml={props.skipHtml}
-          remarkPlugins={[remarkGfm]}
+          remarkPlugins={remarkPlugins}
           urlTransform={onlyHttpUrls}
         >
           {props.body}
@@ -53,7 +58,9 @@ export function Markdown(props: MarkdownProps) {
       </TextTransform>
     </div>
   );
-}
+});
+
+const remarkPlugins = [remarkGfm];
 
 /**
  * Applies the transform to this part's own text and leaves everything else

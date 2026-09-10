@@ -16,7 +16,12 @@ export interface ZenThreadPickerProps {
 
 export function ZenThreadPicker(props: ZenThreadPickerProps) {
   return (
-    <OctantCard aria-label="Threads" className="zen-panel zen-thread-picker px-6" role="dialog">
+    <OctantCard
+      aria-label="Threads"
+      className="zen-panel zen-thread-picker px-6"
+      role="dialog"
+      variant="glass"
+    >
       <header className="card-head">
         <div>
           <h2>Threads</h2>

@@ -898,6 +898,13 @@ export const ChatEventFrame = Schema.Struct({
   threadId: ChatThreadId,
   sequence: GlobalSequence.pipe(Schema.positive()),
   event: ChatPublicEvent,
+  /**
+   * The body of the reference an `attempt-updated` event just appended, so a
+   * subscriber can grow the reply it already shows without re-reading the
+   * whole thread once per text delta. Sent only to subscribers that asked for
+   * it, because a client decoding frames strictly would refuse the field.
+   */
+  contents: Schema.optional(Schema.Array(ChatContentBody).pipe(Schema.maxItems(1))),
 }).annotations(strict);
 export type ChatEventFrame = typeof ChatEventFrame.Type;
 
