@@ -24,7 +24,10 @@ bun install --frozen-lockfile
 - `bun run build && bun run package:desktop` — unsigned `out/Octant.app`.
 
 Use `OCTANT_DATA_DIR=/absolute/disposable/path` when experimenting so you do
-not touch your real data directory.
+not touch your real data directory. `bun run smoke:packaged-desktop` is the
+local unsigned developer-package smoke: it uses a clean `OCTANT_DATA_DIR`,
+records the smoked commit, and is not the signed technical-preview release
+gate.
 
 ## Check your work
 
