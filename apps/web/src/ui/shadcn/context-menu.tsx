@@ -55,7 +55,7 @@ export function ContextMenuLabel({
 }
 
 const contextMenuItemClassName =
-  "window-no-drag relative flex cursor-default items-center rounded-md px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground";
+  "window-no-drag relative flex cursor-default items-center rounded-md px-2 py-1.5 text-xs outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground";
 
 export function ContextMenuItem({
   className,

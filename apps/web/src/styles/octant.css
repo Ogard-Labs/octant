@@ -430,42 +430,31 @@ h3,
 h4 {
   text-wrap: balance;
 }
-/* Keyboard focus draws one neutral edge on every control, declared here and
-   nowhere else (0105). It is an outline, so it never moves layout and works on
-   a control that has no border of its own; it is inset, so a dense row or a
-   scrolling container cannot clip it. A pointer press does not match
-   :focus-visible, so clicking still paints nothing.
-
-   Selected, expanded, and checked fills remain state cues. They were the only
-   cue under 0094 and could not carry focus: the fill a ghost control receives
-   is a 1.23:1 step on the workspace, and four button variants had none. */
+/* Focus uses fill and text emphasis without outlining an entire control or
+   popup (0114). Container focus only hosts keyboard navigation; menu items
+   keep the shared recipe's highlighted fill. */
 :focus-visible {
-  outline: 1px solid var(--oct-focus-edge);
-  outline-offset: -1px;
-}
-
-/* A filled accent control inverts the edge so it stays visible on its own
-   fill: the primary button, a checked switch, a checked checkbox. This is the
-   same indicator in the same place, only inked to survive the surface under
-   it. Declared here rather than in the recipes because the global rule above
-   is unlayered and would otherwise win over a Tailwind focus utility. */
-[data-slot="button"][data-variant="default"]:focus-visible,
-[data-slot="switch"][data-checked]:focus-visible,
-.octant-checkbox:checked:focus-visible {
-  outline-color: var(--oct-focus-edge-on-accent);
-}
-
-/* A container that takes focus only to hold the keyboard shows no edge of its
-   own; the item inside it that the user is on shows one. */
-.octant-menu__positioner:focus-visible,
-.octant-menu__popup:focus-visible,
-.octant-dialog__popup:focus-visible,
-.octant-preview-card:focus-visible,
-.model-picker__listbox:focus-visible,
-.execution-context-picker__listbox:focus-visible,
-.settings-search-results:focus-visible,
-.zen-surface:focus-visible {
   outline: none;
+}
+:where(
+  button,
+  a,
+  summary,
+  [role="button"],
+  [role="tab"],
+  [role="option"],
+  [role="menuitem"],
+  [role="menuitemradio"],
+  [role="menuitemcheckbox"]
+):focus-visible {
+  background-color: var(--octant-control-hover);
+  color: var(--octant-text-primary);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+[data-slot="button"][data-variant="default"]:focus-visible {
+  background-color: var(--octant-text-primary);
+  color: var(--octant-surface);
 }
 
 /* ─── layout primitives ─────────────────────────────────────────────── */
@@ -950,7 +939,7 @@ h4 {
 .input:focus-visible,
 .textarea:focus-visible,
 .select:focus-visible {
-  border-color: var(--oct-accent-fg);
+  background: var(--octant-control-hover);
 }
 .input[aria-invalid="true"] {
   border-color: var(--oct-danger-fg);
@@ -4183,7 +4172,7 @@ input.switch:checked::after {
   transition: box-shadow var(--oct-dur-base) var(--oct-ease-color);
 }
 .composer:focus-within {
-  box-shadow: var(--octant-shadow-lg);
+  box-shadow: var(--octant-shadow-md);
 }
 .composer-chips {
   display: flex;
@@ -4232,6 +4221,13 @@ input.switch:checked::after {
 }
 .composer-row .composer-gap {
   flex: 1;
+}
+.composer-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: auto;
 }
 /* A narrow column shortens the model's name before anything else moves, and
    when even that is not enough the row wraps rather than pushing the send
@@ -4350,7 +4346,7 @@ input.switch:checked::after {
 }
 
 /* Existing conversations keep the message surface distinct from its binding.
-   Feedback has a stable lane above the toolbar, including while it is empty. */
+   Feedback appears only when there is something to act on. */
 .composer.composer--follow-up,
 .composer.composer--follow-up:focus-within {
   background: var(--octant-tray);
@@ -4362,9 +4358,6 @@ input.switch:checked::after {
   background: var(--octant-card);
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
-}
-.thread-composer__surface:focus-within {
-  border-color: var(--octant-border-strong);
 }
 .thread-composer__surface > label {
   display: block;
@@ -4381,10 +4374,14 @@ input.switch:checked::after {
   position: relative;
   display: flex;
   align-items: center;
-  height: 28px;
+  min-height: 0;
   min-width: 0;
   padding-inline: 12px;
   overflow: auto;
+}
+.thread-composer__feedback:empty,
+.thread-composer__feedback:has(> .composer-status:empty) {
+  display: none;
 }
 .thread-composer__feedback > .composer-status {
   flex: 1 0 auto;
@@ -4402,6 +4399,9 @@ input.switch:checked::after {
   padding-inline: 12px;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+}
+.thread-composer__context:empty {
+  display: none;
 }
 /* The quiet line under the composer's toolbar: the keyboard hint or a
    receipt on the left, spend and limits on the right. One recipe replaces

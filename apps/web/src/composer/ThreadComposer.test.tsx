@@ -4,6 +4,23 @@ import { describe, expect, it, vi } from "vitest";
 import { ThreadComposer } from "./ThreadComposer";
 
 describe("ThreadComposer", () => {
+  it("keeps access controls with send when the composer has to wrap", () => {
+    const { container } = render(
+      <ThreadComposer
+        input={<textarea aria-label="Message" className="composer-input" />}
+        row={{
+          leading: <span>Model</span>,
+          trailing: <span>Ask</span>,
+          actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } },
+        }}
+      />,
+    );
+    const trailing = container.querySelector(".composer-actions");
+    expect(trailing).toContainElement(screen.getByText("Ask"));
+    expect(trailing).toContainElement(screen.getByRole("button", { name: "Send" }));
+    expect(trailing).not.toContainElement(screen.getByText("Model"));
+  });
+
   it("keeps follow-up feedback and checkout context separate from the message toolbar", () => {
     const row = {
       actions: { kind: "send" as const, send: { ariaLabel: "Send", onSend: vi.fn() } },

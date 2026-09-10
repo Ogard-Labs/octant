@@ -18,7 +18,7 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import { CirclePause, UserRoundCog, X } from "lucide-react";
+import { CirclePause, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
@@ -37,7 +37,6 @@ import {
 } from "../composer/composerThreadDraftStore";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -78,7 +77,7 @@ import { useScaffoldCatalog } from "../scaffolds/useScaffoldCatalog";
 import { WorkspacePresetPicker } from "../workspacePresets/WorkspacePresetPicker";
 import { useWorkspacePresets } from "../workspacePresets/useWorkspacePresets";
 import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPicker";
-import { CODE_ACCESS_POSTURE_LABEL, CodeAccessPicker } from "./CodeAccessPicker";
+import { CodeAccessPicker } from "./CodeAccessPicker";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import { useAgentProfileName } from "../agentProfile/AgentProfileNames";
 
@@ -500,11 +499,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         <div className="bubble">
           <TrackerReferenceText asParagraph text={steered.pending.prompt} />
         </div>
-        {steered.pending.access === previousUserPolicy(messages, messages.length) ? null : (
-          <p className="code-thread-workspace__turn-access">
-            Access · {CODE_ACCESS_POSTURE_LABEL[steered.pending.access]}
-          </p>
-        )}
       </article>
     );
   // An unreachable history is not an empty thread. Treating it as one puts the
@@ -1152,13 +1146,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         )}
                       </>
                     )}
-                    {message.role === "user" &&
-                    message.executionPolicy !== undefined &&
-                    message.executionPolicy !== previousUserPolicy(messages, index) ? (
-                      <p className="code-thread-workspace__turn-access">
-                        Access · {CODE_ACCESS_POSTURE_LABEL[message.executionPolicy]}
-                      </p>
-                    ) : null}
                     {(markedCheckpoint !== undefined ||
                       checkpointDraft?.messageId === message.id) &&
                     message.role === "assistant" &&
@@ -1516,42 +1503,26 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 selectedModelId={thread.modelId}
                 selectedProviderInstanceId={thread.providerInstanceId}
               />
-              <CodeAccessPicker
-                ceiling={thread.executionPolicy}
-                disabled={accessChanging}
-                nativeConfirmationAvailable={props.requestFullAccessApproval !== undefined}
-                onRaiseThread={(next) => void changeAccess(next)}
-                onSelect={setTurnAccessOverride}
-                value={nextTurnAccess}
-              />
-              {props.harnessAutoReviewSupported === true &&
-              (nextTurnAccess === "approval-gated" || nextTurnAccess === "auto-accept-edits") ? (
-                <label
-                  className="code-thread-workspace__auto-approve"
-                  htmlFor={`code-thread-auto-approve-${String(thread.id)}`}
-                >
-                  <OctantCheckbox
-                    checked={thread.autoApprove === true}
-                    disabled={accessChanging}
-                    id={`code-thread-auto-approve-${String(thread.id)}`}
-                    onChange={(event) => void changeAutoApprove(event.currentTarget.checked)}
-                  />
-                  <span>Approve for me</span>
-                </label>
-              ) : null}
-              {/*
-              Provenance, not a control: the profile narrowed this thread once,
-              when it started, and is never consulted again. Editing the profile
-              afterwards cannot change what this thread may do, so the chip says
-              which working mode produced the posture and stops there.
-            */}
-              {profileName === undefined ? null : (
-                <span className="code-thread-workspace__profile" title="Started under this profile">
-                  <UserRoundCog aria-hidden="true" size={12} strokeWidth={1.8} />
-                  <span>{profileName}</span>
-                </span>
-              )}
             </>
+          ),
+          trailing: (
+            <CodeAccessPicker
+              {...(props.harnessAutoReviewSupported === true
+                ? {
+                    autoApprove: {
+                      checked: thread.autoApprove === true,
+                      onChange: (checked: boolean) => void changeAutoApprove(checked),
+                    },
+                  }
+                : {})}
+              {...(profileName === undefined ? {} : { profileName })}
+              ceiling={thread.executionPolicy}
+              disabled={accessChanging}
+              nativeConfirmationAvailable={props.requestFullAccessApproval !== undefined}
+              onRaiseThread={(next) => void changeAccess(next)}
+              onSelect={setTurnAccessOverride}
+              value={nextTurnAccess}
+            />
           ),
           actions: {
             kind: "send",
@@ -1683,24 +1654,6 @@ function codeTurnActions(input: {
   }
   actions.push({ label: "Copy message", value: "copy-references" });
   return actions;
-}
-
-/**
- * The posture a message ran under is worth a line only where it changed.
- * Printing "Access · Ask for approvals" under every message repeated the
- * thread's default on each turn and buried the one turn that differed.
- */
-function previousUserPolicy(
-  messages: ReadonlyArray<CodeController["conversation"][number]>,
-  index: number,
-) {
-  for (let candidateIndex = index - 1; candidateIndex >= 0; candidateIndex -= 1) {
-    const candidate = messages[candidateIndex];
-    if (candidate?.role === "user" && candidate.executionPolicy !== undefined) {
-      return candidate.executionPolicy;
-    }
-  }
-  return undefined;
 }
 
 function previousAssistantMessage(

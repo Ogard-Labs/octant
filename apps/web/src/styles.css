@@ -5846,7 +5846,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
   .project-row[data-active="true"],
   .workspace-pane[data-active="true"] {
-    box-shadow: inset 0 0 0 1px var(--octant-border-strong);
+    box-shadow: none;
   }
 
   .environment-git-group dl,
@@ -5915,18 +5915,18 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   box-sizing: border-box;
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr);
-  width: min(560px, 90vw);
+  width: min(440px, calc(100vw - 24px));
   /* A fixed box, not a cap. The rail switches provider inside one open menu,
      and provider lists differ wildly in length — a twelve-model list next to
      an empty one resized the panel between clicks, so the menu appeared to
      jump under the pointer. A stable height costs some empty space on short
      lists and buys a menu that holds still. The list pane scrolls. */
-  height: min(46vh, 420px);
+  height: min(46vh, 360px);
   max-height: calc(100dvh - 24px);
   padding: 0;
   overflow: hidden;
   background: var(--octant-surface);
-  border: 1px solid var(--octant-border-strong);
+  border: 0;
   border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-overlay);
 }
@@ -5998,7 +5998,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .composer-model-picker__rail-item--active {
   color: var(--octant-text-primary);
   background: var(--octant-accent-tint);
-  box-shadow: inset 0 0 0 1px var(--octant-border-strong);
+  box-shadow: none;
 }
 
 .composer-model-picker__rail-item--favorites {
@@ -6080,7 +6080,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .composer-model-picker__search:focus-within {
-  border-color: var(--octant-focus-ring);
+  background: var(--octant-control-hover);
 }
 
 .composer-model-picker__search input {
@@ -6092,7 +6092,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border: 0;
   outline: none;
   font: inherit;
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-text-xs);
 }
 
 .composer-model-picker__search input::placeholder {
@@ -6211,6 +6211,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   font-weight: var(--oct-weight-display);
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: var(--oct-text-xs);
 }
 
 .composer-model-picker__model-detail {
@@ -6514,17 +6515,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   }
 }
 
-/* The message's bubble, time, reply prose, and their rhythm are the system's
-   (`.turn-user`, `.bubble`, `.turn-time`, `.turn-agent`, as in Chat and
-   Work). Only the access receipt under a person's message is Code's own: a
-   line of meta under the time, on the same edge. */
-.code-thread-workspace__turn-access {
-  margin: 0;
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
-  text-align: end;
-}
-
 /* The composer's frame, placement, focus border, input, chips, bottom row,
    controls, and status line are the system's (`.composer`,
    `.thread-composer`, `.composer-row`, `.composer-status`, as in Chat and
@@ -6754,31 +6744,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 html[data-octant-reduced-motion="true"] .code-transcript-row__status-icon {
   animation: none;
-}
-
-.code-thread-workspace__access {
-  display: inline-flex;
-  align-items: center;
-}
-
-.code-thread-workspace__auto-approve {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--oct-text-xs);
-  color: var(--oct-fg-2);
-  cursor: pointer;
-}
-
-.code-thread-workspace__profile {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
-  color: var(--oct-fg-2);
-  font-size: var(--oct-text-xs);
 }
 
 /* The status line under the composer row is the system's `.composer-status`:

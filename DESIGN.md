@@ -239,11 +239,21 @@ name at the body size and the state at the right as detail text with a 12px
 mark (spinner, check, cross), parted by hairlines and indented together; a
 settled turn folds them behind "N tool calls". A turn paused on the person uses a neutral composer-adjacent request row with
 an icon and explicit answer controls. Follow-up composers use one compact
-hairline message surface across Chat, Work, and Code. A fixed 28px feedback
-lane above the toolbar keeps controls still when notices appear or disappear;
-long messages remain accessible and scrollable. The Code checkout strip is
+hairline message surface across Chat, Work, and Code. Feedback above the toolbar
+appears only when it has content; empty feedback consumes no space. Long notices
+remain accessible and scrollable. The access menu holds the optional provider
+approval-review choice and starting-profile detail. The Code checkout strip is
 attached underneath, rather than floating above the input. Input growth from
-extra typed lines is intentional; status changes do not resize the frame (0098).
+extra typed lines and visible notices is intentional (0114). Repository, branch
+and PR actions stay visible below the input. Utility panels keep one resize
+boundary and a compact tab row without a second horizontal divider.
+
+Attachment and model controls sit on the left; access, context usage and send
+stay together at the right edge even when the controls wrap. Menus use compact
+interface text, and model choices stay in a bounded scrollable popup. Focus
+uses fill and text emphasis, without bright outlining of controls or popups.
+Sent messages do not repeat an access caption; the underlying history remains
+authoritative (0114).
 
 ## Colour system
 

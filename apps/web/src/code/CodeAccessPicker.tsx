@@ -5,8 +5,20 @@ import {
   accessPosturesAbove,
   accessPosturesAtOrBelow,
 } from "@octant/domain/code-policy";
-import { useId } from "react";
-import { OctantSelectField, type OctantSelectOption } from "../ui/base/OctantSelect";
+import { ChevronDown } from "lucide-react";
+import { OctantButton } from "../ui/base/OctantButton";
+import {
+  OctantMenuRoot,
+  OctantMenuTrigger,
+  OctantMenuPortal,
+  OctantMenuPositioner,
+  OctantMenuPopup,
+  OctantMenuRadioGroup,
+  OctantMenuRadioItem,
+  OctantMenuCheckboxItem,
+  OctantMenuGroup,
+  OctantMenuSeparator,
+} from "../ui/base/OctantMenu";
 
 export const CODE_ACCESS_POSTURE_LABEL: Record<ProviderExecutionPolicy, string> = {
   plan: "Plan · read-only",
@@ -15,7 +27,19 @@ export const CODE_ACCESS_POSTURE_LABEL: Record<ProviderExecutionPolicy, string> 
   "full-access": "Full access",
 };
 
+const ACCESS_TRIGGER_LABEL: Readonly<Record<ProviderExecutionPolicy, string>> = {
+  plan: "Plan",
+  "approval-gated": "Ask",
+  "auto-accept-edits": "Auto edits",
+  "full-access": "Full access",
+};
+
 export interface CodeAccessPickerProps {
+  readonly autoApprove?: {
+    readonly checked: boolean;
+    readonly onChange: (checked: boolean) => void;
+  };
+  readonly profileName?: string;
   readonly disabled?: boolean;
   /**
    * The thread's grant. The next turn may sit at or below this. Postures
@@ -44,10 +68,14 @@ export interface CodeAccessPickerProps {
  * thread could never reach Auto-accept edits or Full access again.
  */
 export function CodeAccessPicker(props: CodeAccessPickerProps) {
-  const fieldId = useId();
   const offered = accessPosturesAtOrBelow(props.ceiling);
   const raises = accessPosturesAbove(props.ceiling);
-  const options: ReadonlyArray<OctantSelectOption> = [
+  const options: ReadonlyArray<{
+    readonly id: ProviderExecutionPolicy;
+    readonly label: string;
+    readonly disabled?: boolean;
+    readonly disabledReason?: string;
+  }> = [
     ...offered.map((id) => ({
       id,
       label: CODE_ACCESS_POSTURE_LABEL[id],
@@ -60,25 +88,74 @@ export function CodeAccessPicker(props: CodeAccessPickerProps) {
         : {}),
     })),
   ];
+  const reviewAvailable =
+    props.autoApprove !== undefined &&
+    (props.value === "approval-gated" || props.value === "auto-accept-edits");
   return (
-    <label className="code-thread-workspace__access" htmlFor={fieldId}>
-      <span className="visually-hidden">Next turn access</span>
-      <OctantSelectField
+    <OctantMenuRoot>
+      <OctantMenuTrigger
+        aria-label="Next turn access"
+        aria-description={CODE_ACCESS_POSTURE_LABEL[props.value]}
+        title={CODE_ACCESS_POSTURE_LABEL[props.value]}
         disabled={props.disabled === true}
-        id={fieldId}
-        onValueChange={(value) => {
-          const next = parseAccessPosture(value);
-          if (next === undefined) return;
-          if (ACCESS_POSTURE_RANK[next] > ACCESS_POSTURE_RANK[props.ceiling]) {
-            props.onRaiseThread(next);
-            return;
-          }
-          if (next !== props.value) props.onSelect(next);
-        }}
-        options={options}
-        value={props.value}
-      />
-    </label>
+        render={<OctantButton size="sm" variant="ghost" />}
+      >
+        <span>
+          {reviewAvailable && props.autoApprove?.checked
+            ? "Approve for me"
+            : ACCESS_TRIGGER_LABEL[props.value]}
+        </span>
+        <ChevronDown aria-hidden="true" />
+      </OctantMenuTrigger>
+      <OctantMenuPortal>
+        <OctantMenuPositioner side="top">
+          <OctantMenuPopup>
+            <OctantMenuRadioGroup
+              value={props.value}
+              onValueChange={(value) => {
+                if (props.disabled || typeof value !== "string") return;
+                const next = parseAccessPosture(value);
+                if (next === undefined) return;
+                if (ACCESS_POSTURE_RANK[next] > ACCESS_POSTURE_RANK[props.ceiling]) {
+                  props.onRaiseThread(next);
+                  return;
+                }
+                if (next !== props.value) props.onSelect(next);
+              }}
+            >
+              {options.map((option) => (
+                <OctantMenuRadioItem
+                  closeOnClick
+                  disabled={props.disabled === true || option.disabled === true}
+                  key={option.id}
+                  title={option.disabledReason}
+                  value={option.id}
+                >
+                  {option.label}
+                </OctantMenuRadioItem>
+              ))}
+            </OctantMenuRadioGroup>
+            {reviewAvailable ? (
+              <OctantMenuGroup>
+                <OctantMenuSeparator />
+                <OctantMenuCheckboxItem
+                  checked={props.autoApprove?.checked === true}
+                  disabled={props.disabled === true}
+                  onCheckedChange={(checked) => props.autoApprove?.onChange(checked)}
+                >
+                  Approve for me
+                </OctantMenuCheckboxItem>
+              </OctantMenuGroup>
+            ) : null}
+            {props.profileName === undefined ? null : (
+              <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                Started under {props.profileName}
+              </p>
+            )}
+          </OctantMenuPopup>
+        </OctantMenuPositioner>
+      </OctantMenuPortal>
+    </OctantMenuRoot>
   );
 }
 
