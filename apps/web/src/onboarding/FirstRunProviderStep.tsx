@@ -28,9 +28,9 @@ export interface FirstRunProviderStepProps {
   readonly onRescan: () => void;
   readonly scanning: boolean;
   /**
-   * Turn a configured provider on or off from this step. Discovery registers
-   * every runtime it finds switched off, so without this the step could only
-   * report "Disabled" and send the person to Settings to flip the switch.
+   * Turn a configured provider on or off from this step. First run may enable
+   * a detected Claude Code or Codex CLI; every other detected runtime still
+   * arrives switched off, so this switch is how those get turned on here.
    */
   readonly onSetProviderEnabled?: (instanceId: ProviderInstanceId, enabled: boolean) => void;
 }
@@ -90,8 +90,9 @@ export const FirstRunProviderStep = forwardRef<HTMLButtonElement, FirstRunProvid
     return (
       <div className="first-run__step">
         <p className="first-run__intro">
-          Octant runs on this Mac and talks to the AI providers you choose. Nothing is configured
-          for you, so this step reports what the host can actually reach.
+          Octant runs on this Mac and talks to the AI providers you choose. If Claude Code or Codex
+          CLI is already installed, first run enables it so a thread can start without visiting
+          Settings; you can turn it off later. Other detected CLIs stay off until you enable them.
         </p>
 
         {/* The verdict is the section's own second line, not a row: it speaks
