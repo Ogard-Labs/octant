@@ -89,10 +89,8 @@
 .settings-view .provider-settings__manual-body {
   display: grid;
   gap: 16px;
-  padding: 16px;
-  border: 1px solid var(--oct-hairline);
-  border-radius: var(--oct-radius-lg);
-  background: var(--oct-surface-warm);
+  padding: 16px 0 0;
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .settings-view .provider-settings__create-heading {
