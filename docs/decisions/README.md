@@ -118,6 +118,7 @@ distilled successor of the earlier long-form design specifications.
 | [0104](0104-harness-delegated-approvals.md) | Harness-delegated approvals as a per-thread pass-through | Accepted |
 | [0105](0105-keyboard-focus-draws-one-neutral-edge.md) | Keyboard focus draws one neutral edge | Accepted |
 | [0106](0106-a-zen-space-arranges-itself.md) | A Zen space arranges itself | Accepted |
+| [0107](0107-zen-wears-glass-over-its-ground.md) | Zen wears glass over its ground | Accepted |
 
 ## Adding an ADR
 

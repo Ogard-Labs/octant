@@ -925,6 +925,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
           aria-label={manualPanel === "appearance" ? "Zen appearance" : "Add to this space"}
           className="zen-panel zen-surface__manual-panel window-no-drag px-6"
           role="dialog"
+          variant="glass"
         >
           <header className="card-head">
             <h2>{manualPanel === "appearance" ? "Appearance" : "Add"}</h2>
