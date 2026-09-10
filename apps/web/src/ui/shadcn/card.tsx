@@ -1,3 +1,4 @@
+import { cva, type VariantProps } from "class-variance-authority";
 import type { ComponentProps } from "react";
 import { cn } from "./utils";
 
@@ -6,16 +7,37 @@ import { cn } from "./utils";
  * it sits in the page, and shadow now means something that floats above it.
  * Semantic elements stay — a card is a section with a heading, not a stack of
  * divs.
+ *
+ * The glass variant carries no paint of its own. It marks the card as wearing
+ * the glass material, which the static system defines once beside the other
+ * surfaces that wear it, together with its reduced-transparency and
+ * no-`backdrop-filter` fallbacks (octant.css, 0107). Duplicating the ladder in
+ * utilities here would give the material two definitions.
+ *
+ * Glass belongs only on a surface with a ground behind it (0107). Asking for
+ * it on a flat page produces a blurred card over nothing.
  */
+const cardVariants = cva(
+  "flex flex-col gap-4 overflow-hidden rounded-xl border-0 py-4 text-card-foreground",
+  {
+    variants: {
+      variant: {
+        default: "bg-card ring-1 ring-foreground/10",
+        glass: "",
+      },
+    },
+    defaultVariants: { variant: "default" },
+  },
+);
 
-export function Card({ className, ...props }: ComponentProps<"section">) {
+export type CardProps = ComponentProps<"section"> & VariantProps<typeof cardVariants>;
+
+export function Card({ className, variant, ...props }: CardProps) {
   return (
     <section
-      className={cn(
-        "flex flex-col gap-4 overflow-hidden rounded-xl border-0 bg-card py-4 text-card-foreground ring-1 ring-foreground/10",
-        className,
-      )}
+      className={cn(cardVariants({ variant }), className)}
       data-slot="card"
+      data-variant={variant ?? "default"}
       {...props}
     />
   );
