@@ -247,15 +247,17 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("heading", { name: "General" })).not.toBeInTheDocument();
   });
 
-  it("keeps Profile collapsed in the same open form as the routine General groups", () => {
+  it("leaves Profile open, like the routine General groups around it", () => {
     renderSettings();
 
-    expect(
-      screen.getByRole("heading", { name: "Profile" }).closest(".settings-card-section"),
-    ).toHaveClass("settings-card-section--open");
-    const profileDisclosure = screen.getByRole("heading", { name: "Profile" }).closest("details");
-    expect(profileDisclosure).not.toHaveAttribute("open");
-    expect(profileDisclosure).toHaveTextContent("Not set");
+    // Your name, picture and avatar colour are identity, not an advanced
+    // option, so reaching them costs no click. It used to be a disclosure
+    // whose collapsed summary previewed the display name.
+    const heading = screen.getByRole("heading", { name: "Profile" });
+    expect(heading.closest(".settings-card-section")).toHaveClass("settings-card-section--open");
+    expect(heading.closest("details")).toBeNull();
+    // The row it used to hide is on the page without being opened.
+    expect(document.querySelector('[data-setting-id="user-profile"]')).toBeVisible();
     expect(
       screen.getByRole("heading", { name: "Available modes" }).closest(".settings-card-section"),
     ).toHaveClass("settings-card-section--open");
