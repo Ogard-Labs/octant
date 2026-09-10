@@ -359,8 +359,15 @@ export class Journal {
                 globalSequence: event.globalSequence,
               });
             }
-            this.#upsertCheckpoint.run(projection.name, event.globalSequence, this.#clock());
           }
+        }
+        // One checkpoint row per projection per append, not per event: the
+        // whole append commits or rolls back together, so the intermediate
+        // sequences were never observable, and a streamed turn appends one
+        // event per text delta across ~24 projections.
+        const checkpointAt = this.#clock();
+        for (const projection of this.#projections.all()) {
+          this.#upsertCheckpoint.run(projection.name, lastEvent.globalSequence, checkpointAt);
         }
 
         return {
