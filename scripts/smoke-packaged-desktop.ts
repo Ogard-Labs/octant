@@ -26,10 +26,55 @@ const serverEntry = resolve(packagedRoot, "apps/server/dist/main.mjs");
 const serverPackage = resolve(packagedRoot, "apps/server/package.json");
 const keychainHelper = resolve(appBundle, "Contents/Resources/native/octant-keychain-helper");
 const forceFailureCleanup = process.argv.includes("--fail-after-ready");
+const GIT_HEAD_PATTERN = /^[a-f0-9]{40,64}$/;
+const GIT_HEAD_UNAVAILABLE = "The unsigned developer-package smoke could not record git HEAD.";
 
-await main();
+export interface UnsignedDeveloperPackageSmokeHost {
+  readonly platform: NodeJS.Platform;
+  readonly arch: string;
+  readonly repositoryRoot: string;
+  readonly readHead: (repositoryRoot: string) => Promise<string>;
+}
+
+export async function prepareUnsignedDeveloperPackageSmoke(
+  host: UnsignedDeveloperPackageSmokeHost,
+): Promise<string> {
+  // Platform first: recording HEAD off Apple Silicon would claim that host smoked the commit.
+  if (host.platform !== "darwin" || host.arch !== "arm64") {
+    throw new Error("The packaged desktop smoke requires Apple Silicon macOS.");
+  }
+  let revision: string;
+  try {
+    revision = (await host.readHead(host.repositoryRoot)).trim();
+  } catch {
+    throw new Error(GIT_HEAD_UNAVAILABLE);
+  }
+  if (!GIT_HEAD_PATTERN.test(revision)) {
+    throw new Error(GIT_HEAD_UNAVAILABLE);
+  }
+  console.log(`Unsigned developer-package smoke commit: ${revision}`);
+  return revision;
+}
+
+export function formatUnsignedDeveloperPackageSmokeEvidence(commit: string): string {
+  return [
+    "Unsigned developer-package smoke evidence:",
+    `  package commit: asserted ${commit}`,
+    "  launch: asserted (Keychain helper, SQLite ABI, Node-mode health, app window, shell bootstrap)",
+    "  first-run: maintainer",
+    "  provider setup: maintainer",
+    "  thread creation: maintainer",
+    "  clean shutdown: asserted (quit and process cleanup)",
+  ].join("\n");
+}
 
 async function main(): Promise<void> {
+  const commit = await prepareUnsignedDeveloperPackageSmoke({
+    platform: process.platform,
+    arch: process.arch,
+    repositoryRoot,
+    readHead: readGitHead,
+  });
   const dataDirectory = await mkdtemp(resolve(tmpdir(), "octant-packaged-smoke."));
   const env = sanitizedPackagedEnvironment(process.env, dataDirectory);
   try {
@@ -37,9 +82,23 @@ async function main(): Promise<void> {
     await probePackagedSqlite(env);
     await smokePackagedNodeServer(env);
     await smokePackagedApplication(env, dataDirectory);
+    console.log(formatUnsignedDeveloperPackageSmokeEvidence(commit));
   } finally {
     await rm(dataDirectory, { recursive: true, force: true });
   }
+}
+
+async function readGitHead(repositoryRoot: string): Promise<string> {
+  const path = process.env.PATH;
+  if (path === undefined || path.length === 0) {
+    throw new Error("git PATH is unavailable.");
+  }
+  return await runBoundedCommand(
+    "git",
+    ["-C", repositoryRoot, "rev-parse", "--verify", "HEAD"],
+    { PATH: path },
+    5_000,
+  );
 }
 
 async function probePackagedKeychainHelper(env: NodeJS.ProcessEnv): Promise<void> {
@@ -342,3 +401,5 @@ async function runCommand(
 async function sleep(milliseconds: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
+
+if (import.meta.main) await main();
