@@ -172,6 +172,17 @@ describe("ZenBackground", () => {
     });
   });
 
+  it("accepts a space that stands on the application's own ground", () => {
+    // The kind carries no dials of its own: what the cloud looks like is the
+    // person's Background setting, so a space that repeated it here could
+    // come to disagree with the app it borrows the ground from.
+    expect(decodeBackground({ kind: "theme" })).toEqual({ kind: "theme" });
+  });
+
+  it("refuses to let the application ground carry Zen dials of its own", () => {
+    expect(() => decodeBackground({ kind: "theme", overlay: 40 })).toThrow();
+  });
+
   it("accepts a custom radial gradient", () => {
     expect(
       decodeBackground({
