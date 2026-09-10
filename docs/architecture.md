@@ -529,7 +529,11 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   driver kind, configuration, readiness state, model list, capability report,
   and environment policy. A selected model is `{ hostId, providerInstanceId,
 modelId }`, and the model picker is provider-first. Discovery can find
-  installed runtimes but never auto-registers or installs them.
+  installed runtimes and auto-register them. On first run, a detected Claude
+  Code or Codex CLI instance is created enabled; every other detected runtime
+  is created disabled. Discovery never installs or updates runtimes, never
+  toggles an existing instance, and never treats enablement as readiness
+  ([decisions/0112-first-run-claude-codex-enablement.md](decisions/0112-first-run-claude-codex-enablement.md)).
 - **Driver families.** Direct HTTP drivers (OpenAI-compatible, Anthropic-
   compatible, Azure AI Foundry API-key, Ollama), image HTTP profiles
   (OpenAI Image and Gemini native image — never selectable as Chat, Work, or
