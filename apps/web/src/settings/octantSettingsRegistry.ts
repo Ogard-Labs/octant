@@ -46,7 +46,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Updates",
           scope: "app",
           keywords:
-            "update updates upgrade version release automatic check download install relaunch privacy signed notarized",
+            "update updates upgrade version release automatic check download install relaunch privacy signed notarized what's new notes",
         },
         {
           id: settingId("completed-thread-archive"),
@@ -76,6 +76,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Sidebar width",
           scope: "app",
           keywords: "sidebar width",
+        },
+        {
+          id: settingId("sidebar-destinations"),
+          label: "Sidebar destinations",
+          scope: "app",
+          keywords: "sidebar destinations customize show hide rows menu reorder order",
         },
         {
           id: settingId("sidebar-material"),
@@ -347,7 +353,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Usage",
       scope: "host",
       keywords:
-        "usage operational dashboard provider model host mode project thread request shape attribution filters totals daily weekly cumulative top consumers measurement quality exact estimated reconciled stale unavailable export reset retention purge",
+        "usage operational dashboard provider model host mode project thread request shape attribution filters totals daily weekly cumulative top consumers measurement quality exact estimated reconciled stale unavailable export reset retention purge spend ceiling token budget",
       settings: [],
     },
     {

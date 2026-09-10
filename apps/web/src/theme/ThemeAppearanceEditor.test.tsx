@@ -76,10 +76,14 @@ describe("ThemeAppearanceEditor", () => {
     }
   });
 
-  it("keeps typography visible and theme transfer in an advanced disclosure", () => {
+  it("leaves typography open and keeps theme transfer behind a disclosure", () => {
     render(<ThemeAppearanceEditor controller={controller()} />);
 
-    expect(screen.getByText("Typography").closest("details")).toHaveAttribute("open");
+    // The interface font and its size are among the most-changed settings in
+    // the app, so they cost no click. Import and export is rare, and stays
+    // collapsed.
+    expect(screen.getByText("Typography").closest("details")).toBeNull();
+    expect(screen.getByText("Interface font")).toBeVisible();
     expect(screen.getByText("Import or export theme").closest("details")).not.toHaveAttribute(
       "open",
     );

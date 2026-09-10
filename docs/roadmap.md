@@ -41,8 +41,10 @@ Everything here is merged or being hardened for it.
 - **Shell and appearance** — borderless macOS shell, dockable tabs and splits,
   command palette, semantic themes and presets, sidebar materials, Zen focus
   workspace with backgrounds, notes, checklists, and timer.
-- **Operations** — usage dashboard, diagnostics export, first-run onboarding,
-  packaged desktop smoke scripts.
+- **Operations** — usage dashboard, optional Project and thread token spend
+  ceilings with atomic reservation at turn admission, diagnostics export,
+  first-run onboarding, packaged desktop smoke scripts, and What's new from
+  bundled notes plus a signed summary when an update is offered.
 
 Hardening in progress for the preview:
 
@@ -139,16 +141,13 @@ starts.
   Bedrock Converse/IAM adapters beyond the API-key paths. Design:
   [enterprise-provider-identity.md](enterprise-provider-identity.md).
 - **Remote SSH development environments**, **live guest sharing**, **thread
-  retention and purge**, **agent-to-agent messaging** (authority model in
+  retention and purge**, and **agent-to-agent messaging** (authority model in
   [decisions/0063-agent-to-agent-messaging.md](decisions/0063-agent-to-agent-messaging.md);
-  implementation waits on acceptance), and **in-app changelog** — each waits
-  on the foundation named in its own design note.
-  Changelog design is
-  [decisions/0061-in-app-changelog.md](decisions/0061-in-app-changelog.md).
-- **Usage spend ceilings** — Project and thread caps on provider usage,
-  reusing the usage ledger and goal-budget shape; design in
-  [0060](decisions/0060-usage-spend-ceilings.md). Enforcement waits until that
-  record is Accepted.
+  implementation waits on acceptance) — each waits on the foundation named in
+  its own design note.
+- **Monetary spend ceilings** — token ceilings are enforced
+  ([0060](decisions/0060-usage-spend-ceilings.md)); money waits until scoped
+  pricing metadata is actually configured on a host.
 
 ## Not planned
 

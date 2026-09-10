@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { decodeCanvasBlock } from "@octant/contracts";
+import { createManagedMcpTools } from "../providers/managedMcpTools";
 import { CANVAS_TOOL_NAME, createCanvasAgentTools } from "./canvasAgentTools";
 
 const windowId = "11111111-1111-4111-8111-111111111111" as never;
@@ -49,6 +53,117 @@ describe("createCanvasAgentTools", () => {
       CANVAS_TOOL_NAME,
     ]);
   });
+
+  it("lets an MCP agent discover the Canvas workflow and author the supplied example", async () => {
+    const { create, set } = tools();
+    const server = createManagedMcpTools(set.definitions, async (name, inputJson) => {
+      const answer = await set.execute({ name, inputJson });
+      return { resultJson: JSON.stringify(answer.result), isError: answer.isError === true };
+    });
+    if (server.kind !== "ready") throw new Error("Canvas tools must form a valid catalogue.");
+    const client = new Client({ name: "canvas-agent", version: "1" });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    await server.server.connect(serverTransport);
+    await client.connect(clientTransport);
+    try {
+      const catalogue = await client.listTools();
+      expect(catalogue.tools).toEqual(set.definitions);
+      expect(catalogue.tools[0]?.description).toContain("describe");
+      expect(catalogue.tools.map((tool) => tool.name)).not.toContain("octant_browser");
+      const described = await client.callTool({
+        name: CANVAS_TOOL_NAME,
+        arguments: { operation: "describe" },
+      });
+      const content = described.content;
+      if (!Array.isArray(content) || content[0]?.type !== "text")
+        throw new Error("Expected JSON tool documentation.");
+      const guidance = JSON.parse(content[0].text);
+      const block = decodeCanvasBlock(guidance.example.blocks[0]);
+      expect(block.kind).toBe("rich-text");
+      const created = await client.callTool({
+        name: CANVAS_TOOL_NAME,
+        arguments: guidance.example,
+      });
+      expect(created.isError).toBe(false);
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Report" }),
+        expect.anything(),
+        expect.anything(),
+        [block],
+      );
+    } finally {
+      await client.close();
+      await server.server.close();
+    }
+  });
+
+  it("explains how to create and present a Canvas without reading a Project or creating a document", async () => {
+    const { create, revise, set } = tools({
+      activeContext: () => {
+        throw new Error("Schema discovery must not read window state.");
+      },
+    });
+
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe" }),
+    });
+
+    expect(outcome.isError).not.toBe(true);
+    expect(outcome.result).toMatchObject({
+      blockKinds: expect.arrayContaining(["rich-text", "diagram", "table", "chart"]),
+      example: {
+        operation: "create",
+        blocks: [{ blockId: "summary", kind: "rich-text", text: "The report goes here." }],
+      },
+    });
+    expect(set.definitions[0]?.description).toContain("Open Canvas");
+    expect(create).not.toHaveBeenCalled();
+    expect(revise).not.toHaveBeenCalled();
+  });
+
+  it("discloses only the requested block schemas, including the fields needed to draw a diagram", async () => {
+    const { create, set } = tools();
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["diagram"] }),
+    });
+
+    expect(outcome.isError).not.toBe(true);
+    expect(outcome.result).toMatchObject({
+      blockSchema: {
+        type: "object",
+        properties: {
+          kind: { enum: ["diagram"] },
+          nodes: { type: "array" },
+          edges: { type: "array" },
+        },
+        required: expect.arrayContaining(["blockId", "schemaVersion", "kind", "nodes", "edges"]),
+      },
+    });
+    expect(JSON.stringify(outcome.result)).not.toContain("chartType");
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { blockKinds: [] },
+    { blockKinds: ["raw-html"] },
+    { blockKinds: [42] },
+    { blockKinds: "diagram" },
+    { blockKinds: ["diagram", "table", "chart", "heading"] },
+  ])(
+    "refuses invalid block schema requests without authoring a document: $blockKinds",
+    async ({ blockKinds }) => {
+      const { create, revise, set } = tools();
+      const outcome = await set.execute({
+        name: CANVAS_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "describe", blockKinds }),
+      });
+      expect(outcome.isError).toBe(true);
+      expect(create).not.toHaveBeenCalled();
+      expect(revise).not.toHaveBeenCalled();
+    },
+  );
 
   it("writes an authored document into a Canvas the host opens for the thread", async () => {
     const { create, set } = tools();

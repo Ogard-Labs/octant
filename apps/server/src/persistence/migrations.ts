@@ -396,6 +396,24 @@ CREATE INDEX thread_checkpoint_thread_idx
   ON thread_checkpoint_projection (thread_id, last_sequence);
 `;
 
+const SPEND_CEILING_PROJECTION_SQL = `
+CREATE TABLE spend_ceiling_projection (
+  scope_kind TEXT NOT NULL CHECK(scope_kind IN ('project', 'thread')),
+  scope_key TEXT NOT NULL CHECK(length(trim(scope_key)) > 0),
+  thread_type TEXT CHECK(thread_type IS NULL OR thread_type IN ('chat-thread', 'work-thread', 'code-thread')),
+  window_json TEXT NOT NULL CHECK(json_valid(window_json)),
+  policy_json TEXT NOT NULL CHECK(json_valid(policy_json)),
+  overrun_json TEXT CHECK(overrun_json IS NULL OR json_valid(overrun_json)),
+  set_at TEXT NOT NULL,
+  set_by_json TEXT NOT NULL CHECK(json_valid(set_by_json)),
+  aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+  last_sequence INTEGER NOT NULL CHECK(last_sequence > 0),
+  PRIMARY KEY (scope_kind, scope_key)
+) STRICT;
+CREATE INDEX spend_ceiling_scope_idx
+  ON spend_ceiling_projection (scope_kind, scope_key);
+`;
+
 const THREAD_RETENTION_PROJECTION_SQL = `
 CREATE TABLE thread_retention_projection (
   scope_kind TEXT NOT NULL CHECK(scope_kind IN ('host', 'project', 'thread')),
@@ -1766,6 +1784,11 @@ ALTER TABLE code_runtime_projection
     version: 57,
     name: "add_gemini_copilot_cline_qwen_provider_projection",
     sql: ADD_GEMINI_COPILOT_CLINE_QWEN_PROVIDER_PROJECTION_SQL,
+  },
+  {
+    version: 58,
+    name: "create_spend_ceiling_projection",
+    sql: SPEND_CEILING_PROJECTION_SQL,
   },
 ];
 

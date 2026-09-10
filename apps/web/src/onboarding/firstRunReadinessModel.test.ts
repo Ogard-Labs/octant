@@ -7,7 +7,9 @@ import type {
 import { describe, expect, it } from "vitest";
 import {
   describeDiscoveryNotice,
+  describeFirstRunDiscoveryProgress,
   summarizeFirstRunReadiness,
+  type FirstRunDiscoveryInput,
   type FirstRunReadinessInput,
 } from "./firstRunReadinessModel";
 
@@ -35,11 +37,25 @@ function observed(overrides: Partial<ProviderObservedState> = {}): ProviderObser
   } as unknown as ProviderObservedState;
 }
 
+function searched(candidates: ReadonlyArray<unknown> = []): FirstRunDiscoveryInput {
+  return {
+    scanning: false,
+    snapshot: {
+      hostId: "local",
+      candidates,
+      scannedAt: "2026-08-15T10:00:00.000Z",
+      scanDurationMs: 12,
+      status: "completed",
+    } as unknown as DiscoverySnapshot,
+  };
+}
+
 function summarize(overrides: Partial<FirstRunReadinessInput> = {}) {
   return summarizeFirstRunReadiness({
     providerStatus: "ready",
     instances: [],
     observedByInstance: new Map(),
+    discovery: searched(),
     ...overrides,
   });
 }
@@ -121,11 +137,60 @@ describe("first-run provider readiness", () => {
 
   it("says the registry is unreachable instead of claiming nothing is configured", () => {
     const unavailable = summarize({ providerStatus: "disconnected" });
-    const empty = summarize({ providerStatus: "ready" });
 
     expect(unavailable.overall).toBe("authority-unavailable");
     expect(unavailable.detail).toContain("Nothing is assumed ready.");
-    expect(empty.overall).toBe("none-configured");
+  });
+
+  it("claims nothing is configured only once this Mac has actually been searched", () => {
+    const searchedAndEmpty = summarize({ providerStatus: "ready", discovery: searched() });
+
+    expect(searchedAndEmpty.overall).toBe("none-configured");
+    expect(searchedAndEmpty.headline).toBe("No provider is configured");
+  });
+
+  it("names the unfinished search instead of reporting no provider is configured", () => {
+    const beforeAnyScan = summarize({ discovery: { scanning: false } });
+    const duringFirstScan = summarize({ discovery: { scanning: true } });
+    const duringRescan = summarize({ discovery: { ...searched(), scanning: true } });
+    const afterFailedScan = summarize({
+      discovery: { scanning: false, message: "Discovery scan failed." },
+    });
+    const afterPartialScan = summarize({
+      discovery: {
+        scanning: false,
+        snapshot: { status: "partial", candidates: [] } as unknown as DiscoverySnapshot,
+      },
+    });
+
+    for (const summary of [
+      beforeAnyScan,
+      duringFirstScan,
+      duringRescan,
+      afterFailedScan,
+      afterPartialScan,
+    ]) {
+      expect(summary.overall).toBe("checking");
+      expect(summary.headline).toBe("Octant has not finished checking this Mac");
+    }
+    expect(duringFirstScan.detail).toContain("still running");
+    expect(afterFailedScan.detail).toContain("has not completed");
+  });
+
+  it("treats only a completed scan as an answer about this Mac", () => {
+    expect(describeFirstRunDiscoveryProgress({ scanning: false })).toBe("unsearched");
+    expect(describeFirstRunDiscoveryProgress({ scanning: true })).toBe("scanning");
+    expect(describeFirstRunDiscoveryProgress({ ...searched(), scanning: true })).toBe("scanning");
+    expect(describeFirstRunDiscoveryProgress(searched())).toBe("searched");
+    expect(
+      describeFirstRunDiscoveryProgress({ scanning: false, message: "Discovery scan failed." }),
+    ).toBe("unsearched");
+    expect(
+      describeFirstRunDiscoveryProgress({
+        scanning: false,
+        snapshot: { status: "cancelled" } as unknown as DiscoverySnapshot,
+      }),
+    ).toBe("unsearched");
   });
 
   it("counts detected runtimes that are not configured yet", () => {
@@ -140,7 +205,10 @@ describe("first-run provider readiness", () => {
       status: "completed",
     } as unknown as DiscoverySnapshot;
 
-    const summary = summarize({ instances: [instance()], discoverySnapshot: snapshot });
+    const summary = summarize({
+      instances: [instance()],
+      discovery: { scanning: false, snapshot },
+    });
 
     expect(summary.detectedCount).toBe(1);
   });
@@ -169,5 +237,18 @@ describe("first-run discovery notice", () => {
         snapshot: { status: "completed" } as DiscoverySnapshot,
       }),
     ).toBeUndefined();
+  });
+
+  it("says a re-scan is running instead of repeating the outcome it is retrying", () => {
+    expect(
+      describeDiscoveryNotice({
+        scanning: true,
+        snapshot: { status: "partial" } as DiscoverySnapshot,
+      }),
+    ).toEqual({
+      tone: "info",
+      message: "Checking this Mac for installed providers…",
+      retryable: false,
+    });
   });
 });

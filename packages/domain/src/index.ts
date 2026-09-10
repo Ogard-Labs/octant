@@ -90,6 +90,7 @@ export * from "./threadDraftPresentation";
 export * from "./threadMentionPolicy";
 export * from "./fileMentionPolicy";
 export * from "./usagePolicy";
+export * from "./spendCeilingPolicy";
 export * from "./imageJobPolicy";
 export * from "./imageGenerationInvocationPolicy";
 export * from "./userProfilePolicy";

@@ -103,6 +103,120 @@ describe("ThreadUsagePanel", () => {
     );
   });
 
+  it("names a token ceiling refusal and a recovery on Environment", async () => {
+    const load = vi.fn().mockResolvedValue(dashboard(4));
+    const snapshot = vi.fn().mockResolvedValue({
+      refusal: {
+        kind: "exhausted",
+        scopeKind: "thread",
+        scopeId: "73000000-0000-4000-8000-000000000001",
+        dimension: "tokens",
+        remainingTokens: 0,
+        ceilingTokens: 1_000,
+        recovery: ["raise-ceiling", "clear-ceiling", "open-usage", "pause-work"],
+        message:
+          "This thread's token spend ceiling has 0 tokens remaining of 1,000. Raise or clear the ceiling, open Usage for this thread, or pause work.",
+      },
+    });
+    render(
+      <ThreadUsagePanel
+        client={{ load } as UsageDashboardClient}
+        spendCeilingClient={{ snapshot, execute: vi.fn() } as never}
+        subjectId="thread-1"
+        subjectType="chat-thread"
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("Raise or clear the ceiling"),
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("open Usage");
+  });
+
+  it("shows the tighter remaining capacity when thread and Project ceilings both exist", async () => {
+    const load = vi.fn().mockResolvedValue(dashboard(4));
+    const execute = vi.fn().mockResolvedValue({ kind: "raised" });
+    const snapshot = vi.fn().mockResolvedValue({
+      thread: { version: 3 },
+      project: { version: 9 },
+      threadRemaining: {
+        remainingTokens: 800,
+        ceilingTokens: 1_000,
+        committedTokens: 200,
+        reservedTokens: 0,
+        window: { kind: "lifetime" },
+        version: 3,
+      },
+      projectRemaining: {
+        remainingTokens: 150,
+        ceilingTokens: 500,
+        committedTokens: 350,
+        reservedTokens: 0,
+        window: { kind: "calendar", period: "day", timeZone: "UTC" },
+        version: 9,
+      },
+    });
+    render(
+      <ThreadUsagePanel
+        client={{ load } as UsageDashboardClient}
+        spendCeilingClient={{ snapshot, execute } as never}
+        subjectId="73000000-0000-4000-8000-000000000001"
+        subjectType="chat-thread"
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("150 of 500 tokens remaining"),
+    );
+    expect(document.querySelector("form")).toHaveAttribute("novalidate");
+    expect(screen.getByRole("button", { name: "Raise token ceiling" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear ceiling" })).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Token spend ceiling"), "2000");
+    await userEvent.click(screen.getByRole("button", { name: "Raise token ceiling" }));
+    await waitFor(() => expect(execute).toHaveBeenCalled());
+    expect(execute.mock.calls[0]![0]).toMatchObject({
+      kind: "raise-spend-ceiling",
+      expectedVersion: 3,
+      tokenBudget: 2000,
+    });
+  });
+
+  it("sets a thread ceiling without using the Project version when only a Project cap exists", async () => {
+    const load = vi.fn().mockResolvedValue(dashboard(4));
+    const execute = vi.fn().mockResolvedValue({ kind: "set" });
+    const snapshot = vi.fn().mockResolvedValue({
+      project: { version: 9 },
+      projectRemaining: {
+        remainingTokens: 150,
+        ceilingTokens: 500,
+        committedTokens: 350,
+        reservedTokens: 0,
+        window: { kind: "calendar", period: "day", timeZone: "UTC" },
+        version: 9,
+      },
+    });
+    render(
+      <ThreadUsagePanel
+        client={{ load } as UsageDashboardClient}
+        spendCeilingClient={{ snapshot, execute } as never}
+        subjectId="73000000-0000-4000-8000-000000000001"
+        subjectType="chat-thread"
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("150 of 500 tokens remaining"),
+    );
+    expect(document.querySelector("form")).toHaveAttribute("novalidate");
+    expect(screen.getByRole("button", { name: "Set token ceiling" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear ceiling" })).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Token spend ceiling"), "400");
+    await userEvent.click(screen.getByRole("button", { name: "Set token ceiling" }));
+    await waitFor(() => expect(execute).toHaveBeenCalled());
+    expect(execute.mock.calls[0]![0]).toMatchObject({
+      kind: "set-spend-ceiling",
+      expectedVersion: 0,
+      policy: { tokenBudget: 400 },
+    });
+  });
+
   it("reports a host failure instead of an empty total", async () => {
     const load = vi.fn().mockRejectedValue(new UsageDashboardClientFailure("Host is down.", 0));
     render(

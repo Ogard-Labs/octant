@@ -62,6 +62,8 @@ import {
   decidesCodeEffectsByApproval,
   harnessAutoReviewEffective,
 } from "@octant/domain";
+import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
+import { WORK_TURN_SAFE_INPUT_TOKENS } from "../work/workTurnContext";
 import {
   approvalContextDigest,
   CodeOperationApprovalStore,
@@ -225,6 +227,10 @@ export interface CodeOperationRuntimeOptions {
     readonly checkoutRoot: string;
     readonly windowId: WindowId;
   }) => AppManagedToolSet | undefined;
+  readonly spendCeiling?: {
+    readonly admit: SpendCeilingService["admit"];
+    readonly settle: SpendCeilingService["settle"];
+  };
   /** The harness around a turn: stable instructions in front, the reply observed after. */
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
@@ -343,6 +349,7 @@ export interface CodeOperationRuntime {
 export function createCodeOperationRuntime(
   options: CodeOperationRuntimeOptions,
 ): CodeOperationRuntime {
+  const spendReservations = new Map<string, ReturnType<typeof decodeSpendCeilingReservationId>>();
   const events = new CodeOperationEventStore({
     journal: options.persistence.journal,
     actor: options.actor,
@@ -513,6 +520,7 @@ export function createCodeOperationRuntime(
     gitService,
     runtimeWork,
     observeRuntimeWorkOutcome,
+    spendReservations,
   });
   const authorityForTurn: CodeOperationAuthorityPort = {
     ...authority,
@@ -802,6 +810,27 @@ export function createCodeOperationRuntime(
             }),
           );
         }
+        if (thread !== undefined && options.spendCeiling !== undefined) {
+          const spendReservationId = decodeSpendCeilingReservationId(options.uuid());
+          const spendAdmission = options.spendCeiling.admit({
+            reservationId: spendReservationId,
+            threadId: String(thread.id),
+            threadType: "code-thread",
+            projectId: String(thread.projectId),
+            turnUpperBoundTokens: WORK_TURN_SAFE_INPUT_TOKENS,
+          });
+          if (spendAdmission.status === "refused") {
+            throw new CodeServiceError(
+              decodeCodeFailure({
+                category: "unavailable",
+                message: spendAdmission.refusal.message,
+              }),
+            );
+          }
+          if (spendAdmission.reservedTokens > 0) {
+            spendReservations.set(String(thread.id), spendReservationId);
+          }
+        }
         turns.noteStart(command);
       }
       // Runtime work is opened by the service after its authoritative scope
@@ -810,12 +839,12 @@ export function createCodeOperationRuntime(
       const observed = codeRuntimeWorkObserved(command);
       try {
         const result = await service.execute(windowId, command, executeOptions);
-        if (
-          command.kind === "start-provider-turn" &&
-          result.kind === "provider-turn-state" &&
-          result.state === "running"
-        ) {
-          turns.launch(command.threadId);
+        if (command.kind === "start-provider-turn") {
+          if (result.kind === "provider-turn-state" && result.state === "running") {
+            turns.launch(command.threadId);
+          } else {
+            turns.settleSpendReservation(command.threadId);
+          }
         }
         if (observed !== undefined) {
           const state = codeRuntimeWorkStateFrom(command, result);
@@ -834,6 +863,9 @@ export function createCodeOperationRuntime(
         // A throw is the service refusing or breaking, not the work finishing.
         // The record closes rather than staying open for a unit that will never
         // report again.
+        if (command.kind === "start-provider-turn") {
+          turns.settleSpendReservation(command.threadId);
+        }
         if (observed !== undefined)
           observeRuntimeWorkOutcome(
             runtimeWork.settle({
@@ -1173,6 +1205,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   readonly #active = new Map<string, ActiveTurn>();
   readonly #approvedBrowserContexts = new Set<string>();
 
+  readonly #spendReservations: Map<string, ReturnType<typeof decodeSpendCeilingReservationId>>;
+
   constructor(input: {
     options: CodeOperationRuntimeOptions;
     events: CodeOperationEventStore;
@@ -1180,8 +1214,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     gitService: GitService;
     runtimeWork: CodeRuntimeWorkRecorder;
     observeRuntimeWorkOutcome: (outcome: CodeRuntimeWorkRecordOutcome) => void;
+    spendReservations: Map<string, ReturnType<typeof decodeSpendCeilingReservationId>>;
   }) {
     this.#options = input.options;
+    this.#spendReservations = input.spendReservations;
     this.#events = input.events;
     this.#roots = input.roots;
     this.#git = input.gitService;
@@ -1208,6 +1244,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     launch?.();
   }
 
+  settleSpendReservation(threadId: string): void {
+    const reservationId = this.#spendReservations.get(String(threadId));
+    if (reservationId === undefined) return;
+    this.#spendReservations.delete(String(threadId));
+    this.#options.spendCeiling?.settle({ reservationId });
+  }
+
   async start(input: Parameters<CodeOperationTurnPort["start"]>[0]) {
     const key = String(input.thread.id);
     const existing = this.#active.get(key);
@@ -1220,6 +1263,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       // launch()/stream evidence may still own the in-memory controller.
       return turnState(existing.state);
     }
+    const failStart = () => {
+      this.settleSpendReservation(key);
+      return turnState("failed");
+    };
     const command = this.#pending.get(key);
     const root = this.#roots.get(key);
     if (
@@ -1229,9 +1276,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       root.checkoutRoot !== input.checkoutRoot ||
       this.#active.has(key)
     )
-      return turnState("failed");
+      return failStart();
     const driver = await this.#options.resolveProviderDriver(input.thread);
-    if (driver === undefined) return turnState("failed");
+    if (driver === undefined) return failStart();
     if (
       command.computerUseSelection !== undefined &&
       (this.#options.supportsAppManagedTools?.(input.thread) !== true ||
@@ -1241,11 +1288,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           selection: command.computerUseSelection,
         }) === undefined)
     )
-      return turnState("failed");
+      return failStart();
     const secrets: string[] = [];
     for (const credential of root.credentialReferences) {
       const value = await this.#options.credentialResolver.resolve(credential.reference);
-      if (value === undefined) return turnState("failed");
+      if (value === undefined) return failStart();
       if (value.length > 0) secrets.push(value);
     }
     const active: ActiveTurn = {
@@ -1528,8 +1575,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(this.#options.nativeHarness === undefined
             ? {}
             : {
-                onTurnCompleted: (completed) =>
-                  this.#options.nativeHarness!.turnCompleted({ ...harnessScope, ...completed }),
+                onTurnCompleted: (completed) => {
+                  this.settleSpendReservation(String(active.thread.id));
+                  return this.#options.nativeHarness!.turnCompleted({
+                    ...harnessScope,
+                    ...completed,
+                  });
+                },
               }),
           ...(attachments === undefined ? {} : { attachments }),
           ...(harnessAutoReviewEnabled ? { harnessAutoReviewEnabled: true } : {}),
@@ -1785,6 +1837,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    * forever.
    */
   #persistRuntimeWork(active: ActiveTurn, state: CodeTurnOutcome): void {
+    this.settleSpendReservation(String(active.thread.id));
     this.#observeRuntimeWorkOutcome(
       this.#runtimeWork.settle({
         id: active.operationId,

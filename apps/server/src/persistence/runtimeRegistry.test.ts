@@ -275,6 +275,7 @@ describe("createPhase1RuntimeRegistries", () => {
       "product-feedback",
       "thread-retention",
       "thread-external-content-taint",
+      "spend-ceilings",
     ]);
     expect(second.projections.all().map((projection) => projection.name)).toEqual([
       "aggregate-heads",
@@ -301,6 +302,7 @@ describe("createPhase1RuntimeRegistries", () => {
       "product-feedback",
       "thread-retention",
       "thread-external-content-taint",
+      "spend-ceilings",
     ]);
     expect(first.projections.all()[0]).not.toBe(second.projections.all()[0]);
     expect(first.events.decode("shell.settings-replaced", 1, validSettingsPayload())).toEqual(
@@ -712,6 +714,7 @@ describe("createPhase1RuntimeRegistries", () => {
             overlayOpacity: 100,
             vibrancyMode: "off",
           },
+          sidebarDestinations: { order: [], visibility: [] },
           environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
         },
       } as const;
@@ -923,6 +926,7 @@ function validSettingsPayload() {
         overlayOpacity: 100,
         vibrancyMode: "off",
       },
+      sidebarDestinations: { order: [], visibility: [] },
       environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
     },
   } as const;

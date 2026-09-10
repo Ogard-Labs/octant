@@ -1168,56 +1168,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   scrollbar-gutter: stable;
 }
 
-.settings-profile-disclosure > summary {
-  min-height: 52px;
-  padding: 12px 0;
-}
-
-.settings-profile-disclosure__summary-copy {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-  gap: var(--oct-space-3);
-}
-
-.settings-profile-disclosure__summary-copy h2 {
-  margin: 0;
-  color: var(--octant-text-primary);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
-}
-
-.settings-profile-disclosure__summary-copy > span {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
-  font-weight: 400;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.settings-profile-disclosure > summary > svg {
-  flex: 0 0 auto;
-  color: var(--octant-text-muted);
-  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
-}
-
-.settings-profile-disclosure[open] > summary > svg {
-  transform: rotate(180deg);
-}
-
-/* Collapsed, the summary is the section's only row, so it carries the same
-   hairline the first row of every other open group draws under its heading.
-   Open, that row's own top rule takes over. */
-.settings-profile-disclosure > summary {
-  border-bottom: 1px solid var(--oct-hairline);
-}
-
-.settings-profile-disclosure[open] > .setgroup > .setrow:first-child {
-  border-top: 0;
-}
-
 /* The section's label is its first line, inside the edge it names, so a label
    and the rows it governs read as one thing. */
 
@@ -2257,6 +2207,15 @@ textarea.settings-view__text-input {
 
 .app-update__disclosure-body ul {
   padding-left: 18px;
+}
+
+.app-update__offer-notes {
+  margin: 0 0 8px;
+  max-width: 64ch;
+  color: var(--octant-text-secondary);
+  font-size: calc(12 * var(--oct-text-step));
+  line-height: 1.45;
+  white-space: pre-wrap;
 }
 
 .marketplace-fetch-settings__details {

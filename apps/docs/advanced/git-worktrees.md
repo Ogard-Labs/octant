@@ -159,3 +159,23 @@ Linear bodies into threads.
 - [Code Thread Board](/advanced/code-board) for runtime-derived thread status
 - [Subagents](/advanced/subagents) for child runs in isolated worktrees
 - [Recovery and troubleshooting](/advanced/recovery) for inventory and conflict recovery
+
+## Browse Git history
+
+Open **Review** in the right sidebar of a Code thread, then choose **History**.
+The list shows local commits, branch and tag labels, authors, dates, and a
+parent graph. Select **Current branch**, **All branches**, or a specific ref.
+Search matches commit messages, author names, and SHA prefixes. Use **Load older
+commits** to continue through a bounded page or search scan.
+
+Select a commit to inspect its message and changed files. Merge commits let you
+choose the parent to compare. File sections collapse independently, and **Side
+by side** opens the available changed regions in a read-only comparison.
+**Back to history** preserves the loaded list and scroll position.
+
+History works from the local checkout without GitHub or network access.
+**Refresh** rereads local state; it does not fetch from remotes. Shallow clones
+and preview limits are disclosed. Large unified previews show at most 2,000
+lines per file; side-by-side comparison can inspect the available bounded diff.
+The interface keeps at most 5,000 loaded commits before asking you to narrow
+the branch or search. Switching threads always switches checkout authority.

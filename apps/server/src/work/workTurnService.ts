@@ -50,6 +50,7 @@ import {
   type WorkTurnContextContribution,
 } from "./workTurnContext";
 import type { WorkTurnWrittenFiles } from "@octant/contracts/work-turns";
+import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import { Schema } from "effect";
 import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
@@ -176,6 +177,10 @@ export interface WorkTurnServiceDependencies {
    * while its turn ran would be a half-applied state.
    */
   readonly onTurnRequested?: (threadId: WorkThreadId) => void;
+  readonly spendCeiling?: {
+    readonly admit: SpendCeilingService["admit"];
+    readonly settle: SpendCeilingService["settle"];
+  };
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
     /** Absent means every turn is admitted. */
@@ -235,6 +240,11 @@ export class WorkTurnService {
   readonly #turnRuntime: WorkTurnRuntimePort;
   readonly #resolveAppManagedTools: WorkTurnServiceDependencies["resolveAppManagedTools"];
   readonly #nativeHarness: WorkTurnServiceDependencies["nativeHarness"];
+  readonly #spendCeiling: WorkTurnServiceDependencies["spendCeiling"];
+  readonly #spendReservations = new Map<
+    string,
+    ReturnType<typeof decodeSpendCeilingReservationId>
+  >();
   readonly #onTurnRequested: WorkTurnServiceDependencies["onTurnRequested"];
   readonly #turnFileObserver: WorkTurnFileObserver | undefined;
   readonly #resolveThreadMentionContext: WorkTurnServiceDependencies["resolveThreadMentionContext"];
@@ -263,6 +273,7 @@ export class WorkTurnService {
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
     this.#resolveAppManagedTools = dependencies.resolveAppManagedTools;
     this.#nativeHarness = dependencies.nativeHarness;
+    this.#spendCeiling = dependencies.spendCeiling;
     this.#onTurnRequested = dependencies.onTurnRequested;
     this.#turnFileObserver = dependencies.turnFileObserver;
     this.#resolveThreadMentionContext = dependencies.resolveThreadMentionContext;
@@ -430,6 +441,21 @@ export class WorkTurnService {
       throw this.#failure("invalid", planned.message);
     }
 
+    const spendReservationId = decodeSpendCeilingReservationId(this.#uuid());
+    const spendAdmission = this.#spendCeiling?.admit({
+      reservationId: spendReservationId,
+      threadId: String(command.threadId),
+      threadType: "work-thread",
+      projectId: String(command.authority.projectId),
+      turnUpperBoundTokens: this.#safeInputBudgetTokens,
+    });
+    if (spendAdmission?.status === "refused") {
+      throw this.#failure("unavailable", spendAdmission.refusal.message);
+    }
+    if (spendAdmission !== undefined && spendAdmission.reservedTokens > 0) {
+      this.#spendReservations.set(String(command.requestId), spendReservationId);
+    }
+
     try {
       this.#append(command.requestId, 0, "work.turn-accepted@1", {
         kind: "turn-accepted",
@@ -445,6 +471,7 @@ export class WorkTurnService {
         acceptedAt,
       });
     } catch (error) {
+      this.#settleSpendReservation(command.requestId);
       if (error instanceof ConcurrencyConflict) {
         const duplicate = this.#projection.lookup(command.requestId);
         if (duplicate !== undefined) return this.#lookupMatching(command, duplicate);
@@ -456,6 +483,7 @@ export class WorkTurnService {
 
     const accepted = this.#projection.lookup(command.requestId);
     if (accepted === undefined) {
+      this.#settleSpendReservation(command.requestId);
       throw this.#failure("unavailable", "Work turn acceptance could not be projected.");
     }
     if (starting.attachments.length > 0) {
@@ -478,6 +506,7 @@ export class WorkTurnService {
       context: planned.context,
       signal: controller.signal,
     }).finally(() => {
+      this.#settleSpendReservation(command.requestId);
       this.#controllers.delete(String(command.requestId));
       this.#inflight.delete(String(command.requestId));
       this.#liveResponses.delete(String(command.requestId));
@@ -531,6 +560,7 @@ export class WorkTurnService {
       });
     }
     this.#controllers.get(String(command.requestId))?.abort();
+    this.#settleSpendReservation(command.requestId);
     this.#persistUpdate(turn, {
       status: "cancelled",
       ...(turn.response === undefined ? {} : { response: turn.response }),
@@ -717,6 +747,13 @@ export class WorkTurnService {
     );
     const settled = this.#projection.lookup(input.command.requestId);
     if (settled !== undefined) this.#liveUpdates.settle(input.command.threadId, settled);
+  }
+
+  #settleSpendReservation(requestId: WorkTurnRequestId | string): void {
+    const reservationId = this.#spendReservations.get(String(requestId));
+    if (reservationId === undefined) return;
+    this.#spendReservations.delete(String(requestId));
+    this.#spendCeiling?.settle({ reservationId });
   }
 
   #issueContextContribution(threadId: WorkThreadId): ReadonlyArray<WorkTurnContextContribution> {

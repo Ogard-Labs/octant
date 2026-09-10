@@ -2943,6 +2943,49 @@ describe("CodeService checkout rebind", () => {
  * Confined file listing (#code-file-explorer). Listing is a read, so Plan may
  * perform it; what gates it is the same root authority the save path uses.
  */
+describe("Git history authority", () => {
+  it("resolves the bound checkout before reading history, including in Plan mode", async () => {
+    const read = vi.fn(async () => ({ status: "unavailable" as const, message: "Test reader" }));
+    const fixture = serviceFixture({
+      gitHistory: { read },
+      threads: [thread({ executionPolicy: "plan" })],
+    });
+    await fixture.service.readGitHistory(ids.window, {
+      kind: "history",
+      threadId: ids.thread,
+      checkoutId: checkout.id,
+    });
+    expect(read).toHaveBeenCalledWith(
+      "/private/authorized-root",
+      expect.objectContaining({ checkoutId: checkout.id }),
+      undefined,
+    );
+    read.mockClear();
+    fixture.roots.resolve.mockResolvedValueOnce(undefined as never);
+    expect(
+      await fixture.service.readGitHistory(ids.window, {
+        kind: "history",
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+      }),
+    ).toMatchObject({ status: "unavailable" });
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("refuses another checkout before invoking the history reader", async () => {
+    const read = vi.fn(async () => ({ status: "unavailable" as const, message: "Test reader" }));
+    const fixture = serviceFixture({ gitHistory: { read } });
+    await expect(
+      fixture.service.readGitHistory(ids.window, {
+        kind: "history",
+        threadId: ids.thread,
+        checkoutId: "00000000-0000-4000-8000-000000009999" as typeof checkout.id,
+      }),
+    ).rejects.toThrow();
+    expect(read).not.toHaveBeenCalled();
+  });
+});
+
 describe("CodeService.listFiles", () => {
   it("lists through the resolved root authority", async () => {
     const fixture = serviceFixture();
@@ -3495,6 +3538,7 @@ function serviceFixture(
     readonly probeProvider?: CodeServiceOptions["probeProvider"];
     readonly content?: CodeContentStoreOptions;
     readonly pullRequests?: CodeServiceOptions["pullRequests"];
+    readonly gitHistory?: CodeServiceOptions["gitHistory"];
   } = {},
 ) {
   const threads = options.threads ?? [thread()];
@@ -3598,6 +3642,7 @@ function serviceFixture(
       ? {}
       : { managedThreadCreation: options.managedThreadCreation }),
     ...(options.probeProvider === undefined ? {} : { probeProvider: options.probeProvider }),
+    ...(options.gitHistory === undefined ? {} : { gitHistory: options.gitHistory }),
     ...(options.pullRequests === undefined ? {} : { pullRequests: options.pullRequests }),
     ...(options.watcher === undefined
       ? {}

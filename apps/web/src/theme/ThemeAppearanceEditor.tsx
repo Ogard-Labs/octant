@@ -138,18 +138,10 @@ export function ThemeAppearanceEditor(props: {
           </label>
         </div>
       </section>
-      <details
-        className="settings-card-section settings-card-section--open settings-theme-editor__disclosure"
-        open
-      >
-        <summary>
-          <span>Typography</span>
-          <ChevronDown
-            aria-hidden="true"
-            className="settings-theme-editor__disclosure-icon"
-            size={16}
-          />
-        </summary>
+      {/* The interface font and its size are among the most-changed settings
+          in the app, so they are not worth a click to reach. */}
+      <section className="settings-card-section settings-card-section--open settings-theme-editor__disclosure">
+        <h2>Typography</h2>
         <div className="setgroup settings-theme-editor__disclosure-body">
           <TypographyControl
             label="Interface typography"
@@ -187,7 +179,7 @@ export function ThemeAppearanceEditor(props: {
             />
           </SettingsDisclosure>
         </div>
-      </details>
+      </section>
       <fieldset className="settings-card-section settings-card-section--open settings-theme-editor__accessibility">
         <legend>Accessibility</legend>
         <div className="setgroup">

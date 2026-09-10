@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
-import { ArrowLeft, ChevronDown, Menu, Search, X } from "lucide-react";
+import { ArrowLeft, Menu, Search, X } from "lucide-react";
 import type { ShellSettings } from "@octant/contracts/shell";
 import {
   type SettingsDeepLink,
@@ -35,6 +35,7 @@ import {
   type FirstPartyPluginComponentId,
 } from "./contributionRegistry";
 import { SettingsNavigation, type SettingsNavigationItem } from "./SettingsNavigation";
+import { SidebarDestinationSettings } from "./SidebarDestinationSettings";
 import { PluginSettingsSection } from "./PluginSettingsSection";
 import { ChatSettingsView } from "../chat/ChatSettingsView";
 import type { ChatController } from "../chat/useChatController";
@@ -869,17 +870,11 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           </SettingRow>
         </div>
       </div>
-      <details
-        className="settings-card-section settings-card-section--open settings-profile-disclosure"
-        open={focusedSetting === settingId("user-profile") ? true : undefined}
-      >
-        <summary>
-          <span className="settings-profile-disclosure__summary-copy">
-            <h2>Profile</h2>
-            <span>{props.settings.userProfile.displayName ?? "Not set"}</span>
-          </span>
-          <ChevronDown aria-hidden="true" size={16} strokeWidth={1.5} />
-        </summary>
+      {/* Your name, picture and avatar colour: identity, not an advanced
+          option, so it is not worth a click to reach. The collapsed summary
+          used to preview the display name; the row it opens onto says it. */}
+      <section className="settings-card-section settings-card-section--open">
+        <h2>Profile</h2>
         <div className="setgroup">
           <SettingRow
             description="How you are shown inside Octant. There is no account behind this, and none of it is required."
@@ -895,7 +890,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             />
           </SettingRow>
         </div>
-      </details>
+      </section>
       <div className="settings-card-section settings-card-section--open">
         <h2>Updates</h2>
         <p className="settings-section-note">
@@ -1010,6 +1005,20 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
                   props.onSettingsChange({ sidebarWidth: Number(event.currentTarget.value) })
                 }
                 value={props.settings.sidebarWidth}
+              />
+            </SettingRow>
+          ) : null}
+          {isAvailable("sidebar-destinations") ? (
+            <SettingRow
+              description="Choose which destinations appear in the sidebar, where they live, and in what order."
+              focused={focusedSetting === settingId("sidebar-destinations")}
+              label="Sidebar destinations"
+              scope="app"
+              settingId="sidebar-destinations"
+            >
+              <SidebarDestinationSettings
+                customization={props.settings.sidebarDestinations}
+                onChange={(sidebarDestinations) => props.onSettingsChange({ sidebarDestinations })}
               />
             </SettingRow>
           ) : null}

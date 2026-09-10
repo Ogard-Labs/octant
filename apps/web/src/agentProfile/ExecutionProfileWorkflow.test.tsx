@@ -79,11 +79,13 @@ function controller(
 }
 
 describe("ExecutionProfileWorkflow", () => {
-  it("keeps saved profiles visible while advanced execution context is collapsed", async () => {
+  it("shows the execution context and the saved profiles together", () => {
     render(<ExecutionProfileWorkflow controller={controller()} variant="settings" />);
     expect(screen.getByRole("button", { name: "Create profile" })).toBeVisible();
-    expect(screen.getByRole("listbox")).not.toBeVisible();
-    await userEvent.click(screen.getByText("Execution context"));
+    // Which provider and model new drafts resolve against is the reason to
+    // open this page, so it costs no click. It used to be a disclosure whose
+    // collapsed summary previewed the model name.
+    expect(screen.getByText("Execution context").closest("details")).toBeNull();
     expect(screen.getByRole("listbox")).toBeVisible();
   });
 

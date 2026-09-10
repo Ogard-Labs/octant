@@ -31,6 +31,7 @@ describe("remote access policy", () => {
     "host.store.retention",
     "host.store.purge",
     "host.store.data-map",
+    "host.store.spend-ceiling",
   ])("requires a local principal for %s", (action) => {
     expect(authorizePrincipalAction({ principalKind: "remote-device", action })).toMatchObject({
       kind: "deny",
@@ -188,7 +189,12 @@ describe("remote access policy", () => {
       ]),
     );
     expect(catalog.remoteApprovable).toEqual(
-      expect.arrayContaining(["chat.send-turn", "code.create-thread", "project.overview.read"]),
+      expect.arrayContaining([
+        "chat.send-turn",
+        "code.create-thread",
+        "project.overview.read",
+        "usage.spend-ceiling.read",
+      ]),
     );
   });
 

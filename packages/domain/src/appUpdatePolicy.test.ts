@@ -98,6 +98,23 @@ describe("resolveUpdateOffer", () => {
     expect(result).toEqual({ kind: "refuse", refusal: "untrusted-signature" });
   });
 
+  it("refuses the whole offer when notes were altered after signing", () => {
+    const original = feed();
+    const tampered = feed({ release: { notes: "Install this." } });
+    const result = resolveUpdateOffer({
+      document: { ...tampered, signature: original.signature },
+      app,
+      verifySignature: (message, signature) => {
+        const expected = canonicalReleaseBytes(original.release as AppUpdateRelease);
+        return (
+          Buffer.from(message).equals(Buffer.from(expected)) && signature === original.signature
+        );
+      },
+    });
+
+    expect(result).toEqual({ kind: "refuse", refusal: "untrusted-signature" });
+  });
+
   it("refuses without believing anything the document claims", () => {
     // An unsigned document's version number is not evidence, so the signature
     // is checked before any field is read. A verifier that says no must not be
@@ -209,6 +226,32 @@ describe("canonicalReleaseBytes", () => {
     for (const covered of ["url", "sha256", "version", "platform", "arch", "releasedAt"]) {
       expect(canonical).toContain(`"${covered}"`);
     }
+  });
+
+  it("covers notes with the signature when they are present", () => {
+    const release = {
+      version: version("0.3.0"),
+      platform: "darwin",
+      arch: "arm64",
+      ring: "stable",
+      url: "https://updates.example.test/Octant.zip",
+      sha256: "b".repeat(64),
+      releasedAt: "2026-08-19T09:00:00.000Z",
+      notes: "The dock keeps pins.",
+    } as unknown as AppUpdateRelease;
+    const withoutNotes = {
+      version: version("0.3.0"),
+      platform: "darwin",
+      arch: "arm64",
+      ring: "stable",
+      url: "https://updates.example.test/Octant.zip",
+      sha256: "b".repeat(64),
+      releasedAt: "2026-08-19T09:00:00.000Z",
+    } as unknown as AppUpdateRelease;
+    const canonical = new TextDecoder().decode(canonicalReleaseBytes(release));
+
+    expect(canonical).toContain("The dock keeps pins.");
+    expect(canonicalReleaseBytes(release)).not.toEqual(canonicalReleaseBytes(withoutNotes));
   });
 
   it("signs the same release identically however the server spaced its JSON", () => {

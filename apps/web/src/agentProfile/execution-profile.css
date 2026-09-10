@@ -48,10 +48,6 @@
   font-size: var(--oct-text-sm);
 }
 
-.execution-profile-workflow__context > summary {
-  padding-inline: 0;
-}
-
 .execution-profile-workflow--settings .execution-profile-workflow__profiles {
   gap: 0;
 }

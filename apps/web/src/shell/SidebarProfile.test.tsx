@@ -147,6 +147,25 @@ describe("SidebarProfile", () => {
     expect(screen.queryByRole("menuitem", { name: "Zen mode" })).not.toBeInTheDocument();
   });
 
+  it("opens the sidebar destination editor from the account menu", async () => {
+    const user = userEvent.setup();
+    const onOpenSettings = vi.fn();
+    render(
+      <SidebarProfile
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={onOpenSettings}
+        profile={profile}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Customize sidebar" }));
+    expect(onOpenSettings).toHaveBeenCalledWith({
+      section: "appearance",
+      setting: "sidebar-destinations",
+    });
+  });
+
   it("closes on Escape and returns focus to the row it opened from", async () => {
     const user = userEvent.setup();
     render(<SidebarProfile onOpenNavigator={vi.fn()} onOpenSettings={vi.fn()} profile={profile} />);

@@ -25,6 +25,7 @@ import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Effect, Fiber, Scope, Stream } from "effect";
 import type { ContextHarnessService } from "../context/contextHarnessService";
 import type { ProviderCapacityScheduler } from "../context/providerCapacityScheduler";
+import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
@@ -123,6 +124,10 @@ export interface ChatTurnRunnerOptions {
   readonly researchRouter: ResearchRouter;
   readonly maxEvents?: number;
   readonly timeoutMs?: number;
+  readonly spendCeiling?: {
+    readonly admit: SpendCeilingService["admit"];
+    readonly settle: SpendCeilingService["settle"];
+  };
 }
 
 export interface ChatTurnRunnerInput {
@@ -179,9 +184,11 @@ export class ChatTurnRunner {
   readonly #contextHarness: ContextHarnessService;
   readonly #maxEvents: number;
   readonly #timeoutMs: number;
+  readonly #spendCeiling: ChatTurnRunnerOptions["spendCeiling"];
 
   constructor(options: ChatTurnRunnerOptions) {
     this.#capacityScheduler = options.capacityScheduler;
+    this.#spendCeiling = options.spendCeiling;
     this.#contextHarness = options.contextHarness;
     this.#maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
@@ -194,6 +201,7 @@ export class ChatTurnRunner {
     const contextHarness = this.#contextHarness;
     const maxEvents = this.#maxEvents;
     const timeoutMs = this.#timeoutMs;
+    const spendCeiling = this.#spendCeiling;
 
     return Effect.gen(function* () {
       yield* Effect.addFinalizer(() =>
@@ -269,6 +277,30 @@ export class ChatTurnRunner {
         );
       }
       capacityScheduler.markRunning(input.reservationId);
+      const spendReservationId = decodeSpendCeilingReservationId(String(input.reservationId));
+      const spendAdmission = spendCeiling?.admit({
+        reservationId: spendReservationId,
+        threadId: String(input.thread.id),
+        threadType: "chat-thread",
+        ...(input.thread.projectId === undefined
+          ? {}
+          : { projectId: String(input.thread.projectId) }),
+        turnUpperBoundTokens: input.estimatedTokens,
+      });
+      if (spendAdmission?.status === "refused") {
+        yield* persistOutcome("interrupted");
+        terminalOutcome = "interrupted";
+        capacityScheduler.recordTerminal({
+          reservationId: input.reservationId,
+          outcome: "cancelled",
+        });
+        return yield* Effect.fail(
+          decodeChatFailure({
+            category: "unavailable",
+            message: spendAdmission.refusal.message,
+          }),
+        );
+      }
 
       const persistProviderFailure = (error: unknown) => {
         if (!isProviderFailure(error)) {
@@ -346,6 +378,10 @@ export class ChatTurnRunner {
             .stop(input.attempt.providerSessionId)
             .pipe(Effect.catchAll(() => Effect.void));
           if (terminalOutcome === "completed" && actualInputTokens + actualOutputTokens > 0) {
+            spendCeiling?.settle({
+              reservationId: decodeSpendCeilingReservationId(String(input.reservationId)),
+              observedTokens: actualInputTokens + actualOutputTokens,
+            });
             capacityScheduler.recordTerminal({
               reservationId: input.reservationId,
               outcome: "completed",
@@ -371,6 +407,9 @@ export class ChatTurnRunner {
               // Usage reconciliation is best-effort after a completed turn.
             }
           } else if (terminalOutcome !== undefined) {
+            spendCeiling?.settle({
+              reservationId: decodeSpendCeilingReservationId(String(input.reservationId)),
+            });
             capacityScheduler.recordTerminal({
               reservationId: input.reservationId,
               outcome:
@@ -381,6 +420,9 @@ export class ChatTurnRunner {
                     : "interrupted",
             });
           } else {
+            spendCeiling?.settle({
+              reservationId: decodeSpendCeilingReservationId(String(input.reservationId)),
+            });
             capacityScheduler.recordTerminal({
               reservationId: input.reservationId,
               outcome: "interrupted",

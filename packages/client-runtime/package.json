@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./git-history-client": "./src/gitHistoryClient.ts",
     ".": "./src/index.ts",
     "./agent-run-client": "./src/agentRunClient.ts",
     "./agent-run-settings-client": "./src/agentRunSettingsClient.ts",
@@ -64,6 +65,7 @@
     "./provider-client": "./src/providerClient.ts",
     "./provider-usage-limits-client": "./src/providerUsageLimitsClient.ts",
     "./provider-usage-history-client": "./src/providerUsageHistoryClient.ts",
+    "./spend-ceiling-client": "./src/spendCeilingClient.ts",
     "./provider-federation": "./src/providerFederation.ts",
     "./shell-client": "./src/shellClient.ts",
     "./remote-pairing-client": "./src/remotePairingClient.ts",

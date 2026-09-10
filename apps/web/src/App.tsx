@@ -238,6 +238,7 @@ import type { WorkspaceChoices } from "./onboarding/firstRunStepModel";
 import {
   describeDiscoveryNotice,
   summarizeFirstRunReadiness,
+  type FirstRunDiscoveryInput,
 } from "./onboarding/firstRunReadinessModel";
 import {
   useFirstRunOnboardingController,
@@ -269,7 +270,7 @@ import {
   useRepositoryPullRequests,
 } from "./environment/useRepositoryPullRequests";
 import { RightUtilityDock } from "./shell/RightUtilityDock";
-import { DockProjectPullRequestReviewTool } from "./shell/DockProjectPullRequestReviewTool";
+import { ProjectReviewModule as DockProjectPullRequestReviewTool } from "./dockModules/ProjectReviewModule";
 import { composerThreadDrafts } from "./composer/composerThreadDraftStore";
 import { ThreadUtilityDockContent } from "./shell/ThreadUtilityDockContent";
 import {
@@ -1152,6 +1153,7 @@ function LaunchedShell(
     shipClient,
     usageClient,
     usageDashboardClient,
+    spendCeilingClient,
     localUsageHistoryClient,
     workMutationClient,
     workOverviewClient,
@@ -2109,30 +2111,37 @@ function LaunchedShell(
 
   // First run is derived from projected host settings, never renderer storage,
   // so a clean store is the only thing that can produce it.
+  // The readiness line and the notice under it read the same discovery record,
+  // so first run cannot say "nothing is configured" above a scan it is still
+  // running (`BOOT-02`).
+  const firstRunDiscovery = useMemo<FirstRunDiscoveryInput>(
+    () => ({
+      scanning: discoveryController.scanning,
+      ...(discoveryController.snapshot === undefined
+        ? {}
+        : { snapshot: discoveryController.snapshot }),
+      ...(discoveryController.message === undefined
+        ? {}
+        : { message: discoveryController.message }),
+    }),
+    [discoveryController.scanning, discoveryController.snapshot, discoveryController.message],
+  );
   const firstRunReadiness = useMemo(
     () =>
       summarizeFirstRunReadiness({
         providerStatus: providerController.status,
         instances: providerController.instances,
         observedByInstance: providerController.observedByInstance,
-        ...(discoveryController.snapshot === undefined
-          ? {}
-          : { discoverySnapshot: discoveryController.snapshot }),
+        discovery: firstRunDiscovery,
       }),
     [
       providerController.status,
       providerController.instances,
       providerController.observedByInstance,
-      discoveryController.snapshot,
+      firstRunDiscovery,
     ],
   );
-  const firstRunDiscoveryNotice = describeDiscoveryNotice({
-    scanning: discoveryController.scanning,
-    ...(discoveryController.snapshot === undefined
-      ? {}
-      : { snapshot: discoveryController.snapshot }),
-    ...(discoveryController.message === undefined ? {} : { message: discoveryController.message }),
-  });
+  const firstRunDiscoveryNotice = describeDiscoveryNotice(firstRunDiscovery);
   const recordFirstRunOutcome = useCallback(
     async (outcome: FirstRunOnboardingOutcome) => {
       await controller.updateSettings({ firstRunOnboarding: outcome });
@@ -5530,6 +5539,7 @@ function LaunchedShell(
                       });
                     }}
                     usageDashboardClient={usageDashboardClient}
+                    spendCeilingClient={spendCeilingClient}
                     onOpenUsageDashboard={(filter) => {
                       setPendingUsageFilter(filter);
                       setUsageOpen(true);
@@ -5815,9 +5825,7 @@ function LaunchedShell(
                 const utilityTab = displayedDockState.tabs.find((tab) => tab.id === descriptor.id);
                 if (utilityTab === undefined) return null;
                 if (utilityTab.surface === "environment") {
-                  return (
-                    <div className="thread-environment-dock-host" data-octant-environment-dock />
-                  );
+                  return threadUtility("environment", utilityTab);
                 }
                 if (
                   utilityTab.surface === "review" &&

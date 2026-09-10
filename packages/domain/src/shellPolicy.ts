@@ -151,6 +151,7 @@ export function defaultShellSettings(): ShellSettings {
     modeSwitcherPresentation: "dropdown",
     projectViewSwitcherPresentation: "dropdown",
     sidebarBackground: DEFAULT_SIDEBAR_BACKGROUND,
+    sidebarDestinations: { order: [], visibility: [] },
     environmentPresentationByMode: defaultEnvironmentPresentationByMode(),
     firstRunOnboarding: "pending",
     automaticUpdateChecks: true,

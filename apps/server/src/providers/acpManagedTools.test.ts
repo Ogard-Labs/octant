@@ -1,15 +1,8 @@
+import { BROWSER_TOOL_DEFINITION } from "../browser/browserToolDefinition";
 import { describe, expect, it, vi } from "vitest";
 import { createAcpManagedToolsBridge } from "./acpManagedTools";
 
-const definition = {
-  name: "octant_browser",
-  description: "Inspect the app-owned browser.",
-  inputSchema: {
-    type: "object",
-    properties: { operation: { type: "string" } },
-    required: ["operation"],
-  },
-};
+const definition = BROWSER_TOOL_DEFINITION;
 
 describe("ACP managed tool bridge", () => {
   it("serves the exact offered catalogue over an authenticated loopback path", async (context) => {

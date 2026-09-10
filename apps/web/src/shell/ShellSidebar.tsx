@@ -22,7 +22,7 @@ import { ModeSwitcher } from "./ModeSwitcher";
 import { SidebarBackgroundLayer, type BackgroundFetcher } from "./SidebarBackgroundLayer";
 import { SidebarProfile } from "./SidebarProfile";
 import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigation";
-import { buildSidebarAppMenu, type SidebarNavigationInput } from "./navigationModel";
+import { layoutSidebarDestinations, type SidebarNavigationInput } from "./navigationModel";
 
 export interface ShellSidebarProps {
   /**
@@ -150,7 +150,12 @@ export function ShellSidebar(props: ShellSidebarProps) {
         ? "available"
         : "unavailable",
   };
-  const secondaryActions = buildSidebarAppMenu(navigationInput).flatMap((descriptor) => {
+  const destinationLayout = layoutSidebarDestinations({
+    activeMode,
+    customization: props.settings.sidebarDestinations,
+    input: navigationInput,
+  });
+  const secondaryActions = destinationLayout.menu.flatMap((descriptor) => {
     const action = navigationActions[descriptor.id];
     return action === undefined ? [] : [{ ...descriptor, onSelect: action }];
   });
@@ -225,6 +230,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
             : { counts: { inbox: props.inboxCount } })}
           input={navigationInput}
           projectSection={props.projectSection}
+          rows={destinationLayout.rows}
         />
         {chatStatusMessage === undefined ? null : (
           <div className="project-nav__status sidebar__chat-status" role="alert">

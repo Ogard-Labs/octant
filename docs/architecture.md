@@ -23,13 +23,13 @@ The design rests on a small set of invariants that every package obeys:
   server marketplace fetches when the person searches, inspects, previews, or
   installs from the catalog. Both have a Settings off switch: marketplace
   off means no catalog request; Updates off disables automatic update checks
-  (manual Check for updates may still contact the signed feed). An in-app changelog, when implemented, rides that update
-  path and bundled notes rather than adding a third call
-  ([decisions/0061-in-app-changelog.md](decisions/0061-in-app-changelog.md)).
+  (manual Check for updates may still contact the signed feed). An in-app
+  changelog rides that update path and bundled notes rather than adding a
+  third call ([decisions/0061-in-app-changelog.md](decisions/0061-in-app-changelog.md)).
 - **The server is the authority.** Every authority check (mode, Project,
-  thread, provider, approval, remote principal) runs in `apps/server` before a
-  side effect. The renderer and mobile app render what the server says is
-  allowed; they never decide it.
+  thread, provider, approval, remote principal, optional spend ceiling) runs in
+  `apps/server` before a side effect. The renderer and mobile app render what
+  the server says is allowed; they never decide it.
 - **The event journal is authoritative; projections are rebuildable.** Commands
   append versioned events to a SQLite journal. Read models are idempotent
   projections that can be dropped and rebuilt from the journal at any time.
@@ -137,6 +137,19 @@ stays disabled. Code browser sessions can request an inline approval without
 raising thread access. The grant is bound to the exact browser context and
 owner, and browser-service policy is checked again before effects. See
 [decision 0093](decisions/0093-app-owned-tools-use-managed-runtime-transports.md).
+
+Tool definitions carry the agent's usage guidance alongside their argument
+schemas. Each mode offers only its admitted tools, so providers receive the
+same guidance through MCP, dynamic tools, or direct tool calls without a
+separate global tool installation or prompt catalogue. Browser shares one
+definition across modes. Canvas's `describe` operation lists the closed block
+catalogue and a creation example, or returns canonical schemas for up to three
+requested block kinds. It reads no Project data and creates no artifact.
+Descriptions explain the existing presentation flows and distinguish creation,
+queued jobs, and work proposals from opened previews or completed work.
+Work also includes a short, budgeted artifact instruction in its required
+context, so runtimes that use their own file tools know how written documents
+appear in Files and Document. That instruction offers no tools or authority.
 
 The local-server provider adapter owns a separate process for each acquired
 connection and allows one live session per connection. Its MCP protocol does
@@ -264,7 +277,15 @@ accessible active state. Completed layout operations go through
 server-authoritative workspace commands. One visible tree belongs to one
 authority context (host, mode, Project, and bound root); a cross-Project,
 cross-mode, or cross-host placement is refused or offered in a new window.
-Thread utilities live in the Right Utility Dock outside the split tree. The
+Thread utilities live in the Right Utility Dock outside the split tree.
+The shell loads each tool through `dockModuleRegistry`; modules under
+`apps/web/src/dockModules` receive only declared inputs and contain render
+failures. Review owns local Working tree and Git History views. History reads
+through `GitHistoryReader` and the authenticated Code checkout-read boundary;
+its Git subprocesses are network-denied and its data is an ephemeral read,
+not a second journal. Pages anchor to immutable Git tips, and commit details
+compare immutable object IDs with an explicit parent for merges.
+The
 top-right control reveals the dock only when the active pane has a bound thread
 or a valid launchable tool. An available empty dock shows a compact launcher;
 an open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
@@ -370,8 +391,12 @@ Refusal fails creation visibly. No Linear write-back path exists.
 Context usage is a circular used-versus-available meter on
 the active thread's composer; opening it shows an authoritative breakdown
 popover without a further provider call, and Inspect context opens the
-composition inspector for pin, exclude, and rebuild. Project memory lives on
-every mode's Project Overview. Navigator is one host-owned conversation opened
+composition inspector for pin, exclude, and rebuild. Optional Project and
+thread token spend ceilings (0060) are host owner policy: the server refuses a
+provider-consuming turn at admission when remaining reserved capacity cannot
+cover a declared per-turn bound, and the composer and Environment name a
+recovery. Spend is the existing `UsageRecord` ledger, never imported provider
+history. Project memory lives on every mode's Project Overview. Navigator is one host-owned conversation opened
 as an app-wide popover from the bottom-left profile and Settings control, and
 opening it never changes the active Project or thread. Zen is a separate
 presentation aggregate inside the same window, not a split-tree tab and not a
@@ -540,7 +565,8 @@ modelId }`, and the model picker is provider-first. Discovery can find
   Code turn drivers), SDK/RPC drivers (Claude Agent SDK, Codex app-server,
   OpenCode, Pi and Oh My Pi), and ACP-based agent CLIs
   (Kilo, Devin, Mistral Vibe, Kimi Code, Grok Build, Goose, GLM Agent, Gemini CLI,
-  GitHub Copilot, Cline, Qwen Code). Image profiles are
+  GitHub Copilot, Cline, Qwen Code). fx ACP was probed and remains unselectable;
+  see [fx-acp-compatibility.md](fx-acp-compatibility.md). Image profiles are
   recorded in [decisions/0055-image-generation-provider-profiles.md](decisions/0055-image-generation-provider-profiles.md).
   Generation itself is a journaled job with OpenAI and Gemini adapters, a
   bounded generated-image attachment scope, and usage rows attributed as

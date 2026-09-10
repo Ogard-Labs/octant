@@ -47,6 +47,11 @@ CSS-selected elements, press a browser key, scroll horizontally or vertically,
 wait for an element, take a screenshot, and stop its session. Page observations
 include a revision that subsequent actions may use to refuse stale targets.
 
+The tool's built-in guidance tells the agent to navigate, inspect the page,
+act using the observed target and revision, and inspect the result to verify
+success. The same definition reaches supported providers in every mode.
+Installing a browser skill or configuring a global MCP server is unnecessary.
+
 Chat, Work, and approval-gated Code tasks may request an isolated browser
 session for an origin through an inline approval. This does not change the task to Full
 access. Unsupported runtimes, expired grants, changed owners, and cancelled

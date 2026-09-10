@@ -1,0 +1,10 @@
+Octant 0.1.0
+
+Apple Silicon technical preview.
+
+Chat, Work, and Code stay separate modes on this machine. Updates are signed,
+and Octant never replaces itself until you relaunch.
+
+What's new for this build is this file. Opening it does not contact a network.
+A short summary for an offered update, when present, is already inside the
+signed feed from a check you asked for or allowed.

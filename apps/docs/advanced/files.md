@@ -69,6 +69,43 @@ They can originate from attachment cards, the Work file browser, artifact
 entries, the Code file tree, test and diagnostic evidence, search results,
 deep links, and recent items.
 
+## Agent-authored documents and canvases
+
+Agents receive usage instructions with the tools available to their current
+task. In a Chat Project, `octant_canvas` creates and revises structured reports,
+diagrams, tables, and dashboards. Its read-only `describe` operation lists the
+supported block kinds and a creation example. Requesting up to three
+`blockKinds` returns their exact schemas from the host's block contracts:
+
+```json
+{ "operation": "describe", "blockKinds": ["rich-text", "diagram"] }
+```
+
+The agent supplies the actual document as validated blocks. A prompt alone is
+only a provenance note. Revisions replace the block list and must name the
+last observed version sequence; creation starts at sequence 1. Raw HTML,
+JavaScript, CSS, and invented file or artifact references are not Canvas
+content.
+
+A created Canvas appears as a card in its Chat with **Open Canvas**. Octant
+can also offer newly authored documents beside the conversation. Revisions
+do not force a document the user closed to reopen. Agents should identify the
+created document rather than invent a download URL or claim a preview opened
+without evidence. Canvas authoring through this tool currently requires a
+Chat Project; it does not grant Work or Code authoring authority.
+
+In Work and Code, permitted file tools can create documents within the bound
+folder or checkout. The agent should report their real relative paths so the
+user can find them in **Files**; observed Markdown and text documents can also
+appear in **Document**. Binary document formats require appropriate generation
+tools, not text saved with a different extension.
+Work includes this artifact guidance in the task's context budget even when
+the selected runtime uses its own file tools.
+
+Image generation uses a separate configured image profile. The agent's image
+tool returns a job id and status; queued or running work is not a finished
+image. Completed artifacts appear in the task for opening or attachment.
+
 ## Next steps
 
 - [Editor and terminals](/advanced/editor-and-terminals) for editing and command surfaces
