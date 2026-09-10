@@ -7,10 +7,11 @@ export type BackgroundImageFetcher = (backgroundId: string) => Promise<Blob>;
 
 /**
  * Where the ground is drawn: under one welcome surface, masked away behind
- * its composer, or under the whole shell, where there is no composer to
- * clear and only the edges soften.
+ * its composer; under the whole shell, where there is no composer to clear
+ * and only the edges soften; or under a Zen space, which fills the window
+ * edge to edge and wants the whole cloud, unmasked, as its floor.
  */
-export type AppBackdropPlacement = "welcome" | "shell";
+export type AppBackdropPlacement = "welcome" | "shell" | "zen";
 
 export interface AppBackdropProps {
   readonly resolved: ResolvedAppBackground;

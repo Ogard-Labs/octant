@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Select as AuthoredSelect,
+  SelectGroup,
+  SelectGroupLabel,
   SelectItem,
   SelectPopup,
   SelectPortal,
@@ -12,6 +14,8 @@ import { cn } from "../shadcn/utils";
 
 export {
   AuthoredSelect as OctantSelectRoot,
+  SelectGroup as OctantSelectGroup,
+  SelectGroupLabel as OctantSelectGroupLabel,
   SelectItem as OctantSelectItem,
   SelectPopup as OctantSelectPopup,
   SelectPortal as OctantSelectPortal,
@@ -25,6 +29,11 @@ export interface OctantSelectOption {
   readonly disabledReason?: string;
   readonly id: string;
   readonly label: string;
+  /**
+   * Options sharing a group render under one label, in the order groups first
+   * appear. Ungrouped options render bare, so existing callers are unaffected.
+   */
+  readonly group?: string;
 }
 
 export interface OctantSelectFieldProps {
@@ -54,6 +63,25 @@ function encodeSelectValue(id: string): string {
 
 function decodeSelectValue(value: string): string {
   return value === EMPTY_SELECT_VALUE ? "" : value;
+}
+
+interface OptionSegment {
+  readonly group: string | undefined;
+  readonly options: ReadonlyArray<OctantSelectOption>;
+}
+
+/** Consecutive options sharing a group become one segment, in first-seen order. */
+function segmentOptions(options: ReadonlyArray<OctantSelectOption>): ReadonlyArray<OptionSegment> {
+  const segments: Array<{ group: string | undefined; options: Array<OctantSelectOption> }> = [];
+  for (const option of options) {
+    const last = segments.at(-1);
+    if (last !== undefined && last.group === option.group) {
+      last.options.push(option);
+      continue;
+    }
+    segments.push({ group: option.group, options: [option] });
+  }
+  return segments;
 }
 
 /**
@@ -105,16 +133,29 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
             sideOffset={4}
           >
             <SelectPopup>
-              {props.options.map((option) => (
-                <SelectItem
-                  disabled={option.disabled}
-                  key={encodeSelectValue(option.id)}
-                  {...(option.disabledReason === undefined ? {} : { title: option.disabledReason })}
-                  value={encodeSelectValue(option.id)}
-                >
-                  {option.label}
-                </SelectItem>
-              ))}
+              {segmentOptions(props.options).map((segment, index) => {
+                const items = segment.options.map((option) => (
+                  <SelectItem
+                    disabled={option.disabled}
+                    key={encodeSelectValue(option.id)}
+                    {...(option.disabledReason === undefined
+                      ? {}
+                      : { title: option.disabledReason })}
+                    value={encodeSelectValue(option.id)}
+                  >
+                    {option.label}
+                  </SelectItem>
+                ));
+                if (segment.group === undefined) {
+                  return <Fragment key={`ungrouped-${index}`}>{items}</Fragment>;
+                }
+                return (
+                  <SelectGroup key={`${segment.group}-${index}`}>
+                    <SelectGroupLabel>{segment.group}</SelectGroupLabel>
+                    {items}
+                  </SelectGroup>
+                );
+              })}
             </SelectPopup>
           </SelectPositioner>
         </SelectPortal>
