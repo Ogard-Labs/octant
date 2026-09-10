@@ -2,6 +2,7 @@ import type { ZenThreadCatalogEntry, ZenThreadCatalogRef } from "@octant/contrac
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCard } from "../ui/base/OctantCard";
 import { OctantInput } from "../ui/base/OctantInput";
+import { relativeTimeLabel } from "../lib/relativeTime";
 
 export interface ZenThreadPickerProps {
   readonly entries: ReadonlyArray<ZenThreadCatalogEntry>;
@@ -15,7 +16,12 @@ export interface ZenThreadPickerProps {
 
 export function ZenThreadPicker(props: ZenThreadPickerProps) {
   return (
-    <OctantCard aria-label="Threads" className="zen-panel zen-thread-picker px-6" role="dialog">
+    <OctantCard
+      aria-label="Threads"
+      className="zen-panel zen-thread-picker px-6"
+      role="dialog"
+      variant="glass"
+    >
       <header className="card-head">
         <div>
           <h2>Threads</h2>
@@ -44,8 +50,10 @@ export function ZenThreadPicker(props: ZenThreadPickerProps) {
               <strong>{entry.title}</strong>
               <p>{identityLabel(entry)}</p>
               <p>
-                <time dateTime={entry.recentActivityAt}>{entry.recentActivityAt}</time>
-                {` · ${entry.providerInstanceId} · ${entry.modelId}`}
+                <time dateTime={entry.recentActivityAt}>
+                  {relativeTimeLabel(entry.recentActivityAt)}
+                </time>
+                {` · ${entry.modelId}`}
               </p>
             </div>
             <OctantButton

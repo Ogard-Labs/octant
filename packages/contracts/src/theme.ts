@@ -261,7 +261,7 @@ export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
     ui: {
       family:
         "'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
-      size: 13,
+      size: 14,
       weight: 400,
     },
     editor: {

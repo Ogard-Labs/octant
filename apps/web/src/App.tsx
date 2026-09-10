@@ -253,7 +253,11 @@ import { useProviderBootstrap } from "./providers/useProviderBootstrap";
 import { hasSelectableProviderModels } from "./providers/providerBootstrapPolicy";
 import { useArchivedChatThreadSearch } from "./chat/useArchivedChatThreadSearch";
 import { useChatTranscriptSearch } from "./chat/useChatTranscriptSearch";
-import { createChatReadCursorStore, useChatController } from "./chat/useChatController";
+import {
+  createChatReadCursorStore,
+  useChatController,
+  type ChatThreadRestOutcome,
+} from "./chat/useChatController";
 import {
   autoConfigureChatDefaults,
   chatDefaultModelCommand,
@@ -321,7 +325,12 @@ import { ComposerContextMeterShortcut } from "./context/ComposerContextMeter";
 import { ComposerContextMeterProvider } from "./context/composerContextMeterScope";
 import { useContextController } from "./context/useContextController";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
-import { createCodeReadCursorStore, useCodeController } from "./code/useCodeController";
+import {
+  createCodeReadCursorStore,
+  useCodeController,
+  type CodeThreadRestOutcome,
+} from "./code/useCodeController";
+import { useContinueCards } from "./code/useContinueCards";
 import {
   CodeThreadControllerSlots,
   createCodeThreadControllers,
@@ -1249,6 +1258,11 @@ function LaunchedShell(
     (query: CodeBoardQuery) => codeClient.queryBoard(query),
     [codeClient],
   );
+  // Continue names the window's own threads, so the window reads them. The
+  // draft screen that shows them is remounted whenever a new task starts, and
+  // a read held down there began again — and emptied the section — on every
+  // New task. The board is re-read on the same signal the thread list follows.
+  const continueCards = useContinueCards(loadCodeBoard, machineChanges.codeNavigation);
   const loadOpenLinearIssues = useCallback(
     () => linearClient.listIssues({ filter: { assigneeId: "unassigned" }, pageSize: 20 }),
     [linearClient],
@@ -2782,7 +2796,13 @@ function LaunchedShell(
     if (nextState.tabs.length === 0) closeBottomPanel();
   }
   function toggleBottomPanel(opener: HTMLElement) {
-    if (bottomPanelOpen) {
+    // With a reader up the panel is stepped aside, not closed, so the toggle
+    // leaves the reader and shows it again rather than closing something the
+    // person cannot see (the dock's toggle reads the same way).
+    if (readerOpen) {
+      closeWorkspaceReaders();
+      if (bottomPanelOpen) return;
+    } else if (bottomPanelOpen) {
       closeBottomPanel(false);
       opener.focus();
       return;
@@ -3293,16 +3313,27 @@ function LaunchedShell(
     );
   }
 
+  // A rest command runs from a sidebar row, which has nowhere of its own to
+  // report a refusal, so its answer reads where thread notices already appear
+  // — the same line Work's rest commands use. Without it the row simply stays
+  // where it was and the click reads as nothing at all.
+  const noteCodeThreadRest = (outcome: CodeThreadRestOutcome): void => {
+    if (outcome.status === "refused") setThreadExportNotice(outcome.message);
+  };
   const codeThreadRowActions: ThreadRowActions = {
     ...(exportCodeThread === undefined ? {} : { onExportThread: exportCodeThread }),
     ...(handOffCodeThread === undefined ? {} : { onHandOffThread: handOffCodeThread }),
     onArchiveThread: (threadId) => void codeController.archiveThread(decodeCodeThreadId(threadId)),
     onCompleteThread: (threadId) =>
-      void codeController.completeThread(decodeCodeThreadId(threadId)),
-    onReopenThread: (threadId) => void codeController.reopenThread(decodeCodeThreadId(threadId)),
+      void codeController.completeThread(decodeCodeThreadId(threadId)).then(noteCodeThreadRest),
+    onReopenThread: (threadId) =>
+      void codeController.reopenThread(decodeCodeThreadId(threadId)).then(noteCodeThreadRest),
     onSnoozeThread: (threadId, until) =>
-      void codeController.snoozeThread(decodeCodeThreadId(threadId), until),
-    onWakeThread: (threadId) => void codeController.wakeThread(decodeCodeThreadId(threadId)),
+      void codeController
+        .snoozeThread(decodeCodeThreadId(threadId), until)
+        .then(noteCodeThreadRest),
+    onWakeThread: (threadId) =>
+      void codeController.wakeThread(decodeCodeThreadId(threadId)).then(noteCodeThreadRest),
     onCompleteFollowUp: (threadId) =>
       void codeController.completeFollowUp(decodeCodeThreadId(threadId)),
     onMarkFollowUp: (threadId) => void codeController.markFollowUp(decodeCodeThreadId(threadId)),
@@ -3323,15 +3354,22 @@ function LaunchedShell(
   // What a Chat thread row offers on right-click. List pin is a Code-only
   // mark; pane placement is the window's split tree, so Chat and Work get
   // that without a list pin they cannot honor.
+  const noteChatThreadRest = (outcome: ChatThreadRestOutcome): void => {
+    if (outcome.status === "refused") setThreadExportNotice(outcome.message);
+  };
   const chatThreadRowActions: ThreadRowActions = {
     ...(exportChatThread === undefined ? {} : { onExportThread: exportChatThread }),
     ...(handOffChatThread === undefined ? {} : { onHandOffThread: handOffChatThread }),
     onCompleteThread: (threadId) =>
-      void chatController.completeThread(decodeChatThreadId(threadId)),
-    onReopenThread: (threadId) => void chatController.reopenThread(decodeChatThreadId(threadId)),
+      void chatController.completeThread(decodeChatThreadId(threadId)).then(noteChatThreadRest),
+    onReopenThread: (threadId) =>
+      void chatController.reopenThread(decodeChatThreadId(threadId)).then(noteChatThreadRest),
     onSnoozeThread: (threadId, until) =>
-      void chatController.snoozeThread(decodeChatThreadId(threadId), until),
-    onWakeThread: (threadId) => void chatController.wakeThread(decodeChatThreadId(threadId)),
+      void chatController
+        .snoozeThread(decodeChatThreadId(threadId), until)
+        .then(noteChatThreadRest),
+    onWakeThread: (threadId) =>
+      void chatController.wakeThread(decodeChatThreadId(threadId)).then(noteChatThreadRest),
     onMarkThreadRead: (threadId) => chatController.markThreadRead(decodeChatThreadId(threadId)),
     onMarkThreadUnread: (threadId) => chatReadCursorStore.unmark(decodeChatThreadId(threadId)),
     onPinInPane: pinChatThreadInPane,
@@ -3567,6 +3605,14 @@ function LaunchedShell(
   // opens its Review beside that list, so the detail must remain visible.
   const dockPresentedOpen =
     dockOpen && (!readerOpen || (codePullRequestsOpen && projectPullRequestReviewOpen));
+  // The bottom panel steps aside for the same reason, and it had not been:
+  // a terminal opened on a thread kept a quarter of the viewport on Board,
+  // Inbox, and the pull request list, pages that are about many threads and
+  // show none of them. The panel keeps its tabs and its height and comes back
+  // with the thread; only the presentation is withheld. Ownership stays on
+  // `bottomPanelOpen`, so which tools the dock may still launch does not
+  // change while a reader is up.
+  const bottomPanelPresentedOpen = bottomPanelOpen && !readerOpen;
 
   function closeWorkspaceReaders() {
     setRailPlaceholder(undefined);
@@ -4620,6 +4666,7 @@ function LaunchedShell(
       integrationClient={linearClient}
       usageClient={usageClient}
       {...(providerUsageLimitsClient === undefined ? {} : { providerUsageLimitsClient })}
+      {...(localUsageHistoryClient === undefined ? {} : { localUsageHistoryClient })}
       visibleSettings={controller.visibleSettings}
       backgroundImageLibrary={backgroundImageLibrary}
       announcement={controller.announcement}
@@ -4772,6 +4819,7 @@ function LaunchedShell(
               onSetChecklistItemCompleted={zen.setChecklistItemCompleted}
               onUpdateAppearance={(appearance) => void zen.updateAppearance(appearance)}
               onUpdateElement={(element) => zen.updateElement(element)}
+              onSetLayout={(layout) => zen.setLayout(layout)}
               onUpdateViewport={(viewport) => void zen.updateViewport(viewport)}
               space={zen.space}
             />
@@ -4802,7 +4850,7 @@ function LaunchedShell(
           <WindowChrome
             activeSurface={activeSurface}
             bottomPanelAvailable={bottomPanelAvailable && !isNarrow}
-            bottomPanelExpanded={bottomPanelOpen}
+            bottomPanelExpanded={bottomPanelPresentedOpen}
             dockAvailable={dockAvailable}
             dockExpanded={dockPresentedOpen}
             dockLabel="Right sidebar"
@@ -4829,7 +4877,7 @@ function LaunchedShell(
         }
         contextSidebarWidth={contextSidebarWidth}
         bottomPanelHeight={bottomPanelHeight}
-        bottomPanelOpen={bottomPanelOpen}
+        bottomPanelOpen={bottomPanelPresentedOpen}
         material={material}
         workspaceMaterial={workspaceMaterial}
         onCommitSidebarWidth={(width) => {
@@ -5596,7 +5644,7 @@ function LaunchedShell(
                     }
                     linearClient={linearClient}
                     codeHome={{
-                      loadBoard: loadCodeBoard,
+                      continueCards,
                       ...(pendingIssue === undefined ? {} : { pendingIssue }),
                       onPendingIssueConsumed: () => setPendingIssue(undefined),
                       loadAssignedLinearIssues,
@@ -5795,7 +5843,7 @@ function LaunchedShell(
               tabs={dockTabs}
               width={contextSidebarWidth}
             />
-            {bottomPanelOpen && activeBottomSurface !== undefined ? (
+            {bottomPanelPresentedOpen && activeBottomSurface !== undefined ? (
               <BottomUtilityPanel
                 activeSurface={activeBottomSurface}
                 content={bottomToolContent(activeBottomSurface.id)}

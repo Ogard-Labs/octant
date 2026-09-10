@@ -102,13 +102,19 @@ export interface SurfaceEmptyProps {
   readonly title: string;
   readonly detail?: string;
   readonly action?: ReactNode;
+  /**
+   * "page" is a surface with nothing on it, where the sentence is the only
+   * thing to read. "lane" is one empty column beside full ones, where the same
+   * sentence in the same ink shouts louder than the real cards next to it.
+   */
+  readonly tone?: "page" | "lane";
 }
 
 /** Quiet empty state: a line of text, not a card. */
 export function SurfaceEmpty(props: SurfaceEmptyProps) {
   return (
-    <div className="surface-empty" role="status">
-      <span className="oct-row-label">{props.title}</span>
+    <div className="surface-empty" data-tone={props.tone ?? "page"} role="status">
+      <span className={props.tone === "lane" ? "oct-meta" : "oct-row-label"}>{props.title}</span>
       {props.detail === undefined ? null : <span className="oct-row-detail">{props.detail}</span>}
       {props.action}
     </div>

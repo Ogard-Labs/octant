@@ -150,26 +150,58 @@ describe("the public-block visual language", () => {
     expect(focus).not.toMatch(/box-shadow:\s*(?!none\s*;)[^;]+;/);
   });
 
-  it("keeps keyboard focus semantics without painting a global ring", () => {
+  it("draws one neutral keyboard focus edge and lets no surface suppress it", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const bridge = readFileSync(join(webRoot, "styles/octant-bridge.css"), "utf8");
     const withoutComments = system.replace(/\/\*[\s\S]*?\*\//g, "");
-    const rule = withoutComments.match(/(?:^|\n)\s*:focus-visible\s*\{[^}]+\}/)?.[0] ?? "";
 
     // Assert the rule was found before asserting about it. Matching only a
     // column-zero selector let the negative checks below pass on an empty
     // string, so an indented or listed rule would have slipped through saying
     // whatever it liked.
+    const rule = withoutComments.match(/(?:^|\n)\s*:focus-visible\s*\{[^}]+\}/)?.[0] ?? "";
     expect(rule).not.toBe("");
 
-    // Focus remains addressable in the DOM, but the application deliberately
-    // does not draw an outline or halo around the focused element.
-    expect(rule).toMatch(/outline:\s*none/);
-    expect(rule).toMatch(/box-shadow:\s*none/);
+    // One edge, declared once, for every control (0105). It supersedes 0094's
+    // suppression: the state fills it relied on are a 1.23:1 step on the
+    // workspace, and four button variants had no focus treatment at all.
+    expect(rule).toMatch(/outline:\s*1px solid var\(--oct-focus-edge\)/);
+    expect(rule).toMatch(/outline-offset:\s*-1px/);
+    expect(rule).not.toMatch(/box-shadow/);
     expect(withoutComments).not.toMatch(/:focus-visible:not\(\[data-slot\]\)/);
 
-    // No radius here: a box-shadow already follows the control's own corner,
-    // and naming one snapped a focused control to a shape it does not have.
+    // No radius here: an inset outline already follows the control's own
+    // corner, and naming one snapped a focused control to a shape it does not
+    // have.
     expect(rule).not.toMatch(/border-radius/);
+
+    // Mixed from the foreground, never from the accent or the focus-ring theme
+    // role: a themed colour there would put a coloured halo back (0094, 0105).
+    const edge = bridge.match(/--oct-focus-edge:[^;]+;/)?.[0] ?? "";
+    expect(edge).toMatch(/var\(--oct-fg\)/);
+    expect(edge).not.toMatch(/accent|focus-ring/);
+
+    // A control whose own fill is the accent inverts the edge; without this the
+    // primary button, a checked switch, and a checked checkbox draw the edge in
+    // the colour they are already painted with.
+    expect(withoutComments).toMatch(
+      /\[data-slot="button"\]\[data-variant="default"\]:focus-visible[^{]*\{[^}]*--oct-focus-edge-on-accent/,
+    );
+    expect(bridge).toMatch(/--oct-focus-edge-on-accent:[^;]*--octant-primary-foreground/);
+
+    // The containers that hold the keyboard without being the focused item are
+    // listed once, in the system stylesheet. A feature surface may not add its
+    // own suppression, or keyboard focus disappears on that surface alone.
+    for (const file of cssFiles(webRoot)) {
+      if (file.endsWith(join("styles", "octant.css"))) continue;
+      const source = readFileSync(file, "utf8");
+      for (const block of source.matchAll(/([^{}]*):focus-visible[^{}]*\{([^}]*)\}/g)) {
+        expect(
+          block[2],
+          `${relative(webRoot, file)} suppresses the focus edge on ${block[1]?.trim() ?? ""}`,
+        ).not.toMatch(/outline:\s*(?:none|0)\b/);
+      }
+    }
   });
 
   it("keeps one transcript rhythm across Chat, Work, and Code", () => {
@@ -374,7 +406,7 @@ describe("the public-block visual language", () => {
       settings.match(/(?:^|\n)\.settings-navigation \.setnav-section\s*\{[^}]+\}/)?.[0] ?? "";
     const hint = settings.match(/\.setrow-hint\s*\{[^}]+\}/)?.[0] ?? "";
 
-    expect(navigation).toMatch(/font-size:\s*calc\(12 \* var\(--oct-text-step\)\)/);
+    expect(navigation).toMatch(/font-size:\s*var\(--oct-text-detail\)/);
     expect(navigation).toMatch(/font-weight:\s*var\(--oct-weight-regular\)/);
     expect(navigation).toMatch(/text-transform:\s*none/);
     expect(navigation).toMatch(/letter-spacing:\s*normal/);
@@ -392,7 +424,7 @@ describe("the public-block visual language", () => {
     expect(settings).not.toMatch(
       /\.settings-navigation__group \+ \.settings-navigation__group\s*\{[^}]*border-top/,
     );
-    expect(hint).toMatch(/font-size:\s*calc\(12 \* var\(--oct-text-step\)\)/);
+    expect(hint).toMatch(/font-size:\s*var\(--oct-text-detail\)/);
   });
 
   it("keeps Usage on the open grammar instead of stat cards", () => {

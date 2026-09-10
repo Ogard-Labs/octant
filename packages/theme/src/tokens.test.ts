@@ -165,6 +165,19 @@ describe("theme semantic token catalog", () => {
     );
   });
 
+  it("keeps muted meta text readable on the control fill, not only the workspace", () => {
+    const role = getRoleDefinition("text-muted");
+    expect(role.contrastLevel).toBe("normal-text");
+    for (const surface of ["workspace", "control", "floating", "sidebar"] as const) {
+      expect(meetsContrast(role.defaultLight, DEFAULT_LIGHT_TOKENS[surface]!, "normal-text")).toBe(
+        true,
+      );
+      expect(meetsContrast(role.defaultDark, DEFAULT_DARK_TOKENS[surface]!, "normal-text")).toBe(
+        true,
+      );
+    }
+  });
+
   it("holds danger text to normal-text contrast on the floating surface it actually sits on", () => {
     const role = getRoleDefinition("danger-text");
     expect(role.contrastTarget).toBe("floating");

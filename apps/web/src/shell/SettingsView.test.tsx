@@ -869,6 +869,38 @@ describe("SettingsView", () => {
     expect(noResults).toBeDefined();
   });
 
+  it("leads Usage with provider history, which is the only source that knows cost", async () => {
+    const usageClient = { query: vi.fn(), export: vi.fn(), reset: vi.fn(), retain: vi.fn() };
+    const localUsageHistoryClient = {
+      load: vi.fn(async () => {
+        throw new Error("history unavailable in this test");
+      }),
+    };
+    renderSettings({
+      usageClient: usageClient as never,
+      localUsageHistoryClient: localUsageHistoryClient as never,
+    });
+    fireEvent.click(
+      within(screen.getByRole("navigation", { name: "Settings sections" })).getByRole("button", {
+        name: "Usage",
+      }),
+    );
+
+    // The Octant ledger records tokens and states that it has no pricing
+    // metadata, so it can never answer "what am I spending". The provider
+    // history can, and was reachable only from a per-thread link.
+    expect(
+      await screen.findByRole("region", { name: "Local provider usage history" }),
+    ).toBeVisible();
+    expect(localUsageHistoryClient.load).toHaveBeenCalled();
+    // Both sources stay one control away from each other.
+    const source = screen.getByRole("group", { name: "Usage source" });
+    expect(within(source).getByRole("button", { name: "Provider history" })).toBeVisible();
+    expect(within(source).getByRole("button", { name: "Octant records" })).toBeVisible();
+    // The embedded view contributes its controls, not a second page title.
+    expect(screen.getAllByRole("heading", { name: "Usage" })).toHaveLength(1);
+  });
+
   it("forwards isNarrow to the Usage dashboard activity table", async () => {
     const usageClient = {
       query: vi.fn(async () => ({

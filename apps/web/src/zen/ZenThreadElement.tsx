@@ -51,8 +51,11 @@ export function ZenThreadElement(props: ZenThreadElementProps) {
     <div className="zen-thread-element">
       <strong>{entry.title}</strong>
       {identity}
-      <p>{`${entry.status} · Updated ${entry.recentActivityAt}`}</p>
-      <p>{`${entry.providerInstanceId} · ${entry.modelId}`}</p>
+      {/* The model that answers, and nothing else. The card's head carries how
+          long ago the thread moved, so repeating it here said the same thing
+          twice within a few pixels; the provider instance id it replaced was a
+          UUID that told the reader nothing they could act on. */}
+      <p>{entry.modelId}</p>
       {live === undefined ? null : (
         <p className="zen-thread-element__paused" role="status">
           {pausedExplanation(live.reason)}

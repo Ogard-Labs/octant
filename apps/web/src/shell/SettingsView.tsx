@@ -25,7 +25,7 @@ import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { OctantSlider } from "../ui/base/OctantSlider";
+import { SliderField } from "../settings/SliderField";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
@@ -42,6 +42,8 @@ import type { ChatController } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
 import { CodeSettingsView } from "../code/CodeSettingsView";
 import { UsageDashboard } from "../usage/UsageDashboard";
+import { ProviderUsageHistoryWorkspace } from "../usage/ProviderUsageHistoryWorkspace";
+import type { LocalUsageHistoryClient } from "@octant/client-runtime/provider-usage-history-client";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { DiagnosticsExportControl } from "../support/DiagnosticsExportControl";
@@ -123,6 +125,7 @@ export interface SettingsViewProps {
   readonly discoveryController?: DiscoveryController;
   readonly usageClient?: UsageClient;
   readonly providerUsageLimitsClient?: ProviderUsageLimitsClient;
+  readonly localUsageHistoryClient?: LocalUsageHistoryClient;
   readonly diagnosticsExportClient?: DiagnosticsExportClient;
   readonly hostControlClient?: HostControlClient;
   readonly hostFederationLifecycle?: HostFederationLifecycle;
@@ -603,19 +606,23 @@ function ActiveSectionContent({
       );
     case "usage":
       return props.usageClient !== undefined ? (
-        <div className="settings-usage-stack" id="settings-usage">
-          <UsageDashboard
-            client={props.usageClient}
-            {...(props.isNarrow === undefined ? {} : { isNarrow: props.isNarrow })}
-            showHeading={false}
-          />
-          {props.providerUsageLimitsClient === undefined ? null : (
-            <ProviderUsageLimitsPanel
-              client={props.providerUsageLimitsClient}
-              instances={props.providerController?.instances ?? []}
-            />
-          )}
-        </div>
+        <UsageSettingsSection
+          client={props.usageClient}
+          {...(props.isNarrow === undefined ? {} : { isNarrow: props.isNarrow })}
+          {...(props.localUsageHistoryClient === undefined
+            ? {}
+            : { historyClient: props.localUsageHistoryClient })}
+          {...(props.providerUsageLimitsClient === undefined
+            ? {}
+            : {
+                limits: (
+                  <ProviderUsageLimitsPanel
+                    client={props.providerUsageLimitsClient}
+                    instances={props.providerController?.instances ?? []}
+                  />
+                ),
+              })}
+        />
       ) : null;
     case "host":
       return props.hostControlClient !== undefined ? (
@@ -984,9 +991,10 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               scope="app"
               settingId="sidebar-width"
             >
-              <OctantSlider
+              <SliderField
                 aria-label="Sidebar width"
                 className="settings-view__range"
+                format={(value) => `${String(value)}px`}
                 max={420}
                 min={220}
                 onChange={(event) =>
@@ -1260,9 +1268,12 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
         <div className="settings-card-section settings-card-section--open">
           <h2>Reset</h2>
           <div className="setgroup">
+            {/* The section says Reset and the description says what returns
+                to its default, so the row and its button each said "Reset
+                appearance" a second and third time. */}
             <SettingRow
               description="Return every appearance setting to its default."
-              label="Reset appearance"
+              label="Appearance"
               scope="app"
               settingId="reset-appearance"
             >
@@ -1272,7 +1283,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
                 type="button"
                 variant="secondary"
               >
-                Reset appearance
+                Reset
               </OctantButton>
             </SettingRow>
           </div>
@@ -1285,6 +1296,65 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
 interface AdvancedSectionProps extends SectionProps {
   readonly capabilities: SettingsNativeCapabilities;
   readonly diagnosticsExportClient?: DiagnosticsExportClient;
+}
+
+/**
+ * Usage has two honest answers and this page owes the reader the useful one
+ * first.
+ *
+ * The Octant ledger counts what this host recorded, and states plainly that it
+ * has no pricing metadata, so it can never say what anything cost. The
+ * provider history reads what the installed providers wrote down themselves,
+ * which does carry cost, a daily series, and a per-model share. The cost view
+ * was reachable only from a per-thread link, so the page a person opens from
+ * the account menu was the one that structurally cannot answer "what am I
+ * spending". It leads now, and the ledger stays one toggle away.
+ */
+function UsageSettingsSection(props: {
+  readonly client: UsageClient;
+  readonly historyClient?: LocalUsageHistoryClient;
+  readonly isNarrow?: boolean;
+  readonly limits?: ReactNode;
+}) {
+  const [source, setSource] = useState<"provider" | "octant">(
+    props.historyClient === undefined ? "octant" : "provider",
+  );
+  const sourceControl =
+    props.historyClient === undefined ? undefined : (
+      <OctantToggleGroup<"provider" | "octant">
+        aria-label="Usage source"
+        value={[source]}
+        onValueChange={(values) => {
+          const next = values[0];
+          if (next !== undefined) setSource(next);
+        }}
+      >
+        <OctantToggleGroupItem value="provider">Provider history</OctantToggleGroupItem>
+        <OctantToggleGroupItem value="octant">Octant records</OctantToggleGroupItem>
+      </OctantToggleGroup>
+    );
+  return (
+    <div className="settings-usage-stack" id="settings-usage">
+      {source === "provider" && props.historyClient !== undefined ? (
+        <ProviderUsageHistoryWorkspace
+          client={props.historyClient}
+          embedded
+          sourceControl={sourceControl}
+          {...(props.limits === undefined ? {} : { limits: props.limits })}
+        />
+      ) : (
+        <>
+          {sourceControl}
+          <UsageDashboard
+            client={props.client}
+            {...(props.isNarrow === undefined ? {} : { isNarrow: props.isNarrow })}
+            showHeading={false}
+          />
+          {props.limits}
+        </>
+      )}
+    </div>
+  );
 }
 
 function AdvancedSection({
@@ -1474,9 +1544,10 @@ function SidebarBackgroundSettings({
       </label>
       <label className="settings-view__field">
         <span>Overlay opacity</span>
-        <OctantSlider
+        <SliderField
           aria-label="Sidebar overlay opacity"
           className="settings-view__range"
+          format={(value) => `${String(value)}%`}
           max={100}
           min={0}
           onChange={(event) =>

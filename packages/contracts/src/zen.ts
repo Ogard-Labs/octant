@@ -114,6 +114,17 @@ export const ZenGeometry = Schema.Struct({
 }).annotations(strict);
 export type ZenGeometry = typeof ZenGeometry.Type;
 
+/**
+ * How a space places its cards. `wall` derives every card's rectangle from the
+ * card count and the area on screen, so pins cannot stack, a removal reflows,
+ * and a resize re-tiles. `arrange` uses the geometry each card stores, which is
+ * what a hand-made arrangement needs. A wall never writes geometry, so leaving
+ * `arrange` and coming back finds the arrangement as it was, and a space that
+ * predates the wall loses nothing by starting as one (0106).
+ */
+export const ZenSpaceLayout = Schema.Literal("wall", "arrange");
+export type ZenSpaceLayout = typeof ZenSpaceLayout.Type;
+
 export const ZenViewport = Schema.Struct({
   panX: Schema.Number.pipe(Schema.between(-10000, 10000)),
   panY: Schema.Number.pipe(Schema.between(-10000, 10000)),
@@ -775,6 +786,12 @@ export const ZenSpace = Schema.Struct({
   appearance: ZenAppearance,
   active: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   barCollapsed: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  // A space journaled before the wall existed replays as a wall, like a new
+  // one. Its stored geometry came from the spawn cascade rather than from a
+  // person, so keeping it would preserve the stacking this replaces; and
+  // because the wall never writes geometry, anyone who did arrange their cards
+  // by hand gets that arrangement back exactly by pressing Arrange once.
+  layout: Schema.optionalWith(ZenSpaceLayout, { default: () => "wall" as const }),
   assistant: Schema.NullOr(ZenAssistantBinding),
   research: Schema.optionalWith(Schema.NullOr(ZenResearchDock), { default: () => null }),
   createdAt: UtcTimestamp,
@@ -1349,11 +1366,18 @@ export const ZenSetPresentationCommand = Schema.Struct({
   expectedVersion: AggregateVersion,
   active: Schema.optional(Schema.Boolean),
   barCollapsed: Schema.optional(Schema.Boolean),
+  layout: Schema.optional(ZenSpaceLayout),
 })
   .pipe(
-    Schema.filter((command) => command.active !== undefined || command.barCollapsed !== undefined, {
-      message: () => "set-presentation must include active or barCollapsed",
-    }),
+    Schema.filter(
+      (command) =>
+        command.active !== undefined ||
+        command.barCollapsed !== undefined ||
+        command.layout !== undefined,
+      {
+        message: () => "set-presentation must include active, barCollapsed, or layout",
+      },
+    ),
   )
   .annotations(strict);
 export type ZenSetPresentationCommand = typeof ZenSetPresentationCommand.Type;

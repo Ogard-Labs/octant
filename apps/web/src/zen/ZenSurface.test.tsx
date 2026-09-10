@@ -1,13 +1,14 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import type { ZenAssistantSnapshot, ZenElementPayload, ZenSpace } from "@octant/contracts/zen";
 import {
   DEFAULT_ZEN_APPEARANCE,
   DEFAULT_ZEN_VIEWPORT,
+  ZEN_BUILTIN_BACKGROUNDS,
   type ZenElementId,
   type ZenSpaceId,
 } from "@octant/contracts/zen";
@@ -19,6 +20,7 @@ import { ZenSurface } from "./ZenSurface";
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000911");
 const spaceId = "00000000-0000-4000-8000-000000000912" as ZenSpaceId;
 const elementId = "00000000-0000-4000-8000-000000000913" as ZenElementId;
+const secondElementId = "00000000-0000-4000-8000-000000000914" as ZenElementId;
 
 /** Zen's own assistant facts for a surface whose provider supports Zen actions. */
 const ASSISTANT_SNAPSHOT: ZenAssistantSnapshot = {
@@ -44,7 +46,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function makeSpace(elements: ZenElementPayload[] = []): ZenSpace {
+function makeSpace(
+  elements: ZenElementPayload[] = [],
+  layout: ZenSpace["layout"] = "arrange",
+): ZenSpace {
   return {
     spaceId,
     windowId,
@@ -54,6 +59,7 @@ function makeSpace(elements: ZenElementPayload[] = []): ZenSpace {
     appearance: DEFAULT_ZEN_APPEARANCE,
     active: false,
     barCollapsed: false,
+    layout,
     assistant: null,
     research: null,
     createdAt: "2026-07-26T12:00:00.000Z" as ZenSpace["createdAt"],
@@ -240,17 +246,19 @@ describe("ZenSurface", () => {
     );
   });
 
-  it("keeps the appearance dialog and preset labels inside a narrow Zen surface", () => {
+  it("keeps the appearance dialog and every preset's name inside a narrow Zen surface", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/zen.css"), "utf8");
     expect(styles).toMatch(
       /\.zen-surface__manual-panel\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*calc\(100% - 32px\);/s,
     );
+    // A background is chosen by its picture, so several fit across a narrow
+    // sheet and the name under each wraps rather than truncating. Truncation
+    // was what the one-per-row grid existed to avoid; wrapping avoids it
+    // without spending a whole row on every preset.
     expect(styles).toMatch(
-      /\.zen-appearance__preset-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/s,
+      /\.zen-appearance__preset-grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fill, minmax\(92px, 1fr\)\);/s,
     );
-    expect(styles).toMatch(
-      /\.zen-appearance__preset-grid > \[data-slot="button"\]\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s,
-    );
+    expect(styles).toMatch(/\.zen-appearance__preset-name\s*\{[^}]*white-space:\s*normal;/s);
 
     render(
       <ZenSurface
@@ -267,9 +275,14 @@ describe("ZenSurface", () => {
     fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
     const dialog = screen.getByRole("dialog", { name: "Zen appearance" });
     expect(dialog.querySelector(".zen-appearance__preset-grid")).not.toBeNull();
-    expect(
-      dialog.querySelectorAll('.zen-appearance__preset-grid > [data-slot="button"]').length,
-    ).toBeGreaterThan(0);
+    // A name nobody can read is not a choice: every built-in is still offered
+    // by its full title, whatever the visible label had room to show.
+    expect(dialog.querySelectorAll(".zen-appearance__preset")).toHaveLength(
+      ZEN_BUILTIN_BACKGROUNDS.length,
+    );
+    for (const preset of ZEN_BUILTIN_BACKGROUNDS) {
+      expect(within(dialog).getByRole("button", { name: preset.title })).toBeVisible();
+    }
   });
 
   it("forces readable opaque elements when transparency is reduced", () => {
@@ -373,7 +386,33 @@ describe("ZenSurface", () => {
     expect(onTimerAction).toHaveBeenCalledWith(elementId, "start");
   });
 
-  it("adds a bounded Timer from the manual Widgets panel", () => {
+  it("closes the open panel on Escape rather than leaving Zen", () => {
+    const onExit = vi.fn();
+    const onCloseThreadPicker = vi.fn();
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onCloseThreadPicker={onCloseThreadPicker}
+        onExit={onExit}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onOpenThreads={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        space={makeSpace()}
+        threadEntries={[]}
+        threadPickerOpen
+      />,
+    );
+
+    // The picker holds focus inside itself, so the key never reached the
+    // surface and the only way out was its own Close button.
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onCloseThreadPicker).toHaveBeenCalledOnce();
+    expect(onExit).not.toHaveBeenCalled();
+  });
+
+  it("adds a bounded Timer from the Add panel", () => {
     const onAddTimer = vi.fn();
     render(
       <ZenSurface
@@ -388,8 +427,8 @@ describe("ZenSurface", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Widgets" }));
-    expect(screen.getByRole("dialog", { name: "Zen additions" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByRole("dialog", { name: "Add to this space" })).toBeInTheDocument();
     fireEvent.change(screen.getByRole("spinbutton", { name: "Timer duration in minutes" }), {
       target: { value: "40" },
     });
@@ -704,12 +743,153 @@ describe("ZenSurface", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Widgets" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(screen.getByRole("button", { name: "Add Notes" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add Checklist" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add timer" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Add Notes" }));
     expect(onCreateWidget).toHaveBeenCalledWith("notes");
+  });
+
+  it("places every card itself on a wall, so two pins never land on each other", () => {
+    // Both cards carry the same stored geometry, which is exactly what the
+    // cascade used to produce: two pins on one origin, one hiding the other.
+    const stacked = { x: 64, y: 96, width: 420, height: 260 };
+    const space = makeSpace(
+      [
+        {
+          elementId,
+          kind: "notes",
+          widgetVersion: 0 as AggregateVersion,
+          content: "First",
+          geometry: stacked,
+          zIndex: 1,
+          minimized: false,
+          locked: false,
+          title: "First",
+        },
+        {
+          elementId: secondElementId,
+          kind: "notes",
+          widgetVersion: 0 as AggregateVersion,
+          content: "Second",
+          geometry: stacked,
+          zIndex: 2,
+          minimized: false,
+          locked: false,
+          title: "Second",
+        },
+      ],
+      "wall",
+    );
+
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onExit={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        onExpandBar={() => undefined}
+        space={space}
+      />,
+    );
+
+    const rect = (node: HTMLElement) => ({
+      x: Number.parseFloat(node.style.left),
+      y: Number.parseFloat(node.style.top),
+      width: Number.parseFloat(node.style.width),
+      height: Number.parseFloat(node.style.height),
+    });
+    const first = rect(screen.getByRole("group", { name: "First" }));
+    const second = rect(screen.getByRole("group", { name: "Second" }));
+    const overlaps =
+      first.x < second.x + second.width &&
+      second.x < first.x + first.width &&
+      first.y < second.y + second.height &&
+      second.y < first.y + first.height;
+    expect(overlaps).toBe(false);
+  });
+
+  it("offers no hand placement on a wall and writes nothing when a card is dragged", () => {
+    const onUpdateElement = vi.fn();
+    const space = makeSpace(
+      [
+        {
+          elementId,
+          kind: "notes",
+          widgetVersion: 0 as AggregateVersion,
+          content: "Focus note",
+          geometry: { x: 40, y: 40, width: 240, height: 160 },
+          zIndex: 1,
+          minimized: false,
+          locked: false,
+          title: "Focus note",
+        },
+      ],
+      "wall",
+    );
+
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onExit={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={onUpdateElement}
+        onUpdateViewport={() => undefined}
+        onExpandBar={() => undefined}
+        space={space}
+      />,
+    );
+
+    // A nudge would write a geometry the wall ignores, so the card would snap
+    // back and the write would misreport what the reader did.
+    const card = screen.getByRole("group", { name: "Focus note" });
+    card.focus();
+    fireEvent.keyDown(card, { key: "ArrowRight" });
+    expect(onUpdateElement).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Resize Focus note" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Zoom in" })).not.toBeInTheDocument();
+  });
+
+  it("leaves the wall for a hand-made arrangement without touching a card", async () => {
+    const user = userEvent.setup();
+    const onSetLayout = vi.fn();
+    const onUpdateElement = vi.fn();
+    const space = makeSpace(
+      [
+        {
+          elementId,
+          kind: "notes",
+          widgetVersion: 0 as AggregateVersion,
+          content: "Focus note",
+          geometry: { x: 40, y: 40, width: 240, height: 160 },
+          zIndex: 1,
+          minimized: false,
+          locked: false,
+          title: "Focus note",
+        },
+      ],
+      "wall",
+    );
+
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onExit={() => undefined}
+        onHideBar={() => undefined}
+        onSetLayout={onSetLayout}
+        onUpdateElement={onUpdateElement}
+        onUpdateViewport={() => undefined}
+        onExpandBar={() => undefined}
+        space={space}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Arrange" }));
+    expect(onSetLayout).toHaveBeenCalledWith("arrange");
+    // The stored geometry is the arrangement; switching must not rewrite it.
+    expect(onUpdateElement).not.toHaveBeenCalled();
   });
 
   it("renders elements and moves the focused element with arrow keys", () => {
@@ -1300,6 +1480,63 @@ describe("ZenSurface live thread cards", () => {
       sourceContext: element.sourceContext,
     } as never;
   }
+
+  it("names a card in the interface face and dates it in the head", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-28T15:00:00.000Z"));
+    try {
+      const element = threadElement(1, "code");
+      render(
+        <ZenSurface
+          barCollapsed={false}
+          onExit={() => undefined}
+          onExpandBar={() => undefined}
+          onHideBar={() => undefined}
+          onUpdateElement={() => undefined}
+          onUpdateViewport={() => undefined}
+          renderLiveThread={() => undefined}
+          space={makeSpace([element], "wall")}
+          threadEntries={[catalogEntry(element)]}
+        />,
+      );
+
+      // The head carries the card's identity, so it is set in the interface
+      // face at the body size rather than the editor face at the metadata
+      // size, and it says how long ago the thread last moved.
+      const head = screen.getByText("Thread 1", { selector: ".zen-el-title" });
+      expect(head).toBeVisible();
+      expect(screen.getByText("3h ago", { selector: "time" })).toBeVisible();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("dates a card that is not streaming instead of printing its stored timestamp", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-29T12:00:00.000Z"));
+    try {
+      const element = threadElement(1, "code");
+      render(
+        <ZenSurface
+          barCollapsed={false}
+          onExit={() => undefined}
+          onExpandBar={() => undefined}
+          onHideBar={() => undefined}
+          onUpdateElement={() => undefined}
+          onUpdateViewport={() => undefined}
+          renderLiveThread={() => undefined}
+          space={makeSpace([element], "wall")}
+          threadEntries={[catalogEntry(element)]}
+        />,
+      );
+
+      expect(screen.getByText(/1d ago/)).toBeVisible();
+      expect(screen.queryByText(/2026-07-28T12:00:00\.000Z/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/00000000-0000-4000-8000-000000000003/)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("keeps a live thread's resize grip above its composer", () => {
     const element = threadElement(1, "code");
