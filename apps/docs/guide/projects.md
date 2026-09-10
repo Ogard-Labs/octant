@@ -40,6 +40,12 @@ Projects support the following operations:
 
 The sidebar displays a mode-aware Project hierarchy. Each mode group lists its Projects, and the active Project is highlighted. Threads belong to exactly one Project. A cross-Project tab drop does not silently change authority; it offers to open the thread in a new window instead.
 
+## What a thread row shows
+
+Sidebar thread rows can carry a branch, a linked pull request, when the thread was last updated, and its status mark. **Property visibility** in the Project view filter menu turns each of those on or off, and **Hide all** clears them in one action.
+
+The choice belongs to the view you are looking at. Hiding pull requests in the Project tree leaves the activity feed as it was, and the reverse; the activity feed also offers its Project name. Each view remembers its own choice on this device.
+
 ## Bound root lifecycle
 
 When a Work or Code Project root becomes unavailable:
