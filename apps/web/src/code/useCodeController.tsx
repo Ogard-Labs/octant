@@ -1517,6 +1517,7 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly attachmentIds?: ReadonlyArray<CodeAttachmentId>;
       readonly fileMentionPaths?: ReadonlyArray<string>;
       readonly computerUseSelection?: ExtensionSelection;
+      readonly extensionSelections?: ReadonlyArray<ExtensionSelection>;
       /**
        * The posture this turn asks to run under. The host clamps it to the
        * thread's grant, so this is an intent, not a grant.
@@ -1540,6 +1541,9 @@ export function useCodeController(options: CodeControllerOptions) {
         ...(input.computerUseSelection === undefined
           ? {}
           : { computerUseSelection: input.computerUseSelection }),
+        ...(input.extensionSelections === undefined || input.extensionSelections.length === 0
+          ? {}
+          : { extensionSelections: [...input.extensionSelections] }),
         ...(input.threadMentionIds === undefined || input.threadMentionIds.length === 0
           ? {}
           : { threadMentionIds: [...input.threadMentionIds] }),
@@ -1565,6 +1569,7 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly attachmentIds?: ReadonlyArray<CodeAttachmentId>;
       readonly fileMentionPaths?: ReadonlyArray<string>;
       readonly computerUseSelection?: ExtensionSelection;
+      readonly extensionSelections?: ReadonlyArray<ExtensionSelection>;
     }): Promise<boolean> => {
       const prompt = input.prompt.trim();
       if (prompt.length === 0) return false;
@@ -1951,6 +1956,7 @@ export function useCodeController(options: CodeControllerOptions) {
       /** True when the composer already cleared this draft while it waited. */
       delayed?: boolean,
       computerUseSelection?: ExtensionSelection,
+      extensionSelections?: ReadonlyArray<ExtensionSelection>,
     ): Promise<boolean> => {
       const trimmed = prompt.trim();
       const view = activeView?.thread.id === activeThreadId.current ? activeView : undefined;
@@ -2003,6 +2009,9 @@ export function useCodeController(options: CodeControllerOptions) {
           attachmentIds: attachments.map((attachment) => attachment.attachmentId),
           fileMentionPaths,
           ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
+          ...(extensionSelections === undefined || extensionSelections.length === 0
+            ? {}
+            : { extensionSelections: [...extensionSelections] }),
           ...(executionPolicy === undefined ? {} : { executionPolicy }),
           signal: controller.signal,
         });

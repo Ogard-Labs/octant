@@ -1,4 +1,5 @@
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
+import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { createHash } from "node:crypto";
 import {
@@ -3129,7 +3130,12 @@ export class ChatService {
       return { selections: [], entries: [] };
     }
     const computer = selections.filter(isComputerUseSelection);
-    const other = selections.filter((selection) => !isComputerUseSelection(selection));
+    // Browser is a host-owned app-managed tool, like Computer. Its structured
+    // selection is retained with the turn but does not enter the generic
+    // extension resolver (which only knows installed packages).
+    const other = selections.filter(
+      (selection) => !isComputerUseSelection(selection) && !isBrowserUseSelection(selection),
+    );
     const computerTools =
       computer.length === 1 && computer[0] !== undefined && windowId !== undefined
         ? this.#resolveComputerUseTools?.({ thread, windowId, selection: computer[0] })

@@ -1,7 +1,17 @@
-import { ComputerUseMention, useComputerUseMention } from "../../computerUse/ComputerUseMention";
-import type { ExtensionSelection } from "@octant/contracts/extensions";
+import {
+  BrowserUseMention,
+  ComputerUseMention,
+  useBrowserUseMention,
+  useComputerUseMention,
+} from "../../computerUse/ComputerUseMention";
+import type { ExtensionProviderFamily, ExtensionSelection } from "@octant/contracts/extensions";
+import { ExtensionProviderFamily as ExtensionProviderFamilySchema } from "@octant/contracts/extensions";
+import { Schema } from "effect";
 import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
 import type { ProjectId } from "@octant/contracts/projects";
+import type { ExtensionClient } from "@octant/client-runtime/extension-client";
+import { useExtensionDraftSelections } from "../../chat/useExtensionDraftSelections";
+import { useComposerSlashCommands, ComposerSlashTypeahead } from "../../composer/useComposerSlashCommands";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import type { CreateHostViewScope, PickerGroup } from "@octant/domain";
@@ -59,7 +69,10 @@ export interface WorkComposerAdapterProps {
     images?: ReadonlyArray<File>,
     threadMentionIds?: ReadonlyArray<MentionableThreadId>,
     computerUseSelection?: ExtensionSelection,
+    extensionSelections?: ReadonlyArray<ExtensionSelection>,
   ) => boolean | void | Promise<boolean | void>;
+  readonly extensionClient?: ExtensionClient;
+  readonly browserAvailable?: boolean;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly onAttachFolder?: () => void;
@@ -81,6 +94,25 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     draft: prompt,
     onDraftChange: setPrompt,
     scopeKey: "work-draft",
+  });
+  const extensionDraft = useExtensionDraftSelections({
+    ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
+    mode: "work",
+    projectId: props.projectId ?? null,
+    providerFamily: selectedProviderFamily(props.providerGroups, props.selectedProviderInstanceId),
+  });
+  const browser = useBrowserUseMention({
+    textarea: () => textareaRef.current,
+    draft: prompt,
+    onDraftChange: setPrompt,
+    scopeKey: "work-draft",
+    available: props.browserAvailable,
+    onChoose: () => void extensionDraft.resolveReference("@browser"),
+  });
+  const slash = useComposerSlashCommands({
+    draft: prompt,
+    onDraftChange: setPrompt,
+    onResolveExtensionReference: extensionDraft.resolveReference,
   });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionListId = "work-new-thread-mentions";
@@ -116,6 +148,9 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     setSubmitting(true);
     const staged = images.filesForSend();
     const computerUseSelection = computer.selection;
+    const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
+      receipt.selection === undefined ? [] : [receipt.selection],
+    );
     void threadMentions
       .resolveForSend()
       .then(async (threadMentionIds) => {
@@ -126,6 +161,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
           ...(computerUseSelection === undefined
             ? ([] as const)
             : ([computerUseSelection] as const)),
+          ...(extensionSelections.length === 0 ? ([] as const) : ([extensionSelections] as const)),
         );
         if (created !== false) {
           images.clearAfterAccepted();
@@ -136,7 +172,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
       .finally(() => {
         setSubmitting(false);
       });
-  }, [canSubmit, computer, images, props, threadMentions, trimmed]);
+  }, [canSubmit, computer, extensionDraft, images, props, threadMentions, trimmed]);
 
   function attachFromTransfer(items: DataTransfer | null): boolean {
     if (items === null) return false;
@@ -155,6 +191,8 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (computer.handleKeyDown(event)) return;
+    if (browser.handleKeyDown(event)) return;
+    if (slash.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -221,6 +259,28 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
             chips={
               <>
                 <ComputerUseMention controller={computer} surface="chips" />
+                <BrowserUseMention controller={browser} surface="chips" />
+                {extensionDraft.receipts.length > 0 ? (
+                  <ul aria-label="Selected extensions" className="composer-chips">
+                    {extensionDraft.receipts.map((receipt) => (
+                      <li className="chip" key={receipt.reference}>
+                        <span>{receipt.label}</span>
+                        {receipt.status.kind === "blocked" ? (
+                          <span>{`Blocked: ${receipt.status.reason}`}</span>
+                        ) : null}
+                        <OctantButton
+                          aria-label={`Remove ${receipt.label} extension`}
+                          className="chip-x window-no-drag"
+                          onClick={() => extensionDraft.remove(receipt.reference)}
+                          type="button"
+                          variant="ghost"
+                        >
+                          ×
+                        </OctantButton>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
                 <ThreadMentionChips
                   chips={threadMentions.chips}
                   onRemove={(threadId) => threadMentions.composer?.onRemoveChip(threadId)}
@@ -233,20 +293,24 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
               <OctantTextarea
                 aria-label="First message"
                 aria-autocomplete="list"
-                aria-expanded={computer.open}
-                aria-controls={computer.open ? computer.listId : undefined}
-                aria-activedescendant={computer.open ? `${computer.listId}-computer` : undefined}
+                aria-expanded={computer.open || browser.open || slash.open}
+                aria-controls={computer.open ? computer.listId : browser.open ? browser.listId : slash.open ? slash.listId : undefined}
+                aria-activedescendant={computer.open ? `${computer.listId}-computer` : browser.open ? `${browser.listId}-browser` : slash.active === undefined ? undefined : `${slash.listId}-${slash.active.id}`}
                 autoFocus
                 className="composer-input"
                 disabled={props.creating}
                 onChange={(event) => {
                   setPrompt(event.target.value);
                   computer.sync(event.target.value, event.currentTarget.selectionStart);
+                  browser.sync(event.target.value, event.currentTarget.selectionStart);
+                  slash.sync(event.target.value, event.currentTarget.selectionStart);
                   mention.sync(event.target.value, event.currentTarget.selectionStart);
                 }}
-                onClick={(event) =>
-                  mention.sync(event.currentTarget.value, event.currentTarget.selectionStart)
-                }
+                onClick={(event) => {
+                  mention.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                  browser.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                  slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                }}
                 ref={textareaRef}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={(event) => {
@@ -264,6 +328,10 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
             typeahead={
               computer.open ? (
                 <ComputerUseMention controller={computer} surface="typeahead" />
+              ) : browser.open ? (
+                <BrowserUseMention controller={browser} surface="typeahead" />
+              ) : slash.open ? (
+                <ComposerSlashTypeahead controller={slash} />
               ) : mention.open ? (
                 <ThreadMentionTypeahead
                   activeIndex={mention.activeIndex}
@@ -364,4 +432,16 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
       </div>
     </section>
   );
+}
+
+function selectedProviderFamily(
+  groups: ReadonlyArray<PickerGroup>,
+  selectedProviderInstanceId: ProviderInstanceId | undefined,
+): ExtensionProviderFamily | undefined {
+  const group = groups.find(
+    (candidate) => String(candidate.instance.id) === String(selectedProviderInstanceId),
+  );
+  return group !== undefined && Schema.is(ExtensionProviderFamilySchema)(group.instance.driverKind)
+    ? group.instance.driverKind
+    : undefined;
 }

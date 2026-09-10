@@ -31,6 +31,7 @@ import type {
   MentionableThreadId,
 } from "@octant/contracts";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
+import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import {
   CreateFromIssuePicker,
   useGithubIssuesCreateAvailable,
@@ -138,6 +139,7 @@ export interface DraftThreadWorkspaceProps {
     issueContext?: GithubIssueContextRequest,
     linearIssueContext?: LinearIssueContextRequest,
     computerUseSelection?: ExtensionSelection,
+    extensionSelections?: ReadonlyArray<ExtensionSelection>,
   ) => boolean | void | Promise<boolean | void>;
   readonly onCreateCodeThread?: (
     input: CodeComposerSubmitInput,
@@ -166,6 +168,8 @@ export interface DraftThreadWorkspaceProps {
   readonly onCancel: () => void;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
+  readonly extensionClient?: ExtensionClient;
+  readonly browserAvailable?: boolean;
   readonly creating?: boolean;
   readonly errorMessage?: string;
   readonly pendingMessage?: string;
@@ -603,6 +607,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ? {}
             : { windowCapability: props.windowCapability })}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+          {...(props.browserAvailable === undefined ? {} : { browserAvailable: props.browserAvailable })}
           onCreateThread={(input) => {
             const submitted = {
               ...input,
@@ -624,6 +630,19 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                 issueContext,
                 linearIssueContext,
                 submitted.computerUseSelection,
+                submitted.extensionSelections,
+              );
+            if (submitted.extensionSelections !== undefined && submitted.extensionSelections.length > 0)
+              return props.onCreateThread(
+                submitted.prompt,
+                selectedProjectId,
+                submitted.deliveryTarget.outcomeKind,
+                submitted.images,
+                submitted.threadMentionIds,
+                issueContext,
+                linearIssueContext,
+                undefined,
+                submitted.extensionSelections,
               );
             return issueContext === undefined && linearIssueContext === undefined
               ? props.onCreateThread(
@@ -677,7 +696,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(props.windowCapability === undefined
             ? {}
             : { windowCapability: props.windowCapability })}
-          onCreateThread={(prompt, images, threadMentionIds, computerUseSelection) =>
+          {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+          {...(props.browserAvailable === undefined ? {} : { browserAvailable: props.browserAvailable })}
+          onCreateThread={(prompt, images, threadMentionIds, computerUseSelection, extensionSelections) =>
             computerUseSelection !== undefined
               ? props.onCreateThread(
                   prompt,
@@ -688,7 +709,20 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                   issueContext,
                   linearIssueContext,
                   computerUseSelection,
+                  extensionSelections,
                 )
+              : extensionSelections !== undefined && extensionSelections.length > 0
+                ? props.onCreateThread(
+                    prompt,
+                    selectedProjectId,
+                    undefined,
+                    images,
+                    threadMentionIds,
+                    issueContext,
+                    linearIssueContext,
+                    undefined,
+                    extensionSelections,
+                  )
               : issueContext === undefined && linearIssueContext === undefined
                 ? props.onCreateThread(
                     prompt,

@@ -40,6 +40,12 @@ Agent control is separate from manual Browser availability. A provider needs a
 verified app-managed tool transport; an authenticated provider or a visible
 Browser tab alone does not prove that transport works.
 
+In any Chat, Work, or Code composer, type `@Browser` and choose the structured
+Browser mention to tell the selected agent to use Octant's built-in Browser.
+The mention carries a host-owned selection; it never opens an origin or grants
+approval by itself. The existing Browser tool still requests origin approval at
+the first action that needs it.
+
 Where supported, Octant registers `octant_browser` when the provider session
 starts. The agent does not need a separate browser skill, a debugging URL, or
 a shell-launched browser. The tool can navigate, read page text, click and fill

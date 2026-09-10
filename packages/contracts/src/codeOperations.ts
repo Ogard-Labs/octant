@@ -562,6 +562,7 @@ const StartProviderTurn = Schema.Struct({
   ...OperationScope,
   sessionId: ProviderSessionId,
   prompt: CodeEvidenceReference,
+  extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
   computerUseSelection: Schema.optional(ExtensionSelection),
   /**
    * `#thread` mentions this turn points at. Ids only: the host
@@ -1021,6 +1022,7 @@ const ConversationTurnStartedEvent = Schema.Struct({
   modelId: ProviderModelId,
   sessionId: ProviderSessionId,
   prompt: CodeEvidenceReference,
+  extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
   /** Images sent with this turn. Absent when the turn attached none. */
   attachments: Schema.optional(
     Schema.Array(CodeAttachmentReference).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),

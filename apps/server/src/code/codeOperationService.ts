@@ -890,6 +890,9 @@ export class CodeOperationService {
                   modelId: scope.thread.modelId,
                   sessionId: command.sessionId,
                   prompt: command.prompt,
+                  ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
+                    ? {}
+                    : { extensionSelections: command.extensionSelections }),
                   executionPolicy: turnThread.executionPolicy,
                   ...(starting.attachments.length === 0
                     ? {}
@@ -2560,6 +2563,7 @@ function sameConversationStart(
     event.prompt.contentId === command.prompt.contentId &&
     event.prompt.digest === command.prompt.digest &&
     event.prompt.byteLength === command.prompt.byteLength
+    && JSON.stringify(event.extensionSelections ?? []) === JSON.stringify(command.extensionSelections ?? [])
   );
 }
 

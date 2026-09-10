@@ -175,6 +175,7 @@ export const WorkTurnState = Schema.Struct({
   providerSessionId: Schema.optional(ProviderSessionId),
   status: WorkTurnLifecycleStatus,
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
+  extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
   response: Schema.optional(boundedText(MAX_WORK_TURN_RESPONSE_BYTES)),
   transcript: Schema.Array(WorkTranscriptEntry).pipe(Schema.maxItems(8)),
   attachments: Schema.optional(
@@ -197,6 +198,7 @@ export const StartWorkThreadTurnCommand = Schema.Struct({
   turnId: WorkTurnId,
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
   computerUseSelection: Schema.optional(ExtensionSelection),
+  extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
   authority: WorkTurnAuthority,
   /**
    * Images already staged for this thread. Ids only: the host reads the bytes
