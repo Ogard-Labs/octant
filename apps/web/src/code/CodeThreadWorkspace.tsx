@@ -1,3 +1,5 @@
+import { ComputerUseMention, useComputerUseMention } from "../computerUse/ComputerUseMention";
+import type { ExtensionSelection } from "@octant/contracts/extensions";
 import {
   MAX_CODE_THREAD_TITLE_LENGTH,
   type CodeApprovalId,
@@ -103,6 +105,7 @@ const UNAVAILABLE_ATTACHMENT_CLIENT: CodeAttachmentClient = {
  * whatever the composer happens to hold when the running turn finally stops.
  */
 interface CodeSteeredMessage {
+  readonly computerUseSelection?: ExtensionSelection;
   readonly id: string;
   readonly threadKey: string;
   readonly restore: (message: CodeSteeredMessage) => void;
@@ -230,6 +233,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // a steered message leaves the composer, so an async mention lookup cannot
   // erase a newer draft typed while that lookup is pending.
   const draftRevisionRef = useRef(0);
+  const computer = useComputerUseMention({
+    textarea: () => textareaRef.current,
+    draft,
+    scopeKey: String(props.threadId),
+    onDraftChange: (next) => {
+      draftRevisionRef.current += 1;
+      setDraft(next);
+      props.controller.setPendingDraft?.(next);
+    },
+    onSelectionEdited: () => {
+      draftRevisionRef.current += 1;
+    },
+  });
   const activeThreadKeyRef = useRef(String(props.threadId));
   activeThreadKeyRef.current = String(props.threadId);
   const [providerChanging, setProviderChanging] = useState(false);
@@ -396,6 +412,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   }, [markDraftStagedDropped, peekAbandoned, props.threadId]);
 
   function syncMentions(value: string, caret: number | null) {
+    computer.sync(value, caret);
     mention.sync(value, caret);
     pathMentions.sync(value, caret);
   }
@@ -507,6 +524,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   async function submitFollowUp() {
     if (!canSend || steered.pending !== undefined) return;
     const draftRevision = draftRevisionRef.current;
+    const computerUseSelection = computer.selection;
     const originThreadKey = String(props.threadId);
     // The one-shot override is consumed when the message is sent, not when the
     // turn later finishes: a long running turn must not leave Plan selected for
@@ -518,6 +536,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       const threadMentionChips = threadMentions.chips;
       const fileMentionPaths = pathMentions.selectedPaths;
       const detachedAttachments = attachments.detachForSend();
+      computer.consume(computerUseSelection);
       const prompt = trimmed;
       // Clear immediately so typing during a slow mention lookup edits the
       // next draft instead of appending to the message being prepared.
@@ -542,6 +561,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       // a parked message. The first message's context is detached atomically;
       // a refusal restores it, while later edits stay with the composer.
       const steeredMessage: CodeSteeredMessage = {
+        ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
         id: globalThis.crypto.randomUUID(),
         threadKey: String(props.threadId),
         restore: restoreSteeredRef.current,
@@ -562,6 +582,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           props.controller.setPendingDraft?.(prompt);
           threadMentions.restore(threadMentionChips);
           pathMentions.restore(fileMentionPaths);
+          computer.restore(computerUseSelection);
           setTurnAccessOverride((current) => current ?? override);
         } else {
           // A newer draft won the race to steer this message. Its detached
@@ -576,14 +597,20 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     // must leave the message retryable with the same images, not just its text.
     const threadMentionIds = await threadMentions.resolveForSend();
     const fileMentionPaths = pathMentions.selectedPaths;
-    const sent = await props.controller.sendFollowUp(
+    const sendArguments: Parameters<typeof props.controller.sendFollowUp> = [
       trimmed,
       threadMentionIds,
       attachments.peekForSend(),
       fileMentionPaths,
       access,
-    );
+    ];
+    if (computerUseSelection !== undefined) {
+      sendArguments[5] = false;
+      sendArguments[6] = computerUseSelection;
+    }
+    const sent = await props.controller.sendFollowUp(...sendArguments);
     if (sent) {
+      computer.consume(computerUseSelection);
       attachments.takeForSend();
       // Only the draft that was sent is cleared: typing during the awaited send
       // bumps the revision, and that newer draft stays. The host keeps the
@@ -610,6 +637,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         message.fileMentionPaths,
         message.access,
         true,
+        ...(message.computerUseSelection === undefined
+          ? ([] as const)
+          : ([message.computerUseSelection] as const)),
       );
       if (sent) {
         // The detached images belong to this message only. Keep any images
@@ -643,6 +673,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     props.controller.setPendingDraft?.(message.prompt);
     threadMentions.restore(message.threadMentionChips);
     pathMentions.restore(message.fileMentionPaths);
+    computer.restore(message.computerUseSelection);
   };
 
   function attachFromTransfer(items: DataTransfer | null): boolean {
@@ -662,6 +693,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (computer.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
     if (pathMentions.handleKeyDown(event)) return;
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
@@ -1290,6 +1322,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
              * removal here: rendering a control whose sidecar this workspace
              * cannot open would mint a thread the user never sees.
              */}
+            <ComputerUseMention controller={computer} surface="chips" />
             <ThreadMentionChips
               chips={threadMentions.chips}
               onRemove={(mentionedThreadId) =>
@@ -1350,17 +1383,25 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         input={
           <OctantTextarea
             aria-activedescendant={
-              mention.activeCandidate !== undefined
-                ? `${mentionListId}-${String(mention.activeCandidate.threadId)}`
-                : pathMentionOpen && pathMentions.activeCandidate !== undefined
-                  ? `${pathMentionListId}-${pathMentions.activeCandidate.path}`
-                  : undefined
+              computer.open
+                ? `${computer.listId}-computer`
+                : mention.activeCandidate !== undefined
+                  ? `${mentionListId}-${String(mention.activeCandidate.threadId)}`
+                  : pathMentionOpen && pathMentions.activeCandidate !== undefined
+                    ? `${pathMentionListId}-${pathMentions.activeCandidate.path}`
+                    : undefined
             }
             aria-autocomplete="list"
             aria-controls={
-              mention.open ? mentionListId : pathMentionOpen ? pathMentionListId : undefined
+              computer.open
+                ? computer.listId
+                : mention.open
+                  ? mentionListId
+                  : pathMentionOpen
+                    ? pathMentionListId
+                    : undefined
             }
-            aria-expanded={mention.open || pathMentionOpen}
+            aria-expanded={computer.open || mention.open || pathMentionOpen}
             className="composer-input window-no-drag"
             id={`code-thread-composer-${String(thread.id)}`}
             onChange={(event) => {
@@ -1412,30 +1453,34 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           />
         }
         typeahead={
-          <>
-            {mention.open ? (
-              <ThreadMentionTypeahead
-                activeIndex={mention.activeIndex}
-                {...(threadMentions.composer?.busy === undefined
-                  ? {}
-                  : { busy: threadMentions.composer.busy })}
-                candidates={threadMentions.composer?.candidates ?? []}
-                listId={mentionListId}
-                onChoose={mention.choose}
-                onHover={mention.setActiveIndex}
-              />
-            ) : null}
-            {pathMentionOpen ? (
-              <PathMentionTypeahead
-                activeIndex={pathMentions.activeIndex}
-                busy={pathMentions.busy}
-                candidates={pathMentions.candidates}
-                listId={pathMentionListId}
-                onChoose={pathMentions.choose}
-                onHover={pathMentions.setActiveIndex}
-              />
-            ) : null}
-          </>
+          computer.open ? (
+            <ComputerUseMention controller={computer} surface="typeahead" />
+          ) : (
+            <>
+              {mention.open ? (
+                <ThreadMentionTypeahead
+                  activeIndex={mention.activeIndex}
+                  {...(threadMentions.composer?.busy === undefined
+                    ? {}
+                    : { busy: threadMentions.composer.busy })}
+                  candidates={threadMentions.composer?.candidates ?? []}
+                  listId={mentionListId}
+                  onChoose={mention.choose}
+                  onHover={mention.setActiveIndex}
+                />
+              ) : null}
+              {pathMentionOpen ? (
+                <PathMentionTypeahead
+                  activeIndex={pathMentions.activeIndex}
+                  busy={pathMentions.busy}
+                  candidates={pathMentions.candidates}
+                  listId={pathMentionListId}
+                  onChoose={pathMentions.choose}
+                  onHover={pathMentions.setActiveIndex}
+                />
+              ) : null}
+            </>
+          )
         }
         row={{
           ariaLabel: "Thread context",

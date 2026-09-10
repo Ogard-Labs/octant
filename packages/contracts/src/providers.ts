@@ -1060,11 +1060,21 @@ export const ProviderTurnInput = Schema.Struct({
 }).annotations(strict);
 export type ProviderTurnInput = typeof ProviderTurnInput.Type;
 
+export const ProviderToolImage = Schema.Struct({
+  mimeType: Schema.Literal("image/png", "image/jpeg"),
+  data: Schema.NonEmptyTrimmedString.pipe(
+    Schema.maxLength(2_097_152),
+    Schema.pattern(/^[A-Za-z0-9+/]+={0,2}$/),
+  ),
+}).annotations(strict);
+export type ProviderToolImage = typeof ProviderToolImage.Type;
+
 export const ProviderToolAnswer = Schema.Struct({
   sessionId: ProviderSessionId,
   requestId: BoundedProviderRequestId,
   resultJson: BoundedProviderJson,
   isError: Schema.Boolean,
+  images: Schema.optional(Schema.Array(ProviderToolImage).pipe(Schema.maxItems(4))),
 }).annotations(strict);
 export type ProviderToolAnswer = typeof ProviderToolAnswer.Type;
 

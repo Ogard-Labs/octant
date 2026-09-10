@@ -158,6 +158,10 @@ export interface AttentionNotificationRequest {
 }
 
 export interface OctantHostBridge {
+  readonly getComputerUseStatus?: () => Promise<unknown>;
+  readonly requestComputerUsePermissions?: () => Promise<unknown>;
+  readonly openComputerUsePermissionSettings?: () => Promise<void>;
+  readonly checkComputerUseUpdates?: () => Promise<unknown>;
   readonly notifyAttention?: (request: AttentionNotificationRequest) => Promise<void>;
   readonly setAttentionBadge?: (count: number) => Promise<void>;
   readonly attachBrowserSurface?: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;

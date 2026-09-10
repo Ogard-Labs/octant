@@ -291,11 +291,17 @@ describe("serverSpawnSpec", () => {
       instanceId: "managed-instance",
       packaged: false,
       execPath: "/usr/bin/octant",
-      env: { PATH: "/usr/bin" },
+      env: {
+        PATH: "/usr/bin",
+        OCTANT_COMPUTER_USE_BROKER_URL: "http://127.0.0.1:49999/v1/computer-use",
+        OCTANT_COMPUTER_USE_BROKER_TOKEN: "inherited-token",
+      },
     });
     expect(spec.env.OCTANT_CREDENTIAL_BROKER_URL).toBeUndefined();
     expect(spec.env.OCTANT_CREDENTIAL_BROKER_TOKEN).toBeUndefined();
     expect(spec.env.OCTANT_CODE_FILE_HELPER_PATH).toBeUndefined();
+    expect(spec.env.OCTANT_COMPUTER_USE_BROKER_URL).toBeUndefined();
+    expect(spec.env.OCTANT_COMPUTER_USE_BROKER_TOKEN).toBeUndefined();
     expect(spec.env.OCTANT_BROWSER_BROKER_URL).toBe("http://127.0.0.1:42000/");
   });
 

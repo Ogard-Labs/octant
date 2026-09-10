@@ -188,6 +188,11 @@ host that Electron attached to must be restarted separately — and
 `apps/desktop/src` edits are rebuilt automatically
 the next time you start `bun run dev`.
 
+For Computer use in the macOS development app, run `bun run computer-use:prepare`
+once to download and verify the pinned CuaDriver. Desktop packaging includes
+this step automatically. Select **Computer** from a composer's `@` picker and
+use **Settings → Computer use** for permissions and automatic driver updates.
+
 To run the host without Electron and attach a browser client:
 
 ```sh

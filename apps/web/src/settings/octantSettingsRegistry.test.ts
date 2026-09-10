@@ -12,6 +12,7 @@ describe("octantSettingsRegistry", () => {
       "navigator-assistant",
       "voice",
       "image-generation",
+      "computer-use",
       "providers",
       "profiles",
       "agents",

@@ -265,6 +265,45 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       settings: [],
     },
     {
+      id: "computer-use",
+      label: "Computer use",
+      scope: "host",
+      keywords:
+        "computer use computer automation cua driver permissions accessibility screen recording plugin updates upgrade",
+      settings: [
+        {
+          id: settingId("computer-use-enabled"),
+          label: "Computer use",
+          scope: "host",
+          keywords: "plugin enable computer control",
+        },
+        {
+          id: settingId("computer-use-accessibility"),
+          label: "Accessibility",
+          scope: "host",
+          keywords: "permissions accessibility",
+        },
+        {
+          id: settingId("computer-use-screen-recording"),
+          label: "Screen recording",
+          scope: "host",
+          keywords: "permissions screen capture",
+        },
+        {
+          id: settingId("computer-use-version"),
+          label: "Installed driver",
+          scope: "host",
+          keywords: "cua driver version",
+        },
+        {
+          id: settingId("computer-use-automatic-updates"),
+          label: "Automatic updates",
+          scope: "host",
+          keywords: "automatic updates upgrade",
+        },
+      ],
+    },
+    {
       id: "providers",
       label: "Providers & Models",
       scope: "app",

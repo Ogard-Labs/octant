@@ -3,6 +3,7 @@ import {
   type ProviderFailure,
   type ProviderToolAnswer,
   type ProviderToolDefinition,
+  type ProviderToolImage,
 } from "@octant/contracts";
 import { Effect } from "effect";
 import {
@@ -22,6 +23,7 @@ export interface AnthropicToolResult {
   readonly toolCallId: string;
   readonly resultJson: string;
   readonly isError: boolean;
+  readonly images?: ReadonlyArray<ProviderToolImage> | undefined;
 }
 
 /**
@@ -128,7 +130,7 @@ export function buildAnthropicMessagesBody(
         content: entry.toolResults.map((result) => ({
           type: "tool_result",
           tool_use_id: result.toolCallId,
-          content: result.resultJson,
+          content: anthropicToolObservation(result),
           ...(result.isError ? { is_error: true } : {}),
         })),
       });
@@ -156,7 +158,7 @@ export function buildAnthropicMessagesBody(
     ...answers.map((answer) => ({
       type: "tool_result",
       tool_use_id: answer.requestId,
-      content: answer.resultJson,
+      content: anthropicToolObservation(answer),
       ...(answer.isError ? { is_error: true } : {}),
     })),
     ...(input.prompt.length === 0 ? [] : [{ type: "text", text: input.prompt }]),
@@ -599,4 +601,19 @@ function classifyAnthropicStreamError(type: string): ProviderFailure | undefined
     default:
       return undefined;
   }
+}
+
+function anthropicToolObservation(result: {
+  readonly resultJson: string;
+  readonly images?: ReadonlyArray<ProviderToolImage> | undefined;
+}) {
+  return result.images === undefined || result.images.length === 0
+    ? result.resultJson
+    : [
+        { type: "text", text: result.resultJson },
+        ...result.images.map((image) => ({
+          type: "image",
+          source: { type: "base64", media_type: image.mimeType, data: image.data },
+        })),
+      ];
 }

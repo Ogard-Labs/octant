@@ -1,3 +1,4 @@
+import type { ExtensionSelection } from "@octant/contracts/extensions";
 import {
   CodeClientSnapshotRequiredError,
   createCodeClient,
@@ -1515,6 +1516,7 @@ export function useCodeController(options: CodeControllerOptions) {
        */
       readonly attachmentIds?: ReadonlyArray<CodeAttachmentId>;
       readonly fileMentionPaths?: ReadonlyArray<string>;
+      readonly computerUseSelection?: ExtensionSelection;
       /**
        * The posture this turn asks to run under. The host clamps it to the
        * thread's grant, so this is an intent, not a grant.
@@ -1535,6 +1537,9 @@ export function useCodeController(options: CodeControllerOptions) {
         checkoutId: input.checkoutId,
         sessionId,
         prompt: reference,
+        ...(input.computerUseSelection === undefined
+          ? {}
+          : { computerUseSelection: input.computerUseSelection }),
         ...(input.threadMentionIds === undefined || input.threadMentionIds.length === 0
           ? {}
           : { threadMentionIds: [...input.threadMentionIds] }),
@@ -1559,6 +1564,7 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
       readonly attachmentIds?: ReadonlyArray<CodeAttachmentId>;
       readonly fileMentionPaths?: ReadonlyArray<string>;
+      readonly computerUseSelection?: ExtensionSelection;
     }): Promise<boolean> => {
       const prompt = input.prompt.trim();
       if (prompt.length === 0) return false;
@@ -1944,6 +1950,7 @@ export function useCodeController(options: CodeControllerOptions) {
       executionPolicy?: ProviderExecutionPolicy,
       /** True when the composer already cleared this draft while it waited. */
       delayed?: boolean,
+      computerUseSelection?: ExtensionSelection,
     ): Promise<boolean> => {
       const trimmed = prompt.trim();
       const view = activeView?.thread.id === activeThreadId.current ? activeView : undefined;
@@ -1995,6 +2002,7 @@ export function useCodeController(options: CodeControllerOptions) {
           threadMentionIds,
           attachmentIds: attachments.map((attachment) => attachment.attachmentId),
           fileMentionPaths,
+          ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
           ...(executionPolicy === undefined ? {} : { executionPolicy }),
           signal: controller.signal,
         });

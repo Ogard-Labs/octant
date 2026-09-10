@@ -9,6 +9,12 @@ function toolSet(name: string): AppManagedToolSet & { execute: ReturnType<typeof
 }
 
 describe("combineAppManagedToolSets", () => {
+  it("closes a turn's owned resources once even when cleanup is requested twice", async () => {
+    const close = vi.fn(async () => {});
+    const combined = combineAppManagedToolSets({ ...toolSet("octant_computer"), close });
+    await Promise.all([combined.close?.(), combined.close?.()]);
+    expect(close).toHaveBeenCalledOnce();
+  });
   it("concatenates definitions and routes execution to the owning set", async () => {
     const first = toolSet("octant_terminal");
     const second = toolSet("octant_github");

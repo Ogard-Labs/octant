@@ -7,7 +7,7 @@ const shared = {
   platform: "node" as const,
   deps: {
     alwaysBundle: [DESKTOP_INTERNAL_RUNTIME_PATTERN],
-    neverBundle: ["electron"],
+    neverBundle: ["electron", /^@trycua\//],
     onlyBundle: false as const,
   },
 };

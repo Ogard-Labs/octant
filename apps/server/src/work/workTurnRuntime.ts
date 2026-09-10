@@ -125,6 +125,11 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
   ): Effect.Effect<WorkTurnRuntimeOutcome, ProviderFailure, Scope.Scope> {
     const cleanupTimeoutMs = Math.max(1, Math.min(this.#timeoutMs, 1_000));
     return Effect.gen(function* () {
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(async () => {
+          await input.appManagedTools?.close?.();
+        }).pipe(Effect.catchAllCause(() => Effect.logWarning("App-managed tool cleanup failed."))),
+      );
       let reachedTerminalEvent = false;
       const connection = yield* input.driver.acquire({
         instanceId: input.command.authority.providerInstanceId,
@@ -214,6 +219,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                       } catch {
                         return {
                           result: { error: "tool-execution-failed" },
+                          images: [],
                           isError: true,
                         } as const;
                       }
@@ -225,6 +231,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                       sessionId: input.providerSessionId,
                       requestId: event.requestId,
                       resultJson: boundedToolResultJson(execution.result),
+                      ...(execution.images === undefined ? {} : { images: execution.images }),
                       isError: execution.isError === true,
                     })
                     .pipe(Effect.catchAll(() => Effect.void));

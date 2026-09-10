@@ -267,7 +267,7 @@ export const CLOSED_TOOL_CATALOG: ReadonlyArray<ClosedToolCatalogEntry> = [
     capabilityId: "computer-use",
     version: 1,
     owner: "core",
-    modes: ["work", "code"],
+    modes: ["chat", "work", "code"],
     requiredCapabilityClass: "computer-use",
     approvalClass: "external-application",
     irreversibleUnderTaint: true,
