@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
-import { ArrowLeft, ChevronDown, Menu, Search, X } from "lucide-react";
+import { ArrowLeft, Menu, Search, X } from "lucide-react";
 import type { ShellSettings } from "@octant/contracts/shell";
 import {
   type SettingsDeepLink,
@@ -870,17 +870,11 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           </SettingRow>
         </div>
       </div>
-      <details
-        className="settings-card-section settings-card-section--open settings-profile-disclosure"
-        open={focusedSetting === settingId("user-profile") ? true : undefined}
-      >
-        <summary>
-          <span className="settings-profile-disclosure__summary-copy">
-            <h2>Profile</h2>
-            <span>{props.settings.userProfile.displayName ?? "Not set"}</span>
-          </span>
-          <ChevronDown aria-hidden="true" size={16} strokeWidth={1.5} />
-        </summary>
+      {/* Your name, picture and avatar colour: identity, not an advanced
+          option, so it is not worth a click to reach. The collapsed summary
+          used to preview the display name; the row it opens onto says it. */}
+      <section className="settings-card-section settings-card-section--open">
+        <h2>Profile</h2>
         <div className="setgroup">
           <SettingRow
             description="How you are shown inside Octant. There is no account behind this, and none of it is required."
@@ -896,7 +890,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             />
           </SettingRow>
         </div>
-      </details>
+      </section>
       <div className="settings-card-section settings-card-section--open">
         <h2>Updates</h2>
         <p className="settings-section-note">

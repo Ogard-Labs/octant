@@ -129,16 +129,12 @@ export function ExecutionProfileWorkflow(props: {
   const settingsBody = (
     <>
       {alert}
-      <details className="settings-card-section settings-card-section--open settings-profile-disclosure execution-profile-workflow__context">
-        <summary>
-          <span className="settings-profile-disclosure__summary-copy">
-            <h2 className="oct-section-label">Execution context</h2>
-            <span>
-              {controller.selectedEntry?.modelDisplayName ?? "Provider, model, and defaults"}
-            </span>
-          </span>
-          <ChevronDown aria-hidden="true" size={16} />
-        </summary>
+      {/* Which provider and model new drafts resolve against is the reason
+          to open this page, so it is not worth a click to reach. The
+          collapsed summary previewed the model; the picker it opens onto
+          names it. */}
+      <section className="settings-card-section settings-card-section--open execution-profile-workflow__context">
+        <h2 className="oct-section-label">Execution context</h2>
         <p className="settings-section-note">
           Choose the provider, model, and profile used to resolve draft defaults.
         </p>
@@ -153,7 +149,7 @@ export function ExecutionProfileWorkflow(props: {
           </SettingRow>
         </div>
         <ResolutionReceipt controller={controller} quiet />
-      </details>
+      </section>
       <div className="settings-card-section settings-card-section--open">
         <div className="settings-section-head">
           <h2 className="oct-section-label">Saved profiles</h2>
