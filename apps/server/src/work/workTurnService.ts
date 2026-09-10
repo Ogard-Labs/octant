@@ -672,6 +672,21 @@ export class WorkTurnService {
       });
       return;
     }
+    // Work does not yet have an approved skill-material resolver. Refuse an
+    // explicit skill selection before provider execution instead of silently
+    // dropping the instruction the person chose. Host-owned Browser selections
+    // remain valid because Browser is already composed through app-managed
+    // tools above.
+    if (input.command.extensionSelections?.some((selection) => selection.kind === "skill")) {
+      this.#persistUpdate(current, {
+        status: "failed",
+        failure: {
+          category: "unavailable",
+          message: "Selected skill context is unavailable for Work on this host.",
+        },
+      });
+      return;
+    }
     const harnessScope: NativeHarnessTurnScope | undefined =
       input.thread === undefined
         ? undefined

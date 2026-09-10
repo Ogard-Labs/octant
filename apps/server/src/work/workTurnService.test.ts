@@ -75,6 +75,36 @@ describe("WorkTurnService", () => {
     });
   });
 
+  it("refuses an explicit skill until Work has a material resolver", async () => {
+    const fixture = serviceFixture();
+    const result = await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      extensionSelections: [
+        {
+          kind: "skill",
+          skillId: `agents-skills-directory:project:review:sha256:${"a".repeat(64)}`,
+          packageDigest: `sha256:${"a".repeat(64)}`,
+          catalogEpoch: `sha256:${"b".repeat(64)}`,
+          origin: { kind: "draft", reference: "$review" },
+        },
+      ],
+    });
+    expect(result.kind).toBe("accepted");
+    await fixture.waitForIdle();
+    const lookup = await fixture.service.lookupFirstTurn(ids.window, ids.request);
+    expect(lookup).toMatchObject({
+      kind: "accepted",
+      turn: {
+        status: "failed",
+        failure: {
+          category: "unavailable",
+          message: "Selected skill context is unavailable for Work on this host.",
+        },
+      },
+    });
+    expect(fixture.acquireInputs).toHaveLength(0);
+  });
+
   it("preserves draft semantics by rejecting a stale binding without creating a turn", async () => {
     const fixture = serviceFixture({
       project: {
