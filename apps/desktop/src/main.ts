@@ -997,6 +997,10 @@ let hostStatusPoll: ReturnType<typeof setInterval> | undefined;
 const pendingCodeDeepLinks: CodeDeepLink[] = [];
 let quitPrepared = false;
 let preparingQuit = false;
+// The active-work confirmation only applies to quits the user starts inside
+// the app (menu, Cmd+Q). Signal- or event-driven termination (SIGTERM,
+// AppleScript "quit", logout) cannot answer a dialog and must still proceed.
+let quitCanPrompt = false;
 let handlersInstalled = false;
 let projectRootPicker: ReturnType<typeof createProjectRootPicker> | undefined;
 const projectWindowLifecycle = createProjectWindowAuthorityLifecycle();
@@ -2326,6 +2330,7 @@ async function runMenuBarAction(
         message: formatRedactedHostDiagnostics(hostLifecycle.snapshot()),
       });
     } else if (action === "fully-quit") {
+      quitCanPrompt = true;
       app.quit();
     }
   } catch {
@@ -3241,11 +3246,15 @@ async function confirmQuitWithActiveWork(
 }
 
 async function prepareToQuit(): Promise<void> {
-  const accepted = await evaluateQuitRequest({
-    refreshActivity: refreshHostActivity,
-    snapshot: hostLifecycle.snapshot,
-    confirm: confirmQuitWithActiveWork,
-  });
+  const interactive = quitCanPrompt;
+  quitCanPrompt = false;
+  const accepted =
+    !interactive ||
+    (await evaluateQuitRequest({
+      refreshActivity: refreshHostActivity,
+      snapshot: hostLifecycle.snapshot,
+      confirm: confirmQuitWithActiveWork,
+    }));
   if (!accepted) {
     preparingQuit = false;
     return;
@@ -3341,6 +3350,10 @@ function installApplicationMenu(): void {
     Menu.buildFromTemplate(
       buildApplicationMenuTemplate({
         appName: app.name,
+        onQuit: () => {
+          quitCanPrompt = true;
+          app.quit();
+        },
         onOpenSettings: () => {
           const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
           if (window === undefined || window.isDestroyed()) return;
@@ -3386,7 +3399,10 @@ else {
     .catch(handleFatalStartup);
 }
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  if (process.platform !== "darwin") {
+    quitCanPrompt = true;
+    app.quit();
+  }
 });
 app.on("activate", requestActiveWindow);
 app.on("before-quit", (event) => {

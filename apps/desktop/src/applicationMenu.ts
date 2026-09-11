@@ -3,6 +3,7 @@ import type { MenuItemConstructorOptions } from "electron";
 export interface ApplicationMenuOptions {
   readonly appName: string;
   readonly onOpenSettings: () => void;
+  readonly onQuit: () => void;
 }
 
 /** Standard macOS application menu plus Octant's shared Settings surface. */
@@ -27,7 +28,14 @@ export function buildApplicationMenuTemplate(
         { role: "hideOthers" },
         { role: "unhide" },
         { type: "separator" },
-        { role: "quit" },
+        // An explicit item (not the `quit` role) marks the quit as interactive
+        // so the active-work confirmation can tell it apart from signal- or
+        // event-driven termination that nobody can answer.
+        {
+          accelerator: "CmdOrCtrl+Q",
+          click: options.onQuit,
+          label: `Quit ${options.appName}`,
+        },
       ],
     },
     { role: "fileMenu" },
