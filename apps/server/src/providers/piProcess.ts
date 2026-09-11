@@ -414,6 +414,16 @@ function lstatExists(path: string): boolean {
   }
 }
 
+function packageRootAbove(directory: string): string | undefined {
+  let current = directory;
+  while (true) {
+    if (existsSync(join(current, "package.json"))) return current;
+    const parent = dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+}
+
 export function makePiConfinementLive(options: PiConfinementOptions = {}): PiConfinementPort {
   const platform = options.platform ?? process.platform;
   const sandboxPath =
@@ -506,7 +516,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
         );
         const binaryDirectory = dirname(realpathSync(input.binaryPath));
         const runtimeDirectory = dirname(binaryDirectory);
-        const packageRoot = dirname(runtimeDirectory);
+        const packageRoot = packageRootAbove(binaryDirectory);
         const networkEgress = materializeOsNetworkEgress(
           resolveDefaultThreadEgressPolicy({
             mode: input.mode,
@@ -550,7 +560,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
                 piHome,
                 binaryDirectory,
                 runtimeDirectory,
-                packageRoot,
+                ...(packageRoot === undefined ? [] : [packageRoot]),
                 temporaryDirectoryPath,
                 ...credentialPaths,
               ],
@@ -559,7 +569,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
                 piHome,
                 binaryDirectory,
                 runtimeDirectory,
-                packageRoot,
+                ...(packageRoot === undefined ? [] : [packageRoot]),
                 ...credentialPaths,
               ],
               ...(bridgeRule === undefined ? {} : { extraRules: [bridgeRule] }),
