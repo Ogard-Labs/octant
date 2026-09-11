@@ -4,7 +4,7 @@ description: Chat mode provides conversation threads in virtual Projects with sc
 
 # Chat
 
-Chat is the conversation surface. Chat Projects are virtual containers with shared scoped memory and no implicit filesystem or shell access. Chat is always available; disabling it in Settings never deletes existing Chat data.
+Chat is the conversation surface. Chat Projects are virtual containers with shared scoped memory and no implicit filesystem or shell access. Chat can be disabled in **Settings → General → Available modes**; a disabled Chat refuses new threads and turns on the host but never deletes existing Chat data. Code is the mode that is always available.
 
 ## Chat Projects
 

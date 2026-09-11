@@ -7,7 +7,9 @@ description: Technical-preview boundaries, data location, and release compatibil
 Octant's first release is an **Apple Silicon technical preview**. A declared
 release is signed with a Developer ID, notarized, and updates itself. A
 package you build locally is unsigned because signing needs maintainer
-credentials. The preview includes no Intel, Windows, or Linux packaging.
+credentials. The preview includes no signed Intel, Windows, or Linux
+packaging; a Linux x64 AppImage can be built locally as an unsigned dogfood
+artifact that the updater will not update.
 Physical Apple devices, TestFlight, and App Store distribution are
 post-preview. This page records what that means for compatibility and
 migration.
@@ -55,9 +57,11 @@ validation remain post-preview work.
 
 - Full IDE/LSP/debugger/extension-host scope (Monaco and external-editor
   handoff are primary)
-- Hosted relay, Octant cloud account, and multi-host federation
-- Intel, Windows, and Linux packaging, and native mobile store
-  distribution
+- Hosted relay, Octant cloud account, and cross-host command routing (a
+  paired client can register several hosts, but every command runs on the
+  one host that owns the thread)
+- Signed Intel, Windows, and Linux packaging with auto-update, and native
+  mobile store distribution
 - Mutating PR review and merge operations
 - Schedules, connector/OAuth marketplace, and data migration from current
   Octant
