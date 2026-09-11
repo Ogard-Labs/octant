@@ -91,19 +91,24 @@ describe("packaged compatible native identity and helper protocol", () => {
       "forced",
     );
 
-    expect(identity).toEqual({
-      dataDirectoryPrefix: "octant-compatible-forced.",
-      providerInstanceId: "80000000-0000-4000-8000-000000000551",
-      service: OCTANT_KEYCHAIN_SERVICE,
-    });
+    expect(identity.dataDirectoryPrefix).toBe("octant-compatible-forced.");
+    expect(identity.providerInstanceId).toBe("80000000-0000-4000-8000-000000000551");
+    expect(identity.storeScope).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+    expect(identity.service).toBe(OCTANT_KEYCHAIN_SERVICE);
   });
 
   it("passes a credential only through helper stdin", () => {
-    const invocation = keychainHelperInvocation("/Applications/Octant/helper", {
-      operation: "set",
-      providerInstanceId: "80000000-0000-4000-8000-000000000551",
-      credential: "private-value",
-    });
+    const invocation = keychainHelperInvocation(
+      "/Applications/Octant/helper",
+      {
+        operation: "set",
+        providerInstanceId: "80000000-0000-4000-8000-000000000551",
+        credential: "private-value",
+      },
+      "80000000-0000-4000-8000-000000000552",
+    );
 
     expect(invocation.command).toBe("/Applications/Octant/helper");
     expect(invocation.args).toEqual([]);
