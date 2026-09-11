@@ -1,8 +1,9 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import type { ProviderFailure } from "@octant/contracts";
 import { Effect, type Scope } from "effect";
+import { approvedHomeBinDirs } from "./discoveryService";
 import { makePiRpcClient, type PiRpcClient } from "./piRpcClient";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 
@@ -72,6 +73,26 @@ export function sanitizeOhMyPiEnvironment(
     // Keep Oh My Pi state isolated from the user's interactive OMP profile.
     ["OMP_HOME", managedHome],
   ]);
+}
+
+// The GUI PATH does not include user bin directories, so a `#!env node`-style
+// shim resolves nothing. The binary's own directory is where its runtime
+// siblings live, and the approved home bin directories are the same allowlist
+// discovery already trusts — together they join PATH ahead of the inherited
+// entries so a registered provider actually starts.
+export function ohMyPiProcessEnvironment(
+  binaryPath: string,
+  host: NodeJS.ProcessEnv,
+  managedHome: string,
+): NodeJS.ProcessEnv {
+  const sanitized = sanitizeOhMyPiEnvironment(host, managedHome);
+  const binaryDirectory = dirname(binaryPath);
+  const path = sanitized.PATH?.split(delimiter).filter(Boolean) ?? [];
+  const searched = [binaryDirectory, ...approvedHomeBinDirs(host.HOME), ...path];
+  return {
+    ...sanitized,
+    PATH: [...new Set(searched)].join(delimiter),
+  };
 }
 
 export function ohMyPiProbeArguments(): ReadonlyArray<string> {
@@ -238,7 +259,11 @@ export function makeOhMyPiProcessLive(options: OhMyPiProcessOptions = {}): OhMyP
               ),
             );
           }
-          const environment = sanitizeOhMyPiEnvironment(inherited, input.managedHome);
+          const environment = ohMyPiProcessEnvironment(
+            input.binaryPath,
+            inherited,
+            input.managedHome,
+          );
           const version = yield* Effect.tryPromise({
             try: () => inspectVersion(input.binaryPath, environment, versionTimeoutMs),
             catch: () => failure("incompatible", "Oh My Pi version could not be verified."),
