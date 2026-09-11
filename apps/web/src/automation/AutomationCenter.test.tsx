@@ -453,7 +453,7 @@ describe("AutomationCenter creation and editing", () => {
     fireEvent.change(within(form).getByLabelText("Run at"), {
       target: { value: "2026-09-01T09:00" },
     });
-    await userEvent.type(within(form).getByLabelText("Delivery target"), "A summary exists.");
+    await userEvent.type(within(form).getByLabelText("Delivery"), "A summary exists.");
     await userEvent.click(
       within(form).getByLabelText("I confirm this delivery target for every scheduled run"),
     );
@@ -566,7 +566,7 @@ describe("AutomationCenter narrow layout, keyboard, and focus", () => {
 describe("AutomationCenter calendar view", () => {
   it("lays the same routines out by when they run, and goes back to the list", async () => {
     renderCenter();
-    expect(await screen.findByLabelText("Automations")).toBeTruthy();
+    expect(await screen.findByRole("list", { name: "Automations" })).toBeTruthy();
 
     await userEvent.click(screen.getByRole("button", { name: "Calendar" }));
 
@@ -575,11 +575,11 @@ describe("AutomationCenter calendar view", () => {
       within(calendar).getAllByRole("button", { name: /Weekly summary/ }).length,
     ).toBeGreaterThan(0);
     // The list is a view, not a place: switching away and back keeps the rows.
-    expect(screen.queryByLabelText("Automations")).toBeNull();
+    expect(screen.queryByRole("list", { name: "Automations" })).toBeNull();
 
     await userEvent.click(screen.getByRole("button", { name: "List" }));
 
-    expect(screen.getByLabelText("Automations")).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Automations" })).toBeTruthy();
   });
 
   it("moves between months without losing the routines", async () => {
