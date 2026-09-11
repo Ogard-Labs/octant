@@ -32,10 +32,14 @@ import type {
   ProviderModelId,
   ProviderObservedState,
 } from "@octant/contracts";
+import { isImageProfileDriverKind } from "@octant/domain";
 import type { ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { ProviderCreateForm } from "./ProviderSettingsConfiguration";
+import {
+  ProviderCreateForm,
+  type ProviderCreateProviderType,
+} from "./ProviderSettingsConfiguration";
 import { ProviderSettingsList } from "./ProviderSettingsList";
 import type { TransientProviderCredential } from "./useProviderController";
 
@@ -275,6 +279,29 @@ export interface ProviderSettingsViewProps {
   readonly onRetry: () => Promise<boolean>;
 }
 
+const GENERAL_PROVIDER_TYPES: ReadonlyArray<ProviderCreateProviderType> = [
+  "opencode",
+  "codex",
+  "kimi-code",
+  "claude",
+  "devin",
+  "kilo",
+  "pi",
+  "oh-my-pi",
+  "ollama",
+  "mistral-vibe",
+  "grok",
+  "goose",
+  "glm",
+  "gemini",
+  "copilot",
+  "cline",
+  "qwen",
+  "openai-compatible",
+  "anthropic-compatible",
+  "azure-foundry",
+];
+
 export function ProviderSettingsView(props: ProviderSettingsViewProps) {
   // The settings shell already renders the pane's `.oct-title` and
   // `.oct-subtitle`; repeating an identity heading here read as three titles
@@ -304,6 +331,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         busy={props.busy}
         createForm={
           <ProviderCreateForm
+            allowedProviderTypes={GENERAL_PROVIDER_TYPES}
             busy={props.busy}
             credentialManagementAvailable={props.credentialManagementAvailable}
             onCreate={props.onCreate}
@@ -327,7 +355,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         credentialManagementAvailable={props.credentialManagementAvailable}
         defaults={props.defaults}
         discoverySnapshot={props.discoverySnapshot}
-        instances={props.instances}
+        instances={props.instances.filter(
+          (instance) => !isImageProfileDriverKind(instance.driverKind),
+        )}
         observedByInstance={props.observedByInstance}
         {...(props.presentationObservedByInstance === undefined
           ? {}

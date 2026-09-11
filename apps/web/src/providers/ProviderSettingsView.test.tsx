@@ -15,6 +15,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import type { ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { ProviderCreateForm } from "./ProviderSettingsConfiguration";
+import { ProviderSettingsList } from "./ProviderSettingsList";
 import { ProviderSettingsView, type ProviderSettingsViewProps } from "./ProviderSettingsView";
 import { useProviderController } from "./useProviderController";
 import type { OctantHostBridge } from "../shell/hostBridge";
@@ -34,6 +36,31 @@ function renderExpanded(ui: ReactElement) {
   for (const configure of screen.queryAllByRole("button", { name: /^Configure / })) {
     if (configure.getAttribute("aria-expanded") === "false") fireEvent.click(configure);
   }
+  return result;
+}
+
+function renderProviderListExpanded(props: ProviderSettingsViewProps) {
+  return renderExpanded(
+    <ProviderSettingsList {...props} discoverySnapshot={props.discoverySnapshot} />,
+  );
+}
+
+function renderImageProviderCreation(props: ProviderSettingsViewProps) {
+  const result = render(
+    <ProviderCreateForm
+      {...props}
+      allowedProviderTypes={[
+        "openai-image",
+        "gemini-native-image",
+        "bfl-image",
+        "ideogram-image",
+        "openai-compatible",
+      ]}
+      initialProviderType="openai-image"
+      triggerLabel="Add image provider"
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Add image provider" }));
   return result;
 }
 
@@ -108,6 +135,14 @@ describe("ProviderSettingsView", () => {
     );
   });
 
+  it("keeps dedicated image providers out of the general provider page", () => {
+    renderProviderSettings(
+      <ProviderSettingsView {...fixture({ instance: openAiImageProvider() })} />,
+    );
+
+    expect(screen.queryByRole("article", { name: "GPT Image" })).not.toBeInTheDocument();
+  });
+
   it("keeps manual provider setup behind an advanced disclosure", async () => {
     const user = userEvent.setup();
     renderProviderSettings(<ProviderSettingsView {...fixture()} />);
@@ -118,6 +153,10 @@ describe("ProviderSettingsView", () => {
     await user.click(disclosure);
     expect(disclosure).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("heading", { name: "Custom endpoint or binary" })).toBeVisible();
+    await user.click(screen.getByRole("combobox", { name: "Provider type" }));
+    expect(screen.queryByRole("option", { name: "OpenAI Image" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Gemini Image" })).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "Details for Existing CLI" }));
     const configure = screen.getByRole("button", { name: "Configure Existing CLI" });
     expect(configure).toHaveAttribute("aria-controls");
@@ -1022,7 +1061,7 @@ describe("ProviderSettingsView", () => {
   it("creates an OpenAI image profile with a write-only key and no base URL", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: openAiImageProvider() });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderImageProviderCreation(props);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "OpenAI Image");
     const create = screen.getByRole("form", { name: "Add OpenAI image profile" });
@@ -1052,7 +1091,7 @@ describe("ProviderSettingsView", () => {
   });
 
   it("shows stored Keychain status and omits a connection check for an OpenAI image profile", async () => {
-    renderExpanded(<ProviderSettingsView {...fixture({ instance: openAiImageProvider() })} />);
+    renderProviderListExpanded(fixture({ instance: openAiImageProvider() }));
     const stored = screen.getByRole("article", { name: "GPT Image" });
     expect(await within(stored).findByText("Stored in Keychain")).toBeVisible();
     expect(
@@ -1063,22 +1102,18 @@ describe("ProviderSettingsView", () => {
 
   it("shows a missing image-profile credential as not configured", async () => {
     const props = fixture({ instance: openAiImageProvider() });
-    renderExpanded(
-      <ProviderSettingsView
-        {...props}
-        onProviderCredentialStatus={vi.fn(async () => "missing" as const)}
-      />,
-    );
+    renderProviderListExpanded({
+      ...props,
+      onProviderCredentialStatus: vi.fn(async () => "missing" as const),
+    });
     expect(
       await within(screen.getByRole("article", { name: "GPT Image" })).findByText("Not configured"),
     ).toBeVisible();
   });
 
   it("shows unavailable credential status for an image profile on a remote client", () => {
-    renderExpanded(
-      <ProviderSettingsView
-        {...fixture({ instance: openAiImageProvider(), credentialManagementAvailable: false })}
-      />,
+    renderProviderListExpanded(
+      fixture({ instance: openAiImageProvider(), credentialManagementAvailable: false }),
     );
     const card = screen.getByRole("article", { name: "GPT Image" });
     expect(within(card).getByText("Unavailable")).toBeVisible();
@@ -1088,7 +1123,7 @@ describe("ProviderSettingsView", () => {
   it("saves OpenAI image configuration and clears the stored key on remove", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: openAiImageProvider() });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderProviderListExpanded(props);
     const card = screen.getByRole("article", { name: "GPT Image" });
     await user.clear(within(card).getByLabelText("Model allowlist for GPT Image"));
     await user.type(within(card).getByLabelText("Model allowlist for GPT Image"), "gpt-image-1");
@@ -1116,7 +1151,7 @@ describe("ProviderSettingsView", () => {
   it("creates a Gemini image profile with a write-only key and no base URL", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: geminiImageProvider() });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderImageProviderCreation(props);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Gemini Image");
     const create = screen.getByRole("form", { name: "Add Gemini image profile" });
@@ -1150,7 +1185,7 @@ describe("ProviderSettingsView", () => {
   it("creates a BFL image profile with a write-only key, no base URL, and no quality or size fields", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: geminiImageProvider() });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderImageProviderCreation(props);
 
     await chooseSelectFieldOption(
       user,
@@ -1186,7 +1221,7 @@ describe("ProviderSettingsView", () => {
   it("saves BFL image configuration and clears the stored key on remove", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: bflImageProvider() });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderProviderListExpanded(props);
     const card = screen.getByRole("article", { name: "FLUX" });
     await user.clear(within(card).getByLabelText("Model allowlist for FLUX"));
     await user.type(within(card).getByLabelText("Model allowlist for FLUX"), "flux-dev");
@@ -1214,7 +1249,7 @@ describe("ProviderSettingsView", () => {
   it("creates an Ideogram image profile with a write-only key and no base URL", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: geminiImageProvider() });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderImageProviderCreation(props);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Ideogram Image");
     const create = screen.getByRole("form", { name: "Add Ideogram image profile" });
@@ -1246,7 +1281,7 @@ describe("ProviderSettingsView", () => {
   it("saves Ideogram image configuration and clears the stored key on remove", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: ideogramImageProvider() });
-    renderExpanded(<ProviderSettingsView {...props} />);
+    renderProviderListExpanded(props);
     const card = screen.getByRole("article", { name: "Ideogram" });
     await user.clear(within(card).getByLabelText("Model allowlist for Ideogram"));
     await user.type(within(card).getByLabelText("Model allowlist for Ideogram"), "ideogram-v4");

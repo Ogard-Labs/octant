@@ -97,6 +97,10 @@ export type ProviderSettingsListProps = Pick<
   readonly discoverySnapshot: DiscoverySnapshot | undefined;
   readonly presentationObservedByInstance?: ReadonlyMap<ProviderInstanceId, ProviderObservedState>;
   readonly createForm?: ReactNode;
+  readonly heading?: string;
+  readonly note?: string;
+  readonly showAgentEligibleModels?: boolean;
+  readonly showReorder?: boolean;
 };
 
 export function ProviderSettingsList(props: ProviderSettingsListProps) {
@@ -152,8 +156,8 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         {/* The pane is already titled "Providers"; this label names the list
             against the detection section above it. */}
         <div className="settings-section-head">
-          <h2>Configured providers</h2>
-          {ordered.length < 2 ? null : (
+          <h2>{props.heading ?? "Configured providers"}</h2>
+          {props.showReorder === false || ordered.length < 2 ? null : (
             <OctantButton
               aria-pressed={reordering}
               onClick={() => setReordering((current) => !current)}
@@ -168,7 +172,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         <p className="settings-section-note">
           {reordering
             ? "Use the arrow controls to change the model-picker order."
-            : "The first ready provider is the default for new threads."}
+            : (props.note ?? "The first ready provider is the default for new threads.")}
         </p>
         {ordered.length === 0 ? null : (
           <p
@@ -244,7 +248,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
           <div className="provider-settings__foot">{props.createForm}</div>
         )}
       </section>
-      {ordered.length === 0 ? null : (
+      {ordered.length === 0 || props.showAgentEligibleModels === false ? null : (
         <AgentEligibleModelsControls
           agentEligibleModels={props.defaults.agentEligibleModels}
           busy={busy}
