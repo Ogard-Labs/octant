@@ -129,6 +129,7 @@ distilled successor of the earlier long-form design specifications.
 | [0115](0115-terminal-cache-ancestors-expose-only-metadata.md) | Terminal cache ancestors expose only directory metadata | Accepted |
 | [0116](0116-settings-use-open-row-surfaces.md) | Settings use open row surfaces | Accepted |
 | [0117](0117-a-default-folder-for-what-nobody-gave-a-home.md) | A default folder for what nobody gave a home | Accepted |
+| [0118](0118-a-work-project-keeps-its-status-in-its-folder.md) | A Work Project keeps its status in its folder | Accepted |
 
 ## Adding an ADR
 

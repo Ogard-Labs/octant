@@ -358,6 +358,8 @@ import { FolderBrowseService } from "./folderBrowseService";
 import { ProjectService } from "./projectService";
 import { windowCanAccessCodeProject } from "./windowCodeProjectAccess";
 import { ProjectRootPort } from "./projectRootPort";
+import { WorkProjectStatusFiles } from "./work/workProjectStatusFiles";
+import { WorkProjectStatusReader, listWorkFolderTopLevel } from "./work/workProjectStatusReader";
 import { DEFAULT_FOLDER_ARTIFACTS_SUBFOLDER, effectiveDefaultFolder } from "./defaultFolder";
 import { createArtifactLibraryRouteHandler } from "./artifactLibraryRoutes";
 import { createArtifactMirrorRouteHandler } from "./artifactMirrorRoutes";
@@ -2718,12 +2720,20 @@ export function startOctantServer(
       projectRootPort,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    const workProjectStatusFiles = new WorkProjectStatusFiles();
+    const workProjectStatusReader = new WorkProjectStatusReader({
+      files: workProjectStatusFiles,
+      clock: () => new Date().toISOString(),
+    });
     const projectService = new ProjectService({
       persistence,
       bindingReceiptStore,
       projectRootPort,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
+      seedWorkProjectFiles: async (canonicalRoot, name, today) => {
+        await workProjectStatusFiles.seed(canonicalRoot, name, today);
+      },
     });
     const gitEnvironmentPort = options.gitEnvironmentPort ?? new GitEnvironmentPort();
     const gitObservationPort = new GitObservationPort();
@@ -5038,6 +5048,7 @@ export function startOctantServer(
       },
       nativeHarness: nativeHarnessHooks,
       turnFileObserver: new WorkTurnFileObserver(),
+      projectStatusFiles: workProjectStatusFiles,
       threads: workThreadService,
       peekIssueContextFramed: peekCreateFromIssueFramed,
       consumeIssueContextFramed: consumeCreateFromIssueFramed,
@@ -7041,25 +7052,56 @@ export function startOctantServer(
           const projectById = new Map(
             projects.active.map((project) => [String(project.id), project] as const),
           );
-          const boardThreads: WorkBoardThread[] = bootstrap.threads
-            .filter((thread) => thread.lifecycle !== "archived" && thread.completedAt === undefined)
-            .map((thread) => {
-              const project = projectById.get(String(thread.projectId));
-              const currentRevisionId =
-                project !== undefined && project.type === "work"
-                  ? project.bindingRevisionId
-                  : undefined;
-              return {
-                thread,
-                project: { id: thread.projectId, name: project?.name ?? thread.title },
-                projectProjectionPresent: project !== undefined,
-                bindingRevisionCurrent:
-                  thread.bindingRevisionId === undefined ||
-                  (currentRevisionId !== undefined &&
-                    String(currentRevisionId) === String(thread.bindingRevisionId)),
-                followUp: false,
-              };
-            });
+          const openThreads = bootstrap.threads.filter(
+            (thread) => thread.lifecycle !== "archived" && thread.completedAt === undefined,
+          );
+          // A due date in a Project's STATUS.md raises the follow-up mark on
+          // that Project's most recent open thread (decision 0118): the
+          // reminder belongs to the work, and that thread is where the person
+          // would pick it up.
+          const dueByProject = new Map<string, boolean>();
+          await Promise.all(
+            [...new Set(openThreads.map((thread) => String(thread.projectId)))].map(
+              async (projectId) => {
+                const project = projectById.get(projectId);
+                if (project?.type !== "work") return;
+                dueByProject.set(
+                  projectId,
+                  await workProjectStatusReader.hasDueItems(
+                    project.id,
+                    project.binding.canonicalRoot,
+                  ),
+                );
+              },
+            ),
+          );
+          const newestByProject = new Map<string, string>();
+          for (const thread of openThreads) {
+            const key = String(thread.projectId);
+            const current = openThreads.find((c) => String(c.id) === newestByProject.get(key));
+            if (current === undefined || current.updatedAt < thread.updatedAt) {
+              newestByProject.set(key, String(thread.id));
+            }
+          }
+          const boardThreads: WorkBoardThread[] = openThreads.map((thread) => {
+            const project = projectById.get(String(thread.projectId));
+            const currentRevisionId =
+              project !== undefined && project.type === "work"
+                ? project.bindingRevisionId
+                : undefined;
+            return {
+              thread,
+              project: { id: thread.projectId, name: project?.name ?? thread.title },
+              projectProjectionPresent: project !== undefined,
+              bindingRevisionCurrent:
+                thread.bindingRevisionId === undefined ||
+                (currentRevisionId !== undefined &&
+                  String(currentRevisionId) === String(thread.bindingRevisionId)),
+              followUp:
+                dueByProject.get(String(thread.projectId)) === true &&
+                newestByProject.get(String(thread.projectId)) === String(thread.id),
+            };
+          });
           const board = new WorkThreadBoardService({
             threads: { list: () => boardThreads },
             evidence: {
@@ -7109,6 +7151,8 @@ export function startOctantServer(
       projects: projectService,
       requests: workRequestService,
       windowAuthorityStore,
+      status: workProjectStatusReader,
+      folder: listWorkFolderTopLevel,
     });
     const sidebarBackgroundStore = new SidebarBackgroundStore({
       dataDirectory: providerDataDirectory,

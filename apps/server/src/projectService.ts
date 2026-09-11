@@ -51,6 +51,8 @@ import { Schema } from "effect";
 import { mkdir } from "node:fs/promises";
 import { BindingReceiptError, type BindingReceiptStorePort } from "./bindingReceiptStore";
 import { defaultFolderProjectRoot, effectiveDefaultFolder } from "./defaultFolder";
+import { isWorkStatusDate } from "@octant/domain/work-project-status-policy";
+import type { WorkStatusDate } from "@octant/contracts/work-project-status";
 import { ConcurrencyConflict, JournalWriteFailed } from "./persistence/journalErrors";
 import type { PersistenceService } from "./persistence/persistenceService";
 import { ProjectionApplicationFailed } from "./persistence/projection";
@@ -105,6 +107,17 @@ export interface ProjectServiceOptions {
   readonly defaultFolder?: () => string;
   /** Creates a directory and its parents; a directory that exists is fine. */
   readonly ensureDirectory?: (path: string) => Promise<void>;
+  /**
+   * Seeds a new Work Project's `AGENTS.md` and `STATUS.md`
+   * (`docs/decisions/0118`). Runs after the Project is journaled; a folder
+   * that refuses the files still has its Project, and the first task seeds
+   * again.
+   */
+  readonly seedWorkProjectFiles?: (
+    canonicalRoot: string,
+    projectName: string,
+    today: WorkStatusDate,
+  ) => Promise<void>;
 }
 
 /** What the host names the Project it provisions under the default folder. */
@@ -141,6 +154,7 @@ export class ProjectService implements ProjectServiceApi {
   readonly #initializeGitRepository: NonNullable<ProjectServiceOptions["initializeGitRepository"]>;
   readonly #defaultFolder: () => string;
   readonly #ensureDirectory: (path: string) => Promise<void>;
+  readonly #seedWorkProjectFiles: ProjectServiceOptions["seedWorkProjectFiles"];
   readonly #archiveListeners = new Set<
     (project: Extract<Project, { readonly type: "work" }>) => void
   >();
@@ -168,6 +182,7 @@ export class ProjectService implements ProjectServiceApi {
       (async (path) => {
         await mkdir(path, { recursive: true });
       });
+    this.#seedWorkProjectFiles = options.seedWorkProjectFiles;
   }
 
   hasActiveProject(projectId: ProjectId, requiredType: ProjectType): boolean {
@@ -712,6 +727,16 @@ export class ProjectService implements ProjectServiceApi {
       const authoritative = this.#persistence.readProject(project.id);
       if (authoritative === undefined || authoritative.version !== project.version) {
         throw this.#unavailable();
+      }
+      if (eventName === "project.created@1" && authoritative.type === "work") {
+        const today = timestamp.slice(0, 10);
+        if (this.#seedWorkProjectFiles !== undefined && isWorkStatusDate(today)) {
+          await this.#seedWorkProjectFiles(
+            authoritative.binding.canonicalRoot,
+            authoritative.name,
+            today,
+          ).catch(() => undefined);
+        }
       }
       if (
         current?.type === "work" &&

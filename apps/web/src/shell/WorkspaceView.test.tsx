@@ -1484,7 +1484,7 @@ describe("WorkspaceView Work overview", () => {
       within(composer).getByRole("textbox", { name: "Start a new task" }),
       "Prepare the brief",
     );
-    await user.click(within(composer).getByRole("button", { name: "Start thread" }));
+    await user.click(within(composer).getByRole("button", { name: "Start task" }));
 
     await waitFor(() => {
       expect(onCreateWorkThread).toHaveBeenCalledWith(projectId, "Prepare the brief");

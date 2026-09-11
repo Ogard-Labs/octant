@@ -15,8 +15,8 @@ describe("WorkOverview", () => {
     render(<WorkOverview model={populatedModel()} onCreateThread={vi.fn(async () => true)} />);
 
     expect(screen.getByRole("region", { name: "Work overview" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Recent files and artifacts" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Active workflows and threads" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Produced by Octant" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Recent tasks" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Approvals" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Versions and recent changes" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Validation" })).toBeVisible();
@@ -34,6 +34,60 @@ describe("WorkOverview", () => {
     expect(
       screen.queryByRole("button", { name: /Open Git|Open terminal|Open PR/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("leads with where the work stands and which dates are due, read from STATUS.md", () => {
+    render(
+      <WorkOverview
+        model={{
+          ...populatedModel(),
+          status: {
+            projectId: "00000000-0000-4000-8000-000000000001" as never,
+            hasAgentsFile: true,
+            hasStatusFile: true,
+            lastUpdatedOn: "2026-08-20",
+            stale: true,
+            currentStatus: "Offer v2 sent, waiting on procurement.",
+            followUps: [
+              { date: "2026-09-14", text: "Call Dana about scope", state: "due-soon" },
+              { date: "2026-10-01", text: "Kick-off if signed", state: "upcoming" },
+            ],
+            deadlines: [{ date: "2026-09-01", text: "Signed offer was due", state: "overdue" }],
+          },
+        }}
+        onCreateThread={vi.fn(async () => true)}
+      />,
+    );
+
+    const status = screen.getByRole("region", { name: "Status" });
+    expect(within(status).getByText("Last updated 2026-08-20 · stale")).toBeVisible();
+    expect(within(status).getByText("Offer v2 sent, waiting on procurement.")).toBeVisible();
+    const due = within(status).getByRole("status");
+    expect(within(due).getByText("Signed offer was due")).toBeVisible();
+    expect(within(due).getByText("2026-09-01 · overdue")).toBeVisible();
+    expect(within(due).getByText("2026-09-14 · due soon")).toBeVisible();
+    expect(within(due).queryByText("Kick-off if signed")).not.toBeInTheDocument();
+    expect(within(status).getByText("Kick-off if signed")).toBeVisible();
+  });
+
+  it("says when a Project has no STATUS.md yet instead of showing an empty card", () => {
+    render(
+      <WorkOverview
+        model={{
+          ...emptyModel(),
+          status: {
+            projectId: "00000000-0000-4000-8000-000000000001" as never,
+            hasAgentsFile: false,
+            hasStatusFile: false,
+            stale: true,
+            followUps: [],
+            deadlines: [],
+          },
+        }}
+        onCreateThread={vi.fn(async () => true)}
+      />,
+    );
+    expect(screen.getByText(/No STATUS.md yet/)).toBeVisible();
   });
 
   it("distinguishes an active workflow from an ordinary related thread by its rendered detail and still opens the underlying thread", () => {
@@ -57,7 +111,7 @@ describe("WorkOverview", () => {
       />,
     );
 
-    const section = screen.getByRole("region", { name: "Active workflows and threads" });
+    const section = screen.getByRole("region", { name: "Recent tasks" });
     expect(within(section).getByText("Active workflow")).toBeVisible();
     expect(within(section).getByText("Active thread")).toBeVisible();
 
@@ -104,7 +158,7 @@ describe("WorkOverview", () => {
         filesAndArtifacts: { status, message, items: [] },
       };
       render(<WorkOverview model={model} onCreateThread={vi.fn(async () => true)} />);
-      const section = screen.getByRole("region", { name: "Recent files and artifacts" });
+      const section = screen.getByRole("region", { name: "Produced by Octant" });
       const role =
         status === "loading" || status === "empty" || status === "stale" ? "status" : "alert";
       expect(within(section).getByRole(role)).toHaveTextContent(message);
@@ -118,7 +172,7 @@ describe("WorkOverview", () => {
     const composer = screen.getByRole("region", { name: "Work quick start" });
     const input = within(composer).getByRole("textbox", { name: "Start a new task" });
     fireEvent.change(input, { target: { value: "Summarize the brief" } });
-    fireEvent.click(within(composer).getByRole("button", { name: "Start thread" }));
+    fireEvent.click(within(composer).getByRole("button", { name: "Start task" }));
 
     await waitFor(() => {
       expect(onCreateThread).toHaveBeenCalledWith("Summarize the brief");
@@ -133,7 +187,7 @@ describe("WorkOverview", () => {
     const composer = screen.getByRole("region", { name: "Work quick start" });
     const input = within(composer).getByRole("textbox", { name: "Start a new task" });
     fireEvent.change(input, { target: { value: "Open the quarterly notes" } });
-    fireEvent.click(within(composer).getByRole("button", { name: "Start thread" }));
+    fireEvent.click(within(composer).getByRole("button", { name: "Start task" }));
 
     await waitFor(() => {
       expect(onCreateThread).toHaveBeenCalledWith("Open the quarterly notes");
@@ -249,7 +303,7 @@ describe("WorkOverview", () => {
 
     const composer = screen.getByRole("region", { name: "Work quick start" });
     expect(within(composer).getByRole("textbox", { name: "Start a new task" })).toBeDisabled();
-    expect(within(composer).getByRole("button", { name: "Start thread" })).toBeDisabled();
+    expect(within(composer).getByRole("button", { name: "Start task" })).toBeDisabled();
     expect(
       within(composer).getByText("Thread creation is unavailable for this Project."),
     ).toBeVisible();
@@ -276,7 +330,7 @@ describe("WorkOverview", () => {
 
     await user.click(providerSetup);
     expect(onOpenSettings).toHaveBeenCalledOnce();
-    expect(within(composer).getByRole("button", { name: "Start thread" })).toBeDisabled();
+    expect(within(composer).getByRole("button", { name: "Start task" })).toBeDisabled();
   });
 
   it("creates a starter artifact with the default markdown path and preserves content on failure", async () => {
@@ -366,6 +420,10 @@ describe("WorkOverview", () => {
 
 function populatedModel(): WorkOverviewModel {
   return {
+    folder: {
+      status: "ready",
+      items: [{ id: "folder:offers", label: "offers", detail: "Folder" }],
+    },
     filesAndArtifacts: {
       status: "ready",
       items: [{ id: "artifact-1", label: "Quarterly notes", detail: "DOCX" }],
@@ -397,6 +455,7 @@ function populatedModel(): WorkOverviewModel {
 
 function emptyModel(): WorkOverviewModel {
   return {
+    folder: { status: "empty", message: "The folder is empty.", items: [] },
     filesAndArtifacts: {
       status: "empty",
       message: "No recent files or artifacts in this Project yet.",

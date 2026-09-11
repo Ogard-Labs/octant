@@ -37,6 +37,7 @@
     "./work-confinement-policy": "./src/workConfinementPolicy.ts",
     "./work-delivery-policy": "./src/workDeliveryPolicy.ts",
     "./work-promotion-policy": "./src/workPromotionPolicy.ts",
+    "./work-project-status-policy": "./src/workProjectStatusPolicy.ts",
     "./work-research-policy": "./src/workResearchPolicy.ts",
     "./event-policy": "./src/eventPolicy.ts",
     "./execution-capsule-policy": "./src/executionCapsulePolicy.ts",
