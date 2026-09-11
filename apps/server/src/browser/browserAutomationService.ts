@@ -633,7 +633,9 @@ export class BrowserAutomationService {
     );
     if (threadContexts.length === 0) return { status: "ready", threadId, evidence: [] };
     if (threadContexts.length === 1) {
-      return this.inspect(windowId, threadId, threadContexts[0].record.contextId);
+      const single = threadContexts[0];
+      if (single === undefined) return { status: "ready", threadId, evidence: [] };
+      return this.inspect(windowId, threadId, single.record.contextId);
     }
     const inspected = threadContexts.map((owned) =>
       this.inspect(windowId, threadId, owned.record.contextId),
@@ -1032,7 +1034,14 @@ function threadSnapshotFromSnapshots(
       right.context?.state === "active" ? 2 : right.context?.state === "creating" ? 1 : 0;
     return rightWeight - leftWeight;
   });
-  const primary = ordered[0]!;
+  const primary = ordered[0];
+  if (primary === undefined) {
+    return failedSnapshot(
+      threadId,
+      { category: "unavailable", message: "No browser context is available for this thread." },
+      "failed",
+    );
+  }
   const contexts: BrowserContextObservation[] = ordered.map((snap) => ({
     context: snap.context as BrowserContextRecord,
     ...(snap.observation === undefined ? {} : { observation: snap.observation }),
