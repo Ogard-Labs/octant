@@ -82,6 +82,7 @@ export function createCompatibleSmokeIdentity(
   return {
     dataDirectoryPrefix: `octant-compatible-${shutdown}.`,
     providerInstanceId,
+    storeScope: randomUUID(),
     service: OCTANT_KEYCHAIN_SERVICE,
   } as const;
 }
@@ -146,11 +147,15 @@ type HelperRequest =
   | { readonly operation: "set"; readonly providerInstanceId: string; readonly credential: string }
   | { readonly operation: "delete" | "has" | "resolve"; readonly providerInstanceId: string };
 
-export function keychainHelperInvocation(command: string, request: HelperRequest) {
+export function keychainHelperInvocation(
+  command: string,
+  request: HelperRequest,
+  storeScope: string,
+) {
   return {
     command,
     args: [] as readonly string[],
-    stdin: `${JSON.stringify({ version: 1, ...request })}\n`,
+    stdin: `${JSON.stringify({ version: 1, storeScope, ...request })}\n`,
   };
 }
 
@@ -265,12 +270,11 @@ async function main(): Promise<void> {
   const configuration = readCompatibleSmokeConfiguration(process.env);
   await assertSmokePortAvailable();
   const baseline = await processIdentities();
-  const helper = packagedCredentialHelper();
 
   if (configuration.kind === "native-only") {
     const identity = createCompatibleSmokeIdentity(randomUUID(), "native");
     await withCredentialLifecycle(
-      helper,
+      packagedCredentialHelper(identity.storeScope),
       identity.providerInstanceId,
       randomUUID(),
       async () => undefined,
@@ -285,7 +289,7 @@ async function main(): Promise<void> {
     const dataDirectory = await mkdtemp(resolve(tmpdir(), identity.dataDirectoryPrefix));
     try {
       await withCredentialLifecycle(
-        helper,
+        packagedCredentialHelper(identity.storeScope),
         identity.providerInstanceId,
         configuration.apiKey,
         async () => {
@@ -308,9 +312,9 @@ async function main(): Promise<void> {
   );
 }
 
-function packagedCredentialHelper(): CredentialHelper {
+function packagedCredentialHelper(storeScope: string): CredentialHelper {
   const invoke = async (request: HelperRequest): Promise<Record<string, unknown>> => {
-    const spec = keychainHelperInvocation(helperPath, request);
+    const spec = keychainHelperInvocation(helperPath, request, storeScope);
     const child = spawn(spec.command, spec.args, { stdio: ["pipe", "pipe", "pipe"] });
     child.stdin.end(spec.stdin);
     const stdout: Buffer[] = [];
