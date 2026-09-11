@@ -580,9 +580,9 @@ describe("WindowChrome", () => {
     expect(styles).not.toContain(
       ".shell--app-backdrop.shell--app-backdrop-sidebar.shell-frame > .sidebar",
     );
-    expect(
-      cssRule(".shell--app-backdrop.shell-frame .code-thread-workspace"),
-    ).toContain("background: color-mix(in srgb, var(--octant-workspace) 94%, transparent);");
+    expect(cssRule(".shell--app-backdrop.shell-frame .code-thread-workspace")).toContain(
+      "background: color-mix(in srgb, var(--octant-workspace) 94%, transparent);",
+    );
   });
 
   it("clears the workspace and pane fills under a translucent workspace so the glass shows", () => {
