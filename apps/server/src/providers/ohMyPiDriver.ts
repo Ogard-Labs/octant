@@ -103,8 +103,17 @@ function normalizeModels(response: PiRpcResponse) {
 /**
  * Probe-first Oh My Pi driver. Full turn execution remains fail-closed until
  * authority/tool mapping is complete; this slice owns identity, version pin,
- * ready framing, model discovery, and clean shutdown evidence.
+ * model discovery, and clean shutdown evidence.
+ *
+ * Readiness answers "can this provider run a turn right now?" — the model
+ * picker admits every `ready` or `degraded` instance and Chat auto-selects the
+ * first admitted model. Because `acquire` always refuses, a successful probe
+ * reports `unavailable` while keeping the discovered models and version as
+ * evidence, so Settings can show what was found without offering it as usable.
  */
+const turnsUnavailableMessage = (modelCount: number) =>
+  `Oh My Pi reported ${modelCount} ${modelCount === 1 ? "model" : "models"}, but Octant cannot start turns on it yet. Discovery works; turn execution is not available in this release.`;
+
 export function makeOhMyPiDriver(options: OhMyPiDriverOptions): ProviderDriver {
   const clock = options.clock ?? (() => new Date().toISOString());
 
@@ -136,14 +145,15 @@ export function makeOhMyPiDriver(options: OhMyPiDriverOptions): ProviderDriver {
         const observedAt = clock();
         const result = decodeProviderProbeResult({
           instanceId,
-          readiness: models.length === 0 ? "degraded" : "ready",
+          readiness: "unavailable",
           processState: "stopped",
           detectedVersion: connection.version,
           models,
           capabilities,
-          ...(models.length === 0
-            ? { message: "Oh My Pi did not report an authenticated selectable model." }
-            : {}),
+          message:
+            models.length === 0
+              ? "Oh My Pi did not report an authenticated selectable model, and Octant cannot start turns on it yet."
+              : turnsUnavailableMessage(models.length),
           lastSuccessfulProbeAt: observedAt,
           observedAt,
         });

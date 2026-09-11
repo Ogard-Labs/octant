@@ -80,7 +80,8 @@ disabled until you enable them):
 - Devin ACP
 - Kilo ACP
 - Pi RPC
-- Oh My Pi
+- Oh My Pi (discovery only: Octant lists its models but cannot start turns on
+  it yet, so Settings reports it as unavailable and no picker offers it)
 - Mistral Vibe ACP
 - Grok Build ACP
 - Goose ACP

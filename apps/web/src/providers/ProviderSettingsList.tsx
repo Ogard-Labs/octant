@@ -1462,6 +1462,11 @@ function guidance(
             : "Review unavailable capabilities before starting work."}
       </p>
     );
+  // Oh My Pi's probe reports `unavailable` after a successful discovery because
+  // turn execution refuses; the generic "verify the binary path" advice would
+  // send the user chasing a problem that does not exist.
+  if (readiness === "unavailable" && driverKind === "oh-my-pi" && message !== undefined)
+    return <p className="provider-card__guidance">{message}</p>;
   if (readiness === "unavailable")
     return (
       <p className="provider-card__guidance">
