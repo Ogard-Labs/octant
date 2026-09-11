@@ -113,6 +113,9 @@ describe("packaged compatible native identity and helper protocol", () => {
     expect(invocation.command).toBe("/Applications/Octant/helper");
     expect(invocation.args).toEqual([]);
     expect(invocation.stdin).toContain("private-value");
+    expect(JSON.parse(invocation.stdin)).toMatchObject({
+      storeScope: "80000000-0000-4000-8000-000000000552",
+    });
     expect(`${invocation.command}\0${invocation.args.join("\0")}`).not.toContain("private-value");
   });
 
