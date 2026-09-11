@@ -7268,6 +7268,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   display: block;
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
   color: var(--oct-fg);
 }
 .prov-meta {
@@ -7291,6 +7292,55 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
 .prov-status {
   display: grid;
   place-items: center;
+}
+
+/* Same state language as the Code home rows and sidebar threads: a small dot
+   carries the tone, the word stays readable for anyone who cannot read the
+   colour. Ready gets a filled pill; the quieter states keep the dot only so a
+   wall of amber pills does not shout over the list. */
+.prov-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+  line-height: 1.4;
+  white-space: nowrap;
+  color: var(--oct-meta);
+}
+.prov-state::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--oct-fg-2);
+  opacity: 0.45;
+}
+.prov-state[data-tone="ok"] {
+  padding: 2px 8px;
+  border-radius: var(--oct-radius-pill);
+  color: var(--octant-success-text);
+  background: var(--octant-success-surface);
+}
+.prov-state[data-tone="ok"]::before {
+  background: var(--octant-success-text);
+  opacity: 1;
+}
+.prov-state[data-tone="warn"] {
+  color: var(--oct-warn-fg);
+}
+.prov-state[data-tone="warn"]::before {
+  background: var(--oct-warn-fg);
+  opacity: 0.9;
+}
+.prov-state[data-tone="danger"] {
+  color: var(--oct-danger-fg);
+}
+.prov-state[data-tone="danger"]::before {
+  background: var(--oct-danger-fg);
+  opacity: 0.9;
 }
 
 /* Off keeps everything: key, endpoint, and model-picker position. Dim only

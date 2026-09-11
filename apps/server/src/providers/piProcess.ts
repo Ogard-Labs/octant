@@ -14,13 +14,14 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import type {
   ProviderExecutionPolicy,
   ProviderFailure,
   ProviderToolDefinition,
 } from "@octant/contracts";
 import { Effect, type Scope } from "effect";
+import { approvedHomeBinDirs } from "./discoveryService";
 import { makePiRpcClient, type PiRpcClient } from "./piRpcClient";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import { makeSeatbeltConfinementLive, SeatbeltConfinementError } from "../process/seatbeltProfile";
@@ -250,6 +251,27 @@ export function sanitizePiEnvironment(
     ["OCTANT_PI_APPROVALS", approvals],
     ["NO_COLOR", "1"],
   ]);
+}
+
+// The GUI PATH does not include user bin directories, so a `#!env node`-style
+// shim resolves nothing. The binary's own directory is where its runtime
+// siblings live, and the approved home bin directories are the same allowlist
+// discovery already trusts — together they join PATH ahead of the inherited
+// entries so a registered provider actually starts.
+export function piProcessEnvironment(
+  binaryPath: string,
+  host: NodeJS.ProcessEnv,
+  piHome: string,
+  approvals: "enabled" | "disabled" = "enabled",
+): NodeJS.ProcessEnv {
+  const sanitized = sanitizePiEnvironment(host, piHome, approvals);
+  const binaryDirectory = dirname(binaryPath);
+  const path = sanitized.PATH?.split(delimiter).filter(Boolean) ?? [];
+  const searched = [binaryDirectory, ...approvedHomeBinDirs(host.HOME), ...path];
+  return {
+    ...sanitized,
+    PATH: [...new Set(searched)].join(delimiter),
+  };
 }
 
 export function piArguments(
@@ -617,7 +639,8 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
     start: (input) =>
       Effect.acquireRelease(
         Effect.gen(function* () {
-          const baseEnvironment = sanitizePiEnvironment(
+          const baseEnvironment = piProcessEnvironment(
+            input.binaryPath,
             inherited,
             input.piHome,
             input.executionPolicy === "full-access" ? "disabled" : "enabled",

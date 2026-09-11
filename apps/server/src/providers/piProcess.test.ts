@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import type { ProviderToolDefinition } from "@octant/contracts";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
@@ -18,6 +18,7 @@ import {
   makePiConfinementLive,
   piArguments,
   piExtensionSource,
+  piProcessEnvironment,
   sanitizePiEnvironment,
 } from "./piProcess";
 
@@ -49,6 +50,26 @@ afterEach(async () => {
 });
 
 describe("Pi process boundary", () => {
+  it("prepends the binary directory and approved home bins so env-shebang runtimes resolve", () => {
+    const environment = piProcessEnvironment(
+      "/Users/test/lib/node_modules/pkg/dist/cli.js",
+      { HOME: "/Users/test", PATH: ["/usr/bin", "/bin"].join(delimiter) },
+      "/tmp/pi-home",
+    );
+
+    expect(environment.PATH).toBe(
+      [
+        "/Users/test/lib/node_modules/pkg/dist",
+        "/Users/test/.local/bin",
+        "/Users/test/.bun/bin",
+        "/Users/test/.kimi-code/bin",
+        "/Users/test/.grok/bin",
+        "/usr/bin",
+        "/bin",
+      ].join(delimiter),
+    );
+  });
+
   it("registers only the supplied app-managed tools in the explicit extension", () => {
     const tool: ProviderToolDefinition = {
       name: "octant_browser",
