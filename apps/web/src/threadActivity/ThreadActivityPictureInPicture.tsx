@@ -412,6 +412,41 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
 }
 
 function BrowserActivityPreview(props: { readonly snapshot: BrowserAutomationSnapshot }) {
+  const contexts = props.snapshot.contexts;
+  if (contexts !== undefined && contexts.length > 1) {
+    return (
+      <div
+        aria-label="Browser windows"
+        className="thread-activity-pip__visual thread-activity-pip__visual--stack"
+      >
+        {contexts.map((entry, index) => {
+          const observation = entry.observation;
+          const screenshot =
+            observation?.stale === false ? observation.screenshotDataUrl : undefined;
+          const title = observation?.title ?? `Browser ${index + 1}`;
+          const offset = (index - (contexts.length - 1) / 2) * 10;
+          const rotation = -3 + index * 2;
+          return (
+            <div
+              key={String(entry.context.contextId)}
+              className="thread-activity-pip__card thread-activity-pip__stack-card"
+              style={{
+                transform: `rotate(${rotation}deg) translate(${offset}px, ${Math.abs(offset) * 0.4}px)`,
+                zIndex: contexts.length - index,
+              }}
+              title={title}
+            >
+              {screenshot !== undefined ? (
+                <img alt={`${title} browser activity`} src={screenshot} />
+              ) : (
+                <span className="thread-activity-pip__stack-placeholder">{title}</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
   const observation = props.snapshot.observation;
   const screenshot = observation?.stale === false ? observation.screenshotDataUrl : undefined;
   const title = observation?.title ?? "Browser";
@@ -469,8 +504,12 @@ function ComputerUseActivityPreview(props: {
 }
 
 function isBrowserActivity(snapshot: BrowserAutomationSnapshot): boolean {
-  const state = snapshot.context?.state;
-  return state === "creating" || state === "active" || state === "stopping" || state === "failed";
+  const active = (state: string | undefined) =>
+    state === "creating" || state === "active" || state === "stopping" || state === "failed";
+  if (snapshot.contexts !== undefined && snapshot.contexts.length > 0) {
+    return snapshot.contexts.some((entry) => active(entry.context.state));
+  }
+  return active(snapshot.context?.state);
 }
 
 function isComputerUseActivity(session: ComputerUseSessionView): boolean {

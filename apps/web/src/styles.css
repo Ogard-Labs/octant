@@ -452,6 +452,41 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   cursor: default;
 }
 
+/* Multiple active Browser windows fan out so every surface stays visible,
+   with the most recent window on top of the stack. */
+.thread-activity-pip__visual--stack {
+  position: relative;
+  display: block;
+  height: 172px;
+}
+
+.thread-activity-pip__stack-card {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 148px;
+  border-radius: var(--oct-radius-md);
+  overflow: hidden;
+  transition: transform var(--oct-motion-fast) ease;
+}
+
+.thread-activity-pip__stack-card img {
+  width: 100%;
+  height: 148px;
+  object-fit: cover;
+  object-position: top center;
+}
+
+.thread-activity-pip__stack-placeholder {
+  display: grid;
+  width: 100%;
+  height: 148px;
+  place-items: center;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  background: var(--octant-surface-inset);
+}
+
 .thread-activity-pip__visual img {
   width: 100%;
   height: 148px;

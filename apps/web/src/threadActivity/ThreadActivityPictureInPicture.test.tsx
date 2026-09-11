@@ -526,6 +526,47 @@ function browserSnapshot(): BrowserAutomationSnapshot {
   };
 }
 
+it("renders multiple Browser windows as an offset, slanted stack", async () => {
+  const first = browserSnapshot();
+  const second = {
+    ...browserSnapshot(),
+    context: {
+      ...browserSnapshot().context,
+      contextId: "31000000-0000-4000-8000-000000000002",
+    },
+    observation: {
+      ...browserSnapshot().observation,
+      contextId: "31000000-0000-4000-8000-000000000002",
+      title: "Second",
+      screenshotDataUrl: "data:image/jpeg;base64,BBBB",
+    },
+  };
+  const stacked = {
+    ...first,
+    contexts: [
+      { context: first.context, observation: first.observation },
+      { context: second.context, observation: second.observation },
+    ],
+  };
+  const browser = {
+    inspectThread: vi.fn(async () => stacked),
+    stop: vi.fn(),
+  } as unknown as BrowserAutomationClient;
+  render(
+    <ThreadActivityPictureInPicture
+      browserClient={browser}
+      pollIntervalMs={60_000}
+      threadId={threadId as never}
+    >
+      <div>Conversation</div>
+    </ThreadActivityPictureInPicture>,
+  );
+
+  expect(await screen.findByLabelText("Browser windows")).toBeVisible();
+  const images = screen.getAllByRole("img", { name: /browser activity/ });
+  expect(images).toHaveLength(2);
+});
+
 function computerSession(
   ownedThreadId: string,
   state: ComputerUseSessionView["state"],
