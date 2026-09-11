@@ -85,7 +85,7 @@ distilled successor of the earlier long-form design specifications.
 | [0075](0075-thread-reads-are-snapshot-first-and-change-driven.md)            | Thread reads are snapshot-first and change-driven                                           | Accepted           |
 | [0076](0076-pull-request-snapshot-survives-restart.md)                       | The pull-request snapshot survives host restart                                             | Accepted           |
 | [0077](0077-environment-is-a-dock-tool.md)                                   | Environment is a context-aware dock tool                                                    | Accepted           |
-| [0078](0078-the-welcome-composer-carries-its-context-beneath-the-prompt.md)  | The welcome composer carries its context beneath the prompt                                 | Accepted           |
+| [0078](0078-the-welcome-composer-carries-its-context-beneath-the-prompt.md)  | The welcome composer carries its context beneath the prompt                                 | Superseded by 0117 |
 | [0079](0079-code-project-creation-may-initialize-git.md)                     | Code Project creation may initialize Git on request                                         | Accepted           |
 | [0080](0080-hand-off-writes-a-canvas-from-the-export-cut.md)                 | Hand off writes a Canvas from the export cut                                                | Accepted           |
 | [0081](0081-image-generation-is-its-own-surface.md)                          | Image generation is its own surface                                                         | Accepted           |
@@ -128,6 +128,7 @@ distilled successor of the earlier long-form design specifications.
 | [0114](0114-quiet-thread-composer-and-utility-chrome.md) | Thread composers and utility panels keep only useful chrome | Accepted |
 | [0115](0115-terminal-cache-ancestors-expose-only-metadata.md) | Terminal cache ancestors expose only directory metadata | Accepted |
 | [0116](0116-settings-use-open-row-surfaces.md) | Settings use open row surfaces | Accepted |
+| [0117](0117-the-welcome-composer-lets-its-context-ride-above-the-card.md) | The welcome composer lets its context ride above the card | Accepted |
 
 ## Adding an ADR
 

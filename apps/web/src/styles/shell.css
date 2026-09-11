@@ -1471,19 +1471,6 @@ html[data-octant-native-host="true"]
   gap: 8px;
 }
 
-/* Where the thread runs is chosen in a quiet chip row above the card, so the
-   composer stays one object — prompt and send row — instead of a banded
-   stack. */
-.composer-tray--above {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px 12px;
-  margin: 0 2px 10px;
-  color: var(--oct-meta);
-}
-
 .draft-thread__context-strip {
   display: flex;
   flex-wrap: wrap;
