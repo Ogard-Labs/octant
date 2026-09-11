@@ -1363,7 +1363,7 @@ html[data-octant-native-host="true"]
   display: grid;
   justify-items: start;
   gap: 4px;
-  margin-bottom: 14px;
+  margin-bottom: 24px;
 }
 
 .draft-thread:not(.agent-mode-welcome) .draft-thread__welcome {
@@ -1469,6 +1469,19 @@ html[data-octant-native-host="true"]
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* Where the thread runs is chosen in a quiet chip row above the card, so the
+   composer stays one object — prompt and send row — instead of a banded
+   stack. */
+.composer-tray--above {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin: 0 2px 10px;
+  color: var(--oct-meta);
 }
 
 .draft-thread__context-strip {
@@ -1717,6 +1730,9 @@ form > .work-composer-adapter__attachments {
 @media (prefers-reduced-motion: reduce) {
   .draft-thread__intent-card {
     transition: none;
+  }
+  .draft-thread__intent-cards > button:hover:not(:disabled) {
+    transform: none;
   }
 }
 
@@ -2466,12 +2482,18 @@ form > .work-composer-adapter__attachments {
   background: var(--octant-card);
   text-align: left;
   white-space: normal;
+  transition:
+    border-color var(--oct-motion-base) var(--oct-ease-standard),
+    box-shadow var(--oct-motion-base) var(--oct-ease-standard),
+    transform var(--oct-motion-base) var(--oct-ease-standard);
 }
 
 .code-home__suggestions > button:hover:not(:disabled),
 .draft-thread__intent-cards > button:hover:not(:disabled) {
   border-color: var(--oct-border-strong);
   background: var(--octant-card);
+  box-shadow: var(--octant-shadow-xs);
+  transform: translateY(-1px);
 }
 
 .code-home__suggestion-label,

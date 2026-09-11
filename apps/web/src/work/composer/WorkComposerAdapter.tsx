@@ -264,6 +264,15 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
         </div>
 
         <div className="composer-stack">
+          <div className="composer-tray composer-tray--above" aria-label="Thread context">
+            <div className="composer-tray__leading">
+              {projectControl}
+              {environmentControl}
+            </div>
+            {props.createFromControl === undefined ? null : (
+              <div className="composer-tray__trailing">{props.createFromControl}</div>
+            )}
+          </div>
           <ThreadComposer
             chips={
               <>
@@ -418,17 +427,6 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 },
               },
             }}
-            footer={
-              <div className="composer-tray" aria-label="Thread context">
-                <div className="composer-tray__leading">
-                  {projectControl}
-                  {environmentControl}
-                </div>
-                {props.createFromControl === undefined ? null : (
-                  <div className="composer-tray__trailing">{props.createFromControl}</div>
-                )}
-              </div>
-            }
           />
         </div>
 
