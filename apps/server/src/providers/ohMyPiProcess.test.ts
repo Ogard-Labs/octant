@@ -1,15 +1,35 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { Effect, Exit } from "effect";
 import {
   makeOhMyPiProcessLive,
   ohMyPiProbeArguments,
+  ohMyPiProcessEnvironment,
   sanitizeOhMyPiEnvironment,
 } from "./ohMyPiProcess";
 
 describe("Oh My Pi process probe", () => {
+  it("prepends the binary directory and approved home bins so env-shebang runtimes resolve", () => {
+    const environment = ohMyPiProcessEnvironment(
+      "/Users/test/.bun/bin/omp",
+      { HOME: "/Users/test", PATH: ["/usr/bin", "/bin"].join(delimiter) },
+      "/tmp/omp-home",
+    );
+
+    expect(environment.PATH).toBe(
+      [
+        "/Users/test/.bun/bin",
+        "/Users/test/.local/bin",
+        "/Users/test/.kimi-code/bin",
+        "/Users/test/.grok/bin",
+        "/usr/bin",
+        "/bin",
+      ].join(delimiter),
+    );
+  });
+
   it("keeps probe args fail-closed without tools/extensions/skills/session", () => {
     expect(ohMyPiProbeArguments()).toEqual([
       "--mode",

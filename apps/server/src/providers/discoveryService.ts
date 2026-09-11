@@ -316,7 +316,7 @@ function sanitizedPathDirs(pathValue: string): string[] {
  * bounded allowlist beneath the validated user HOME so supported runtimes do
  * not disappear merely because the app was started from Finder.
  */
-function approvedHomeBinDirs(home: string | undefined): string[] {
+export function approvedHomeBinDirs(home: string | undefined): string[] {
   if (home === undefined || !isAbsolute(home)) return [];
   if (/[`$(){}|;&<>!#*?[\]'"]/g.test(home)) return [];
   const canonicalHome = resolve(home);

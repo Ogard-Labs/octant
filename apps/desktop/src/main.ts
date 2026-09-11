@@ -1892,13 +1892,14 @@ async function createWindow(): Promise<void> {
           window.webContents.send(IPC_CHANNELS.codeDeepLink, pendingCodeDeepLinks.shift());
         }
       });
-      window.webContents.on("render-process-gone", () => {
+      window.webContents.on("render-process-gone", (_event, details) => {
         codeOperationApprovalViews?.closeWindow(state.windowId);
         void Promise.all([
           browserSurfaceHost?.closeOwnerContexts(state.windowId),
           closeAuthority(),
         ]).finally(() => {
           if (!window.isDestroyed()) window.destroy();
+          recoverWindowAfterRendererExit(details.reason);
         });
       });
       window.once("ready-to-show", () => {
@@ -3321,6 +3322,27 @@ const requestActiveWindow = () =>
     request: requestWindow,
     handleFailure: handleFatalStartup,
   });
+
+// An unexpected renderer exit should not leave the running app headless, but a
+// renderer that keeps dying must not reopen forever: allow at most two
+// automatic recoveries in a minute, then wait for the user to re-activate.
+// "clean-exit" and "killed" cover normal window teardown, where reopening would
+// resurrect every deliberately closed window.
+export function shouldRecoverWindowAfterRendererExit(reason: string): boolean {
+  return reason !== "clean-exit" && reason !== "killed";
+}
+
+const rendererRecoveryTimestamps: number[] = [];
+
+function recoverWindowAfterRendererExit(reason: string): void {
+  if (!shouldRecoverWindowAfterRendererExit(reason)) return;
+  const now = Date.now();
+  const recent = rendererRecoveryTimestamps.filter((at) => now - at <= 60_000);
+  if (recent.length >= 2) return;
+  rendererRecoveryTimestamps.length = 0;
+  rendererRecoveryTimestamps.push(...recent, now);
+  requestActiveWindow();
+}
 
 function installApplicationMenu(): void {
   if (process.platform !== "darwin") return;
