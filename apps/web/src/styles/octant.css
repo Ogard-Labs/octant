@@ -4177,7 +4177,7 @@ input.switch:checked::after {
   transition: box-shadow var(--oct-dur-base) var(--oct-ease-color);
 }
 .composer:focus-within {
-  box-shadow: var(--octant-shadow-md);
+  box-shadow: var(--octant-shadow-lg);
 }
 .composer-chips {
   display: flex;
@@ -4205,8 +4205,14 @@ input.switch:checked::after {
   resize: none;
   field-sizing: content;
 }
-.composer-input:focus {
+/* The focused-field fill the shared focus rule paints is for standalone form
+   fields; the composer input lives inside a raised card and keeps that card's
+   surface, otherwise the focused box fills with the hover tint. */
+.composer-input:focus,
+.composer-input:focus-visible {
   outline: none;
+  background: none;
+  color: var(--oct-fg);
 }
 .composer-input::placeholder {
   color: var(--oct-meta);
@@ -4363,6 +4369,9 @@ input.switch:checked::after {
   background: var(--octant-card);
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
+}
+.thread-composer__surface:focus-within {
+  border-color: var(--octant-border-strong);
 }
 .thread-composer__surface > label {
   display: block;
