@@ -338,9 +338,28 @@ export const CompletedThreadArchiveAfterDays = Schema.Int.pipe(
 export type CompletedThreadArchiveAfterDays = typeof CompletedThreadArchiveAfterDays.Type;
 export const DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS: CompletedThreadArchiveAfterDays = 7;
 
+/**
+ * An absolute folder path as the host canonicalized it. Same shape the
+ * artifact mirror accepts for a folder the person names.
+ */
+export const DefaultFolder = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(4_096),
+  Schema.filter((value) => value.startsWith("/") && !value.includes("\0")),
+  Schema.brand("DefaultFolder"),
+);
+export type DefaultFolder = typeof DefaultFolder.Type;
+
 export const ShellSettings = Schema.Struct({
   chatEnabled: Schema.Boolean,
   workEnabled: Schema.Boolean,
+  /**
+   * Where Octant puts what nobody gave a home: Work and Code threads started
+   * without a Project bind `<folder>/Work` and `<folder>/Code`, and artifact
+   * files mirror under `<folder>/Artifacts` unless the mirror says otherwise.
+   * Absent means the host's own default (`~/Documents/Octant`); the host fills
+   * it in on read so every client sees the folder that is actually in effect.
+   */
+  defaultFolder: Schema.optional(DefaultFolder),
   sidebarWidth: SidebarWidth,
   contextSidebarWidth: ContextSidebarWidth,
   lastContextSurface: Schema.NullOr(ContextSurfaceId),

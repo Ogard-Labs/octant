@@ -1924,6 +1924,8 @@ export function useCodeController(options: CodeControllerOptions) {
     readonly defaultExecutionPolicy: CodeThread["executionPolicy"];
     readonly defaultPermissionPersistence: CodeThread["permissionPersistence"];
     readonly externalEditor?: CodeExternalEditor;
+    readonly requireGitRepository?: boolean;
+    readonly allowDefaultFolderThreads?: boolean;
   }): Promise<boolean> {
     if (bootstrap === undefined) return false;
     const result = await execute({

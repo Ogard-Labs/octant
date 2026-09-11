@@ -5730,6 +5730,23 @@ function LaunchedShell(
                         initializeGit,
                       );
                     }}
+                    {...(controller.settings?.defaultFolder === undefined
+                      ? {}
+                      : { defaultFolder: controller.settings.defaultFolder })}
+                    codeDefaultFolderThreads={
+                      codeController.bootstrap?.settings.allowDefaultFolderThreads === true
+                    }
+                    onEnsureDefaultProject={(mode) => {
+                      const destinationHostId = refuseUnlessCreatableDestination({
+                        action: "create-project",
+                        requiredCapability: mode,
+                        onRefuse: (reason) => setDraftError(reason),
+                      });
+                      if (destinationHostId === undefined) {
+                        return Promise.resolve(undefined);
+                      }
+                      return projectController.ensureDefault(mode, destinationHostId);
+                    }}
                     {...(draftCreating ? { onDraftCreating: true } : {})}
                     {...(draftError === undefined ? {} : { onDraftError: draftError })}
                     {...(draftPendingMessage === undefined

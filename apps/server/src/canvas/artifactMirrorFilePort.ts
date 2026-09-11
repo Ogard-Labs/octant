@@ -22,6 +22,11 @@ export function createArtifactMirrorFilePort(): ArtifactMirrorFilePort {
       }
     },
 
+    async ensureRoot(absolutePath) {
+      if (!isAbsolute(absolutePath)) return;
+      await mkdir(absolutePath, { recursive: true });
+    },
+
     async write(absolutePath, contents) {
       const directory = dirname(absolutePath);
       await mkdir(directory, { recursive: true });
