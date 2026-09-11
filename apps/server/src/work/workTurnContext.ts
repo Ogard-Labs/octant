@@ -27,9 +27,9 @@ export type WorkTurnContextPlan =
 
 export interface WorkTurnContextContribution {
   readonly text: string;
-  readonly sourceKind: "message" | "file";
+  readonly sourceKind: "message" | "file" | "instruction";
   readonly referenceId: string;
-  readonly category: "conversation" | "current-request" | "workspace-context";
+  readonly category: "conversation" | "current-request" | "workspace-context" | "octant-policy";
   readonly posture: "required" | "compressible";
   readonly block: ProviderContextBlock;
 }

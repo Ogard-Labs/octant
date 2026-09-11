@@ -13,6 +13,7 @@ export * from "./workArtifacts";
 export * from "./workFileListing";
 export * from "./workBoard";
 export * from "./workOverview";
+export * from "./workProjectStatus";
 export * from "./workPromotion";
 export * from "./workRequests";
 export * from "./workResearch";

@@ -1258,7 +1258,7 @@ describe("App", () => {
     );
   });
 
-  it("enables overview Start thread and opens the created Work thread", async () => {
+  it("enables overview Start task and opens the created Work thread", async () => {
     const user = userEvent.setup();
     const shellApi = client(workShellBootstrap());
     const workThreadClient = {
@@ -1361,7 +1361,7 @@ describe("App", () => {
 
     const prompt = await screen.findByRole("textbox", { name: "Start a new task" });
     await user.type(prompt, "Draft brief");
-    const start = screen.getByRole("button", { name: "Start thread" });
+    const start = screen.getByRole("button", { name: "Start task" });
     expect(start).toBeEnabled();
     await user.click(start);
 
@@ -1467,7 +1467,7 @@ describe("App", () => {
 
     const prompt = await screen.findByRole("textbox", { name: "Start a new task" });
     await user.type(prompt, "Keep this overview draft");
-    await user.click(screen.getByRole("button", { name: "Start thread" }));
+    await user.click(screen.getByRole("button", { name: "Start task" }));
 
     expect(workThreadClient.execute).toHaveBeenCalled();
     expect(workTurnClient.startFirstTurn).not.toHaveBeenCalled();

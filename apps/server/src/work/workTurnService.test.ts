@@ -24,6 +24,7 @@ import {
   WorkTurnServiceError,
   type WorkTurnServiceDependencies,
 } from "./workTurnService";
+import { WorkProjectStatusFiles } from "./workProjectStatusFiles";
 import type { WorkTurnRuntimePort } from "./workTurnRuntime";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 
@@ -152,6 +153,105 @@ describe("WorkTurnService", () => {
       kind: "instructions",
       text: expect.stringContaining("Octant's built-in Browser"),
     });
+  });
+
+  it("opens every task with the Project's brief and status, and takes stock when the status is stale", async () => {
+    const contexts: Array<ReadonlyArray<{ readonly kind: string; readonly text: string }>> = [];
+    const disk = new Map<string, string>([
+      ["/private/tmp/knowledge/AGENTS.md", "# Acme\nAlways address Dana formally."],
+      [
+        "/private/tmp/knowledge/STATUS.md",
+        "Last updated: 2026-07-01\n## Deadlines\n- 2026-08-01 Signed offer due\n",
+      ],
+    ]);
+    const fixture = serviceFixture({
+      projectStatusFiles: inMemoryStatusFiles(disk),
+      turnRuntime: {
+        run: async (input) => {
+          contexts.push(input.context ?? []);
+          return { kind: "completed", response: "Provider reply" };
+        },
+      },
+    });
+
+    const result = await fixture.service.startFirstTurn(ids.window, startCommand());
+    expect(result.kind).toBe("accepted");
+    await fixture.waitForIdle();
+
+    const sent = contexts.flat();
+    expect(sent).toContainEqual({
+      kind: "user-message",
+      text: expect.stringContaining("Always address Dana formally."),
+    });
+    expect(sent).toContainEqual({
+      kind: "user-message",
+      text: expect.stringContaining("Signed offer due"),
+    });
+    const instruction = sent.find(
+      (block) => block.kind === "instructions" && block.text.includes("Take stock first"),
+    );
+    expect(instruction?.text).toMatch(/not been updated for a while.*date has passed/);
+    // Nothing on disk was rewritten by reading it.
+    expect(disk.get("/private/tmp/knowledge/AGENTS.md")).toBe(
+      "# Acme\nAlways address Dana formally.",
+    );
+  });
+
+  it("seeds a Project's missing brief files on its first task", async () => {
+    const disk = new Map<string, string>();
+    const fixture = serviceFixture({ projectStatusFiles: inMemoryStatusFiles(disk) });
+
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+
+    expect([...disk.keys()].sort()).toEqual([
+      "/private/tmp/knowledge/AGENTS.md",
+      "/private/tmp/knowledge/STATUS.md",
+    ]);
+    expect(disk.get("/private/tmp/knowledge/STATUS.md")).toContain("Last updated: 2026-08-11");
+  });
+
+  it("records what a turn changed in STATUS.md when the turn left it untouched", async () => {
+    const disk = new Map<string, string>([
+      ["/private/tmp/knowledge/STATUS.md", "Last updated: 2026-08-11\n## Recent changes\n"],
+    ]);
+    const observer = {
+      observe: () => ({
+        finish: () => ({ paths: ["offer-v2.docx", "notes/call.md"], truncated: false }),
+      }),
+    };
+    const fixture = serviceFixture({
+      projectStatusFiles: inMemoryStatusFiles(disk),
+      turnFileObserver: observer as never,
+    });
+
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+    // The backfill runs after the outcome is persisted; give it a tick.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(disk.get("/private/tmp/knowledge/STATUS.md")).toContain(
+      "- 2026-08-11 Draft brief: `offer-v2.docx`, `notes/call.md`",
+    );
+  });
+
+  it("leaves STATUS.md alone when the turn itself updated it", async () => {
+    const written = "Last updated: 2026-08-11\n## Current status\nAgent wrote this.\n";
+    const disk = new Map<string, string>([["/private/tmp/knowledge/STATUS.md", written]]);
+    const fixture = serviceFixture({
+      projectStatusFiles: inMemoryStatusFiles(disk),
+      turnFileObserver: {
+        observe: () => ({
+          finish: () => ({ paths: ["STATUS.md", "offer.docx"], truncated: false }),
+        }),
+      } as never,
+    });
+
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(disk.get("/private/tmp/knowledge/STATUS.md")).toBe(written);
   });
 
   it("preserves draft semantics by rejecting a stale binding without creating a turn", async () => {
@@ -630,6 +730,8 @@ function serviceFixture(
     readonly resolveFileMentionContext?: WorkTurnServiceDependencies["resolveFileMentionContext"];
     readonly resolveAppManagedTools?: WorkTurnServiceDependencies["resolveAppManagedTools"];
     readonly spendCeiling?: WorkTurnServiceDependencies["spendCeiling"];
+    readonly projectStatusFiles?: WorkProjectStatusFiles;
+    readonly turnFileObserver?: WorkTurnServiceDependencies["turnFileObserver"];
   } = {},
 ) {
   const projection = new WorkTurnProjection();
@@ -770,6 +872,12 @@ function serviceFixture(
       ? {}
       : { resolveAppManagedTools: options.resolveAppManagedTools }),
     ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
+    ...(options.projectStatusFiles === undefined
+      ? {}
+      : { projectStatusFiles: options.projectStatusFiles }),
+    ...(options.turnFileObserver === undefined
+      ? {}
+      : { turnFileObserver: options.turnFileObserver }),
     uuid: (() => {
       let n = 0;
       return () => {
@@ -797,6 +905,30 @@ function serviceFixture(
   };
 
   return { service, persistence, projection, threads, acquireInputs, waitForIdle };
+}
+
+/** The two brief files on a pretend disk keyed by absolute path. */
+function inMemoryStatusFiles(disk: Map<string, string>): WorkProjectStatusFiles {
+  return new WorkProjectStatusFiles({
+    lstat: async (path) => {
+      const text = disk.get(path);
+      if (text === undefined) throw new Error("ENOENT");
+      return { isFile: true, isSymbolicLink: false, size: text.length, mtimeMs: 0 };
+    },
+    readFile: async (path) => {
+      const text = disk.get(path);
+      if (text === undefined) throw new Error("ENOENT");
+      return text;
+    },
+    createFile: async (path, text) => {
+      if (disk.has(path)) throw new Error("EEXIST");
+      disk.set(path, text);
+    },
+    replaceFile: async (path, text) => {
+      if (!disk.has(path)) throw new Error("ENOENT");
+      disk.set(path, text);
+    },
+  });
 }
 
 function workProject(): Project {

@@ -1,5 +1,6 @@
 import type { ProjectAvailability } from "@octant/contracts/projects";
 import type { WorkOverviewItem as ContractOverviewItem } from "@octant/contracts/work-overview";
+import type { WorkProjectStatus } from "@octant/contracts/work-project-status";
 import type {
   WorkOverviewItem,
   WorkOverviewModel,
@@ -20,11 +21,16 @@ export interface WorkOverviewProjectionInput {
   readonly versions?: ReadonlyArray<WorkOverviewItem | ContractOverviewItem>;
   readonly validation?: ReadonlyArray<WorkOverviewItem | ContractOverviewItem>;
   readonly exports?: ReadonlyArray<WorkOverviewItem | ContractOverviewItem>;
-  readonly sectionStatus?: Partial<Record<keyof WorkOverviewModel, OverviewSectionStatus>>;
-  readonly sectionMessage?: Partial<Record<keyof WorkOverviewModel, string>>;
+  readonly folder?: ReadonlyArray<WorkOverviewItem | ContractOverviewItem>;
+  readonly status?: WorkProjectStatus;
+  readonly sectionStatus?: Partial<Record<WorkOverviewSectionKey, OverviewSectionStatus>>;
+  readonly sectionMessage?: Partial<Record<WorkOverviewSectionKey, string>>;
 }
 
-const EMPTY_MESSAGES: Record<keyof WorkOverviewModel, string> = {
+export type WorkOverviewSectionKey = Exclude<keyof WorkOverviewModel, "status">;
+
+const EMPTY_MESSAGES: Record<WorkOverviewSectionKey, string> = {
+  folder: "The folder is empty.",
   filesAndArtifacts: "No recent files or artifacts in this Project yet.",
   workflowsAndThreads: "No active workflows or related threads yet.",
   approvals: "No pending approvals.",
@@ -41,6 +47,8 @@ const EMPTY_MESSAGES: Record<keyof WorkOverviewModel, string> = {
 export function buildWorkOverviewModel(input: WorkOverviewProjectionInput = {}): WorkOverviewModel {
   const rootUnavailable = input.availability?.status === "unavailable";
   return {
+    ...(input.status === undefined ? {} : { status: input.status }),
+    folder: section("folder", input.folder, input, rootUnavailable),
     filesAndArtifacts: section(
       "filesAndArtifacts",
       input.filesAndArtifacts,
@@ -61,7 +69,7 @@ export function buildWorkOverviewModel(input: WorkOverviewProjectionInput = {}):
 }
 
 function section(
-  key: keyof WorkOverviewModel,
+  key: WorkOverviewSectionKey,
   items: ReadonlyArray<WorkOverviewItem | ContractOverviewItem> | undefined,
   input: WorkOverviewProjectionInput,
   rootUnavailable: boolean,
@@ -112,7 +120,7 @@ function unavailableReason(availability: ProjectAvailability | undefined): strin
 }
 
 function messageFor(
-  key: keyof WorkOverviewModel,
+  key: WorkOverviewSectionKey,
   status: OverviewSectionStatus,
   reason: string | undefined,
 ): string {
@@ -137,8 +145,10 @@ function messageFor(
   }
 }
 
-function label(key: keyof WorkOverviewModel): string {
+function label(key: WorkOverviewSectionKey): string {
   switch (key) {
+    case "folder":
+      return "the folder";
     case "filesAndArtifacts":
       return "recent files and artifacts";
     case "workflowsAndThreads":
@@ -154,8 +164,10 @@ function label(key: keyof WorkOverviewModel): string {
   }
 }
 
-function title(key: keyof WorkOverviewModel): string {
+function title(key: WorkOverviewSectionKey): string {
   switch (key) {
+    case "folder":
+      return "Folder contents";
     case "filesAndArtifacts":
       return "Recent files";
     case "workflowsAndThreads":

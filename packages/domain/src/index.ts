@@ -38,6 +38,7 @@ export * from "./diagnosticsExportPolicy";
 export * from "./workConfinementPolicy";
 export * from "./workDeliveryPolicy";
 export * from "./workPromotionPolicy";
+export * from "./workProjectStatusPolicy";
 export * from "./workRequestPolicy";
 export * from "./workResearchPolicy";
 export * from "./workTurnPolicy";
