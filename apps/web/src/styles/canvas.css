@@ -157,6 +157,54 @@
   max-width: 100%;
 }
 
+/* A diagram as a board: the drawing pans and zooms inside a fixed frame, so the
+   surrounding document keeps its height while the picture moves. */
+.canvas-board {
+  position: relative;
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.canvas-board__controls {
+  display: flex;
+  gap: var(--oct-space-1);
+  align-items: center;
+}
+
+.canvas-board__zoom {
+  margin-left: var(--oct-space-2);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--oct-meta);
+}
+
+.canvas-board__svg {
+  aspect-ratio: 16 / 9;
+  height: auto;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+
+.canvas-board[data-editable="true"] .canvas-board__node {
+  cursor: move;
+}
+
+.canvas-board__node:focus-visible rect {
+  stroke: var(--oct-accent);
+  stroke-width: 2;
+  outline: none;
+}
+
+.canvas-board__message {
+  margin: 0;
+  font-size: var(--oct-text-xs);
+  color: var(--oct-danger-fg);
+}
+
 .canvas-block__diagram-edge {
   stroke: var(--oct-chart-axis);
   stroke-width: 1.5;

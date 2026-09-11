@@ -114,10 +114,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "packages/contracts/src/nativeHarness.ts",
     "Native harness session, advisor, follow-up, and tool-bound contracts, delivered schema-first ahead of the turn runtime. Remove once the server journals a NativeHarnessTurnRecord or a surface renders a NativeHarnessFollowUpSet.",
   ],
-  [
-    "packages/domain/src/canvasBoardPolicy.ts",
-    "Canvas board comment and layout-revision policy; server journal wiring and renderer integration are out of scope for the contracts/domain slice. Remove once a server service or renderer calls admitCanvasCommentCommand or admitCanvasDiagramLayoutRevision.",
-  ],
 ]);
 
 /** Route modules exempt from Rule A, with the reason they are not registered. */

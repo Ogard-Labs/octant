@@ -102,6 +102,16 @@ function createRevisionRoute(projection = new CanvasProjection()) {
           level: 1,
           text: "A bounded Canvas",
         },
+        {
+          blockId: "board-1" as never,
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          kind: "diagram",
+          nodes: [
+            { nodeId: "api" as never, label: "API" },
+            { nodeId: "db" as never, label: "Database" },
+          ],
+          edges: [{ edgeId: "api-db" as never, source: "api" as never, target: "db" as never }],
+        },
       ],
     },
     createdBy: {
@@ -452,6 +462,16 @@ function seedProjection(projection: CanvasProjection) {
             level: 1,
             text: "A bounded Canvas",
           },
+          {
+            blockId: "board-1" as never,
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            kind: "diagram",
+            nodes: [
+              { nodeId: "api" as never, label: "API" },
+              { nodeId: "db" as never, label: "Database" },
+            ],
+            edges: [{ edgeId: "api-db" as never, source: "api" as never, target: "db" as never }],
+          },
         ],
       },
       createdBy: {
@@ -628,6 +648,64 @@ describe("canvas routes", () => {
     if (historyOutcome.kind !== "ready") return;
     expect(historyOutcome.history.entries).toHaveLength(2);
     expect(historyOutcome.history.entries[1]?.promptSummary).toBe("Add a summary section");
+  });
+
+  it("journals a dragged node through the authenticated route and refuses the same drag without a window", async () => {
+    const route = createRevisionRoute();
+    const command = {
+      kind: "canvas-diagram-layout-revise",
+      canvasId,
+      versionId: "33333333-3333-4333-8333-333333333333",
+      blockId: "board-1",
+      positions: [{ nodeId: "db", x: 320, y: 40 }],
+      actor: { kind: "local-user", actorId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" },
+      expectedSequence: 1,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      issuedAt: now,
+    };
+    const unauthenticated = await route(
+      new Request("http://127.0.0.1/api/canvas/layout-revise", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      }),
+    );
+    expect(unauthenticated?.status).toBe(401);
+
+    const response = await route(
+      new Request("http://127.0.0.1/api/canvas/layout-revise", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": windowCapability,
+        },
+        body: JSON.stringify(command),
+      }),
+    );
+    expect(response?.status).toBe(200);
+    expect(JSON.parse(await response!.text())).toMatchObject({
+      kind: "accepted",
+      versionId: "33333333-3333-4333-8333-333333333333",
+      sequence: 2,
+    });
+
+    const reread = await route(
+      new Request(`http://127.0.0.1/api/canvas/get?canvasId=${String(canvasId)}`, {
+        method: "GET",
+        headers: { "x-octant-window-capability": windowCapability },
+      }),
+    );
+    const body = JSON.parse(await reread!.text());
+    expect(body.version.sequence).toBe(2);
+    expect(body.version.createdBy).toEqual({
+      kind: "local-user",
+      actorId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+    const board = body.version.definition.blocks.find(
+      (block: { blockId: string }) => block.blockId === "board-1",
+    );
+    expect(board.layout).toBe("manual");
+    expect(board.nodes[1]).toMatchObject({ nodeId: "db", x: 320, y: 40, positioned: true });
   });
 
   it("refreshes an approved recipe through the authenticated route", async () => {
