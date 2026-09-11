@@ -211,6 +211,7 @@ describe("PersistenceLive", () => {
             persistence,
             uuid: () => "00000000-0000-4000-8000-000000000915",
             clock: () => now,
+            home: "/Users/ada",
           });
           const bootstrap = service.bootstrap(
             decodeWindowId("00000000-0000-4000-8000-000000000916"),
@@ -232,7 +233,11 @@ describe("PersistenceLive", () => {
       ),
     );
 
-    expect(result.bootstrap.settings).toEqual(decodePersistedShellSettings(legacySettings));
+    // The default folder is filled in on read as a host fact; it is not persisted.
+    expect(result.bootstrap.settings).toEqual({
+      ...decodePersistedShellSettings(legacySettings),
+      defaultFolder: "/Users/ada/Documents/Octant",
+    });
     expect(result.bootstrap.settingsVersion).toBe(1);
     expect(result.event).toEqual({ payload_json: legacyPayloadJson });
     expect(result.projection).toEqual({ settings_json: legacySettingsJson });

@@ -1380,6 +1380,13 @@ export class CodeOperationService {
         // The renderer selects a definition; it never authors one. Re-deriving
         // the checkout's definitions here is what stops a submitted definition
         // from carrying argv the server never discovered.
+        if (checkout.head.kind === "none") {
+          return this.#failed(
+            command.operationId,
+            "unavailable",
+            "Repository tests need a Git repository; this folder has none.",
+          );
+        }
         const discovered = await this.#options.repositoryTests.discover({
           checkoutId: String(checkout.id),
           rootPath: root.checkoutRoot,

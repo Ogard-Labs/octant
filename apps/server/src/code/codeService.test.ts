@@ -158,6 +158,8 @@ describe("CodeService reads", () => {
       settings: {
         defaultExecutionPolicy: "approval-gated",
         defaultPermissionPersistence: "current-session",
+        requireGitRepository: true,
+        allowDefaultFolderThreads: false,
         version: 0,
         updatedAt: now,
       },
@@ -646,6 +648,33 @@ describe("CodeService commands", () => {
         events: [expect.objectContaining({ eventName: "code.settings-updated@1" })],
       }),
     );
+  });
+
+  it("refuses threads without a Project while a Git repository is still required", async () => {
+    const fixture = serviceFixture();
+    const update = (input: {
+      readonly requireGitRepository: boolean;
+      readonly allowDefaultFolderThreads: boolean;
+    }) =>
+      fixture.service.execute(ids.window, {
+        kind: "update-code-settings",
+        expectedVersion: 0,
+        defaultExecutionPolicy: "approval-gated",
+        defaultPermissionPersistence: "current-session",
+        ...input,
+      });
+
+    await expect(
+      update({ requireGitRepository: true, allowDefaultFolderThreads: true }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+
+    await expect(
+      update({ requireGitRepository: false, allowDefaultFolderThreads: true }),
+    ).resolves.toMatchObject({
+      kind: "settings-updated",
+      settings: { requireGitRepository: false, allowDefaultFolderThreads: true },
+    });
   });
 
   it("journals an authorized new thread at expected aggregate version zero", async () => {

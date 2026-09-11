@@ -337,7 +337,7 @@ describe("managed Code thread creation (composer submit -> worktree -> thread bi
     if (result?.kind !== "managed-thread-created")
       throw new Error("expected managed-thread-created");
     // HEAD and receipt provenance agree on the fetched OID, not the stale local head.
-    expect(result.checkout.head.oid).toBe(fetchedHead);
+    expect(result.checkout.head).toMatchObject({ oid: fetchedHead });
     expect(result.provenance.resolvedHead).toBe(fetchedHead);
     // The receipt's expectedHead is the fetched OID.
     const receipt = receipts.records.get("60000000-0000-4000-8000-000000000020");

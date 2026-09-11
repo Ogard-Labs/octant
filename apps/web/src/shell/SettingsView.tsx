@@ -26,6 +26,7 @@ import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { SliderField } from "../settings/SliderField";
+import { DefaultFolderSettings } from "../settings/DefaultFolderSettings";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
@@ -113,7 +114,8 @@ export interface SettingsViewProps {
   readonly onResetLayout: () => void;
   readonly onResetNativeBounds: () => void;
   readonly onSearchChange: (value: string) => void;
-  readonly onSettingsChange: (patch: Partial<ShellSettings>) => void;
+  /** May resolve to whether the host accepted the patch; a void result is read as accepted. */
+  readonly onSettingsChange: (patch: Partial<ShellSettings>) => Promise<boolean> | boolean | void;
   readonly search: string;
   readonly settings: ShellSettings;
   readonly sidebarVibrancySupported: boolean;
@@ -906,6 +908,22 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             }
             onReleaseRingChange={(ring) => props.onSettingsChange({ releaseRing: ring })}
           />
+        </div>
+      </SettingsSection>
+      <SettingsSection title="Files">
+        <div className="setgroup">
+          <SettingRow
+            description="Where Work and Code threads started without a Project keep their files, and where artifact files are mirrored unless a Project says otherwise."
+            focused={focusedSetting === settingId("default-folder")}
+            label="Default folder"
+            scope="host"
+            settingId="default-folder"
+          >
+            <DefaultFolderSettings
+              folder={props.settings.defaultFolder}
+              onFolderChange={(folder) => props.onSettingsChange({ defaultFolder: folder })}
+            />
+          </SettingRow>
         </div>
       </SettingsSection>
       <SettingsSection title="Threads">

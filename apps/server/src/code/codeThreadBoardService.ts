@@ -314,7 +314,12 @@ function overlayCheckoutWorktree(
   return {
     kind: "available",
     checkoutId: checkout.id,
-    path: checkout.kind === "managed-worktree" ? "Managed worktree" : "Current checkout",
+    path:
+      checkout.kind === "managed-worktree"
+        ? "Managed worktree"
+        : checkout.kind === "plain-folder"
+          ? "Folder"
+          : "Current checkout",
     head: checkout.head,
     ...(checkout.kind === "managed-worktree" ? { receiptId: checkout.ownershipReceiptId } : {}),
   };

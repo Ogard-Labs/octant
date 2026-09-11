@@ -34,6 +34,24 @@ _Avoid_: Remote device
 A persistent headless Linux Machine.
 _Avoid_: Cloud, server container, orb
 
+## Places work lives
+
+**Default folder**:
+The one host-wide folder Octant uses for anything nobody gave a home: the
+default Projects of Work and Code, and mirrored artifact files.
+_Avoid_: Octant folder, home, scratch, projectless folder
+
+**Default Project**:
+The Work or Code Project the host provisions under the default folder so a
+thread can start without a chosen Project. An ordinary Project in every other
+respect.
+_Avoid_: Rootless thread, unfiled thread, projectless thread, quick task
+
+**Plain folder**:
+A Code checkout that is the bound folder itself, with no Git repository behind
+it and therefore no revision. Allowed only when the Git requirement is off.
+_Avoid_: Unborn checkout, detached folder, non-repo worktree
+
 ## Thread execution
 
 **Environment**:

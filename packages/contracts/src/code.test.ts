@@ -170,7 +170,15 @@ describe("Code aggregate contracts", () => {
       version: 1,
       updatedAt: now,
     } as const;
-    expect(decodeCodeSettings(settings)).toEqual(settings);
+    // A store from before the Git requirement was a setting decodes to on.
+    expect(decodeCodeSettings(settings)).toEqual({
+      ...settings,
+      requireGitRepository: true,
+      allowDefaultFolderThreads: false,
+    });
+    expect(decodeCodeSettings({ ...settings, requireGitRepository: false })).toMatchObject({
+      requireGitRepository: false,
+    });
     expect(() =>
       decodeCodeSettings({
         ...settings,
@@ -337,6 +345,8 @@ describe("Code aggregate contracts", () => {
     const settings = {
       defaultExecutionPolicy: "approval-gated",
       defaultPermissionPersistence: "current-session",
+      requireGitRepository: true,
+      allowDefaultFolderThreads: false,
       version: 1,
       updatedAt: now,
     } as const;

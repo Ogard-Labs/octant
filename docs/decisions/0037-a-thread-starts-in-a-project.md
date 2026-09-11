@@ -60,3 +60,5 @@ thread with no container at all.
 - 0003 Product modes: Chat, Work, and Code authority (amended)
 - 0017 Code Projects bind any folder
 - 0002 Durable event journal and rebuildable projections
+- 0117 Adds a third way forward to the composer: the host-provisioned default
+  Project. The rule that every thread belongs to a Project is unchanged.

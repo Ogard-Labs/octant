@@ -2153,6 +2153,37 @@ textarea.settings-view__text-input {
   gap: var(--oct-space-6);
 }
 
+/* The folder path reads as a path and stays on one line; the row's control
+   edge holds it beside its one button. */
+.default-folder-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--oct-space-2);
+}
+
+.default-folder-settings__path {
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--oct-text-detail);
+  color: var(--oct-muted);
+}
+
+.default-folder-settings--editing > input {
+  min-width: 26ch;
+}
+
+.default-folder-settings__status {
+  flex-basis: 100%;
+  margin: 0;
+  text-align: right;
+  font-size: var(--oct-text-detail);
+  color: var(--oct-muted);
+}
+
 /* The reorder arrows ride next to the enable switch at the control edge and
    stay quiet: an enabled row's order matters, a disabled row's does not. */
 .open-in-settings__controls {
