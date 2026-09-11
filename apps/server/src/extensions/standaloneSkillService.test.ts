@@ -336,7 +336,7 @@ describe("standalone skill activation", () => {
     const blocked = service
       .snapshot(baseSnapshot)
       .skills?.find((candidate) => String(candidate.skill.qualifiedId) === qualifiedId);
-    expect(blocked?.effectiveState).toEqual({ kind: "blocked", reason: "review-required" });
+    expect(blocked?.effectiveState).toEqual({ kind: "blocked", reason: "untrusted" });
 
     await service.execute({ kind: "review-skill", qualifiedId, digest: skill.skill.digest });
     expect(
@@ -422,7 +422,7 @@ describe("standalone skill activation", () => {
       .skills?.find(
         (candidate) => String(candidate.skill.qualifiedId) === changedSkill.skill.qualifiedId,
       );
-    expect(afterChange?.effectiveState).toEqual({ kind: "blocked", reason: "review-required" });
+    expect(afterChange?.effectiveState).toEqual({ kind: "blocked", reason: "untrusted" });
     expect(current()[qualifiedId]).toEqual({
       reviewed: true,
       trusted: true,

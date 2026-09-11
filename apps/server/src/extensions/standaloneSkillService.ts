@@ -371,6 +371,9 @@ function standaloneEffectiveState(
   if (superseded) {
     return { kind: "blocked", reason: "superseded" };
   }
+  if (!record.provenance.reviewed) {
+    return { kind: "blocked", reason: "untrusted" };
+  }
   if (!record.reviewed) {
     return { kind: "blocked", reason: "review-required" };
   }
