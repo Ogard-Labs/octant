@@ -50,6 +50,7 @@ import {
   resolveDesktopHostCapabilities,
   resolveConfiguredServerPort,
   resolveLocalWebAppUrl,
+  shouldRecoverWindowAfterRendererExit,
   resolveCodeFileHelperPath,
   resolveKeychainHelperPath,
   validateProjectWindowTarget,
@@ -894,6 +895,27 @@ describe("Project window production request gate", () => {
     await Promise.resolve();
 
     expect(handleFailure).not.toHaveBeenCalled();
+  });
+});
+
+describe("renderer exit window recovery", () => {
+  it("reopens the window for crash-class renderer exits", () => {
+    for (const reason of [
+      "crashed",
+      "abnormal-exit",
+      "oom",
+      "unresponsive",
+      "launch-failed",
+      "integrity-failure",
+    ]) {
+      expect(shouldRecoverWindowAfterRendererExit(reason)).toBe(true);
+    }
+  });
+
+  it("does not resurrect a window whose renderer exited deliberately", () => {
+    for (const reason of ["clean-exit", "killed"]) {
+      expect(shouldRecoverWindowAfterRendererExit(reason)).toBe(false);
+    }
   });
 });
 
