@@ -67,6 +67,8 @@ export interface ThreadComposerRow {
   readonly toolbar?: boolean | undefined;
   /** Surface-specific controls: pickers, access policy, attachments, profile. */
   readonly leading?: ReactNode;
+  /** Access and approval choices stay beside send at the trailing edge. */
+  readonly trailing?: ReactNode;
   readonly actions: ThreadComposerActions;
 }
 
@@ -129,7 +131,7 @@ export function ThreadComposer(props: ThreadComposerProps) {
       {...(props.row.toolbar === true ? { role: "toolbar" } : {})}
     >
       {props.row.leading}
-      <ThreadComposerTrailing actions={props.row.actions} />
+      <ThreadComposerTrailing actions={props.row.actions} controls={props.row.trailing} />
     </div>
   );
   const body = followUp ? (
@@ -169,13 +171,16 @@ function sendRefused(send: ThreadComposerSend): boolean {
   return send.disabled === true || send.disabledReason !== undefined;
 }
 
-function ThreadComposerTrailing(props: { readonly actions: ThreadComposerActions }) {
+function ThreadComposerTrailing(props: {
+  readonly actions: ThreadComposerActions;
+  readonly controls?: ReactNode;
+}) {
   const meter = <ComposerContextMeter />;
   if (props.actions.kind === "send") {
     const { send } = props.actions;
     return (
-      <>
-        <span className="composer-gap" />
+      <div className="composer-actions">
+        {props.controls}
         {meter}
         <OctantButton
           aria-label={send.ariaLabel}
@@ -187,12 +192,13 @@ function ThreadComposerTrailing(props: { readonly actions: ThreadComposerActions
         >
           <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
         </OctantButton>
-      </>
+      </div>
     );
   }
   const { cellClassName, sending, send, stop } = props.actions;
   return (
     <div className={cellClassName}>
+      {props.controls}
       {meter}
       {sending ? (
         <OctantButton

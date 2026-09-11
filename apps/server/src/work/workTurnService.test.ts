@@ -16,6 +16,7 @@ import {
 import { Effect, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import { browserUseSelection } from "@octant/plugin-host/browser-use";
 import { WorkAttachmentStore } from "./workAttachmentStore";
 import { WorkTurnProjection } from "./workTurnProjection";
 import {
@@ -72,6 +73,84 @@ describe("WorkTurnService", () => {
         status: "completed",
         response: "Provider reply",
       }),
+    });
+  });
+
+  it("refuses an explicit skill until Work has a material resolver", async () => {
+    const fixture = serviceFixture();
+    const result = await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      extensionSelections: [
+        {
+          kind: "skill",
+          skillId: `agents-skills-directory:project:review:sha256:${"a".repeat(64)}`,
+          packageDigest: `sha256:${"a".repeat(64)}`,
+          catalogEpoch: `sha256:${"b".repeat(64)}`,
+          origin: { kind: "draft", reference: "review" },
+        },
+      ],
+    });
+    expect(result.kind).toBe("accepted");
+    await fixture.waitForIdle();
+    const lookup = await fixture.service.lookupFirstTurn(ids.window, ids.request);
+    expect(lookup).toMatchObject({
+      kind: "accepted",
+      turn: {
+        status: "failed",
+        failure: {
+          category: "unavailable",
+          message: "Selected skill context is unavailable for Work on this host.",
+        },
+      },
+    });
+    expect(fixture.acquireInputs).toHaveLength(0);
+  });
+
+  it("refuses Browser when the selected Work provider exposes no Browser tool", async () => {
+    const fixture = serviceFixture();
+    const result = await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      extensionSelections: [browserUseSelection("work-test")],
+    });
+    expect(result.kind).toBe("accepted");
+    await fixture.waitForIdle();
+    const lookup = await fixture.service.lookupFirstTurn(ids.window, ids.request);
+    expect(lookup).toMatchObject({
+      kind: "accepted",
+      turn: {
+        status: "failed",
+        failure: {
+          category: "unsupported",
+          message: "The selected Browser is unavailable for this provider or task.",
+        },
+      },
+    });
+    expect(fixture.acquireInputs).toHaveLength(0);
+  });
+
+  it("forwards fixed Browser guidance when Work exposes Browser", async () => {
+    const contexts: Array<ReadonlyArray<{ readonly kind: string; readonly text: string }>> = [];
+    const fixture = serviceFixture({
+      resolveAppManagedTools: () => ({
+        definitions: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+        execute: async () => ({ result: {} }),
+      }),
+      turnRuntime: {
+        run: async (input) => {
+          contexts.push(input.context ?? []);
+          return { kind: "completed", response: "Provider reply" };
+        },
+      },
+    });
+    const result = await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      extensionSelections: [browserUseSelection("work-browser-guidance")],
+    });
+    expect(result.kind).toBe("accepted");
+    await fixture.waitForIdle();
+    expect(contexts.flat()).toContainEqual({
+      kind: "instructions",
+      text: expect.stringContaining("Octant's built-in Browser"),
     });
   });
 
@@ -495,6 +574,7 @@ function serviceFixture(
     readonly supportsAttachments?: () => boolean;
     readonly safeInputBudgetTokens?: number;
     readonly resolveFileMentionContext?: WorkTurnServiceDependencies["resolveFileMentionContext"];
+    readonly resolveAppManagedTools?: WorkTurnServiceDependencies["resolveAppManagedTools"];
     readonly spendCeiling?: WorkTurnServiceDependencies["spendCeiling"];
   } = {},
 ) {
@@ -632,6 +712,9 @@ function serviceFixture(
     ...(options.resolveFileMentionContext === undefined
       ? {}
       : { resolveFileMentionContext: options.resolveFileMentionContext }),
+    ...(options.resolveAppManagedTools === undefined
+      ? {}
+      : { resolveAppManagedTools: options.resolveAppManagedTools }),
     ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
     uuid: (() => {
       let n = 0;

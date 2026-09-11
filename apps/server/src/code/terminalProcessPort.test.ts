@@ -1,6 +1,7 @@
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
@@ -288,6 +289,52 @@ describe("TerminalProcessPort", () => {
     expect(launch(first, "repo_b").stateDirectory).not.toBe(a.stateDirectory);
     expect(launch(first).stateDirectory).toBe(a.stateDirectory);
   });
+
+  it.skipIf(process.platform !== "darwin")(
+    "lets shell startup create its caches while keeping sibling terminal state private",
+    () => {
+      const fake = createFakeSandboxConfinement();
+      directories.push(fake.root);
+      const shellStateDirectory = join(fake.root, "host-state", "code", "terminal-shell");
+      const checkout = join(fake.root, "checkout");
+      mkdirSync(checkout);
+      const spawn = vi.fn(() => fakePty());
+      new TerminalProcessPort({
+        spawn,
+        killProcessGroup: vi.fn(),
+        confinement: fake.confinement,
+        temporaryDirectory: fake.temporaryDirectory,
+        shellStateDirectory,
+        seatbeltHomeDirectory: fake.root,
+        platform: "darwin",
+      }).start({
+        shell: "/bin/zsh",
+        cwd: checkout,
+        stateScope: "repo_test",
+        environment: {},
+        columns: 80,
+        rows: 24,
+      });
+      const profile = launchedProfile(spawn);
+      const ownCache = join(launchedStateDirectory(spawn), "cache", "zsh");
+      const run = (command: string, args: ReadonlyArray<string>) =>
+        spawnSync("/usr/bin/sandbox-exec", ["-p", profile, "--", command, ...args], {
+          encoding: "utf8",
+        });
+      const cacheSetup = run("/bin/mkdir", ["-p", ownCache]);
+      expect(cacheSetup.stderr).toBe("");
+      expect(cacheSetup.status).toBe(0);
+      expect(existsSync(ownCache)).toBe(true);
+
+      const sibling = join(shellStateDirectory, "another-repository");
+      mkdirSync(sibling);
+      const history = join(sibling, "history");
+      writeFileSync(history, "private terminal history\n");
+      expect(run("/bin/ls", [shellStateDirectory]).status).not.toBe(0);
+      expect(run("/bin/cat", [history]).status).not.toBe(0);
+      expect(run("/usr/bin/touch", [join(sibling, "changed")]).status).not.toBe(0);
+    },
+  );
 
   it("fails closed when Seatbelt confinement is unavailable", () => {
     expect(() =>

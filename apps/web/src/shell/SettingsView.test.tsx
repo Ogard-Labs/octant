@@ -681,10 +681,10 @@ describe("SettingsView", () => {
       /\.settings-view\s*\{[\s\S]*grid-template-columns:\s*var\(--octant-sidebar-width, 248px\) minmax\(0, 1fr\);/,
     );
     // A bounded reading column centers in the workspace while keeping the saved sidebar width.
-    expect(styles).toMatch(/--oct-settings-reading-width:\s*800px;/);
+    expect(styles).toMatch(/--oct-settings-reading-width:\s*920px;/);
     expect(styles).toMatch(/\.settings-view__content-inner\s*\{[\s\S]*margin:\s*0 auto;/);
     expect(styles).toMatch(
-      /\.settings-view__content-inner\s*\{[\s\S]*padding:\s*40px var\(--oct-settings-gutter\) 64px;/,
+      /\.settings-view__content-inner\s*\{[\s\S]*padding:\s*48px var\(--oct-settings-gutter\) 72px;/,
     );
     expect(styles).toContain("font-family: var(--oct-font-display)");
     expect(styles).toContain("font-size: var(--octant-ui-font-size)");
@@ -722,22 +722,21 @@ describe("SettingsView", () => {
     expect(styles).toMatch(/\.settings-scheme__card\s*\{[^}]*height:\s*auto;/);
   });
 
-  it("draws every preference section as an object on the page ground", () => {
+  it("draws every preference section as an open row surface", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 
     expect(styles).toMatch(
       /\.settings-view\s*\{[\s\S]*background:\s*var\(--octant-app-background\)/,
     );
-    // A section is an object (0109): the card is built from the section's
-    // content children, over the surface fill and inside a hairline, with no
-    // shadow because it sits in the page rather than floating above it (0090).
-    // The label and its description stay out on the page ground. It used to be
-    // drawn wholly flat, which left nothing to see a section by.
+    // A section remains the object that owns its label and rows (0109), while
+    // routine content stays on the page ground with one hairline per row
+    // under the scoped presentation supersession in 0116.
     expect(styles).toMatch(/\.settings-card-section\s*\{[^}]*border:\s*0/);
-    expect(styles).toMatch(/border-inline:\s*1px solid var\(--oct-hairline\)/);
-    expect(styles).toMatch(/border-start-start-radius:\s*var\(--oct-radius-lg\)/);
     expect(styles).toMatch(/\.settings-card-section\s*\{[^}]*box-shadow:\s*none/);
     expect(styles).toMatch(/\.settings-card-section--open\s*\{[\s\S]*box-shadow:\s*none/);
+    expect(styles).toMatch(
+      /\.settings-card-section--open\s*>\s*\.setgroup\s*\{[\s\S]*background:\s*transparent;/,
+    );
     expect(styles).toContain("border-radius: var(--oct-radius-md)");
     // Code defaults are SettingRows in the shared open sections; there is no
     // Code-only section recipe left to keep in step with them.

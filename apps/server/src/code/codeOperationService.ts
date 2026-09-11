@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import {
   decodeCodeOperationCommand,
   decodeCodeOperationResult,
@@ -890,6 +891,10 @@ export class CodeOperationService {
                   modelId: scope.thread.modelId,
                   sessionId: command.sessionId,
                   prompt: command.prompt,
+                  ...(command.extensionSelections === undefined ||
+                  command.extensionSelections.length === 0
+                    ? {}
+                    : { extensionSelections: command.extensionSelections }),
                   executionPolicy: turnThread.executionPolicy,
                   ...(starting.attachments.length === 0
                     ? {}
@@ -2205,6 +2210,13 @@ export class CodeOperationService {
         "unavailable",
         "Provider prompt evidence is unavailable.",
       );
+    if (command.extensionSelections?.some((selection) => !isBrowserUseSelection(selection))) {
+      return this.#failed(
+        command.operationId,
+        "unavailable",
+        "Selected skill context is unavailable for Code on this host.",
+      );
+    }
     const supportsImages = this.#options.supportsAttachments?.(thread) === true;
     // Notes the user pointed at the running product ride with the next turn
     // they send. They are quoted as evidence beside the prompt, never folded
@@ -2559,7 +2571,9 @@ function sameConversationStart(
     event.sessionId === command.sessionId &&
     event.prompt.contentId === command.prompt.contentId &&
     event.prompt.digest === command.prompt.digest &&
-    event.prompt.byteLength === command.prompt.byteLength
+    event.prompt.byteLength === command.prompt.byteLength &&
+    JSON.stringify(event.extensionSelections ?? []) ===
+      JSON.stringify(command.extensionSelections ?? [])
   );
 }
 

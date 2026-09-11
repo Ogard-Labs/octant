@@ -24,7 +24,8 @@ const alternateProviderId = "80000000-0000-4000-8000-0000000000a2" as never;
 const alternateModelId = "model-two" as never;
 
 describe("CodeThreadWorkspace", () => {
-  it("names the profile a thread was started under, and stays quiet when it has none", () => {
+  it("keeps the starting profile in the access menu, and stays quiet when it has none", async () => {
+    const user = userEvent.setup();
     const profileId = "60000000-0000-4000-8000-000000000001";
     const withProfile = controller();
     const { rerender } = render(
@@ -44,7 +45,10 @@ describe("CodeThreadWorkspace", () => {
         />
       </AgentProfileNamesProvider>,
     );
-    expect(screen.getByText("Reviewer")).toBeVisible();
+    expect(screen.queryByText("Reviewer")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Next turn access" }));
+    expect(await screen.findByText("Started under Reviewer")).toBeVisible();
+    await user.keyboard("{Escape}");
 
     rerender(
       <AgentProfileNamesProvider profiles={[{ id: profileId, displayName: "Reviewer" } as never]}>
@@ -1017,16 +1021,18 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("combobox", { name: "Next turn access" })).toHaveTextContent(
-      "Ask for approvals",
-    );
-    await user.click(screen.getByRole("combobox", { name: "Next turn access" }));
-    expect(screen.queryByRole("option", { name: "Auto-accept edits" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next turn access" })).toHaveTextContent("Ask");
+    await user.click(screen.getByRole("button", { name: "Next turn access" }));
     expect(
-      await screen.findByRole("option", { name: "Raise thread · Auto-accept edits" }),
+      screen.queryByRole("menuitemradio", { name: "Auto-accept edits" }),
+    ).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole("menuitemradio", { name: "Raise thread · Auto-accept edits" }),
     ).toBeVisible();
-    expect(await screen.findByRole("option", { name: "Raise thread · Full access" })).toBeVisible();
-    await user.click(await screen.findByRole("option", { name: "Plan · read-only" }));
+    expect(
+      await screen.findByRole("menuitemradio", { name: "Raise thread · Full access" }),
+    ).toBeVisible();
+    await user.click(await screen.findByRole("menuitemradio", { name: "Plan · read-only" }));
     expect(execute).not.toHaveBeenCalled();
 
     await user.type(screen.getByLabelText("Follow-up message"), "just look");
@@ -1052,15 +1058,15 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("combobox", { name: "Next turn access" })).toHaveTextContent(
-      "Auto-accept edits",
+    expect(screen.getByRole("button", { name: "Next turn access" })).toHaveTextContent(
+      "Auto edits",
     );
-    await user.click(screen.getByRole("combobox", { name: "Next turn access" }));
-    expect(await screen.findByRole("option", { name: "Plan · read-only" })).toBeVisible();
-    expect(screen.getByRole("option", { name: "Ask for approvals" })).toBeVisible();
-    expect(screen.getByRole("option", { name: "Raise thread · Full access" })).toBeVisible();
-    expect(screen.queryByRole("option", { name: "Full access" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("option", { name: "Ask for approvals" }));
+    await user.click(screen.getByRole("button", { name: "Next turn access" }));
+    expect(await screen.findByRole("menuitemradio", { name: "Plan · read-only" })).toBeVisible();
+    expect(screen.getByRole("menuitemradio", { name: "Ask for approvals" })).toBeVisible();
+    expect(screen.getByRole("menuitemradio", { name: "Raise thread · Full access" })).toBeVisible();
+    expect(screen.queryByRole("menuitemradio", { name: "Full access" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("menuitemradio", { name: "Ask for approvals" }));
     expect(execute).not.toHaveBeenCalled();
 
     await user.type(screen.getByLabelText("Follow-up message"), "ask me first");
@@ -1085,13 +1091,15 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    const picker = screen.getByRole("combobox", { name: "Next turn access" });
-    expect(picker).toHaveTextContent("Plan · read-only");
+    const picker = screen.getByRole("button", { name: "Next turn access" });
+    expect(picker).toHaveTextContent("Plan");
     expect(picker).toBeEnabled();
     await user.click(picker);
-    expect(screen.queryByRole("option", { name: "Ask for approvals" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitemradio", { name: "Ask for approvals" }),
+    ).not.toBeInTheDocument();
     await user.click(
-      await screen.findByRole("option", { name: "Raise thread · Ask for approvals" }),
+      await screen.findByRole("menuitemradio", { name: "Raise thread · Ask for approvals" }),
     );
     expect(execute).toHaveBeenCalledWith({
       kind: "change-code-thread-access",
@@ -1114,8 +1122,10 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    await user.click(screen.getByRole("combobox", { name: "Next turn access" }));
-    await user.click(await screen.findByRole("option", { name: "Raise thread · Full access" }));
+    await user.click(screen.getByRole("button", { name: "Next turn access" }));
+    await user.click(
+      await screen.findByRole("menuitemradio", { name: "Raise thread · Full access" }),
+    );
     expect(requestFullAccessApproval).toHaveBeenCalledWith({
       kind: "change-thread-full-access",
       threadId,
@@ -1137,20 +1147,16 @@ describe("CodeThreadWorkspace", () => {
     const sendFollowUp = vi.fn(() => new Promise<boolean>(() => undefined));
     render(<CodeThreadWorkspace controller={controller({ sendFollowUp })} threadId={threadId} />);
 
-    await user.click(screen.getByRole("combobox", { name: "Next turn access" }));
-    await user.click(await screen.findByRole("option", { name: "Plan · read-only" }));
-    expect(screen.getByRole("combobox", { name: "Next turn access" })).toHaveTextContent(
-      "Plan · read-only",
-    );
+    await user.click(screen.getByRole("button", { name: "Next turn access" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Plan · read-only" }));
+    expect(screen.getByRole("button", { name: "Next turn access" })).toHaveTextContent("Plan");
     await user.type(screen.getByLabelText("Follow-up message"), "just look");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
     expect(sendFollowUp).toHaveBeenCalledWith("just look", [], [], [], "plan");
-    expect(screen.getByRole("combobox", { name: "Next turn access" })).toHaveTextContent(
-      "Ask for approvals",
-    );
+    expect(screen.getByRole("button", { name: "Next turn access" })).toHaveTextContent("Ask");
   });
 
-  it("says which posture a turn ran under", () => {
+  it("keeps sent messages free of access captions", () => {
     render(
       <CodeThreadWorkspace
         controller={controller({
@@ -1168,10 +1174,10 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByText("Access · Auto-accept edits")).toBeVisible();
+    expect(screen.queryByText("Access · Auto-accept edits")).not.toBeInTheDocument();
   });
 
-  it("names the posture only on the turn where it changes", () => {
+  it("keeps policy changes in the access control rather than repeating them in the transcript", () => {
     render(
       <CodeThreadWorkspace
         controller={controller({
@@ -1203,8 +1209,8 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getAllByText("Access · Ask for approvals")).toHaveLength(1);
-    expect(screen.getByText("Access · Auto-accept edits")).toBeVisible();
+    expect(screen.queryByText("Access · Ask for approvals")).not.toBeInTheDocument();
+    expect(screen.queryByText("Access · Auto-accept edits")).not.toBeInTheDocument();
   });
 
   it("answers agent-initiated approvals and questions through the controller", async () => {

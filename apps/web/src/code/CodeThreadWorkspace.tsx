@@ -1,4 +1,9 @@
-import { ComputerUseMention, useComputerUseMention } from "../computerUse/ComputerUseMention";
+import {
+  BrowserUseMention,
+  ComputerUseMention,
+  useBrowserUseMention,
+  useComputerUseMention,
+} from "../computerUse/ComputerUseMention";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import {
   MAX_CODE_THREAD_TITLE_LENGTH,
@@ -18,7 +23,7 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import { CirclePause, UserRoundCog, X } from "lucide-react";
+import { CirclePause, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
@@ -37,7 +42,6 @@ import {
 } from "../composer/composerThreadDraftStore";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -55,6 +59,7 @@ import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { HostId } from "@octant/contracts/host";
 import type { CodeClient, ThreadMentionClient } from "@octant/client-runtime";
+import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useCodeAttachments, type StagedCodeAttachment } from "./useCodeAttachments";
 import {
   ThreadMentionChips,
@@ -78,9 +83,17 @@ import { useScaffoldCatalog } from "../scaffolds/useScaffoldCatalog";
 import { WorkspacePresetPicker } from "../workspacePresets/WorkspacePresetPicker";
 import { useWorkspacePresets } from "../workspacePresets/useWorkspacePresets";
 import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPicker";
-import { CODE_ACCESS_POSTURE_LABEL, CodeAccessPicker } from "./CodeAccessPicker";
+import { CodeAccessPicker } from "./CodeAccessPicker";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import { useAgentProfileName } from "../agentProfile/AgentProfileNames";
+import type { ComposerExtensionSelection } from "../composer/composerExtensionSelection";
+import { ExtensionProviderFamily as ExtensionProviderFamilySchema } from "@octant/contracts/extensions";
+import { Schema } from "effect";
+import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections";
+import {
+  ComposerSlashTypeahead,
+  useComposerSlashCommands,
+} from "../composer/useComposerSlashCommands";
 
 export type CodeAttachmentClient = Pick<
   CodeClient,
@@ -106,6 +119,8 @@ const UNAVAILABLE_ATTACHMENT_CLIENT: CodeAttachmentClient = {
  */
 interface CodeSteeredMessage {
   readonly computerUseSelection?: ExtensionSelection;
+  readonly extensionSelections: ReadonlyArray<ExtensionSelection>;
+  readonly extensionReceipts: ReadonlyArray<ComposerExtensionSelection>;
   readonly id: string;
   readonly threadKey: string;
   readonly restore: (message: CodeSteeredMessage) => void;
@@ -203,6 +218,8 @@ export interface CodeThreadWorkspaceProps {
   ) => void;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
+  readonly extensionClient?: ExtensionClient;
+  readonly browserAvailable?: boolean;
 }
 
 /**
@@ -245,6 +262,42 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     onSelectionEdited: () => {
       draftRevisionRef.current += 1;
     },
+  });
+  const providerFamily = providerGroupsForThread(
+    props.providerGroups,
+    view?.thread.providerInstanceId,
+  );
+  const extensionDraft = useExtensionDraftSelections({
+    ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
+    mode: "code",
+    projectId: view?.thread.projectId ?? null,
+    threadId: view === undefined ? props.threadId : view.thread.id,
+    ...(providerFamily === undefined ? {} : { providerFamily }),
+  });
+  const browser = useBrowserUseMention({
+    textarea: () => textareaRef.current,
+    draft,
+    onDraftChange: (next) => {
+      draftRevisionRef.current += 1;
+      setDraft(next);
+      props.controller.setPendingDraft?.(next);
+    },
+    scopeKey: String(props.threadId),
+    ...(props.browserAvailable === undefined ? {} : { available: props.browserAvailable }),
+    onChoose: () => void extensionDraft.resolveReference("@browser"),
+    onSelectionEdited: () => {
+      draftRevisionRef.current += 1;
+    },
+  });
+  const slash = useComposerSlashCommands({
+    textarea: () => textareaRef.current,
+    draft,
+    onDraftChange: (next) => {
+      draftRevisionRef.current += 1;
+      setDraft(next);
+      props.controller.setPendingDraft?.(next);
+    },
+    onResolveExtensionReference: extensionDraft.resolveReference,
   });
   const activeThreadKeyRef = useRef(String(props.threadId));
   activeThreadKeyRef.current = String(props.threadId);
@@ -413,6 +466,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
   function syncMentions(value: string, caret: number | null) {
     computer.sync(value, caret);
+    browser.sync(value, caret);
+    slash.sync(value, caret);
     mention.sync(value, caret);
     pathMentions.sync(value, caret);
   }
@@ -486,7 +541,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // A running turn never blocks the composer: the host admits one turn per
   // thread, so a message sent during one is held by the surface and sent the
   // moment that turn stops, without the user having to manage it.
-  const canSend = trimmed.length > 0 && !attachments.busy && steered.pending === undefined;
+  const canSend =
+    trimmed.length > 0 && !attachments.busy && !slash.resolving && steered.pending === undefined;
   const providerGroups = props.providerGroups ?? [];
   const messages = props.controller.conversation;
   // A message sent while a turn was running is already the user's message. It
@@ -500,11 +556,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         <div className="bubble">
           <TrackerReferenceText asParagraph text={steered.pending.prompt} />
         </div>
-        {steered.pending.access === previousUserPolicy(messages, messages.length) ? null : (
-          <p className="code-thread-workspace__turn-access">
-            Access · {CODE_ACCESS_POSTURE_LABEL[steered.pending.access]}
-          </p>
-        )}
       </article>
     );
   // An unreachable history is not an empty thread. Treating it as one puts the
@@ -525,6 +576,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     if (!canSend || steered.pending !== undefined) return;
     const draftRevision = draftRevisionRef.current;
     const computerUseSelection = computer.selection;
+    const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>
+      receipt.selection === undefined ? [] : [receipt.selection],
+    );
+    const extensionReceipts = [...extensionDraft.receipts];
     const originThreadKey = String(props.threadId);
     // The one-shot override is consumed when the message is sent, not when the
     // turn later finishes: a long running turn must not leave Plan selected for
@@ -562,6 +617,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       // a refusal restores it, while later edits stay with the composer.
       const steeredMessage: CodeSteeredMessage = {
         ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
+        extensionSelections,
+        extensionReceipts,
         id: globalThis.crypto.randomUUID(),
         threadKey: String(props.threadId),
         restore: restoreSteeredRef.current,
@@ -583,6 +640,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           threadMentions.restore(threadMentionChips);
           pathMentions.restore(fileMentionPaths);
           computer.restore(computerUseSelection);
+          extensionDraft.restore(extensionReceipts);
           setTurnAccessOverride((current) => current ?? override);
         } else {
           // A newer draft won the race to steer this message. Its detached
@@ -608,6 +666,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       sendArguments[5] = false;
       sendArguments[6] = computerUseSelection;
     }
+    if (extensionSelections.length > 0) sendArguments[7] = extensionSelections;
     const sent = await props.controller.sendFollowUp(...sendArguments);
     if (sent) {
       computer.consume(computerUseSelection);
@@ -622,6 +681,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         props.controller.setPendingDraft?.("");
         threadMentions.clear();
         pathMentions.clear();
+        extensionDraft.clear();
       }
     } else {
       setTurnAccessOverride((current) => current ?? override);
@@ -640,6 +700,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         ...(message.computerUseSelection === undefined
           ? ([] as const)
           : ([message.computerUseSelection] as const)),
+        ...(message.extensionSelections.length === 0
+          ? ([] as const)
+          : ([message.extensionSelections] as const)),
       );
       if (sent) {
         // The detached images belong to this message only. Keep any images
@@ -648,6 +711,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         if (draftRevisionRef.current === message.draftRevision) {
           threadMentions.clear();
           pathMentions.clear();
+          extensionDraft.clear();
         }
       }
       return sent;
@@ -674,6 +738,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     threadMentions.restore(message.threadMentionChips);
     pathMentions.restore(message.fileMentionPaths);
     computer.restore(message.computerUseSelection);
+    extensionDraft.restore(message.extensionReceipts);
   };
 
   function attachFromTransfer(items: DataTransfer | null): boolean {
@@ -694,6 +759,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (computer.handleKeyDown(event)) return;
+    if (browser.handleKeyDown(event)) return;
+    if (slash.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
     if (pathMentions.handleKeyDown(event)) return;
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
@@ -1152,13 +1219,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         )}
                       </>
                     )}
-                    {message.role === "user" &&
-                    message.executionPolicy !== undefined &&
-                    message.executionPolicy !== previousUserPolicy(messages, index) ? (
-                      <p className="code-thread-workspace__turn-access">
-                        Access · {CODE_ACCESS_POSTURE_LABEL[message.executionPolicy]}
-                      </p>
-                    ) : null}
                     {(markedCheckpoint !== undefined ||
                       checkpointDraft?.messageId === message.id) &&
                     message.role === "assistant" &&
@@ -1323,6 +1383,28 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
              * cannot open would mint a thread the user never sees.
              */}
             <ComputerUseMention controller={computer} surface="chips" />
+            <BrowserUseMention controller={browser} surface="chips" />
+            {extensionDraft.receipts.length > 0 ? (
+              <ul aria-label="Selected extensions" className="composer-chips">
+                {extensionDraft.receipts.map((receipt) => (
+                  <li className="chip" key={receipt.reference}>
+                    <span>{receipt.label}</span>
+                    {receipt.status.kind === "blocked" ? (
+                      <span>{`Blocked: ${receipt.status.reason}`}</span>
+                    ) : null}
+                    <OctantButton
+                      aria-label={`Remove ${receipt.label} extension`}
+                      className="chip-x window-no-drag"
+                      onClick={() => extensionDraft.remove(receipt.reference)}
+                      type="button"
+                      variant="ghost"
+                    >
+                      ×
+                    </OctantButton>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             <ThreadMentionChips
               chips={threadMentions.chips}
               onRemove={(mentionedThreadId) =>
@@ -1385,23 +1467,33 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             aria-activedescendant={
               computer.open
                 ? `${computer.listId}-computer`
-                : mention.activeCandidate !== undefined
-                  ? `${mentionListId}-${String(mention.activeCandidate.threadId)}`
-                  : pathMentionOpen && pathMentions.activeCandidate !== undefined
-                    ? `${pathMentionListId}-${pathMentions.activeCandidate.path}`
-                    : undefined
+                : browser.open
+                  ? `${browser.listId}-browser`
+                  : slash.active !== undefined
+                    ? `${slash.listId}-${slash.active.id}`
+                    : mention.activeCandidate !== undefined
+                      ? `${mentionListId}-${String(mention.activeCandidate.threadId)}`
+                      : pathMentionOpen && pathMentions.activeCandidate !== undefined
+                        ? `${pathMentionListId}-${pathMentions.activeCandidate.path}`
+                        : undefined
             }
             aria-autocomplete="list"
             aria-controls={
               computer.open
                 ? computer.listId
-                : mention.open
-                  ? mentionListId
-                  : pathMentionOpen
-                    ? pathMentionListId
-                    : undefined
+                : browser.open
+                  ? browser.listId
+                  : slash.open
+                    ? slash.listId
+                    : mention.open
+                      ? mentionListId
+                      : pathMentionOpen
+                        ? pathMentionListId
+                        : undefined
             }
-            aria-expanded={computer.open || mention.open || pathMentionOpen}
+            aria-expanded={
+              computer.open || browser.open || slash.open || mention.open || pathMentionOpen
+            }
             className="composer-input window-no-drag"
             id={`code-thread-composer-${String(thread.id)}`}
             onChange={(event) => {
@@ -1455,6 +1547,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         typeahead={
           computer.open ? (
             <ComputerUseMention controller={computer} surface="typeahead" />
+          ) : browser.open ? (
+            <BrowserUseMention controller={browser} surface="typeahead" />
+          ) : slash.open ? (
+            <ComposerSlashTypeahead controller={slash} />
           ) : (
             <>
               {mention.open ? (
@@ -1516,42 +1612,26 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 selectedModelId={thread.modelId}
                 selectedProviderInstanceId={thread.providerInstanceId}
               />
-              <CodeAccessPicker
-                ceiling={thread.executionPolicy}
-                disabled={accessChanging}
-                nativeConfirmationAvailable={props.requestFullAccessApproval !== undefined}
-                onRaiseThread={(next) => void changeAccess(next)}
-                onSelect={setTurnAccessOverride}
-                value={nextTurnAccess}
-              />
-              {props.harnessAutoReviewSupported === true &&
-              (nextTurnAccess === "approval-gated" || nextTurnAccess === "auto-accept-edits") ? (
-                <label
-                  className="code-thread-workspace__auto-approve"
-                  htmlFor={`code-thread-auto-approve-${String(thread.id)}`}
-                >
-                  <OctantCheckbox
-                    checked={thread.autoApprove === true}
-                    disabled={accessChanging}
-                    id={`code-thread-auto-approve-${String(thread.id)}`}
-                    onChange={(event) => void changeAutoApprove(event.currentTarget.checked)}
-                  />
-                  <span>Approve for me</span>
-                </label>
-              ) : null}
-              {/*
-              Provenance, not a control: the profile narrowed this thread once,
-              when it started, and is never consulted again. Editing the profile
-              afterwards cannot change what this thread may do, so the chip says
-              which working mode produced the posture and stops there.
-            */}
-              {profileName === undefined ? null : (
-                <span className="code-thread-workspace__profile" title="Started under this profile">
-                  <UserRoundCog aria-hidden="true" size={12} strokeWidth={1.8} />
-                  <span>{profileName}</span>
-                </span>
-              )}
             </>
+          ),
+          trailing: (
+            <CodeAccessPicker
+              {...(props.harnessAutoReviewSupported === true
+                ? {
+                    autoApprove: {
+                      checked: thread.autoApprove === true,
+                      onChange: (checked: boolean) => void changeAutoApprove(checked),
+                    },
+                  }
+                : {})}
+              {...(profileName === undefined ? {} : { profileName })}
+              ceiling={thread.executionPolicy}
+              disabled={accessChanging}
+              nativeConfirmationAvailable={props.requestFullAccessApproval !== undefined}
+              onRaiseThread={(next) => void changeAccess(next)}
+              onSelect={setTurnAccessOverride}
+              value={nextTurnAccess}
+            />
           ),
           actions: {
             kind: "send",
@@ -1683,24 +1763,6 @@ function codeTurnActions(input: {
   }
   actions.push({ label: "Copy message", value: "copy-references" });
   return actions;
-}
-
-/**
- * The posture a message ran under is worth a line only where it changed.
- * Printing "Access · Ask for approvals" under every message repeated the
- * thread's default on each turn and buried the one turn that differed.
- */
-function previousUserPolicy(
-  messages: ReadonlyArray<CodeController["conversation"][number]>,
-  index: number,
-) {
-  for (let candidateIndex = index - 1; candidateIndex >= 0; candidateIndex -= 1) {
-    const candidate = messages[candidateIndex];
-    if (candidate?.role === "user" && candidate.executionPolicy !== undefined) {
-      return candidate.executionPolicy;
-    }
-  }
-  return undefined;
 }
 
 function previousAssistantMessage(
@@ -1906,6 +1968,18 @@ function ProviderInputPrompt(props: {
       </OctantButton>
     </form>
   );
+}
+
+function providerGroupsForThread(
+  groups: ReadonlyArray<PickerGroup> | undefined,
+  providerInstanceId: CodeThread["providerInstanceId"] | undefined,
+): import("@octant/contracts/extensions").ExtensionProviderFamily | undefined {
+  const group = groups?.find(
+    (candidate) => String(candidate.instance.id) === String(providerInstanceId),
+  );
+  return group !== undefined && Schema.is(ExtensionProviderFamilySchema)(group.instance.driverKind)
+    ? group.instance.driverKind
+    : undefined;
 }
 
 function useObservedChangedFiles(options: {

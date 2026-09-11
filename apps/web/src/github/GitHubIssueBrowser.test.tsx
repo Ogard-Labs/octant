@@ -506,11 +506,11 @@ describe("GitHubIssueBrowser", () => {
     );
   });
 
-  it("keeps the contrast outline on the lowercase currentcolor keyword", () => {
+  it("marks the current issue with fill and text emphasis in increased contrast", () => {
     const stylesheet = readFileSync(resolve(import.meta.dirname, "../styles/github.css"), "utf8");
     expect(stylesheet).toMatch(
-      /@media \(prefers-contrast: more\)[\s\S]*?box-shadow:[^;]*currentcolor/,
+      /@media \(prefers-contrast: more\)[\s\S]*?background:\s*var\(--octant-control-hover\);[\s\S]*?text-decoration:\s*underline/,
     );
-    expect(stylesheet).not.toMatch(/\bcurrentColor\b/);
+    expect(stylesheet).not.toMatch(/box-shadow:\s*inset 0 0 0 2px/);
   });
 });

@@ -7,8 +7,14 @@ import {
 } from "@octant/contracts";
 import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import type { ShellSettings } from "@octant/contracts/shell";
-import { listImageSourceEligibleInstances, resolveImageCustomSources } from "@octant/domain";
-import { useState } from "react";
+import {
+  isImageProfileDriverKind,
+  listImageSourceEligibleInstances,
+  resolveImageCustomSources,
+} from "@octant/domain";
+import { useState, type ReactNode } from "react";
+import type { ProviderController } from "../providers/useProviderController";
+import { ProviderCreateForm } from "../providers/ProviderSettingsConfiguration";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -22,6 +28,7 @@ const MAX_LABEL_LENGTH = 120;
 export interface ImageGenerationSettingsViewProps {
   readonly settings: ImageGenerationSettings;
   readonly providerSnapshot?: ProviderRegistrySnapshot | undefined;
+  readonly providerController?: ProviderController;
   readonly onSettingsChange: (patch: Partial<ShellSettings>) => void;
 }
 
@@ -43,20 +50,49 @@ function sourceKey(source: {
 export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewProps) {
   const instances = props.providerSnapshot?.instances ?? [];
   const eligible = listImageSourceEligibleInstances(instances);
+  const eligibleIds = new Set(eligible.map((instance) => String(instance.id)));
+  const hasImageProvider = instances.some(
+    (instance) =>
+      instance.enabled &&
+      (eligibleIds.has(String(instance.id)) || isImageProfileDriverKind(instance.driverKind)),
+  );
   const resolved = resolveImageCustomSources(props.settings.customSources, instances);
   const atLimit = props.settings.customSources.length >= IMAGE_GENERATION_MAX_CUSTOM_SOURCES;
 
   const apply = (customSources: ReadonlyArray<ImageGenerationCustomSource>) =>
     props.onSettingsChange({ imageGeneration: { customSources } });
 
+  const imageProviderForm =
+    props.providerController === undefined ? null : (
+      <ImageProviderCreateForm controller={props.providerController} />
+    );
+
   return (
-    <section aria-label="Image Generation" id="settings-image-generation">
-      {eligible.length === 0 ? (
-        <p className="provider-settings__hint" role="status">
-          Image generation needs an enabled OpenAI-compatible HTTP provider. Add one in Providers
-          &amp; Models, then add it here.
+    <section
+      aria-label="Image generation"
+      className="image-generation-settings"
+      id="settings-image-generation"
+    >
+      {!hasImageProvider ? (
+        <p className="settings-state settings-state--empty" role="status">
+          No image providers are enabled. Add one below, or enable an existing provider in Providers
+          &amp; Models.
         </p>
       ) : null}
+      {imageProviderForm === null ? null : (
+        <section
+          aria-label="Image providers"
+          className="settings-card-section settings-card-section--open image-generation-settings__providers"
+        >
+          <div className="settings-section-head">
+            <h2>Image providers</h2>
+          </div>
+          <p className="settings-section-note">
+            Connect an image API with the same credential flow used by Providers &amp; Models.
+          </p>
+          <div className="image-generation-settings__provider-form">{imageProviderForm}</div>
+        </section>
+      )}
       <div className="settings-card-section settings-card-section--open">
         <div className="setgroup">
           <SettingRow
@@ -69,11 +105,17 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
               Saved profiles in Image generator choose defaults for a generation, such as the model,
               size, and quality.
             </p>
-            {resolved.length === 0 ? (
+            {eligible.length === 0 ? (
+              <p className="provider-settings__field-guidance" role="status">
+                To add a custom source, connect an OpenAI-compatible HTTP provider in Providers
+                &amp; Models.
+              </p>
+            ) : null}
+            {resolved.length === 0 && eligible.length > 0 ? (
               <p className="provider-settings__field-guidance" role="status">
                 No custom image sources are configured.
               </p>
-            ) : (
+            ) : resolved.length === 0 ? null : (
               <ul className="image-generation-settings__sources">
                 {resolved.map((resolution, index) => {
                   const source = props.settings.customSources[index];
@@ -109,7 +151,7 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
                 Up to {IMAGE_GENERATION_MAX_CUSTOM_SOURCES} custom image sources are supported.
                 Remove one to add another.
               </p>
-            ) : (
+            ) : eligible.length === 0 ? null : (
               <CustomImageSourceForm
                 eligible={eligible}
                 existing={props.settings.customSources}
@@ -120,6 +162,37 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
         </div>
       </div>
     </section>
+  );
+}
+
+function ImageProviderCreateForm(props: { readonly controller: ProviderController }): ReactNode {
+  const controller = props.controller;
+  return (
+    <ProviderCreateForm
+      allowedProviderTypes={["openai-image", "gemini-native-image", "bfl-image", "ideogram-image"]}
+      busy={controller.busy}
+      credentialManagementAvailable={controller.credentialManagementAvailable}
+      heading="Connect an image provider"
+      hint="Use an OpenAI, Gemini, Black Forest Labs, or Ideogram image API. Credentials stay in the host's secure store."
+      initialProviderType="openai-image"
+      onCreate={controller.create}
+      onCreateAnthropicCompatible={controller.createAnthropicCompatible}
+      onCreateAzureFoundry={controller.createAzureFoundry}
+      onCreateBflImage={controller.createBflImage}
+      onCreateClaude={controller.createClaude}
+      onCreateGemini={controller.createGemini}
+      onCreateGeminiImage={controller.createGeminiImage}
+      onCreateGrok={controller.createGrok}
+      onCreateGlm={controller.createGlm}
+      onCreateCline={controller.createCline}
+      onCreateIdeogramImage={controller.createIdeogramImage}
+      onCreateMistralVibe={controller.createMistralVibe}
+      onCreateOllama={controller.createOllama}
+      onCreateOpenAiCompatible={controller.createOpenAiCompatible}
+      onCreateOpenAiImage={controller.createOpenAiImage}
+      onCreateQwen={controller.createQwen}
+      triggerLabel="Add image provider"
+    />
   );
 }
 

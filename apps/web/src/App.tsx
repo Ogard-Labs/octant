@@ -4086,6 +4086,9 @@ function LaunchedShell(
         ...(input.computerUseSelection === undefined
           ? {}
           : { computerUseSelection: input.computerUseSelection }),
+        ...(input.extensionSelections === undefined || input.extensionSelections.length === 0
+          ? {}
+          : { extensionSelections: input.extensionSelections }),
         ...(input.threadMentionIds === undefined || input.threadMentionIds.length === 0
           ? {}
           : { threadMentionIds: input.threadMentionIds }),
@@ -4131,6 +4134,7 @@ function LaunchedShell(
     issueContext?: import("@octant/contracts").GithubIssueContextRequest,
     linearIssueContext?: import("@octant/contracts").LinearIssueContextRequest,
     computerUseSelection?: import("@octant/contracts/extensions").ExtensionSelection,
+    extensionSelections?: ReadonlyArray<import("@octant/contracts/extensions").ExtensionSelection>,
   ): Promise<boolean | void> {
     setDraftCreating(true);
     setDraftError(undefined);
@@ -4179,12 +4183,14 @@ function LaunchedShell(
           }
           thread = changed.thread;
         }
+        const draftExtensionSelections =
+          extensionSelections ?? (computerUseSelection === undefined ? [] : [computerUseSelection]);
         const sendOutcome = chatController
           .execute({
             kind: "send-chat-turn",
-            ...(computerUseSelection === undefined
+            ...(draftExtensionSelections.length === 0
               ? {}
-              : { extensionSelections: [computerUseSelection] }),
+              : { extensionSelections: draftExtensionSelections }),
             threadId: thread.id,
             expectedVersion: thread.version,
             prompt,
@@ -4397,6 +4403,9 @@ function LaunchedShell(
         const started = await workTurnClient.startFirstTurn({
           kind: "start-work-thread-turn",
           ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
+          ...(extensionSelections === undefined || extensionSelections.length === 0
+            ? {}
+            : { extensionSelections }),
           requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
           threadId: created.thread.id,
           turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),

@@ -71,35 +71,54 @@ export type ProviderCreateFormProps = Pick<
   | "onCreateOllama"
 >;
 
-export function ProviderCreateForm(props: ProviderCreateFormProps) {
+export type ProviderCreateProviderType =
+  | "opencode"
+  | "codex"
+  | "kimi-code"
+  | "claude"
+  | "devin"
+  | "kilo"
+  | "pi"
+  | "oh-my-pi"
+  | "ollama"
+  | "mistral-vibe"
+  | "grok"
+  | "goose"
+  | "glm"
+  | "gemini"
+  | "copilot"
+  | "cline"
+  | "qwen"
+  | "openai-compatible"
+  | "anthropic-compatible"
+  | "azure-foundry"
+  | "openai-image"
+  | "gemini-native-image"
+  | "bfl-image"
+  | "ideogram-image";
+
+/**
+ * Optional presentation limits for embedded creation flows. Settings can
+ * expose the same credential-authorized provider lifecycle in a focused
+ * context (for example, image generation) without cloning the form or
+ * inventing a second provider configuration path.
+ */
+export interface ProviderCreateFormPresentationProps {
+  readonly initialProviderType?: ProviderCreateProviderType;
+  readonly allowedProviderTypes?: ReadonlyArray<ProviderCreateProviderType>;
+  readonly triggerLabel?: string;
+  readonly heading?: string;
+  readonly hint?: string;
+}
+
+export function ProviderCreateForm(
+  props: ProviderCreateFormProps & ProviderCreateFormPresentationProps,
+) {
   const [creating, setCreating] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
-  const [providerType, setProviderType] = useState<
-    | "opencode"
-    | "codex"
-    | "kimi-code"
-    | "claude"
-    | "devin"
-    | "kilo"
-    | "pi"
-    | "oh-my-pi"
-    | "ollama"
-    | "mistral-vibe"
-    | "grok"
-    | "goose"
-    | "glm"
-    | "gemini"
-    | "copilot"
-    | "cline"
-    | "qwen"
-    | "openai-compatible"
-    | "anthropic-compatible"
-    | "azure-foundry"
-    | "openai-image"
-    | "gemini-native-image"
-    | "bfl-image"
-    | "ideogram-image"
-  >("opencode");
+  const initialProviderType =
+    props.initialProviderType ?? props.allowedProviderTypes?.[0] ?? "opencode";
+  const [providerType, setProviderType] = useState<ProviderCreateProviderType>(initialProviderType);
   const [claudeAuthentication, setClaudeAuthentication] =
     useState<ClaudeAuthentication>("subscription");
   const [vibeAuthentication, setVibeAuthentication] =
@@ -107,6 +126,7 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
   const [grokAuthentication, setGrokAuthentication] = useState<GrokAuthentication>("subscription");
   const credentialInput = useRef<HTMLInputElement>(null);
   const selectedDriverLabel = driverLabel(providerType);
+  const allowedProviderTypes = props.allowedProviderTypes;
   const selectedBinaryName =
     providerType === "mistral-vibe"
       ? "vibe-acp"
@@ -125,16 +145,16 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
         type="button"
         variant="secondary"
       >
-        <span>Add provider manually</span>
+        <span>{props.triggerLabel ?? "Add provider manually"}</span>
         <ChevronDown aria-hidden="true" className="provider-settings__disclosure-icon" size={16} />
       </OctantButton>
       {manualOpen ? (
         <div className="provider-settings__manual-body">
           <div className="provider-settings__create-heading">
-            <h3>Custom endpoint or binary</h3>
+            <h3>{props.heading ?? "Custom endpoint or binary"}</h3>
             <p className="provider-settings__hint">
-              Installed runtimes are detected automatically. Use this only for a custom HTTP
-              endpoint or an unusual executable location.
+              {props.hint ??
+                "Installed runtimes are detected automatically. Use this only for a custom HTTP endpoint or an unusual executable location."}
             </p>
           </div>
           <form
@@ -406,7 +426,11 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
                     label: "Black Forest Labs Image",
                   },
                   { id: "ideogram-image", group: "Image generation", label: "Ideogram Image" },
-                ]}
+                ].filter(
+                  (option) =>
+                    allowedProviderTypes === undefined ||
+                    allowedProviderTypes.includes(option.id as ProviderCreateProviderType),
+                )}
                 value={providerType}
               />
             </label>

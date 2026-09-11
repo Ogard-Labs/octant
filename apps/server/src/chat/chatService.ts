@@ -1,4 +1,9 @@
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
+import {
+  BROWSER_SELECTION_GUIDANCE,
+  isBrowserUseSelection,
+  validateBrowserUseSelection,
+} from "@octant/plugin-host/browser-use";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { createHash } from "node:crypto";
 import {
@@ -3129,7 +3134,36 @@ export class ChatService {
       return { selections: [], entries: [] };
     }
     const computer = selections.filter(isComputerUseSelection);
-    const other = selections.filter((selection) => !isComputerUseSelection(selection));
+    const browser = selections.filter(isBrowserUseSelection);
+    if (
+      browser.length > 1 ||
+      browser.some((selection) => !validateBrowserUseSelection(selection))
+    ) {
+      throw new ChatServiceError({
+        category: "unavailable",
+        message: "Browser selection is invalid or stale.",
+      });
+    }
+    if (browser.length > 0) {
+      const browserTools =
+        windowId === undefined
+          ? undefined
+          : this.#resolveAppManagedTools?.({ windowId, thread })?.definitions.some(
+              (definition) => definition.name === "octant_browser",
+            ) === true;
+      if (!browserTools) {
+        throw new ChatServiceError({
+          category: "unavailable",
+          message: "The selected Browser is unavailable for this provider or task.",
+        });
+      }
+    }
+    // Browser is a host-owned app-managed tool, like Computer. Its structured
+    // selection is retained with the turn but does not enter the generic
+    // extension resolver (which only knows installed packages).
+    const other = selections.filter(
+      (selection) => !isComputerUseSelection(selection) && !isBrowserUseSelection(selection),
+    );
     const computerTools =
       computer.length === 1 && computer[0] !== undefined && windowId !== undefined
         ? this.#resolveComputerUseTools?.({ thread, windowId, selection: computer[0] })
@@ -3155,9 +3189,25 @@ export class ChatService {
             ...(windowId === undefined ? {} : { windowId }),
           });
     const externalTools = "toolSet" in resolved ? resolved.toolSet : undefined;
+    const browserEntries =
+      browser.length === 0
+        ? []
+        : [
+            {
+              contextEntry: this.#contextEntry(
+                thread,
+                "octant-tools",
+                BROWSER_SELECTION_GUIDANCE,
+                BROWSER_SELECTION_GUIDANCE.length,
+                "required",
+                { kind: "plugin", referenceId: "app:browser" },
+              ),
+              providerContext: { kind: "instructions" as const, text: BROWSER_SELECTION_GUIDANCE },
+            },
+          ];
     return {
       selections,
-      entries: resolved.entries,
+      entries: [...resolved.entries, ...browserEntries],
       ...(externalTools === undefined && computerTools === undefined
         ? {}
         : { toolSet: combineAppManagedToolSets(externalTools, computerTools) }),

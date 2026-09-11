@@ -111,6 +111,11 @@ import { CodeTurnRunner, type CodeTurnEvent, type CodeTurnOutcome } from "./code
 import { createCodeAppManagedTools, type CodeAppManagedToolsOptions } from "./codeAppManagedTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
+import {
+  BROWSER_SELECTION_GUIDANCE,
+  isBrowserUseSelection,
+  validateBrowserUseSelection,
+} from "@octant/plugin-host/browser-use";
 
 type Awaitable<T> = T | Promise<T>;
 
@@ -1162,6 +1167,9 @@ function persistenceLabel(value: "current-session" | "project-default"): string 
 
 interface ActiveTurn {
   readonly computerUseSelection?: import("@octant/contracts/extensions").ExtensionSelection;
+  readonly extensionSelections?: ReadonlyArray<
+    import("@octant/contracts/extensions").ExtensionSelection
+  >;
   readonly windowId: WindowId;
   readonly thread: CodeThread;
   readonly operationId: CodeOperationId;
@@ -1279,6 +1287,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return failStart();
     const driver = await this.#options.resolveProviderDriver(input.thread);
     if (driver === undefined) return failStart();
+    const browserSelections = command.extensionSelections?.filter(isBrowserUseSelection) ?? [];
+    if (
+      browserSelections.length > 1 ||
+      browserSelections.some((selection) => !validateBrowserUseSelection(selection)) ||
+      (browserSelections.length > 0 &&
+        (this.#options.browserAutomation === undefined ||
+          this.#options.supportsAppManagedTools?.(input.thread) !== true))
+    ) {
+      return failStart();
+    }
     if (
       command.computerUseSelection !== undefined &&
       (this.#options.supportsAppManagedTools?.(input.thread) !== true ||
@@ -1299,6 +1317,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ...(command.computerUseSelection === undefined
         ? {}
         : { computerUseSelection: command.computerUseSelection }),
+      ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
+        ? {}
+        : { extensionSelections: command.extensionSelections }),
       windowId: input.windowId,
       thread: input.thread,
       operationId: command.operationId,
@@ -1562,7 +1583,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     };
     const harnessContext = this.#options.nativeHarness?.contextFor(harnessScope) ?? [];
     this.#options.nativeHarness?.turnStarted(harnessScope);
-    const fullContext = [...harnessContext, ...(context ?? [])];
+    const browserSelected = active.extensionSelections?.some(isBrowserUseSelection) === true;
+    const fullContext = [
+      ...harnessContext,
+      ...(browserSelected
+        ? [{ kind: "instructions" as const, text: BROWSER_SELECTION_GUIDANCE }]
+        : []),
+      ...(context ?? []),
+    ];
     const harnessAutoReviewEnabled = this.#resolveHarnessAutoReview(active.thread);
     void Effect.runPromise(
       Effect.scoped(

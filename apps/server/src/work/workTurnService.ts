@@ -33,6 +33,11 @@ import {
   type ThreadWorkingDirectory,
   type WindowId,
 } from "@octant/contracts";
+import {
+  BROWSER_SELECTION_GUIDANCE,
+  isBrowserUseSelection,
+  validateBrowserUseSelection,
+} from "@octant/plugin-host/browser-use";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type {
@@ -668,6 +673,51 @@ export class WorkTurnService {
           category: "unsupported",
           message:
             "Computer use is unavailable for this provider or task. Check Computer use in Settings.",
+        },
+      });
+      return;
+    }
+    const browserSelections =
+      input.command.extensionSelections?.filter(isBrowserUseSelection) ?? [];
+    if (
+      browserSelections.length > 1 ||
+      browserSelections.some((selection) => !validateBrowserUseSelection(selection))
+    ) {
+      this.#persistUpdate(current, {
+        status: "failed",
+        failure: { category: "unavailable", message: "Browser selection is invalid or stale." },
+      });
+      return;
+    }
+    if (browserSelections.length > 0) {
+      if (
+        !appManagedTools?.definitions.some((definition) => definition.name === "octant_browser")
+      ) {
+        this.#persistUpdate(current, {
+          status: "failed",
+          failure: {
+            category: "unsupported",
+            message: "The selected Browser is unavailable for this provider or task.",
+          },
+        });
+        return;
+      }
+      input = {
+        ...input,
+        context: [...input.context, { kind: "instructions", text: BROWSER_SELECTION_GUIDANCE }],
+      };
+    }
+    // Work does not yet have an approved skill-material resolver. Refuse an
+    // explicit skill selection before provider execution instead of silently
+    // dropping the instruction the person chose. Host-owned Browser selections
+    // remain valid because Browser is already composed through app-managed
+    // tools above.
+    if (input.command.extensionSelections?.some((selection) => !isBrowserUseSelection(selection))) {
+      this.#persistUpdate(current, {
+        status: "failed",
+        failure: {
+          category: "unavailable",
+          message: "Selected skill context is unavailable for Work on this host.",
         },
       });
       return;

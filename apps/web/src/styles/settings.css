@@ -10,27 +10,10 @@
   color: var(--octant-text-primary);
   background: var(--octant-app-background);
   font-family: var(--oct-font-display);
-  /* Light cards are workspace white; dark cards lift with the floating fill.
-     Using floating in light is the grey well. Using workspace in dark is
-     invisible against the same app ground. */
-  --octant-settings-card: var(--octant-card);
-  --oct-settings-gutter: clamp(32px, 4vw, 56px);
-  --oct-settings-reading-width: 800px;
-}
-
-html[data-octant-theme-mode="dark"] .settings-view,
-html[data-appearance="dark"] .settings-view,
-html[data-theme="dark"] .settings-view {
-  --octant-settings-card: var(--octant-floating);
-}
-
-@media (prefers-color-scheme: dark) {
-  html:not([data-octant-theme-mode="light"]):not([data-appearance="light"]):not(
-      [data-theme="light"]
-    )
-    .settings-view {
-    --octant-settings-card: var(--octant-floating);
-  }
+  --oct-settings-gutter: clamp(32px, 5vw, 64px);
+  --oct-settings-reading-width: 920px;
+  --oct-settings-control: 180px;
+  --oct-settings-control-height: 32px;
 }
 
 .settings-view__sidebar {
@@ -161,17 +144,23 @@ html[data-theme="dark"] .settings-view {
 /* The shared title/subtitle roles carry the type; this header only spaces the
    sections below it, and the subtitle's own end margin must not stack on top. */
 .settings-view__header {
-  margin-bottom: 32px;
+  display: grid;
+  gap: 6px;
+  margin-bottom: 36px;
 }
 
 .settings-view__header h1 {
   color: var(--octant-text-primary);
+  margin: 0;
+  font-size: var(--oct-text-xl);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: var(--oct-tracking-tight);
+  line-height: 1.2;
 }
 
 .settings-view__header .oct-subtitle {
-  max-width: 62ch;
-  margin-top: 6px;
-  margin-bottom: 0;
+  max-width: 68ch;
+  margin: 0;
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
@@ -721,7 +710,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   max-width: calc(
     var(--oct-settings-reading-width) + var(--oct-settings-gutter) + var(--oct-settings-gutter)
   );
-  padding: 40px var(--oct-settings-gutter) 64px;
+  padding: 48px var(--oct-settings-gutter) 72px;
   margin: 0 auto;
 }
 
@@ -777,22 +766,13 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .settings-section-stack {
   display: grid;
-  gap: 32px;
+  gap: 28px;
 }
 
-/* All preference sections share an open layout, including expanded editors. */
-/* A settings section is an object (0109). Flat rows on the page ground left a
-   reader nothing to see a section by: where one ended and the next began had
-   to be inferred from a gap between two equally quiet labels, and nothing led
-   the eye across a row from its name to its control.
-
-   The object is the section, not the group inside it. Several sections carry
-   rows that never sit in a `.setgroup` — GitHub's account state, the host
-   facts — and drawing an edge round only the ones that do reads worse than
-   drawing none: one boxed row floating among flat ones.
-
-   `overflow` stays visible: rows hold menus, popovers and comboboxes that
-   have to escape the box. */
+/* All preference sections share an open layout, including expanded editors.
+   The section remains the object that owns its label and row list (0109), but
+   routine content stays on the page ground under the scoped supersession in
+   0116. `overflow` stays visible so rows can host menus and comboboxes. */
 .settings-card-section {
   display: grid;
   gap: 0;
@@ -802,65 +782,12 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   box-shadow: none;
 }
 
-/* The card is built from the section's content children rather than from the
-   section itself, so the label and its one-line description stay out on the
-   page ground where they read as the section's title rather than as its first
-   row. Sides and fill on every content child; the first closes the top and
-   the last closes the bottom. */
-/* What the card holds: everything after a label except another label, and
-   except the one sentence directly under a label, which belongs to it.
-   Sections name their own description class (`settings-section-note`, the
-   harness's `native-harness-panel__lead`), so the rule reads the position
-   rather than the name. */
-.settings-card-section
-  > :is(h2, h3, summary, legend, .settings-section-head)
-  ~ *:not(
-    :is(h2, h3, summary, legend, .settings-section-head),
-    .settings-section-note,
-    :is(h2, h3, summary, legend, .settings-section-head) + p
-  ) {
-  border-inline: 1px solid var(--oct-hairline);
-  background: var(--oct-surface);
-}
+/* Routine Settings content stays open on the page ground. A section owns its
+   label and row list; bounded surfaces are reserved for discrete editors and
+   protected actions (0116). */
 
-/* A card opens under each label, so a section that asks two questions — the
-   harness names both its model slots and its jobs — gets a card for each
-   rather than one long box with a heading stranded inside it. */
-.settings-card-section
-  > :is(h2, h3, summary, legend, .settings-section-head)
-  + *:not(:is(h2, h3, summary, legend, .settings-section-head), .settings-section-note, p),
-.settings-card-section
-  > :is(.settings-section-note, :is(h2, h3, summary, legend, .settings-section-head) + p)
-  + *:not(:is(h2, h3, summary, legend, .settings-section-head)) {
-  border-top: 1px solid var(--oct-hairline);
-  border-start-start-radius: var(--oct-radius-lg);
-  border-start-end-radius: var(--oct-radius-lg);
-}
-
-/* And closes at the last row before the next label, or at the last row there
-   is. */
-.settings-card-section
-  > :is(h2, h3, summary, legend, .settings-section-head)
-  ~ *:not(
-    :is(h2, h3, summary, legend, .settings-section-head),
-    .settings-section-note,
-    :is(h2, h3, summary, legend, .settings-section-head) + p
-  ):has(+ :is(h2, h3, summary, legend, .settings-section-head)),
-.settings-card-section
-  > :is(h2, h3, summary, legend, .settings-section-head)
-  ~ *:last-child:not(
-    :is(h2, h3, summary, legend, .settings-section-head),
-    .settings-section-note,
-    :is(h2, h3, summary, legend, .settings-section-head) + p
-  ) {
-  border-bottom: 1px solid var(--oct-hairline);
-  border-end-start-radius: var(--oct-radius-lg);
-  border-end-end-radius: var(--oct-radius-lg);
-}
-
-/* Every section carries `--open`, so this may not undo the section's own edge:
-   at equal specificity the later rule wins, and flattening here silently
-   un-carded all seventeen destinations. */
+/* Every section carries `--open`; the modifier documents that routine rows
+   stay on the page ground and keeps the shared selector explicit. */
 .settings-card-section--open {
   overflow: visible;
   box-shadow: none;
@@ -869,50 +796,34 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-card-section.settings-card-section--open
   > :is(h2, h3, summary, legend, .settings-section-head),
 .settings-card-section > :is(h2, h3, summary, legend, .settings-section-head) + p {
-  padding: 0 2px 10px;
+  padding: 0 0 10px;
 }
 
 .settings-card-section.settings-card-section--open > summary {
-  padding: 0 2px 10px;
+  padding: 0 0 10px;
 }
 
 .settings-card-section.settings-card-section--open > legend {
-  padding: 0 2px 10px;
+  padding: 0 0 10px;
 }
 
-/* A label that follows a card is the next question, not a caption on the one
-   above it. Same 0-2-1 specificity as the open-state label padding so
-   padding-top is not zeroed on later labels. */
+/* A label that follows another section is the next question, not a caption on
+   the one above it. */
 .settings-card-section.settings-card-section
   > *
   + :is(h2, h3, summary, legend, .settings-section-head) {
   padding-top: var(--oct-space-6);
 }
 
+/* The group is a transparent row list. Its children own the separators, so a
+   section never inherits a second edge or corner from the legacy card recipe. */
 .settings-card-section--open > .setgroup {
   overflow: visible;
-}
-
-/* The section draws an edge now, so everything inside keeps the inset that
-   holds text and controls off it. These rules used to zero that inset, back
-   when the rows sat on the open page and had nothing to clear. */
-.settings-card-section
-  > :is(h2, h3, summary, legend, .settings-section-head)
-  ~ *:not(
-    :is(h2, h3, summary, legend, .settings-section-head),
-    .settings-section-note,
-    :is(h2, h3, summary, legend, .settings-section-head) + p
-  ),
-.settings-card-section > .setgroup > *,
-.settings-card-section > .provider-settings__form > * {
-  padding-inline: var(--oct-space-5);
-}
-
-/* A wrapper passes the inset through to the rows it holds rather than adding
-   a second one. */
-.settings-card-section > .setgroup,
-.settings-card-section > .provider-settings__form {
-  padding-inline: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 /* Scanning and partial-result messages share one reserved line so the
@@ -985,6 +896,11 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   border-top: 1px solid var(--oct-hairline);
 }
 
+.settings-card-section--open > .setgroup > .setgroup-head + .setrow,
+.settings-card-section--open > .setgroup > .setgroup-note + .setrow {
+  border-top: 1px solid var(--oct-hairline);
+}
+
 /* A section label may carry the actions that act on the whole collection
    ("Check again", "Reorder providers", "Create profile"). They sit on the
    label's line at the control edge; the head takes the label's padding so
@@ -994,8 +910,8 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   align-items: center;
   justify-content: space-between;
   gap: var(--oct-space-3);
-  min-height: 40px;
-  padding: 6px 0 4px;
+  min-height: 0;
+  padding: 0 0 10px;
 }
 
 .settings-section-head__actions {
@@ -1017,8 +933,8 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
    inset and the header's rule closes under it. */
 .settings-card-section--open > .settings-section-note {
   margin: 0;
-  padding: 0 2px 12px;
-  max-width: 64ch;
+  padding: 0 0 12px;
+  max-width: 68ch;
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-detail);
   line-height: 1.45;
@@ -1070,13 +986,13 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-card-section > summary,
 .settings-card-section > legend {
   margin: 0;
-  padding: 10px 0 8px;
+  padding: 0 0 10px;
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-detail);
-  font-weight: var(--oct-weight-regular);
+  font-weight: var(--oct-weight-medium);
   letter-spacing: -0.01em;
-  line-height: 1.3;
+  line-height: 1.35;
   text-transform: none;
 }
 
@@ -1265,7 +1181,8 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .setrow {
   column-gap: 24px;
-  padding: 16px 0;
+  min-height: 44px;
+  padding: 12px 0;
   font-family: var(--oct-font-display);
 }
 
@@ -1384,17 +1301,22 @@ textarea.settings-view__text-input {
 }
 
 .settings-view__preset-swatch {
+  position: relative;
   min-width: 28px;
   min-height: 28px;
   padding: 0;
   border: 1px solid color-mix(in oklab, var(--oct-fg) 26%, transparent);
 }
 
-/* Selection is carried by `aria-checked` in the markup; the accent ring is
-   reinforcement and is independent of the quiet focus treatment. */
-.settings-view__preset-swatch[aria-checked="true"] {
-  outline: 2px solid var(--oct-accent-fg);
-  outline-offset: 2px;
+.settings-view__selection-mark {
+  position: absolute;
+  inset: 4px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
 }
 
 .settings-view__setting-copy {
@@ -1463,22 +1385,13 @@ textarea.settings-view__text-input {
   overflow: hidden;
   white-space: normal;
   text-align: center;
-  background: var(--oct-surface);
-  border: 1px solid transparent;
   border-radius: var(--oct-radius-md);
   cursor: pointer;
-  transition: border-color var(--oct-motion-fast) var(--oct-ease-standard);
+  transition: background-color var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
-.settings-scheme__card:hover {
-  border-color: var(--oct-hairline);
-}
-
-/* One 1px ring says which scheme is chosen. A border plus a shadow ring drew
-   the same edge twice. */
-.settings-scheme__card[aria-checked="true"] {
-  border-color: var(--oct-fg);
-  box-shadow: none;
+.settings-scheme__card[aria-checked="true"] .settings-scheme__label::before {
+  content: "✓ ";
 }
 
 .settings-scheme__preview {
@@ -1775,9 +1688,7 @@ textarea.settings-view__text-input {
 }
 
 .octant-number-stepper:focus-within {
-  /* Keyboard focus stays visible through the quiet border cue. The previous
-     three-pixel halo read as a second card around the control. */
-  border-color: var(--octant-border-strong);
+  background: var(--octant-control-hover);
 }
 
 .octant-number-stepper__button {

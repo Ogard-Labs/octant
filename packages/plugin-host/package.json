@@ -12,8 +12,10 @@
     "./collisions": "./src/collisions.ts",
     "./composer": "./src/composer.ts",
     "./model": "./src/model.ts",
+    "./skills": "./src/skills.ts",
     "./bundled-skills": "./src/bundledSkills.ts",
-    "./computer-use": "./src/computerUsePlugin.ts"
+    "./computer-use": "./src/computerUsePlugin.ts",
+    "./browser-use": "./src/browserUsePlugin.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

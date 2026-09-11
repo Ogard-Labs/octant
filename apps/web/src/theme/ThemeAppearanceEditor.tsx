@@ -70,7 +70,7 @@ export function ThemeAppearanceEditor(props: {
                 onClick={() => void theme.applyPatch({ mode: option.value })}
                 role="radio"
                 type="button"
-                variant="ghost"
+                variant={draft.mode === option.value ? "secondary" : "ghost"}
               >
                 <span
                   aria-hidden="true"

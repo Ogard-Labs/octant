@@ -125,6 +125,9 @@ distilled successor of the earlier long-form design specifications.
 | [0111](0111-host-driven-provider-oauth.md) | Host-driven provider OAuth auth kind and broker | Proposed |
 | [0112](0112-first-run-claude-codex-enablement.md) | First-run Claude Code and Codex CLI enablement | Accepted |
 | [0113](0113-computer-use-plugin-and-driver-updates.md) | Computer use is a bundled plugin with a managed driver | Accepted |
+| [0114](0114-quiet-thread-composer-and-utility-chrome.md) | Thread composers and utility panels keep only useful chrome | Accepted |
+| [0115](0115-terminal-cache-ancestors-expose-only-metadata.md) | Terminal cache ancestors expose only directory metadata | Accepted |
+| [0116](0116-settings-use-open-row-surfaces.md) | Settings use open row surfaces | Accepted |
 
 ## Adding an ADR
 

@@ -40,7 +40,7 @@ export function DropdownMenuPopup({
 }
 
 const dropdownMenuItemClassName =
-  "relative flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag";
+  "relative flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag";
 
 export function DropdownMenuPortal(props: ComponentProps<typeof MenuPrimitive.Portal>) {
   return <MenuPrimitive.Portal {...props} />;

@@ -8,8 +8,10 @@ import {
   type KeyboardEvent,
 } from "react";
 import { Monitor, X } from "lucide-react";
+import { Globe2 } from "lucide-react";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { computerUseSelection } from "@octant/plugin-host/computer-use";
+import { browserUseSelection } from "@octant/plugin-host/browser-use";
 import { OctantButton } from "../ui/base/OctantButton";
 
 interface Token {
@@ -30,18 +32,57 @@ export function useComputerUseMention(input: {
   readonly onSelectionEdited?: () => void;
   readonly textarea?: () => HTMLTextAreaElement | null;
 }) {
+  return useApplicationMention(input, {
+    kind: "computer",
+    label: "Computer",
+    available:
+      typeof window !== "undefined" &&
+      typeof window.octantHost?.getComputerUseStatus === "function",
+  });
+}
+
+/** The same explicit mention surface for Octant's host-owned Browser. */
+export function useBrowserUseMention(input: {
+  readonly draft: string;
+  readonly onDraftChange: (draft: string, caret?: number) => void;
+  readonly scopeKey: string;
+  readonly available?: boolean;
+  readonly onChoose?: () => void;
+  readonly onSelectionEdited?: () => void;
+  readonly textarea?: () => HTMLTextAreaElement | null;
+}) {
+  return useApplicationMention(input, {
+    kind: "browser",
+    label: "Browser",
+    available: input.available === true,
+  });
+}
+
+function useApplicationMention(
+  input: {
+    readonly draft: string;
+    readonly onDraftChange: (draft: string, caret?: number) => void;
+    readonly scopeKey: string;
+    readonly available?: boolean;
+    readonly onChoose?: () => void;
+    readonly onSelectionEdited?: () => void;
+    readonly textarea?: () => HTMLTextAreaElement | null;
+  },
+  app: {
+    readonly kind: "computer" | "browser";
+    readonly label: string;
+    readonly available: boolean;
+  },
+) {
   const listId = useId();
   const [token, setToken] = useState<Token>();
   const [chosen, setChosen] = useState<{
     readonly scope: string;
     readonly selection: ExtensionSelection;
   }>();
-  const enabled = useComputerUseEnabled();
-  const available =
-    enabled &&
-    (input.available ??
-      (typeof window !== "undefined" &&
-        typeof window.octantHost?.getComputerUseStatus === "function"));
+  const computerEnabled = useComputerUseEnabled();
+  const enabled = app.kind === "browser" ? input.available === true : computerEnabled;
+  const available = enabled && (input.available ?? app.available);
   const selection = chosen?.scope === input.scopeKey ? chosen.selection : undefined;
   const scopeKey = input.scopeKey;
   const currentScope = useRef(scopeKey);
@@ -72,7 +113,13 @@ export function useComputerUseMention(input: {
     const next = input.draft.slice(0, token.start) + input.draft.slice(token.end);
     input.onDraftChange(next, token.start);
     if (input.onChoose === undefined)
-      setChosen({ scope: input.scopeKey, selection: computerUseSelection(crypto.randomUUID()) });
+      setChosen({
+        scope: input.scopeKey,
+        selection:
+          app.kind === "computer"
+            ? computerUseSelection(crypto.randomUUID())
+            : browserUseSelection(crypto.randomUUID()),
+      });
     else input.onChoose();
     setToken(undefined);
     const caret = token.start;
@@ -100,7 +147,7 @@ export function useComputerUseMention(input: {
       const match = /(?:^|\s)@([a-z]*)$/i.exec(draft.slice(0, caret));
       const query = match?.[1];
       setToken(
-        query !== undefined && "computer".startsWith(query.toLowerCase())
+        query !== undefined && app.label.toLowerCase().startsWith(query.toLowerCase())
           ? { start: caret - query.length - 1, end: caret, raw: `@${query}`, scope: input.scopeKey }
           : undefined,
       );
@@ -127,8 +174,38 @@ export function ComputerUseMention({
   surface,
 }: {
   readonly controller: ReturnType<typeof useComputerUseMention>;
-  readonly surface?: "chips" | "typeahead";
+  readonly surface?: "chips" | "typeahead" | undefined;
 }) {
+  return <ApplicationMention controller={controller} kind="computer" surface={surface} />;
+}
+
+export function BrowserUseMention({
+  controller,
+  surface,
+}: {
+  readonly controller: ReturnType<typeof useBrowserUseMention>;
+  readonly surface?: "chips" | "typeahead" | undefined;
+}) {
+  return <ApplicationMention controller={controller} kind="browser" surface={surface} />;
+}
+
+function ApplicationMention({
+  controller,
+  kind,
+  surface,
+}: {
+  readonly controller: {
+    readonly open: boolean;
+    readonly selection?: ExtensionSelection | undefined;
+    readonly choose: () => void;
+    readonly clear: () => void;
+    readonly listId: string;
+  };
+  readonly kind: "computer" | "browser";
+  readonly surface?: "chips" | "typeahead" | undefined;
+}) {
+  const label = kind === "computer" ? "Computer" : "Browser";
+  const detail = kind === "computer" ? "Computer use" : "Built-in browser";
   return (
     <>
       {controller.open && surface !== "chips" ? (
@@ -140,7 +217,7 @@ export function ComputerUseMention({
             className="thread-mention__list"
           >
             <OctantButton
-              id={`${controller.listId}-computer`}
+              id={`${controller.listId}-${kind}`}
               role="option"
               aria-selected="true"
               type="button"
@@ -149,9 +226,13 @@ export function ComputerUseMention({
               onMouseDown={(event) => event.preventDefault()}
               onClick={controller.choose}
             >
-              <Monitor aria-hidden="true" size={16} />
-              <span>Computer</span>
-              <span className="thread-mention__meta">Computer use</span>
+              {kind === "computer" ? (
+                <Monitor aria-hidden="true" size={16} />
+              ) : (
+                <Globe2 aria-hidden="true" size={16} />
+              )}
+              <span>{label}</span>
+              <span className="thread-mention__meta">{detail}</span>
             </OctantButton>
           </div>
         </div>
@@ -159,13 +240,17 @@ export function ComputerUseMention({
       {controller.selection === undefined || surface === "typeahead" ? null : (
         <ul aria-label="Selected applications" className="composer-chips">
           <li className="chip">
-            <Monitor aria-hidden="true" size={16} />
-            <span>Computer</span>
+            {kind === "computer" ? (
+              <Monitor aria-hidden="true" size={16} />
+            ) : (
+              <Globe2 aria-hidden="true" size={16} />
+            )}
+            <span>{label}</span>
             <OctantButton
               className="chip-x window-no-drag"
               type="button"
               variant="ghost"
-              aria-label="Remove Computer"
+              aria-label={`Remove ${label}`}
               onClick={controller.clear}
             >
               <X aria-hidden="true" size={12} />

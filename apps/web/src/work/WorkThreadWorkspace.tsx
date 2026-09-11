@@ -1,4 +1,9 @@
-import { ComputerUseMention, useComputerUseMention } from "../computerUse/ComputerUseMention";
+import {
+  BrowserUseMention,
+  ComputerUseMention,
+  useBrowserUseMention,
+  useComputerUseMention,
+} from "../computerUse/ComputerUseMention";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import {
@@ -25,6 +30,7 @@ import { composerPlaceholder, FILE_HINT, THREAD_HINT } from "../composer/compose
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
+import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import {
   WorkTurnClientFailure,
@@ -93,6 +99,14 @@ import {
   type TurnHeaderOutcome,
 } from "../transcript/TurnHeader";
 import { providerModelLabel } from "../providers/providerModelLabel";
+import { ExtensionProviderFamily as ExtensionProviderFamilySchema } from "@octant/contracts/extensions";
+import { Schema } from "effect";
+import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections";
+import type { ComposerExtensionSelection } from "../composer/composerExtensionSelection";
+import {
+  ComposerSlashTypeahead,
+  useComposerSlashCommands,
+} from "../composer/useComposerSlashCommands";
 
 /**
  * A message the user sent while a turn was still running.
@@ -103,6 +117,8 @@ import { providerModelLabel } from "../providers/providerModelLabel";
  */
 interface WorkSteeredMessage {
   readonly computerUseSelection?: ExtensionSelection;
+  readonly extensionSelections: ReadonlyArray<ExtensionSelection>;
+  readonly extensionReceipts: ReadonlyArray<ComposerExtensionSelection>;
   readonly id: string;
   readonly originRestore: (message: WorkSteeredMessage) => void;
   readonly threadKey: string;
@@ -209,6 +225,8 @@ export interface WorkThreadWorkspaceProps {
   readonly hostId?: HostId;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
+  readonly extensionClient?: ExtensionClient;
+  readonly browserAvailable?: boolean;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   readonly onThreadUpdated?: (thread: WorkThread) => void;
   /**
@@ -312,6 +330,8 @@ async function waitForWorkStreamReconnect(signal: AbortSignal, delayMs: number):
 }
 
 export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
+  const [projectId, setProjectId] = useState<ProjectId | undefined>(props.initialThread?.projectId);
+  const [thread, setThread] = useState<WorkThread | undefined>(props.initialThread);
   const composerDraft = useComposerThreadDraft({
     mode: "work",
     threadId: String(props.threadId),
@@ -325,8 +345,28 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
     onSelectionEdited: () => composerDraft.setDraft(composerDraft.text),
   });
-  const [projectId, setProjectId] = useState<ProjectId | undefined>(props.initialThread?.projectId);
-  const [thread, setThread] = useState<WorkThread | undefined>(props.initialThread);
+  const providerFamily = providerGroupsForThread(props.providerGroups, thread?.providerInstanceId);
+  const extensionDraft = useExtensionDraftSelections({
+    ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
+    mode: "work",
+    projectId: thread?.projectId ?? projectId ?? null,
+    threadId: thread?.id ?? props.threadId,
+    ...(providerFamily === undefined ? {} : { providerFamily }),
+  });
+  const browser = useBrowserUseMention({
+    textarea: () => textareaRef.current,
+    draft: composerDraft.text,
+    onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
+    scopeKey: String(props.threadId),
+    ...(props.browserAvailable === undefined ? {} : { available: props.browserAvailable }),
+    onChoose: () => void extensionDraft.resolveReference("@browser"),
+  });
+  const slash = useComposerSlashCommands({
+    textarea: () => textareaRef.current,
+    draft: composerDraft.text,
+    onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
+    onResolveExtensionReference: extensionDraft.resolveReference,
+  });
   const [turns, setTurns] = useState<ReadonlyArray<WorkTurnState>>([]);
   const [pendingRequests, setPendingRequests] = useState<ReadonlyArray<WorkRequest>>([]);
   const [browserApprovals, setBrowserApprovals] = useState<ReadonlyArray<BrowserToolApproval>>([]);
@@ -398,6 +438,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const canSubmit =
     trimmed.length > 0 &&
     !creating &&
+    !slash.resolving &&
     !completionLocked &&
     steered.pending === undefined &&
     projectId !== undefined &&
@@ -765,6 +806,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       }
       const computerUseSelection =
         message === undefined ? computer.selection : message.computerUseSelection;
+      const extensionSelections =
+        message?.extensionSelections ??
+        extensionDraft.receipts.flatMap((receipt) =>
+          receipt.selection === undefined ? [] : [receipt.selection],
+        );
       const promptText = (message?.prompt ?? composerDraft.text).trim();
       if (promptText.length === 0) return false;
       const sendingThreadId = String(thread.id);
@@ -800,6 +846,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         const started = await props.turnClient.startFirstTurn({
           kind: "start-work-thread-turn",
           ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
+          ...(extensionSelections.length === 0 ? {} : { extensionSelections }),
           requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
           threadId: props.threadId,
           turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
@@ -830,6 +877,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           // happens to be identical to the text this send carried.
           if (composerDraft.revisionFor(String(props.threadId)) === draftRevision) {
             composerDraft.clear();
+            extensionDraft.clear();
           }
         }
         setTurns((current) =>
@@ -861,6 +909,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       providerChanging,
       thread,
       threadMentions,
+      extensionDraft,
     ],
   );
   sendSteeredRef.current = (message) => sendWorkTurn(message);
@@ -882,8 +931,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       threadMentions.restore(message.threadMentionChips);
       fileMentions.restore(message.fileMentionPaths);
       computer.restore(message.computerUseSelection);
+      extensionDraft.restore(message.extensionReceipts);
     },
-    [composerDraft, fileMentions, images, threadMentions],
+    [composerDraft, extensionDraft, fileMentions, images, threadMentions],
   );
 
   const submit = useCallback(async () => {
@@ -894,8 +944,13 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       // this thread stops running one.
       if (!canSubmit) return;
       const threadMentionChips = [...threadMentions.chips];
+      const extensionReceipts = [...extensionDraft.receipts];
       const steeredMessage: WorkSteeredMessage = {
         ...(computer.selection === undefined ? {} : { computerUseSelection: computer.selection }),
+        extensionSelections: extensionReceipts.flatMap((receipt) =>
+          receipt.selection === undefined ? [] : [receipt.selection],
+        ),
+        extensionReceipts,
         id: globalThis.crypto.randomUUID(),
         originRestore: restoreWorkMessage,
         threadKey: String(props.threadId),
@@ -913,6 +968,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       images.takeForSend();
       threadMentions.clear();
       fileMentions.clear();
+      extensionDraft.clear();
       composerDraft.clear();
       return;
     }
@@ -951,6 +1007,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   }, [
     computer.selection,
     computer.consume,
+    extensionDraft,
     canSubmit,
     composerDraft,
     projectId,
@@ -1019,6 +1076,8 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (computer.handleKeyDown(event)) return;
+    if (browser.handleKeyDown(event)) return;
+    if (slash.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
     if (fileMentions.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
@@ -1034,6 +1093,8 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
 
   function syncMentions(value: string, caret: number | null) {
     computer.sync(value, caret);
+    browser.sync(value, caret);
+    slash.sync(value, caret);
     mention.sync(value, caret);
     fileMentions.sync(value, caret);
   }
@@ -1264,6 +1325,28 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         chips={
           <>
             <ComputerUseMention controller={computer} surface="chips" />
+            <BrowserUseMention controller={browser} surface="chips" />
+            {extensionDraft.receipts.length > 0 ? (
+              <ul aria-label="Selected extensions" className="composer-chips">
+                {extensionDraft.receipts.map((receipt) => (
+                  <li className="chip" key={receipt.reference}>
+                    <span>{receipt.label}</span>
+                    {receipt.status.kind === "blocked" ? (
+                      <span>{`Blocked: ${receipt.status.reason}`}</span>
+                    ) : null}
+                    <OctantButton
+                      aria-label={`Remove ${receipt.label} extension`}
+                      className="chip-x window-no-drag"
+                      onClick={() => extensionDraft.remove(receipt.reference)}
+                      type="button"
+                      variant="ghost"
+                    >
+                      ×
+                    </OctantButton>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             <ThreadMentionChips
               chips={threadMentions.chips}
               onRemove={(mentionedThreadId) =>
@@ -1283,9 +1366,25 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           <OctantTextarea
             aria-label="Work prompt"
             aria-autocomplete="list"
-            aria-expanded={computer.open}
-            aria-controls={computer.open ? computer.listId : undefined}
-            aria-activedescendant={computer.open ? `${computer.listId}-computer` : undefined}
+            aria-expanded={computer.open || browser.open || slash.open}
+            aria-controls={
+              computer.open
+                ? computer.listId
+                : browser.open
+                  ? browser.listId
+                  : slash.open
+                    ? slash.listId
+                    : undefined
+            }
+            aria-activedescendant={
+              computer.open
+                ? `${computer.listId}-computer`
+                : browser.open
+                  ? `${browser.listId}-browser`
+                  : slash.active === undefined
+                    ? undefined
+                    : `${slash.listId}-${slash.active.id}`
+            }
             autoFocus
             className="composer-input"
             disabled={
@@ -1326,6 +1425,10 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         typeahead={
           computer.open ? (
             <ComputerUseMention controller={computer} surface="typeahead" />
+          ) : browser.open ? (
+            <BrowserUseMention controller={browser} surface="typeahead" />
+          ) : slash.open ? (
+            <ComposerSlashTypeahead controller={slash} />
           ) : (
             <>
               {mention.open ? (
@@ -1455,6 +1558,18 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       />
     </section>
   );
+}
+
+function providerGroupsForThread(
+  groups: ReadonlyArray<PickerGroup> | undefined,
+  providerInstanceId: WorkThread["providerInstanceId"] | undefined,
+): import("@octant/contracts/extensions").ExtensionProviderFamily | undefined {
+  const group = groups?.find(
+    (candidate) => String(candidate.instance.id) === String(providerInstanceId),
+  );
+  return group !== undefined && Schema.is(ExtensionProviderFamilySchema)(group.instance.driverKind)
+    ? group.instance.driverKind
+    : undefined;
 }
 
 function workTurnSettlement(turns: ReadonlyArray<WorkTurnState>): TurnSettlement | "idle" {

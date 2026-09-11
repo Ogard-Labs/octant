@@ -1377,6 +1377,30 @@ describe("CodeOperationService", () => {
     expect(fixture.turns.start.mock.calls[0]![0].context).toBeUndefined();
   });
 
+  it("refuses a selected skill before Code provider execution when no material resolver exists", async () => {
+    const fixture = providerTurnFixture();
+    const result = await fixture.service.execute(ids.window, {
+      ...startProviderTurn,
+      extensionSelections: [
+        {
+          kind: "skill",
+          skillId: `agents-skills-directory:project:review:sha256:${"a".repeat(64)}`,
+          packageDigest: `sha256:${"a".repeat(64)}`,
+          catalogEpoch: `sha256:${"b".repeat(64)}`,
+          origin: { kind: "draft", reference: "review" },
+        },
+      ],
+    });
+    expect(result).toMatchObject({
+      kind: "operation-failed",
+      failure: {
+        category: "unavailable",
+        message: "Selected skill context is unavailable for Code on this host.",
+      },
+    });
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+  });
+
   it("keeps using the snapshotted instructions after the live profile would have changed", async () => {
     const fixture = providerTurnFixture({
       thread: decodeCodeThread({

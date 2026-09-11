@@ -53,6 +53,16 @@ describe("CodeCheckoutBar", () => {
     expect(screen.queryByText(/[+−]\d/)).not.toBeInTheDocument();
   });
 
+  it("names the bound repository even when the Project uses a different label", () => {
+    render(
+      <CodeCheckoutProvider observation={facts({ projectName: "Release work" })}>
+        <CodeCheckoutBar />
+      </CodeCheckoutProvider>,
+    );
+    expect(screen.getByText("octant")).toBeVisible();
+    expect(screen.getByText("fix/shell-polish")).toBeVisible();
+  });
+
   it("offers the one action the branch and its diff lead to", async () => {
     const onCreatePullRequest = vi.fn();
     const user = userEvent.setup();

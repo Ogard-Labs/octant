@@ -124,7 +124,7 @@ Surface (reading measure 880px, or wide for boards)
 ```
 
 Leaving a reader route is always the ghost "Back to workspace" control in the
-header. Settings is the same shell with an 800px measure and its own
+header. Settings is the same shell with a 920px measure and its own
 navigation rail; the rail names each group of pages with a quiet label and
 draws no hairline between groups. Rows in Settings are `SettingRow`; rows everywhere else are
 `surface-row`. Both draw the same hairline.
@@ -239,11 +239,21 @@ name at the body size and the state at the right as detail text with a 12px
 mark (spinner, check, cross), parted by hairlines and indented together; a
 settled turn folds them behind "N tool calls". A turn paused on the person uses a neutral composer-adjacent request row with
 an icon and explicit answer controls. Follow-up composers use one compact
-hairline message surface across Chat, Work, and Code. A fixed 28px feedback
-lane above the toolbar keeps controls still when notices appear or disappear;
-long messages remain accessible and scrollable. The Code checkout strip is
+hairline message surface across Chat, Work, and Code. Feedback above the toolbar
+appears only when it has content; empty feedback consumes no space. Long notices
+remain accessible and scrollable. The access menu holds the optional provider
+approval-review choice and starting-profile detail. The Code checkout strip is
 attached underneath, rather than floating above the input. Input growth from
-extra typed lines is intentional; status changes do not resize the frame (0098).
+extra typed lines and visible notices is intentional (0114). Repository, branch
+and PR actions stay visible below the input. Utility panels keep one resize
+boundary and a compact tab row without a second horizontal divider.
+
+Attachment and model controls sit on the left; access, context usage and send
+stay together at the right edge even when the controls wrap. Menus use compact
+interface text, and model choices stay in a bounded scrollable popup. Focus
+uses fill and text emphasis, without bright outlining of controls or popups.
+Sent messages do not repeat an access caption; the underlying history remains
+authoritative (0114).
 
 ## Colour system
 
@@ -546,15 +556,14 @@ row’s leading edge. Search is a compact in-place filter for the current mode's
 threads, with a command-style overlay available for broader actions.
 
 Settings is a grouped form page. The shared resizable navigation rail and
-search remain fixed while one centred, bounded 800px reading column scrolls.
-A 32–56px workspace gutter protects the content at narrower widths. The page
+search remain fixed while one centred, bounded 920px reading column scrolls.
+A 32–64px workspace gutter protects the content at narrower widths. The page
 title, quiet section captions, and primary field labels have distinct roles;
-sections follow a consistent 32px rhythm. Navigation groups use quiet separators
-rather than competing labels. A section is an object (0109): the content
-beneath the label forms the child-built card (hairline ring over the surface
-fill), while the label and its one-line description remain outside the card
-on the page ground. Rows inside the card are divisions of it separated by
-hairlines.
+sections follow a consistent 28px rhythm. Navigation groups use quiet separators
+rather than competing labels. A section is an open object: its content is one
+hairline-separated row list on the page ground, while the label and its one-line
+description remain outside the list. Discrete editors and protected actions may
+retain a bounded surface when their hierarchy requires it.
 Everything inside takes the section's inset, including content that is not a
 row. A section keeps `overflow: visible`, because its rows hold menus and
 popovers that have to escape it. Keybindings have their own destination and raw

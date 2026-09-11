@@ -336,6 +336,7 @@ export interface WorkspaceViewProps {
     issueContext?: import("@octant/contracts").GithubIssueContextRequest,
     linearIssueContext?: import("@octant/contracts").LinearIssueContextRequest,
     computerUseSelection?: import("@octant/contracts/extensions").ExtensionSelection,
+    extensionSelections?: ReadonlyArray<import("@octant/contracts/extensions").ExtensionSelection>,
   ) => boolean | void | Promise<boolean | void>;
   readonly githubPluginEnabled?: boolean;
   readonly linearClient?: import("@octant/client-runtime/integration-client").IntegrationClient;
@@ -1046,6 +1047,8 @@ function renderNonCodeTab(
           ? {}
           : { folderBrowseClient: props.folderBrowseClient })}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+        {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+        browserAvailable={props.browserAutomationClient !== undefined}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
         {...(props.githubClient === undefined ? {} : { githubClient: props.githubClient })}
         {...(props.githubCloneClient === undefined
@@ -1100,6 +1103,7 @@ function renderNonCodeTab(
           issueContext,
           linearIssueContext,
           computerUseSelection,
+          extensionSelections,
         ) => {
           // Returning quietly here made a wired-up composer look dead: the user
           // pressed Create thread and nothing happened anywhere. A missing
@@ -1119,6 +1123,9 @@ function renderNonCodeTab(
             ...(computerUseSelection === undefined
               ? ([] as const)
               : ([computerUseSelection] as const)),
+            ...(extensionSelections === undefined
+              ? ([] as const)
+              : ([extensionSelections] as const)),
           );
         }}
         {...(props.onCreateProject === undefined ? {} : { onCreateProject: props.onCreateProject })}
@@ -1312,6 +1319,10 @@ function renderNonCodeTab(
                 {...(props.projectWindowCapability === undefined
                   ? {}
                   : { windowCapability: props.projectWindowCapability })}
+                {...(props.extensionClient === undefined
+                  ? {}
+                  : { extensionClient: props.extensionClient })}
+                browserAvailable={props.browserAutomationClient !== undefined}
                 {...(props.onOpenCanvasReference === undefined
                   ? {}
                   : { onOpenCanvas: props.onOpenCanvasReference })}
