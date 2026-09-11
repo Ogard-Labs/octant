@@ -4177,7 +4177,7 @@ input.switch:checked::after {
   transition: box-shadow var(--oct-dur-base) var(--oct-ease-color);
 }
 .composer:focus-within {
-  box-shadow: var(--octant-shadow-lg);
+  box-shadow: var(--octant-shadow-md);
 }
 .composer-chips {
   display: flex;
