@@ -1,14 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import type { SkillMarketplaceEntry } from "@octant/contracts/extension-rpc";
-import type { ExtensionPackageManifest } from "@octant/contracts/extensions";
+import type { ExtensionPackageManifest, StandaloneSkillRecord } from "@octant/contracts/extensions";
+import type { StandaloneSkillActivationState } from "@octant/contracts/shell";
 import {
   calculateExtensionPackageDigest,
   type ExtensionArchiveEntry,
   type InspectedExtensionPackage,
   type ResolvedExtensionPackage,
 } from "./packageInspector";
-import { StandaloneSkillService } from "./standaloneSkillService";
+import {
+  StandaloneSkillService,
+  type StandaloneSkillActivationStore,
+} from "./standaloneSkillService";
 
 const extensionId = "46000000-0000-4000-8000-000000000001";
 const packageId = "46000000-0000-4000-8000-000000000002";
@@ -262,5 +266,215 @@ describe("standalone skill marketplace service", () => {
           (skill) => skill.skill.name === "review-in-parallel" && skill.source.kind === "bundled",
         ),
     ).toBe(true);
+  });
+});
+
+function discoveredSkill(
+  name = "test-skill",
+  content = "# Test skill instructions",
+): StandaloneSkillRecord {
+  const digest = `sha256:${"1".repeat(64)}` as never;
+  const qualifiedId = `agents-skills-directory:user-global:${name}:${digest}` as never;
+  return {
+    skill: {
+      qualifiedId,
+      name,
+      sourceKind: "agents-skills-directory",
+      digest,
+      available: true,
+    },
+    source: { kind: "agents-skills-directory", sourceRef: "user-global" as never },
+    displayName: name,
+    contentBytes: content.length,
+    instructions: content,
+    provenance: { reviewed: false },
+    reviewed: false,
+    desiredEnabled: false,
+    effectiveState: { kind: "blocked", reason: "review-required" },
+  };
+}
+
+function memoryActivationStore(): {
+  store: StandaloneSkillActivationStore;
+  current: () => Readonly<Record<string, StandaloneSkillActivationState>>;
+} {
+  let activations: Readonly<Record<string, StandaloneSkillActivationState>> = {};
+  return {
+    current: () => activations,
+    store: {
+      async read() {
+        return activations;
+      },
+      async write(next) {
+        activations = next;
+      },
+    },
+  };
+}
+
+describe("standalone skill activation", () => {
+  it("keeps discovered skills unavailable until reviewed, trusted, and enabled", async () => {
+    const skill = discoveredSkill();
+    const { store, current } = memoryActivationStore();
+    const service = new StandaloneSkillService({
+      discovery: {
+        snapshot: () => ({ skills: [skill], collisions: [] }),
+        reconcile: async () => ({ skills: [skill], collisions: [] }),
+      },
+      lifecycle: {
+        snapshot: () => baseSnapshot,
+        install: async () => baseSnapshot,
+        update: async () => baseSnapshot,
+        uninstall: async () => baseSnapshot,
+      },
+      activationStore: store,
+    });
+
+    await service.reconcile();
+    const qualifiedId = String(skill.skill.qualifiedId);
+
+    const blocked = service
+      .snapshot(baseSnapshot)
+      .skills?.find((candidate) => String(candidate.skill.qualifiedId) === qualifiedId);
+    expect(blocked?.effectiveState).toEqual({ kind: "blocked", reason: "review-required" });
+
+    await service.execute({ kind: "review-skill", qualifiedId, digest: skill.skill.digest });
+    expect(
+      service
+        .snapshot(baseSnapshot)
+        .skills?.find((candidate) => String(candidate.skill.qualifiedId) === qualifiedId)?.reviewed,
+    ).toBe(true);
+
+    await service.execute({
+      kind: "trust-skill-source",
+      qualifiedId,
+      digest: skill.skill.digest,
+      trusted: true,
+    });
+    await service.execute({
+      kind: "set-skill-desired",
+      qualifiedId,
+      digest: skill.skill.digest,
+      desired: true,
+    });
+
+    const effective = service
+      .snapshot(baseSnapshot)
+      .skills?.find((candidate) => String(candidate.skill.qualifiedId) === qualifiedId);
+    expect(effective?.effectiveState).toEqual({ kind: "effective" });
+    expect(current()[qualifiedId]).toEqual({
+      reviewed: true,
+      trusted: true,
+      desiredEnabled: true,
+    });
+  });
+
+  it("revokes activation when the skill content changes and the digest no longer matches", async () => {
+    const skill = discoveredSkill();
+    const { store, current } = memoryActivationStore();
+    const makeService = (skills: ReadonlyArray<StandaloneSkillRecord>) =>
+      new StandaloneSkillService({
+        discovery: {
+          snapshot: () => ({ skills, collisions: [] }),
+          reconcile: async () => ({ skills, collisions: [] }),
+        },
+        lifecycle: {
+          snapshot: () => baseSnapshot,
+          install: async () => baseSnapshot,
+          update: async () => baseSnapshot,
+          uninstall: async () => baseSnapshot,
+        },
+        activationStore: store,
+      });
+    const service = makeService([skill]);
+
+    await service.reconcile();
+    const qualifiedId = String(skill.skill.qualifiedId);
+    await service.execute({ kind: "review-skill", qualifiedId, digest: skill.skill.digest });
+    await service.execute({
+      kind: "trust-skill-source",
+      qualifiedId,
+      digest: skill.skill.digest,
+      trusted: true,
+    });
+    await service.execute({
+      kind: "set-skill-desired",
+      qualifiedId,
+      digest: skill.skill.digest,
+      desired: true,
+    });
+
+    const newDigest = `sha256:${"2".repeat(64)}` as never;
+    const changedSkill: StandaloneSkillRecord = {
+      ...skill,
+      skill: {
+        ...skill.skill,
+        digest: newDigest,
+        qualifiedId: `agents-skills-directory:user-global:test-skill:${newDigest}` as never,
+      },
+      instructions: "# changed",
+    };
+    const changedService = makeService([changedSkill]);
+    await changedService.reconcile();
+
+    const afterChange = changedService
+      .snapshot(baseSnapshot)
+      .skills?.find(
+        (candidate) => String(candidate.skill.qualifiedId) === changedSkill.skill.qualifiedId,
+      );
+    expect(afterChange?.effectiveState).toEqual({ kind: "blocked", reason: "review-required" });
+    expect(current()[qualifiedId]).toEqual({
+      reviewed: true,
+      trusted: true,
+      desiredEnabled: true,
+    });
+  });
+
+  it("resolves name collisions by selecting exactly one source", async () => {
+    const userSkill = discoveredSkill("colliding", "# user");
+    const projectSkill: StandaloneSkillRecord = {
+      ...discoveredSkill("colliding", "# project"),
+      source: { kind: "agents-skills-directory", sourceRef: "project:project-1:working" as never },
+      skill: {
+        ...discoveredSkill("colliding", "# project").skill,
+        qualifiedId:
+          `agents-skills-directory:project:project-1:working:colliding:${"3".repeat(64)}` as never,
+      },
+    };
+    const { store } = memoryActivationStore();
+    const service = new StandaloneSkillService({
+      discovery: {
+        snapshot: () => ({ skills: [userSkill, projectSkill], collisions: [] }),
+        reconcile: async () => ({ skills: [userSkill, projectSkill], collisions: [] }),
+      },
+      lifecycle: {
+        snapshot: () => baseSnapshot,
+        install: async () => baseSnapshot,
+        update: async () => baseSnapshot,
+        uninstall: async () => baseSnapshot,
+      },
+      activationStore: store,
+    });
+
+    await service.reconcile();
+    expect(service.snapshot(baseSnapshot).collisions).toHaveLength(1);
+
+    const qualifiedId = String(userSkill.skill.qualifiedId);
+    await service.execute({
+      kind: "select-skill-collision",
+      name: "colliding",
+      qualifiedId,
+    });
+
+    const snapshot = service.snapshot(baseSnapshot);
+    expect(snapshot.collisions).toHaveLength(0);
+    const selected = snapshot.skills?.find(
+      (candidate) => String(candidate.skill.qualifiedId) === qualifiedId,
+    );
+    const superseded = snapshot.skills?.find(
+      (candidate) => String(candidate.skill.qualifiedId) !== qualifiedId,
+    );
+    expect(selected?.effectiveState).toEqual({ kind: "effective" });
+    expect(superseded?.effectiveState).toEqual({ kind: "blocked", reason: "superseded" });
   });
 });
