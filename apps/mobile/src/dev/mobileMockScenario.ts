@@ -528,6 +528,10 @@ function createMockTransport(input: {
   const workThreads = [...input.workThreads];
   const codeThreads = [...input.codeThreads];
   let mockChatMutationSequence = 0;
+  // Work turns the phone started in this session, keyed by thread. The mock
+  // answers the first read as running and every later read as completed, so a
+  // reopened thread shows a finished reply the way the host would.
+  const workTurns = new Map<string, Array<Record<string, unknown>>>();
   const codeCheckout = {
     id: CHECKOUT_ID,
     repositoryId: REPOSITORY_ID,
@@ -545,6 +549,78 @@ function createMockTransport(input: {
       }
       if (request.method === "GET" && request.path === "/api/work/threads/bootstrap") {
         return Response.json(decodeWorkThreadBootstrap({ threads: workThreads }));
+      }
+      if (request.method === "GET" && request.path.startsWith("/api/work/turns/transcript/")) {
+        const threadId = decodeURIComponent(
+          request.path.slice("/api/work/turns/transcript/".length),
+        );
+        const turns = (workTurns.get(threadId) ?? []).map((turn) =>
+          turn.status === "accepted"
+            ? {
+                ...turn,
+                status: "completed",
+                response: `Mock reply to: ${String(turn.prompt)}`,
+                transcript: [
+                  { role: "user", text: turn.prompt },
+                  { role: "assistant", text: `Mock reply to: ${String(turn.prompt)}` },
+                ],
+                version: 2,
+                updatedAt: NOW,
+              }
+            : turn,
+        );
+        workTurns.set(threadId, turns);
+        return Response.json({ threadId, turns, liveCursor: turns.length });
+      }
+      if (request.method === "POST" && request.path === "/api/work/turns") {
+        const command = JSON.parse(String(request.body ?? "{}")) as {
+          readonly threadId?: string;
+          readonly requestId?: string;
+          readonly turnId?: string;
+          readonly prompt?: string;
+          readonly authority?: { readonly projectId?: string };
+        };
+        if (command.threadId === undefined || command.prompt === undefined) {
+          return new Response("Mock route not found", { status: 404 });
+        }
+        const turn = {
+          requestId: command.requestId,
+          threadId: command.threadId,
+          turnId: command.turnId,
+          projectId: command.authority?.projectId ?? PROJECT_ID,
+          authority: command.authority,
+          status: "accepted",
+          prompt: command.prompt,
+          transcript: [{ role: "user", text: command.prompt }],
+          capabilities: {
+            workspace: "project-backed",
+            confinement: "project-root-confined",
+            shell: "denied",
+            git: "denied",
+            worktree: "denied",
+            pullRequest: "denied",
+            code: "denied",
+          },
+          version: 1,
+          acceptedAt: NOW,
+          updatedAt: NOW,
+        };
+        workTurns.set(command.threadId, [...(workTurns.get(command.threadId) ?? []), turn]);
+        return Response.json({ kind: "accepted", turn });
+      }
+      if (
+        request.method === "GET" &&
+        request.path.startsWith("/api/code/threads/") &&
+        request.path.endsWith("/conversation")
+      ) {
+        const threadId = decodeURIComponent(
+          request.path.slice("/api/code/threads/".length, -"/conversation".length),
+        );
+        return Response.json({ version: 3, threadId, turns: [], nextCursor: 0, hasMore: false });
+      }
+      if (request.method === "POST" && request.path === "/api/code/evidence/batch") {
+        const body = JSON.parse(String(request.body ?? "{}")) as { readonly threadId?: string };
+        return Response.json({ threadId: body.threadId, items: [] });
       }
       if (request.method === "GET" && request.path === "/api/code/bootstrap") {
         return Response.json(

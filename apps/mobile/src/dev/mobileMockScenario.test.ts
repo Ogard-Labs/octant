@@ -86,7 +86,7 @@ describe("mobile mock scenarios", () => {
     });
   });
 
-  it("persists mock Work creation data from the command", async () => {
+  it("persists mock Work creation data from the command and starts the prompt as its first turn", async () => {
     const scenario = createMobileMockScenario("full");
     const transport = scenario.transports[0]!;
     const projects = await fetchMobileWorkProjects(transport);
@@ -112,6 +112,13 @@ describe("mobile mock scenarios", () => {
           title: "Prepare release notes",
         }),
       ]),
+    });
+    const transcript = await transport.authenticatedFetch({
+      method: "GET",
+      path: `/api/work/turns/transcript/${String(row.threadId)}`,
+    });
+    await expect(transcript.json()).resolves.toMatchObject({
+      turns: [expect.objectContaining({ prompt: "Prepare release notes" })],
     });
   });
 
