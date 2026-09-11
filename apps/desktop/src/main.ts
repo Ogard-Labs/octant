@@ -2329,6 +2329,7 @@ async function runMenuBarAction(
         message: formatRedactedHostDiagnostics(hostLifecycle.snapshot()),
       });
     } else if (action === "fully-quit") {
+      quitCanPrompt = true;
       app.quit();
     }
   } catch {
