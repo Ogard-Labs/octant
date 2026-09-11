@@ -1,11 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
 import {
   createInMemoryDeviceKeyStore,
   createRemoteSessionBridge,
-  exerciseRemoteChatMutation,
   mapBridgeStateToHostHealth,
 } from "@octant/client-runtime";
 import {
@@ -18,6 +17,10 @@ import {
 import { RemoteShellView } from "./RemoteShellView";
 
 const hostId = decodeStableHostId(HOST_ID);
+const now = "2026-08-03T00:00:00.000Z";
+const providerInstanceId = "10000000-0000-4000-8000-000000000001";
+const chatThreadId = "40000000-0000-4000-8000-000000000001";
+const chatProjectId = "30000000-0000-4000-8000-000000000001";
 
 async function waitUntil(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
   const start = Date.now();
@@ -37,102 +40,221 @@ async function pemFromPublicKey(publicKey: CryptoKey): Promise<string> {
   return `-----BEGIN PUBLIC KEY-----\n${lines.join("\n")}\n-----END PUBLIC KEY-----`;
 }
 
-async function readyBridge(): Promise<ReturnType<typeof createRemoteSessionBridge>> {
-  const now = "2026-08-03T00:00:00.000Z";
-  const server = createFakeRemoteServer({
-    handleProductRequest({ method, path }) {
-      if (method === "GET" && path === "/api/chat/bootstrap") {
+const chatThread = {
+  id: chatThreadId,
+  projectId: chatProjectId,
+  title: "Planning from the phone",
+  lifecycle: "active",
+  providerInstanceId,
+  modelId: "model-a",
+  researchEnabled: false,
+  researchRouting: "automatic",
+  personalityInstructions: "Be concise.",
+  version: 1,
+  createdAt: now,
+  updatedAt: now,
+};
+
+const capabilities = {
+  streaming: "supported",
+  resume: "unsupported",
+  interruption: "supported",
+  approvals: "unsupported",
+  userQuestions: "unsupported",
+  reasoning: "supported",
+  usage: "unavailable",
+  toolActivity: "unsupported",
+  fileChanges: "unavailable",
+  diffs: "unavailable",
+  taskProgress: "unavailable",
+  nativeChildAgents: "unsupported",
+  harnessAutoReview: "unsupported",
+  nativeAttachments: "unavailable",
+  nativeWebResearch: "unavailable",
+  appManagedTools: "unavailable",
+  citations: "unavailable",
+};
+
+interface ProductRequest {
+  readonly method: string;
+  readonly path: string;
+  readonly body: unknown;
+  readonly headers: Headers;
+}
+
+/** A fake host that answers the reads the remote workspace performs. */
+function answerProduct(seen: ProductRequest[]) {
+  return (input: ProductRequest): Response => {
+    seen.push(input);
+    const { method, path, body } = input;
+    if (method === "GET" && path === "/api/chat/bootstrap") {
+      return Response.json({
+        settings: {
+          defaultProviderInstanceId: providerInstanceId,
+          defaultModelId: "model-a",
+          defaultResearchEnabled: false,
+          defaultResearchRouting: "automatic",
+          defaultPersonalityInstructions: "Be concise.",
+          version: 1,
+          updatedAt: now,
+        },
+        threads: [chatThread],
+      });
+    }
+    if (method === "GET" && path === "/api/chat/navigation") {
+      return Response.json({
+        threads: [
+          {
+            id: chatThreadId,
+            title: chatThread.title,
+            providerInstanceId,
+            updatedAt: now,
+            lastSequence: 1,
+          },
+        ],
+      });
+    }
+    if (method === "GET" && path === `/api/chat/threads/${chatThreadId}`) {
+      return Response.json({
+        thread: chatThread,
+        turns: [],
+        lastSequence: 1,
+        contents: [],
+        attachments: [],
+        citations: [],
+        workItems: [],
+        workListVersion: 0,
+        followUpVersion: 0,
+      });
+    }
+    if (method === "GET" && path === `/api/chat/threads/${chatThreadId}/events`) {
+      return new Response("", {
+        status: 200,
+        headers: { "content-type": "application/x-ndjson" },
+      });
+    }
+    if (method === "POST" && path === "/api/chat/commands") {
+      const command = body as { readonly kind?: string };
+      if (command.kind === "send-chat-turn") {
         return Response.json({
-          settings: {
-            defaultResearchEnabled: false,
-            defaultResearchRouting: "automatic",
-            defaultPersonalityInstructions: "Be concise.",
+          kind: "turn-created",
+          turn: {
+            id: "90000000-0000-4000-8000-000000000001",
+            threadId: chatThreadId,
+            sequence: 1,
+            userMessageRef: {
+              contentId: "90000000-0000-4000-8000-000000000002",
+              digest: "a".repeat(64),
+              byteLength: 5,
+            },
+            attachmentIds: [],
+            attempts: [],
+            createdAt: now,
+          },
+        });
+      }
+      return Response.json(
+        { category: "invalid", message: "Unexpected command." },
+        { status: 400 },
+      );
+    }
+    if (method === "GET" && path === "/api/work/threads/bootstrap") {
+      return Response.json({
+        threads: [
+          {
+            id: "20000000-0000-4000-8000-000000000001",
+            projectId: "30000000-0000-4000-8000-000000000002",
+            title: "Remote Work",
+            lifecycle: "active",
+            providerInstanceId,
+            modelId: "model-a",
             version: 1,
+            createdAt: now,
             updatedAt: now,
           },
-          threads: [],
-        });
-      }
-      if (method === "GET" && path === "/api/work/threads/bootstrap") {
-        return Response.json({
-          threads: [
-            {
-              id: "20000000-0000-4000-8000-000000000001",
-              projectId: "30000000-0000-4000-8000-000000000001",
-              title: "Remote Work",
-              lifecycle: "active",
-              providerInstanceId: "10000000-0000-4000-8000-000000000001",
-              modelId: "model-a",
-              version: 1,
-              createdAt: now,
-              updatedAt: now,
-            },
-          ],
-        });
-      }
-      if (method === "GET" && path === "/api/code/bootstrap") {
-        return Response.json({
-          settings: {
-            defaultExecutionPolicy: "plan",
-            defaultPermissionPersistence: "current-session",
+        ],
+      });
+    }
+    if (method === "GET" && path === "/api/code/bootstrap") {
+      return Response.json({
+        settings: {
+          defaultExecutionPolicy: "plan",
+          defaultPermissionPersistence: "current-session",
+          version: 1,
+          updatedAt: now,
+        },
+        threads: [],
+        checkouts: [],
+        activity: [],
+      });
+    }
+    if (method === "GET" && path === "/api/providers/bootstrap") {
+      return Response.json({
+        instances: [
+          {
+            id: providerInstanceId,
+            displayName: "Codex local",
+            driverKind: "codex",
+            configuration: { kind: "codex-cli", binaryPath: "/usr/local/bin/codex" },
+            enabled: true,
+            environmentPolicy: "inherit-host",
             version: 1,
+            createdAt: now,
             updatedAt: now,
           },
-          threads: [],
-          checkouts: [],
-          activity: [],
-        });
-      }
-      if (method === "GET" && path === "/api/projects/bootstrap") {
-        return Response.json({
-          active: [
-            {
-              id: "30000000-0000-4000-8000-000000000001",
-              name: "Remote Chat",
-              lifecycle: "active",
-              pinned: true,
-              rank: "0/1",
-              version: 1,
-              createdAt: now,
-              updatedAt: now,
-              type: "chat",
-            },
-            {
-              id: "30000000-0000-4000-8000-000000000002",
-              name: "Remote Work",
-              lifecycle: "active",
-              pinned: false,
-              rank: "0/1",
-              version: 1,
-              createdAt: now,
-              updatedAt: now,
-              type: "work",
-              binding: { canonicalRoot: "/opaque/work" },
-              bindingRevisionId: "30000000-0000-4000-8000-000000000012",
-            },
-            {
-              id: "30000000-0000-4000-8000-000000000003",
-              name: "Remote Code",
-              lifecycle: "active",
-              pinned: false,
-              rank: "1/3",
-              version: 1,
-              createdAt: now,
-              updatedAt: now,
-              type: "code",
-              binding: { canonicalRoot: "/opaque/repo" },
-              bindingRevisionId: "30000000-0000-4000-8000-000000000013",
-              codeAccessPersistence: "current-session",
-            },
-          ],
-          archived: [],
-          availability: [],
-          memory: [],
-        });
-      }
-      return Response.json({ ok: true });
-    },
-  });
+        ],
+        defaults: { permissionPersistence: "current-session", version: 1 },
+        observedStates: [
+          {
+            instanceId: providerInstanceId,
+            readiness: "ready",
+            processState: "running",
+            models: [
+              {
+                id: "model-a",
+                displayName: "Model A",
+                source: "discovered",
+                verification: "verified",
+                reasoning: "supported",
+                inputModalities: ["text"],
+                options: [],
+              },
+            ],
+            capabilities,
+            observedAt: now,
+          },
+        ],
+      });
+    }
+    if (method === "GET" && path === "/api/projects/bootstrap") {
+      return Response.json({
+        active: [
+          {
+            id: chatProjectId,
+            name: "Remote Chat",
+            lifecycle: "active",
+            pinned: true,
+            rank: "0/1",
+            version: 1,
+            createdAt: now,
+            updatedAt: now,
+            type: "chat",
+          },
+        ],
+        archived: [],
+        availability: [],
+        memory: [],
+      });
+    }
+    return Response.json(
+      { category: "unavailable", message: "Not on this host." },
+      { status: 404 },
+    );
+  };
+}
+
+async function readyBridge(seen: ProductRequest[] = []) {
+  const server = createFakeRemoteServer({ handleProductRequest: answerProduct(seen) });
   const pairingStore = createInMemoryDeviceKeyStore();
   const keyPair = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, [
     "sign",
@@ -159,65 +281,60 @@ async function readyBridge(): Promise<ReturnType<typeof createRemoteSessionBridg
     origin: ORIGIN,
   });
   await waitUntil(() => bridge.getState().kind === "ready");
-  return bridge;
+  return { bridge, server };
 }
 
 describe("RemoteShellView", () => {
-  it("shows host freshness and exercises Chat mutation when ready", async () => {
+  it("opens a Chat thread from the paired host and sends a real turn over the remote session", async () => {
     const user = userEvent.setup();
-    const bridge = await readyBridge();
+    const seen: ProductRequest[] = [];
+    const { bridge, server } = await readyBridge(seen);
     render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
 
     expect(await screen.findByText("This Mac")).toBeInTheDocument();
     expect(mapBridgeStateToHostHealth(bridge.getState())).toBe("healthy");
 
-    await user.click(screen.getByRole("button", { name: "Verify Chat mutation" }));
-    await waitFor(() =>
+    const list = await screen.findByRole("navigation", { name: "Chat thread list" });
+    await user.click(await within(list).findByRole("button", { name: "Planning from the phone" }));
+
+    const composer = await screen.findByRole("textbox", { name: /message/i }, { timeout: 5000 });
+    await user.type(composer, "Hello");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
       expect(
-        screen.getByText(/Verify Chat mutation succeeded over the remote session/i),
-      ).toBeInTheDocument(),
-    );
+        seen.some(
+          (request) =>
+            request.method === "POST" &&
+            request.path === "/api/chat/commands" &&
+            (request.body as { kind?: string }).kind === "send-chat-turn",
+        ),
+      ).toBe(true);
+    });
+    expect(server.productProofVerified()).toBe(true);
+    for (const request of seen) {
+      expect(request.headers.get("x-octant-window-capability")).toBeNull();
+    }
+    expect(screen.queryByRole("button", { name: /verify .* mutation/i })).not.toBeInTheDocument();
   });
 
-  it("exercises Work and Code mutations from their mode panels", async () => {
+  it("lists Work threads and explains an empty Code inventory instead of offering probe buttons", async () => {
     const user = userEvent.setup();
-    const bridge = await readyBridge();
+    const { bridge } = await readyBridge();
     render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
 
-    await user.click(screen.getByRole("button", { name: "Work" }));
-    await user.click(screen.getByRole("button", { name: "Verify Work mutation" }));
-    await waitFor(() =>
-      expect(
-        screen.getByText(/Verify Work mutation succeeded over the remote session/i),
-      ).toBeInTheDocument(),
-    );
+    await user.click(await screen.findByRole("button", { name: "Work" }));
+    const work = await screen.findByRole("navigation", { name: "Work thread list" });
+    expect(await within(work).findByRole("button", { name: "Remote Work" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Code" }));
-    await user.click(screen.getByRole("button", { name: "Verify Code mutation" }));
-    await waitFor(() =>
-      expect(
-        screen.getByText(/Verify Code mutation succeeded over the remote session/i),
-      ).toBeInTheDocument(),
-    );
-  });
-
-  it("preserves drafts across stale transitions and blocks offline mutations", async () => {
-    const user = userEvent.setup();
-    const bridge = await readyBridge();
-    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
-
-    const draft = await screen.findByLabelText("Composer draft");
-    await user.type(draft, "offline-safe draft");
-    bridge.connection()?.disconnect();
-    await waitFor(() => expect(bridge.getState().kind).toBe("stale"));
-
-    expect(screen.getByDisplayValue("offline-safe draft")).toBeInTheDocument();
-    await expect(exerciseRemoteChatMutation({ bridge })).rejects.toThrow(/disconnected/i);
-    expect(screen.getByRole("button", { name: "Verify Chat mutation" })).toBeDisabled();
+    await screen.findByRole("navigation", { name: "Code thread list" });
+    expect(await screen.findByText(/No Code threads on this host yet/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /read code bootstrap/i })).not.toBeInTheDocument();
   });
 
   it("marks local-host-only surfaces unavailable without action buttons", async () => {
-    const bridge = await readyBridge();
+    const { bridge } = await readyBridge();
     render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
 
     expect(await screen.findByText("Local host only")).toBeInTheDocument();
@@ -227,40 +344,21 @@ describe("RemoteShellView", () => {
     expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
   });
 
-  it("shows preview as context-bound instead of sending an invalid metadata request", async () => {
-    const bridge = await readyBridge();
+  it("shows device self-service and host health, and turns stale without offering to send", async () => {
+    const { bridge } = await readyBridge();
     render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
 
-    expect(await screen.findByText("Previews")).toBeInTheDocument();
-    expect(screen.getByText("Available in Project context")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /preview metadata/i })).not.toBeInTheDocument();
-  });
-
-  it("shows Project Overview, device self-service, and host health label", async () => {
-    const bridge = await readyBridge();
-    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
-
-    expect(await screen.findByRole("region", { name: "Project Overview" })).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Remote Chat")).toBeInTheDocument();
     expect(await screen.findByRole("region", { name: "This browser device" })).toBeInTheDocument();
     expect(await screen.findByText("Remote browser", {}, { timeout: 3000 })).toBeInTheDocument();
     expect(screen.getByText("Connected")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /revoke all/i })).not.toBeInTheDocument();
-  });
 
-  it("keeps stale Project Overview labeling while host identity stays visible", async () => {
-    const bridge = await readyBridge();
-    render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
-
-    await screen.findByDisplayValue("Remote Chat");
     bridge.connection()?.disconnect();
     await waitFor(() => expect(bridge.getState().kind).toBe("stale"));
 
     expect(screen.getByText("This Mac")).toBeInTheDocument();
-    expect(screen.getByText("Stale connection")).toBeInTheDocument();
-    expect(screen.getByText(/Project snapshot stale/i)).toBeInTheDocument();
-    expect(screen.getByText(/Stale snapshot · read-only/i)).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Remote Chat")).toBeInTheDocument();
+    expect(screen.getByText("Connection stale")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New thread" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeDisabled();
   });
 });
