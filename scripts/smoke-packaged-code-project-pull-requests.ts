@@ -39,27 +39,38 @@ async function main(): Promise<void> {
         if (unavailable !== undefined) {
           throw new Error(unavailable);
         }
-        await command(process.execPath, ["run", "package:desktop"]);
+        await command(process.execPath, ["run", "package:desktop"], 600_000);
         return;
       case "fake-gh-port":
-        await command(process.execPath, [
-          "run",
-          "--cwd",
-          "apps/server",
-          "test",
-          "--",
-          "src/code/codeProjectPullRequestFakeGh.test.ts",
-        ]);
+        await command(
+          process.execPath,
+          [
+            "run",
+            "--cwd",
+            "apps/server",
+            "test",
+            "--",
+            "src/code/codeProjectPullRequestFakeGh.test.ts",
+          ],
+          180_000,
+        );
         return;
     }
   });
+  console.log("Packaged Code project pull-request package and fake-gh smoke passed.");
 }
 
-async function command(executable: string, arguments_: readonly string[]): Promise<void> {
-  const result = await runBoundedCommand(executable, arguments_);
-  if (result.exitCode !== 0) {
-    throw new Error("Packaged Code project pull-request smoke command failed.");
-  }
+async function command(
+  executable: string,
+  arguments_: readonly string[],
+  timeoutMs: number,
+): Promise<void> {
+  await runBoundedCommand(
+    executable,
+    arguments_,
+    { ...process.env, PATH: process.env.PATH ?? "/usr/bin:/bin:/usr/sbin:/sbin" },
+    timeoutMs,
+  );
 }
 
 if (import.meta.main) {
