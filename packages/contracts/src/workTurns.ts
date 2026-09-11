@@ -7,6 +7,7 @@ import { ProviderInstanceId, ProviderModelId, ProviderSessionId } from "./provid
 import { ThreadWorkingDirectory } from "./workingDirectory";
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
+import { ThreadTaskProgressList } from "./threadTasks";
 import { WorkThreadId } from "./workThreads";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -184,6 +185,8 @@ export const WorkTurnState = Schema.Struct({
   failure: Schema.optional(WorkTurnFailure),
   /** Files that changed in the bound folder while this turn ran. */
   wroteFiles: Schema.optional(WorkTurnWrittenFiles),
+  /** The provider's own task list for this turn, restated whole as it moves. */
+  tasks: Schema.optional(ThreadTaskProgressList),
   capabilities: WorkTurnCapabilityFacts,
   version: AggregateVersion,
   acceptedAt: UtcTimestamp,
@@ -292,6 +295,13 @@ export const WorkTurnStreamFrame = Schema.Union(
     text: boundedText(MAX_WORK_TURN_RESPONSE_BYTES),
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("turn-tasks"),
+    sequence: Schema.Int.pipe(Schema.positive()),
+    threadId: WorkThreadId,
+    requestId: WorkTurnRequestId,
+    tasks: ThreadTaskProgressList,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("turn-settled"),
     sequence: Schema.Int.pipe(Schema.positive()),
     threadId: WorkThreadId,
@@ -332,6 +342,7 @@ export const WorkTurnUpdated = Schema.Struct({
   transcript: Schema.optional(Schema.Array(WorkTranscriptEntry).pipe(Schema.maxItems(8))),
   wroteFiles: Schema.optional(WorkTurnWrittenFiles),
   failure: Schema.optional(WorkTurnFailure),
+  tasks: Schema.optional(ThreadTaskProgressList),
   updatedAt: UtcTimestamp,
 }).annotations(strict);
 export type WorkTurnUpdated = typeof WorkTurnUpdated.Type;

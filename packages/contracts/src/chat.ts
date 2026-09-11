@@ -18,6 +18,7 @@ import { CanvasContextSelection, MAX_CHAT_TURN_CANVAS_SELECTIONS } from "./canva
 import { GithubIssueContextRequest } from "./githubIssueContext";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
+import { ThreadTaskProgressList } from "./threadTasks";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -180,6 +181,12 @@ export const ChatAttempt = Schema.Struct({
   citationIds: Schema.Array(ChatCitationId),
   usage: Schema.optional(Usage),
   resumeCursor: Schema.optional(ProviderResumeCursor),
+  /**
+   * The provider's own task list for this attempt, restated whole as it moves.
+   * Absent for providers that report no task progress, which the capability
+   * matrix states instead of this field implying.
+   */
+  tasks: Schema.optional(ThreadTaskProgressList),
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
 }).annotations(strict);

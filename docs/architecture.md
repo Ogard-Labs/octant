@@ -229,10 +229,27 @@ excerpts and beyond that Chat one-hop tool, is designed in
 [decisions/0063-agent-to-agent-messaging.md](decisions/0063-agent-to-agent-messaging.md)
 and
 [security/agent-to-agent-messaging-threat-model.md](security/agent-to-agent-messaging-threat-model.md).
-It is Proposed only: the host would admit, clamp, journal, and deliver; bodies
-would taint the recipient as untrusted external content; messaging must never
-bypass sandbox, approvals, or mode authority. Implementation waits on
-acceptance of that record **and** sign-off of the companion threat model.
+The record is still Proposed, and implementation is gated on its acceptance and
+threat-model sign-off; the journaled contracts, pure clamps, delivery service,
+Code turn tool registration, and the Agents center's messaging bounds view now
+exist so that review happens against real code, delivered behind the
+maintainer's explicit direction. The built shape follows the record: the host
+admits, clamps, journals, and delivers; bodies stay out of the journal, are
+stored under opaque references, and taint the recipient as untrusted external
+content; messaging grants no authority, starts no turn, and purged threads
+leave no resurrectable bodies. 0049 remains the Chat mention path.
+
+## Agent task display
+
+Providers that report their own task plans (Claude, Codex, ACP, OpenCode) emit
+`task-progress` runtime events, and the host journals them. Each thread surface
+shows the agent's restated plan as a live "N of M tasks completed" panel while
+any task is open or the turn is still writing: Code from its journaled
+operation events, Chat from `ChatAttempt.tasks` carried on
+`chat.attempt-updated@1`, and Work from `WorkTurnState.tasks` journaled on
+`work.turn-updated@1` with a live `turn-tasks` stream frame. The panel is a
+projection of journaled state, never a renderer-owned plan; per-step detail
+stays in the transcript's activity rows.
 
 ## Workspace shell
 

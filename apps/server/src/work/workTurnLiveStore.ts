@@ -1,5 +1,6 @@
 import {
   decodeWorkTurnStreamFrame,
+  type ThreadTaskProgressList,
   type WorkThreadId,
   type WorkTurnRequestId,
   type WorkTurnState,
@@ -59,6 +60,26 @@ export class WorkTurnLiveStore {
         threadId,
         requestId,
         text,
+      }),
+    );
+  }
+
+  /** Publishes the provider's restated task list whole, so a late subscriber reads current state. */
+  appendTasks(
+    threadId: WorkThreadId,
+    requestId: WorkTurnRequestId,
+    tasks: ThreadTaskProgressList,
+  ): void {
+    if (this.#closed || tasks.length === 0) return;
+    const state = this.#state(threadId);
+    this.#publish(
+      threadId,
+      decodeWorkTurnStreamFrame({
+        kind: "turn-tasks",
+        sequence: state.nextSequence,
+        threadId,
+        requestId,
+        tasks,
       }),
     );
   }

@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./agent-run-client": "./src/agentRunClient.ts",
     "./agent-run-settings-client": "./src/agentRunSettingsClient.ts",
+    "./agent-message-client": "./src/agentMessageClient.ts",
     "./automation-notification-client": "./src/automationNotificationClient.ts",
     "./apple-toolchain-client": "./src/appleToolchainClient.ts",
     "./chat-client": "./src/chatClient.ts",

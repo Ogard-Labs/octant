@@ -30,6 +30,7 @@ import {
   type ProviderAttachmentInput,
   type ProviderContextBlock,
   type ProviderInstance,
+  type ThreadTaskProgressList,
   type ThreadWorkingDirectory,
   type WindowId,
 } from "@octant/contracts";
@@ -265,6 +266,7 @@ export class WorkTurnService {
   readonly #controllers = new Map<string, AbortController>();
   readonly #inflight = new Map<string, Promise<void>>();
   readonly #liveResponses = new Map<string, string>();
+  readonly #liveTasks = new Map<string, ThreadTaskProgressList>();
 
   constructor(dependencies: WorkTurnServiceDependencies) {
     this.#persistence = dependencies.persistence;
@@ -515,6 +517,7 @@ export class WorkTurnService {
       this.#controllers.delete(String(command.requestId));
       this.#inflight.delete(String(command.requestId));
       this.#liveResponses.delete(String(command.requestId));
+      this.#liveTasks.delete(String(command.requestId));
     });
     this.#inflight.set(String(command.requestId), launch);
     return decodeWorkTurnLookupResult({ kind: "accepted", turn: this.#withLive(accepted) });
@@ -759,6 +762,11 @@ export class WorkTurnService {
         const delta = response.startsWith(previous) ? response.slice(previous.length) : response;
         this.#liveUpdates.appendResponse(input.command.threadId, input.command.requestId, delta);
       },
+      onTasks: (tasks) => {
+        if (input.signal.aborted) return;
+        this.#liveTasks.set(String(input.command.requestId), tasks);
+        this.#liveUpdates.appendTasks(input.command.threadId, input.command.requestId, tasks);
+      },
     });
     const wroteFiles = observation?.finish();
     const latest = this.#projection.lookup(input.command.requestId);
@@ -768,10 +776,12 @@ export class WorkTurnService {
       // stopped are still on disk. Returning without recording them told the
       // person the folder was untouched when it was not.
       if (wroteFiles !== undefined) {
+        const settledTasks = this.#liveTasks.get(String(input.command.requestId));
         this.#persistUpdate(latest, {
           status: "cancelled",
           ...(latest.response === undefined ? {} : { response: latest.response }),
           wroteFiles,
+          ...(settledTasks === undefined ? {} : { tasks: settledTasks }),
         });
         const settledCancel = this.#projection.lookup(input.command.requestId);
         if (settledCancel !== undefined) {
@@ -794,6 +804,7 @@ export class WorkTurnService {
       live === undefined ? latest : decodeWorkTurnState({ ...latest, response: live }),
       outcome,
       wroteFiles,
+      this.#liveTasks.get(String(input.command.requestId)),
     );
     const settled = this.#projection.lookup(input.command.requestId);
     if (settled !== undefined) this.#liveUpdates.settle(input.command.threadId, settled);
@@ -916,13 +927,18 @@ export class WorkTurnService {
     // failed or was interrupted may still have written a file, and leaving that
     // out would tell the person the folder is untouched when it is not.
     wroteFiles?: WorkTurnWrittenFiles,
+    // The provider's task list survived only in process-local state while the
+    // turn ran; settling is the last chance to journal it for replay.
+    tasks?: ThreadTaskProgressList,
   ): void {
     const written = wroteFiles === undefined ? {} : { wroteFiles };
+    const recordedTasks = tasks === undefined ? {} : { tasks };
     if (outcome.kind === "completed") {
       this.#persistUpdate(turn, {
         status: "completed",
         response: outcome.response,
         ...written,
+        ...recordedTasks,
       });
       return;
     }
@@ -931,6 +947,7 @@ export class WorkTurnService {
         status: "cancelled",
         ...(turn.response === undefined ? {} : { response: turn.response }),
         ...written,
+        ...recordedTasks,
       });
       return;
     }
@@ -938,6 +955,7 @@ export class WorkTurnService {
       status: outcome.kind === "waiting" ? "waiting" : "failed",
       ...(turn.response === undefined ? {} : { response: turn.response }),
       ...written,
+      ...recordedTasks,
       failure: outcome.failure,
     });
   }
@@ -949,11 +967,13 @@ export class WorkTurnService {
       readonly response?: string;
       readonly wroteFiles?: WorkTurnWrittenFiles;
       readonly failure?: WorkTurnState["failure"];
+      readonly tasks?: ThreadTaskProgressList;
     },
   ): void {
     const latest = this.#projection.lookup(turn.requestId) ?? turn;
     const updatedAt = decodeTimestamp(this.#clock());
     const response = update.response ?? latest.response;
+    const tasks = update.tasks ?? latest.tasks;
     const transcript = [
       { role: "user" as const, text: latest.prompt },
       ...(response === undefined && update.status === "running"
@@ -979,6 +999,7 @@ export class WorkTurnService {
         transcript,
         ...(update.wroteFiles === undefined ? {} : { wroteFiles: update.wroteFiles }),
         ...(update.failure === undefined ? {} : { failure: update.failure }),
+        ...(tasks === undefined ? {} : { tasks }),
         updatedAt,
       });
     } catch {

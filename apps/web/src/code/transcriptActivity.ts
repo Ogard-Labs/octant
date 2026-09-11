@@ -1,4 +1,5 @@
 import type { CodeOperationEvent } from "@octant/contracts";
+import type { ThreadTaskProgress } from "../transcript/ThreadTasksPanel";
 
 /**
  * What a running turn is doing, beyond the message it is writing.
@@ -43,6 +44,33 @@ export interface CodeTurnActivity {
    * tool and reasoning steps, so a reopened thread offers nothing here.
    */
   readonly writtenPaths?: ReadonlyArray<string>;
+}
+
+export type TaskActivityRow = Extract<CodeActivityRow, { kind: "task" }>;
+
+/**
+ * The latest turn that journaled provider task progress, with whether it is
+ * still in flight. Providers restate their whole plan as a turn proceeds, so
+ * the newest list is the agent's ongoing work; merging older turns would mix
+ * finished history into the current checklist.
+ *
+ * Returns undefined when nothing deserves a persistent panel: a settled turn
+ * whose tasks all completed or failed is already told by the transcript, and a
+ * turn that journaled no tasks has no list to show.
+ */
+export function liveTaskProgress(
+  turns: ReadonlyArray<{ readonly activity: CodeTurnActivity; readonly running: boolean }>,
+): ThreadTaskProgress | undefined {
+  const turn = turns.findLast((candidate) =>
+    candidate.activity.rows.some((row) => row.kind === "task"),
+  );
+  if (turn === undefined) return undefined;
+  const tasks = turn.activity.rows.filter((row): row is TaskActivityRow => row.kind === "task");
+  const stillOpen = tasks.some(
+    (task) => task.state === "pending" || task.state === "running" || task.state === "waiting",
+  );
+  if (!turn.running && !stillOpen) return undefined;
+  return { tasks, running: turn.running };
 }
 
 export const EMPTY_TURN_ACTIVITY: CodeTurnActivity = { rows: [], reasoning: "" };

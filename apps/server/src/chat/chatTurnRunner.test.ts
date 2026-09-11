@@ -1246,6 +1246,97 @@ describe("ChatTurnRunner", () => {
     expect(updates.at(-1)?.outcome).toBe("completed");
   });
 
+  it("keeps the provider's restated task list in the attempt it journals", async () => {
+    const updates: ChatAttempt[] = [];
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: () =>
+        Effect.gen(function* () {
+          yield* Queue.offer(queue, { kind: "text-delta", sessionId, text: "On it." } as never);
+          yield* Queue.offer(queue, {
+            kind: "task-progress",
+            sessionId,
+            taskId: "task-1",
+            status: "in-progress",
+            summary: "Watch CI on the branch head",
+          } as never);
+          yield* Queue.offer(queue, {
+            kind: "task-progress",
+            sessionId,
+            taskId: "task-1",
+            status: "completed",
+            summary: "Watch CI on the branch head",
+          } as never);
+          yield* Queue.offer(queue, {
+            kind: "task-progress",
+            sessionId,
+            taskId: "task-2",
+            status: "pending",
+            summary: "Commit the captured evidence",
+          } as never);
+          yield* Queue.offer(queue, { kind: "completed", sessionId } as never);
+        }),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        providerNativeExecute: async () => ({
+          query: "x",
+          backend: "provider-native",
+          results: [],
+        }),
+      }),
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        runner.run({
+          thread: thread(),
+          attempt: attempt(),
+          prompt: "hello",
+          scratchRoot: "/tmp/octant-scratch/thread",
+          driver: { acquire: () => Effect.succeed(connection) } as never,
+          providerInstanceId,
+          serviceLimits: serviceLimits(),
+          contextSubject: subject,
+          contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+          requestShape: "chat-turn",
+          varianceReserve: 20,
+          reservationId: reservation,
+          estimatedTokens: 100,
+          researchEnabled: true,
+          researchRoute: researchRoute({ backend: "searxng" }),
+          attachments: [],
+          persistAttempt: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
+          persistResponse: () =>
+            Effect.succeed({
+              contentId: decodeChatContentId("82000000-0000-4000-8000-000000000060"),
+              digest: "a".repeat(64),
+              byteLength: 4,
+            }),
+        }),
+      ),
+    );
+
+    expect(updates.at(-1)?.tasks).toEqual([
+      { taskId: "task-1", state: "completed", summary: "Watch CI on the branch head" },
+      { taskId: "task-2", state: "pending", summary: "Commit the captured evidence" },
+    ]);
+  });
+
   it("passes finalized attachment bytes to send", async () => {
     const sent: Array<{ readonly attachments: ReadonlyArray<{ readonly bytes: Uint8Array }> }> = [];
     const bytes = new TextEncoder().encode("attachment-bytes");

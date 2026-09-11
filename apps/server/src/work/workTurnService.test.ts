@@ -511,6 +511,60 @@ describe("WorkTurnService", () => {
     controller.abort();
   });
 
+  it("publishes the provider's task list live and journals it with the settled turn", async () => {
+    const gate = deferred<void>();
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          input.onDelta?.("Partial");
+          input.onTasks?.([{ taskId: "task-1", state: "running", summary: "Watch CI" }]);
+          await gate.promise;
+          input.onTasks?.([
+            { taskId: "task-1", state: "completed", summary: "Watch CI" },
+            { taskId: "task-2", state: "pending", summary: "Commit the evidence" },
+          ]);
+          return { kind: "completed", response: "Partial reply" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    const controller = new AbortController();
+    const stream = fixture.service.subscribe(ids.window, ids.thread, 0, controller.signal);
+
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "response-delta", sequence: 1, text: "Partial" },
+    });
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "turn-tasks", sequence: 2, requestId: ids.request },
+    });
+    gate.resolve();
+    // The settled turn carries the newest list, so a subscriber that re-reads
+    // the transcript after reconnect sees the same plan the live feed showed.
+    let settled: { readonly kind: string; readonly turn?: { readonly tasks?: unknown } };
+    for (;;) {
+      const next = await stream.next();
+      const frame = next.value as {
+        readonly kind: string;
+        readonly turn?: { readonly tasks?: unknown };
+      };
+      if (frame.kind === "turn-settled") {
+        settled = frame;
+        break;
+      }
+    }
+    expect(settled.turn?.tasks).toEqual([
+      { taskId: "task-1", state: "completed", summary: "Watch CI" },
+      { taskId: "task-2", state: "pending", summary: "Commit the evidence" },
+    ]);
+    const transcript = await fixture.service.transcript(ids.window, ids.thread);
+    const settledTurn = transcript.turns.at(-1);
+    expect(settledTurn?.tasks).toEqual([
+      { taskId: "task-1", state: "completed", summary: "Watch CI" },
+      { taskId: "task-2", state: "pending", summary: "Commit the evidence" },
+    ]);
+    controller.abort();
+  });
+
   it("hands a follow-up turn the prior transcript as provider context", async () => {
     const run = vi.fn();
     run.mockImplementationOnce(async () => ({

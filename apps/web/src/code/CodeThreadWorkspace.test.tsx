@@ -1522,6 +1522,84 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByText("Check the failing suite first.")).toBeVisible();
   });
 
+  it("keeps the live task list under the conversation while the turn works through it", () => {
+    const operationId = "70000000-0000-4000-8000-000000000053";
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: `${operationId}:assistant`,
+              role: "assistant",
+              text: "",
+              operationId: operationId as never,
+              status: "incomplete",
+            },
+          ],
+          turnActivity: new Map([
+            [
+              operationId,
+              {
+                reasoning: "",
+                rows: [
+                  {
+                    kind: "task",
+                    id: "task-1",
+                    state: "completed",
+                    summary: "Watch CI on PR #1112 head c65201e8",
+                  },
+                  {
+                    kind: "task",
+                    id: "task-2",
+                    state: "running",
+                    summary: "Triage review-bot findings",
+                  },
+                ],
+              },
+            ],
+          ]),
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByRole("region", { name: "Agent tasks" })).toBeVisible();
+    expect(screen.getByText("1 of 2 tasks completed")).toBeVisible();
+  });
+
+  it("shows no task list for a settled turn whose tasks all finished", () => {
+    const operationId = "70000000-0000-4000-8000-000000000054";
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: `${operationId}:assistant`,
+              role: "assistant",
+              text: "Done.",
+              operationId: operationId as never,
+              status: "completed",
+            },
+          ],
+          turnActivity: new Map([
+            [
+              operationId,
+              {
+                reasoning: "",
+                rows: [
+                  { kind: "task", id: "task-1", state: "completed", summary: "Rewrite the pane" },
+                ],
+              },
+            ],
+          ]),
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.queryByRole("region", { name: "Agent tasks" })).not.toBeInTheDocument();
+  });
+
   it("renders no activity disclosure for a turn that reported none", () => {
     render(
       <CodeThreadWorkspace

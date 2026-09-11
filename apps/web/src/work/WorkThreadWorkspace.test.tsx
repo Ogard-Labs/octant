@@ -303,6 +303,69 @@ describe("WorkThreadWorkspace", () => {
     expect(within(files).getByText("research/notes.txt")).toBeVisible();
   });
 
+  it("shows the provider's task list on the turn that reported it", async () => {
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({
+        threadId,
+        turns: [
+          {
+            requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            threadId,
+            turnId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            projectId: "20000000-0000-4000-8000-000000000101",
+            authority: {
+              hostId: "local",
+              projectId: "20000000-0000-4000-8000-000000000101",
+              bindingRevisionId: "30000000-0000-4000-8000-000000000101",
+              workingDirectory: ".",
+              confinementPosture: "project-root-confined",
+              providerInstanceId: providerId,
+              modelId,
+            },
+            status: "completed",
+            prompt: "Draft the brief",
+            transcript: [
+              { role: "user", text: "Draft the brief" },
+              { role: "assistant", text: "Done." },
+            ],
+            tasks: [
+              { taskId: "task-1", state: "completed", summary: "Read the brief" },
+              { taskId: "task-2", state: "pending", summary: "Commit the evidence" },
+            ],
+            capabilities: {
+              workspace: "project-backed",
+              confinement: "project-root-confined",
+              shell: "denied",
+              git: "denied",
+              worktree: "denied",
+              pullRequest: "denied",
+              code: "denied",
+            },
+            version: 2,
+            acceptedAt: "2026-09-04T20:00:00.000Z",
+            updatedAt: "2026-09-04T20:01:00.000Z",
+          },
+        ],
+      })),
+    };
+
+    render(
+      <WorkThreadWorkspace
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    expect(await screen.findByRole("region", { name: "Agent tasks" })).toBeVisible();
+    expect(screen.getByText("1 of 2 tasks completed")).toBeVisible();
+  });
+
   it("renders the durable transcript and pending request projection", async () => {
     const threadClient = {
       bootstrap: vi.fn(async () => ({ threads: [workThread()] })),

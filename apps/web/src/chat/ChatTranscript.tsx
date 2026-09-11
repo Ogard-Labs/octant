@@ -18,6 +18,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
+import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { ChatRichText } from "./ChatRichText";
@@ -513,6 +514,18 @@ const AttemptBlock = memo(function AttemptBlock(props: {
             return workedFor === undefined ? {} : { workedFor };
           })()}
         />
+        {props.attempt.tasks === undefined || props.attempt.tasks.length === 0 ? null : (
+          <ThreadTasksPanel
+            tasks={{
+              running: props.attempt.outcome === "queued" || props.attempt.outcome === "streaming",
+              tasks: props.attempt.tasks.map((task) => ({
+                id: task.taskId,
+                state: task.state,
+                summary: task.summary,
+              })),
+            }}
+          />
+        )}
         {props.attempt.responseRefs.length === 0 ? null : responseBody === undefined ? (
           <p role="alert">Response content is unavailable.</p>
         ) : canQuote ? (

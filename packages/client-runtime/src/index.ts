@@ -1,5 +1,6 @@
 export * from "./agentRunClient";
 export * from "./agentRunSettingsClient";
+export * from "./agentMessageClient";
 export * from "./agentProfileClient";
 export * from "./appleToolchainClient";
 export * from "./automationClient";

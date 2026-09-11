@@ -10,6 +10,10 @@ import {
 } from "@octant/client-runtime";
 import { createAgentRunClient, type AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import {
+  createAgentMessageClient,
+  type AgentMessageClient,
+} from "@octant/client-runtime/agent-message-client";
+import {
   createAgentRunSettingsClient,
   type AgentRunSettingsClient,
 } from "@octant/client-runtime/agent-run-settings-client";
@@ -99,6 +103,7 @@ export interface LaunchedShellClients {
   readonly agentProfileClient: AgentProfileClient;
   readonly agentRunClient: AgentRunClient;
   readonly agentRunSettingsClient: AgentRunSettingsClient;
+  readonly agentMessageClient: AgentMessageClient;
   readonly nativeHarnessClient: NativeHarnessClient;
   readonly appleToolchainClient: AppleToolchainClient;
   readonly automationClient: AutomationClient;
@@ -180,6 +185,7 @@ export function createLaunchedShellClients(
     agentProfileClient: options.agentProfileClient ?? createAgentProfileClient(port),
     agentRunClient: options.agentRunClient ?? createAgentRunClient(port),
     agentRunSettingsClient: options.agentRunSettingsClient ?? createAgentRunSettingsClient(port),
+    agentMessageClient: createAgentMessageClient(port),
     appleToolchainClient: options.appleToolchainClient ?? createAppleToolchainClient(port),
     automationClient: options.automationClient ?? createAutomationClient(port),
     automationNotificationClient: createAutomationNotificationClient(port),

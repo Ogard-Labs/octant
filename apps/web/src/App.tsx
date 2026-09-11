@@ -1123,6 +1123,7 @@ function LaunchedShell(
     agentProfileClient,
     agentRunClient,
     agentRunSettingsClient,
+    agentMessageClient,
     nativeHarnessClient,
     appleToolchainClient,
     automationClient,
@@ -5359,6 +5360,7 @@ function LaunchedShell(
                 }}
                 agentsCenterVisible={agentsCenterVisible}
                 agentRunClient={agentRunClient}
+                agentMessageClient={agentMessageClient}
                 projectNames={
                   new Map(
                     projectController.projects.map((project) => [String(project.id), project.name]),

@@ -223,6 +223,14 @@ export interface CodeOperationRuntimeOptions {
     readonly readThread: (windowId: WindowId, threadId: CodeThreadId) => CodeThread | undefined;
   }) => AppManagedToolSet | undefined;
   /**
+   * The agent-message tool set for this thread, when the host admits agent
+   * messaging (decision 0063). The service is server-owned; the tool only
+   * petitions it.
+   */
+  readonly agentMessages?: (input: {
+    readonly thread: CodeThread;
+  }) => AppManagedToolSet | undefined;
+  /**
    * The native harness tool set for a direct-endpoint provider: reads, edits,
    * the sandboxed shell, and the harness's own reads, each authorized at the
    * server choke point. Absent for providers that bring their own tools.
@@ -1722,6 +1730,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                     thread: active.thread,
                     readThread: (windowId, threadId) => this.#effectiveThread(windowId, threadId),
                   }),
+                  this.#options.agentMessages?.({ thread: active.thread }),
                   this.#options.nativeHarnessTools?.({
                     thread: active.thread,
                     checkoutRoot: active.checkoutRoot,

@@ -686,6 +686,109 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   }
 }
 
+/* The live task list sits in the conversation like the plan viewer does, but
+   reads as one floating card: it is a projection the host journals, not an
+   action surface, so it stays quiet until the next task moves. */
+.thread-tasks {
+  width: min(560px, 100%);
+  margin: 0 12px 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-floating);
+  box-shadow: var(--octant-shadow-hairline);
+  font-variant-numeric: tabular-nums;
+}
+
+.thread-tasks__header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}
+
+.thread-tasks[data-running="true"] .thread-tasks__header {
+  color: var(--octant-text-primary);
+}
+
+.thread-tasks[data-running="true"] .thread-tasks__header-icon {
+  animation: turn-header-spin var(--oct-motion-spin) linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-tasks[data-running="true"] .thread-tasks__header-icon {
+    animation: none;
+  }
+}
+
+.thread-tasks__list {
+  display: grid;
+  gap: 2px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.thread-tasks__list > li {
+  display: grid;
+  grid-template-columns: auto 16px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 7px;
+  padding: 3px 2px;
+}
+
+.thread-tasks__list > li[data-task-state="running"] {
+  background: var(--oct-selection);
+}
+
+.thread-tasks__index {
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.thread-tasks__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--octant-text-secondary);
+}
+
+.thread-tasks__list > li[data-task-state="completed"] .thread-tasks__mark {
+  color: var(--octant-success-text);
+}
+
+.thread-tasks__list > li[data-task-state="failed"] .thread-tasks__mark {
+  color: var(--octant-danger-text);
+}
+
+.thread-tasks__list > li[data-task-state="running"] .thread-tasks__mark,
+.thread-tasks__list > li[data-task-state="running"] .thread-tasks__mark > svg {
+  color: var(--octant-accent-text);
+}
+
+.thread-tasks__list > li[data-task-state="running"] .thread-tasks__mark > svg {
+  animation: turn-header-spin var(--oct-motion-spin) linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-tasks__list > li[data-task-state="running"] .thread-tasks__mark > svg {
+    animation: none;
+  }
+}
+
+.thread-tasks__summary {
+  overflow-wrap: anywhere;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  line-height: 1.45;
+}
+
+.thread-tasks__list > li[data-task-state="completed"] .thread-tasks__summary,
+.thread-tasks__list > li[data-task-state="failed"] .thread-tasks__summary {
+  color: var(--octant-text-secondary);
+}
+
 .goal-loop {
   display: flex;
   flex-direction: column;

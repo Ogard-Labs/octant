@@ -35,6 +35,33 @@ describe("WorkTurnLiveStore", () => {
     await expect(stream.next()).resolves.toMatchObject({ done: true });
   });
 
+  it("publishes the provider's restated task list in cursor order with the deltas", async () => {
+    const store = new WorkTurnLiveStore();
+    const controller = new AbortController();
+    const stream = store.subscribe({ threadId, afterSequence: 0, signal: controller.signal });
+
+    store.appendResponse(threadId, requestId, "first");
+    store.appendTasks(threadId, requestId, [
+      { taskId: "task-1", state: "running", summary: "Watch CI" },
+    ]);
+    store.appendTasks(threadId, requestId, [
+      { taskId: "task-1", state: "completed", summary: "Watch CI" },
+    ]);
+
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "response-delta", sequence: 1, text: "first" },
+    });
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "turn-tasks", sequence: 2, requestId, tasks: [{ taskId: "task-1" }] },
+    });
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "turn-tasks", sequence: 3, tasks: [{ taskId: "task-1" }] },
+    });
+
+    controller.abort();
+    await expect(stream.next()).resolves.toMatchObject({ done: true });
+  });
+
   it("requires a fresh snapshot when a cursor falls behind the bounded replay", async () => {
     const store = new WorkTurnLiveStore({ maxFramesPerThread: 2 });
     store.appendResponse(threadId, requestId, "one");
