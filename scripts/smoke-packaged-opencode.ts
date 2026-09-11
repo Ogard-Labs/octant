@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, mkdtemp, rm } from "node:fs/promises";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -114,6 +115,7 @@ async function smokeLifecycle(
     ownedOpenCodeProcessGroup = await waitForOwnedOpenCodeProcessGroup(baseline, 2_000);
   } catch (error) {
     primaryFailure = error;
+    console.error("Packaged OpenCode probe/start failure detail:", error);
     ownedOpenCodeProcessGroup = await findOwnedOpenCodeProcessGroupIfPresent(baseline);
   }
 
@@ -335,6 +337,11 @@ async function processIdentities(): Promise<ReadonlyArray<ProcessIdentity>> {
 async function resolveOpenCodeBinary(): Promise<string> {
   const output = (await runCommand("/usr/bin/which", ["opencode"], process.env)).trim();
   if (!output.startsWith("/")) throw new Error("OpenCode CLI is not installed on the host PATH.");
+  try {
+    await access(output, constants.X_OK);
+  } catch {
+    throw new Error(`OpenCode CLI resolved to ${output}, but the path is not executable.`);
+  }
   return output;
 }
 
