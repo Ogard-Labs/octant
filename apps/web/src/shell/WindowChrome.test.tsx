@@ -571,15 +571,18 @@ describe("WindowChrome", () => {
     expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
   });
 
-  it("preserves the selected translucent material when the background covers the sidebar", () => {
+  it("keeps dense sidebar content legible when the background covers it", () => {
     expect(
       cssRule(
         ".shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-opaque.shell-frame > .sidebar",
       ),
-    ).toContain("background: var(--octant-sidebar-translucent-subtle);");
+    ).toContain("background: color-mix(in srgb, var(--octant-sidebar) 88%, transparent);");
     expect(styles).not.toContain(
       ".shell--app-backdrop.shell--app-backdrop-sidebar.shell-frame > .sidebar",
     );
+    expect(
+      cssRule(".shell--app-backdrop.shell-frame .code-thread-workspace"),
+    ).toContain("background: color-mix(in srgb, var(--octant-workspace) 94%, transparent);");
   });
 
   it("clears the workspace and pane fills under a translucent workspace so the glass shows", () => {
