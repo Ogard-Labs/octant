@@ -63,7 +63,9 @@ are not required for a PR.
 - CI must be green on the exact head being merged. If `main` has moved, a
   standalone PR may rebase or merge `main`. A native stacked PR must
   cascading-rebase onto the new `main` (`Rebase stack`, or `gh stack rebase`
-  then `gh stack push`); do not merge `main` into a stack layer.
+  then `gh stack push`); do not merge `main` into a stack layer. This explicit
+  stack operation is the exception to the ordinary no-rewrite rule; do not rebase
+  unrelated or shared work.
 - Behavior changes come with tests (see below). Documentation changes to
   `docs/`, `apps/docs`, or this file are welcome on their own.
 - Describe what changed, why, and how you verified it. Link the issue if

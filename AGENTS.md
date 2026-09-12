@@ -295,7 +295,9 @@ credentials, physical devices, release authority, or subjective judgment.
   each landed layer. If `main` moves before the stack lands, rebase the stack
   (`Rebase stack`, or `gh stack rebase` then `gh stack push`); do not merge `main`
   into a stack layer. Do not manually create sibling PRs or repeatedly rebase every
-  child when the stack relationship already expresses the dependency.
+  child when the stack relationship already expresses the dependency. This
+  explicit stack operation is the exception to the ordinary no-rewrite rule;
+  never rebase unrelated or shared work.
 - Canonical repository documentation (`README.md`, `docs/architecture.md`,
   `docs/decisions/`, `apps/docs`) still updates in the same pull request as the
   change they describe — not a new pull request, and not a repository pull
