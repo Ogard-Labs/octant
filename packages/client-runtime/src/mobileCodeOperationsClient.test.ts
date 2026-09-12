@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { MAX_CODE_EVIDENCE_BATCH_ITEMS } from "@octant/contracts";
 import {
   loadMobileCodeConversation,
   observeMobilePullRequest,
@@ -156,6 +157,139 @@ describe("mobile Code follow-through", () => {
         status: "completed",
         prompt: "Fix the test",
         assistant: ["Done: the test now passes."],
+        updatedAt: now,
+      },
+    ]);
+  });
+
+  it("refuses a Code conversation whose threadId does not match the request", async () => {
+    const otherThreadId = "84000000-0000-4000-8000-000000000099";
+    const fetch = vi.fn(async ({ path }: { path: string }) => {
+      if (path === `/api/code/threads/${threadId}/conversation`) {
+        return jsonResponse({
+          version: 3,
+          threadId: otherThreadId,
+          turns: [],
+          nextCursor: 0,
+          hasMore: false,
+        });
+      }
+      return jsonResponse({ category: "unavailable" }, 404);
+    });
+    const port = {
+      hostId: "host-1",
+      authenticatedFetch: fetch as MobileRemoteTransport["authenticatedFetch"],
+    };
+    await expect(loadMobileCodeConversation(port, threadId)).rejects.toMatchObject({
+      category: "unavailable",
+      message: "Code conversation identity mismatch.",
+    });
+  });
+
+  it("refuses a Code evidence batch whose threadId does not match the request", async () => {
+    const otherThreadId = "84000000-0000-4000-8000-000000000099";
+    const fetch = vi.fn(async ({ method, path }: { method: string; path: string }) => {
+      if (method === "GET" && path === `/api/code/threads/${threadId}/conversation`) {
+        return jsonResponse({
+          version: 3,
+          threadId,
+          turns: [
+            {
+              operationId,
+              providerInstanceId,
+              modelId: "model-a",
+              sessionId: "89000000-0000-4000-8000-000000000001",
+              prompt: reference(promptContentId, 12),
+              assistant: [],
+              status: "completed",
+              startedAt: now,
+              updatedAt: now,
+            },
+          ],
+          nextCursor: 1,
+          hasMore: false,
+        });
+      }
+      if (method === "POST" && path === "/api/code/evidence/batch") {
+        return jsonResponse({ threadId: otherThreadId, items: [] });
+      }
+      return jsonResponse({ category: "unavailable" }, 404);
+    });
+    const port = {
+      hostId: "host-1",
+      authenticatedFetch: fetch as MobileRemoteTransport["authenticatedFetch"],
+    };
+    await expect(loadMobileCodeConversation(port, threadId)).rejects.toMatchObject({
+      category: "unavailable",
+      message: "Code evidence identity mismatch.",
+    });
+  });
+
+  it("keeps the earliest evidence references when a conversation exceeds one batch", async () => {
+    const assistant = Array.from({ length: MAX_CODE_EVIDENCE_BATCH_ITEMS }, (_, index) => {
+      const contentId = `87000000-0000-4000-8000-${String(index + 10).padStart(12, "0")}`;
+      return { contentId, text: `part-${index}` };
+    });
+    const requested: Array<{ operationId: string; contentId: string }> = [];
+    const fetch = vi.fn(
+      async ({ method, path, body }: { method: string; path: string; body?: string }) => {
+        if (method === "GET" && path === `/api/code/threads/${threadId}/conversation`) {
+          return jsonResponse({
+            version: 3,
+            threadId,
+            turns: [
+              {
+                operationId,
+                providerInstanceId,
+                modelId: "model-a",
+                sessionId: "89000000-0000-4000-8000-000000000001",
+                prompt: reference(promptContentId, 12),
+                assistant: assistant.map((part) => reference(part.contentId, part.text.length)),
+                status: "completed",
+                startedAt: now,
+                updatedAt: now,
+              },
+            ],
+            nextCursor: 1,
+            hasMore: false,
+          });
+        }
+        if (method === "POST" && path === "/api/code/evidence/batch") {
+          const payload = JSON.parse(body ?? "{}") as {
+            items: Array<{ operationId: string; contentId: string }>;
+          };
+          requested.push(...payload.items);
+          const texts = new Map<string, string>([
+            [promptContentId, "Fix the test"],
+            ...assistant.map((part) => [part.contentId, part.text] as const),
+          ]);
+          return jsonResponse({
+            threadId,
+            items: payload.items.map((item) => ({
+              ...item,
+              text: texts.get(item.contentId) ?? "",
+            })),
+          });
+        }
+        return jsonResponse({ category: "unavailable" }, 404);
+      },
+    );
+    const port = {
+      hostId: "host-1",
+      authenticatedFetch: fetch as MobileRemoteTransport["authenticatedFetch"],
+    };
+    const conversation = await loadMobileCodeConversation(port, threadId);
+    expect(requested).toHaveLength(MAX_CODE_EVIDENCE_BATCH_ITEMS);
+    expect(requested[0]).toEqual({ operationId, contentId: promptContentId });
+    expect(requested.at(-1)?.contentId).toBe(
+      assistant[MAX_CODE_EVIDENCE_BATCH_ITEMS - 2]?.contentId,
+    );
+    expect(conversation).toEqual([
+      {
+        operationId,
+        status: "completed",
+        prompt: "Fix the test",
+        assistant: assistant.slice(0, MAX_CODE_EVIDENCE_BATCH_ITEMS - 1).map((part) => part.text),
         updatedAt: now,
       },
     ]);

@@ -124,6 +124,9 @@ export async function loadMobileCodeConversation(
     decodeCodeConversationPage,
     "Could not load the Code conversation from the host.",
   );
+  if (String(page.threadId) !== threadId) {
+    throw new MobileInboxFailure("unavailable", "Code conversation identity mismatch.");
+  }
   const wanted = page.turns
     .flatMap((turn) => [
       { operationId: turn.operationId, contentId: turn.prompt.contentId },
@@ -132,7 +135,7 @@ export async function loadMobileCodeConversation(
         contentId: part.contentId,
       })),
     ])
-    .slice(-MAX_CODE_EVIDENCE_BATCH_ITEMS);
+    .slice(0, MAX_CODE_EVIDENCE_BATCH_ITEMS);
   const text = new Map<string, string>();
   if (wanted.length > 0) {
     const batch = await decodeJson(
@@ -144,6 +147,9 @@ export async function loadMobileCodeConversation(
       decodeCodeEvidenceBatchResponse,
       "Could not load the Code conversation text from the host.",
     );
+    if (String(batch.threadId) !== threadId) {
+      throw new MobileInboxFailure("unavailable", "Code evidence identity mismatch.");
+    }
     for (const item of batch.items) {
       text.set(`${item.operationId}:${item.contentId}`, item.text);
     }

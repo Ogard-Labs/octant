@@ -532,6 +532,16 @@ function createMockTransport(input: {
   // answers the first read as running and every later read as completed, so a
   // reopened thread shows a finished reply the way the host would.
   const workTurns = new Map<string, Array<Record<string, unknown>>>();
+  const codeTurns = new Map<string, Array<Record<string, unknown>>>();
+  const codeEvidence = new Map<
+    string,
+    {
+      readonly contentId: string;
+      readonly digest: string;
+      readonly byteLength: number;
+      readonly text: string;
+    }
+  >();
   const codeCheckout = {
     id: CHECKOUT_ID,
     repositoryId: REPOSITORY_ID,
@@ -616,11 +626,36 @@ function createMockTransport(input: {
         const threadId = decodeURIComponent(
           request.path.slice("/api/code/threads/".length, -"/conversation".length),
         );
-        return Response.json({ version: 3, threadId, turns: [], nextCursor: 0, hasMore: false });
+        const turns = codeTurns.get(threadId) ?? [];
+        return Response.json({
+          version: 3,
+          threadId,
+          turns,
+          nextCursor: turns.length,
+          hasMore: false,
+        });
       }
       if (request.method === "POST" && request.path === "/api/code/evidence/batch") {
-        const body = JSON.parse(String(request.body ?? "{}")) as { readonly threadId?: string };
-        return Response.json({ threadId: body.threadId, items: [] });
+        const body = JSON.parse(String(request.body ?? "{}")) as {
+          readonly threadId?: string;
+          readonly items?: ReadonlyArray<{
+            readonly operationId?: string;
+            readonly contentId?: string;
+          }>;
+        };
+        const items = (body.items ?? []).flatMap((item) => {
+          if (item.operationId === undefined || item.contentId === undefined) return [];
+          const evidence = codeEvidence.get(item.contentId);
+          if (evidence === undefined) return [];
+          return [
+            {
+              operationId: item.operationId,
+              contentId: item.contentId,
+              text: evidence.text,
+            },
+          ];
+        });
+        return Response.json({ threadId: body.threadId, items });
       }
       if (request.method === "GET" && request.path === "/api/code/bootstrap") {
         return Response.json(
@@ -661,10 +696,16 @@ function createMockTransport(input: {
           readonly kind?: string;
           readonly operationId?: string;
           readonly threadId?: string;
+          readonly sessionId?: string;
           readonly title?: string;
           readonly providerInstanceId?: string;
           readonly modelId?: string;
           readonly deliveryTarget?: CodeThread["deliveryTarget"];
+          readonly prompt?: {
+            readonly contentId?: string;
+            readonly digest?: string;
+            readonly byteLength?: number;
+          };
           readonly thread?: {
             readonly id?: string;
             readonly title?: string;
@@ -744,6 +785,32 @@ function createMockTransport(input: {
           );
         }
         if (command.kind === "start-provider-turn" && command.operationId !== undefined) {
+          if (
+            command.threadId !== undefined &&
+            command.prompt?.contentId !== undefined &&
+            command.prompt.digest !== undefined &&
+            command.prompt.byteLength !== undefined
+          ) {
+            const existing = codeTurns.get(command.threadId) ?? [];
+            codeTurns.set(command.threadId, [
+              ...existing,
+              {
+                operationId: command.operationId,
+                providerInstanceId: PROVIDER_ID,
+                modelId: MODEL_ID,
+                sessionId: command.sessionId ?? globalThis.crypto.randomUUID(),
+                prompt: {
+                  contentId: command.prompt.contentId,
+                  digest: command.prompt.digest,
+                  byteLength: command.prompt.byteLength,
+                },
+                assistant: [],
+                status: "completed",
+                startedAt: NOW,
+                updatedAt: NOW,
+              },
+            ]);
+          }
           return Response.json({
             kind: "provider-turn-state",
             operationId: command.operationId,
@@ -762,10 +829,14 @@ function createMockTransport(input: {
       }
       if (request.method === "PUT" && request.path === "/api/code/evidence") {
         const body = String(request.body ?? "");
+        const contentId = globalThis.crypto.randomUUID();
+        const digest = "f".repeat(64);
+        const byteLength = new TextEncoder().encode(body).byteLength;
+        codeEvidence.set(contentId, { contentId, digest, byteLength, text: body });
         return Response.json({
-          contentId: "80000000-0000-4000-8000-000000000001",
-          digest: "f".repeat(64),
-          byteLength: new TextEncoder().encode(body).byteLength,
+          contentId,
+          digest,
+          byteLength,
         });
       }
       if (request.method === "POST" && request.path === "/api/chat/commands") {

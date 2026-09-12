@@ -122,7 +122,7 @@ export async function loadMobileWorkTranscript(
   transport: MobileRemoteTransport,
   threadId: string,
 ): Promise<WorkThreadTranscript> {
-  return decodeJson(
+  const transcript = await decodeJson(
     await transport.authenticatedFetch({
       method: "GET",
       path: `/api/work/turns/transcript/${encodeURIComponent(threadId)}`,
@@ -130,6 +130,10 @@ export async function loadMobileWorkTranscript(
     decodeWorkThreadTranscript,
     "Could not load the Work transcript from the host.",
   );
+  if (String(transcript.threadId) !== threadId) {
+    throw new MobileInboxFailure("unavailable", "Work transcript identity mismatch.");
+  }
+  return transcript;
 }
 
 /**

@@ -256,6 +256,24 @@ describe("mobile work follow-through", () => {
     ).rejects.toMatchObject({ category: "unavailable" });
   });
 
+  it("refuses a Work transcript whose threadId does not match the request", async () => {
+    const otherThreadId = "00000000-0000-4000-8000-000000000202";
+    const fetch = async ({ method, path }: { method: string; path: string }) => {
+      if (method === "GET" && path === `/api/work/turns/transcript/${threadId}`) {
+        return Response.json({ threadId: otherThreadId, turns: [], liveCursor: 0 });
+      }
+      return new Response("missing", { status: 404 });
+    };
+    const port: MobileRemoteTransport = {
+      hostId,
+      authenticatedFetch: fetch as MobileRemoteTransport["authenticatedFetch"],
+    };
+    await expect(loadMobileWorkTranscript(port, threadId)).rejects.toMatchObject({
+      category: "unavailable",
+      message: "Work transcript identity mismatch.",
+    });
+  });
+
   it("sends a follow-up under the thread's own authority and returns the accepted turn", async () => {
     const started: Array<Record<string, unknown>> = [];
     const port = transport([], started);

@@ -185,6 +185,12 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const activeAttempt = view === undefined ? undefined : latestActiveChatAttempt(view);
   const retryableAttempt = view === undefined ? undefined : latestRetryableChatAttempt(view);
   const liveBusy = busy || activeAttempt !== undefined;
+  const selectedIdentity =
+    props.selected === undefined
+      ? undefined
+      : `${props.selected.hostId}:${props.selected.threadId}`;
+  const selectedIdentityRef = useRef(selectedIdentity);
+  selectedIdentityRef.current = selectedIdentity;
 
   const refresh = useCallback(
     async (options?: { readonly quiet?: boolean }) => {
@@ -196,6 +202,12 @@ export function ThreadScreen(props: ThreadScreenProps) {
         setCodeTurns(undefined);
         return;
       }
+      // Quiet polling and a later inbox selection can overlap. An older
+      // Code/Work load that commits after the selection changes would paint
+      // the previous transcript, or leave that thread's workThread mounted
+      // so a follow-up sends under the previous Project and binding.
+      const identity = `${props.selected.hostId}:${props.selected.threadId}`;
+      const stillSelected = () => selectedIdentityRef.current === identity;
       if (props.selected.mode === "code") {
         setView(undefined);
         setWorkThread(undefined);
@@ -209,17 +221,18 @@ export function ThreadScreen(props: ThreadScreenProps) {
             loadMobileCodeThread(transport, props.selected.threadId),
             loadMobileCodeConversation(transport, props.selected.threadId),
           ]);
+          if (!stillSelected()) return;
           setCodePolicy(thread.executionPolicy);
           setCodeTurns(turns);
         } catch (cause) {
-          if (options?.quiet === true) return;
+          if (!stillSelected() || options?.quiet === true) return;
           setCodePolicy(undefined);
           setCodeTurns(undefined);
           setError(
             cause instanceof MobileInboxFailure ? cause.message : "Could not load the Code thread.",
           );
         } finally {
-          if (options?.quiet !== true) setBusy(false);
+          if (options?.quiet !== true && stillSelected()) setBusy(false);
         }
         return;
       }
@@ -236,17 +249,18 @@ export function ThreadScreen(props: ThreadScreenProps) {
             loadMobileWorkThread(transport, props.selected.threadId),
             loadMobileWorkTranscript(transport, props.selected.threadId),
           ]);
+          if (!stillSelected()) return;
           setWorkThread(thread);
           setWorkTurns(transcript.turns);
         } catch (cause) {
-          if (options?.quiet === true) return;
+          if (!stillSelected() || options?.quiet === true) return;
           setWorkThread(undefined);
           setWorkTurns(undefined);
           setError(
             cause instanceof MobileInboxFailure ? cause.message : "Could not load the Work thread.",
           );
         } finally {
-          if (options?.quiet !== true) setBusy(false);
+          if (options?.quiet !== true && stillSelected()) setBusy(false);
         }
         return;
       }
@@ -275,6 +289,13 @@ export function ThreadScreen(props: ThreadScreenProps) {
     },
     [models.options, props.selected, transport],
   );
+
+  useEffect(() => {
+    setWorkThread(undefined);
+    setWorkTurns(undefined);
+    setCodeTurns(undefined);
+    setCodePolicy(undefined);
+  }, [selectedIdentity]);
 
   useEffect(() => {
     void refresh();
@@ -394,24 +415,34 @@ export function ThreadScreen(props: ThreadScreenProps) {
       setError(staleGate.message);
       return;
     }
+    const identity = `${props.selected.hostId}:${props.selected.threadId}`;
+    const stillSelected = () => selectedIdentityRef.current === identity;
     setBusy(true);
     setError(undefined);
     try {
       if (props.selected.mode === "work") {
-        if (workThread === undefined) return;
+        if (workThread === undefined || String(workThread.id) !== props.selected.threadId) {
+          return;
+        }
         const turn = await sendMobileWorkTurn({ transport, thread: workThread, prompt });
+        if (!stillSelected()) return;
         setWorkTurns((current) => [...(current ?? []), turn]);
       } else if (props.selected.mode === "code") {
-        await sendMobileCodeTurn({ transport, threadId: props.selected.threadId, prompt });
-        setCodeTurns(await loadMobileCodeConversation(transport, props.selected.threadId));
+        const threadId = props.selected.threadId;
+        await sendMobileCodeTurn({ transport, threadId, prompt });
+        const turns = await loadMobileCodeConversation(transport, threadId);
+        if (!stillSelected()) return;
+        setCodeTurns(turns);
       } else {
         return;
       }
+      if (!stillSelected()) return;
       setPrompt("");
     } catch (cause) {
+      if (!stillSelected()) return;
       setError(cause instanceof MobileInboxFailure ? cause.message : "Follow-up failed.");
     } finally {
-      setBusy(false);
+      if (stillSelected()) setBusy(false);
     }
   };
 
