@@ -108,10 +108,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "packages/domain/src/cursorAcpPolicy.ts",
     "Residual Cursor ACP connection-check policy kept for cursorAcpPolicy.test.ts and future probe wiring; production runtime and settings paths were removed. Remove once a product caller imports runCursorAcpConnectionCheck or the probe suite is retired.",
   ],
-  [
-    "packages/domain/src/canvasBoardPolicy.ts",
-    "Canvas board comment and layout-revision policy; server journal wiring and renderer integration are out of scope for the contracts/domain slice. Remove once a server service or renderer calls admitCanvasCommentCommand or admitCanvasDiagramLayoutRevision.",
-  ],
 ]);
 
 /** Route modules exempt from Rule A, with the reason they are not registered. */

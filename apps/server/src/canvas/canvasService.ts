@@ -4,6 +4,7 @@ import {
   decodeCanvasActionResult,
   decodeCanvasActor,
   decodeCanvasCreateResult,
+  decodeCanvasDiagramLayoutReviseCommand,
   decodeCanvasId,
   decodeCanvasReviseRequest,
   decodeCanvasReviseResult,
@@ -19,7 +20,10 @@ import {
   type CanvasActionResult,
   type CanvasActor,
   type CanvasVersion,
+  type CanvasBoardDenialCode,
   type CanvasCreateResult,
+  type CanvasDiagramLayoutReviseCommand,
+  type CanvasDiagramLayoutReviseResult,
   type CanvasThreadReferenceCard,
   type CanvasGetOutcome,
   type CanvasHistoryOutcome,
@@ -41,6 +45,7 @@ import {
   CanvasCardsPolicyRejected,
   CanvasRevisionPolicyRejected,
   admitCanvasCreate,
+  admitCanvasDiagramLayoutRevision,
   admitCanvasRevise,
   authorizeCanvasCreateRequest,
   buildCreateVersion,
@@ -57,6 +62,7 @@ import {
   reportCanvasActionCapability,
   sameCanvasActionIdentity,
   type CanvasActionCapability,
+  type CanvasBoardRejectionCode,
 } from "@octant/domain";
 import type { CanvasProjection } from "./canvasProjection";
 import { CanvasEventStore, CanvasEventStoreError } from "./canvasEventStore";
@@ -442,6 +448,86 @@ export class CanvasService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Append the version a user's drag produced.
+   *
+   * The client names the new version id, so a retry after a lost response
+   * finds the version already journaled and is answered with it instead of
+   * being refused as stale. A command whose expected sequence no longer
+   * matches the head is refused; the renderer reloads and the user drags
+   * again on the version that actually exists.
+   */
+  reviseDiagramLayout(
+    requestInput: unknown,
+    context: CanvasAuthorizationContext,
+    project: CanvasProjectRecord | undefined,
+  ): CanvasDiagramLayoutReviseResult {
+    let command: CanvasDiagramLayoutReviseCommand;
+    try {
+      command = decodeCanvasDiagramLayoutReviseCommand(requestInput);
+    } catch {
+      return {
+        kind: "denied",
+        denialCode: "malformed-request",
+        message: "Canvas layout revision is malformed.",
+      };
+    }
+    const canvasId = decodeCanvasId(command.canvasId);
+    const entry = this.#projection.getById(canvasId);
+    if (entry === undefined) {
+      return {
+        kind: "denied",
+        denialCode: "unavailable",
+        message: "Canvas is unavailable. Reopen it from the Project.",
+      };
+    }
+    if (!this.#authorize(entry, context, project)) {
+      return {
+        kind: "denied",
+        denialCode: "unauthorized",
+        message: "Canvas layout revision is not authorized in this workspace.",
+      };
+    }
+    const already = entry.versions.find(
+      (version) => String(version.versionId) === String(command.versionId),
+    );
+    if (already !== undefined) {
+      return {
+        kind: "accepted",
+        canvasId,
+        versionId: already.versionId,
+        sequence: already.sequence,
+      };
+    }
+    const admitted = admitCanvasDiagramLayoutRevision(
+      command,
+      entry.currentVersion,
+      command.versionId,
+      this.#clock(),
+    );
+    if (admitted.kind === "rejected") {
+      return {
+        kind: "denied",
+        denialCode: layoutDenialCode(admitted.code),
+        message: admitted.message,
+      };
+    }
+    this.#eventStore.appendVersion({
+      canvasId,
+      current: entry.currentVersion,
+      next: admitted.next,
+      occurredAt: admitted.next.createdAt,
+    });
+    this.#projection.applyVersionAppended({ canvasId, version: admitted.next });
+    this.#announceVersion(admitted.next);
+    return {
+      kind: "accepted",
+      canvasId,
+      versionId: admitted.next.versionId,
+      sequence: admitted.next.sequence,
+    };
   }
 
   /**
@@ -1382,4 +1468,30 @@ function sameCanvasSource(
     // sourceVersion is a mutable observation, not part of source identity.
     left.displayName === right.displayName
   );
+}
+
+/**
+ * The board policy shares one rejection vocabulary between comments and
+ * layout; a layout revision can only raise the layout half, so a comment code
+ * arriving here is a policy bug reported as a malformed request rather than a
+ * code the renderer has no wording for.
+ */
+function layoutDenialCode(code: CanvasBoardRejectionCode): CanvasBoardDenialCode {
+  switch (code) {
+    case "malformed-request":
+    case "stale-version":
+    case "unauthorized":
+    case "oversized-payload":
+    case "not-a-diagram":
+    case "unknown-node":
+    case "missing-position":
+      return code;
+    case "comment-budget-exceeded":
+    case "unknown-comment":
+    case "duplicate-comment":
+    case "duplicate-reply":
+    case "reply-budget-exceeded":
+    case "unknown-reply-target":
+      return "malformed-request";
+  }
 }

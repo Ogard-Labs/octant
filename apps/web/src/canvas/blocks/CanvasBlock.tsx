@@ -2,10 +2,18 @@ import type { CanvasBlock } from "@octant/contracts/canvas";
 import { CodeBlocks } from "./CodeBlocks";
 import { DataBlocks } from "./DataBlocks";
 import { ReferenceBlocks } from "./ReferenceBlocks";
+import type { DiagramBoardLayoutRuntime } from "./DiagramBoard";
 import { StructuredBlocks } from "./StructuredBlocks";
 import { TextBlocks } from "./TextBlocks";
 
-export function CanvasBlockRenderer({ block }: { readonly block: CanvasBlock }) {
+export function CanvasBlockRenderer({
+  block,
+  layoutRuntime,
+}: {
+  readonly block: CanvasBlock;
+  /** Lets a diagram journal a drag; absent on surfaces that cannot. */
+  readonly layoutRuntime?: DiagramBoardLayoutRuntime;
+}) {
   switch (block.kind) {
     case "heading":
     case "rich-text":
@@ -23,7 +31,12 @@ export function CanvasBlockRenderer({ block }: { readonly block: CanvasBlock }) 
     case "chart":
     case "timeline":
     case "diagram":
-      return <StructuredBlocks block={block} />;
+      return (
+        <StructuredBlocks
+          block={block}
+          {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
+        />
+      );
     case "code-excerpt":
     case "pseudocode":
     case "diff":

@@ -3,6 +3,7 @@ import {
   decodeCanvasGetOutcome,
   decodeCanvasHistoryOutcome,
   decodeCanvasCreateResult,
+  decodeCanvasDiagramLayoutReviseResult,
   decodeCanvasInventoryList,
   decodeCanvasThreadReferenceCardsOutcome,
   decodeCanvasReviseResult,
@@ -18,6 +19,8 @@ import {
   type CanvasId,
   type CanvasCreateRequest,
   type CanvasCreateResult,
+  type CanvasDiagramLayoutReviseCommand,
+  type CanvasDiagramLayoutReviseResult,
   type CanvasInventoryList,
   type CanvasReviseRequest,
   type CanvasReviseResult,
@@ -46,6 +49,14 @@ export interface CanvasClient {
   get(canvasId: CanvasId, versionId?: string): Promise<CanvasGetOutcome>;
   history(canvasId: CanvasId): Promise<CanvasHistoryOutcome>;
   revise(request: CanvasReviseRequest): Promise<CanvasReviseResult>;
+  /**
+   * Journal a user's node positions as a new immutable version of a board.
+   * Optional like the other board-era methods: a transport whose host serves
+   * no layout route leaves the board readable but not draggable.
+   */
+  reviseDiagramLayout?(
+    command: CanvasDiagramLayoutReviseCommand,
+  ): Promise<CanvasDiagramLayoutReviseResult>;
   refresh?(request: CanvasRefreshRequest, signal?: AbortSignal): Promise<CanvasRefreshResult>;
   cancelRefresh?(request: CanvasRefreshCancelRequest): Promise<CanvasRefreshResult>;
   executeAction?(request: CanvasActionRequest, signal?: AbortSignal): Promise<CanvasActionResult>;
@@ -123,6 +134,18 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           body: JSON.stringify(body),
         },
         decodeCanvasReviseResult,
+      );
+    },
+    reviseDiagramLayout(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/layout-revise", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeCanvasDiagramLayoutReviseResult,
       );
     },
     refresh(body, signal) {

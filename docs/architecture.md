@@ -160,6 +160,19 @@ Work also includes a short, budgeted artifact instruction in its required
 context, so runtimes that use their own file tools know how written documents
 appear in Files and Document. That instruction offers no tools or authority.
 
+A Canvas diagram block is also a board. The renderer zooms, pans, and fits the
+same deterministic layout every surface draws, and a user's drag or keyboard
+nudge is journaled through `/api/canvas/layout-revise` as a new immutable
+`canvas.version-appended@1` version with `actor: local-user`, admitted by the
+pure `admitCanvasDiagramLayoutRevision` policy (target must be a diagram,
+every moved node must exist, the sequence must be the head, budgets stand).
+Agent revisions and user layout share one history; a stale drag is refused and
+the renderer reloads rather than overwriting a newer version. Only the head
+version is editable. The route is host-window only; a paired browser reads
+boards but does not move nodes. Comments are contracted and admitted in the
+same policy but not yet journaled or rendered
+([decisions/0052-canvas-boards.md](decisions/0052-canvas-boards.md)).
+
 The local-server provider adapter owns a separate process for each acquired
 connection and allows one live session per connection. Its MCP protocol does
 not reliably carry native session identity, so the private endpoint binds calls
