@@ -755,6 +755,8 @@ function renderCodeTab(
         {...(props.appleToolchainClient === undefined
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}
+        {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+        {...(browserAutomationClient === undefined ? {} : { browserAvailable: true })}
         controller={codeController}
         onOpenCodeThread={props.onOpenCodeThread}
         {...(props.onPinTerminal === undefined ? {} : { onPinTerminal: props.onPinTerminal })}

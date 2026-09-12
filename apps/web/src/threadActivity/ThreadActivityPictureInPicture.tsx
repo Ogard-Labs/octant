@@ -22,15 +22,17 @@ export interface ThreadActivityPictureInPictureProps {
     sessionId: string,
     represented: boolean,
   ) => void;
+  /** Opens the thread's Browser surface when agent-owned Browser activity appears. */
   readonly onOpenBrowser?: () => void;
   readonly pollIntervalMs?: number;
   readonly threadId: BrowserThreadId;
 }
 
 /**
- * Display-only companion for a thread-owned Browser or Computer Use session.
+ * Companion for a thread-owned Browser or Computer Use session.
  * It never creates or rebinds authority: every action goes back through the
- * existing exact-thread clients.
+ * existing exact-thread clients, while Browser activity can ask the shell to
+ * reveal the already-authoritative Browser surface.
  */
 export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPictureProps) {
   const [browserSnapshot, setBrowserSnapshot] = useState<BrowserAutomationSnapshot>();
@@ -145,6 +147,16 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
     String(computerSession.threadId) === String(props.threadId)
       ? computerSession
       : undefined;
+
+  const browserIsActive = currentBrowserSnapshot !== undefined;
+  const browserWasActive = useRef(false);
+  useEffect(() => {
+    // Browser activity is created by the thread's agent. Surface it in the
+    // workspace when it first appears, while keeping polling from reopening
+    // the same Browser tab on every refresh.
+    if (browserIsActive && !browserWasActive.current) props.onOpenBrowser?.();
+    browserWasActive.current = browserIsActive;
+  }, [browserIsActive, props.onOpenBrowser]);
 
   const representedComputerUseSessionId = currentComputerSession?.sessionId;
   useEffect(() => {
