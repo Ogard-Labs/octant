@@ -44,8 +44,8 @@ export function MessageActions(props: {
         },
         label: {
           color: colors.textSecondary,
-          fontSize: 11,
-          fontWeight: "600",
+          fontSize: 12,
+          fontWeight: "500",
         },
         labelActive: {
           color: colors.accent,

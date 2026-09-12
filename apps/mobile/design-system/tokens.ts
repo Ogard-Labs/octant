@@ -124,7 +124,7 @@ export const lightColors: ThemeColors = {
   accentMuted: "#4F4F4F",
   danger: "#A8102F",
   success: "#0F6144",
-  warning: "#8A6218",
+  warning: "#6F5300",
   merged: "#5B4BB0",
   attention: "#1E5FAE",
   backdrop: "rgba(0, 0, 0, 0.30)",
@@ -134,7 +134,7 @@ export const lightColors: ThemeColors = {
   border: "#E0E0DE",
   separator: "#BDBDBB",
   surfaceSolid: "#FFFFFF",
-  surfaceElevatedSolid: "#F0F0EF",
+  surfaceElevatedSolid: "#FDFDFC",
   customDim: "rgba(255, 255, 255, 0.60)",
   customScrimTop: "rgba(255,255,255,0.74)",
   customScrimMid: "rgba(255,255,255,0.36)",
@@ -187,9 +187,9 @@ export const darkColors: ThemeColors = {
   assistantBubble: "rgba(35, 35, 35, 0.70)",
   accent: "#F0F0F0",
   accentMuted: "#A9A9A9",
-  danger: "#D95778",
+  danger: "#E17D96",
   success: "#6BB299",
-  warning: "#D9A441",
+  warning: "#EDBC26",
   merged: "#AB98F2",
   attention: "#74B0F3",
   backdrop: "rgba(0, 0, 0, 0.55)",
@@ -222,17 +222,17 @@ export const space = {
   md: 16,
   lg: 24,
   xl: 32,
-  xxl: 40,
+  xxl: 48,
 } as const;
 
 export const spacing = space;
 
 export const radii = {
   sm: 10,
-  md: 16,
-  lg: 16,
-  composer: 20,
-  bubble: 16,
+  md: 22,
+  lg: 26,
+  composer: 30,
+  bubble: 22,
   pill: 999,
   circle: 999,
 } as const;
@@ -247,37 +247,35 @@ export const fonts = {
 
 export const typography = {
   hero: {
-    fontSize: 20,
-    fontWeight: "600" as const,
-    letterSpacing: -0.2,
+    fontSize: 28,
+    fontWeight: "500" as const,
+    letterSpacing: -0.7,
   },
   brand: {
     fontSize: 17,
-    fontWeight: "600" as const,
+    fontWeight: "500" as const,
     letterSpacing: -0.2,
   },
   title: {
-    fontSize: 17,
+    fontSize: 20,
     fontWeight: "600" as const,
-    letterSpacing: -0.2,
+    letterSpacing: -0.5,
   },
   body: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "400" as const,
-    letterSpacing: -0.1,
   },
   caption: {
     fontSize: 13,
     fontWeight: "400" as const,
   },
   section: {
-    fontSize: 12,
-    fontWeight: "600" as const,
-    letterSpacing: 0.6,
-    textTransform: "uppercase" as const,
+    fontSize: 14,
+    fontWeight: "500" as const,
+    letterSpacing: -0.1,
   },
   mono: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: "400" as const,
     letterSpacing: 0.2,
     fontFamily: fonts.mono,

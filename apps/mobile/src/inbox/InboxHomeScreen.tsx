@@ -358,9 +358,9 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         },
         hero: {
           color: colors.textPrimary,
-          fontSize: typography.hero.fontSize,
-          fontWeight: typography.hero.fontWeight,
-          letterSpacing: typography.hero.letterSpacing,
+          fontSize: typography.title.fontSize,
+          fontWeight: typography.title.fontWeight,
+          letterSpacing: typography.title.letterSpacing,
         },
         subhero: {
           color: colors.textSecondary,
@@ -402,7 +402,6 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           fontSize: typography.section.fontSize,
           fontWeight: typography.section.fontWeight,
           letterSpacing: typography.section.letterSpacing,
-          textTransform: "uppercase",
           marginBottom: space.sm,
         },
         projectScroll: { marginBottom: space.lg },
@@ -423,7 +422,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         projectName: {
           color: colors.textPrimary,
           fontSize: typography.caption.fontSize,
-          fontWeight: "600",
+          fontWeight: "500",
         },
         workFeed: { gap: space.lg },
         workSection: { gap: space.sm },
@@ -437,7 +436,6 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           fontSize: typography.section.fontSize,
           fontWeight: typography.section.fontWeight,
           letterSpacing: typography.section.letterSpacing,
-          textTransform: "uppercase",
         },
         workSectionCount: {
           color: colors.textTertiary,
@@ -465,16 +463,16 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         threadTitle: {
           color: colors.textPrimary,
           fontSize: typography.body.fontSize,
-          fontWeight: "600",
+          fontWeight: "500",
         },
         threadMeta: { color: colors.textSecondary, fontSize: typography.caption.fontSize },
         status: {
           color: colors.textSecondary,
-          fontSize: 11,
-          fontWeight: "600",
+          fontSize: 12,
+          fontWeight: "500",
           textAlign: "right",
         },
-        empty: { color: colors.textSecondary, lineHeight: 22, paddingVertical: space.md },
+        empty: { color: colors.textSecondary, lineHeight: 20, paddingVertical: space.md },
         loader: { marginTop: space.md },
         composerError: {
           color: colors.danger,
@@ -532,7 +530,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           accessibilityLabel="Open navigation menu"
           name="menu-outline"
           onPress={() => setNavigationOpen(true)}
-          size={40}
+          size={44}
           testID="mobile-home-menu"
         />
         <View style={styles.topActions}>
@@ -541,7 +539,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
             iconSize={20}
             name="search-outline"
             onPress={() => props.onOpenAgents("all")}
-            size={40}
+            size={44}
             testID="mobile-home-search"
           />
           {props.homeMode === "inbox" ? (
@@ -550,7 +548,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
               iconSize={20}
               name="folder-open-outline"
               onPress={props.onAddWorkspace}
-              size={40}
+              size={44}
               testID="mobile-home-add-workspace"
             />
           ) : null}

@@ -77,14 +77,13 @@ export function AppearanceBackgroundPanel() {
         help: {
           fontSize: typography.body.fontSize,
           color: colors.textSecondary,
-          lineHeight: 22,
+          lineHeight: 20,
         },
         section: {
           marginTop: space.sm,
           fontSize: typography.section.fontSize,
           fontWeight: typography.section.fontWeight,
           letterSpacing: typography.section.letterSpacing,
-          textTransform: "uppercase",
           color: colors.textTertiary,
         },
         themeRow: {
@@ -97,7 +96,7 @@ export function AppearanceBackgroundPanel() {
         },
         previewLabel: {
           color: colors.textPrimary,
-          fontWeight: "600",
+          fontWeight: "500",
         },
         button: {
           backgroundColor: colors.accent,
@@ -108,11 +107,11 @@ export function AppearanceBackgroundPanel() {
         buttonDisabled: { opacity: 0.45 },
         buttonLabel: {
           color: colors.sendLabel,
-          fontWeight: "700",
+          fontWeight: "500",
           fontSize: typography.body.fontSize,
         },
         secondary: { alignItems: "center", paddingVertical: space.sm },
-        secondaryLabel: { color: colors.accent, fontWeight: "600" },
+        secondaryLabel: { color: colors.accent, fontWeight: "500" },
         message: { color: colors.textSecondary, fontSize: typography.caption.fontSize },
       }),
     [colors],

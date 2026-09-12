@@ -31,7 +31,7 @@ export function AttemptStatus(props: {
         },
         label: {
           fontSize: typography.caption.fontSize,
-          fontWeight: "600",
+          fontWeight: "500",
           color: failed ? colors.danger : active ? colors.accent : colors.textSecondary,
         },
       }),

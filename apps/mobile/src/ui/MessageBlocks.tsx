@@ -28,18 +28,17 @@ export function MessageBlocks(props: MessageBlocksProps) {
         paragraph: {
           color: textColor,
           fontSize: typography.body.fontSize,
-          lineHeight: 24,
-          letterSpacing: typography.body.letterSpacing,
+          lineHeight: 21,
         },
         heading: {
           color: textColor,
-          fontWeight: "600",
+          fontWeight: "500",
           letterSpacing: -0.3,
         },
         listItem: {
           color: textColor,
           fontSize: typography.body.fontSize,
-          lineHeight: 24,
+          lineHeight: 21,
         },
         codeWrap: {
           borderRadius: radii.sm,
@@ -60,16 +59,16 @@ export function MessageBlocks(props: MessageBlocksProps) {
         codeLang: {
           flex: 1,
           color: muted,
-          fontSize: 11,
-          fontWeight: "600",
+          fontSize: 13,
+          fontWeight: "500",
           fontFamily: fonts.mono,
           textTransform: "lowercase",
         },
         codeBody: {
           color: textColor,
           fontFamily: fonts.mono,
-          fontSize: 12,
-          lineHeight: 18,
+          fontSize: 13,
+          lineHeight: 22,
           padding: space.sm,
         },
         inlineCode: {

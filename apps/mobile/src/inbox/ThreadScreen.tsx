@@ -551,7 +551,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
         help: {
           color: colors.textSecondary,
           paddingHorizontal: mobileSpacing.md,
-          lineHeight: 22,
+          lineHeight: 20,
         },
         error: { color: colors.danger },
         connectionStatus: {
@@ -578,7 +578,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
         emptyBody: {
           color: colors.textSecondary,
           fontSize: mobileTypography.body.fontSize,
-          lineHeight: 22,
+          lineHeight: 20,
           textAlign: "center",
           maxWidth: 280,
         },

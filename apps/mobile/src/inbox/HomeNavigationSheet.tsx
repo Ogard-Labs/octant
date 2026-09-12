@@ -54,7 +54,7 @@ export function HomeNavigationSheet(props: {
           backgroundColor: colors.glassFillThin,
         },
         body: { flex: 1, gap: 2 },
-        label: { color: colors.textPrimary, fontSize: typography.body.fontSize, fontWeight: "600" },
+        label: { color: colors.textPrimary, fontSize: typography.body.fontSize, fontWeight: "500" },
         detail: { color: colors.textTertiary, fontSize: typography.caption.fontSize },
         divider: {
           height: StyleSheet.hairlineWidth,
