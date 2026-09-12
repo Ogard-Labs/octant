@@ -765,10 +765,11 @@ One pull request delivers one coherent outcome. The expected order is:
 9. folder, taint, wiring, and unauthorized-code cleanup;
 10. final cross-flow polish and dogfood evidence.
 
-Dependent pull requests wait for the preceding contract to land. Each branch
-uses an isolated worktree, stages exact paths, links its Linear issue in the PR
-description, and targets `main`. No pull request is merged without Henrik's
-explicit instruction for that pull request.
+Dependent pull requests wait for the preceding contract to land. Each standalone
+or bottom PR uses an isolated worktree, stages exact paths, links its Linear issue
+in the PR description, and targets `main`; dependent slices may use a native
+stack whose child PR targets the preceding branch. No pull request is merged
+without Henrik's explicit instruction for that pull request.
 
 ## Out of scope
 

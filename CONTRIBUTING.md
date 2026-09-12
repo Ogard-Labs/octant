@@ -49,9 +49,17 @@ are not required for a PR.
 ## Branches and pull requests
 
 - `main` is the only long-lived branch. Work on a feature branch
-  (`feature/<short-topic>` or `fix/<short-topic>`) and open a PR against
-  `main`.
+  (`feature/<short-topic>` or `fix/<short-topic>`). A standalone or bottom PR
+  targets `main`; a dependent child PR may target the immediately preceding
+  feature branch.
+- Before opening a branch or PR, search the open PRs and branch ancestry for the
+  same task or user-visible outcome. Continue an existing PR for follow-up work
+  that belongs to it instead of creating a sibling PR.
 - Keep PRs small and focused on one outcome. Split unrelated changes.
+- Prefer one PR when the work is one outcome and not independently reviewable.
+  Use a native GitHub stack for independently reviewable dependent slices: link
+  the parent and child PRs, record their order, keep the stack linear, and queue
+  it from the lowest eligible PR. Use separate `main` PRs for independent work.
 - CI must be green on the exact head being merged. Rebase or merge `main` in
   if it has moved.
 - Behavior changes come with tests (see below). Documentation changes to
