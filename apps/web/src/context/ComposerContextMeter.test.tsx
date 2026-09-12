@@ -258,6 +258,66 @@ describe("ComposerContextMeter", () => {
     expect(popover).toHaveTextContent("Reported by the provider with its last turn.");
   });
 
+  it("fills the ring from the model's declared limit when the provider reported occupancy without a window", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerContextMeterProvider
+        fallback={{
+          inputTokens: 25_500,
+          outputTokens: 38,
+          modelContextWindow: 400_000,
+          contextTokens: 100_000,
+          limits: [],
+        }}
+        status="not-planned"
+        subjectKey="code-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+
+    const button = screen.getByRole("button", {
+      name: /Context window 100K of 400K \(25%\)/i,
+    });
+    await user.click(button);
+    const popover = screen.getByRole("dialog", { name: "Context window" });
+    expect(popover).toHaveTextContent("context limit declared for the selected model");
+  });
+
+  it("fills the ring from the fullest account limit when no window is known at all", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerContextMeterProvider
+        fallback={{
+          inputTokens: 25_500,
+          outputTokens: 38,
+          limits: [
+            {
+              window: "five_hour",
+              status: "warning",
+              utilization: 0.91,
+              resetsAt: "2026-08-24T01:00:00.000Z" as never,
+            },
+          ],
+        }}
+        status="not-planned"
+        subjectKey="code-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+
+    // The label names the figure so a screen reader is not told the ring is a
+    // context share when it is the account's quota.
+    screen.getByRole("button", { name: /ring shows 91% of the 5-hour limit used/i });
+    const used = document.querySelector(".composer-context-meter__used");
+    expect(used).not.toBeNull();
+  });
+
   it("keeps provider usage and account limits useful when no context plan exists", async () => {
     const user = userEvent.setup();
     render(
