@@ -325,13 +325,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       settings: [],
     },
     {
-      id: "profiles",
-      label: "Execution profiles",
-      scope: "app",
-      keywords: "profiles execution context provider model permissions defaults reusable behavior",
-      settings: [],
-    },
-    {
       id: "agents",
       label: "Agents",
       scope: "app",

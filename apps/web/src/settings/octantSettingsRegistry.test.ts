@@ -14,7 +14,6 @@ describe("octantSettingsRegistry", () => {
       "image-generation",
       "computer-use",
       "providers",
-      "profiles",
       "agents",
       "harness",
       "skills",
@@ -112,10 +111,10 @@ describe("octantSettingsRegistry", () => {
     expect(providers?.label).toBe("Providers & Models");
   });
 
-  it("registers execution profiles as their own Settings destination", () => {
-    const profiles = octantSettingsRegistry.sections.find((s) => s.id === "profiles");
-    expect(profiles?.label).toBe("Execution profiles");
-    expect(profiles?.settings).toEqual([]);
+  it("does not offer retired execution-profile settings", () => {
+    expect(octantSettingsRegistry.sections.some((section) => section.id === "profiles")).toBe(
+      false,
+    );
   });
 
   it("gates reset-window-bounds on native bounds availability", () => {

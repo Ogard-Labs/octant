@@ -12,7 +12,6 @@
 
 export type OctantCommandGroup =
   | "Skills"
-  | "Agent profiles"
   | "Modes"
   | "Threads"
   | "Projects"

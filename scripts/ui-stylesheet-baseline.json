@@ -25,7 +25,6 @@
     "apps/web/src/usage/usageWorkspace.css": 1
   },
   "control-repaint": {
-    "apps/web/src/agentProfile/execution-profile.css": 3,
     "apps/web/src/agents/agent-hierarchy.css": 1,
     "apps/web/src/context/context.css": 6,
     "apps/web/src/onboarding/first-run.css": 3,
