@@ -1766,6 +1766,32 @@ describe("ProviderSettingsView", () => {
     expect(props.onProviderOrderChange).toHaveBeenCalledWith([second.id, firstId]);
   });
 
+  it("keeps image-provider IDs when reordering the general list", async () => {
+    const user = userEvent.setup();
+    const firstId = decodeProviderInstanceId("70000000-0000-4000-8000-000000000091");
+    const secondId = decodeProviderInstanceId("70000000-0000-4000-8000-000000000094");
+    const imageId = decodeProviderInstanceId("70000000-0000-4000-8000-000000000095");
+    const first = provider({ id: firstId, displayName: "First Provider" });
+    const second = provider({ id: secondId, displayName: "Second Provider" });
+    const image = { ...openAiImageProvider(), id: imageId };
+    const props = fixture();
+    render(
+      <ProviderSettingsView
+        {...props}
+        instances={[first, second, image]}
+        defaults={{
+          permissionPersistence: "current-session",
+          providerOrder: [firstId, imageId, secondId],
+          version: 0 as never,
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Reorder providers" }));
+    await user.click(screen.getByRole("button", { name: "Move Second Provider up" }));
+    expect(props.onProviderOrderChange).toHaveBeenCalledWith([secondId, firstId, imageId]);
+  });
+
   it("adds a ready model to the agent-eligible default pool without activating providers", async () => {
     const user = userEvent.setup();
     const props = fixture({ observed: observation() });

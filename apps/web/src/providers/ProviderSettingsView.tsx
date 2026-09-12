@@ -279,6 +279,15 @@ export interface ProviderSettingsViewProps {
   readonly onRetry: () => Promise<boolean>;
 }
 
+function keepUnlistedProviderOrder(
+  visibleOrder: ReadonlyArray<ProviderInstanceId>,
+  stored: ReadonlyArray<ProviderInstanceId> | undefined,
+): ReadonlyArray<ProviderInstanceId> {
+  const visible = new Set(visibleOrder);
+  const retained = (stored ?? []).filter((id) => !visible.has(id));
+  return retained.length === 0 ? visibleOrder : [...visibleOrder, ...retained];
+}
+
 const GENERAL_PROVIDER_TYPES: ReadonlyArray<ProviderCreateProviderType> = [
   "opencode",
   "codex",
@@ -393,7 +402,11 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}
         onProbe={props.onProbe}
         onProviderCredentialStatus={props.onProviderCredentialStatus}
-        onProviderOrderChange={props.onProviderOrderChange}
+        onProviderOrderChange={(visibleOrder) =>
+          props.onProviderOrderChange(
+            keepUnlistedProviderOrder(visibleOrder, props.defaults.providerOrder),
+          )
+        }
         onRemove={props.onRemove}
         onRename={props.onRename}
         onSetEnabled={props.onSetEnabled}
