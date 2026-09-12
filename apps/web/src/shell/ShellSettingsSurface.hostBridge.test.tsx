@@ -24,7 +24,6 @@ describe("ShellSettingsSurface host integration", () => {
         codeController={{} as never}
         diagnosticsExportClient={{} as never}
         discoveryController={{} as never}
-        executionProfiles={null}
         extensionClient={{} as never}
         githubClient={{} as never}
         hostBridge={{ listOpenInApplications: vi.fn() } as never}
