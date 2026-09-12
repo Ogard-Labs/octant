@@ -2516,6 +2516,25 @@ function LaunchedShell(
     projectController.activeProject.lifecycle === "active"
       ? projectController.activeProject
       : undefined;
+  /**
+   * The active Code thread's usage, with the model's declared context limit
+   * standing in for a window the provider's usage report never named. A
+   * reported window always wins — the declared figure only answers what the
+   * provider did not.
+   */
+  const activeCodeThreadUsageFallback = useMemo(() => {
+    const thread = activeCodeThreadController?.activeView?.thread;
+    const usage = activeCodeThreadController?.threadUsage;
+    if (thread === undefined || usage === undefined) return usage;
+    const observed = providerController.observedByInstance.get(thread.providerInstanceId);
+    const model = observed?.models.find((listed) => String(listed.id) === String(thread.modelId));
+    if (usage.contextWindow !== undefined || model?.contextLimit === undefined) return usage;
+    return { ...usage, modelContextWindow: model.contextLimit };
+  }, [
+    activeCodeThreadController?.activeView?.thread,
+    activeCodeThreadController?.threadUsage,
+    providerController.observedByInstance,
+  ]);
   const workCreateThreadAvailable = workProviderChoice !== undefined;
   const enabledProjectTypes = new Set(
     enabledModes(controller.settings ?? { chatEnabled: true, workEnabled: true }),
@@ -5403,9 +5422,9 @@ function LaunchedShell(
                     void contextController.setPinned(entryId, pinned)
                   }
                   status={contextController.status}
-                  {...(activeMode !== "code" || activeCodeThreadController === undefined
+                  {...(activeMode !== "code" || activeCodeThreadUsageFallback === undefined
                     ? {}
-                    : { fallback: activeCodeThreadController.threadUsage })}
+                    : { fallback: activeCodeThreadUsageFallback })}
                   {...(contextController.snapshot === undefined
                     ? {}
                     : { snapshot: contextController.snapshot })}
