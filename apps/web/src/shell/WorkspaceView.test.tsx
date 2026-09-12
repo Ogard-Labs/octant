@@ -251,6 +251,24 @@ describe("WorkspaceView Code tab registration", () => {
     ).toBeVisible();
   });
 
+  it("keeps Browser available in the composer of an existing Code thread", async () => {
+    const user = userEvent.setup();
+    const base = propsFor(codeTab("code-overview", "Browser mention owner"));
+    const browserAutomationClient = {
+      inspectThread: vi.fn(async () => ({
+        status: "ready",
+        threadId: codeIds.thread,
+        evidence: [],
+      })),
+    } as never;
+
+    render(<WorkspaceView {...base} browserAutomationClient={browserAutomationClient} />);
+
+    const composer = await screen.findByLabelText("Follow-up message");
+    await user.type(composer, "@");
+    expect(await screen.findByRole("option", { name: /Browser/ })).toBeVisible();
+  });
+
   it("mounts the exact-thread Browser activity preview over an active Code conversation", async () => {
     const base = propsFor(codeTab("code-overview", "Browser owner"));
     const onOpenSurface = vi.fn();
@@ -284,8 +302,10 @@ describe("WorkspaceView Code tab registration", () => {
     const preview = await screen.findByRole("img", { name: "Preview page browser activity" });
     expect(preview).toBeVisible();
     expect(screen.queryByRole("button", { name: "Open Browser tab" })).toBeNull();
+    await waitFor(() => expect(onOpenSurface).toHaveBeenCalledWith("browser", ids.pane));
+    expect(onOpenSurface).toHaveBeenCalledOnce();
     fireEvent.click(preview);
-    expect(onOpenSurface).not.toHaveBeenCalled();
+    expect(onOpenSurface).toHaveBeenCalledOnce();
   });
 
   it("keeps Code auxiliary probes off when conversation history is unavailable", async () => {

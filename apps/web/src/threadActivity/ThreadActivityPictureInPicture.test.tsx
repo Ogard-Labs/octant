@@ -187,6 +187,27 @@ describe("ThreadActivityPictureInPicture", () => {
     expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
   });
 
+  it("opens the Browser surface once when Browser activity first appears", async () => {
+    const onOpenBrowser = vi.fn();
+    const browser = {
+      inspectThread: vi.fn(async () => browserSnapshot()),
+    } as unknown as BrowserAutomationClient;
+
+    render(
+      <ThreadActivityPictureInPicture
+        browserClient={browser}
+        onOpenBrowser={onOpenBrowser}
+        pollIntervalMs={60_000}
+        threadId={threadId as never}
+      >
+        <div>Conversation</div>
+      </ThreadActivityPictureInPicture>,
+    );
+
+    expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
+    expect(onOpenBrowser).toHaveBeenCalledOnce();
+  });
+
   it("shows, hides, restores, and stops the exact thread Browser preview", async () => {
     const user = userEvent.setup();
     const running = browserSnapshot();
