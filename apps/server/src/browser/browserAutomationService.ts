@@ -16,7 +16,11 @@ import type {
   ToolEvidence,
   WindowId,
 } from "@octant/contracts";
-import { MAX_BROWSER_TABS_PER_CONTEXT, sameToolActionAuthority } from "@octant/contracts";
+import {
+  MAX_BROWSER_TABS_PER_CONTEXT,
+  MAX_BROWSER_THREAD_CONTEXTS,
+  sameToolActionAuthority,
+} from "@octant/contracts";
 import {
   authorizeToolAction,
   canRequestToolCancellation,
@@ -621,16 +625,22 @@ export class BrowserAutomationService {
   }
 
   inspectThread(windowId: WindowId, threadId: BrowserThreadId): BrowserAutomationSnapshot {
-    const threadContexts = [...this.#contexts.values()].filter(
-      (owned) =>
-        owned.windowId === windowId &&
-        owned.threadId === threadId &&
-        !owned.dedicated &&
-        (owned.record.state === "active" ||
-          owned.record.state === "creating" ||
-          owned.record.state === "stopping" ||
-          owned.record.state === "failed"),
-    );
+    const threadContexts = [...this.#contexts.values()]
+      .filter(
+        (owned) =>
+          owned.windowId === windowId &&
+          owned.threadId === threadId &&
+          !owned.dedicated &&
+          (owned.record.state === "active" ||
+            owned.record.state === "creating" ||
+            owned.record.state === "stopping" ||
+            owned.record.state === "failed"),
+      )
+      .sort(
+        (left, right) =>
+          contextInspectWeight(right.record.state) - contextInspectWeight(left.record.state),
+      )
+      .slice(0, MAX_BROWSER_THREAD_CONTEXTS);
     if (threadContexts.length === 0) return { status: "ready", threadId, evidence: [] };
     if (threadContexts.length === 1) {
       const single = threadContexts[0];
@@ -1023,6 +1033,10 @@ function snapshot(owned: OwnedContext): BrowserAutomationSnapshot {
   };
 }
 
+function contextInspectWeight(state: BrowserContextRecord["state"]): number {
+  return state === "active" ? 2 : state === "creating" ? 1 : 0;
+}
+
 function threadSnapshotFromSnapshots(
   snapshots: ReadonlyArray<BrowserAutomationSnapshot>,
   threadId: BrowserThreadId,
@@ -1042,10 +1056,12 @@ function threadSnapshotFromSnapshots(
       "failed",
     );
   }
-  const contexts: BrowserContextObservation[] = ordered.map((snap) => ({
-    context: snap.context as BrowserContextRecord,
-    ...(snap.observation === undefined ? {} : { observation: snap.observation }),
-  }));
+  const contexts: BrowserContextObservation[] = ordered
+    .slice(0, MAX_BROWSER_THREAD_CONTEXTS)
+    .map((snap) => ({
+      context: snap.context as BrowserContextRecord,
+      ...(snap.observation === undefined ? {} : { observation: snap.observation }),
+    }));
   return {
     status: primary.status,
     threadId,
