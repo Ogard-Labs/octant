@@ -99,16 +99,18 @@ Direct API endpoints:
 - Anthropic-compatible HTTP (`messages`)
 - Azure AI Foundry (OpenAI-compatible v1 profile, API key)
 
-Credentials are stored in the macOS Keychain, resolved by the desktop broker,
-and never written to the event journal or returned to the renderer.
+Credentials are stored in the macOS Keychain (the Linux dogfood build uses the
+desktop's Secret Service), resolved by the desktop broker, and never written to
+the event journal or returned to the renderer.
 
 ## Status
 
 Octant is an **Apple Silicon technical preview**. Releases are signed with a
 Developer ID, notarized, and update themselves — you choose when an update
 applies, and it never replaces a running app or interrupts work in flight. It
-ships no Intel, Windows, or Linux desktop builds. Expect rough edges and
-breaking changes to local data formats between previews. Remote clients, the
+ships no signed Intel, Windows, or Linux desktop builds; a Linux x64 AppImage
+can be built locally as an unsigned dogfood artifact (see below). Expect rough
+edges and breaking changes to local data formats between previews. Remote clients, the
 Expo mobile app, and packaged native checks are separate evidence gates from the
 local test suite.
 
