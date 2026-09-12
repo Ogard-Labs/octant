@@ -103,7 +103,11 @@ server through `@octant/cli` (`octant server run`, `octant web`).
 and to authenticated remote browsers alike. It talks to the server through
 `@octant/client-runtime` and never holds authority of its own. In development
 Vite serves it with hot reload; in a packaged build the server serves the
-built assets.
+built assets. A paired browser mounts the remote shell rather than the desktop
+workspace: the same Chat, Work, and Code thread workspaces, driven by the
+ordinary product clients over `createRemoteProductFetch`, which carries each
+request on the device session and never presents a window capability. The
+desktop's window-bound sidebar, dock, and Settings are not served remotely.
 
 **Mobile (`apps/mobile`).** An Expo iOS/Android remote-control client. Threads
 are host-owned; the phone stores only device keys, a host registry, and session

@@ -117,6 +117,7 @@ export interface FakeRemoteServerConfig {
     readonly method: string;
     readonly path: string;
     readonly body: unknown;
+    readonly headers: Headers;
   }) => Response | Promise<Response>;
 }
 
@@ -518,7 +519,12 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
         } catch {
           return Response.json({ category: "invalid" }, { status: 400 });
         }
-        return config.handleProductRequest({ method, path, body });
+        return config.handleProductRequest({
+          method,
+          path,
+          body,
+          headers: new Headers(init?.headers),
+        });
       }
       return Response.json({ ok: true });
     }
