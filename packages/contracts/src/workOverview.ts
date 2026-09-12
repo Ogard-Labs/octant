@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { ProjectId } from "./projects";
+import { WorkProjectStatus } from "./workProjectStatus";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -26,6 +27,13 @@ export const WorkOverviewProjection = Schema.Struct({
   versions: Schema.Array(WorkOverviewItem).pipe(Schema.maxItems(64)),
   validation: Schema.Array(WorkOverviewItem).pipe(Schema.maxItems(64)),
   exports: Schema.Array(WorkOverviewItem).pipe(Schema.maxItems(64)),
+  /**
+   * The top level of the bound folder: what is actually in the Project,
+   * beside what Octant produced. Absent on a host that could not list it.
+   */
+  folder: Schema.optional(Schema.Array(WorkOverviewItem).pipe(Schema.maxItems(64))),
+  /** What `STATUS.md` says, read from the folder. Absent when unreadable. */
+  status: Schema.optional(WorkProjectStatus),
 }).annotations(strict);
 export type WorkOverviewProjection = typeof WorkOverviewProjection.Type;
 

@@ -1,7 +1,8 @@
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts";
+import type { WorkProjectStatus, WorkStatusDatedItem } from "@octant/contracts/work-project-status";
 import type { CreateHostViewScope, PickerGroup, ModelPickerSelection } from "@octant/domain";
-import { FolderOpen, ShieldCheck } from "lucide-react";
+import { CalendarClock, FolderOpen, ShieldCheck } from "lucide-react";
 import { useState, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
 import { clipboardHasImage } from "../chat/composerImagePaste";
 import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
@@ -36,6 +37,9 @@ export interface WorkOverviewSectionModel {
 }
 
 export interface WorkOverviewModel {
+  /** What STATUS.md says, when the host could read it. */
+  readonly status?: WorkProjectStatus;
+  readonly folder: WorkOverviewSectionModel;
   readonly filesAndArtifacts: WorkOverviewSectionModel;
   readonly workflowsAndThreads: WorkOverviewSectionModel;
   readonly approvals: WorkOverviewSectionModel;
@@ -75,8 +79,9 @@ export interface WorkOverviewProps {
 }
 
 const SECTIONS = [
-  { key: "filesAndArtifacts", title: "Recent files and artifacts" },
-  { key: "workflowsAndThreads", title: "Active workflows and threads" },
+  { key: "workflowsAndThreads", title: "Recent tasks" },
+  { key: "folder", title: "In the folder" },
+  { key: "filesAndArtifacts", title: "Produced by Octant" },
   { key: "approvals", title: "Approvals" },
   { key: "versions", title: "Versions and recent changes" },
   { key: "validation", title: "Validation" },
@@ -156,27 +161,7 @@ export function WorkOverview(props: WorkOverviewProps) {
 
   return (
     <section aria-label="Work overview" className="project-overview work-overview">
-      <div className="work-overview__sections">
-        {SECTIONS.map((section) => {
-          const onOpenItem =
-            section.key === "workflowsAndThreads" && props.onOpenThread !== undefined
-              ? (itemId: string) => {
-                  props.onOpenThread?.(itemId);
-                }
-              : undefined;
-          return (
-            <OverviewSection
-              key={section.key}
-              {...(onOpenItem === undefined ? {} : { onOpenItem })}
-              section={props.model[section.key]}
-              title={section.title}
-            />
-          );
-        })}
-      </div>
-
-      {props.research}
-
+      {props.model.status === undefined ? null : <WorkStatusCard status={props.model.status} />}
       <section aria-label="Work quick start" className="work-overview__composer">
         <div aria-label="Thread context" className="work-overview__context-strip">
           <HostSelector
@@ -264,10 +249,31 @@ export function WorkOverview(props: WorkOverviewProps) {
             type="submit"
             variant="secondary"
           >
-            Start thread
+            Start task
           </OctantButton>
         </form>
       </section>
+
+      <div className="work-overview__sections">
+        {SECTIONS.map((section) => {
+          const onOpenItem =
+            section.key === "workflowsAndThreads" && props.onOpenThread !== undefined
+              ? (itemId: string) => {
+                  props.onOpenThread?.(itemId);
+                }
+              : undefined;
+          return (
+            <OverviewSection
+              key={section.key}
+              {...(onOpenItem === undefined ? {} : { onOpenItem })}
+              section={props.model[section.key]}
+              title={section.title}
+            />
+          );
+        })}
+      </div>
+
+      {props.research}
 
       {createStarterArtifactAvailable ? (
         <section aria-label="Create starter artifact" className="work-overview__composer">
@@ -318,6 +324,73 @@ export function WorkOverview(props: WorkOverviewProps) {
         </section>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * Where the work stands, from the folder's own STATUS.md: the current status
+ * the agent or the person wrote, and every dated line that has passed or is
+ * close. A Project without the file says so rather than showing nothing.
+ */
+function WorkStatusCard({ status }: { readonly status: WorkProjectStatus }) {
+  const due = [...status.deadlines, ...status.followUps]
+    .filter((item) => item.state !== "upcoming")
+    .sort((left, right) => left.date.localeCompare(right.date));
+  const upcoming = [...status.deadlines, ...status.followUps]
+    .filter((item) => item.state === "upcoming")
+    .sort((left, right) => left.date.localeCompare(right.date))
+    .slice(0, 5);
+  return (
+    <section aria-label="Status" className="work-overview__section work-status">
+      <div className="work-status__head">
+        <h2>Status</h2>
+        <span className="work-status__updated">
+          {!status.hasStatusFile
+            ? "No STATUS.md yet — the first task creates it"
+            : status.lastUpdatedOn === undefined
+              ? "Undated"
+              : `Last updated ${status.lastUpdatedOn}${status.stale ? " · stale" : ""}`}
+        </span>
+      </div>
+      {status.currentStatus === undefined ? null : (
+        <p className="work-status__current">{status.currentStatus}</p>
+      )}
+      {due.length === 0 ? null : (
+        <div className="work-status__due" role="status">
+          <h3>
+            <CalendarClock aria-hidden="true" size={14} strokeWidth={1.8} />
+            Follow-ups due
+          </h3>
+          <ul className="work-overview__items">
+            {due.map((item) => (
+              <DatedItem item={item} key={`${item.date}:${item.text}`} />
+            ))}
+          </ul>
+        </div>
+      )}
+      {upcoming.length === 0 ? null : (
+        <div className="work-status__upcoming">
+          <h3>Coming up</h3>
+          <ul className="work-overview__items">
+            {upcoming.map((item) => (
+              <DatedItem item={item} key={`${item.date}:${item.text}`} />
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DatedItem({ item }: { readonly item: WorkStatusDatedItem }) {
+  return (
+    <li className={`work-status__item work-status__item--${item.state}`}>
+      <span>{item.text}</span>
+      <span>
+        {item.date}
+        {item.state === "overdue" ? " · overdue" : item.state === "due-soon" ? " · due soon" : ""}
+      </span>
+    </li>
   );
 }
 

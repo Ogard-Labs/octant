@@ -5522,6 +5522,45 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border-top: 1px solid var(--oct-border);
 }
 
+/* The status card leads the page: it is the one section read from the
+   folder itself rather than from what Octant recorded. */
+.work-status {
+  margin: 0 16px;
+  border-top: none;
+}
+
+.work-status__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.work-status__updated {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.work-status__current {
+  white-space: pre-wrap;
+}
+
+.work-status h3 {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin: 12px 0 0;
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+  color: var(--oct-muted);
+}
+
+.work-status__item--overdue > span:last-child,
+.work-status__item--due-soon > span:last-child {
+  color: var(--oct-fg);
+}
+
 .work-overview__composer form {
   display: flex;
   flex-direction: column;

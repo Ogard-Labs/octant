@@ -62,6 +62,16 @@ import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalE
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { WorkTurnFileObserver } from "./workTurnFileObserver";
+import type { WorkProjectStatusFiles } from "./workProjectStatusFiles";
+import {
+  DEFAULT_WORK_STATUS_STALE_AFTER_DAYS,
+  WORK_AGENTS_FILE_NAME,
+  WORK_STATUS_FILE_NAME,
+  decideWorkResumeBrief,
+  isWorkStatusDate,
+  parseWorkStatus,
+  type WorkResumeBriefReason,
+} from "@octant/domain/work-project-status-policy";
 import {
   WorkAttachmentInvalid,
   WorkAttachmentTooLarge,
@@ -81,6 +91,24 @@ const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeProviderSessionId = Schema.decodeUnknownSync(ProviderSessionId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
+
+/**
+ * The standing rule for every Work turn, plus the resume brief when the
+ * status has gone quiet or a date is close. Says what to do with `STATUS.md`,
+ * never what the status is; the file itself is in the context beside it.
+ */
+function statusUpkeepInstruction(reasons: ReadonlyArray<WorkResumeBriefReason>): string {
+  const standing = `This Project keeps its standing brief in ${WORK_AGENTS_FILE_NAME} and its current state in ${WORK_STATUS_FILE_NAME} at the top of the folder; both are in your context. Before you finish this task, update ${WORK_STATUS_FILE_NAME}: revise "Current status", add or resolve dated lines under "Follow-ups" and "Deadlines" (one per line, "- YYYY-MM-DD what"), and set the "Last updated:" line to today. Do not rewrite ${WORK_AGENTS_FILE_NAME}.`;
+  if (reasons.length === 0) return standing;
+  const why = [
+    reasons.includes("stale") ? "the status has not been updated for a while" : undefined,
+    reasons.includes("overdue") ? "at least one deadline or follow-up date has passed" : undefined,
+    reasons.includes("due-soon") ? "a deadline or follow-up is due within days" : undefined,
+  ]
+    .filter((part) => part !== undefined)
+    .join(", and ");
+  return `${standing}\n\nTake stock first: ${why}. Before starting the request, briefly summarize where this work stands from ${WORK_STATUS_FILE_NAME} — current status, open follow-ups, and deadlines with their dates — then ask the person what has happened since and what they need to follow up on. Update ${WORK_STATUS_FILE_NAME} with their answer before continuing with the request.`;
+}
 
 export class WorkTurnServiceError extends Error {
   override readonly name = "WorkTurnServiceError";
@@ -202,6 +230,14 @@ export interface WorkTurnServiceDependencies {
    */
   readonly turnFileObserver?: WorkTurnFileObserver;
   /**
+   * The Project's `AGENTS.md` and `STATUS.md` (`docs/decisions/0119`). Absent
+   * on a host that keeps no brief files, which sends the turn with only its
+   * own transcript as before.
+   */
+  readonly projectStatusFiles?: WorkProjectStatusFiles;
+  /** Days before a status counts as stale and a new task opens by taking stock. */
+  readonly statusStaleAfterDays?: number;
+  /**
    * Resolves the `#thread` mentions a Work turn names. Absent on a host that
    * cannot re-derive Open authority, which reports every mention unread rather
    * than inventing transcript.
@@ -253,6 +289,8 @@ export class WorkTurnService {
   >();
   readonly #onTurnRequested: WorkTurnServiceDependencies["onTurnRequested"];
   readonly #turnFileObserver: WorkTurnFileObserver | undefined;
+  readonly #projectStatusFiles: WorkProjectStatusFiles | undefined;
+  readonly #statusStaleAfterDays: number;
   readonly #resolveThreadMentionContext: WorkTurnServiceDependencies["resolveThreadMentionContext"];
   readonly #resolveFileMentionContext: WorkTurnServiceDependencies["resolveFileMentionContext"];
   readonly #takeIssueContextFramed: WorkTurnServiceDependencies["takeIssueContextFramed"];
@@ -283,6 +321,9 @@ export class WorkTurnService {
     this.#spendCeiling = dependencies.spendCeiling;
     this.#onTurnRequested = dependencies.onTurnRequested;
     this.#turnFileObserver = dependencies.turnFileObserver;
+    this.#projectStatusFiles = dependencies.projectStatusFiles;
+    this.#statusStaleAfterDays =
+      dependencies.statusStaleAfterDays ?? DEFAULT_WORK_STATUS_STALE_AFTER_DAYS;
     this.#resolveThreadMentionContext = dependencies.resolveThreadMentionContext;
     this.#resolveFileMentionContext = dependencies.resolveFileMentionContext;
     if (dependencies.takeIssueContextFramed !== undefined) {
@@ -423,6 +464,7 @@ export class WorkTurnService {
       createdAt: this.#clock(),
       safeInputBudget: this.#safeInputBudgetTokens,
       contributions: [
+        ...(await this.#projectBriefContributions(project, command.threadId)),
         ...this.#priorTranscriptContributions(command.threadId),
         ...(await this.#threadMentionContributions(
           command.threadMentionIds,
@@ -508,6 +550,7 @@ export class WorkTurnService {
       windowId: authenticatedWindowId,
       providerSessionId,
       projectRoot,
+      projectCanonicalRoot: project.binding.canonicalRoot,
       driver,
       attachments: attachmentInputs,
       context: planned.context,
@@ -640,6 +683,8 @@ export class WorkTurnService {
     readonly windowId: WindowId;
     readonly providerSessionId: ProviderSessionId;
     readonly projectRoot: string;
+    /** The Project's bound root, where `STATUS.md` lives; the turn may run in a subfolder. */
+    readonly projectCanonicalRoot: string;
     readonly driver: ProviderDriver;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
     readonly context: ReadonlyArray<ProviderContextBlock>;
@@ -806,6 +851,9 @@ export class WorkTurnService {
       wroteFiles,
       this.#liveTasks.get(String(input.command.requestId)),
     );
+    if (outcome.kind === "completed" && wroteFiles !== undefined) {
+      await this.#backfillStatus(input.projectCanonicalRoot, input.thread, wroteFiles);
+    }
     const settled = this.#projection.lookup(input.command.requestId);
     if (settled !== undefined) this.#liveUpdates.settle(input.command.threadId, settled);
   }
@@ -832,6 +880,108 @@ export class WorkTurnService {
         block: { kind: "user-message", text: framed.text },
       },
     ];
+  }
+
+  /**
+   * The Project's brief, ahead of everything the thread itself remembers.
+   *
+   * `AGENTS.md` and `STATUS.md` are read from the bound root on every turn, so
+   * a task started two weeks later knows where the work stands without the
+   * person re-explaining. A Project that has neither file gets them seeded
+   * here, on its first task, so an older Project joins without a migration.
+   * When the status is stale or a dated line is overdue or near, the turn is
+   * also told to take stock first — summarize, ask what happened, update the
+   * file — before doing what it was asked.
+   */
+  async #projectBriefContributions(
+    project: Extract<Project, { readonly type: "work" }>,
+    threadId: WorkThreadId,
+  ): Promise<ReadonlyArray<WorkTurnContextContribution>> {
+    const files = this.#projectStatusFiles;
+    if (files === undefined) return [];
+    const root = project.binding.canonicalRoot;
+    const today = this.#today();
+    try {
+      await files.seed(root, project.name, today);
+    } catch {
+      // A folder that refuses the seed still gets whatever it already has.
+    }
+    let snapshot;
+    try {
+      snapshot = await files.read(root);
+    } catch {
+      return [];
+    }
+    const contributions: WorkTurnContextContribution[] = [];
+    const fileBlock = (name: string, text: string): WorkTurnContextContribution => ({
+      text,
+      sourceKind: "file",
+      referenceId: `project-brief:${name}:${String(threadId)}`,
+      category: "workspace-context",
+      posture: "compressible",
+      block: {
+        kind: "user-message",
+        text: `Contents of ${name} at the top of this Project's folder:\n\n${text}`,
+      },
+    });
+    if (snapshot.agents !== undefined) {
+      contributions.push(fileBlock(WORK_AGENTS_FILE_NAME, snapshot.agents.text));
+    }
+    if (snapshot.status !== undefined) {
+      contributions.push(fileBlock(WORK_STATUS_FILE_NAME, snapshot.status.text));
+    }
+    const instruction = statusUpkeepInstruction(
+      snapshot.status === undefined
+        ? []
+        : decideWorkResumeBrief(
+            parseWorkStatus(snapshot.status.text, today),
+            today,
+            this.#statusStaleAfterDays,
+          ),
+    );
+    contributions.push({
+      text: instruction,
+      sourceKind: "instruction",
+      referenceId: `project-brief:instruction:${String(threadId)}`,
+      category: "octant-policy",
+      posture: "required",
+      block: { kind: "instructions", text: instruction },
+    });
+    return contributions;
+  }
+
+  /**
+   * When a turn changed files but left `STATUS.md` alone, record the change
+   * there itself. Octant asserts only what it observed — which paths, in which
+   * task — never what the change meant; that sentence is the agent's or the
+   * person's to write.
+   */
+  async #backfillStatus(
+    canonicalRoot: string,
+    thread: WorkThread | undefined,
+    wroteFiles: WorkTurnWrittenFiles,
+  ): Promise<void> {
+    const files = this.#projectStatusFiles;
+    if (files === undefined) return;
+    const changed = wroteFiles.paths.filter((path) => path !== WORK_STATUS_FILE_NAME);
+    if (changed.length === 0 || wroteFiles.paths.includes(WORK_STATUS_FILE_NAME)) return;
+    try {
+      await files.appendRecentChange(canonicalRoot, {
+        date: this.#today(),
+        taskTitle: thread?.title ?? "Task",
+        paths: changed,
+        truncated: wroteFiles.truncated,
+      });
+    } catch {
+      // The turn already happened; a status file that cannot be written is
+      // reported by its absence on the Project page, not by failing the turn.
+    }
+  }
+
+  #today() {
+    const date = this.#clock().slice(0, 10);
+    if (!isWorkStatusDate(date)) throw new Error("Host clock did not produce a calendar date.");
+    return date;
   }
 
   #priorTranscriptContributions(

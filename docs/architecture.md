@@ -216,6 +216,17 @@ threads without a Project need the further `allowDefaultFolderThreads` switch,
 which the host accepts only while Git is not required. See
 [decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md](decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md).
 
+A Work Project folder carries `AGENTS.md` (the person's standing brief, seeded
+once and never rewritten) and `STATUS.md` (where the work stands, with dated
+follow-ups and deadlines). Both are read into every Work turn ahead of the
+thread's transcript, with a standing instruction to keep `STATUS.md` current;
+a completed turn that changed files without touching it gets a `Recent
+changes` line appended from the 0083 record. A stale status or a near or passed
+date makes the next task open by taking stock and asking for an update. The
+Work Project page and the Work board's follow-up mark read the same file on
+demand; nothing about it is journaled. See
+[decisions/0119-a-work-project-keeps-its-status-in-its-folder.md](decisions/0119-a-work-project-keeps-its-status-in-its-folder.md).
+
 Work never silently becomes Code. When coding work is detected in a Work
 thread, the server records a **promotion proposal**; only explicit user approval
 creates a linked Code thread, and the new thread inherits no authority from the

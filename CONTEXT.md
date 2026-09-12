@@ -52,6 +52,22 @@ A Code checkout that is the bound folder itself, with no Git repository behind
 it and therefore no revision. Allowed only when the Git requirement is off.
 _Avoid_: Unborn checkout, detached folder, non-repo worktree
 
+**Project brief**:
+The `AGENTS.md` at the top of a Work Project folder: the person's standing
+instructions for anyone working there. Seeded once, never rewritten by Octant.
+_Avoid_: System prompt, instructions file, README
+
+**Project status**:
+The `STATUS.md` at the top of a Work Project folder: where the work stands,
+with dated follow-ups and deadlines. The agent keeps it; Octant reads it into
+every task and backfills only what changed.
+_Avoid_: Memory, summary, changelog
+
+**Resume brief**:
+The instruction a Work task opens with when the Project status is stale or a
+date is near: take stock, ask what happened, update the status, then proceed.
+_Avoid_: Reminder, digest, catch-up
+
 ## Thread execution
 
 **Environment**:

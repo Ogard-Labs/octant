@@ -3,7 +3,9 @@ import type { ProjectAvailability, ProjectId } from "@octant/contracts/projects"
 import type { WorkOverviewClient } from "@octant/client-runtime/work-overview-client";
 import { WorkOverviewClientFailure } from "@octant/client-runtime/work-overview-client";
 import { buildWorkOverviewModel, type WorkOverviewProjectionInput } from "./buildWorkOverviewModel";
-import type { WorkOverviewModel, OverviewSectionStatus } from "./WorkOverview";
+import type { OverviewSectionStatus } from "./WorkOverview";
+import type { WorkOverviewModel } from "./WorkOverview";
+import type { WorkOverviewSectionKey } from "./buildWorkOverviewModel";
 
 export interface UseWorkOverviewControllerOptions {
   readonly availability?: ProjectAvailability;
@@ -48,6 +50,7 @@ export function useWorkOverviewController(
         ...(options.availability === undefined ? {} : { availability: options.availability }),
         sectionStatus: allSections("loading"),
         sectionMessage: {
+          folder: "Loading the folder.",
           filesAndArtifacts: "Loading recent files and artifacts.",
           workflowsAndThreads: "Loading active workflows and threads.",
           approvals: "Loading approvals.",
@@ -70,6 +73,8 @@ export function useWorkOverviewController(
           versions: projection.versions,
           validation: projection.validation,
           exports: projection.exports,
+          ...(projection.folder === undefined ? {} : { folder: projection.folder }),
+          ...(projection.status === undefined ? {} : { status: projection.status }),
         };
         setModel(buildWorkOverviewModel(input));
         setStatus("ready");
@@ -83,6 +88,7 @@ export function useWorkOverviewController(
             ...(options.availability === undefined ? {} : { availability: options.availability }),
             sectionStatus: allSections(failureStatus === "idle" ? "failure" : failureStatus),
             sectionMessage: {
+              folder: messageFor(failureStatus, "Folder contents"),
               filesAndArtifacts: messageFor(failureStatus, "Recent files"),
               workflowsAndThreads: messageFor(failureStatus, "Workflows and threads"),
               approvals: messageFor(failureStatus, "Approvals"),
@@ -104,8 +110,9 @@ export function useWorkOverviewController(
 
 function allSections(
   status: OverviewSectionStatus,
-): Partial<Record<keyof WorkOverviewModel, OverviewSectionStatus>> {
+): Partial<Record<WorkOverviewSectionKey, OverviewSectionStatus>> {
   return {
+    folder: status,
     filesAndArtifacts: status,
     workflowsAndThreads: status,
     approvals: status,

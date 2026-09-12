@@ -2,6 +2,7 @@ import {
   decodeWorkOverviewProjection,
   decodeProjectId,
   decodeWorkThreadId,
+  type WorkOverviewItem,
   type WorkOverviewProjection,
   type WorkRequest,
   type WorkThreadId,
@@ -16,6 +17,7 @@ import { composeWorkOverviewProjection } from "./work/workOverviewComposer";
 import type { WorkArtifactProjection } from "./work/workArtifactProjection";
 import type { WorkThreadRouteService } from "./workThreadRoutes";
 import type { ProjectService } from "./projectService";
+import type { WorkProjectStatusReader } from "./work/workProjectStatusReader";
 
 const METHODS = "GET, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
@@ -36,6 +38,10 @@ export interface WorkOverviewRouteDependencies {
   readonly projects: Pick<ProjectService, "bootstrap">;
   readonly requests: WorkOverviewRequestsPort;
   readonly windowAuthorityStore: WindowAuthorityStore;
+  /** What `STATUS.md` says for a Work Project. Absent means the page shows no status. */
+  readonly status?: WorkProjectStatusReader;
+  /** The top level of the bound folder. Absent means the page shows no folder. */
+  readonly folder?: (canonicalRoot: string) => Promise<ReadonlyArray<WorkOverviewItem>>;
   readonly now?: () => number;
 }
 
@@ -108,7 +114,19 @@ export function createWorkOverviewRouteHandler(dependencies: WorkOverviewRouteDe
             workflowSource.hasActiveForThread?.(projectId, decodeWorkThreadId(threadId)) ?? false,
       dependencies.requests.listPending(projectId),
     );
-    return jsonResponse(decodeWorkOverviewProjection(projection), 200, origin);
+    const [status, folder] = await Promise.all([
+      dependencies.status?.read(projectId, project.binding.canonicalRoot).catch(() => undefined),
+      dependencies.folder?.(project.binding.canonicalRoot).catch(() => undefined),
+    ]);
+    return jsonResponse(
+      decodeWorkOverviewProjection({
+        ...projection,
+        ...(status === undefined ? {} : { status }),
+        ...(folder === undefined ? {} : { folder }),
+      }),
+      200,
+      origin,
+    );
   };
 }
 

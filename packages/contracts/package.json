@@ -30,6 +30,7 @@
     "./work-file-listing": "./src/workFileListing.ts",
     "./work-board": "./src/workBoard.ts",
     "./work-overview": "./src/workOverview.ts",
+    "./work-project-status": "./src/workProjectStatus.ts",
     "./work-promotion": "./src/workPromotion.ts",
     "./work-requests": "./src/workRequests.ts",
     "./work-research": "./src/workResearch.ts",
