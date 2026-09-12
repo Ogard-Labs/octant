@@ -414,6 +414,16 @@ function lstatExists(path: string): boolean {
   }
 }
 
+function packageRootAbove(directory: string): string | undefined {
+  let current = directory;
+  while (true) {
+    if (existsSync(join(current, "package.json"))) return current;
+    const parent = dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+}
+
 export function makePiConfinementLive(options: PiConfinementOptions = {}): PiConfinementPort {
   const platform = options.platform ?? process.platform;
   const sandboxPath =
@@ -506,6 +516,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
         );
         const binaryDirectory = dirname(realpathSync(input.binaryPath));
         const runtimeDirectory = dirname(binaryDirectory);
+        const packageRoot = packageRootAbove(binaryDirectory);
         const networkEgress = materializeOsNetworkEgress(
           resolveDefaultThreadEgressPolicy({
             mode: input.mode,
@@ -541,11 +552,15 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
               allowFileReadStar: true,
               allowProcessExec: !(input.executionPolicy === "plan" || input.mode === "chat"),
               allowProcessFork: !(input.executionPolicy === "plan" || input.mode === "chat"),
+              ...(input.environment?.PATH === undefined
+                ? {}
+                : { interpreterSearchPath: input.environment.PATH }),
               readRoots: [
                 root,
                 piHome,
                 binaryDirectory,
                 runtimeDirectory,
+                ...(packageRoot === undefined ? [] : [packageRoot]),
                 temporaryDirectoryPath,
                 ...credentialPaths,
               ],
@@ -554,6 +569,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
                 piHome,
                 binaryDirectory,
                 runtimeDirectory,
+                ...(packageRoot === undefined ? [] : [packageRoot]),
                 ...credentialPaths,
               ],
               ...(bridgeRule === undefined ? {} : { extraRules: [bridgeRule] }),
@@ -667,7 +683,7 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
           const rpc = makePiRpcClient({ stdin: child.stdin, stdout: child.stdout });
           const exited = new Promise<void>((resolveExit, rejectExit) => {
             child.once("exit", (code, signal) => {
-              if (code === 0 || signal === "SIGTERM") resolveExit();
+              if (code === 0 || code === 143 || signal === "SIGTERM") resolveExit();
               else rejectExit(new Error("Pi process exited unexpectedly."));
             });
             child.once("error", rejectExit);
