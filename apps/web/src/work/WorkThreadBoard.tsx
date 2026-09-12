@@ -147,9 +147,9 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
   ).length;
 
   return (
-    <Surface ariaLabel="Task board" className="code-board" measure="wide">
+    <Surface ariaLabel="Thread board" className="code-board" measure="wide">
       <SurfaceHeader
-        subtitle="Your tasks by status."
+        subtitle="Your threads by status."
         title="Board"
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
       />
@@ -878,7 +878,7 @@ function cardDetailRows(
   });
   rows.push({ label: "Model", value: card.modelId });
   rows.push({
-    label: "Delivery target",
+    label: "Delivery",
     value: `${card.deliveryTarget} · ${card.deliverySatisfaction}`,
   });
   rows.push({ label: "Reason", value: workBoardStatusReasonLabel(card.statusReason) });

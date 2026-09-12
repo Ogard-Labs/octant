@@ -1075,7 +1075,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       props.onThreadUpdated?.(result.thread);
       setCompletionFormOpen(false);
       setCompletionEvidence("");
-      setStatus("Delivery target marked complete.");
+      setStatus("Delivery marked complete.");
     } catch {
       setErrorMessage("This task could not be marked complete. Try again.");
     } finally {
