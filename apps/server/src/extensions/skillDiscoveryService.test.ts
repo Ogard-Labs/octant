@@ -66,7 +66,7 @@ describe("bounded standalone skill discovery", () => {
     ]);
     expect(result.skills.every((entry) => entry.desiredEnabled === false)).toBe(true);
     expect(result.skills.map((entry) => entry.effectiveState)).toEqual(
-      result.skills.map(() => ({ kind: "blocked", reason: "untrusted" })),
+      result.skills.map(() => ({ kind: "blocked", reason: "review-required" })),
     );
     expect(result.skills.some((entry) => entry.skill.name === "unbounded")).toBe(false);
     expect(result.skills.some((entry) => entry.skill.name === "escape")).toBe(true);

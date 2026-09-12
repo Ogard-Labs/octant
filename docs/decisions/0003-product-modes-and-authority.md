@@ -31,7 +31,7 @@ users start quickly without a setup modal.
   authority transition. Octant never infers a root from the prompt, process
   directory, or another thread. The only folder Octant may create is the
   verified result of an explicitly approved managed repository clone into the
-  host's inventory (amended by 0117: the host may also create the mode's
+  host's inventory (amended by 0118: the host may also create the mode's
   subfolder of the user-configured default folder to provision a default
   Project).
 - Work never silently becomes Code. Coding discoveries offer a linked
@@ -92,4 +92,4 @@ users start quickly without a setup modal.
 - 0044 The dock hosts live thread-owned tools
 - 0049 Amends the read-only thread-reference decision for one explicit Chat
   coordination path
-- 0117 Amends the folder-creation rule for default Projects
+- 0118 Amends the folder-creation rule for default Projects

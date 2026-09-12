@@ -243,7 +243,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
       ) : null}
       {props.codeBoardOpen && props.activeMode === "code" ? (
         <div className="code-board-layer">
-          <LazyRailSurface label="Code Thread Board">
+          <LazyRailSurface label="Thread board">
             <CodeThreadBoard
               isNarrow={props.isNarrow}
               loadBoard={(query) => props.codeClient.queryBoard(query)}
@@ -265,7 +265,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
       ) : null}
       {props.workBoardOpen && props.activeMode === "work" ? (
         <div className="code-board-layer">
-          <LazyRailSurface label="Task board">
+          <LazyRailSurface label="Thread board">
             <WorkThreadBoard
               isNarrow={props.isNarrow}
               loadBoard={(query) => props.workThreadClient.queryBoard(query)}
@@ -335,7 +335,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
       ) : null}
       {props.automationCenterVisible ? (
         <div className="automation-center-layer">
-          <LazyRailSurface label="Automation Center">
+          <LazyRailSurface label="Automations">
             <AutomationCenter
               catalog={props.automationEditorCatalog}
               client={props.automationClient}
@@ -355,7 +355,7 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
       ) : null}
       {props.agentsCenterVisible ? (
         <div className="agents-center-layer">
-          <LazyRailSurface label="Agents Center">
+          <LazyRailSurface label="Agents">
             <AgentsCenter
               client={props.agentRunClient}
               {...(props.agentMessageClient === undefined

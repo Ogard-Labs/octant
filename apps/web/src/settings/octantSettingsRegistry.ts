@@ -364,6 +364,34 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       settings: [],
     },
     {
+      id: "remote-access",
+      label: "Remote access",
+      scope: "host",
+      keywords:
+        "remote access private listener lan tailscale https certificate pairing pair link ticket code approve deny device browser phone revoke rename origin port exposure",
+      settings: [
+        {
+          id: settingId("remote-listener"),
+          label: "Remote listener",
+          scope: "host",
+          keywords:
+            "remote listener enable disable restart hostname port origin certificate tls https lan tailscale exposure",
+        },
+        {
+          id: settingId("remote-pairing"),
+          label: "Pair a device",
+          scope: "host",
+          keywords: "pair pairing link code ticket approve deny comparison browser phone request",
+        },
+        {
+          id: settingId("remote-devices"),
+          label: "Paired devices",
+          scope: "host",
+          keywords: "paired devices inventory rename revoke revoke all browser phone",
+        },
+      ],
+    },
+    {
       id: "host",
       label: "Host",
       scope: "host",

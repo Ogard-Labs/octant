@@ -537,6 +537,7 @@ import {
   StandaloneSkillService,
   type SkillMarketplacePort,
 } from "./extensions/standaloneSkillService";
+import { ShellSettingsStandaloneSkillActivationStore } from "./extensions/standaloneSkillActivationStore";
 import { createCompositeSkillMarketplace } from "./extensions/compositeSkillMarketplace";
 import {
   CodexPluginPackageResolver,
@@ -3131,6 +3132,7 @@ export function startOctantServer(
       discovery: skillDiscoveryService,
       lifecycle: extensionLifecycleService,
       marketplace: skillMarketplace,
+      activationStore: new ShellSettingsStandaloneSkillActivationStore({ persistence }),
     });
     refreshStandaloneSkills = async () => {
       await standaloneSkillService.reconcile();

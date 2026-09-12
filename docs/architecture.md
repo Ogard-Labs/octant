@@ -103,11 +103,20 @@ server through `@octant/cli` (`octant server run`, `octant web`).
 and to authenticated remote browsers alike. It talks to the server through
 `@octant/client-runtime` and never holds authority of its own. In development
 Vite serves it with hot reload; in a packaged build the server serves the
-built assets.
+built assets. A paired browser mounts the remote shell rather than the desktop
+workspace: the same Chat, Work, and Code thread workspaces, driven by the
+ordinary product clients over `createRemoteProductFetch`, which carries each
+request on the device session and never presents a window capability. The
+desktop's window-bound sidebar, dock, and Settings are not served remotely.
 
 **Mobile (`apps/mobile`).** An Expo iOS/Android remote-control client. Threads
 are host-owned; the phone stores only device keys, a host registry, and session
-material. It uses the same contracts and client runtime as the browser.
+material. It uses the same contracts and client runtime as the browser. The
+phone creates Chat, Work, and Code threads, reads their transcripts, and sends
+follow-up turns under each thread's own authority (`start-work-thread-turn`
+with the thread's binding; `start-provider-turn` on the thread's checkout).
+Approvals, folder binding, file edits, and shell remain host-only and the
+composer says so.
 
 **Local client context.** Opening the canonical host URL directly creates a
 process-local client context through `/api/shell/local-session`; no launcher
@@ -186,7 +195,7 @@ repository on a `plain-folder` checkout whose head is `none`; every Git-backed
 feature reports itself unavailable there rather than inventing a revision. Code
 threads without a Project need the further `allowDefaultFolderThreads` switch,
 which the host accepts only while Git is not required. See
-[decisions/0117-a-default-folder-for-what-nobody-gave-a-home.md](decisions/0117-a-default-folder-for-what-nobody-gave-a-home.md).
+[decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md](decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md).
 
 Work never silently becomes Code. When coding work is detected in a Work
 thread, the server records a **promotion proposal**; only explicit user approval
@@ -594,7 +603,9 @@ modelId }`, and the model picker is provider-first. Discovery can find
   compatible, Azure AI Foundry API-key, Ollama), image HTTP profiles
   (OpenAI Image and Gemini native image — never selectable as Chat, Work, or
   Code turn drivers), SDK/RPC drivers (Claude Agent SDK, Codex app-server,
-  OpenCode, Pi and Oh My Pi), and ACP-based agent CLIs
+  OpenCode, Pi, and Oh My Pi — whose driver discovers models but refuses
+  `acquire`, so its probe reports `unavailable` and it never reaches a
+  picker), and ACP-based agent CLIs
   (Kilo, Devin, Mistral Vibe, Kimi Code, Grok Build, Goose, GLM Agent, Gemini CLI,
   GitHub Copilot, Cline, Qwen Code). fx ACP was probed and remains unselectable;
   see [fx-acp-compatibility.md](fx-acp-compatibility.md). Image profiles are
@@ -619,12 +630,14 @@ modelId }`, and the model picker is provider-first. Discovery can find
   audio, persists nothing, and reports each direction `ready`, `unconfigured`,
   or `unavailable` with the Settings link that fixes it; see
   [decisions/0084-voice-rides-an-openai-compatible-provider.md](decisions/0084-voice-rides-an-openai-compatible-provider.md).
-  Every composer (Chat, Work, Code, the welcome and draft composers) and
+  Every desktop composer (Chat, Work, Code, the welcome and draft composers) and
   Navigator show a microphone beside the attach control only while
   transcription is `ready`; the clip is recorded by the browser's own encoder,
   the transcript is appended to the draft, and the person still sends. Navigator
   can read replies aloud through the configured synthesis endpoint, or with the
-  operating system's voices when none is set.
+  operating system's voices when none is set. The mobile composer shows a
+  disabled microphone labelled unavailable; phone voice input is planned under
+  the same decision and not wired.
   The ACP drivers share one
   generic ACP client and protocol layer. Each in-tree vendor is a bundled
   `provider-driver` plugin that reaches the host only through `provider-sdk`;
