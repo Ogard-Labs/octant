@@ -101,7 +101,13 @@ agent's revisions. Older versions stay intact and can still be opened; a board
 opened at an older version is read-only. If the host has moved on since you
 opened the board, the drag is refused, the board reloads, and you drag again on
 the current version. Boards keep the diagram budgets (512 nodes, 1,024 edges).
-Comments and board templates are not available yet. Revisions
+**Comments** live beside the Canvas in the sidebar. A comment is anchored to a
+block or to a board node; replies, resolving, and deleting are journaled by
+the host, so they survive restart and reload. Every comment is authored as you,
+with the device it came through noted ("paired device" when it arrived from a
+paired phone or browser). A comment whose block has since left the canvas is
+kept and marked rather than dropped. Shared snapshots never include comments.
+Board templates are not available yet. Revisions
 do not force a document the user closed to reopen. Agents should identify the
 created document rather than invent a download URL or claim a preview opened
 without evidence. Canvas authoring through this tool currently requires a

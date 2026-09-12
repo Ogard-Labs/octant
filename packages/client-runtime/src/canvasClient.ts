@@ -3,6 +3,8 @@ import {
   decodeCanvasGetOutcome,
   decodeCanvasHistoryOutcome,
   decodeCanvasCreateResult,
+  decodeCanvasCommentCommandResult,
+  decodeCanvasCommentsOutcome,
   decodeCanvasDiagramLayoutReviseResult,
   decodeCanvasInventoryList,
   decodeCanvasThreadReferenceCardsOutcome,
@@ -19,6 +21,9 @@ import {
   type CanvasId,
   type CanvasCreateRequest,
   type CanvasCreateResult,
+  type CanvasCommentCommand,
+  type CanvasCommentCommandResult,
+  type CanvasCommentsOutcome,
   type CanvasDiagramLayoutReviseCommand,
   type CanvasDiagramLayoutReviseResult,
   type CanvasInventoryList,
@@ -57,6 +62,9 @@ export interface CanvasClient {
   reviseDiagramLayout?(
     command: CanvasDiagramLayoutReviseCommand,
   ): Promise<CanvasDiagramLayoutReviseResult>;
+  /** Comments on a Canvas and the commands that change them; host-journaled. */
+  comments?(canvasId: CanvasId): Promise<CanvasCommentsOutcome>;
+  comment?(command: CanvasCommentCommand): Promise<CanvasCommentCommandResult>;
   refresh?(request: CanvasRefreshRequest, signal?: AbortSignal): Promise<CanvasRefreshResult>;
   cancelRefresh?(request: CanvasRefreshCancelRequest): Promise<CanvasRefreshResult>;
   executeAction?(request: CanvasActionRequest, signal?: AbortSignal): Promise<CanvasActionResult>;
@@ -134,6 +142,28 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           body: JSON.stringify(body),
         },
         decodeCanvasReviseResult,
+      );
+    },
+    comments(canvasId) {
+      const url = new URL("/api/canvas/comments", options.baseUrl);
+      url.searchParams.set("canvasId", String(canvasId));
+      return request(
+        options.fetch,
+        url.toString(),
+        { method: "GET", headers },
+        decodeCanvasCommentsOutcome,
+      );
+    },
+    comment(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/comment", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeCanvasCommentCommandResult,
       );
     },
     reviseDiagramLayout(body) {

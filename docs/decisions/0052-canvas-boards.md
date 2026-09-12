@@ -48,9 +48,13 @@ catalog, the no-markup rule, or mode, Project, or host authority.
   `CANVAS_MAX_DIAGRAM_EDGES` is 1_024 in `packages/contracts/src/canvas.ts`;
   domain policy re-checks both before a definition can persist or render.
   Boards do not raise those caps.
-- **Open question, before comments are persisted:** on a local-only host, is
-  a comment authored as the single local user, or as a named actor per remote
-  client? Do not pick this silently in contracts or journal events.
+- **Comments are authored as the local user, with the device recorded.** On a
+  local-only host there is one person; a comment from a paired phone is still
+  that person's comment. The author stays `local-user` (or `agent`), and the
+  server stamps a `CanvasCommentOrigin` — `host` or `remote-device` with the
+  authenticated device id — beside it from the principal it authenticated. A
+  client never names its own origin. Per-person actors return only if a
+  shared host (0040) introduces a second person.
 
 Non-goals for this record: freehand ink, realtime co-edit, physical-device
 boards, and Mermaid or PlantUML import.

@@ -36,6 +36,7 @@ import { CanvasEventStore } from "./canvas/canvasEventStore";
 import { CanvasProjection } from "./canvas/canvasProjection";
 import { CanvasService } from "./canvas/canvasService";
 import { CanvasShareEventStore, registerCanvasShareEvents } from "./canvas/canvasShareEventStore";
+import { CanvasCommentService, registerCanvasCommentEvents } from "./canvas/canvasCommentService";
 import { CanvasShareService } from "./canvas/canvasShareService";
 import {
   CANVAS_ACTION_RECEIPT_RECORDED,
@@ -125,12 +126,14 @@ function createRevisionRoute(projection = new CanvasProjection()) {
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
   applyMigrations(connection, MIGRATIONS, () => now);
-  const registry = registerCanvasShareEvents(
-    new EventRegistry()
-      .register(CANVAS_CREATED, 1, CanvasCreated)
-      .register(CANVAS_VERSION_APPENDED, 1, CanvasVersionAppended)
-      .register(CANVAS_REFRESH_RECEIPT_RECORDED, 1, CanvasRefreshReceiptRecorded)
-      .register(CANVAS_ACTION_RECEIPT_RECORDED, 1, CanvasActionReceiptRecorded),
+  const registry = registerCanvasCommentEvents(
+    registerCanvasShareEvents(
+      new EventRegistry()
+        .register(CANVAS_CREATED, 1, CanvasCreated)
+        .register(CANVAS_VERSION_APPENDED, 1, CanvasVersionAppended)
+        .register(CANVAS_REFRESH_RECEIPT_RECORDED, 1, CanvasRefreshReceiptRecorded)
+        .register(CANVAS_ACTION_RECEIPT_RECORDED, 1, CanvasActionReceiptRecorded),
+    ),
   );
   const projections = new ProjectionRegistry()
     .register(new AggregateHeadsProjection())
@@ -183,12 +186,22 @@ function createRevisionRoute(projection = new CanvasProjection()) {
     version: versionEnvelope as never,
     occurredAt: now as never,
   });
+  const canvasCommentService = new CanvasCommentService(
+    {
+      journal,
+      projection,
+      uuid: () => `abababab-abab-4bab-8bab-${(counter += 1).toString(16).padStart(12, "0")}`,
+      actor,
+    },
+    { authorize: () => true },
+  );
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability: windowCapability, now: 0 });
   const route = createCanvasRouteHandler({
     canvasProjection: projection,
     canvasService,
     canvasShareService,
+    canvasCommentService,
     windowAuthorityStore: store,
     projects: {
       bootstrap: async () => ({
@@ -971,5 +984,120 @@ describe("canvas routes", () => {
     const overview = decodeCanvasShareOverview(JSON.parse(await audited!.text()));
     expect(overview.accessLog).toHaveLength(1);
     expect(overview.accessLog[0]?.principalId).toBe(remoteDeviceId);
+  });
+});
+
+describe("canvas comment routes", () => {
+  const commentId = "abababab-abab-4bab-8bab-000000000101";
+
+  function commentBody(expectedSequence: number) {
+    return {
+      kind: "canvas-comment-add",
+      canvasId,
+      commentId,
+      anchor: { kind: "node", blockId: "board-1", nodeId: "db" },
+      author: { kind: "local-user", actorId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" },
+      body: "Should this be Postgres?",
+      expectedSequence,
+      issuedAt: now,
+    };
+  }
+
+  it("journals a comment from the host window and reads it back with a host origin", async () => {
+    const route = createRevisionRoute();
+    const unauthenticated = await route(
+      new Request("http://127.0.0.1/api/canvas/comment", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(commentBody(0)),
+      }),
+    );
+    expect(unauthenticated?.status).toBe(401);
+
+    const accepted = await route(
+      new Request("http://127.0.0.1/api/canvas/comment", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": windowCapability,
+        },
+        body: JSON.stringify(commentBody(0)),
+      }),
+    );
+    expect(JSON.parse(await accepted!.text())).toMatchObject({ kind: "accepted", sequence: 1 });
+
+    const read = await route(
+      new Request(`http://127.0.0.1/api/canvas/comments?canvasId=${String(canvasId)}`, {
+        method: "GET",
+        headers: { "x-octant-window-capability": windowCapability },
+      }),
+    );
+    const outcome = JSON.parse(await read!.text());
+    expect(outcome.kind).toBe("ready");
+    expect(outcome.threads[0].comment).toMatchObject({
+      body: "Should this be Postgres?",
+      origin: { kind: "host" },
+      anchor: { kind: "node", blockId: "board-1", nodeId: "db" },
+    });
+
+    const stale = await route(
+      new Request("http://127.0.0.1/api/canvas/comment", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": windowCapability,
+        },
+        body: JSON.stringify({
+          ...commentBody(0),
+          commentId: "abababab-abab-4bab-8bab-000000000102",
+        }),
+      }),
+    );
+    expect(JSON.parse(await stale!.text())).toMatchObject({
+      kind: "denied",
+      denialCode: "stale-version",
+    });
+  });
+
+  it("records the paired device a comment came through, beside the local author", async () => {
+    const route = createRevisionRoute();
+    const remoteRequest = new Request("http://127.0.0.1/api/canvas/comment", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-window-capability": windowCapability,
+      },
+      body: JSON.stringify(commentBody(0)),
+    });
+    bindPrincipalRouteContext(remoteRequest, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "17171717-1717-4171-8171-171717171717" as never,
+      }),
+      scopeId: remoteDeviceId as never,
+    });
+    expect(JSON.parse(await (await route(remoteRequest))!.text())).toMatchObject({
+      kind: "accepted",
+    });
+    const read = await route(
+      new Request(`http://127.0.0.1/api/canvas/comments?canvasId=${String(canvasId)}`, {
+        method: "GET",
+        headers: { "x-octant-window-capability": windowCapability },
+      }),
+    );
+    const outcome = JSON.parse(await read!.text());
+    expect(outcome.threads[0].comment.origin).toEqual({
+      kind: "remote-device",
+      deviceId: remoteDeviceId,
+    });
+    expect(outcome.threads[0].comment.author).toEqual({
+      kind: "local-user",
+      actorId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
   });
 });
