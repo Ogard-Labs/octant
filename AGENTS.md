@@ -280,8 +280,11 @@ credentials, physical devices, release authority, or subjective judgment.
   next change cannot land without the unmerged parent (a real stack).
 - Do not open a sibling `fix/*` or `feature/*` off `main` for work that belongs
   on an in-flight pull request.
+<<<<<<< HEAD
 - A report, assessment, audit, or Agent Store / Context document is not a reason
   to open a GitHub pull request. Those stay in the store or chat.
+=======
+>>>>>>> origin/feature/stacked-pr-policy
 - Choose the smallest delivery shape that preserves reviewability:
   - Keep one outcome on one pull request when its jobs are not independently
     reviewable.
