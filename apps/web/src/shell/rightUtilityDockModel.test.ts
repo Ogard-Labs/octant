@@ -1,7 +1,9 @@
 import type { OctantMode } from "@octant/contracts/modes";
+import { MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
 import { describe, expect, it } from "vitest";
 import {
   RIGHT_UTILITY_DOCK_SURFACES,
+  resolveDockPresentationWidth,
   resolveRightUtilityDockSurface,
   type RightUtilityDockResolutionInput,
   type RightUtilityDockSurfaceAvailability,
@@ -21,6 +23,25 @@ function surface(id: (typeof RIGHT_UTILITY_DOCK_SURFACES)[number]["id"]) {
   if (found === undefined) throw new Error(`Missing ${id} dock surface.`);
   return found;
 }
+
+describe("resolving the right utility dock width", () => {
+  it("uses the compact width only while the dock is an empty launcher", () => {
+    expect(
+      resolveDockPresentationWidth({
+        configuredWidth: 560,
+        resolution: { kind: "closed", reason: "no-surface" },
+        tabCount: 0,
+      }),
+    ).toBe(MIN_CONTEXT_SIDEBAR_WIDTH);
+    expect(
+      resolveDockPresentationWidth({
+        configuredWidth: 560,
+        resolution: { kind: "surface", surface: surface("browser") },
+        tabCount: 1,
+      }),
+    ).toBe(560);
+  });
+});
 
 describe("resolving what the right utility dock shows", () => {
   it("publishes only the live thread-owned surfaces in stable order", () => {

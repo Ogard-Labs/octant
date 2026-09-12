@@ -186,7 +186,9 @@ describe("CodeComposerAdapter", () => {
     render(<CodeComposerAdapter {...defaultProps} onCreateThread={onCreateThread} />);
 
     await user.click(screen.getByRole("button", { name: "Access policy" }));
-    await user.click(screen.getByRole("switch", { name: "Remember access for this Project" }));
+    await user.click(
+      await screen.findByRole("menuitemcheckbox", { name: "Remember for this Project" }),
+    );
     await user.keyboard("{Escape}");
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Ship it");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
@@ -380,7 +382,7 @@ describe("CodeComposerAdapter interactions", () => {
       fireEvent.click(access);
     });
     await act(async () => {
-      fireEvent.click(screen.getByRole("option", { name: /Plan/ }));
+      fireEvent.click(await screen.findByRole("menuitemradio", { name: /Plan/ }));
     });
     expect(onExecutionPolicyChange).toHaveBeenCalledWith("plan");
     root.unmount();

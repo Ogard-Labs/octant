@@ -1,6 +1,8 @@
 import {
+  ApplicationMentionTypeahead,
   BrowserUseMention,
   ComputerUseMention,
+  useApplicationMentionTypeahead,
   useBrowserUseMention,
   useComputerUseMention,
 } from "../../computerUse/ComputerUseMention";
@@ -245,6 +247,10 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     onDraftChange: setPrompt,
     onResolveExtensionReference: extensionDraft.resolveReference,
   });
+  const appMentions = useApplicationMentionTypeahead([
+    { controller: computer, kind: "computer" },
+    { controller: browser, kind: "browser" },
+  ]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composerIdRef = useRef(globalThis.crypto.randomUUID());
   useEffect(() => {
@@ -571,6 +577,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (appMentions.handleKeyDown(event)) return;
     if (computer.handleKeyDown(event)) return;
     if (browser.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
@@ -687,22 +694,26 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 aria-autocomplete="list"
                 aria-expanded={computer.open || browser.open || slash.open}
                 aria-controls={
-                  computer.open
-                    ? computer.listId
-                    : browser.open
-                      ? browser.listId
-                      : slash.open
-                        ? slash.listId
-                        : undefined
+                  appMentions.open.length > 1
+                    ? appMentions.listId
+                    : computer.open
+                      ? computer.listId
+                      : browser.open
+                        ? browser.listId
+                        : slash.open
+                          ? slash.listId
+                          : undefined
                 }
                 aria-activedescendant={
-                  computer.open
-                    ? `${computer.listId}-computer`
-                    : browser.open
-                      ? `${browser.listId}-browser`
-                      : slash.active === undefined
-                        ? undefined
-                        : `${slash.listId}-${slash.active.id}`
+                  appMentions.open.length > 1
+                    ? `${appMentions.listId}-${appMentions.open[appMentions.active]?.kind ?? ""}`
+                    : computer.open
+                      ? `${computer.listId}-computer`
+                      : browser.open
+                        ? `${browser.listId}-browser`
+                        : slash.active === undefined
+                          ? undefined
+                          : `${slash.listId}-${slash.active.id}`
                 }
                 autoFocus
                 className="composer-input"
@@ -733,7 +744,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               />
             }
             typeahead={
-              computer.open ? (
+              appMentions.open.length > 1 ? (
+                <ApplicationMentionTypeahead typeahead={appMentions} />
+              ) : computer.open ? (
                 <ComputerUseMention controller={computer} surface="typeahead" />
               ) : browser.open ? (
                 <BrowserUseMention controller={browser} surface="typeahead" />

@@ -37,8 +37,10 @@ const BLOCK_REASON_LABELS: Readonly<Record<ExtensionBlockReason, string>> = {
   "stale-catalog-epoch": "Catalog changed",
   "not-installed": "Not installed",
   untrusted: "Untrusted",
+  "review-required": "Review required",
   "plugin-disabled": "Plugin disabled",
   "component-disabled": "Component disabled",
+  superseded: "Superseded by another source",
   incompatible: "Incompatible",
   quarantined: "Quarantined",
   draining: "Draining",
@@ -256,6 +258,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
     "idle" | "searching" | "empty" | "offline" | "failed"
   >("idle");
   const [busyPackageId, setBusyPackageId] = useState<string | undefined>();
+  const [busySkillId, setBusySkillId] = useState<string | undefined>();
   const [inspectingEntryId, setInspectingEntryId] = useState<string | undefined>();
   const [preview, setPreview] = useState<ExtensionPackagePreview | undefined>();
   const [localPreview, setLocalPreview] = useState<ExtensionPackagePreview | undefined>();
@@ -345,8 +348,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   }, [reload]);
 
   const runLifecycle = useCallback(
-    async (command: ExtensionCommand, packageId?: string): Promise<boolean> => {
+    async (command: ExtensionCommand, packageId?: string, skillId?: string): Promise<boolean> => {
       if (packageId !== undefined) setBusyPackageId(packageId);
+      if (skillId !== undefined) setBusySkillId(skillId);
       setFailure(undefined);
       try {
         const result = await props.client.execute(command);
@@ -364,6 +368,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         return false;
       } finally {
         if (packageId !== undefined) setBusyPackageId(undefined);
+        if (skillId !== undefined) setBusySkillId(undefined);
       }
     },
     [props.client, reload],
@@ -644,7 +649,11 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       : filteredStandaloneSkills.slice(0, INSTALLED_SKILL_PREVIEW_LIMIT);
   const standaloneSkillSummary = standaloneSkills.reduce(
     (summary, skill) => {
-      if (skill.effectiveState.kind === "blocked" && skill.effectiveState.reason === "untrusted") {
+      if (
+        skill.effectiveState.kind === "blocked" &&
+        (skill.effectiveState.reason === "review-required" ||
+          skill.effectiveState.reason === "untrusted")
+      ) {
         summary.needsReview += 1;
       } else if (skill.effectiveState.kind === "effective" && skill.skill.available) {
         summary.available += 1;
@@ -655,6 +664,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
     },
     { available: 0, needsReview: 0, other: 0 },
   );
+  const standaloneSkillCollisions = new Set(snapshot.collisions.map((collision) => collision.name));
   const skillPreviewAction =
     skillPreview === undefined ? undefined : skillPackageAction(snapshot, skillPreview);
 
@@ -818,7 +828,58 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                       tabIndex={0}
                     >
                       {visibleStandaloneSkills.map((skill) => (
-                        <StandaloneSkillCard key={String(skill.skill.qualifiedId)} skill={skill} />
+                        <StandaloneSkillCard
+                          key={String(skill.skill.qualifiedId)}
+                          skill={skill}
+                          busy={busySkillId === String(skill.skill.qualifiedId)}
+                          colliding={standaloneSkillCollisions.has(skill.skill.name)}
+                          onReview={() =>
+                            runLifecycle(
+                              {
+                                kind: "review-skill",
+                                qualifiedId: String(skill.skill.qualifiedId),
+                                digest: skill.skill.digest,
+                              },
+                              undefined,
+                              String(skill.skill.qualifiedId),
+                            )
+                          }
+                          onTrust={(trusted) =>
+                            runLifecycle(
+                              {
+                                kind: "trust-skill-source",
+                                qualifiedId: String(skill.skill.qualifiedId),
+                                digest: skill.skill.digest,
+                                trusted,
+                              },
+                              undefined,
+                              String(skill.skill.qualifiedId),
+                            )
+                          }
+                          onDesired={(desired) =>
+                            runLifecycle(
+                              {
+                                kind: "set-skill-desired",
+                                qualifiedId: String(skill.skill.qualifiedId),
+                                digest: skill.skill.digest,
+                                desired,
+                              },
+                              undefined,
+                              String(skill.skill.qualifiedId),
+                            )
+                          }
+                          onSelectCollision={() =>
+                            runLifecycle(
+                              {
+                                kind: "select-skill-collision",
+                                name: skill.skill.name,
+                                qualifiedId: String(skill.skill.qualifiedId),
+                              },
+                              undefined,
+                              String(skill.skill.qualifiedId),
+                            )
+                          }
+                        />
                       ))}
                     </ul>
                   )}
@@ -1362,12 +1423,24 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   );
 }
 
-function StandaloneSkillCard(props: { readonly skill: StandaloneSkillRecord }) {
+interface StandaloneSkillCardProps {
+  readonly skill: StandaloneSkillRecord;
+  readonly busy: boolean;
+  readonly colliding: boolean;
+  readonly onReview: () => Promise<boolean>;
+  readonly onTrust: (trusted: boolean) => Promise<boolean>;
+  readonly onDesired: (desired: boolean) => Promise<boolean>;
+  readonly onSelectCollision: () => Promise<boolean>;
+}
+
+function StandaloneSkillCard(props: StandaloneSkillCardProps) {
   const skill = props.skill;
   const [detailsOpen, setDetailsOpen] = useState(false);
   const blocked = skill.effectiveState.kind === "blocked";
-  const summarizedUntrusted =
-    skill.effectiveState.kind === "blocked" && skill.effectiveState.reason === "untrusted";
+  const needsReview =
+    blocked &&
+    (skill.effectiveState.reason === "review-required" ||
+      skill.effectiveState.reason === "untrusted");
   return (
     <li className="extcard">
       <span aria-hidden="true" className="icon-mark">
@@ -1375,7 +1448,7 @@ function StandaloneSkillCard(props: { readonly skill: StandaloneSkillRecord }) {
       </span>
       <span className="extcard-name">{skill.displayName}</span>
       <span className="extcard-right">
-        {summarizedUntrusted ? (
+        {needsReview ? (
           <span className="extensions-settings__state-label">Needs review</span>
         ) : (
           <span
@@ -1388,6 +1461,57 @@ function StandaloneSkillCard(props: { readonly skill: StandaloneSkillRecord }) {
                 : "Unavailable"}
           </span>
         )}
+        {!skill.reviewed ? (
+          <OctantButton
+            aria-label={`Review ${skill.displayName}`}
+            disabled={props.busy}
+            onClick={() => void props.onReview()}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            Review
+          </OctantButton>
+        ) : (
+          <OctantButton
+            aria-label={
+              skill.provenance.reviewed
+                ? `Revoke review for ${skill.displayName}`
+                : `Trust ${skill.displayName}`
+            }
+            disabled={props.busy}
+            onClick={() => void props.onTrust(!skill.provenance.reviewed)}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            {skill.provenance.reviewed ? "Revoke trust" : "Trust source"}
+          </OctantButton>
+        )}
+        <OctantButton
+          aria-label={
+            skill.desiredEnabled ? `Disable ${skill.displayName}` : `Enable ${skill.displayName}`
+          }
+          disabled={props.busy}
+          onClick={() => void props.onDesired(!skill.desiredEnabled)}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          {skill.desiredEnabled ? "Disable" : "Enable"}
+        </OctantButton>
+        {props.colliding ? (
+          <OctantButton
+            aria-label={`Use ${skill.displayName} from this source`}
+            disabled={props.busy}
+            onClick={() => void props.onSelectCollision()}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            Use this source
+          </OctantButton>
+        ) : null}
         <OctantButton
           aria-expanded={detailsOpen}
           aria-label={`${detailsOpen ? "Hide" : "Show"} details for ${skill.displayName}`}
@@ -1420,6 +1544,10 @@ function StandaloneSkillCard(props: { readonly skill: StandaloneSkillRecord }) {
             <div>
               <dt>Review</dt>
               <dd>{skill.reviewed ? "Reviewed" : "Review required"}</dd>
+            </div>
+            <div>
+              <dt>Trusted</dt>
+              <dd>{skill.provenance.reviewed ? "Trusted" : "Not trusted"}</dd>
             </div>
             <div>
               <dt>Requested</dt>

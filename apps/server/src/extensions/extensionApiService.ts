@@ -134,6 +134,10 @@ export class ExtensionApiService {
         case "update-skill":
         case "remove-skill":
         case "reconcile-skills":
+        case "review-skill":
+        case "trust-skill-source":
+        case "set-skill-desired":
+        case "select-skill-collision":
           if (this.#skills === undefined) return unavailableSkills();
           {
             const result = await this.#skills.execute(command, signal);
