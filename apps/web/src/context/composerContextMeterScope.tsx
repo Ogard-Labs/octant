@@ -26,6 +26,13 @@ export interface ComposerContextUsageFallback {
   /** The provider's own account of its window, when it reported one. */
   readonly contextWindow?: number;
   readonly contextTokens?: number;
+  /**
+   * The window the selected model declares, when the provider's usage report
+   * did not name one. A driver that lists a model's context limit already
+   * attested it; the meter may divide the reported occupancy by it, but the
+   * popover says whose number it is.
+   */
+  readonly modelContextWindow?: number;
 }
 
 function ignoredRebuild(): void {}
