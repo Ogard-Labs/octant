@@ -54,7 +54,8 @@ export function AppearanceBackgroundPanel() {
   const { colors } = useTheme();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | undefined>();
-  const custom = appearance.preferences.backgroundMode === "custom";
+  const backgroundMode = appearance.preferences.backgroundMode;
+  const custom = backgroundMode === "custom";
   const themePreference = appearance.preferences.colorSchemePreference;
   const surfaceStyle = appearance.preferences.surfaceStyle;
 
@@ -189,7 +190,11 @@ export function AppearanceBackgroundPanel() {
       <Text style={styles.section}>{MOBILE_COPY.backgroundSectionTitle}</Text>
       <GlassSurface contentStyle={styles.previewPad} material="thin" radius={radii.md}>
         <Text style={styles.previewLabel}>
-          {custom ? MOBILE_COPY.backgroundModeCustom : MOBILE_COPY.backgroundModeCodeGradient}
+          {custom
+            ? MOBILE_COPY.backgroundModeCustom
+            : backgroundMode === "atmosphere"
+              ? MOBILE_COPY.backgroundModeAtmosphere
+              : MOBILE_COPY.backgroundModeCodeGradient}
         </Text>
       </GlassSurface>
 
@@ -217,6 +222,19 @@ export function AppearanceBackgroundPanel() {
         testID="mobile-appearance-use-code-gradient"
       >
         <Text style={styles.secondaryLabel}>{MOBILE_COPY.backgroundUseCodeGradient}</Text>
+      </Pressable>
+
+      <Pressable
+        disabled={busy}
+        onPress={() => {
+          void appearance.useAtmosphere().then(() => {
+            setMessage(MOBILE_COPY.backgroundModeAtmosphere);
+          });
+        }}
+        style={styles.secondary}
+        testID="mobile-appearance-use-atmosphere"
+      >
+        <Text style={styles.secondaryLabel}>{MOBILE_COPY.backgroundUseAtmosphere}</Text>
       </Pressable>
 
       {custom ? (

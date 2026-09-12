@@ -208,7 +208,7 @@ export function HomeComposerSheet(props: {
       )}
 
       <View style={styles.toolbar}>
-        <IconButton accessibilityLabel="Attachments unavailable" disabled name="add" size={46} />
+        <IconButton accessibilityLabel="Attachments unavailable" disabled name="add" size={38} />
         <Pressable
           accessibilityLabel={`Choose model, ${props.modelLabel}`}
           accessibilityRole="button"
@@ -225,14 +225,14 @@ export function HomeComposerSheet(props: {
           accessibilityLabel="Voice input unavailable"
           disabled
           name="mic-outline"
-          size={46}
+          size={38}
         />
         <IconButton
           accessibilityLabel={props.busy === true ? "Creating" : "Send"}
           disabled={!canSubmit}
           name={props.busy === true ? "hourglass-outline" : "arrow-up"}
           onPress={props.onSubmit}
-          size={46}
+          size={38}
           testID="mobile-home-composer-submit"
           variant="send"
         />

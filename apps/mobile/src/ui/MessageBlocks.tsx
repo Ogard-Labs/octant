@@ -17,9 +17,9 @@ export function MessageBlocks(props: MessageBlocksProps) {
   const blocks = useMemo(() => parseMarkdownBlocks(props.text), [props.text]);
   const user = props.tone === "user";
   const textColor = user ? colors.userBubbleText : colors.textPrimary;
-  const muted = user ? "rgba(247,247,244,0.72)" : colors.textSecondary;
-  const codeBg = user ? "rgba(247,247,244,0.12)" : colors.surfaceSolid;
-  const codeBorder = user ? "rgba(247,247,244,0.18)" : colors.glassStroke;
+  const muted = user ? colors.onBubbleMuted : colors.textSecondary;
+  const codeBg = user ? colors.onBubbleFill : colors.surfaceSolid;
+  const codeBorder = user ? colors.onBubbleStroke : colors.glassStroke;
 
   const styles = useMemo(
     () =>

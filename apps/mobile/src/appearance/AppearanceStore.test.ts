@@ -21,39 +21,39 @@ function memoryStorage() {
 }
 
 describe("AppearanceStore", () => {
-  it("defaults to atmosphere canvas, system theme, and glass surfaces", () => {
+  it("defaults to the Octant canvas, system theme, and flat surfaces", () => {
     expect(parseAppearancePreferences(null)).toEqual(DEFAULT_APPEARANCE);
     expect(parseAppearancePreferences("{")).toEqual(DEFAULT_APPEARANCE);
     expect(DEFAULT_APPEARANCE.colorSchemePreference).toBe("system");
-    expect(DEFAULT_APPEARANCE.surfaceStyle).toBe("glass");
+    expect(DEFAULT_APPEARANCE.surfaceStyle).toBe("flat");
   });
 
-  it("parses legacy prefs without theme/surface as system + glass", () => {
+  it("parses legacy prefs without theme/surface as system + flat", () => {
     expect(parseAppearancePreferences(JSON.stringify({ backgroundMode: "code-gradient" }))).toEqual(
       {
         backgroundMode: "code-gradient",
         colorSchemePreference: "system",
-        surfaceStyle: "glass",
+        surfaceStyle: "flat",
       },
     );
   });
 
   it("persists surface style independently of wallpaper and theme", async () => {
     const store = createAppearanceStore(memoryStorage());
-    const flat = await store.setSurfaceStyle("flat");
-    expect(flat.surfaceStyle).toBe("flat");
-    expect(flat.colorSchemePreference).toBe("system");
+    const glass = await store.setSurfaceStyle("glass");
+    expect(glass.surfaceStyle).toBe("glass");
+    expect(glass.colorSchemePreference).toBe("system");
 
     const dark = await store.setColorSchemePreference("dark");
-    expect(dark.surfaceStyle).toBe("flat");
+    expect(dark.surfaceStyle).toBe("glass");
     expect(dark.colorSchemePreference).toBe("dark");
 
     const withImage = await store.saveCustomImage("data:image/png;base64,abc");
-    expect(withImage.surfaceStyle).toBe("flat");
+    expect(withImage.surfaceStyle).toBe("glass");
     expect(withImage.backgroundMode).toBe("custom");
 
     const cleared = await store.clearCustomImage();
-    expect(cleared.surfaceStyle).toBe("flat");
+    expect(cleared.surfaceStyle).toBe("glass");
     expect(cleared.backgroundMode).toBe("code-gradient");
   });
 
@@ -73,6 +73,21 @@ describe("AppearanceStore", () => {
     expect(await store.load()).toEqual(cleared);
   });
 
+  it("persists the opt-in atmosphere background independently of theme", async () => {
+    const store = createAppearanceStore(memoryStorage());
+    const atmosphere = await store.setBackgroundMode("atmosphere");
+    expect(atmosphere.backgroundMode).toBe("atmosphere");
+    expect(atmosphere.surfaceStyle).toBe("flat");
+    expect(await store.load()).toEqual(atmosphere);
+
+    const dark = await store.setColorSchemePreference("dark");
+    expect(dark.backgroundMode).toBe("atmosphere");
+
+    const canvas = await store.setBackgroundMode("code-gradient");
+    expect(canvas.backgroundMode).toBe("code-gradient");
+    expect(canvas.colorSchemePreference).toBe("dark");
+  });
+
   it("persists and clears a custom background image", async () => {
     const store = createAppearanceStore(memoryStorage());
     const withImage = await store.saveCustomImage("data:image/png;base64,abc");
@@ -84,7 +99,7 @@ describe("AppearanceStore", () => {
     expect(cleared).toEqual({
       backgroundMode: "code-gradient",
       colorSchemePreference: "system",
-      surfaceStyle: "glass",
+      surfaceStyle: "flat",
     });
     expect(await store.load()).toEqual(cleared);
   });

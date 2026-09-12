@@ -38,7 +38,7 @@ export function FloatingComposer(props: FloatingComposerProps) {
           paddingTop: space.md,
           paddingBottom: space.sm,
           gap: space.sm,
-          minHeight: 96,
+          minHeight: 84,
         },
         placeholder: {
           color: colors.textTertiary,

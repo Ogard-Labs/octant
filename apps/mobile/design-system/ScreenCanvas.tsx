@@ -4,7 +4,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { themeAtmosphereOpacity, themeAtmosphereSources } from "./themeAtmospheres";
 import { useTheme } from "./theme";
 
-export type CanvasBackgroundMode = "code-gradient" | "custom";
+export type CanvasBackgroundMode = "code-gradient" | "atmosphere" | "custom";
 
 export interface ScreenCanvasProps {
   readonly children: ReactNode;
@@ -15,9 +15,10 @@ export interface ScreenCanvasProps {
 }
 
 /**
- * Distilled canvas: theme atmosphere photo at partial opacity + translucent
- * scrim so liquid-glass chrome can frost over the image.
- * Custom photos stay dimmed for readability.
+ * The Octant canvas mirrors the desktop ground: a flat workspace colour with a
+ * whisper of neutral wash — not a loud photo. The bundled atmosphere and custom
+ * wallpapers remain opt-in through Appearance → Background; custom photos stay
+ * dimmed for readability.
  */
 export function ScreenCanvas(props: ScreenCanvasProps) {
   const { colors, scheme } = useTheme();
@@ -51,7 +52,7 @@ export function ScreenCanvas(props: ScreenCanvasProps) {
             style={StyleSheet.absoluteFill}
           />
         </>
-      ) : (
+      ) : mode === "atmosphere" ? (
         <>
           <Image
             accessibilityIgnoresInvertColors
@@ -62,22 +63,24 @@ export function ScreenCanvas(props: ScreenCanvasProps) {
           />
           <LinearGradient
             colors={[
-              scheme === "dark" ? "rgba(20,19,16,0.55)" : "rgba(247,247,244,0.28)",
-              scheme === "dark" ? "rgba(20,19,16,0.28)" : "transparent",
-              scheme === "dark" ? "rgba(20,19,16,0.68)" : "rgba(247,247,244,0.42)",
+              scheme === "dark" ? "rgba(26,26,26,0.55)" : "rgba(255,255,255,0.30)",
+              "transparent",
+              scheme === "dark" ? "rgba(26,26,26,0.70)" : "rgba(255,255,255,0.44)",
             ]}
             end={{ x: 0.5, y: 1 }}
             start={{ x: 0.2, y: 0 }}
             style={StyleSheet.absoluteFill}
             testID="mobile-canvas-gradient"
           />
-          <LinearGradient
-            colors={[colors.atmosphereGradientStart, "transparent", colors.atmosphereGradientEnd]}
-            end={{ x: 1, y: 0.85 }}
-            start={{ x: 0.05, y: 0 }}
-            style={StyleSheet.absoluteFill}
-          />
         </>
+      ) : (
+        <LinearGradient
+          colors={[colors.atmosphereGradientStart, "transparent", colors.atmosphereGradientEnd]}
+          end={{ x: 1, y: 0.85 }}
+          start={{ x: 0.05, y: 0 }}
+          style={StyleSheet.absoluteFill}
+          testID="mobile-canvas-ground-wash"
+        />
       )}
       <View style={styles.content}>{props.children}</View>
     </View>

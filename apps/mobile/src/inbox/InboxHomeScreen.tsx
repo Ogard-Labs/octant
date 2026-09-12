@@ -353,8 +353,8 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           flexDirection: "row",
           alignItems: "center",
           justifyContent: "space-between",
-          marginTop: space.lg,
-          marginBottom: space.xl,
+          marginTop: space.sm,
+          marginBottom: space.lg,
         },
         hero: {
           color: colors.textPrimary,
@@ -377,7 +377,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           marginBottom: space.sm,
         },
         workspaceRow: {
-          minHeight: 68,
+          minHeight: 52,
           flexDirection: "row",
           alignItems: "center",
           gap: space.sm,
@@ -445,7 +445,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           fontVariant: ["tabular-nums"],
         },
         threadList: { gap: space.sm },
-        threadRow: { minHeight: 68 },
+        threadRow: { minHeight: 56 },
         threadRowContent: {
           flexDirection: "row",
           alignItems: "center",
@@ -532,25 +532,25 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           accessibilityLabel="Open navigation menu"
           name="menu-outline"
           onPress={() => setNavigationOpen(true)}
-          size={52}
+          size={40}
           testID="mobile-home-menu"
         />
         <View style={styles.topActions}>
           <IconButton
             accessibilityLabel="Search all work"
-            iconSize={24}
+            iconSize={20}
             name="search-outline"
             onPress={() => props.onOpenAgents("all")}
-            size={52}
+            size={40}
             testID="mobile-home-search"
           />
           {props.homeMode === "inbox" ? (
             <IconButton
               accessibilityLabel="Add workspace"
-              iconSize={24}
+              iconSize={20}
               name="folder-open-outline"
               onPress={props.onAddWorkspace}
-              size={52}
+              size={40}
               testID="mobile-home-add-workspace"
             />
           ) : null}
