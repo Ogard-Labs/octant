@@ -265,10 +265,15 @@ credentials, physical devices, release authority, or subjective judgment.
 ## Delivery And Completion
 
 - `main` is the only long-lived branch. Work on `feature/*` or `fix/*` branches
-  and open a pull request to `main`. Never commit directly to `main` unless the
-  maintainer explicitly asks.
+  and keep the bottom or standalone pull request targeted at `main`. A dependent
+  child in a native GitHub stack may target the immediately preceding feature
+  branch. Never commit directly to `main` unless the maintainer explicitly asks.
 - One pull request delivers one coherent outcome. Link the Linear issue in the PR
   description, not in code or docs.
+- Before creating a branch or pull request, inspect open pull requests and branch
+  ancestry for the same task or user-visible outcome. If an existing pull request
+  already owns that outcome, continue on its branch and pull request; do not open
+  a sibling pull request for follow-up work that belongs there.
 - If an open pull request already owns this outcome, push to that branch. Review
   fixes, docs, and follow-ups stay there.
 - Open a new pull request only for a different user-visible outcome, or when the
@@ -277,6 +282,22 @@ credentials, physical devices, release authority, or subjective judgment.
   on an in-flight pull request.
 - A report, assessment, audit, or Agent Store / Context document is not a reason
   to open a GitHub pull request. Those stay in the store or chat.
+- Choose the smallest delivery shape that preserves reviewability:
+  - Keep one outcome on one pull request when its jobs are not independently
+    reviewable.
+  - Use a native stacked PR chain for independently reviewable slices that depend
+    on one another: the bottom PR targets `main`, each child targets its parent,
+    and every PR records the stack order and links its adjacent PRs.
+  - Use separate PRs targeting `main` for independent outcomes so the merge queue
+    can group them without creating artificial dependencies.
+- Treat a stack as one delivery unit: keep its branches linear, enqueue or merge
+  it from the lowest eligible PR, and let GitHub perform the cascading rebase after
+  each landed layer. If `main` moves before the stack lands, rebase the stack
+  (`Rebase stack`, or `gh stack rebase` then `gh stack push`); do not merge `main`
+  into a stack layer. Do not manually create sibling PRs or repeatedly rebase every
+  child when the stack relationship already expresses the dependency. This
+  explicit stack operation is the exception to the ordinary no-rewrite rule;
+  never rebase unrelated or shared work.
 - Canonical repository documentation (`README.md`, `docs/architecture.md`,
   `docs/decisions/`, `apps/docs`) still updates in the same pull request as the
   change they describe — not a new pull request, and not a repository pull
@@ -286,8 +307,9 @@ credentials, physical devices, release authority, or subjective judgment.
   setup, workflow, security, deployment, or user-visible truth changes. Add a
   new decision record when a change would contradict or extend an existing one.
 - Ready for review requires: acceptance criteria mapped to evidence, relevant
-  checks run, current documentation, a pushed named branch, a non-draft PR to
-  `main`, and no unexplained changes.
+  checks run, current documentation, a pushed named branch, a non-draft standalone
+  or bottom PR to `main` (or a child PR with its parent stack link), and no
+  unexplained changes.
 - A ready PR is not necessarily merge-ready. Required CI and any PR-owned
   pre-merge QA must pass on the exact head. Never merge without the maintainer's
   explicit instruction for that specific PR.
