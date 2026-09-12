@@ -11,13 +11,15 @@ the parent thread's provider, model, and authority ceiling.
 ## Availability
 
 Subagent infrastructure — contracts, journaling, projection, the
-orchestration service, process supervision, and packaged child smoke — is
-landing on `main`. The full user-facing flow, including
-**Settings → Agents**, role cards, mixed-vendor routing, and a child-creation
-interface, remains a planned part of the technical-preview program. What you
-can use today is compact child-run status on a live parent thread in Chat,
-Work, or Code — how many children are working, waiting, or blocked, with a
-stop control that cancels only that thread's children — and the read-only
+orchestration service, process supervision, and packaged child smoke — is on
+`main`. **Settings → Agents** is available and holds one control: the
+server-authoritative child-creation posture (Off, Ask, Automatic). Role cards,
+mixed-vendor routing per role, and a child-creation form remain planned; the
+**Add agent** action in a Code thread opens the Agents dock tool rather than a
+creation form. What you can use today is compact child-run status on a live
+parent thread in Chat, Work, or Code — how many children are working, waiting,
+or blocked, with a stop control that cancels only that thread's children — and
+the read-only
 **Agents** hierarchy panel in Code threads, which shows active and history
 runs, posture, usage quality, recovery state, and an **"Acknowledge result"**
 button. Opening the list from the header chrome uses that same hierarchy, not

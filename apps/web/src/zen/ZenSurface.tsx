@@ -659,6 +659,12 @@ export function ZenSurface(props: ZenSurfaceProps) {
             : "Zen background unavailable; using the safe default."}
         </div>
       ) : null}
+      {props.space.elements.length === 0 ? (
+        <div className="zen-surface__empty">
+          <strong>Build your focus space</strong>
+          <span>Open Threads to pin active work, or Add a note, checklist, or timer.</span>
+        </div>
+      ) : null}
       <div
         className="zen-surface__canvas"
         onPointerDown={beginPan}

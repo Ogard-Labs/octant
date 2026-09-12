@@ -190,12 +190,14 @@ describe("shell settings policy", () => {
       // The host has not been told who is using it, so the profile carries no
       // name and no address — only the accent the initials avatar falls back to.
       userProfile: { accent: "indigo", avatar: { kind: "initials" } },
+      standaloneSkillActivations: {},
     });
     expect(replaceShellSettings(current, replacement)).toEqual({
       ...replacement,
       sidebarWidth: 420,
       contextSidebarWidth: 960,
       environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
+      standaloneSkillActivations: {},
     });
     expect(current.chatEnabled).toBe(true);
     expect(replaceShellSettings(current, { ...replacement, sidebarWidth: 1 }).sidebarWidth).toBe(

@@ -19,7 +19,7 @@ product assets, copy, registries, or distinctive implementation structures.
 Use the desktop's neutral, high-contrast tokens on a quiet flat ground. The
 Octant canvas is a workspace colour with a whisper of neutral wash — not a loud
 photo. Glass panels and the bundled atmosphere photo remain opt-in materials
-(ScreenCanvas `atmosphere` prop, Appearance → Surfaces).
+(ScreenCanvas `backgroundMode="atmosphere"`, Appearance → Background).
 
 ## Thread behavior
 

@@ -128,6 +128,7 @@ distilled successor of the earlier long-form design specifications.
 | [0114](0114-quiet-thread-composer-and-utility-chrome.md) | Thread composers and utility panels keep only useful chrome | Accepted |
 | [0115](0115-terminal-cache-ancestors-expose-only-metadata.md) | Terminal cache ancestors expose only directory metadata | Accepted |
 | [0116](0116-settings-use-open-row-surfaces.md) | Settings use open row surfaces | Accepted |
+| [0117](0117-the-welcome-composer-lets-its-context-ride-above-the-card.md) | The welcome composer lets its context ride above the card | Accepted |
 
 ## Adding an ADR
 

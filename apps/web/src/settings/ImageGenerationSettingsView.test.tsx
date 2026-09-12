@@ -57,9 +57,7 @@ describe("ImageGenerationSettingsView", () => {
       <ImageGenerationSettingsView onSettingsChange={vi.fn()} settings={{ customSources: [] }} />,
     );
     expect(screen.getByText(/No image providers are enabled/)).toBeVisible();
-    expect(
-      screen.getByText(/To add a custom source, connect an OpenAI-compatible HTTP provider/),
-    ).toBeVisible();
+    expect(screen.getByText(/Add an OpenAI-compatible custom endpoint above/)).toBeVisible();
     expect(screen.queryByRole("button", { name: "Add image source" })).not.toBeInTheDocument();
   });
 
@@ -89,9 +87,7 @@ describe("ImageGenerationSettingsView", () => {
     );
 
     expect(screen.queryByText(/No image providers are enabled/)).not.toBeInTheDocument();
-    expect(
-      screen.getByText(/To add a custom source, connect an OpenAI-compatible HTTP provider/),
-    ).toBeVisible();
+    expect(screen.getByText(/Add an OpenAI-compatible custom endpoint above/)).toBeVisible();
     expect(screen.queryByRole("button", { name: "Add image source" })).not.toBeInTheDocument();
   });
 

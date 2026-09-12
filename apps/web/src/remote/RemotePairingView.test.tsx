@@ -144,9 +144,7 @@ describe("RemotePairingView", () => {
 
     expect(sessionClient.resume).toHaveBeenCalledTimes(1);
     resolveResume?.();
-    expect(
-      await screen.findByRole("heading", { name: "Octant remote session" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Remote Octant shell" })).toBeInTheDocument();
   });
 
   it("retries a stored-device resume after a temporary outage", async () => {
@@ -188,9 +186,7 @@ describe("RemotePairingView", () => {
     expect(await screen.findByText("The host is temporarily offline.")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(sessionClient.resume).toHaveBeenCalledTimes(2);
-    expect(
-      await screen.findByRole("heading", { name: "Octant remote session" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Remote Octant shell" })).toBeInTheDocument();
   });
 
   it.each([
@@ -346,9 +342,7 @@ describe("RemotePairingView", () => {
     await screen.findByRole("heading", { name: "Confirm this host" });
     await user.click(screen.getByRole("button", { name: "Pair this browser" }));
 
-    expect(
-      await screen.findByRole("heading", { name: "Octant remote session" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Remote Octant shell" })).toBeInTheDocument();
     expect(sessionClient.connect).toHaveBeenCalled();
   });
 

@@ -188,6 +188,7 @@ describe("Journal", () => {
         navigatorAssistant: {},
         voice: {},
         imageGeneration: { customSources: [] },
+        standaloneSkillActivations: {},
         computerUse: { enabled: false, automaticUpdates: false },
         projectViewSwitcherPresentation: "dropdown",
         transcriptTextSize: "medium",

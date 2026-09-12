@@ -31,7 +31,17 @@ export class RemoteDeviceControlFailure extends Error {
 }
 
 export type DeviceSourceClass = "loopback" | "lan-private" | "tailscale" | "unknown";
+/** The network classes a device may claim a ticket over; `unknown` cannot pair. */
+export type PairingTicketSourceClass = Exclude<DeviceSourceClass, "unknown">;
 export type DeviceState = "active" | "revoked" | "expired";
+
+export interface MintedPairingTicket {
+  readonly ticketId: string;
+  readonly ticketProof: string;
+  /** Epoch milliseconds; the ticket is single-use and never persisted. */
+  readonly expiresAt: number;
+  readonly sourceClass: PairingTicketSourceClass;
+}
 
 export interface PendingPairingRequest {
   readonly kind: "pending";
@@ -69,6 +79,9 @@ export interface RemoteCredentialOperationReceipt {
 }
 
 export interface RemoteDeviceControlRuntime {
+  readonly mintPairingTicket: (input: {
+    readonly sourceClass: PairingTicketSourceClass;
+  }) => Promise<MintedPairingTicket>;
   readonly listPairingRequests: () => Promise<ReadonlyArray<PendingPairingRequest>>;
   readonly approvePairingRequest: (input: {
     readonly ticketId: string;
@@ -95,6 +108,7 @@ export interface RemoteDeviceControlRuntime {
 }
 
 export interface RemoteDeviceControlService {
+  readonly mintPairingTicket: (sourceClass: string) => Promise<MintedPairingTicket>;
   readonly listPairingRequests: () => Promise<ReadonlyArray<PendingPairingRequest>>;
   readonly approvePairingRequest: (ticketId: string) => Promise<{
     readonly decision: "approved";
@@ -127,6 +141,12 @@ export function createRemoteDeviceControlService(options: {
     }
   };
   return Object.freeze({
+    mintPairingTicket: async (sourceClass: string) => {
+      if (!isPairingTicketSourceClass(sourceClass)) {
+        throw new RemoteDeviceControlFailure("invalid");
+      }
+      return await invoke(() => options.runtime.mintPairingTicket({ sourceClass }));
+    },
     listPairingRequests: () => invoke(options.runtime.listPairingRequests),
     approvePairingRequest: async (ticketId: string) => {
       validateUuid(ticketId, "pairing request");
@@ -167,6 +187,10 @@ export function createRemoteDeviceControlHttpRuntime(
 ): RemoteDeviceControlRuntime {
   const fetch = options.fetch ?? globalThis.fetch;
   return {
+    mintPairingTicket: async (input) =>
+      decodeMintedTicket(
+        await request(fetch, options, "POST", "/api/desktop/remote/pairing-tickets", input),
+      ),
     listPairingRequests: async () =>
       decodePending(await request(fetch, options, "GET", "/api/desktop/remote/pairing-requests")),
     approvePairingRequest: async (input) =>
@@ -239,6 +263,27 @@ async function request(
   }
   if (!response.ok) throw new RemoteDeviceControlFailure(decodeFailureCode(value));
   return value;
+}
+
+function decodeMintedTicket(value: unknown): MintedPairingTicket {
+  requireExactKeys(value, ["ticket"]);
+  const ticket = value.ticket;
+  requireExactKeys(ticket, ["expiresAt", "sourceClass", "ticketId", "ticketProof"]);
+  if (
+    !UUID_PATTERN.test(String(ticket.ticketId)) ||
+    typeof ticket.ticketProof !== "string" ||
+    ticket.ticketProof.length === 0 ||
+    !Number.isSafeInteger(ticket.expiresAt) ||
+    !isPairingTicketSourceClass(ticket.sourceClass)
+  ) {
+    throw new RemoteDeviceControlFailure("failed");
+  }
+  return Object.freeze({
+    ticketId: ticket.ticketId as string,
+    ticketProof: ticket.ticketProof,
+    expiresAt: ticket.expiresAt as number,
+    sourceClass: ticket.sourceClass,
+  });
 }
 
 function decodePending(value: unknown): ReadonlyArray<PendingPairingRequest> {
@@ -445,6 +490,10 @@ function decodeFailureCode(value: unknown): RemoteDeviceControlFailureCode {
     return value.category as RemoteDeviceControlFailureCode;
   }
   return "unavailable";
+}
+
+function isPairingTicketSourceClass(value: unknown): value is PairingTicketSourceClass {
+  return value === "loopback" || value === "lan-private" || value === "tailscale";
 }
 
 function validateUuid(value: string, kind: string): void {

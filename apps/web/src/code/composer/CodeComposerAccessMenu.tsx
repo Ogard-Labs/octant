@@ -1,9 +1,18 @@
 import type { PermissionPersistence, ProviderExecutionPolicy } from "@octant/contracts/providers";
-import { ChevronDown, Lock } from "lucide-react";
-import { useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { OctantButton } from "../../ui/base/OctantButton";
-import { OctantPopover } from "../../ui/base/OctantPopover";
-import { OctantSwitch } from "../../ui/base/OctantSwitch";
+import {
+  OctantMenuCheckboxItem,
+  OctantMenuGroup,
+  OctantMenuPopup,
+  OctantMenuPortal,
+  OctantMenuPositioner,
+  OctantMenuRadioGroup,
+  OctantMenuRadioItem,
+  OctantMenuRoot,
+  OctantMenuSeparator,
+  OctantMenuTrigger,
+} from "../../ui/base/OctantMenu";
 
 export const CODE_COMPOSER_ACCESS_OPTIONS: ReadonlyArray<{
   readonly id: ProviderExecutionPolicy;
@@ -47,62 +56,64 @@ export interface CodeComposerAccessMenuProps {
 
 /** New-thread access posture. The in-thread picker still owns raise-grant. */
 export function CodeComposerAccessMenu(props: CodeComposerAccessMenuProps) {
-  const [open, setOpen] = useState(false);
   const selected =
     CODE_COMPOSER_ACCESS_OPTIONS.find((option) => option.id === props.value) ??
     CODE_COMPOSER_ACCESS_OPTIONS[1];
+  const rememberAvailable =
+    props.persistence !== undefined && props.onPersistenceChange !== undefined;
 
   return (
-    <OctantPopover
-      className="code-composer-choice__menu"
-      onOpenChange={setOpen}
-      open={open}
-      title="Access policy"
-      trigger={
-        <>
-          <Lock aria-hidden="true" size={12} strokeWidth={1.8} />
-          <span>{selected?.label}</span>
-          <ChevronDown aria-hidden="true" size={12} />
-        </>
-      }
-      triggerClassName="code-composer-choice__trigger"
-      triggerLabel="Access policy"
-      {...(props.disabled === undefined ? {} : { triggerDisabled: props.disabled })}
-    >
-      <div aria-label="Access policy" className="code-composer-choice__list" role="listbox">
-        {CODE_COMPOSER_ACCESS_OPTIONS.map((option) => (
-          <OctantButton
-            aria-selected={option.id === props.value}
-            className="code-composer-choice__option"
-            key={option.id}
-            onClick={() => {
-              props.onChange(option.id);
-              setOpen(false);
-            }}
-            role="option"
-            type="button"
-            variant="ghost"
-          >
-            <span className="code-composer-choice__option-copy">
-              <span className="code-composer-choice__option-label">{option.label}</span>
-              <span className="code-composer-choice__option-detail">{option.detail}</span>
-            </span>
-          </OctantButton>
-        ))}
-      </div>
-      {props.persistence === undefined || props.onPersistenceChange === undefined ? null : (
-        <div className="code-composer-choice__footer">
-          <span>Remember for this Project</span>
-          <OctantSwitch
-            checked={props.persistence === "project-default"}
-            {...(props.disabled === undefined ? {} : { disabled: props.disabled })}
-            label="Remember access for this Project"
-            onCheckedChange={(checked) =>
-              props.onPersistenceChange?.(checked ? "project-default" : "current-session")
-            }
-          />
-        </div>
-      )}
-    </OctantPopover>
+    <OctantMenuRoot>
+      <OctantMenuTrigger
+        aria-label="Access policy"
+        aria-description={selected?.detail}
+        className="code-composer-choice__trigger"
+        disabled={props.disabled === true}
+        render={<OctantButton size="sm" variant="ghost" />}
+      >
+        <span>{selected?.label}</span>
+        <ChevronDown aria-hidden="true" />
+      </OctantMenuTrigger>
+      <OctantMenuPortal>
+        <OctantMenuPositioner align="end" side="top">
+          <OctantMenuPopup aria-label="Access policy">
+            <OctantMenuRadioGroup
+              value={props.value}
+              onValueChange={(value) => {
+                if (props.disabled || typeof value !== "string") return;
+                const next = CODE_COMPOSER_ACCESS_OPTIONS.find((option) => option.id === value);
+                if (next !== undefined) props.onChange(next.id);
+              }}
+            >
+              {CODE_COMPOSER_ACCESS_OPTIONS.map((option) => (
+                <OctantMenuRadioItem
+                  closeOnClick
+                  disabled={props.disabled === true}
+                  key={option.id}
+                  title={option.detail}
+                  value={option.id}
+                >
+                  {option.label}
+                </OctantMenuRadioItem>
+              ))}
+            </OctantMenuRadioGroup>
+            {rememberAvailable ? (
+              <OctantMenuGroup>
+                <OctantMenuSeparator />
+                <OctantMenuCheckboxItem
+                  checked={props.persistence === "project-default"}
+                  disabled={props.disabled === true}
+                  onCheckedChange={(checked) =>
+                    props.onPersistenceChange?.(checked ? "project-default" : "current-session")
+                  }
+                >
+                  Remember for this Project
+                </OctantMenuCheckboxItem>
+              </OctantMenuGroup>
+            ) : null}
+          </OctantMenuPopup>
+        </OctantMenuPositioner>
+      </OctantMenuPortal>
+    </OctantMenuRoot>
   );
 }

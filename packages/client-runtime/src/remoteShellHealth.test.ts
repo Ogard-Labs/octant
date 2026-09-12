@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { createRemoteDraftRegistry } from "./remoteDraftRegistry";
 import { localHostDisplayName } from "./localHostDisplayName";
 import {
   mapBridgeStateToHostHealth,
@@ -45,15 +44,5 @@ describe("remoteShellHealth", () => {
     expect(
       canExecuteRemoteProductMutation({ kind: "stale", hostId: "h", displayName: "Mac" }),
     ).toBe(false);
-  });
-});
-
-describe("remoteDraftRegistry", () => {
-  it("preserves drafts until explicit clear", () => {
-    const registry = createRemoteDraftRegistry();
-    registry.write("draft-one");
-    expect(registry.read()).toBe("draft-one");
-    registry.clear();
-    expect(registry.read()).toBe("");
   });
 });
