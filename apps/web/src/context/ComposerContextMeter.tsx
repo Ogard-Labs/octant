@@ -71,7 +71,10 @@ export function ComposerContextMeter() {
   const windowModel = snapshot === undefined ? undefined : contextWindowModel(snapshot);
   const health = snapshot === undefined ? undefined : snapshot.next.plan.health;
   const reported = fallback === undefined ? undefined : reportedWindow(fallback);
-  const percent = windowModel === undefined ? (reported?.percent ?? 0) : windowModel.percent;
+  const limit =
+    fallback === undefined || reported !== undefined ? undefined : bindingLimit(fallback);
+  const percent =
+    windowModel === undefined ? (reported?.percent ?? limit?.percent ?? 0) : windowModel.percent;
   const usedArc = (Math.max(0, Math.min(100, percent)) / 100) * METER_CIRCUMFERENCE;
   const label = meterLabel({
     open,
@@ -183,21 +186,42 @@ export function ComposerContextMeter() {
 /**
  * The share of the model's window the provider itself reported with its last
  * turn. A runtime the host does not plan has no context plan to measure, so
- * the provider's own figure is the window the meter shows.
+ * the provider's own figure is the window the meter shows. When the usage
+ * report named the occupancy but not the window, the limit the provider
+ * declared for the selected model stands in — the popover says whose number
+ * it is.
  */
 function reportedWindow(
   fallback: ComposerContextUsageFallback,
-): { readonly percent: number; readonly label: string } | undefined {
-  if (fallback.contextWindow === undefined || fallback.contextTokens === undefined)
-    return undefined;
-  const percent = Math.max(
-    0,
-    Math.min(100, (fallback.contextTokens / fallback.contextWindow) * 100),
-  );
+): { readonly percent: number; readonly label: string; readonly declared: boolean } | undefined {
+  const window = fallback.contextWindow ?? fallback.modelContextWindow;
+  if (window === undefined || fallback.contextTokens === undefined) return undefined;
+  const percent = Math.max(0, Math.min(100, (fallback.contextTokens / window) * 100));
   return {
     percent,
-    label: `${compactTokens(fallback.contextTokens)} of ${compactTokens(fallback.contextWindow)} (${String(Math.round(percent))}%)`,
+    declared: fallback.contextWindow === undefined,
+    label: `${compactTokens(fallback.contextTokens)} of ${compactTokens(window)} (${String(Math.round(percent))}%)`,
   };
+}
+
+/**
+ * The fullest provider account window, when no context share exists to draw.
+ * A provider that cannot say how large the model's window is may still report
+ * how much of the account's quota is spent — a dead ring next to a number the
+ * popover already carries is the misleading option.
+ */
+function bindingLimit(
+  fallback: ComposerContextUsageFallback,
+): { readonly percent: number; readonly window: string } | undefined {
+  let binding: { readonly percent: number; readonly window: string } | undefined;
+  for (const limit of fallback.limits) {
+    if (limit.utilization === undefined) continue;
+    const percent = Math.max(0, Math.min(100, limit.utilization * 100));
+    if (binding === undefined || percent > binding.percent) {
+      binding = { percent, window: limit.window };
+    }
+  }
+  return binding;
 }
 
 function ContextUsageFallback(props: { readonly fallback: ComposerContextUsageFallback }) {
@@ -230,7 +254,9 @@ function ContextUsageFallback(props: { readonly fallback: ComposerContextUsageFa
             <span style={{ width: `${String(reported.percent)}%` }} />
           </div>
           <p className="context-window-popover__source">
-            Reported by the provider with its last turn.
+            {reported.declared
+              ? "The provider did not name a window; this divides the last request's occupancy by the context limit declared for the selected model."
+              : "Reported by the provider with its last turn."}
           </p>
         </>
       )}
@@ -425,9 +451,17 @@ function meterLabel(input: {
     if (input.fallback !== undefined) {
       const reported = reportedWindow(input.fallback);
       if (reported !== undefined) {
-        return `${action} context usage. Context window ${reported.label}, as the provider reported it.`;
+        const source = reported.declared
+          ? "against the selected model's declared context limit"
+          : "as the provider reported it";
+        return `${action} context usage. Context window ${reported.label}, ${source}.`;
       }
-      return `${action} context usage. Provider reported ${compactTokens(input.fallback.inputTokens)} input and ${compactTokens(input.fallback.outputTokens)} output. Context window maximum unavailable.`;
+      const limit = bindingLimit(input.fallback);
+      const limitText =
+        limit === undefined
+          ? ""
+          : ` The ring shows ${String(Math.round(limit.percent))}% of the ${providerLimitWindowLabel(limit.window)} used.`;
+      return `${action} context usage. Provider reported ${compactTokens(input.fallback.inputTokens)} input and ${compactTokens(input.fallback.outputTokens)} output. Context window maximum unavailable.${limitText}`;
     }
     return `${action} context usage. ${emptyMessage(input.status)}`;
   }
@@ -496,9 +530,17 @@ function liveLabel(input: {
     if (input.fallback !== undefined) {
       const reported = reportedWindow(input.fallback);
       if (reported !== undefined) {
-        return `Context window ${reported.label}, as the provider reported it.`;
+        const source = reported.declared
+          ? "against the selected model's declared context limit"
+          : "as the provider reported it";
+        return `Context window ${reported.label}, ${source}.`;
       }
-      return `Provider reported ${compactTokens(input.fallback.inputTokens)} input and ${compactTokens(input.fallback.outputTokens)} output. Context window maximum unavailable.`;
+      const limit = bindingLimit(input.fallback);
+      const limitText =
+        limit === undefined
+          ? ""
+          : ` The ring shows ${String(Math.round(limit.percent))}% of the ${providerLimitWindowLabel(limit.window)} used.`;
+      return `Provider reported ${compactTokens(input.fallback.inputTokens)} input and ${compactTokens(input.fallback.outputTokens)} output. Context window maximum unavailable.${limitText}`;
     }
     return emptyMessage(input.status);
   }
