@@ -232,9 +232,7 @@ export type CanvasCommentEvent = typeof CanvasCommentEvent.Type;
 /** One comment with its replies, as the conversation panel shows it. */
 export const CanvasCommentThread = Schema.Struct({
   comment: CanvasComment,
-  replies: Schema.Array(CanvasCommentReply).pipe(
-    Schema.maxItems(CANVAS_MAX_REPLIES_PER_COMMENT),
-  ),
+  replies: Schema.Array(CanvasCommentReply).pipe(Schema.maxItems(CANVAS_MAX_REPLIES_PER_COMMENT)),
 }).annotations(strict);
 export type CanvasCommentThread = typeof CanvasCommentThread.Type;
 
