@@ -12,6 +12,7 @@ import {
   type ShellBootstrap,
   type ShellCommandResult,
   type ShellFailure,
+  type ShellSettings,
   type WindowWorkspace,
   type WorkspaceContextKey,
   type WorkspaceLayoutNode,
@@ -39,6 +40,7 @@ import { ConcurrencyConflict, JournalWriteFailed } from "./persistence/journalEr
 import type { PersistenceService } from "./persistence/persistenceService";
 import { ProjectionApplicationFailed } from "./persistence/projection";
 import { SHELL_SETTINGS_AGGREGATE_ID } from "./persistence/shellProjection";
+import { hostDefaultFolder, judgeDefaultFolder } from "./defaultFolder";
 
 const decodeActorId = Schema.decodeUnknownSync(ActorId);
 const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
@@ -60,6 +62,8 @@ export interface ShellServiceOptions {
   readonly readWorkThread?: (threadId: WorkThreadId) => WorkThread | undefined;
   readonly uuid: () => string;
   readonly clock: () => string;
+  /** The user's home directory; the default folder must live inside it. */
+  readonly home?: string;
 }
 
 export class ShellServiceError extends Error {
@@ -75,6 +79,7 @@ export class ShellService implements ShellServiceApi {
   readonly #readWorkThread: ShellServiceOptions["readWorkThread"];
   readonly #uuid: () => string;
   readonly #clock: () => string;
+  readonly #home: string | undefined;
   readonly #registeredWindowIds = new Set<WindowId>();
 
   constructor(options: ShellServiceOptions) {
@@ -82,6 +87,7 @@ export class ShellService implements ShellServiceApi {
     this.#readWorkThread = options.readWorkThread;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
+    this.#home = options.home;
   }
 
   bootstrap(windowId: WindowId): ShellBootstrap {
@@ -99,13 +105,34 @@ export class ShellService implements ShellServiceApi {
     this.#registeredWindowIds.delete(windowId);
   }
 
+  /**
+   * A folder the renderer names is checked here, before it is journaled,
+   * because the Project provisioner and the artifact mirror will both create
+   * directories under it without asking again.
+   */
+  #withJudgedDefaultFolder(settings: ShellSettings): ShellSettings {
+    if (settings.defaultFolder === undefined) return settings;
+    const verdict = judgeDefaultFolder(settings.defaultFolder, this.#home);
+    if (verdict.status === "refused") {
+      throw new ShellServiceError({ category: "invalid", message: verdict.message });
+    }
+    return { ...settings, defaultFolder: verdict.folder };
+  }
+
   #readBootstrap(windowId: WindowId): ShellBootstrap {
     this.#assertReady();
     try {
       const projectedSettings = this.#persistence.readShellSettings();
       const projectedWorkspace = this.#persistence.readWindowWorkspace(windowId);
       const projectedPresentation = this.#persistence.readEnvironmentPresentation(windowId);
-      const settings = projectedSettings?.settings ?? defaultShellSettings();
+      const stored = projectedSettings?.settings ?? defaultShellSettings();
+      // The folder in effect is a host fact: a client that has never been
+      // told it would otherwise show an empty row for a setting that is
+      // already doing something.
+      const settings =
+        stored.defaultFolder === undefined
+          ? { ...stored, defaultFolder: hostDefaultFolder(this.#home) }
+          : stored;
       const workspace = reconcileWorkspaceWithSettings(
         reconcileCanvasTabs(
           reconcilePreviewTabs(
@@ -166,7 +193,8 @@ export class ShellService implements ShellServiceApi {
       }
       if (command.kind === "replace-settings") {
         const current = this.#persistence.readShellSettings()?.settings ?? defaultShellSettings();
-        const settings = replaceShellSettings(current, command.settings);
+        const replaced = replaceShellSettings(current, command.settings);
+        const settings = this.#withJudgedDefaultFolder(replaced);
         const activeWorkspace = reconcileWorkspaceWithSettings(
           this.#persistence.readWindowWorkspace(command.windowId)?.workspace ??
             defaultWindowWorkspace(command.windowId),

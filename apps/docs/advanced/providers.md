@@ -66,6 +66,12 @@ OpenCode CLI, Kilo ACP, Pi RPC, Oh My Pi, Devin ACP, Mistral Vibe ACP,
 Ollama, Kimi Code ACP, Grok Build ACP, Goose ACP, GLM Agent, Gemini CLI ACP,
 GitHub Copilot ACP, Cline ACP, and Qwen Code ACP.
 
+Oh My Pi is discovery-only in this release. Its Connection Check verifies the
+pinned version and lists the models it reports, but Octant cannot start a turn
+on it yet, so the provider row stays **Unavailable** with that explanation and
+no Chat, Work, or Code picker offers its models. A saved default that points
+at it is kept and shown as unavailable rather than removed.
+
 The beta `opencode2` executable appears separately as **OpenCode 2 preview**.
 Octant uses its bounded loopback HTTP API to discover the provider catalog and
 models, then uses the executable's ACP transport for Code and Work sessions.

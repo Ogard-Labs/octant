@@ -33,6 +33,7 @@ import {
   createExistingWorktreeCodeFileRootAuthority,
   deriveExistingWorktreeCheckoutId,
   pathIsProjectConfined,
+  plainFolderCheckoutIdentity,
   startOctantServer,
 } from "./server";
 import { ProviderRuntimeRegistry } from "./providers/providerRuntimeRegistry";
@@ -1461,6 +1462,103 @@ describe("startOctantServer", () => {
     ]) {
       await expect(observing(observed)).rejects.not.toThrow(/git init/i);
     }
+  });
+
+  it("starts a Code thread on the plain folder when Git is not required, and files resolve to it", async () => {
+    const projectId = "00000000-0000-4000-8000-000000001331";
+    const revisionId = "00000000-0000-4000-8000-000000001332";
+    const root = "/private/plain-folder-project";
+    const project = {
+      projects: {
+        bootstrap: vi.fn(
+          async () =>
+            ({
+              active: [{ id: projectId, type: "code", binding: { canonicalRoot: root } }],
+              archived: [],
+              availability: [],
+              memory: [],
+            }) as never,
+        ),
+      },
+      readProject: vi.fn(
+        () =>
+          ({
+            id: projectId,
+            type: "code",
+            lifecycle: "active",
+            binding: { canonicalRoot: root },
+            bindingHistory: [{ revisionId, currentBinding: { canonicalRoot: root } }],
+          }) as never,
+      ),
+    };
+    const notRepository = { status: "unavailable" as const, reason: "not-repository" as const };
+    let requireGit = false;
+    const checkouts = createExistingWorktreeCodeCheckoutObservation({
+      ...project,
+      repository: { observe: vi.fn(async () => notRepository as never) },
+      clock: () => "2026-07-21T17:00:00.000Z",
+      requireGitRepository: () => requireGit,
+    });
+
+    const prepared = await checkouts.observe(
+      "00000000-0000-4000-8000-000000001335" as never,
+      projectId as never,
+    );
+    const expected = plainFolderCheckoutIdentity({
+      projectId,
+      bindingRevisionId: revisionId,
+      canonicalRoot: root,
+    });
+    expect(prepared).toMatchObject({
+      bindingRevisionId: revisionId,
+      checkout: {
+        id: expected.checkoutId,
+        repositoryId: expected.repositoryId,
+        kind: "plain-folder",
+        availability: "available",
+        head: { kind: "none" },
+      },
+    });
+    // No object id is ever invented for a folder without a repository.
+    expect(JSON.stringify(prepared)).not.toMatch(/"oid"/);
+
+    // Turning the requirement back on restores the refusal with the git init advice.
+    requireGit = true;
+    await expect(
+      checkouts.observe("00000000-0000-4000-8000-000000001335" as never, projectId as never),
+    ).rejects.toThrow(/git init/i);
+
+    const observe = vi.fn();
+    const roots = createExistingWorktreeCodeFileRootAuthority({
+      ...project,
+      repository: { observe },
+      statIdentity: vi.fn(async () => ({ device: "3", inode: "4" })),
+    });
+    const thread = {
+      id: "00000000-0000-4000-8000-000000001333",
+      projectId,
+      bindingRevisionId: revisionId,
+      repositoryId: expected.repositoryId,
+    } as never;
+    await expect(
+      roots.resolve(
+        "00000000-0000-4000-8000-000000001335" as never,
+        thread,
+        prepared.checkout,
+        "notes.md" as never,
+      ),
+    ).resolves.toMatchObject({ rootPath: root, rootIdentity: { device: "3", inode: "4" } });
+    // The folder is the checkout; nothing asks Git about it.
+    expect(observe).not.toHaveBeenCalled();
+    // A plain-folder checkout journaled for another folder does not reach this one.
+    await expect(
+      roots.resolve(
+        "00000000-0000-4000-8000-000000001335" as never,
+        thread,
+        { ...prepared.checkout, id: "00000000-0000-4000-8000-000000001399" } as never,
+        "notes.md" as never,
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it("owns and closes a configured Code file helper transport", async () => {

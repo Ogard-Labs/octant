@@ -676,7 +676,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       </div>
 
       <div className="automation-editor__field">
-        <label htmlFor={ids.target}>Delivery target</label>
+        <label htmlFor={ids.target}>Delivery</label>
         <OctantTextarea
           className="textarea"
           id={ids.target}

@@ -60,7 +60,7 @@ const styles = StyleSheet.create({
   },
   line: {
     position: "absolute",
-    fontSize: 11,
+    fontSize: 12,
     fontFamily: fonts.mono,
     letterSpacing: 0.2,
     width: "120%",

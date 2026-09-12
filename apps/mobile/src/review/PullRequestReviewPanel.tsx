@@ -63,7 +63,7 @@ export function PullRequestReviewPanel(props: PullRequestReviewPanelProps) {
         section: {
           ...mobileTypography.body,
           color: colors.textPrimary,
-          fontWeight: "600",
+          fontWeight: "500",
           marginTop: mobileSpacing.sm,
         },
         meta: {

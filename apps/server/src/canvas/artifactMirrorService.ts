@@ -40,6 +40,11 @@ export interface ArtifactMirrorFilePort {
   readonly remove: (absolutePath: string) => Promise<void>;
   /** Canonicalize a root, or report that it cannot be reached. */
   readonly resolveRoot: (absolutePath: string) => Promise<string | undefined>;
+  /**
+   * Create a folder destination that does not exist yet. Optional: a port
+   * without it leaves a missing folder unavailable, as before.
+   */
+  readonly ensureRoot?: (absolutePath: string) => Promise<void>;
 }
 
 export interface ArtifactMirrorProjectPort {
@@ -84,6 +89,13 @@ export interface ArtifactMirrorServiceDependencies {
     }) => void;
   };
   readonly clock: () => UtcTimestamp;
+  /**
+   * Where files go before anyone has chosen: `<default folder>/Artifacts`.
+   * Read per use so a change to the default folder moves the next write.
+   * Once a person sets any mirror setting, their fallback is the fallback
+   * and this is no longer consulted. Absent means `internal-only`.
+   */
+  readonly defaultFallback?: () => ArtifactMirrorDestination;
 }
 
 const INITIAL_SETTINGS = {
@@ -115,8 +127,15 @@ export class ArtifactMirrorService {
     });
   }
 
+  /**
+   * The settings in effect. Until someone chooses, the fallback is the host
+   * default rather than the journal's empty record, so what the Settings page
+   * shows is where the files actually go.
+   */
   settings(): ArtifactMirrorSettings {
-    return this.#settings;
+    const defaultFallback = this.#dependencies.defaultFallback;
+    if (this.#settings.version !== 0 || defaultFallback === undefined) return this.#settings;
+    return { ...this.#settings, fallback: defaultFallback() };
   }
 
   async execute(commandInput: unknown): Promise<ArtifactMirrorResult> {
@@ -126,10 +145,12 @@ export class ArtifactMirrorService {
     if (command.expectedVersion !== this.#settings.version) {
       return this.#refused("stale-version", "The mirror settings changed since you read them.");
     }
+    // The effective fallback, so a first override does not quietly journal
+    // the empty record's `internal-only` in place of the host default.
     const fallback =
       command.kind === "set-artifact-mirror-fallback"
         ? command.destination
-        : this.#settings.fallback;
+        : this.settings().fallback;
     const overrides = this.#nextOverrides(command);
     const requestedAutoCommit =
       command.kind === "set-artifact-mirror-auto-commit"
@@ -181,7 +202,7 @@ export class ArtifactMirrorService {
   async materialize(version: CanvasVersion): Promise<ArtifactMirrorReceipt> {
     const provenance = version.definition.provenance;
     const projectId = String(provenance.projectId);
-    const destination = resolveArtifactDestination(this.#settings, projectId);
+    const destination = resolveArtifactDestination(this.settings(), projectId);
     const project = this.#dependencies.projects.read(projectId);
 
     const root = await this.#resolveDestinationRoot(destination, project?.checkoutRoot);
@@ -353,6 +374,10 @@ export class ArtifactMirrorService {
   ): Promise<string | undefined> {
     if (destination.kind === "internal-only") return undefined;
     if (destination.kind === "global-folder") {
+      // A folder destination is created on demand: the person (or the host
+      // default) named it, and a missing folder is not a reason to write
+      // nothing.
+      await this.#dependencies.files.ensureRoot?.(destination.canonicalRoot).catch(() => undefined);
       return this.#dependencies.files.resolveRoot(destination.canonicalRoot);
     }
     return checkoutRoot === undefined

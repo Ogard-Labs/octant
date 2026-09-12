@@ -26,6 +26,133 @@ const successorId = decodeMemoryEntryId("00000000-0000-4000-8000-000000000611");
 const transferId = decodeMemoryEntryId("00000000-0000-4000-8000-000000000612");
 const now = "2026-07-14T10:00:00.000Z";
 
+describe("a thread started without a Project", () => {
+  const defaultProjectId = decodeProjectId("00000000-0000-4000-8000-000000000620");
+
+  it("provisions the mode's subfolder of the default folder as an ordinary Project once", async () => {
+    const ensureDirectory = vi.fn(async () => undefined);
+    const fixture = fixtureService({
+      defaultFolder: () => "/home/ada/Documents/Octant",
+      ensureDirectory,
+    });
+
+    const first = await fixture.service.executeProject(windowId, {
+      kind: "ensure-default-project",
+      projectId: defaultProjectId,
+      expectedVersion: 0,
+      projectType: "work",
+      hostId: "local",
+    });
+    expect(first).toMatchObject({
+      kind: "default-project-ensured",
+      created: true,
+      project: {
+        id: defaultProjectId,
+        type: "work",
+        name: "Octant folder",
+        origin: "default-folder",
+        binding: { canonicalRoot: "/home/ada/Documents/Octant/Work" },
+      },
+    });
+    expect(ensureDirectory).toHaveBeenCalledWith("/home/ada/Documents/Octant/Work");
+    expect(fixture.append).toHaveBeenCalledTimes(1);
+
+    const again = await fixture.service.executeProject(windowId, {
+      kind: "ensure-default-project",
+      projectId: decodeProjectId("00000000-0000-4000-8000-000000000621"),
+      expectedVersion: 0,
+      projectType: "work",
+      hostId: "local",
+    });
+    expect(again).toMatchObject({
+      kind: "default-project-ensured",
+      created: false,
+      project: { id: defaultProjectId },
+    });
+    expect(fixture.append).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Work and Code default Projects apart and leaves the old one when the folder moves", async () => {
+    let folder = "/home/ada/Documents/Octant";
+    const fixture = fixtureService({
+      defaultFolder: () => folder,
+      ensureDirectory: async () => {},
+      codeSettings: { allowDefaultFolderThreads: true },
+    });
+    const ensure = (projectType: "work" | "code", suffix: string) =>
+      fixture.service.executeProject(windowId, {
+        kind: "ensure-default-project",
+        projectId: decodeProjectId(`00000000-0000-4000-8000-0000000006${suffix}`),
+        expectedVersion: 0,
+        projectType,
+        hostId: "local",
+      });
+
+    await expect(ensure("code", "30")).resolves.toMatchObject({
+      created: true,
+      project: { type: "code", binding: { canonicalRoot: "/home/ada/Documents/Octant/Code" } },
+    });
+    await expect(ensure("work", "31")).resolves.toMatchObject({
+      created: true,
+      project: { type: "work", binding: { canonicalRoot: "/home/ada/Documents/Octant/Work" } },
+    });
+
+    folder = "/home/ada/Elsewhere";
+    await expect(ensure("work", "32")).resolves.toMatchObject({
+      created: true,
+      project: { binding: { canonicalRoot: "/home/ada/Elsewhere/Work" } },
+    });
+    const bootstrap = await fixture.service.bootstrap(windowId);
+    expect(bootstrap.active.map((project) => project.name)).toEqual([
+      "Octant folder",
+      "Octant folder",
+      "Octant folder",
+    ]);
+  });
+
+  it("refuses a Code default Project until Code settings allow threads without a Project", async () => {
+    const ensureDirectory = vi.fn(async () => undefined);
+    for (const codeSettings of [undefined, { allowDefaultFolderThreads: false }]) {
+      const fixture = fixtureService({
+        defaultFolder: () => "/home/ada/Documents/Octant",
+        ensureDirectory,
+        ...(codeSettings === undefined ? {} : { codeSettings }),
+      });
+      await expect(
+        fixture.service.executeProject(windowId, {
+          kind: "ensure-default-project",
+          projectId: defaultProjectId,
+          expectedVersion: 0,
+          projectType: "code",
+          hostId: "local",
+        }),
+      ).rejects.toMatchObject({ failure: { category: "unsupported" } });
+      expect(fixture.append).not.toHaveBeenCalled();
+    }
+    // Nothing is created on disk for a refused ask.
+    expect(ensureDirectory).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the default folder cannot be created", async () => {
+    const fixture = fixtureService({
+      defaultFolder: () => "/home/ada/Documents/Octant",
+      ensureDirectory: async () => {
+        throw new Error("EACCES");
+      },
+    });
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "ensure-default-project",
+        projectId: defaultProjectId,
+        expectedVersion: 0,
+        projectType: "work",
+        hostId: "local",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    expect(fixture.append).not.toHaveBeenCalled();
+  });
+});
+
 describe("ProjectService", () => {
   it("projects a credential-free GitHub identity for an available Code Project", async () => {
     const project = codeProject();
@@ -1089,6 +1216,9 @@ function fixtureService(
       | { readonly status: "already-repository" }
       | { readonly status: "failed"; readonly message: string }
     >;
+    defaultFolder?: () => string;
+    ensureDirectory?: (path: string) => Promise<void>;
+    codeSettings?: { allowDefaultFolderThreads: boolean };
   } = {},
 ) {
   const projects = [...(options.projects ?? [])];
@@ -1148,6 +1278,8 @@ function fixtureService(
       },
       aggregateVersion: 0,
     }),
+    readCodeSettings: () =>
+      options.codeSettings === undefined ? undefined : { settings: options.codeSettings },
     status,
   } as unknown as PersistenceService;
   return {
@@ -1169,6 +1301,10 @@ function fixtureService(
       ...(options.initializeGitRepository === undefined
         ? {}
         : { initializeGitRepository: options.initializeGitRepository }),
+      ...(options.defaultFolder === undefined ? {} : { defaultFolder: options.defaultFolder }),
+      ...(options.ensureDirectory === undefined
+        ? {}
+        : { ensureDirectory: options.ensureDirectory }),
     }),
   };
 }

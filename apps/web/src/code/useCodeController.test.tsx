@@ -2996,6 +2996,8 @@ function bootstrap(version = 1, activitySequence = 0): CodeBootstrap {
     settings: {
       defaultExecutionPolicy: "approval-gated",
       defaultPermissionPersistence: "current-session",
+      requireGitRepository: true,
+      allowDefaultFolderThreads: false,
       updatedAt: now as never,
       version: 1 as never,
     },

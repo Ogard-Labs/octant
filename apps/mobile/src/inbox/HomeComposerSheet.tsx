@@ -76,7 +76,7 @@ export function HomeComposerSheet(props: {
         modeLabel: {
           color: colors.textTertiary,
           fontSize: typography.caption.fontSize,
-          fontWeight: "600",
+          fontWeight: "500",
         },
         modeLabelSelected: { color: colors.textPrimary },
         context: { flexDirection: "row", alignItems: "center", gap: space.sm },
@@ -91,7 +91,7 @@ export function HomeComposerSheet(props: {
           minHeight: 120,
           color: colors.textPrimary,
           fontSize: 18,
-          lineHeight: 25,
+          lineHeight: 21,
           textAlignVertical: "top",
           outlineColor: "transparent",
           outlineStyle: "solid",
@@ -113,7 +113,7 @@ export function HomeComposerSheet(props: {
           flex: 1,
           color: colors.textPrimary,
           fontSize: typography.body.fontSize,
-          fontWeight: "600",
+          fontWeight: "500",
         },
       }),
     [colors],
@@ -208,7 +208,7 @@ export function HomeComposerSheet(props: {
       )}
 
       <View style={styles.toolbar}>
-        <IconButton accessibilityLabel="Attachments unavailable" disabled name="add" size={46} />
+        <IconButton accessibilityLabel="Attachments unavailable" disabled name="add" size={38} />
         <Pressable
           accessibilityLabel={`Choose model, ${props.modelLabel}`}
           accessibilityRole="button"
@@ -225,14 +225,14 @@ export function HomeComposerSheet(props: {
           accessibilityLabel="Voice input unavailable"
           disabled
           name="mic-outline"
-          size={46}
+          size={38}
         />
         <IconButton
           accessibilityLabel={props.busy === true ? "Creating" : "Send"}
           disabled={!canSubmit}
           name={props.busy === true ? "hourglass-outline" : "arrow-up"}
           onPress={props.onSubmit}
-          size={46}
+          size={38}
           testID="mobile-home-composer-submit"
           variant="send"
         />

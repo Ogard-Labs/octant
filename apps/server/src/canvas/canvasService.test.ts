@@ -251,6 +251,123 @@ function createService(
   return { service, projection, journal, connection, eventStore };
 }
 
+const diagramDefinition = {
+  ...definition,
+  blocks: [
+    ...definition.blocks,
+    {
+      blockId: "board-1",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "diagram",
+      nodes: [
+        { nodeId: "api", label: "API" },
+        { nodeId: "db", label: "Database" },
+      ],
+      edges: [{ edgeId: "api-db", source: "api", target: "db" }],
+    },
+  ],
+} as const;
+
+function layoutReviseCommand(overrides: Record<string, unknown> = {}) {
+  return {
+    kind: "canvas-diagram-layout-revise",
+    canvasId: ids.canvas,
+    versionId: ids.version2,
+    blockId: "board-1",
+    positions: [{ nodeId: "db", x: 320, y: 40 }],
+    actor: provenance.actor,
+    expectedSequence: 1,
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    issuedAt: later,
+    ...overrides,
+  };
+}
+
+const boardContext = { mode: "chat", projectId: ids.project } as const;
+const boardProject = { id: ids.project, type: "chat", lifecycle: "active" } as const;
+
+describe("CanvasService board layout", () => {
+  it("journals a user's node drag as a new immutable version that survives reload", () => {
+    const { service, projection, journal, connection } = createService(
+      undefined,
+      undefined,
+      version({ definition: diagramDefinition }),
+    );
+    const result = service.reviseDiagramLayout(layoutReviseCommand(), boardContext, boardProject);
+    expect(result).toMatchObject({ kind: "accepted", sequence: 2, versionId: ids.version2 });
+
+    const head = projection.getById(canvasId)?.currentVersion;
+    expect(head?.sequence).toBe(2);
+    expect(head?.createdBy).toEqual(provenance.actor);
+    const board = head?.definition.blocks.find((block) => block.blockId === "board-1");
+    expect(board?.kind === "diagram" ? board.layout : undefined).toBe("manual");
+    expect(
+      board?.kind === "diagram" ? board.nodes.find((node) => node.nodeId === "db") : undefined,
+    ).toMatchObject({ x: 320, y: 40, positioned: true });
+
+    const prior = service.get(canvasId, boardContext, boardProject, ids.version as never);
+    expect(prior.kind === "ready" ? prior.version.sequence : undefined).toBe(1);
+
+    const replayed = new CanvasProjection();
+    for (const event of journal.replay({ afterSequence: 0, limit: 100 } as never)) {
+      replayed.apply(connection, event);
+    }
+    expect(replayed.getById(canvasId)?.currentVersion.sequence).toBe(2);
+  });
+
+  it("refuses a drag that targets a version the host has already moved past", () => {
+    const { service, projection } = createService(
+      undefined,
+      undefined,
+      version({ definition: diagramDefinition }),
+    );
+    expect(
+      service.reviseDiagramLayout(layoutReviseCommand(), boardContext, boardProject).kind,
+    ).toBe("accepted");
+    const stale = service.reviseDiagramLayout(
+      layoutReviseCommand({ versionId: "44444444-4444-4444-8444-444444444444" }),
+      boardContext,
+      boardProject,
+    );
+    expect(stale).toMatchObject({ kind: "denied", denialCode: "stale-version" });
+    expect(projection.getById(canvasId)?.currentVersion.sequence).toBe(2);
+  });
+
+  it("answers a retried drag with the version it already journaled", () => {
+    const { service, projection } = createService(
+      undefined,
+      undefined,
+      version({ definition: diagramDefinition }),
+    );
+    const first = service.reviseDiagramLayout(layoutReviseCommand(), boardContext, boardProject);
+    const again = service.reviseDiagramLayout(layoutReviseCommand(), boardContext, boardProject);
+    expect(again).toEqual(first);
+    expect(projection.getById(canvasId)?.versions).toHaveLength(2);
+  });
+
+  it("refuses a drag of a node the diagram does not have, and a drag by an unauthorized workspace", () => {
+    const { service } = createService(
+      undefined,
+      undefined,
+      version({ definition: diagramDefinition }),
+    );
+    expect(
+      service.reviseDiagramLayout(
+        layoutReviseCommand({ positions: [{ nodeId: "ghost", x: 1, y: 1 }] }),
+        boardContext,
+        boardProject,
+      ),
+    ).toMatchObject({ kind: "denied", denialCode: "unknown-node" });
+    expect(
+      service.reviseDiagramLayout(
+        layoutReviseCommand({ blockId: "block-1" }),
+        boardContext,
+        boardProject,
+      ),
+    ).toMatchObject({ kind: "denied", denialCode: "not-a-diagram" });
+  });
+});
+
 describe("CanvasService", () => {
   it("journals a new immutable version on revise and exposes opaque history", () => {
     const { service } = createService();

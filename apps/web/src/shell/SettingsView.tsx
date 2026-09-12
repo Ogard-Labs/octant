@@ -26,6 +26,7 @@ import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { SliderField } from "../settings/SliderField";
+import { DefaultFolderSettings } from "../settings/DefaultFolderSettings";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
@@ -54,6 +55,7 @@ import type { HostFederationLifecycle } from "@octant/client-runtime/host-federa
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import { HostSettingsSection } from "../host/HostSettingsSection";
+import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection";
 import { FederatedHostsLifecyclePanel } from "../host/FederatedHostsLifecyclePanel";
 import {
   type SettingsNativeCapabilities,
@@ -100,7 +102,7 @@ import {
 } from "../settings/MarketplaceFetchSettings";
 import { OpenInApplicationSettings } from "../settings/OpenInApplicationSettings";
 import { ProviderUsageLimitsPanel } from "../usage/ProviderUsageLimitsPanel";
-import type { OctantHostBridge } from "./hostBridge";
+import { remoteAccessAdministrationOf, type OctantHostBridge } from "./hostBridge";
 import "../styles/settings.css";
 import "../styles/settings-specialty.css";
 import "../styles/extensions-settings.css";
@@ -113,7 +115,8 @@ export interface SettingsViewProps {
   readonly onResetLayout: () => void;
   readonly onResetNativeBounds: () => void;
   readonly onSearchChange: (value: string) => void;
-  readonly onSettingsChange: (patch: Partial<ShellSettings>) => void;
+  /** May resolve to whether the host accepted the patch; a void result is read as accepted. */
+  readonly onSettingsChange: (patch: Partial<ShellSettings>) => Promise<boolean> | boolean | void;
   readonly search: string;
   readonly settings: ShellSettings;
   readonly sidebarVibrancySupported: boolean;
@@ -638,6 +641,20 @@ function ActiveSectionContent({
               })}
         />
       ) : null;
+    case "remote-access": {
+      const administration = remoteAccessAdministrationOf(props.hostBridge);
+      return administration !== undefined ? (
+        <RemoteAccessSettingsSection bridge={administration} />
+      ) : (
+        <section aria-label="Remote access" id="settings-remote-access">
+          <p>
+            Enabling the remote listener and pairing devices happen on the host machine, in the
+            Octant desktop app or with the <code>octant pair</code> and <code>octant auth</code>{" "}
+            commands.
+          </p>
+        </section>
+      );
+    }
     case "host":
       return props.hostControlClient !== undefined ? (
         <HostSettingsSection
@@ -906,6 +923,22 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
             }
             onReleaseRingChange={(ring) => props.onSettingsChange({ releaseRing: ring })}
           />
+        </div>
+      </SettingsSection>
+      <SettingsSection title="Files">
+        <div className="setgroup">
+          <SettingRow
+            description="Where Work and Code threads started without a Project keep their files, and where artifact files are mirrored unless a Project says otherwise."
+            focused={focusedSetting === settingId("default-folder")}
+            label="Default folder"
+            scope="host"
+            settingId="default-folder"
+          >
+            <DefaultFolderSettings
+              folder={props.settings.defaultFolder}
+              onFolderChange={(folder) => props.onSettingsChange({ defaultFolder: folder })}
+            />
+          </SettingRow>
         </div>
       </SettingsSection>
       <SettingsSection title="Threads">

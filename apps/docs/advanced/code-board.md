@@ -4,8 +4,9 @@ description: The runtime-derived Code Thread Board, its statuses, Project groupi
 
 # Code Thread Board
 
-The Code Thread Board is a server-authoritative, runtime-derived view of your
-Code threads and their coding agents. It groups whole threads — never work-list
+The Code Thread Board — labelled **Thread board** in the app, like its Work
+counterpart — is a server-authoritative, runtime-derived view of your Code
+threads and their coding agents. It groups whole threads — never work-list
 items, issues, or generic tasks — and opens from the Code sidebar's **Thread
 board** action.
 

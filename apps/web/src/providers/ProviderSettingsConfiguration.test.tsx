@@ -29,7 +29,7 @@ function props(overrides: Partial<ProviderCreateFormProps> = {}): ProviderCreate
 }
 
 describe("ProviderCreateForm presentation limits", () => {
-  it("opens directly on image providers and only offers image provider types", async () => {
+  it("offers dedicated and custom HTTP image providers without coding agents", async () => {
     const user = userEvent.setup();
     render(
       <ProviderCreateForm
@@ -39,6 +39,7 @@ describe("ProviderCreateForm presentation limits", () => {
           "gemini-native-image",
           "bfl-image",
           "ideogram-image",
+          "openai-compatible",
         ]}
         initialProviderType="openai-image"
         triggerLabel="Add image provider"
@@ -55,7 +56,7 @@ describe("ProviderCreateForm presentation limits", () => {
     expect(await screen.findByRole("option", { name: "Black Forest Labs Image" })).toBeVisible();
     expect(await screen.findByRole("option", { name: "Ideogram Image" })).toBeVisible();
     expect(screen.queryByText("OpenCode CLI")).not.toBeInTheDocument();
-    expect(screen.queryByText("OpenAI-compatible HTTP")).not.toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "OpenAI-compatible HTTP" })).toBeVisible();
   });
 
   it("keeps image creation disabled when host credential storage is unavailable", async () => {

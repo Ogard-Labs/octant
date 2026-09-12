@@ -128,7 +128,7 @@ describe("CodeComposerAdapter", () => {
     ).toMatch(/^Describe what to build/);
   });
 
-  it("puts Project, branch, and Environment on the composer's lower band after the prompt", () => {
+  it("puts Project, branch, and Environment on the context row above the composer", () => {
     const { container } = render(<CodeComposerAdapter {...defaultProps} />);
     const frame = container.querySelector(".composer");
     const dock = container.querySelector(".composer-tray");
@@ -139,8 +139,8 @@ describe("CodeComposerAdapter", () => {
     if (frame === null || dock === null || row === null) {
       throw new Error("Composer stack is incomplete.");
     }
-    expect(frame.contains(dock)).toBe(true);
-    expect(row.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(frame.contains(dock)).toBe(false);
+    expect(dock.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(row.querySelector(".host-selector")).toBeNull();
     expect(dock?.textContent).toContain("My Repo");
     expect(dock?.querySelector(".host-selector")).not.toBeNull();
@@ -186,7 +186,9 @@ describe("CodeComposerAdapter", () => {
     render(<CodeComposerAdapter {...defaultProps} onCreateThread={onCreateThread} />);
 
     await user.click(screen.getByRole("button", { name: "Access policy" }));
-    await user.click(screen.getByRole("switch", { name: "Remember access for this Project" }));
+    await user.click(
+      await screen.findByRole("menuitemcheckbox", { name: "Remember for this Project" }),
+    );
     await user.keyboard("{Escape}");
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Ship it");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
@@ -208,13 +210,13 @@ describe("CodeComposerAdapter", () => {
     expect(trailing?.textContent).not.toContain("Choose a Project");
   });
 
-  it("keeps repository context in the checkout bar", () => {
+  it("keeps repository context on the context row above the composer", () => {
     const { container } = render(<CodeComposerAdapter {...defaultProps} />);
     const frame = container.querySelector(".composer");
     const dock = container.querySelector(".composer-tray");
     expect(frame).not.toBeNull();
     expect(dock).not.toBeNull();
-    expect(frame?.contains(dock)).toBe(true);
+    expect(frame?.contains(dock)).toBe(false);
     expect(dock?.textContent).toContain("development");
     expect(container.querySelector('[class*="context-strip"]')).toBeNull();
   });
@@ -380,7 +382,7 @@ describe("CodeComposerAdapter interactions", () => {
       fireEvent.click(access);
     });
     await act(async () => {
-      fireEvent.click(screen.getByRole("option", { name: /Plan/ }));
+      fireEvent.click(await screen.findByRole("menuitemradio", { name: /Plan/ }));
     });
     expect(onExecutionPolicyChange).toHaveBeenCalledWith("plan");
     root.unmount();

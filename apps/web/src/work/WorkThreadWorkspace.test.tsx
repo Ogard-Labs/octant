@@ -193,7 +193,7 @@ describe("WorkThreadWorkspace", () => {
       deliveryTarget: "Draft brief",
       satisfactionEvidence: "The reviewed draft is saved in the bound folder.",
     });
-    expect(await screen.findByText("Delivery target marked complete.")).toBeInTheDocument();
+    expect(await screen.findByText("Delivery marked complete.")).toBeInTheDocument();
   });
 
   it("blocks artifact and provider mutations after completion until reactivation", async () => {
@@ -1563,7 +1563,7 @@ describe("WorkThreadWorkspace", () => {
       "The reviewed draft is saved in the bound folder.",
     );
     await user.click(screen.getByRole("button", { name: "Confirm this task is complete" }));
-    expect(await screen.findByText("Delivery target marked complete.")).toBeInTheDocument();
+    expect(await screen.findByText("Delivery marked complete.")).toBeInTheDocument();
     turns = [workTurn({ status: "completed" })];
     await waitFor(
       () =>

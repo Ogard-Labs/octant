@@ -290,22 +290,25 @@ function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>): {
   let inputTokens = 0;
   let outputTokens = 0;
   let costUsd: number | undefined;
-  // Tokens and cost add up across turns; the window is a state, so the
-  // latest turn that reported one speaks for the thread.
-  let window: { readonly contextWindow: number; readonly contextTokens: number } | undefined;
+  // Tokens and cost add up across turns; the window figures are a state, so
+  // the latest turn that reported each speaks for the thread. The occupancy
+  // report stands alone — a provider can name what the last request held
+  // without knowing the model's window.
+  let contextWindow: number | undefined;
+  let contextTokens: number | undefined;
   for (const usage of byOperation.values()) {
     inputTokens += usage.inputTokens;
     outputTokens += usage.outputTokens;
     if (usage.costUsd !== undefined) costUsd = (costUsd ?? 0) + usage.costUsd;
-    if (usage.contextWindow !== undefined && usage.contextTokens !== undefined) {
-      window = { contextWindow: usage.contextWindow, contextTokens: usage.contextTokens };
-    }
+    if (usage.contextWindow !== undefined) contextWindow = usage.contextWindow;
+    if (usage.contextTokens !== undefined) contextTokens = usage.contextTokens;
   }
   return {
     inputTokens,
     outputTokens,
     ...(costUsd === undefined ? {} : { costUsd }),
-    ...(window ?? {}),
+    ...(contextWindow === undefined ? {} : { contextWindow }),
+    ...(contextTokens === undefined ? {} : { contextTokens }),
   };
 }
 
@@ -1924,6 +1927,8 @@ export function useCodeController(options: CodeControllerOptions) {
     readonly defaultExecutionPolicy: CodeThread["executionPolicy"];
     readonly defaultPermissionPersistence: CodeThread["permissionPersistence"];
     readonly externalEditor?: CodeExternalEditor;
+    readonly requireGitRepository?: boolean;
+    readonly allowDefaultFolderThreads?: boolean;
   }): Promise<boolean> {
     if (bootstrap === undefined) return false;
     const result = await execute({

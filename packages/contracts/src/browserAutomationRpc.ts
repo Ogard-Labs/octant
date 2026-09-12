@@ -7,6 +7,7 @@ import {
   BrowserContextRecord,
   BrowserObservation,
   BrowserThreadId,
+  MAX_BROWSER_THREAD_CONTEXTS,
 } from "./browserAutomation";
 import {
   ToolActionAuthority,
@@ -102,11 +103,20 @@ export const BrowserContextStopCommand = Schema.Struct({
 }).annotations(strict);
 export type BrowserContextStopCommand = typeof BrowserContextStopCommand.Type;
 
+export const BrowserContextObservation = Schema.Struct({
+  context: BrowserContextRecord,
+  observation: Schema.optional(BrowserObservation),
+}).annotations(strict);
+export type BrowserContextObservation = typeof BrowserContextObservation.Type;
+
 export const BrowserAutomationSnapshot = Schema.Struct({
   status: BrowserWorkspaceStatus,
   threadId: BrowserThreadId,
   context: Schema.optional(BrowserContextRecord),
   observation: Schema.optional(BrowserObservation),
+  contexts: Schema.optional(
+    Schema.Array(BrowserContextObservation).pipe(Schema.maxItems(MAX_BROWSER_THREAD_CONTEXTS)),
+  ),
   evidence: Schema.Array(ToolEvidence),
   failure: Schema.optional(BrowserAutomationFailure),
 }).annotations(strict);

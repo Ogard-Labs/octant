@@ -235,6 +235,37 @@ export type CanvasDiagramLayoutRevised = typeof CanvasDiagramLayoutRevised.Type;
 
 export const CANVAS_DIAGRAM_LAYOUT_REVISED = "canvas.diagram-layout-revised@1";
 
+/**
+ * Why a board command was refused. Mirrors the domain policy's rejection codes
+ * plus the two the server adds when it cannot reach the policy at all.
+ */
+export const CanvasBoardDenialCode = Schema.Literal(
+  "malformed-request",
+  "stale-version",
+  "unauthorized",
+  "unavailable",
+  "oversized-payload",
+  "not-a-diagram",
+  "unknown-node",
+  "missing-position",
+);
+export type CanvasBoardDenialCode = typeof CanvasBoardDenialCode.Type;
+
+export const CanvasDiagramLayoutReviseResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("accepted"),
+    canvasId: CanvasId,
+    versionId: CanvasVersionId,
+    sequence: Schema.Int.pipe(Schema.positive()),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("denied"),
+    denialCode: CanvasBoardDenialCode,
+    message: boundedNonEmptyText(1_024),
+  }).annotations(strict),
+);
+export type CanvasDiagramLayoutReviseResult = typeof CanvasDiagramLayoutReviseResult.Type;
+
 // ── Decoders ─────────────────────────────────────────────────────────────────
 
 export const decodeCanvasCommentId = Schema.decodeUnknownSync(CanvasCommentId);
@@ -261,4 +292,7 @@ export const decodeCanvasDiagramLayoutReviseCommand = Schema.decodeUnknownSync(
 );
 export const decodeCanvasDiagramLayoutRevised = Schema.decodeUnknownSync(
   CanvasDiagramLayoutRevised,
+);
+export const decodeCanvasDiagramLayoutReviseResult = Schema.decodeUnknownSync(
+  CanvasDiagramLayoutReviseResult,
 );

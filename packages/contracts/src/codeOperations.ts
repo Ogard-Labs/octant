@@ -1724,7 +1724,7 @@ export const CodeBoardCard = Schema.Struct({
   threadId: CodeThreadId,
   projectId: ProjectId,
   checkoutId: CodeCheckoutId,
-  checkoutKind: Schema.Literal("existing-worktree", "managed-worktree"),
+  checkoutKind: Schema.Literal("existing-worktree", "managed-worktree", "plain-folder"),
   title: boundedNonEmptyText(512),
   status: CodeBoardStatus,
   statusReason: CodeBoardStatusReason,
