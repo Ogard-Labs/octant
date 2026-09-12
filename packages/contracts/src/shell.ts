@@ -362,7 +362,6 @@ export const StandaloneSkillActivationMap = Schema.Record({
 }).annotations(strict);
 export type StandaloneSkillActivationMap = typeof StandaloneSkillActivationMap.Type;
 
-
 export const ShellSettings = Schema.Struct({
   chatEnabled: Schema.Boolean,
   workEnabled: Schema.Boolean,
