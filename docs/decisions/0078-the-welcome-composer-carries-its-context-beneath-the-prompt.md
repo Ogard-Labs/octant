@@ -1,6 +1,6 @@
 # 0078. The welcome composer carries its context beneath the prompt
 
-**Status:** Superseded by 0117
+**Status:** Accepted
 
 ## Context
 
