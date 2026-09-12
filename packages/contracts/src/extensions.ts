@@ -509,8 +509,10 @@ export const ExtensionBlockReason = Schema.Literal(
   "stale-catalog-epoch",
   "not-installed",
   "untrusted",
+  "review-required",
   "plugin-disabled",
   "component-disabled",
+  "superseded",
   "incompatible",
   "quarantined",
   "draining",
@@ -601,6 +603,12 @@ export const StandaloneSkillRecord = Schema.Struct({
   desiredEnabled: Schema.Boolean,
   effectiveState: ExtensionEffectiveState,
   scope: Schema.optional(StandaloneSkillScope),
+  /**
+   * Raw skill instructions text, carried only for discovered/bundled skills
+   * that the host has already read from disk. Trust is still enforced by the
+   * activation ladder before this text reaches any provider context.
+   */
+  instructions: Schema.optional(Schema.String.pipe(Schema.maxLength(256 * 1024))),
   /**
    * Raw, provider-published Canvas skill contribution document, when the skill
    * ships parsed Canvas presentation metadata. Carried as an opaque value and
