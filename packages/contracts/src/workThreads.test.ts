@@ -59,6 +59,46 @@ describe("work thread contracts", () => {
     expect(() => decodeWorkThreadNavigation({ threads: [threadFixture] })).toThrow();
   });
 
+  it("carries a due status line on a navigation runtime row, absent by default", () => {
+    const runtime = decodeWorkThreadNavigation({
+      threads: [threadFixture],
+      runtime: [
+        {
+          threadId: ids.thread,
+          executing: false,
+          followUpDue: {
+            date: "2026-07-20",
+            text: "Offer v2 signature window closed",
+            state: "overdue",
+          },
+        },
+      ],
+    }).runtime;
+    expect(runtime[0]?.followUpDue).toEqual({
+      date: "2026-07-20",
+      text: "Offer v2 signature window closed",
+      state: "overdue",
+    });
+    expect(
+      decodeWorkThreadNavigation({
+        threads: [threadFixture],
+        runtime: [{ threadId: ids.thread, executing: false }],
+      }).runtime[0],
+    ).not.toHaveProperty("followUpDue");
+    expect(() =>
+      decodeWorkThreadNavigation({
+        threads: [threadFixture],
+        runtime: [
+          {
+            threadId: ids.thread,
+            executing: false,
+            followUpDue: { date: "20-07-2026", text: "Bad date", state: "overdue" },
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
   it("decodes create-work-thread command and bootstrap", () => {
     const create = decodeWorkThreadCommand({
       kind: "create-work-thread",

@@ -6,7 +6,11 @@
  * a one-shot banner per newly raised signal, and a standing dock badge count.
  */
 
-export type ThreadAttentionReason = "turn-finished" | "approval-required" | "question-asked";
+export type ThreadAttentionReason =
+  | "turn-finished"
+  | "approval-required"
+  | "question-asked"
+  | "follow-up-due";
 
 export interface ThreadAttentionSignal {
   readonly threadId: string;

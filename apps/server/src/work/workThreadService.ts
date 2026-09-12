@@ -20,6 +20,7 @@ import {
   type ProviderInstance,
   type ProviderModelId,
   type ProviderProbeResult,
+  type WorkStatusDatedItem,
   type ThreadWorkingDirectory,
   type WindowId,
 } from "@octant/contracts";
@@ -140,6 +141,16 @@ export interface WorkThreadServiceDependencies {
   readonly observeRuntime?: (
     threadId: WorkThreadId,
   ) => WorkThreadRuntimeActivity | Promise<WorkThreadRuntimeActivity>;
+  /**
+   * Reads the most urgent dated line in a Work Project's `STATUS.md`, when
+   * one has passed or is near (decision 0118). Optional so unit tests that
+   * only exercise thread CRUD need not wire status files; an absent reader
+   * leaves no follow-up marks on the navigation payload.
+   */
+  readonly projectDueReminder?: (
+    projectId: ProjectId,
+    canonicalRoot: string,
+  ) => Promise<WorkStatusDatedItem | undefined>;
   readonly issueContext?: GithubIssueContextPort;
   readonly linearIssueContext?: LinearIssueContextPort;
 }
@@ -162,6 +173,7 @@ export class WorkThreadService {
   readonly #workingDirectories: WorkThreadServiceDependencies["workingDirectories"];
   readonly #onWorkingDirectoryChanged: WorkThreadServiceDependencies["onWorkingDirectoryChanged"];
   readonly #observeRuntime?: WorkThreadServiceDependencies["observeRuntime"];
+  readonly #projectDueReminder?: WorkThreadServiceDependencies["projectDueReminder"];
   readonly #issueContext?: GithubIssueContextPort;
   readonly #linearIssueContext?: LinearIssueContextPort;
 
@@ -176,6 +188,9 @@ export class WorkThreadService {
     this.#onWorkingDirectoryChanged = dependencies.onWorkingDirectoryChanged;
     if (dependencies.observeRuntime !== undefined) {
       this.#observeRuntime = dependencies.observeRuntime;
+    }
+    if (dependencies.projectDueReminder !== undefined) {
+      this.#projectDueReminder = dependencies.projectDueReminder;
     }
     if (dependencies.issueContext !== undefined) {
       this.#issueContext = dependencies.issueContext;
@@ -192,16 +207,22 @@ export class WorkThreadService {
       const threads = this.#projection
         .list()
         .filter((thread) => accessible.has(String(thread.projectId)));
+      const reminders = await this.#dueRemindersByThread(threads);
       const runtime = [];
-      if (this.#observeRuntime !== undefined) {
+      if (this.#observeRuntime !== undefined || reminders.size > 0) {
         for (const thread of threads) {
           if (thread.lifecycle === "archived" || thread.lifecycle === "deleted") continue;
-          const activity = await this.#observeRuntime(thread.id);
+          const activity =
+            this.#observeRuntime === undefined
+              ? { executing: false }
+              : await this.#observeRuntime(thread.id);
+          const due = reminders.get(String(thread.id));
           runtime.push({
             threadId: thread.id,
             executing: activity.executing,
             // Carried only when true, so an idle row's payload stays as it was.
             ...(activity.awaitingInput === true ? { awaitingInput: true } : {}),
+            ...(due === undefined ? {} : { followUpDue: due }),
           });
         }
       }
@@ -247,17 +268,20 @@ export class WorkThreadService {
           thread.lifecycle === "active"
         );
       });
+      const reminders = await this.#dueRemindersByThread(threads);
       const runtime = [];
       for (const thread of threads) {
         const activity =
           this.#observeRuntime === undefined
             ? { executing: false }
             : await this.#observeRuntime(thread.id);
+        const due = reminders.get(String(thread.id));
         runtime.push({
           threadId: thread.id,
           executing: activity.executing,
           // Carried only when true, so an idle row's payload stays as it was.
           ...(activity.awaitingInput === true ? { awaitingInput: true } : {}),
+          ...(due === undefined ? {} : { followUpDue: due }),
         });
       }
       return decodeWorkThreadNavigation({ threads, runtime });
@@ -576,6 +600,42 @@ export class WorkThreadService {
         .filter((project) => project.type === "work" && project.lifecycle === "active")
         .map((project) => String(project.id)),
     );
+  }
+
+  /**
+   * A due date belongs to the Project, but the reminder lands on its newest
+   * open thread — the place the person would pick the work up, the same rule
+   * the Work board follows (decision 0118). A Project whose status cannot be
+   * read simply carries no mark; it must not empty the sidebar.
+   */
+  async #dueRemindersByThread(
+    threads: ReadonlyArray<WorkThread>,
+  ): Promise<ReadonlyMap<string, WorkStatusDatedItem>> {
+    const port = this.#projectDueReminder;
+    const reminders = new Map<string, WorkStatusDatedItem>();
+    if (port === undefined) return reminders;
+    const newestByProject = new Map<string, WorkThread>();
+    for (const thread of threads) {
+      if (thread.lifecycle !== "active" || thread.completedAt !== undefined) continue;
+      const key = String(thread.projectId);
+      const current = newestByProject.get(key);
+      if (current === undefined || current.updatedAt < thread.updatedAt) {
+        newestByProject.set(key, thread);
+      }
+    }
+    await Promise.all(
+      [...newestByProject.values()].map(async (thread) => {
+        const project = this.#persistence.readProject(thread.projectId);
+        if (project?.type !== "work") return;
+        try {
+          const item = await port(project.id, project.binding.canonicalRoot);
+          if (item !== undefined) reminders.set(String(thread.id), item);
+        } catch {
+          // A status file that refuses to read leaves the thread unmarked.
+        }
+      }),
+    );
+    return reminders;
   }
 
   async #requireProviderModel(

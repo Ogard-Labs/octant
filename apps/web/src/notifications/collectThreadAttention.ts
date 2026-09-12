@@ -42,6 +42,18 @@ export function collectThreadAttentionSignals(
       source: "work" as const,
       ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
     };
+    // A due date in the Project's STATUS.md is the host's reminder, carried
+    // beside whatever the thread itself is asking for (decision 0118).
+    if (thread.followUpDue !== undefined) {
+      signals.push({
+        ...shared,
+        reason: "follow-up-due",
+        detail:
+          thread.followUpDue.state === "overdue"
+            ? `Overdue ${thread.followUpDue.date} — ${thread.followUpDue.text}`
+            : `Due ${thread.followUpDue.date} — ${thread.followUpDue.text}`,
+      });
+    }
     if (thread.followUp === true) {
       signals.push({ ...shared, reason: "question-asked" });
     } else if (thread.unread === true) {

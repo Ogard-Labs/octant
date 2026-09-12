@@ -46,8 +46,12 @@ be one the person could not see or correct where they work.
 - **Dates become reminders without a second store.** The Work Project page
   shows the current status, follow-ups due, and what is coming up, parsed from
   the file on each read; the Work board's follow-up mark (0088) is derived the
-  same way and lands on the Project's most recent open thread. Nothing is
-  journaled; a hand edit to the file is in effect on the next read.
+  same way and lands on the Project's most recent open thread. The inbox reads
+  the same derivation: the most urgent dated line rides the navigation
+  runtime on that thread and surfaces as a `follow-up-due` attention signal,
+  so the reminder reaches the badge and the banner without a journaled copy.
+  Nothing is journaled; a hand edit to the file is in effect on the next
+  read.
 - **The Work Project page is where a Project is worked from.** Status, a new
   task composer, recent tasks, the folder's top level, and what Octant produced
   sit on one page composed from existing projections plus the two files.
@@ -65,9 +69,11 @@ be one the person could not see or correct where they work.
 - Every folderless Work thread shares the default Project's `STATUS.md`
   (0117), so unrelated quick tasks accrue one status. A person who wants a
   separate status makes a Project for it.
-- Reminders reach the Project page and the board, not the inbox: a journaled
-  Work follow-up aggregate would be a second copy of a date the file already
-  holds. If a notification is wanted later it derives from the same read.
+- Reminders reach the Project page, the board, and the inbox — all derived
+  from the same read, so dismissing one surface does not lose the date and a
+  hand edit moves every surface at once. What a reminder still cannot do is
+  wake the person at a chosen hour; if that is wanted later it derives from
+  the same read too.
 
 ## Related
 

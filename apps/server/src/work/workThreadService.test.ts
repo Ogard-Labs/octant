@@ -65,6 +65,70 @@ describe("WorkThreadService", () => {
     expect(fixture.projects.bootstrap).not.toHaveBeenCalled();
   });
 
+  it("marks only the Project's newest open thread when a status date is due", async () => {
+    const older = thread();
+    const newest = thread({
+      id: "72000000-0000-4000-8000-000000000006" as never,
+      title: "Renewal prep",
+      updatedAt: "2026-07-26T22:00:00.000Z" as UtcTimestamp,
+    });
+    const completed = thread({
+      id: "72000000-0000-4000-8000-000000000007" as never,
+      title: "Signed offer",
+      completedAt: "2026-07-26T23:00:00.000Z" as UtcTimestamp,
+      updatedAt: "2026-07-26T23:00:00.000Z" as UtcTimestamp,
+    });
+    const projectDueReminder = vi.fn(async () => ({
+      date: "2026-07-20" as const,
+      text: "Offer v2 signature window closed",
+      state: "overdue" as const,
+    }));
+    const fixture = serviceFixture({
+      threads: [older, newest, completed],
+      projectDueReminder,
+    });
+
+    const navigation = await fixture.service.navigation(ids.window);
+    const byThread = new Map(
+      navigation.runtime.map((entry) => [String(entry.threadId), entry] as const),
+    );
+    expect(byThread.get(String(newest.id))).toEqual({
+      threadId: newest.id,
+      executing: false,
+      followUpDue: {
+        date: "2026-07-20",
+        text: "Offer v2 signature window closed",
+        state: "overdue",
+      },
+    });
+    expect(byThread.get(String(older.id))).toEqual({ threadId: older.id, executing: false });
+    expect(byThread.get(String(completed.id))).toEqual({
+      threadId: completed.id,
+      executing: false,
+    });
+    expect(projectDueReminder).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the reminder off when the status read fails or nothing is due", async () => {
+    const failing = serviceFixture({
+      threads: [thread()],
+      projectDueReminder: vi.fn(async () => {
+        throw new Error("folder refused the read");
+      }),
+    });
+    await expect(failing.service.navigation(ids.window)).resolves.toMatchObject({
+      runtime: [{ threadId: ids.thread, executing: false }],
+    });
+
+    const quiet = serviceFixture({
+      threads: [thread()],
+      projectDueReminder: vi.fn(async () => undefined),
+    });
+    await expect(quiet.service.navigation(ids.window)).resolves.toMatchObject({
+      runtime: [{ threadId: ids.thread, executing: false }],
+    });
+  });
+
   it("does not read a deleted Work thread from its durable projection", async () => {
     const deleted = thread({ lifecycle: "deleted" });
     const fixture = serviceFixture({ threads: [deleted] });
@@ -825,6 +889,7 @@ function serviceFixture(
     readonly issueContext?: WorkThreadServiceDependencies["issueContext"];
     readonly linearIssueContext?: WorkThreadServiceDependencies["linearIssueContext"];
     readonly observeRuntime?: WorkThreadServiceDependencies["observeRuntime"];
+    readonly projectDueReminder?: WorkThreadServiceDependencies["projectDueReminder"];
   } = {},
 ) {
   const projection = new WorkThreadProjection();
@@ -903,6 +968,9 @@ function serviceFixture(
       ? {}
       : { linearIssueContext: options.linearIssueContext }),
     ...(options.observeRuntime === undefined ? {} : { observeRuntime: options.observeRuntime }),
+    ...(options.projectDueReminder === undefined
+      ? {}
+      : { projectDueReminder: options.projectDueReminder }),
   });
   return {
     service,

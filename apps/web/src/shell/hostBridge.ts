@@ -166,7 +166,11 @@ export type ProjectWindowTarget =
       threadId: string;
     }>;
 
-export type AttentionReason = "turn-finished" | "approval-required" | "question-asked";
+export type AttentionReason =
+  | "turn-finished"
+  | "approval-required"
+  | "question-asked"
+  | "follow-up-due";
 
 export interface AttentionNotificationRequest {
   readonly reason: AttentionReason;
