@@ -73,6 +73,38 @@ describe("AppearanceStore", () => {
     expect(await store.load()).toEqual(cleared);
   });
 
+  it("keeps the last requested background mode when writes overlap", async () => {
+    const inner = memoryStorage();
+    let releaseFirstGet: (() => void) | undefined;
+    let getCount = 0;
+    const store = createAppearanceStore({
+      async getItem(key) {
+        getCount += 1;
+        if (getCount === 1) {
+          await new Promise<void>((resolve) => {
+            releaseFirstGet = resolve;
+          });
+        }
+        return inner.getItem(key);
+      },
+      setItem: inner.setItem,
+      deleteItem: inner.deleteItem,
+    });
+
+    const first = store.setBackgroundMode("atmosphere");
+    const second = store.setBackgroundMode("code-gradient");
+    await Promise.resolve();
+    expect(getCount).toBe(1);
+    expect(releaseFirstGet).toBeDefined();
+    releaseFirstGet?.();
+    await Promise.all([first, second]);
+    expect(await store.load()).toEqual({
+      backgroundMode: "code-gradient",
+      colorSchemePreference: "system",
+      surfaceStyle: "flat",
+    });
+  });
+
   it("persists the opt-in atmosphere background independently of theme", async () => {
     const store = createAppearanceStore(memoryStorage());
     const atmosphere = await store.setBackgroundMode("atmosphere");

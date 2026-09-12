@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import {
@@ -54,6 +54,8 @@ export function AppearanceBackgroundPanel() {
   const { colors } = useTheme();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | undefined>();
+  const writeTail = useRef(Promise.resolve());
+  const inflightWrites = useRef(0);
   const backgroundMode = appearance.preferences.backgroundMode;
   const custom = backgroundMode === "custom";
   const themePreference = appearance.preferences.colorSchemePreference;
@@ -116,6 +118,30 @@ export function AppearanceBackgroundPanel() {
       }),
     [colors],
   );
+
+  const runBackgroundAction = (action: () => Promise<void>, successMessage: string) => {
+    inflightWrites.current += 1;
+    setBusy(true);
+    setMessage(undefined);
+    const run = writeTail.current.then(action, action).then(
+      () => {
+        setMessage(successMessage);
+      },
+      (cause: unknown) => {
+        setMessage(cause instanceof Error ? cause.message : MOBILE_COPY.backgroundImageFailed);
+      },
+    );
+    writeTail.current = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    void run.finally(() => {
+      inflightWrites.current -= 1;
+      if (inflightWrites.current === 0) {
+        setBusy(false);
+      }
+    });
+  };
 
   const pickImage = async () => {
     setBusy(true);
@@ -213,11 +239,9 @@ export function AppearanceBackgroundPanel() {
       <Pressable
         disabled={busy}
         onPress={() => {
-          void appearance.useCodeGradient().then(() => {
-            setMessage(MOBILE_COPY.backgroundModeCodeGradient);
-          });
+          runBackgroundAction(appearance.useCodeGradient, MOBILE_COPY.backgroundModeCodeGradient);
         }}
-        style={styles.secondary}
+        style={[styles.secondary, busy ? styles.buttonDisabled : null]}
         testID="mobile-appearance-use-code-gradient"
       >
         <Text style={styles.secondaryLabel}>{MOBILE_COPY.backgroundUseCodeGradient}</Text>
@@ -226,11 +250,9 @@ export function AppearanceBackgroundPanel() {
       <Pressable
         disabled={busy}
         onPress={() => {
-          void appearance.useAtmosphere().then(() => {
-            setMessage(MOBILE_COPY.backgroundModeAtmosphere);
-          });
+          runBackgroundAction(appearance.useAtmosphere, MOBILE_COPY.backgroundModeAtmosphere);
         }}
-        style={styles.secondary}
+        style={[styles.secondary, busy ? styles.buttonDisabled : null]}
         testID="mobile-appearance-use-atmosphere"
       >
         <Text style={styles.secondaryLabel}>{MOBILE_COPY.backgroundUseAtmosphere}</Text>
@@ -240,11 +262,12 @@ export function AppearanceBackgroundPanel() {
         <Pressable
           disabled={busy}
           onPress={() => {
-            void appearance.clearCustomBackground().then(() => {
-              setMessage(MOBILE_COPY.backgroundImageCleared);
-            });
+            runBackgroundAction(
+              appearance.clearCustomBackground,
+              MOBILE_COPY.backgroundImageCleared,
+            );
           }}
-          style={styles.secondary}
+          style={[styles.secondary, busy ? styles.buttonDisabled : null]}
           testID="mobile-appearance-clear-image"
         >
           <Text style={styles.secondaryLabel}>{MOBILE_COPY.backgroundClearImage}</Text>

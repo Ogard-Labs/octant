@@ -81,6 +81,18 @@ export interface AppearanceStore {
  * so preference JSON stays small (SecureStore-friendly).
  */
 export function createAppearanceStore(storage: ExpoSecureStringStorage): AppearanceStore {
+  // Overlapping load-then-save writes can persist the earlier tap. Queue them
+  // so the last requested mode is the one that remains.
+  let writeTail: Promise<void> = Promise.resolve();
+  const runExclusive = <T>(work: () => Promise<T>): Promise<T> => {
+    const run = writeTail.then(work, work);
+    writeTail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
+
   const writeMeta = async (prefs: AppearancePreferences): Promise<void> => {
     const meta: Record<string, string> = {
       backgroundMode: prefs.backgroundMode,
@@ -132,53 +144,63 @@ export function createAppearanceStore(storage: ExpoSecureStringStorage): Appeara
     load,
     save,
     async saveCustomImage(dataUri) {
-      const current = await load();
-      const next: AppearancePreferences = {
-        backgroundMode: "custom",
-        customImageUri: dataUri,
-        colorSchemePreference: current.colorSchemePreference,
-        surfaceStyle: current.surfaceStyle,
-      };
-      await save(next);
-      return next;
+      return runExclusive(async () => {
+        const current = await load();
+        const next: AppearancePreferences = {
+          backgroundMode: "custom",
+          customImageUri: dataUri,
+          colorSchemePreference: current.colorSchemePreference,
+          surfaceStyle: current.surfaceStyle,
+        };
+        await save(next);
+        return next;
+      });
     },
     async clearCustomImage() {
-      const current = await load();
-      const next: AppearancePreferences = {
-        backgroundMode: "code-gradient",
-        colorSchemePreference: current.colorSchemePreference,
-        surfaceStyle: current.surfaceStyle,
-      };
-      await save(next);
-      return next;
+      return runExclusive(async () => {
+        const current = await load();
+        const next: AppearancePreferences = {
+          backgroundMode: "code-gradient",
+          colorSchemePreference: current.colorSchemePreference,
+          surfaceStyle: current.surfaceStyle,
+        };
+        await save(next);
+        return next;
+      });
     },
     async setColorSchemePreference(preference) {
-      const current = await load();
-      const next: AppearancePreferences = {
-        ...current,
-        colorSchemePreference: preference,
-      };
-      await save(next);
-      return next;
+      return runExclusive(async () => {
+        const current = await load();
+        const next: AppearancePreferences = {
+          ...current,
+          colorSchemePreference: preference,
+        };
+        await save(next);
+        return next;
+      });
     },
     async setSurfaceStyle(style) {
-      const current = await load();
-      const next: AppearancePreferences = {
-        ...current,
-        surfaceStyle: style,
-      };
-      await save(next);
-      return next;
+      return runExclusive(async () => {
+        const current = await load();
+        const next: AppearancePreferences = {
+          ...current,
+          surfaceStyle: style,
+        };
+        await save(next);
+        return next;
+      });
     },
     async setBackgroundMode(mode) {
-      const current = await load();
-      const next: AppearancePreferences = {
-        backgroundMode: mode,
-        colorSchemePreference: current.colorSchemePreference,
-        surfaceStyle: current.surfaceStyle,
-      };
-      await save(next);
-      return next;
+      return runExclusive(async () => {
+        const current = await load();
+        const next: AppearancePreferences = {
+          backgroundMode: mode,
+          colorSchemePreference: current.colorSchemePreference,
+          surfaceStyle: current.surfaceStyle,
+        };
+        await save(next);
+        return next;
+      });
     },
   };
 }
