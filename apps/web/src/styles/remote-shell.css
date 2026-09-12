@@ -10,6 +10,65 @@
   color: var(--oct-fg);
 }
 
+/* Once paired, the shell carries a real thread workspace and takes the width
+   the desktop transcript is designed for. */
+.remote-shell--workspace {
+  width: min(100%, 1080px);
+}
+
+.remote-workspace {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  gap: var(--oct-space-4);
+  min-height: 60vh;
+}
+
+@media (width < 720px) {
+  .remote-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.remote-workspace__threads {
+  display: grid;
+  gap: var(--oct-space-2);
+  align-content: start;
+}
+
+.remote-workspace__threads-header {
+  display: flex;
+  gap: var(--oct-space-2);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.remote-workspace__thread-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The button recipe paints the row and its selected (secondary) state; this
+   only lets it fill its column and keep a long title on one line. */
+.remote-workspace__thread {
+  width: 100%;
+  justify-content: start;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-workspace__thread-view {
+  display: grid;
+  min-width: 0;
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  overflow: hidden;
+}
+
 .remote-shell__header {
   display: grid;
   gap: var(--oct-space-3);
@@ -23,50 +82,11 @@
   letter-spacing: var(--oct-tracking-snug);
 }
 
-.remote-shell__composer {
-  display: grid;
-  gap: var(--oct-space-2);
-}
-
-.remote-shell__label {
-  color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.remote-shell__input {
-  width: 100%;
-}
-
 .remote-shell__hint {
   margin: 0;
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
   line-height: var(--oct-leading-body);
-}
-
-.remote-shell__mode-panel {
-  display: grid;
-  gap: var(--oct-space-3);
-  padding: var(--oct-space-4);
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-}
-
-.remote-shell__mode-description {
-  margin: 0;
-  color: var(--oct-fg-2);
-  font-size: var(--oct-text-xs);
-  line-height: var(--oct-leading-body);
-}
-
-.remote-shell__mode-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--oct-space-2);
 }
 
 .remote-shell__surface-grid {
@@ -133,23 +153,6 @@
 .remote-shell__status svg {
   flex: none;
   translate: 0 2px;
-}
-
-.remote-shell__overview {
-  display: grid;
-  gap: var(--oct-space-3);
-}
-
-.remote-shell__stale-banner {
-  display: grid;
-  gap: 4px;
-  padding: var(--oct-space-3);
-  color: var(--oct-warn-fg);
-  font-size: var(--oct-text-xs);
-  line-height: var(--oct-leading-body);
-  background: var(--oct-warn-soft);
-  border: 1px solid color-mix(in oklab, var(--oct-warn) 45%, transparent);
-  border-radius: var(--oct-radius-md);
 }
 
 .remote-shell__device-panel {

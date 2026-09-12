@@ -1,24 +1,24 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { CodeComposerAccessMenu } from "./CodeComposerAccessMenu";
 
 describe("CodeComposerAccessMenu", () => {
-  it("names the current access posture and reports a change", () => {
+  it("names the current access posture and reports a change", async () => {
+    const user = userEvent.setup();
     const onChange = vi.fn();
     render(<CodeComposerAccessMenu onChange={onChange} value="approval-gated" />);
 
     const trigger = screen.getByRole("button", { name: "Access policy" });
     expect(trigger).toHaveTextContent("Ask for approvals");
-    fireEvent.click(trigger);
-    expect(screen.getByRole("option", { name: /Full access/ })).toHaveTextContent(
-      "Allow commands and edits without prompts.",
-    );
-    fireEvent.click(screen.getByRole("option", { name: /Full access/ }));
+    await user.click(trigger);
+    await user.click(await screen.findByRole("menuitemradio", { name: "Full access" }));
 
     expect(onChange).toHaveBeenCalledWith("full-access");
   });
 
-  it("lets the posture be remembered for the Project from the same menu", () => {
+  it("lets the posture be remembered for the Project from the same menu", async () => {
+    const user = userEvent.setup();
     const onPersistenceChange = vi.fn();
     render(
       <CodeComposerAccessMenu
@@ -29,10 +29,12 @@ describe("CodeComposerAccessMenu", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Access policy" }));
-    const remember = screen.getByRole("switch", { name: "Remember access for this Project" });
+    await user.click(screen.getByRole("button", { name: "Access policy" }));
+    const remember = await screen.findByRole("menuitemcheckbox", {
+      name: "Remember for this Project",
+    });
     expect(remember).not.toBeChecked();
-    fireEvent.click(remember);
+    await user.click(remember);
 
     expect(onPersistenceChange).toHaveBeenCalledWith("project-default");
   });

@@ -6,28 +6,17 @@ import { useConnectionStatus } from "@octant/client-runtime/use-connection-statu
 import {
   buildRemoteHostObservation,
   canExecuteRemoteProductMutation,
-  createRemoteDraftRegistry,
-  exerciseRemoteChatMutation,
-  exerciseRemoteChatSurface,
-  exerciseRemoteCodeMutation,
-  exerciseRemoteCodeSurface,
-  exerciseRemoteWorkMutation,
-  exerciseRemoteWorkSurface,
-  exerciseRemoteProviderSurface,
-  exerciseRemoteSettingsSurface,
-  isRemoteProductMutationFailure,
   listRemoteShellSurfacesByAvailability,
-  type RemoteShellSurfaceDescriptor,
 } from "@octant/client-runtime";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCard } from "../ui/base/OctantCard";
-import { OctantInput } from "../ui/base/OctantInput";
 import { HostSelector } from "../shell/HostSelector";
 import { ModeSwitcher } from "../shell/ModeSwitcher";
 import { ShellState } from "../shell/ShellState";
 import { RemoteDeviceSelfPanel } from "./RemoteDeviceSelfPanel";
-import { RemoteProjectOverviewSection } from "./RemoteProjectOverviewSection";
+import { createRemoteProductClients } from "./remoteProductClients";
+import { RemoteWorkspace } from "./RemoteWorkspace";
 import { useRemoteSession } from "./useRemoteSession";
 
 export interface RemoteShellViewProps {
@@ -36,106 +25,6 @@ export interface RemoteShellViewProps {
   readonly onSignedOut?: () => void;
   readonly origin?: string;
 }
-
-const modeDescriptions: Record<OctantMode, string> = {
-  chat: "Conversation state over the authenticated remote session.",
-  work: "Work thread inventory and mutations when the host connection is healthy.",
-  code: "Code workspace state and mutations through the remote listener.",
-};
-
-type RemoteExercise = {
-  readonly kind: "read" | "mutate";
-  readonly label: string;
-  readonly run: (bridge: RemoteSessionBridge) => Promise<{ ok: true }>;
-};
-
-const modeExercises: Record<
-  OctantMode,
-  { readonly read: RemoteExercise; readonly mutate: RemoteExercise }
-> = {
-  chat: {
-    read: {
-      kind: "read",
-      label: "Read Chat bootstrap",
-      run: (bridge) => exerciseRemoteChatSurface({ bridge }),
-    },
-    mutate: {
-      kind: "mutate",
-      label: "Verify Chat mutation",
-      run: (bridge) => exerciseRemoteChatMutation({ bridge }),
-    },
-  },
-  work: {
-    read: {
-      kind: "read",
-      label: "Read Work threads",
-      run: (bridge) => exerciseRemoteWorkSurface({ bridge }),
-    },
-    mutate: {
-      kind: "mutate",
-      label: "Verify Work mutation",
-      run: (bridge) => exerciseRemoteWorkMutation({ bridge }),
-    },
-  },
-  code: {
-    read: {
-      kind: "read",
-      label: "Read Code bootstrap",
-      run: (bridge) => exerciseRemoteCodeSurface({ bridge }),
-    },
-    mutate: {
-      kind: "mutate",
-      label: "Verify Code mutation",
-      run: (bridge) => exerciseRemoteCodeMutation({ bridge }),
-    },
-  },
-};
-
-function modeExercise(
-  mode: OctantMode,
-  kind: "read" | "mutate",
-  bridge: RemoteSessionBridge,
-): Promise<{ ok: true }> {
-  return modeExercises[mode][kind].run(bridge);
-}
-
-const auxiliaryExercises: ReadonlyArray<{
-  readonly surface: RemoteShellSurfaceDescriptor;
-  readonly buttonLabel?: string;
-  readonly run?: (bridge: RemoteSessionBridge) => Promise<{ ok: true }>;
-}> = [
-  {
-    surface: {
-      id: "preview",
-      label: "Previews",
-      description: "Open an authorized preview from its Project or thread context.",
-      availability: "remote",
-      catalogAction: "preview.open-authorized",
-    },
-  },
-  {
-    surface: {
-      id: "provider-models",
-      label: "Provider models",
-      description: "List configured provider models without reading credentials.",
-      availability: "remote",
-      catalogAction: "provider.list-models",
-    },
-    buttonLabel: "List provider models",
-    run: (bridge) => exerciseRemoteProviderSurface({ bridge }),
-  },
-  {
-    surface: {
-      id: "settings-read",
-      label: "Settings",
-      description: "Read non-secret settings and tool configuration.",
-      availability: "remote",
-      catalogAction: "settings.read-non-secret",
-    },
-    buttonLabel: "Read settings",
-    run: (bridge) => exerciseRemoteSettingsSurface({ bridge }),
-  },
-];
 
 export function RemoteShellView(props: RemoteShellViewProps) {
   const state = useRemoteSession(props.bridge);
@@ -149,38 +38,14 @@ export function RemoteShellView(props: RemoteShellViewProps) {
     return () => supervisor.stop();
   }, [supervisor]);
   const connectionStatus = useConnectionStatus(supervisor);
-  const draftRegistry = useMemo(() => createRemoteDraftRegistry(), []);
+  const clients = useMemo(() => createRemoteProductClients(props.bridge), [props.bridge]);
   const hosts = buildRemoteHostObservation({ state });
   const [activeMode, setActiveMode] = useState<OctantMode>("chat");
-  const [draft, setDraft] = useState(() => draftRegistry.read());
-  const [mutationMessage, setMutationMessage] = useState<string>();
-  const ready = canExecuteRemoteProductMutation(state);
+  const connected = canExecuteRemoteProductMutation(state);
   const localHostSurfaces = useMemo(
     () => listRemoteShellSurfacesByAvailability("local-host-only"),
     [],
   );
-
-  const updateDraft = (value: string) => {
-    setDraft(value);
-    draftRegistry.write(value);
-  };
-
-  const runExercise = async (
-    label: string,
-    exercise: () => Promise<{ ok: true }>,
-  ): Promise<void> => {
-    setMutationMessage(undefined);
-    try {
-      await exercise();
-      setMutationMessage(`${label} succeeded over the remote session.`);
-    } catch (error) {
-      if (isRemoteProductMutationFailure(error)) {
-        setMutationMessage(error.message);
-        return;
-      }
-      setMutationMessage(`${label} request failed.`);
-    }
-  };
 
   if (
     state.kind === "connecting" ||
@@ -242,13 +107,11 @@ export function RemoteShellView(props: RemoteShellViewProps) {
     );
   }
 
-  const activeExercises = modeExercises[activeMode];
-
   return (
-    <section aria-label="Remote Octant shell" className="remote-shell" role="region">
+    <section aria-label="Remote Octant shell" className="remote-shell remote-shell--workspace">
       <ConnectionStatusLine status={connectionStatus} />
       <header className="remote-shell__header">
-        <h1 className="remote-shell__title">Octant remote session</h1>
+        <h1 className="remote-shell__title">Octant</h1>
         <HostSelector hosts={hosts} />
         <ModeSwitcher
           activeMode={activeMode}
@@ -261,14 +124,14 @@ export function RemoteShellView(props: RemoteShellViewProps) {
       {state.kind === "stale" ? (
         <ShellState
           action={{ label: "Reconnect", onClick: () => props.bridge.reconnect() }}
-          message="The host connection is stale. Your composer draft remains on this device; reconnect to send changes."
+          message="The host connection is stale. What you see may be behind; reconnect to send a turn."
           role="status"
           state="warning"
           title="Connection stale"
         />
       ) : null}
 
-      <RemoteProjectOverviewSection bridge={props.bridge} mode={activeMode} />
+      <RemoteWorkspace clients={clients} connected={connected} mode={activeMode} />
 
       <RemoteDeviceSelfPanel
         bridge={props.bridge}
@@ -282,91 +145,6 @@ export function RemoteShellView(props: RemoteShellViewProps) {
         }}
       />
 
-      <div className="remote-shell__composer">
-        <label className="remote-shell__label" htmlFor="remote-draft">
-          Composer draft
-        </label>
-        <OctantInput
-          aria-describedby="remote-draft-hint"
-          className="remote-shell__input"
-          id="remote-draft"
-          onChange={(event) => updateDraft(event.target.value)}
-          placeholder="Draft text survives reconnect; it is never queued offline."
-          value={draft}
-        />
-        <p className="remote-shell__hint" id="remote-draft-hint">
-          Drafts stay on this browser across reconnect. Authority-bearing mutations fail closed
-          while offline.
-        </p>
-      </div>
-
-      <section aria-label={`${activeMode} remote surface`} className="remote-shell__mode-panel">
-        <h2 className="remote-shell__surface-title">
-          {activeMode === "chat" ? "Chat" : activeMode === "work" ? "Work" : "Code"}
-        </h2>
-        <p className="remote-shell__mode-description">{modeDescriptions[activeMode]}</p>
-        <div className="remote-shell__mode-actions">
-          <OctantButton
-            disabled={!ready}
-            onClick={() =>
-              void runExercise(activeExercises.read.label, () =>
-                modeExercise(activeMode, "read", props.bridge),
-              )
-            }
-            type="button"
-            variant="secondary"
-          >
-            {activeExercises.read.label}
-          </OctantButton>
-          <OctantButton
-            disabled={!ready}
-            onClick={() =>
-              void runExercise(activeExercises.mutate.label, () =>
-                modeExercise(activeMode, "mutate", props.bridge),
-              )
-            }
-            type="button"
-            variant="default"
-          >
-            {activeExercises.mutate.label}
-          </OctantButton>
-        </div>
-      </section>
-
-      <section aria-label="Remote tools and settings" className="remote-shell__surface-grid">
-        <h2 className="remote-shell__section-title">Remote tools and settings</h2>
-        {auxiliaryExercises.map((entry) => {
-          const exercise =
-            entry.run === undefined || entry.buttonLabel === undefined
-              ? undefined
-              : { label: entry.buttonLabel, run: entry.run };
-          return (
-            <OctantCard
-              className="remote-shell__surface-card p-3"
-              key={entry.surface.id}
-              role="article"
-            >
-              <h3 className="remote-shell__surface-title">{entry.surface.label}</h3>
-              <p className="remote-shell__surface-description">{entry.surface.description}</p>
-              {exercise === undefined ? (
-                <OctantBadge className="remote-shell__surface-badge" variant="secondary">
-                  Available in Project context
-                </OctantBadge>
-              ) : (
-                <OctantButton
-                  disabled={!ready}
-                  onClick={() => void runExercise(exercise.label, () => exercise.run(props.bridge))}
-                  type="button"
-                  variant="secondary"
-                >
-                  {exercise.label}
-                </OctantButton>
-              )}
-            </OctantCard>
-          );
-        })}
-      </section>
-
       <section
         aria-label="Local host only surfaces"
         className="remote-shell__surface-grid"
@@ -374,8 +152,8 @@ export function RemoteShellView(props: RemoteShellViewProps) {
       >
         <h2 className="remote-shell__section-title">Local host only</h2>
         <p className="remote-shell__local-only">
-          These surfaces require the packaged local host and stay hidden or disabled in remote
-          browsers.
+          These stay with the person at the host. A paired browser reads threads and sends turns; it
+          cannot bind folders, approve tool use, or manage credentials.
         </p>
         {localHostSurfaces.map((surface) => (
           <OctantCard
@@ -392,12 +170,6 @@ export function RemoteShellView(props: RemoteShellViewProps) {
           </OctantCard>
         ))}
       </section>
-
-      {mutationMessage === undefined ? null : (
-        <p className="remote-shell__status" role="status" aria-live="polite">
-          {mutationMessage}
-        </p>
-      )}
 
       <OctantButton onClick={props.onReset} type="button" variant="secondary">
         End remote session

@@ -1,6 +1,8 @@
 import {
+  ApplicationMentionTypeahead,
   BrowserUseMention,
   ComputerUseMention,
+  useApplicationMentionTypeahead,
   useBrowserUseMention,
   useComputerUseMention,
 } from "../computerUse/ComputerUseMention";
@@ -234,6 +236,10 @@ export function ChatComposer(props: ChatComposerProps) {
       void resolveExtensionReference("@browser");
     },
   });
+  const appMentions = useApplicationMentionTypeahead([
+    { controller: computer, kind: "computer" },
+    { controller: browser, kind: "browser" },
+  ]);
   const statusId = useId();
   const providerId = useId();
   const modelId = useId();
@@ -420,6 +426,7 @@ export function ChatComposer(props: ChatComposerProps) {
 
   async function onDraftKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.nativeEvent.isComposing) return;
+    if (appMentions.handleKeyDown(event)) return;
     if (computer.handleKeyDown(event)) return;
     if (browser.handleKeyDown(event)) return;
     if (commandOpen && commandMatches.length > 0) {
@@ -608,15 +615,17 @@ export function ChatComposer(props: ChatComposerProps) {
   const input = (
     <OctantTextarea
       aria-activedescendant={
-        computer.open
-          ? `${computer.listId}-computer`
-          : browser.open
-            ? `${browser.listId}-browser`
-            : activeCommand !== undefined
-              ? `${commandListId}-${activeCommand.id}`
-              : activeMention === undefined
-                ? undefined
-                : `${mentionListId}-${String(activeMention.threadId)}`
+        appMentions.open.length > 1
+          ? `${appMentions.listId}-${appMentions.open[appMentions.active]?.kind ?? ""}`
+          : computer.open
+            ? `${computer.listId}-computer`
+            : browser.open
+              ? `${browser.listId}-browser`
+              : activeCommand !== undefined
+                ? `${commandListId}-${activeCommand.id}`
+                : activeMention === undefined
+                  ? undefined
+                  : `${mentionListId}-${String(activeMention.threadId)}`
       }
       aria-autocomplete={
         !computer.available &&
@@ -627,15 +636,17 @@ export function ChatComposer(props: ChatComposerProps) {
           : "list"
       }
       aria-controls={
-        computer.open
-          ? computer.listId
-          : browser.open
-            ? browser.listId
-            : commandOpen
-              ? commandListId
-              : mentionOpen
-                ? mentionListId
-                : undefined
+        appMentions.open.length > 1
+          ? appMentions.listId
+          : computer.open
+            ? computer.listId
+            : browser.open
+              ? browser.listId
+              : commandOpen
+                ? commandListId
+                : mentionOpen
+                  ? mentionListId
+                  : undefined
       }
       aria-describedby={statusId}
       aria-expanded={
@@ -925,7 +936,9 @@ export function ChatComposer(props: ChatComposerProps) {
         },
       }}
       typeahead={
-        computer.open ? (
+        appMentions.open.length > 1 ? (
+          <ApplicationMentionTypeahead typeahead={appMentions} />
+        ) : computer.open ? (
           <ComputerUseMention controller={computer} surface="typeahead" />
         ) : browser.open ? (
           <BrowserUseMention controller={browser} surface="typeahead" />

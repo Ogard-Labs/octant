@@ -5,12 +5,14 @@ import {
   type ExtensionSnapshot,
   type SkillMarketplaceEntry,
 } from "@octant/contracts/extension-rpc";
-import type { ExtensionPackageManifest, StandaloneSkillRecord } from "@octant/contracts/extensions";
-import {
-  buildSkillCatalog,
-  sourceQualifiedSkillId,
-  bundledSkillRecords,
-} from "@octant/plugin-host";
+import type {
+  ExtensionEffectiveState,
+  ExtensionPackageManifest,
+  ExtensionSkillCollision,
+  StandaloneSkillRecord,
+} from "@octant/contracts/extensions";
+import type { StandaloneSkillActivationState } from "@octant/contracts/shell";
+import { sourceQualifiedSkillId, bundledSkillRecords } from "@octant/plugin-host";
 import type { ExtensionLifecycleService } from "./extensionLifecycleService";
 import {
   inspectExtensionPackage,
@@ -18,6 +20,20 @@ import {
   type ResolvedExtensionPackage,
 } from "./packageInspector";
 import type { SkillDiscoveryService } from "./skillDiscoveryService";
+
+export interface StandaloneSkillActivationStore {
+  read(): Promise<Readonly<Record<string, StandaloneSkillActivationState>>>;
+  write(activations: Readonly<Record<string, StandaloneSkillActivationState>>): Promise<void>;
+}
+
+const IN_MEMORY_EMPTY_STORE: StandaloneSkillActivationStore = {
+  async read() {
+    return {};
+  },
+  async write() {
+    // No persistence in memory-only mode.
+  },
+};
 
 export interface SkillMarketplacePort {
   search(
@@ -43,7 +59,11 @@ type SkillCommand = Extract<
       | "install-skill"
       | "update-skill"
       | "remove-skill"
-      | "reconcile-skills";
+      | "reconcile-skills"
+      | "review-skill"
+      | "trust-skill-source"
+      | "set-skill-desired"
+      | "select-skill-collision";
   }
 >;
 
@@ -55,7 +75,9 @@ export class StandaloneSkillService {
     ExtensionLifecycleService,
     "snapshot" | "install" | "update" | "uninstall"
   >;
+  readonly #activationStore: StandaloneSkillActivationStore;
   readonly #inspections = new Map<string, InspectedExtensionPackage>();
+  #activations: Readonly<Record<string, StandaloneSkillActivationState>> = {};
 
   constructor(options: {
     readonly discovery: Pick<SkillDiscoveryService, "snapshot" | "reconcile"> &
@@ -65,15 +87,18 @@ export class StandaloneSkillService {
       ExtensionLifecycleService,
       "snapshot" | "install" | "update" | "uninstall"
     >;
+    readonly activationStore?: StandaloneSkillActivationStore;
   }) {
     this.#discovery = options.discovery;
     this.#marketplace = options.marketplace;
     this.#lifecycle = options.lifecycle;
+    this.#activationStore = options.activationStore ?? IN_MEMORY_EMPTY_STORE;
   }
 
   async reconcile(): Promise<ExtensionSnapshot> {
     await this.#discovery.reconcile();
     await this.#discovery.startWatching?.();
+    this.#activations = await this.#activationStore.read();
     return this.snapshot(this.#lifecycle.snapshot());
   }
 
@@ -96,10 +121,11 @@ export class StandaloneSkillService {
         !installed.some((candidate) => candidate.skill.qualifiedId === skill.skill.qualifiedId) &&
         !discovered.some((candidate) => candidate.skill.qualifiedId === skill.skill.qualifiedId),
     );
-    const catalog = buildSkillCatalog([...discovered, ...bundled, ...installed]);
+    const activated = [...discovered, ...bundled].map((skill) => this.#applyActivation(skill));
+    const catalog = resolveStandaloneSkillCatalog(activated);
     return {
       ...base,
-      skills: catalog.skills,
+      skills: [...catalog.skills, ...installed],
       collisions: [...base.collisions, ...catalog.collisions],
     };
   }
@@ -140,7 +166,83 @@ export class StandaloneSkillService {
         };
       case "reconcile-skills":
         return { kind: "extension-state-updated", snapshot: await this.reconcile() };
+      case "review-skill":
+      case "trust-skill-source":
+      case "set-skill-desired":
+      case "select-skill-collision":
+        return { kind: "extension-state-updated", snapshot: await this.#mutateActivation(command) };
     }
+  }
+
+  async #mutateActivation(
+    command: Extract<
+      SkillCommand,
+      | { readonly kind: "review-skill" }
+      | { readonly kind: "trust-skill-source" }
+      | { readonly kind: "set-skill-desired" }
+      | { readonly kind: "select-skill-collision" }
+    >,
+  ): Promise<ExtensionSnapshot> {
+    const key = command.qualifiedId;
+    const existing = this.#activations[key] ?? {
+      reviewed: false,
+      trusted: false,
+      desiredEnabled: false,
+    };
+    switch (command.kind) {
+      case "review-skill":
+        this.#activations = { ...this.#activations, [key]: { ...existing, reviewed: true } };
+        break;
+      case "trust-skill-source":
+        this.#activations = {
+          ...this.#activations,
+          [key]: { ...existing, reviewed: true, trusted: command.trusted },
+        };
+        break;
+      case "set-skill-desired":
+        this.#activations = {
+          ...this.#activations,
+          [key]: { ...existing, desiredEnabled: command.desired },
+        };
+        break;
+      case "select-skill-collision": {
+        const selectedKey = command.qualifiedId;
+        const selected = this.#activations[selectedKey] ?? {
+          reviewed: false,
+          trusted: false,
+          desiredEnabled: false,
+        };
+        const updated: Record<string, StandaloneSkillActivationState> = {};
+        for (const [candidateKey, candidate] of Object.entries(this.#activations)) {
+          if (candidateKey !== selectedKey && candidateKey.startsWith(`${command.name}:`)) {
+            updated[candidateKey] = { ...candidate, desiredEnabled: false };
+          }
+        }
+        this.#activations = {
+          ...this.#activations,
+          ...updated,
+          [selectedKey]: { ...selected, reviewed: true, trusted: true, desiredEnabled: true },
+        };
+        break;
+      }
+    }
+    await this.#activationStore.write(this.#activations);
+    return this.snapshot(this.#lifecycle.snapshot());
+  }
+
+  #applyActivation(record: StandaloneSkillRecord): StandaloneSkillRecord {
+    const key = String(record.skill.qualifiedId);
+    const activation = this.#activations[key];
+    if (activation === undefined) return record;
+    return {
+      ...record,
+      reviewed: activation.reviewed,
+      desiredEnabled: activation.desiredEnabled,
+      // `provenance.reviewed` carries the user's trust decision for filesystem
+      // skills. The publisher provenance is the skill source itself; trust is
+      // explicit and revocable.
+      provenance: { reviewed: activation.trusted },
+    };
   }
 
   async #inspect(
@@ -257,6 +359,68 @@ function previewSkillInstructions(inspection: InspectedExtensionPackage): {
     throw new Error("Skill instructions exceed the preview limit.");
   }
   return { instructions };
+}
+
+function standaloneEffectiveState(
+  record: StandaloneSkillRecord,
+  superseded: boolean,
+): ExtensionEffectiveState {
+  if (!record.skill.available) {
+    return { kind: "blocked", reason: "unavailable" };
+  }
+  if (superseded) {
+    return { kind: "blocked", reason: "superseded" };
+  }
+  if (!record.provenance.reviewed) {
+    return { kind: "blocked", reason: "untrusted" };
+  }
+  if (!record.reviewed) {
+    return { kind: "blocked", reason: "review-required" };
+  }
+  if (!record.desiredEnabled) {
+    return { kind: "blocked", reason: "component-disabled" };
+  }
+  return { kind: "effective" };
+}
+
+function resolveStandaloneSkillCatalog(records: ReadonlyArray<StandaloneSkillRecord>): {
+  readonly skills: ReadonlyArray<StandaloneSkillRecord>;
+  readonly collisions: ReadonlyArray<ExtensionSkillCollision>;
+} {
+  const byName = new Map<string, StandaloneSkillRecord[]>();
+  for (const record of records) {
+    const list = byName.get(record.skill.name) ?? [];
+    list.push(record);
+    byName.set(record.skill.name, list);
+  }
+
+  const skills: StandaloneSkillRecord[] = [];
+  const collisions: ExtensionSkillCollision[] = [];
+
+  for (const [name, candidates] of byName) {
+    const available = candidates.filter((candidate) => candidate.skill.available);
+    const active = available.filter(
+      (candidate) =>
+        candidate.reviewed && candidate.desiredEnabled && candidate.provenance.reviewed,
+    );
+    const selected = active.length === 1 ? active[0] : undefined;
+    if (available.length > 1 && selected === undefined) {
+      collisions.push({
+        name,
+        candidates: available.map((candidate) => candidate.skill.qualifiedId),
+      });
+    }
+    for (const candidate of candidates) {
+      const superseded =
+        selected !== undefined && candidate.skill.qualifiedId !== selected.skill.qualifiedId;
+      skills.push({
+        ...candidate,
+        effectiveState: standaloneEffectiveState(candidate, superseded),
+      });
+    }
+  }
+
+  return { skills, collisions };
 }
 
 function targetKey(value: {
