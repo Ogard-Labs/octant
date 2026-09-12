@@ -246,11 +246,13 @@ export class SkillDiscoveryService {
       }
       const contentDigest = digest(content);
       const diagnostic = validateSkillContent(content);
+      const instructions = diagnostic === undefined ? new TextDecoder().decode(content) : undefined;
       return this.#record({
         name,
         source,
         digest: contentDigest,
         contentBytes: content.byteLength,
+        ...(instructions === undefined ? {} : { instructions }),
         ...(diagnostic === undefined ? {} : { diagnostic }),
         ...(scope === undefined ? {} : { scope }),
       });
@@ -282,6 +284,7 @@ export class SkillDiscoveryService {
     readonly source: ExtensionSource;
     readonly digest: ExtensionContentDigest;
     readonly contentBytes: number;
+    readonly instructions?: string;
     readonly diagnostic?: ExtensionDiagnostic;
     readonly scope?: StandaloneSkillScope;
   }): StandaloneSkillRecord {
@@ -295,7 +298,7 @@ export class SkillDiscoveryService {
     };
     const effectiveState: ExtensionEffectiveState = {
       kind: "blocked",
-      reason: "untrusted",
+      reason: "review-required",
     };
     return {
       skill,
@@ -307,6 +310,7 @@ export class SkillDiscoveryService {
       desiredEnabled: false,
       effectiveState,
       ...(input.scope === undefined ? {} : { scope: input.scope }),
+      ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
     };
   }
 }
