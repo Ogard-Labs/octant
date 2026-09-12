@@ -7,6 +7,7 @@ import type {
   ToolActionRequest,
   WindowId,
 } from "@octant/contracts";
+import { MAX_BROWSER_THREAD_CONTEXTS } from "@octant/contracts";
 import { decodeToolActionRequest } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -860,5 +861,34 @@ describe("BrowserAutomationService", () => {
       category: "failed",
       message: "The browser action failed.",
     });
+  });
+
+  it("caps a thread inspect when overlapping stops leave more contexts than the contract allows", async () => {
+    const { runtime, service } = harness();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(runtime.closeContext).mockImplementation(async () => held);
+
+    for (let i = 0; i < MAX_BROWSER_THREAD_CONTEXTS + 1; i += 1) {
+      const created = await service.create({
+        windowId,
+        threadId: threadOne,
+        action: action(),
+        policy,
+      });
+      const contextId = created.context?.contextId;
+      expect(contextId).toBeDefined();
+      if (contextId === undefined) throw new Error("expected a created context");
+      void service.stop(windowId, threadOne, contextId);
+      await vi.waitFor(() => {
+        expect(service.inspectThread(windowId, threadOne).context?.state).toBe("stopping");
+      });
+    }
+
+    const snapshot = service.inspectThread(windowId, threadOne);
+    expect(snapshot.contexts?.length).toBe(MAX_BROWSER_THREAD_CONTEXTS);
+    release();
   });
 });
