@@ -41,6 +41,7 @@ export interface ExtensionMaterialLoaderPort {
   load(input: {
     readonly entry: CapabilityCatalogEntry;
     readonly effectiveSnapshot: ExtensionEffectiveSnapshot;
+    readonly snapshot?: ExtensionSnapshot;
   }): Promise<{
     readonly context?: ProviderContextBlock;
     readonly tools: ReadonlyArray<ProviderToolDefinition>;
@@ -77,8 +78,18 @@ export function createStoredExtensionMaterialLoader(
   } = {},
 ): ExtensionMaterialLoaderPort {
   return {
-    async load({ entry, effectiveSnapshot }) {
+    async load({ entry, effectiveSnapshot, snapshot }) {
       const source = entry.source;
+      if (source.kind === "agents-skills-directory") {
+        const skillId = source.referenceId;
+        const record = snapshot?.skills?.find(
+          (candidate) => String(candidate.skill.qualifiedId) === skillId,
+        );
+        if (record?.instructions === undefined || record.effectiveState.kind !== "effective") {
+          throw new Error("Standalone skill instructions are unavailable.");
+        }
+        return { context: { kind: "instructions", text: record.instructions }, tools: [] };
+      }
       if (source.kind !== "plugin-package") {
         throw new Error("Extension material source is unavailable.");
       }
@@ -183,7 +194,7 @@ export function createExtensionChatResolver(options: {
       authoritativeCatalogEpoch: effectiveSnapshot.catalogEpoch,
       capabilityCatalog: catalogs.capabilities,
       capabilityRequest: catalogs.request,
-      loadMaterial: (entry) => options.materialLoader.load({ entry, effectiveSnapshot }),
+      loadMaterial: (entry) => options.materialLoader.load({ entry, effectiveSnapshot, snapshot }),
     });
     if (composed.status === "blocked") {
       throw new ChatServiceError({
@@ -311,21 +322,39 @@ export function buildCatalogs(
     const installed = installedSkills.get(skill.skill.qualifiedId);
     const effectiveState: ExtensionEffectiveState =
       installed?.component.effectiveState ?? skill.effectiveState;
-    const capabilityIds =
-      installed === undefined
-        ? []
-        : [
-            addCapability(entries, {
-              id: contextEntryId(`skill:${skill.skill.qualifiedId}`),
-              referenceId: String(skill.skill.qualifiedId),
-              packageId: String(installed.packageState.packageId),
-              component: installed.component.component,
-              componentKind: "plugin-instruction",
-              label: skill.displayName,
-              providerInstanceId: subject.providerInstanceId,
-              activeScope,
-            }),
-          ];
+    let capabilityIds: string[] = [];
+    if (installed !== undefined) {
+      capabilityIds = [
+        addCapability(entries, {
+          id: contextEntryId(`skill:${skill.skill.qualifiedId}`),
+          referenceId: String(skill.skill.qualifiedId),
+          packageId: String(installed.packageState.packageId),
+          component: installed.component.component,
+          componentKind: "plugin-instruction",
+          label: skill.displayName,
+          providerInstanceId: subject.providerInstanceId,
+          activeScope,
+        }),
+      ];
+    } else if (skill.effectiveState.kind === "effective") {
+      capabilityIds = [
+        addCapability(entries, {
+          id: contextEntryId(`skill:${skill.skill.qualifiedId}`),
+          referenceId: String(skill.skill.qualifiedId),
+          packageId: String(skill.skill.qualifiedId),
+          component: {
+            id: skill.skill.name as never,
+            kind: "skill-instructions",
+            displayName: skill.displayName,
+            declaredCapabilities: [],
+          },
+          componentKind: "skill-instruction",
+          label: skill.displayName,
+          providerInstanceId: subject.providerInstanceId,
+          activeScope,
+        }),
+      ];
+    }
     return {
       skillId: skill.skill.qualifiedId,
       name: skill.skill.name,

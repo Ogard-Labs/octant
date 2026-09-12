@@ -11,6 +11,7 @@ import {
   extractRuntimeSpecifiers,
   extractSpecifiers,
   findBarrelOnlyModules,
+  findStaleIslandExemptions,
   findTypeOnlyReferencedModules,
   findUncalledEndpoints,
   findUnreachableModules,
@@ -344,6 +345,35 @@ describe("findBarrelOnlyModules", () => {
     expect(violations.map(({ path }) => path)).toEqual(["packages/domain/src/sharePolicy.ts"]);
   });
 
+  it("does not let a coincidental bare word keep a barrel-only module alive", () => {
+    const violations = findBarrelOnlyModules([
+      barrel,
+      { path: "packages/domain/src/sharePolicy.ts", content: "export const hostId = 1;" },
+      {
+        path: "apps/server/src/hostService.ts",
+        content: `const facts = { hostId: "local" };\nexport function read() { return facts.hostId; }`,
+      },
+    ]);
+
+    expect(violations.map(({ path }) => path)).toEqual(["packages/domain/src/sharePolicy.ts"]);
+  });
+
+  it("counts a type-only named import and an aliased import as use", () => {
+    const violations = findBarrelOnlyModules([
+      barrel,
+      {
+        path: "packages/domain/src/usedPolicy.ts",
+        content: "export interface Decision {}\nexport function decide() {}",
+      },
+      {
+        path: "apps/web/src/decide.ts",
+        content: `import { type Decision, decide as admit } from "@octant/domain";\nexport const d: Decision = admit();`,
+      },
+    ]);
+
+    expect(violations).toEqual([]);
+  });
+
   it("ignores a module that exports no names, which is Rule B's question", () => {
     const violations = findBarrelOnlyModules([
       barrel,
@@ -604,5 +634,56 @@ describe("production launch wiring", () => {
       const content = await readFile(resolve(repoRoot, relativePath), "utf8");
       expect(content).toMatch(/ServicePolicyStore/);
     }
+  });
+});
+
+describe("findStaleIslandExemptions", () => {
+  const barrel = {
+    path: "packages/contracts/src/index.ts",
+    content: `export * from "./routing";`,
+  };
+
+  it("reports an exemption whose module product code now imports by name", () => {
+    const violations = findStaleIslandExemptions(
+      [
+        barrel,
+        { path: "packages/contracts/src/routing.ts", content: "export const Route = 1;" },
+        {
+          path: "apps/server/src/router.ts",
+          content: `import { Route } from "@octant/contracts";\nexport const r = Route;`,
+        },
+      ],
+      new Map([["packages/contracts/src/routing.ts", "ahead of the server routing engine"]]),
+    );
+
+    expect(violations.map(({ path }) => path)).toEqual(["packages/contracts/src/routing.ts"]);
+    expect(violations[0]?.reason).toMatch(/now reaches/);
+  });
+
+  it("keeps an exemption whose module is still reached only by tests", () => {
+    const violations = findStaleIslandExemptions(
+      [
+        barrel,
+        { path: "packages/contracts/src/routing.ts", content: "export const Route = 1;" },
+        {
+          path: "packages/contracts/src/routing.test.ts",
+          content: `import { Route } from "./routing";\nRoute;`,
+        },
+      ],
+      new Map([["packages/contracts/src/routing.ts", "schema-first, nothing routes yet"]]),
+    );
+
+    expect(violations).toEqual([]);
+  });
+
+  it("reports an exemption for a module that was deleted", () => {
+    const violations = findStaleIslandExemptions(
+      [barrel],
+      new Map([["packages/contracts/src/gone.ts", "removed"]]),
+    );
+
+    expect(violations.map(({ reason }) => reason)).toEqual([
+      expect.stringMatching(/no longer exists/),
+    ]);
   });
 });
