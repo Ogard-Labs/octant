@@ -358,7 +358,7 @@ function WorkStatusCard({ status }: { readonly status: WorkProjectStatus }) {
       {due.length === 0 ? null : (
         <div className="work-status__due" role="status">
           <h3>
-            <CalendarClock aria-hidden="true" size={13} strokeWidth={1.8} />
+            <CalendarClock aria-hidden="true" size={14} strokeWidth={1.8} />
             Follow-ups due
           </h3>
           <ul className="work-overview__items">
