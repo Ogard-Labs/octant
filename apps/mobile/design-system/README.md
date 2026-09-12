@@ -7,7 +7,7 @@ registries, or distinctive implementation structures.
 ## Layering (do not invert)
 
 1. **Tokens** — cream / warm ink / `#F54E00` (and Distilled dark charcoal).
-2. **Home** — status cards + Workspaces (unchanged by chat chrome).
+2. **Home** — status cards + Hosts (unchanged by chat chrome).
 3. **Surfaces** — Apple liquid-glass (default) or flat solid panels; user-selectable.
 4. **Conversation-first thread** — conversation spacing, full-width assistant prose,
    message actions (copy), and a floating composer with arrow-up send.
