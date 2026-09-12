@@ -283,9 +283,9 @@
 
 /* ── Welcome composer ──────────────────────────────────────────────────
    Chat, Work, and Code start from the same geometry: one hero question and
-   the raised `.composer`, whose lower band (`.composer-tray`) carries where
-   the thread runs. The per-mode adapters only decide which controls sit on
-   that band. */
+   the raised `.composer`, with `.composer-tray--above` carrying where the
+   thread runs in a quiet row above the card. The per-mode adapters only
+   decide which controls sit on that row. */
 
 .welcome {
   display: flex;
@@ -333,25 +333,19 @@
   min-height: 96px;
 }
 
-/* The context strip is the composer's own lower band, attached under the
-   prompt and its toolbar: where the thread runs sits on the object that
-   starts it, as one card. The earlier rear tray peeked out above the
-   composer and had to expand in place when a control opened, which let a
-   repository list push the prompt down the page. */
-.composer > .composer-tray {
+/* Where the thread runs rides in a quiet row above the card, so the
+   composer stays one object — prompt and send row — instead of a banded
+   stack. The earlier in-card band read as a second box, and a rear tray
+   peeking out above had once let a repository list push the prompt down the
+   page; above-and-quiet keeps the pickers reachable without either. */
+.composer-tray--above {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 6px 12px;
-  margin: 0;
-  /* Tray items carry 7px of their own inset, so their icons land on the
-     frame's gutter. */
-  padding: 6px calc(var(--oct-composer-gutter) - 7px);
+  margin: 0 2px 10px;
   color: var(--oct-meta);
-  background: var(--octant-tray);
-  border-top: 1px solid var(--oct-border);
-  border-radius: 0 0 var(--oct-radius-lg) var(--oct-radius-lg);
 }
 
 .composer-tray__leading,
