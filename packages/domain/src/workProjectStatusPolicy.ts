@@ -8,7 +8,7 @@ import {
 } from "@octant/contracts/work-project-status";
 
 /**
- * The two files every Work Project folder carries (`docs/decisions/0118`).
+ * The two files every Work Project folder carries (`docs/decisions/0119`).
  *
  * `AGENTS.md` is the person's standing brief for anyone working in the folder;
  * Octant seeds it once and never touches it again. `STATUS.md` is where the

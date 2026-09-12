@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import {
@@ -54,7 +54,10 @@ export function AppearanceBackgroundPanel() {
   const { colors } = useTheme();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | undefined>();
-  const custom = appearance.preferences.backgroundMode === "custom";
+  const writeTail = useRef(Promise.resolve());
+  const inflightWrites = useRef(0);
+  const backgroundMode = appearance.preferences.backgroundMode;
+  const custom = backgroundMode === "custom";
   const themePreference = appearance.preferences.colorSchemePreference;
   const surfaceStyle = appearance.preferences.surfaceStyle;
 
@@ -76,14 +79,13 @@ export function AppearanceBackgroundPanel() {
         help: {
           fontSize: typography.body.fontSize,
           color: colors.textSecondary,
-          lineHeight: 22,
+          lineHeight: 20,
         },
         section: {
           marginTop: space.sm,
           fontSize: typography.section.fontSize,
           fontWeight: typography.section.fontWeight,
           letterSpacing: typography.section.letterSpacing,
-          textTransform: "uppercase",
           color: colors.textTertiary,
         },
         themeRow: {
@@ -96,7 +98,7 @@ export function AppearanceBackgroundPanel() {
         },
         previewLabel: {
           color: colors.textPrimary,
-          fontWeight: "600",
+          fontWeight: "500",
         },
         button: {
           backgroundColor: colors.accent,
@@ -107,15 +109,39 @@ export function AppearanceBackgroundPanel() {
         buttonDisabled: { opacity: 0.45 },
         buttonLabel: {
           color: colors.sendLabel,
-          fontWeight: "700",
+          fontWeight: "500",
           fontSize: typography.body.fontSize,
         },
         secondary: { alignItems: "center", paddingVertical: space.sm },
-        secondaryLabel: { color: colors.accent, fontWeight: "600" },
+        secondaryLabel: { color: colors.accent, fontWeight: "500" },
         message: { color: colors.textSecondary, fontSize: typography.caption.fontSize },
       }),
     [colors],
   );
+
+  const runBackgroundAction = (action: () => Promise<void>, successMessage: string) => {
+    inflightWrites.current += 1;
+    setBusy(true);
+    setMessage(undefined);
+    const run = writeTail.current.then(action, action).then(
+      () => {
+        setMessage(successMessage);
+      },
+      (cause: unknown) => {
+        setMessage(cause instanceof Error ? cause.message : MOBILE_COPY.backgroundImageFailed);
+      },
+    );
+    writeTail.current = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    void run.finally(() => {
+      inflightWrites.current -= 1;
+      if (inflightWrites.current === 0) {
+        setBusy(false);
+      }
+    });
+  };
 
   const pickImage = async () => {
     setBusy(true);
@@ -189,7 +215,11 @@ export function AppearanceBackgroundPanel() {
       <Text style={styles.section}>{MOBILE_COPY.backgroundSectionTitle}</Text>
       <GlassSurface contentStyle={styles.previewPad} material="thin" radius={radii.md}>
         <Text style={styles.previewLabel}>
-          {custom ? MOBILE_COPY.backgroundModeCustom : MOBILE_COPY.backgroundModeCodeGradient}
+          {custom
+            ? MOBILE_COPY.backgroundModeCustom
+            : backgroundMode === "atmosphere"
+              ? MOBILE_COPY.backgroundModeAtmosphere
+              : MOBILE_COPY.backgroundModeCodeGradient}
         </Text>
       </GlassSurface>
 
@@ -209,25 +239,35 @@ export function AppearanceBackgroundPanel() {
       <Pressable
         disabled={busy}
         onPress={() => {
-          void appearance.useCodeGradient().then(() => {
-            setMessage(MOBILE_COPY.backgroundModeCodeGradient);
-          });
+          runBackgroundAction(appearance.useCodeGradient, MOBILE_COPY.backgroundModeCodeGradient);
         }}
-        style={styles.secondary}
+        style={[styles.secondary, busy ? styles.buttonDisabled : null]}
         testID="mobile-appearance-use-code-gradient"
       >
         <Text style={styles.secondaryLabel}>{MOBILE_COPY.backgroundUseCodeGradient}</Text>
+      </Pressable>
+
+      <Pressable
+        disabled={busy}
+        onPress={() => {
+          runBackgroundAction(appearance.useAtmosphere, MOBILE_COPY.backgroundModeAtmosphere);
+        }}
+        style={[styles.secondary, busy ? styles.buttonDisabled : null]}
+        testID="mobile-appearance-use-atmosphere"
+      >
+        <Text style={styles.secondaryLabel}>{MOBILE_COPY.backgroundUseAtmosphere}</Text>
       </Pressable>
 
       {custom ? (
         <Pressable
           disabled={busy}
           onPress={() => {
-            void appearance.clearCustomBackground().then(() => {
-              setMessage(MOBILE_COPY.backgroundImageCleared);
-            });
+            runBackgroundAction(
+              appearance.clearCustomBackground,
+              MOBILE_COPY.backgroundImageCleared,
+            );
           }}
-          style={styles.secondary}
+          style={[styles.secondary, busy ? styles.buttonDisabled : null]}
           testID="mobile-appearance-clear-image"
         >
           <Text style={styles.secondaryLabel}>{MOBILE_COPY.backgroundClearImage}</Text>

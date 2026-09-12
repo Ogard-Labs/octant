@@ -248,6 +248,122 @@ describe("CanvasWorkspaceTab", () => {
     );
   });
 
+  it("journals a node drag as a new version and reloads the board it produced", async () => {
+    const reviseDiagramLayout = vi.fn<NonNullable<CanvasClient["reviseDiagramLayout"]>>(
+      async () => ({
+        kind: "accepted" as const,
+        canvasId: quarterlyCanvasId,
+        versionId: "56565656-5656-4656-8656-565656565656" as never,
+        sequence: quarterlyInventoryEntry.currentSequence + 1,
+      }),
+    );
+    const client = createCanvasClient(readyVersion, undefined, { reviseDiagramLayout });
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+    const node = await screen.findByRole("button", { name: "Report" });
+
+    fireEvent.pointerDown(node, { button: 0, clientX: 10, clientY: 10, pointerId: 1 });
+    fireEvent.pointerMove(node, { clientX: 60, clientY: 10, pointerId: 1 });
+    fireEvent.pointerUp(node, { clientX: 60, clientY: 10, pointerId: 1 });
+
+    await waitFor(() => expect(reviseDiagramLayout).toHaveBeenCalledTimes(1));
+    const command = reviseDiagramLayout.mock.calls[0]?.[0];
+    expect(command).toMatchObject({
+      kind: "canvas-diagram-layout-revise",
+      canvasId: quarterlyCanvasId,
+      blockId: "diagram-1",
+      expectedSequence: quarterlyInventoryEntry.currentSequence,
+      actor: canvasFixture.provenance.actor,
+      positions: [expect.objectContaining({ nodeId: "b" })],
+    });
+    // Reloaded: the board the host now holds, plus its history.
+    await waitFor(() => expect(client.get).toHaveBeenCalledTimes(2));
+    expect(client.history).toHaveBeenCalledTimes(2);
+  });
+
+  it("reloads and explains when a drag targets a version the host has moved past", async () => {
+    const reviseDiagramLayout = vi.fn(async () => ({
+      kind: "denied" as const,
+      denialCode: "stale-version" as const,
+      message: "Canvas diagram layout revision targets a stale Canvas sequence.",
+    }));
+    const client = createCanvasClient(readyVersion, undefined, { reviseDiagramLayout });
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+    const node = await screen.findByRole("button", { name: "Report" });
+    node.focus();
+    fireEvent.keyDown(node, { key: "ArrowRight" });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/changed on the host/);
+    await waitFor(() => expect(client.get).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps a board read-only while an older version is selected", async () => {
+    const reviseDiagramLayout = vi.fn();
+    const olderVersionId = "45454545-4545-4545-8545-454545454545";
+    const client = createCanvasClient(
+      readyVersion,
+      {
+        kind: "ready",
+        history: {
+          canvasId: quarterlyCanvasId,
+          currentVersionId: quarterlyInventoryEntry.currentVersionId,
+          entries: [
+            {
+              versionId: olderVersionId as never,
+              sequence: 1,
+              schemaVersion: 1,
+              title: quarterlyInventoryEntry.title,
+              createdAt: "2026-08-01T20:00:00.000Z" as never,
+              createdBy: {
+                kind: "local-user",
+                actorId: "88888888-8888-4888-8888-888888888888" as never,
+              },
+              providerInstanceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as never,
+              modelId: "octant-test-model" as never,
+            },
+            {
+              versionId: quarterlyInventoryEntry.currentVersionId,
+              sequence: quarterlyInventoryEntry.currentSequence,
+              schemaVersion: 1,
+              title: quarterlyInventoryEntry.title,
+              createdAt: "2026-08-01T21:00:00.000Z" as never,
+              createdBy: {
+                kind: "local-user",
+                actorId: "88888888-8888-4888-8888-888888888888" as never,
+              },
+              providerInstanceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as never,
+              modelId: "octant-test-model" as never,
+            },
+          ],
+        },
+      },
+      {
+        reviseDiagramLayout,
+        get: vi.fn(async (_canvasId, versionId) =>
+          versionId === olderVersionId
+            ? {
+                ...readyVersion,
+                version: {
+                  ...readyVersion.version,
+                  versionId: olderVersionId as never,
+                  sequence: 1,
+                },
+              }
+            : readyVersion,
+        ),
+      },
+    );
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+    await screen.findByRole("button", { name: "Report" });
+    fireEvent.click(await screen.findByRole("button", { name: /Version 1\b|sequence 1|v1/i }));
+    await waitFor(() =>
+      expect(screen.getByRole("group", { name: "Board" })).toHaveAttribute(
+        "data-editable",
+        "false",
+      ),
+    );
+    expect(reviseDiagramLayout).not.toHaveBeenCalled();
+  });
+
   it("offers no refresh control when the host transport cannot refresh", async () => {
     render(<CanvasWorkspaceTab tab={canvasTab} client={createCanvasClient(readyVersion)} />);
 

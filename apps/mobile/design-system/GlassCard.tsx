@@ -54,6 +54,6 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     justifyContent: "space-between",
-    minHeight: 104,
+    minHeight: 88,
   },
 });

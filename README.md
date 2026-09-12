@@ -57,7 +57,8 @@ approval.
 - App-managed browser and computer-use runtime with server-authoritative
   policy.
 - Optional authenticated remote access (LAN or Tailscale) to a single host with
-  device pairing, key rotation, and revocation.
+  device pairing, key rotation, and revocation, administered from Settings →
+  Remote access on the host or the `octant pair` / `octant auth` commands.
 - Semantic themes, presets, and font controls.
 - Native macOS shell: borderless window, a split-tree workspace with one
   surface per pane, translucent sidebar, command palette, and slash commands.
@@ -80,7 +81,8 @@ disabled until you enable them):
 - Devin ACP
 - Kilo ACP
 - Pi RPC
-- Oh My Pi
+- Oh My Pi (discovery only: Octant lists its models but cannot start turns on
+  it yet, so Settings reports it as unavailable and no picker offers it)
 - Mistral Vibe ACP
 - Grok Build ACP
 - Goose ACP
@@ -97,16 +99,18 @@ Direct API endpoints:
 - Anthropic-compatible HTTP (`messages`)
 - Azure AI Foundry (OpenAI-compatible v1 profile, API key)
 
-Credentials are stored in the macOS Keychain, resolved by the desktop broker,
-and never written to the event journal or returned to the renderer.
+Credentials are stored in the macOS Keychain (the Linux dogfood build uses the
+desktop's Secret Service), resolved by the desktop broker, and never written to
+the event journal or returned to the renderer.
 
 ## Status
 
 Octant is an **Apple Silicon technical preview**. Releases are signed with a
 Developer ID, notarized, and update themselves — you choose when an update
 applies, and it never replaces a running app or interrupts work in flight. It
-ships no Intel, Windows, or Linux desktop builds. Expect rough edges and
-breaking changes to local data formats between previews. Remote clients, the
+ships no signed Intel, Windows, or Linux desktop builds; a Linux x64 AppImage
+can be built locally as an unsigned dogfood artifact (see below). Expect rough
+edges and breaking changes to local data formats between previews. Remote clients, the
 Expo mobile app, and packaged native checks are separate evidence gates from the
 local test suite.
 

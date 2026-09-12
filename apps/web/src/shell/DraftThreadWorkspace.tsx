@@ -872,23 +872,19 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
 
         <div className="draft-thread__composer composer-stack">
           {createFromControl}
+          <div className="composer-tray composer-tray--above" aria-label="Thread context">
+            <DraftContextStrip
+              mode={props.mode}
+              {...hostSelectorBinding}
+              {...(props.approvalLabel === undefined ? {} : { approvalLabel: props.approvalLabel })}
+              {...(props.branchName === undefined ? {} : { branchName: props.branchName })}
+              {...(props.projectName === undefined ? {} : { projectName: props.projectName })}
+              {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
+            />
+          </div>
           <ThreadComposer
             chips={<ComputerUseMention controller={computer} surface="chips" />}
             typeahead={<ComputerUseMention controller={computer} surface="typeahead" />}
-            footer={
-              <div className="composer-tray">
-                <DraftContextStrip
-                  mode={props.mode}
-                  {...hostSelectorBinding}
-                  {...(props.approvalLabel === undefined
-                    ? {}
-                    : { approvalLabel: props.approvalLabel })}
-                  {...(props.branchName === undefined ? {} : { branchName: props.branchName })}
-                  {...(props.projectName === undefined ? {} : { projectName: props.projectName })}
-                  {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
-                />
-              </div>
-            }
             input={
               <OctantTextarea
                 aria-label="First message"

@@ -55,6 +55,7 @@ import type { HostFederationLifecycle } from "@octant/client-runtime/host-federa
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import { HostSettingsSection } from "../host/HostSettingsSection";
+import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection";
 import { FederatedHostsLifecyclePanel } from "../host/FederatedHostsLifecyclePanel";
 import {
   type SettingsNativeCapabilities,
@@ -101,7 +102,7 @@ import {
 } from "../settings/MarketplaceFetchSettings";
 import { OpenInApplicationSettings } from "../settings/OpenInApplicationSettings";
 import { ProviderUsageLimitsPanel } from "../usage/ProviderUsageLimitsPanel";
-import type { OctantHostBridge } from "./hostBridge";
+import { remoteAccessAdministrationOf, type OctantHostBridge } from "./hostBridge";
 import "../styles/settings.css";
 import "../styles/settings-specialty.css";
 import "../styles/extensions-settings.css";
@@ -640,6 +641,20 @@ function ActiveSectionContent({
               })}
         />
       ) : null;
+    case "remote-access": {
+      const administration = remoteAccessAdministrationOf(props.hostBridge);
+      return administration !== undefined ? (
+        <RemoteAccessSettingsSection bridge={administration} />
+      ) : (
+        <section aria-label="Remote access" id="settings-remote-access">
+          <p>
+            Enabling the remote listener and pairing devices happen on the host machine, in the
+            Octant desktop app or with the <code>octant pair</code> and <code>octant auth</code>{" "}
+            commands.
+          </p>
+        </section>
+      );
+    }
     case "host":
       return props.hostControlClient !== undefined ? (
         <HostSettingsSection

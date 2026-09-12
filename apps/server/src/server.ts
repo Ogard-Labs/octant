@@ -539,6 +539,7 @@ import {
   StandaloneSkillService,
   type SkillMarketplacePort,
 } from "./extensions/standaloneSkillService";
+import { ShellSettingsStandaloneSkillActivationStore } from "./extensions/standaloneSkillActivationStore";
 import { createCompositeSkillMarketplace } from "./extensions/compositeSkillMarketplace";
 import {
   CodexPluginPackageResolver,
@@ -3141,6 +3142,7 @@ export function startOctantServer(
       discovery: skillDiscoveryService,
       lifecycle: extensionLifecycleService,
       marketplace: skillMarketplace,
+      activationStore: new ShellSettingsStandaloneSkillActivationStore({ persistence }),
     });
     refreshStandaloneSkills = async () => {
       await standaloneSkillService.reconcile();
@@ -7056,7 +7058,7 @@ export function startOctantServer(
             (thread) => thread.lifecycle !== "archived" && thread.completedAt === undefined,
           );
           // A due date in a Project's STATUS.md raises the follow-up mark on
-          // that Project's most recent open thread (decision 0118): the
+          // that Project's most recent open thread (decision 0119): the
           // reminder belongs to the work, and that thread is where the person
           // would pick it up.
           const dueByProject = new Map<string, boolean>();

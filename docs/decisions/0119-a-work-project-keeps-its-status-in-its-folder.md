@@ -1,4 +1,4 @@
-# 0118. A Work Project keeps its status in its folder
+# 0119. A Work Project keeps its status in its folder
 
 **Status:** Accepted
 
@@ -63,7 +63,7 @@ be one the person could not see or correct where they work.
   symlink or a folder, is left alone and reported as unavailable on the page;
   the turn still runs, without the brief.
 - Every folderless Work thread shares the default Project's `STATUS.md`
-  (0117), so unrelated quick tasks accrue one status. A person who wants a
+  (0118), so unrelated quick tasks accrue one status. A person who wants a
   separate status makes a Project for it.
 - Reminders reach the Project page and the board, not the inbox: a journaled
   Work follow-up aggregate would be a second copy of a date the file already
@@ -75,4 +75,4 @@ be one the person could not see or correct where they work.
 - 0003 Product modes: Project memory remains for cross-mode, journaled entries
 - 0083 A Work turn records what changed in its folder (the backfill's source)
 - 0088 Completed and snoozed threads (the follow-up mark)
-- 0117 A default folder for what nobody gave a home
+- 0118 A default folder for what nobody gave a home

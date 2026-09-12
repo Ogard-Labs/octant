@@ -54,7 +54,7 @@ export function HomeNavigationSheet(props: {
           backgroundColor: colors.glassFillThin,
         },
         body: { flex: 1, gap: 2 },
-        label: { color: colors.textPrimary, fontSize: typography.body.fontSize, fontWeight: "600" },
+        label: { color: colors.textPrimary, fontSize: typography.body.fontSize, fontWeight: "500" },
         detail: { color: colors.textTertiary, fontSize: typography.caption.fontSize },
         divider: {
           height: StyleSheet.hairlineWidth,
@@ -111,7 +111,7 @@ export function HomeNavigationSheet(props: {
         })}
         <View style={styles.divider} />
         <Pressable
-          accessibilityLabel="Open workspaces and settings"
+          accessibilityLabel="Open hosts and settings"
           accessibilityRole="button"
           onPress={() => {
             props.onClose();
@@ -124,8 +124,8 @@ export function HomeNavigationSheet(props: {
             <Ionicons color={colors.textSecondary} name="folder-open-outline" size={18} />
           </View>
           <View style={styles.body}>
-            <Text style={styles.label}>Workspaces & Settings</Text>
-            <Text style={styles.detail}>Open workspaces and settings</Text>
+            <Text style={styles.label}>Hosts and settings</Text>
+            <Text style={styles.detail}>Your paired hosts, appearance, and privacy</Text>
           </View>
           <Ionicons color={colors.textTertiary} name="chevron-forward" size={18} />
         </Pressable>

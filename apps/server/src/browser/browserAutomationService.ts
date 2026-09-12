@@ -3,6 +3,7 @@ import type {
   BrowserAutomationFailure,
   BrowserAutomationSnapshot,
   BrowserContextId,
+  BrowserContextObservation,
   BrowserContextPolicy,
   BrowserContextRecord,
   BrowserObservation,
@@ -15,7 +16,11 @@ import type {
   ToolEvidence,
   WindowId,
 } from "@octant/contracts";
-import { MAX_BROWSER_TABS_PER_CONTEXT, sameToolActionAuthority } from "@octant/contracts";
+import {
+  MAX_BROWSER_TABS_PER_CONTEXT,
+  MAX_BROWSER_THREAD_CONTEXTS,
+  sameToolActionAuthority,
+} from "@octant/contracts";
 import {
   authorizeToolAction,
   canRequestToolCancellation,
@@ -620,9 +625,46 @@ export class BrowserAutomationService {
   }
 
   inspectThread(windowId: WindowId, threadId: BrowserThreadId): BrowserAutomationSnapshot {
-    const owned = this.#current(windowId, threadId);
-    if (owned === undefined) return { status: "ready", threadId, evidence: [] };
-    return this.inspect(windowId, threadId, owned.record.contextId);
+    const threadContexts = [...this.#contexts.values()]
+      .filter(
+        (owned) =>
+          owned.windowId === windowId &&
+          owned.threadId === threadId &&
+          !owned.dedicated &&
+          (owned.record.state === "active" ||
+            owned.record.state === "creating" ||
+            owned.record.state === "stopping" ||
+            owned.record.state === "failed"),
+      )
+      .sort(
+        (left, right) =>
+          contextInspectWeight(right.record.state) - contextInspectWeight(left.record.state),
+      )
+      .slice(0, MAX_BROWSER_THREAD_CONTEXTS);
+    if (threadContexts.length === 0) return { status: "ready", threadId, evidence: [] };
+    if (threadContexts.length === 1) {
+      const single = threadContexts[0];
+      if (single === undefined) return { status: "ready", threadId, evidence: [] };
+      return this.inspect(windowId, threadId, single.record.contextId);
+    }
+    const inspected = threadContexts.map((owned) =>
+      this.inspect(windowId, threadId, owned.record.contextId),
+    );
+    const active = inspected.filter(
+      (snap) => snap.context !== undefined && snap.failure === undefined,
+    );
+    if (active.length === 0) {
+      const unauthorized = inspected.find((snap) => snap.failure?.category === "unauthorized");
+      return (
+        unauthorized ??
+        failedSnapshot(
+          threadId,
+          { category: "unavailable", message: "No browser context is available for this thread." },
+          "failed",
+        )
+      );
+    }
+    return threadSnapshotFromSnapshots(active, threadId);
   }
 
   /**
@@ -988,6 +1030,46 @@ function snapshot(owned: OwnedContext): BrowserAutomationSnapshot {
     ...(owned.observation === undefined ? {} : { observation: owned.observation }),
     evidence: [...owned.evidence],
     ...(owned.failure === undefined ? {} : { failure: owned.failure }),
+  };
+}
+
+function contextInspectWeight(state: BrowserContextRecord["state"]): number {
+  return state === "active" ? 2 : state === "creating" ? 1 : 0;
+}
+
+function threadSnapshotFromSnapshots(
+  snapshots: ReadonlyArray<BrowserAutomationSnapshot>,
+  threadId: BrowserThreadId,
+): BrowserAutomationSnapshot {
+  const ordered = [...snapshots].sort((left, right) => {
+    const leftWeight =
+      left.context?.state === "active" ? 2 : left.context?.state === "creating" ? 1 : 0;
+    const rightWeight =
+      right.context?.state === "active" ? 2 : right.context?.state === "creating" ? 1 : 0;
+    return rightWeight - leftWeight;
+  });
+  const primary = ordered[0];
+  if (primary === undefined) {
+    return failedSnapshot(
+      threadId,
+      { category: "unavailable", message: "No browser context is available for this thread." },
+      "failed",
+    );
+  }
+  const contexts: BrowserContextObservation[] = ordered
+    .slice(0, MAX_BROWSER_THREAD_CONTEXTS)
+    .map((snap) => ({
+      context: snap.context as BrowserContextRecord,
+      ...(snap.observation === undefined ? {} : { observation: snap.observation }),
+    }));
+  return {
+    status: primary.status,
+    threadId,
+    context: primary.context,
+    ...(primary.observation === undefined ? {} : { observation: primary.observation }),
+    contexts,
+    evidence: [...primary.evidence],
+    ...(primary.failure === undefined ? {} : { failure: primary.failure }),
   };
 }
 

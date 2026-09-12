@@ -48,6 +48,6 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: typography.caption.fontSize,
-    fontWeight: "600",
+    fontWeight: "500",
   },
 });

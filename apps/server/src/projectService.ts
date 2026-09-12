@@ -109,7 +109,7 @@ export interface ProjectServiceOptions {
   readonly ensureDirectory?: (path: string) => Promise<void>;
   /**
    * Seeds a new Work Project's `AGENTS.md` and `STATUS.md`
-   * (`docs/decisions/0118`). Runs after the Project is journaled; a folder
+   * (`docs/decisions/0119`). Runs after the Project is journaled; a folder
    * that refuses the files still has its Project, and the first task seeds
    * again.
    */

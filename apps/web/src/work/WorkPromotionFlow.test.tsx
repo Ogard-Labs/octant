@@ -160,7 +160,7 @@ describe("WorkPromotionFlow", () => {
 
     await user.click(screen.getByRole("button", { name: "Approve" }));
     expect(approve).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert")).toHaveTextContent(/confirmed delivery target/i);
+    expect(screen.getByRole("alert")).toHaveTextContent(/confirmed delivery/i);
   });
 
   /**

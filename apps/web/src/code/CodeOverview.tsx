@@ -163,7 +163,7 @@ export function CodeOverview(props: CodeOverviewProps) {
       <section aria-label="Code status summary" className="code-overview__summary">
         <article className="code-overview__card code-overview__card--delivery">
           <div>
-            <span className="code-overview__eyebrow">Delivery target</span>
+            <span className="code-overview__eyebrow">Delivery</span>
             <h2>
               <GitBranch aria-hidden="true" size={16} strokeWidth={1.8} />
               {thread.deliveryTarget.branchIntent}

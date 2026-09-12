@@ -100,10 +100,7 @@ export function useAgentsCenterController(
         if (controller.signal.aborted) return;
         setList({
           status: "unavailable",
-          message: agentRunTransportFailureMessage(
-            error,
-            "Agents Center is unavailable right now.",
-          ),
+          message: agentRunTransportFailureMessage(error, "Agents are unavailable right now."),
         });
       });
     return () => controller.abort();

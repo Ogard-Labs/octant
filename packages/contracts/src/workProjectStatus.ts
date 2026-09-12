@@ -38,7 +38,7 @@ export const MAX_WORK_STATUS_EXCERPT_LENGTH = 2_000;
 /**
  * What the host read out of a Work Project's `STATUS.md` and `AGENTS.md`.
  * Derived from the files on every read, never journaled: the folder is the
- * source of truth for a Work Project's status (`docs/decisions/0118`).
+ * source of truth for a Work Project's status (`docs/decisions/0119`).
  */
 export const WorkProjectStatus = Schema.Struct({
   projectId: ProjectId,

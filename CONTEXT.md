@@ -68,6 +68,7 @@ The instruction a Work task opens with when the Project status is stale or a
 date is near: take stock, ask what happened, update the status, then proceed.
 _Avoid_: Reminder, digest, catch-up
 
+
 ## Thread execution
 
 **Environment**:

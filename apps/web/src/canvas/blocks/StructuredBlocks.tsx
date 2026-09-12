@@ -1,8 +1,8 @@
 import { CANVAS_CHART_PALETTE } from "@octant/theme";
 import type { CanvasBlock, CanvasChartSeries } from "@octant/contracts/canvas";
 import { computeYDomain, scaleX, scaleY, type ChartSeriesData } from "../chartGeometry";
-import { layoutCanvasDiagram } from "@octant/domain";
 import { formatScalar } from "../canvasRuntime";
+import { DiagramBoard, type DiagramBoardLayoutRuntime } from "./DiagramBoard";
 import { formatTableCell } from "./DataBlocks";
 
 type Block = Extract<CanvasBlock, { readonly kind: "table" | "chart" | "timeline" | "diagram" }>;
@@ -11,7 +11,13 @@ const PLOT_WIDTH = 320;
 const PLOT_HEIGHT = 160;
 const INSET = 10;
 
-export function StructuredBlocks({ block }: { readonly block: Block }) {
+export function StructuredBlocks({
+  block,
+  layoutRuntime,
+}: {
+  readonly block: Block;
+  readonly layoutRuntime?: DiagramBoardLayoutRuntime;
+}) {
   switch (block.kind) {
     case "table":
       return <TableBlock block={block} />;
@@ -20,7 +26,9 @@ export function StructuredBlocks({ block }: { readonly block: Block }) {
     case "timeline":
       return <TimelineBlock block={block} />;
     case "diagram":
-      return <DiagramBlock block={block} />;
+      return (
+        <DiagramBlock block={block} {...(layoutRuntime === undefined ? {} : { layoutRuntime })} />
+      );
   }
 }
 
@@ -172,50 +180,16 @@ function TimelineBlock({
   );
 }
 
-function DiagramBlock({ block }: { readonly block: Extract<Block, { readonly kind: "diagram" }> }) {
-  const layout = layoutCanvasDiagram(block);
-
+function DiagramBlock({
+  block,
+  layoutRuntime,
+}: {
+  readonly block: Extract<Block, { readonly kind: "diagram" }>;
+  readonly layoutRuntime?: DiagramBoardLayoutRuntime;
+}) {
   return (
-    <figure role="img" aria-label={diagramLabel(block)} className="canvas-block__diagram">
-      <svg
-        role="presentation"
-        className="canvas-block__diagram-svg"
-        viewBox={`0 0 ${String(layout.width)} ${String(layout.height)}`}
-      >
-        {/* Groups first, so a boundary sits behind what it contains. */}
-        {layout.groups.map((group) => (
-          <g key={group.groupId} className="canvas-block__diagram-group">
-            <rect x={group.x} y={group.y} width={group.width} height={group.height} rx={8} />
-            <text x={group.x + 10} y={group.y + 15}>
-              {group.label}
-            </text>
-          </g>
-        ))}
-        {layout.edges.map((edge) => (
-          <g key={edge.edgeId}>
-            <line
-              x1={edge.x1}
-              y1={edge.y1}
-              x2={edge.x2}
-              y2={edge.y2}
-              className="canvas-block__diagram-edge"
-            />
-            {edge.label === undefined ? null : (
-              <text x={edge.labelX} y={edge.labelY} className="canvas-block__diagram-edge-label">
-                {edge.label}
-              </text>
-            )}
-          </g>
-        ))}
-        {layout.nodes.map((node) => (
-          <g key={node.nodeId} className="canvas-block__diagram-node">
-            <rect x={node.x} y={node.y} width={node.width} height={node.height} rx={6} />
-            <text x={node.x + node.width / 2} y={node.y + node.height / 2}>
-              {node.label}
-            </text>
-          </g>
-        ))}
-      </svg>
+    <figure aria-label={diagramLabel(block)} className="canvas-block__diagram">
+      <DiagramBoard block={block} {...(layoutRuntime === undefined ? {} : { layoutRuntime })} />
       {/* The drawing said in words, for a reader who cannot see it. The labels
         are already on the boxes, so this describes what connects to what rather
         than repeating the names on their own. */}

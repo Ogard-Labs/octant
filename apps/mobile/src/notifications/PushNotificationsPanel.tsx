@@ -110,10 +110,10 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
         buttonLabel: {
           ...mobileTypography.body,
           color: colors.sendLabel,
-          fontWeight: "600",
+          fontWeight: "500",
         },
         secondary: { alignItems: "center", paddingVertical: mobileSpacing.sm },
-        secondaryLabel: { color: colors.accent, fontWeight: "600" },
+        secondaryLabel: { color: colors.accent, fontWeight: "500" },
         message: { ...mobileTypography.body, color: colors.textPrimary },
       }),
     [colors],

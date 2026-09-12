@@ -8,7 +8,7 @@ import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 const instanceId = decodeProviderInstanceId("00000000-0000-4000-8000-000000000480");
 
 describe("Oh My Pi driver probe", () => {
-  it("probes models/state without acquiring a turn session", async () => {
+  it("reports discovered models without claiming the provider can run a turn", async () => {
     const request = vi
       .fn()
       .mockResolvedValueOnce({
@@ -70,9 +70,10 @@ describe("Oh My Pi driver probe", () => {
     const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
     expect(result).toMatchObject({
       instanceId,
-      readiness: "ready",
+      readiness: "unavailable",
       detectedVersion: "17.2.1",
       models: [expect.objectContaining({ id: "openai/gpt-test" })],
+      message: expect.stringMatching(/turn/i),
     });
     expect(request.mock.calls.map((call) => call[0])).toEqual([
       "get_available_models",

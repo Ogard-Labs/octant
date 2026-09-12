@@ -73,6 +73,9 @@ export function createStoredCodeProfileSkillTextLoader(options: {
   }) => Promise<string>;
 }): (record: StandaloneSkillRecord) => Promise<string | undefined> {
   return async (record) => {
+    if (record.instructions !== undefined) {
+      return record.instructions;
+    }
     if (record.source.kind === "bundled" && record.skill.name === REVIEW_IN_PARALLEL_SKILL_NAME) {
       return reviewInParallelSkillContent();
     }

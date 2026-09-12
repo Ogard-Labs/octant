@@ -108,7 +108,7 @@ describe("Canvas accessibility basics", () => {
     // The names are on the boxes; what a reader cannot get from the drawing is
     // which of them connects to which.
     expect(
-      screen.getByRole("img", { name: /Diagram with 2 nodes and 1 edges/ }),
+      screen.getByRole("figure", { name: /Diagram with 2 nodes and 1 edges/ }),
     ).toBeInTheDocument();
     expect(screen.getByText("Ingest to Report")).toBeInTheDocument();
   });
