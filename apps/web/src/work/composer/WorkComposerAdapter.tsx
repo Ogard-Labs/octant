@@ -1,6 +1,8 @@
 import {
+  ApplicationMentionTypeahead,
   BrowserUseMention,
   ComputerUseMention,
+  useApplicationMentionTypeahead,
   useBrowserUseMention,
   useComputerUseMention,
 } from "../../computerUse/ComputerUseMention";
@@ -122,6 +124,10 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     onDraftChange: setPrompt,
     onResolveExtensionReference: extensionDraft.resolveReference,
   });
+  const appMentions = useApplicationMentionTypeahead([
+    { controller: computer, kind: "computer" },
+    { controller: browser, kind: "browser" },
+  ]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionListId = "work-new-thread-mentions";
   const images = useWorkComposerImages();
@@ -199,6 +205,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (appMentions.handleKeyDown(event)) return;
     if (computer.handleKeyDown(event)) return;
     if (browser.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
@@ -264,6 +271,15 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
         </div>
 
         <div className="composer-stack">
+          <div className="composer-tray composer-tray--above" aria-label="Thread context">
+            <div className="composer-tray__leading">
+              {projectControl}
+              {environmentControl}
+            </div>
+            {props.createFromControl === undefined ? null : (
+              <div className="composer-tray__trailing">{props.createFromControl}</div>
+            )}
+          </div>
           <ThreadComposer
             chips={
               <>
@@ -304,22 +320,26 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 aria-autocomplete="list"
                 aria-expanded={computer.open || browser.open || slash.open}
                 aria-controls={
-                  computer.open
-                    ? computer.listId
-                    : browser.open
-                      ? browser.listId
-                      : slash.open
-                        ? slash.listId
-                        : undefined
+                  appMentions.open.length > 1
+                    ? appMentions.listId
+                    : computer.open
+                      ? computer.listId
+                      : browser.open
+                        ? browser.listId
+                        : slash.open
+                          ? slash.listId
+                          : undefined
                 }
                 aria-activedescendant={
-                  computer.open
-                    ? `${computer.listId}-computer`
-                    : browser.open
-                      ? `${browser.listId}-browser`
-                      : slash.active === undefined
-                        ? undefined
-                        : `${slash.listId}-${slash.active.id}`
+                  appMentions.open.length > 1
+                    ? `${appMentions.listId}-${appMentions.open[appMentions.active]?.kind ?? ""}`
+                    : computer.open
+                      ? `${computer.listId}-computer`
+                      : browser.open
+                        ? `${browser.listId}-browser`
+                        : slash.active === undefined
+                          ? undefined
+                          : `${slash.listId}-${slash.active.id}`
                 }
                 autoFocus
                 className="composer-input"
@@ -351,7 +371,9 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
               />
             }
             typeahead={
-              computer.open ? (
+              appMentions.open.length > 1 ? (
+                <ApplicationMentionTypeahead typeahead={appMentions} />
+              ) : computer.open ? (
                 <ComputerUseMention controller={computer} surface="typeahead" />
               ) : browser.open ? (
                 <BrowserUseMention controller={browser} surface="typeahead" />
@@ -418,17 +440,6 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 },
               },
             }}
-            footer={
-              <div className="composer-tray" aria-label="Thread context">
-                <div className="composer-tray__leading">
-                  {projectControl}
-                  {environmentControl}
-                </div>
-                {props.createFromControl === undefined ? null : (
-                  <div className="composer-tray__trailing">{props.createFromControl}</div>
-                )}
-              </div>
-            }
           />
         </div>
 

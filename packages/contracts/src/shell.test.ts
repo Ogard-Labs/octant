@@ -76,6 +76,7 @@ const settings = {
   voice: {},
   imageGeneration: { customSources: [] },
   computerUse: { enabled: true, automaticUpdates: true },
+  standaloneSkillActivations: {},
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
 

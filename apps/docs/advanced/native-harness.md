@@ -30,7 +30,7 @@ where to continue.
 
 ## Model slots
 
-Routing is configured by slot, in **Settings → Agents → Model slots**. A slot
+Routing is configured by slot, in **Settings → Octant Harness → Model slots**. A slot
 is an ordered list of models: the first is used; the rest are fallbacks when
 the first is rate-limited, down, or timing out. Jobs the harness performs map
 onto slots:
@@ -57,7 +57,7 @@ The lead can hand a bounded task to a child with `delegate`: research,
 implementation, or review. The child runs on the model its role's slot names,
 under authority no wider than its parent, in its own worktree for Code, and
 returns a reply the lead collects. Whether a child may start at all is the
-**Subagent creation** posture in Settings → Agents: under _Ask_ the lead is
+**Subagent creation** posture in **Settings → Agents**: under _Ask_ the lead is
 told a person must start children; under _Automatic_ they start within the
 usual bounds.
 

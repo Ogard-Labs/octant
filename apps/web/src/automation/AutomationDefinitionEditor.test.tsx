@@ -102,7 +102,7 @@ describe("AutomationDefinitionEditor creation", () => {
     fireEvent.change(screen.getByLabelText("Run at"), { target: { value: "2026-09-01T09:00" } });
 
     await userEvent.type(
-      screen.getByLabelText("Delivery target"),
+      screen.getByLabelText("Delivery"),
       "A confirmed weekly summary document exists in the Project.",
     );
     await userEvent.click(
@@ -143,7 +143,7 @@ describe("AutomationDefinitionEditor creation", () => {
     await userEvent.click(screen.getByRole("checkbox", { name: "Wed" }));
     fireEvent.change(screen.getByLabelText("Time of day"), { target: { value: "09:30" } });
     fireEvent.change(screen.getByLabelText("Timezone"), { target: { value: "Europe/Oslo" } });
-    await userEvent.type(screen.getByLabelText("Delivery target"), "A weekly summary exists.");
+    await userEvent.type(screen.getByLabelText("Delivery"), "A weekly summary exists.");
     await userEvent.click(
       screen.getByLabelText("I confirm this delivery target for every scheduled run"),
     );
@@ -171,7 +171,7 @@ describe("AutomationDefinitionEditor creation", () => {
     await chooseLabeledOption("Authority profile", "Ask for approvals Work");
     await chooseLabeledOption("Schedule", "Run once");
     fireEvent.change(screen.getByLabelText("Run at"), { target: { value: "2026-09-01T09:00" } });
-    await userEvent.type(screen.getByLabelText("Delivery target"), "A weekly summary exists.");
+    await userEvent.type(screen.getByLabelText("Delivery"), "A weekly summary exists.");
     await userEvent.click(screen.getByRole("button", { name: "Save automation" }));
 
     const alert = await screen.findByRole("alert");
@@ -263,7 +263,7 @@ describe("AutomationDefinitionEditor editing", () => {
       "Summarize the Project's open work.",
     );
     expect(screen.getByLabelText("Project")).toHaveTextContent("Docs Project");
-    expect(screen.getByLabelText("Delivery target")).toHaveValue(
+    expect(screen.getByLabelText("Delivery")).toHaveValue(
       "A confirmed weekly summary document exists in the Project.",
     );
     const confirmation = screen.getByLabelText(

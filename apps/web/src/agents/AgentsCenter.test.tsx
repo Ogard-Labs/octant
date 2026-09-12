@@ -110,6 +110,6 @@ describe("AgentsCenter", () => {
         })}
       />,
     );
-    expect(await screen.findByText("Agents Center is unavailable")).toBeInTheDocument();
+    expect(await screen.findByText("Agents are unavailable")).toBeInTheDocument();
   });
 });

@@ -101,7 +101,6 @@ agent's revisions. Older versions stay intact and can still be opened; a board
 opened at an older version is read-only. If the host has moved on since you
 opened the board, the drag is refused, the board reloads, and you drag again on
 the current version. Boards keep the diagram budgets (512 nodes, 1,024 edges).
-
 **Comments** live beside the Canvas in the sidebar. A comment is anchored to a
 block or to a board node; replies, resolving, and deleting are journaled by
 the host, so they survive restart and reload. Every comment is authored as you,

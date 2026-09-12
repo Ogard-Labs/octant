@@ -134,12 +134,12 @@ draws no hairline between groups. Rows in Settings are `SettingRow`; rows everyw
 Chat, Work, and Code open on the same screen: the hero question and one
 raised composer. The composer is prompt first, four lines tall before it
 grows; its toolbar row holds how the thread runs (attach and image on the
-left; model and access on the right, next to send); its lower band holds
-where it runs (Project, base branch, checkout, Environment, repository).
-The band is part of the card, ruled off by a hairline, and it wraps rather
-than grows: a control that needs a list ("Create from…") floats over the
-page. Nothing about delivery is asked up front; it is derived from the band
-and shown on the thread once it exists.
+left; model and access on the right, next to send). Where the thread runs
+(Project, base branch, checkout, Environment, repository) rides in a quiet
+row immediately above the card, so the composer stays a single object.
+The row wraps rather than grows: a control that needs a list ("Create
+from…") floats over the page. Nothing about delivery is asked up front; it
+is derived from the row and shown on the thread once it exists.
 
 The screen sits on the application ground (0091): an ordered-dither cloud
 drawn in `--octant-accent` at one cell per three pixels, or a person's photo
@@ -263,31 +263,31 @@ fallback; `Dark` and `Light` are the same values pinned to one mode.
 
 ### Semantic roles
 
-| Role                   | CSS variable                                        | Dark      | Light       | Use                                                |
-| ---------------------- | --------------------------------------------------- | --------- | ----------- | -------------------------------------------------- |
-| Application background | `--octant-app-background`                           | `#151515` | `#fafaf9`   | Page ground: welcome, lists, Settings              |
-| Chrome                 | `--octant-chrome`                                   | `#151515` | `#fafaf9`   | Title bars and shell chrome                        |
-| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#fafaf9`   | Navigation surface, on the page ground             |
-| Workspace              | `--octant-workspace`                                | `#1a1a1a` | `#ffffff`   | Reading surface: transcript, editor                |
-| Floating               | `--octant-floating` / `--octant-surface-raised`     | `#232323` | `#fdfdfc`   | Menus, popovers, dialogs                           |
-| Card                   | `--octant-card` (derived)                           | floating  | workspace   | Raised objects: composer, setup, profiles          |
-| Tray                   | `--octant-tray` (derived)                           | workspace | control mix | The rear context card behind the composer          |
-| Control                | `--octant-control` / `--octant-surface-muted`       | `#2b2b2b` | `#f0f0ef`   | Quiet control fill, secondary buttons              |
-| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#333333` | `#e8e8e6`   | Hover and highlighted rows                         |
-| Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#dfdfdd`   | Pressed state                                      |
-| Border                 | `--octant-border`                                   | `#303030` | `#e0e0de`   | Hairline separation                                |
-| Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb`   | Input and outline-button edges                     |
-| Strong divider         | `--octant-divider-strong`                           | `#808080` | `#6f6f6d`   | Rare structural divider                            |
-| Primary text           | `--octant-text-primary`                             | `#f0f0f0` | `#1b1b1b`   | Body and control text                              |
-| Secondary text         | `--octant-text-secondary`                           | `#a9a9a9` | `#4f4f4f`   | Supporting copy                                    |
-| Muted text             | `--octant-text-muted`                               | `#949494` | `#666666`   | Metadata and hints at 12px; AA on the control fill |
-| Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff`   | Text on primary fill                               |
-| Focus role             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96`   | Theme compatibility and accent tints               |
-| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#ebebea`   | Selected rows and active controls                  |
-| Accent fill            | `--octant-accent`                                   | `#f0f0f0` | `#1b1b1b`   | One primary action or active mark                  |
-| Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff`   | Text on accent fill                                |
-| Accent text            | `--octant-accent-text`                              | `#f0f0f0` | `#1b1b1b`   | Accent used as text; normal-text contrast          |
-| Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000`   | Opaque by contract; the bridge mixes it to a wash  |
+| Role                   | CSS variable                                        | Dark      | Light       | Use                                                        |
+| ---------------------- | --------------------------------------------------- | --------- | ----------- | ---------------------------------------------------------- |
+| Application background | `--octant-app-background`                           | `#151515` | `#fafaf9`   | Page ground: welcome, lists, Settings                      |
+| Chrome                 | `--octant-chrome`                                   | `#151515` | `#fafaf9`   | Title bars and shell chrome                                |
+| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#fafaf9`   | Navigation surface, on the page ground                     |
+| Workspace              | `--octant-workspace`                                | `#1a1a1a` | `#ffffff`   | Reading surface: transcript, editor                        |
+| Floating               | `--octant-floating` / `--octant-surface-raised`     | `#232323` | `#fdfdfc`   | Menus, popovers, dialogs                                   |
+| Card                   | `--octant-card` (derived)                           | floating  | workspace   | Raised objects: composer, setup, profiles                  |
+| Tray                   | `--octant-tray` (derived)                           | workspace | control mix | Recessed ground under a raised object (follow-up composer) |
+| Control                | `--octant-control` / `--octant-surface-muted`       | `#2b2b2b` | `#f0f0ef`   | Quiet control fill, secondary buttons                      |
+| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#333333` | `#e8e8e6`   | Hover and highlighted rows                                 |
+| Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#dfdfdd`   | Pressed state                                              |
+| Border                 | `--octant-border`                                   | `#303030` | `#e0e0de`   | Hairline separation                                        |
+| Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb`   | Input and outline-button edges                             |
+| Strong divider         | `--octant-divider-strong`                           | `#808080` | `#6f6f6d`   | Rare structural divider                                    |
+| Primary text           | `--octant-text-primary`                             | `#f0f0f0` | `#1b1b1b`   | Body and control text                                      |
+| Secondary text         | `--octant-text-secondary`                           | `#a9a9a9` | `#4f4f4f`   | Supporting copy                                            |
+| Muted text             | `--octant-text-muted`                               | `#949494` | `#666666`   | Metadata and hints at 12px; AA on the control fill         |
+| Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff`   | Text on primary fill                                       |
+| Focus role             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96`   | Theme compatibility and accent tints                       |
+| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#ebebea`   | Selected rows and active controls                          |
+| Accent fill            | `--octant-accent`                                   | `#f0f0f0` | `#1b1b1b`   | One primary action or active mark                          |
+| Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff`   | Text on accent fill                                        |
+| Accent text            | `--octant-accent-text`                              | `#f0f0f0` | `#1b1b1b`   | Accent used as text; normal-text contrast                  |
+| Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000`   | Opaque by contract; the bridge mixes it to a wash          |
 
 The ladder is deliberate: in dark the page is near-black, the sidebar a step
 darker, the reading surface a step lighter, and cards lift one more step. In light the sidebar and the page share one near-white ground and the
@@ -426,9 +426,9 @@ composer. Starter actions appear only when recent work does not already give
 the person a next step. In light the card is workspace white on the
 `--octant-app-background` well, not the grey floating fill — that fill reads
 as a sunken field. Code welcome keeps one stable question while Project,
-base branch, and Environment sit on the composer's lower band
-(`.composer-tray`, rendered through the composer's `footer` slot), under the
-prompt and its toolbar, on the tray fill with a hairline above. Environment is the
+base branch, and Environment sit on the context row above the composer
+(`.composer-tray--above`, rendered beside the card inside `.composer-stack`),
+on the page ground with no band chrome. Environment is the
 create-facing presentation of Octant's authoritative host federation: its
 dropdown selects This computer, devbox, or another healthy capable host without
 creating a second environment model. Workspace remains on that rear card after the three primary choices;

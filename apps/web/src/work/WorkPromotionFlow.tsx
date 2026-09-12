@@ -156,7 +156,7 @@ export function WorkPromotionFlow(props: WorkPromotionFlowProps) {
                         );
                         if (deliveryTarget === undefined) {
                           setLocalError(
-                            "Approving needs a confirmed delivery target on the Code Project you chose.",
+                            "Approving needs a confirmed delivery on the Code Project you chose.",
                           );
                           return;
                         }

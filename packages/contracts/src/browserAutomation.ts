@@ -15,6 +15,8 @@ export const MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS = 54 * 1024;
  * the same navigation admission as the first.
  */
 export const MAX_BROWSER_TABS_PER_CONTEXT = 8;
+/** How many contexts one thread inspect may name. Stopping windows can pile up. */
+export const MAX_BROWSER_THREAD_CONTEXTS = 8;
 
 export const BrowserContextId = brandedUuid("BrowserContextId");
 export type BrowserContextId = typeof BrowserContextId.Type;

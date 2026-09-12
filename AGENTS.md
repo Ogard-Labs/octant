@@ -269,6 +269,18 @@ credentials, physical devices, release authority, or subjective judgment.
   maintainer explicitly asks.
 - One pull request delivers one coherent outcome. Link the Linear issue in the PR
   description, not in code or docs.
+- If an open pull request already owns this outcome, push to that branch. Review
+  fixes, docs, and follow-ups stay there.
+- Open a new pull request only for a different user-visible outcome, or when the
+  next change cannot land without the unmerged parent (a real stack).
+- Do not open a sibling `fix/*` or `feature/*` off `main` for work that belongs
+  on an in-flight pull request.
+- A report, assessment, audit, or Agent Store / Context document is not a reason
+  to open a GitHub pull request. Those stay in the store or chat.
+- Canonical repository documentation (`README.md`, `docs/architecture.md`,
+  `docs/decisions/`, `apps/docs`) still updates in the same pull request as the
+  change they describe — not a new pull request, and not a repository pull
+  request just because a store report exists.
 - Update canonical documentation (`README.md`, `docs/architecture.md`,
   `docs/decisions/`, `apps/docs`) in the same PR when design, architecture,
   setup, workflow, security, deployment, or user-visible truth changes. Add a

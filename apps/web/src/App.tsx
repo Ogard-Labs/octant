@@ -276,6 +276,7 @@ import { ThreadUtilityDockContent } from "./shell/ThreadUtilityDockContent";
 import {
   MULTI_INSTANCE_DOCK_SURFACES,
   RIGHT_UTILITY_DOCK_SURFACES,
+  resolveDockPresentationWidth,
   resolveRightUtilityDockSurface,
   type RightUtilityDockResolution,
   type RightUtilityDockSurfaceId,
@@ -2267,8 +2268,12 @@ function LaunchedShell(
         providerOrder: providerController.defaults.providerOrder,
         hiddenModels: providerController.defaults.hiddenModels,
         mode: "chat",
+        // A saved Oh My Pi default is discovery-only: without this, the
+        // unavailable group is dropped and new Chat binds a different model.
+        ...(firstRunChatDefault === undefined ? {} : { currentSelection: firstRunChatDefault }),
       }),
     [
+      firstRunChatDefault,
       providerController.instances,
       providerController.observedByInstance,
       providerController.defaults.providerOrder,
@@ -2515,6 +2520,25 @@ function LaunchedShell(
     projectController.activeProject.lifecycle === "active"
       ? projectController.activeProject
       : undefined;
+  /**
+   * The active Code thread's usage, with the model's declared context limit
+   * standing in for a window the provider's usage report never named. A
+   * reported window always wins — the declared figure only answers what the
+   * provider did not.
+   */
+  const activeCodeThreadUsageFallback = useMemo(() => {
+    const thread = activeCodeThreadController?.activeView?.thread;
+    const usage = activeCodeThreadController?.threadUsage;
+    if (thread === undefined || usage === undefined) return usage;
+    const observed = providerController.observedByInstance.get(thread.providerInstanceId);
+    const model = observed?.models.find((listed) => String(listed.id) === String(thread.modelId));
+    if (usage.contextWindow !== undefined || model?.contextLimit === undefined) return usage;
+    return { ...usage, modelContextWindow: model.contextLimit };
+  }, [
+    activeCodeThreadController?.activeView?.thread,
+    activeCodeThreadController?.threadUsage,
+    providerController.observedByInstance,
+  ]);
   const workCreateThreadAvailable = workProviderChoice !== undefined;
   const enabledProjectTypes = new Set(
     enabledModes(controller.settings ?? { chatEnabled: true, workEnabled: true }),
@@ -3616,6 +3640,11 @@ function LaunchedShell(
   // opens its Review beside that list, so the detail must remain visible.
   const dockPresentedOpen =
     dockOpen && (!readerOpen || (codePullRequestsOpen && projectPullRequestReviewOpen));
+  const dockPresentationWidth = resolveDockPresentationWidth({
+    configuredWidth: contextSidebarWidth,
+    resolution: dockResolution,
+    tabCount: dockTabs.length,
+  });
   // The bottom panel steps aside for the same reason, and it had not been:
   // a terminal opened on a thread kept a quarter of the viewport on Board,
   // Inbox, and the pull request list, pages that are about many threads and
@@ -4908,7 +4937,7 @@ function LaunchedShell(
             zenRecoveryNeeded={zen.recoveryNeeded}
           />
         }
-        contextSidebarWidth={contextSidebarWidth}
+        contextSidebarWidth={dockPresentationWidth}
         bottomPanelHeight={bottomPanelHeight}
         bottomPanelOpen={bottomPanelPresentedOpen}
         material={material}
@@ -5397,9 +5426,9 @@ function LaunchedShell(
                     void contextController.setPinned(entryId, pinned)
                   }
                   status={contextController.status}
-                  {...(activeMode !== "code" || activeCodeThreadController === undefined
+                  {...(activeMode !== "code" || activeCodeThreadUsageFallback === undefined
                     ? {}
-                    : { fallback: activeCodeThreadController.threadUsage })}
+                    : { fallback: activeCodeThreadUsageFallback })}
                   {...(contextController.snapshot === undefined
                     ? {}
                     : { snapshot: contextController.snapshot })}
@@ -5874,7 +5903,7 @@ function LaunchedShell(
                   : threadUtility("tests")
               }
               tabs={dockTabs}
-              width={contextSidebarWidth}
+              width={dockPresentationWidth}
             />
             {bottomPanelPresentedOpen && activeBottomSurface !== undefined ? (
               <BottomUtilityPanel

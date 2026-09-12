@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
  * Rule C: every endpoint the server answers has a caller.
  * Rule D: no package module is used only by its own barrel.
  * Rule E: no module that exports runtime values is referenced only by type imports.
+ * Rule F: no KNOWN_ISLANDS entry names a module that is reachable after all.
  *
  * Rule B recognizes real non-import entry points (HTML scripts, dynamic
  * `import()`, package `exports` subpaths, binaries) rather than listing them by
@@ -29,9 +30,10 @@ import { fileURLToPath } from "node:url";
  * anything uses what it exports. A 2026-08-15 audit found five such modules,
  * including a complete Canvas sharing policy no server or renderer had ever
  * called. Rule D therefore asks a different question for barrel-only modules:
- * does any exported name appear anywhere else in non-test code? Matching by
- * name over-counts rather than under-counts — a coincidental match suppresses a
- * violation — which is the right bias for a gate that must not cry wolf.
+ * does any non-test module import one of its exported names by name? An
+ * earlier form matched the bare word anywhere in a file, which let a module
+ * exporting a common word such as `hostId` pass on coincidence; a named import
+ * binding is the evidence that a consumer reached for the export.
  *
  * Rule E closes the blind spot Rule B leaves: a path-based edge is not a runtime
  * edge. `import { type CodeThreadProviderChoice } from "./CodeThreadCreateDialog"`
@@ -105,14 +107,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   [
     "packages/domain/src/cursorAcpPolicy.ts",
     "Residual Cursor ACP connection-check policy kept for cursorAcpPolicy.test.ts and future probe wiring; production runtime and settings paths were removed. Remove once a product caller imports runCursorAcpConnectionCheck or the probe suite is retired.",
-  ],
-  [
-    "packages/contracts/src/nativeHarnessRouting.ts",
-    "Native harness slot routing contracts, delivered schema-first ahead of the server routing engine and Settings editor. Remove once the server resolves a NativeHarnessRouteDecision or a surface edits NativeHarnessRoutingSettings.",
-  ],
-  [
-    "packages/contracts/src/nativeHarness.ts",
-    "Native harness session, advisor, follow-up, and tool-bound contracts, delivered schema-first ahead of the turn runtime. Remove once the server journals a NativeHarnessTurnRecord or a surface renders a NativeHarnessFollowUpSet.",
   ],
 ]);
 
@@ -383,12 +377,13 @@ function collectReferences(
 
 export function findUnreachableModules(
   files: ReadonlyArray<ScannedFile>,
+  exemptions: ReadonlyMap<string, string> = KNOWN_ISLANDS,
 ): ReadonlyArray<WiringViolation> {
   const referenced = collectReferencedPaths(files);
   return files
     .filter((file) => isCandidate(file.path))
     .filter((file) => !referenced.has(file.path))
-    .filter((file) => !KNOWN_ISLANDS.has(file.path))
+    .filter((file) => !exemptions.has(file.path))
     .map((file) => ({
       path: file.path,
       reason:
@@ -407,13 +402,14 @@ export function findUnreachableModules(
  */
 export function findTypeOnlyReferencedModules(
   files: ReadonlyArray<ScannedFile>,
+  exemptions: ReadonlyMap<string, string> = KNOWN_ISLANDS,
 ): ReadonlyArray<WiringViolation> {
   const referenced = collectReferencedPaths(files);
   const runtimeReferenced = collectRuntimeReferencedPaths(files);
   return files
     .filter((file) => isCandidate(file.path))
     .filter((file) => referenced.has(file.path) && !runtimeReferenced.has(file.path))
-    .filter((file) => !KNOWN_ISLANDS.has(file.path))
+    .filter((file) => !exemptions.has(file.path))
     .filter((file) => hasRuntimeExport(file.content))
     .map((file) => ({
       path: file.path,
@@ -435,17 +431,44 @@ export function extractExportedNames(content: string): ReadonlyArray<string> {
 }
 
 /**
+ * The names a non-test module imports by name, from any specifier.
+ *
+ * Rule D used to search file contents for a bare word. A module exporting a
+ * generic name — `hostId`, `Usage`, `reason` — then looked used wherever that
+ * word appeared as a field or a local, so a barrel-only module could hide
+ * behind a common word forever. Only a named import binding is evidence that
+ * a module's export is what the consumer reached for. No first-party code
+ * imports `@octant/*` as a namespace, so `import * as` is not a form this
+ * needs to read.
+ */
+const NAMED_IMPORT_PATTERN = /(?:import|export)\s+(?:type\s+)?\{([^}]*)\}\s*from\s*["'][^"']+["']/g;
+
+export function extractImportedNames(content: string): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const match of content.matchAll(NAMED_IMPORT_PATTERN)) {
+    for (const binding of (match[1] ?? "").split(",")) {
+      const local = binding.trim().replace(/^type\s+/, "");
+      if (local === "") continue;
+      const imported = local.split(/\s+as\s+/)[0]?.trim();
+      if (imported !== undefined && imported !== "") names.add(imported);
+    }
+  }
+  return names;
+}
+
+/**
  * Modules a package barrel re-exports that nothing actually uses.
  *
  * A barrel makes every module it names look referenced, so reachability by path
  * cannot see this. The question that survives is whether any name the module
- * exports appears in non-test code somewhere other than the module itself and
- * the barrel that re-exports it. A module exporting nothing is not a candidate:
- * there is no name to look for, and a side-effect-only module is answered by
- * Rule B.
+ * exports is imported by name in non-test code somewhere other than the module
+ * itself and the barrel that re-exports it. A module exporting nothing is not a
+ * candidate: there is no name to look for, and a side-effect-only module is
+ * answered by Rule B.
  */
 export function findBarrelOnlyModules(
   files: ReadonlyArray<ScannedFile>,
+  exemptions: ReadonlyMap<string, string> = KNOWN_ISLANDS,
 ): ReadonlyArray<WiringViolation> {
   const candidates = files.filter(
     (file) =>
@@ -455,29 +478,80 @@ export function findBarrelOnlyModules(
   );
   if (candidates.length === 0) return [];
 
-  const searchable = files.filter(
-    (file) =>
-      SOURCE_EXTENSIONS.some((extension) => file.path.endsWith(extension)) &&
-      !isTestPath(file.path) &&
-      !isPackageBarrel(file.path),
-  );
+  const importedNames = new Map<string, ReadonlySet<string>>();
+  for (const file of files) {
+    if (
+      !SOURCE_EXTENSIONS.some((extension) => file.path.endsWith(extension)) ||
+      isTestPath(file.path) ||
+      isPackageBarrel(file.path)
+    ) {
+      continue;
+    }
+    importedNames.set(file.path, extractImportedNames(file.content));
+  }
 
   const violations: WiringViolation[] = [];
   for (const candidate of candidates) {
-    if (KNOWN_ISLANDS.has(candidate.path)) continue;
+    if (exemptions.has(candidate.path)) continue;
     const names = extractExportedNames(candidate.content);
     if (names.length === 0) continue;
-    const patterns = names.map((name) => new RegExp(`\\b${name}\\b`));
-    const used = searchable.some(
-      (file) =>
-        file.path !== candidate.path && patterns.some((pattern) => pattern.test(file.content)),
-    );
+    let used = false;
+    for (const [path, imported] of importedNames) {
+      if (path === candidate.path) continue;
+      if (names.some((name) => imported.has(name))) {
+        used = true;
+        break;
+      }
+    }
     if (used) continue;
     violations.push({
       path: candidate.path,
       reason:
-        "only its own package barrel re-exports it and no non-test module uses any of its exports; wire it, delete it, or add it to KNOWN_ISLANDS with a reason",
+        "only its own package barrel re-exports it and no non-test module imports any of its exports by name; wire it, delete it, or add it to KNOWN_ISLANDS with a reason",
     });
+  }
+  return violations;
+}
+
+/**
+ * Exemptions that no longer exempt anything.
+ *
+ * An island entry is a reviewed reason for a module to be unreachable. Once the
+ * module is wired, the reason is history and the entry is a claim about the
+ * tree that is no longer true — two native-harness contract entries kept
+ * saying "ahead of the server routing engine" for weeks after the router
+ * imported them. Reporting the entry keeps the list a description of the
+ * present, and keeps a later regression from hiding behind an old exemption.
+ */
+export function findStaleIslandExemptions(
+  files: ReadonlyArray<ScannedFile>,
+  exemptions: ReadonlyMap<string, string> = KNOWN_ISLANDS,
+): ReadonlyArray<WiringViolation> {
+  const known = new Set(files.map((file) => file.path));
+  const none: ReadonlyMap<string, string> = new Map();
+  const stillIslands = new Set(
+    [
+      ...findUnreachableModules(files, none),
+      ...findTypeOnlyReferencedModules(files, none),
+      ...findBarrelOnlyModules(files, none),
+    ].map((violation) => violation.path),
+  );
+  const violations: WiringViolation[] = [];
+  for (const path of exemptions.keys()) {
+    if (!known.has(path)) {
+      violations.push({
+        path,
+        reason: "KNOWN_ISLANDS exempts a module that no longer exists; remove the entry",
+      });
+      continue;
+    }
+    if (!stillIslands.has(path)) {
+      violations.push({
+        path,
+        reason:
+          "KNOWN_ISLANDS exempts a module that product code now reaches; remove the entry so the reason stops describing a tree that no longer exists",
+      });
+    }
   }
   return violations;
 }
@@ -582,6 +656,7 @@ export function findWiringViolations(
     ...findTypeOnlyReferencedModules(files),
     ...findUncalledEndpoints(files),
     ...findBarrelOnlyModules(files),
+    ...findStaleIslandExemptions(files),
   ];
 }
 
