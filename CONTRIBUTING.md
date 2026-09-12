@@ -60,8 +60,10 @@ are not required for a PR.
   Use a native GitHub stack for independently reviewable dependent slices: link
   the parent and child PRs, record their order, keep the stack linear, and queue
   it from the lowest eligible PR. Use separate `main` PRs for independent work.
-- CI must be green on the exact head being merged. Rebase or merge `main` in
-  if it has moved.
+- CI must be green on the exact head being merged. If `main` has moved, a
+  standalone PR may rebase or merge `main`. A native stacked PR must
+  cascading-rebase onto the new `main` (`Rebase stack`, or `gh stack rebase`
+  then `gh stack push`); do not merge `main` into a stack layer.
 - Behavior changes come with tests (see below). Documentation changes to
   `docs/`, `apps/docs`, or this file are welcome on their own.
 - Describe what changed, why, and how you verified it. Link the issue if

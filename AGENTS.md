@@ -290,7 +290,9 @@ credentials, physical devices, release authority, or subjective judgment.
     can group them without creating artificial dependencies.
 - Treat a stack as one delivery unit: keep its branches linear, enqueue or merge
   it from the lowest eligible PR, and let GitHub perform the cascading rebase after
-  each landed layer. Do not manually create sibling PRs or repeatedly rebase every
+  each landed layer. If `main` moves before the stack lands, rebase the stack
+  (`Rebase stack`, or `gh stack rebase` then `gh stack push`); do not merge `main`
+  into a stack layer. Do not manually create sibling PRs or repeatedly rebase every
   child when the stack relationship already expresses the dependency.
 - A report, assessment, audit, or Agent Store / Context document is not a reason
   to open a GitHub pull request. Those stay in the store or chat.
