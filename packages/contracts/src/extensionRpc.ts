@@ -113,6 +113,28 @@ export const ExtensionCommand = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("remove-skill"), ...packageTarget }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("reconcile-skills") }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("review-skill"),
+    qualifiedId: boundedText(1024),
+    digest: ExtensionContentDigest,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("trust-skill-source"),
+    qualifiedId: boundedText(1024),
+    digest: ExtensionContentDigest,
+    trusted: Schema.Boolean,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("set-skill-desired"),
+    qualifiedId: boundedText(1024),
+    digest: ExtensionContentDigest,
+    desired: Schema.Boolean,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("select-skill-collision"),
+    name: boundedText(64),
+    qualifiedId: boundedText(1024),
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("set-source-trust"),
     ...desiredStateMutation,
     trusted: Schema.Boolean,

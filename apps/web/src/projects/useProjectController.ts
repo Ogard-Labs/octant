@@ -289,6 +289,40 @@ export function useProjectController(options: ProjectControllerOptions) {
     return (await execute(command, `${modeLabel(type)} Project created.`)) ? projectId : undefined;
   }
 
+  /**
+   * The Project a thread starts in when nobody chose one. The host provisions
+   * it under the default folder on first use and hands back the same one after,
+   * so the result is the Project to select, created or not.
+   */
+  async function ensureDefault(
+    type: "work" | "code",
+    hostId: HostId = LOCAL_HOST_ID,
+  ): Promise<{ readonly projectId: ProjectId; readonly name: string } | undefined> {
+    setErrorMessage(undefined);
+    try {
+      const result = await fallbackClient.executeProject({
+        kind: "ensure-default-project",
+        projectId: decodeProjectId(crypto.randomUUID()),
+        expectedVersion: 0 as AggregateVersion,
+        projectType: type,
+        hostId,
+      });
+      if (result.kind !== "default-project-ensured") return undefined;
+      if (result.created) {
+        await load("retry");
+        if (!mounted.current) return undefined;
+        announce(`${modeLabel(type)} Project created in the default folder.`);
+      }
+      return { projectId: result.project.id, name: result.project.name };
+    } catch (error) {
+      if (!mounted.current) return undefined;
+      const message = failureMessage(error);
+      setErrorMessage(message);
+      announce(message);
+      return undefined;
+    }
+  }
+
   async function rename(projectId: ProjectId, name: string): Promise<boolean> {
     const project = projectById.get(projectId);
     if (project === undefined) return false;
@@ -520,6 +554,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     availabilityByProject,
     client: fallbackClient,
     create,
+    ensureDefault,
     createMemory,
     clearMemory,
     errorMessage,

@@ -1132,11 +1132,17 @@ describe("ShellService", () => {
   });
   it("synthesizes bootstrap defaults without appending events", () => {
     const { persistence, append } = persistenceStub();
-    const service = new ShellService({ persistence, uuid: uuidSequence(), clock: () => now });
+    const service = new ShellService({
+      persistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+      home: "/Users/ada",
+    });
     const workspace = defaultWindowWorkspace(ids.window);
 
     expect(service.bootstrap(ids.window)).toEqual({
-      settings: defaultShellSettings(),
+      // The default folder is a host fact filled in on read, never stored.
+      settings: { ...defaultShellSettings(), defaultFolder: "/Users/ada/Documents/Octant" },
       workspace,
       availableSurfaces: {
         chat: resolveSurfaceDescriptors(workspace.contextByMode.chat),
@@ -1199,6 +1205,42 @@ describe("ShellService", () => {
     ).toThrowError(
       expect.objectContaining({ failure: expect.objectContaining({ category: "invalid" }) }),
     );
+    expect(append).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a default folder outside the home folder before journaling it", () => {
+    const { persistence, append } = persistenceStub();
+    const service = new ShellService({
+      persistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+      home: "/Users/ada",
+    });
+    service.bootstrap(ids.window);
+    const replace = (defaultFolder: string) =>
+      service.execute(
+        decodeShellCommand({
+          kind: "replace-settings",
+          windowId: ids.window,
+          expectedVersion: 0,
+          settings: { ...defaultShellSettings(), defaultFolder },
+        }),
+      );
+
+    expect(() => replace("/tmp/elsewhere")).toThrowError(
+      expect.objectContaining({
+        failure: {
+          category: "invalid",
+          message: "The default folder must be inside your home folder.",
+        },
+      }),
+    );
+    expect(append).not.toHaveBeenCalled();
+
+    expect(replace("/Users/ada/Octant/tasks/")).toMatchObject({
+      kind: "settings-replaced",
+      settings: { defaultFolder: "/Users/ada/Octant/tasks" },
+    });
     expect(append).toHaveBeenCalledTimes(1);
   });
 

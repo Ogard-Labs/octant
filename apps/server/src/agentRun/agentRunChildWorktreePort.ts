@@ -44,6 +44,8 @@ export async function resolveAgentRunCodeWorkspaceContext(input: {
 }): Promise<AgentRunCodeWorkspaceContext | undefined> {
   const checkout = input.checkout;
   if (checkout === undefined || checkout.availability !== "available") return undefined;
+  // A plain folder has no revision to branch a child worktree from.
+  if (checkout.head.kind === "none") return undefined;
   let parentCheckoutRoot = input.repositoryRoot;
   if (checkout.kind === "managed-worktree") {
     const receipt = await input.loadManagedReceipt(String(checkout.ownershipReceiptId));

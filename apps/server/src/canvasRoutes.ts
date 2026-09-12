@@ -8,6 +8,7 @@ import {
   decodeCanvasOriginThreadId,
   decodeCanvasThreadReferenceCardsOutcome,
   decodeCanvasCreateResult,
+  decodeCanvasDiagramLayoutReviseResult,
   decodeCanvasReviseResult,
   decodeCanvasRefreshResult,
   decodeCanvasShareAccessResult,
@@ -106,6 +107,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "get" &&
       route !== "history" &&
       route !== "revise" &&
+      route !== "layout-revise" &&
       route !== "refresh" &&
       route !== "refresh-cancel" &&
       route !== "action" &&
@@ -322,6 +324,66 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           context.project,
         );
         return jsonResponse(decodeCanvasReviseResult(result), 200, origin);
+      }
+
+      if (route === "layout-revise" && request.method === "POST") {
+        const body = await readJson(request);
+        const malformed = () =>
+          jsonResponse(
+            decodeCanvasDiagramLayoutReviseResult({
+              kind: "denied",
+              denialCode: "malformed-request",
+              message: "Canvas layout revision is malformed.",
+            }),
+            200,
+            origin,
+          );
+        if (body.kind === "too-large" || body.kind === "invalid") return malformed();
+        let canvasId;
+        try {
+          canvasId = decodeCanvasId((body.value as { canvasId?: unknown }).canvasId ?? "");
+        } catch {
+          return malformed();
+        }
+        const context = await resolveAuthorizedContext(
+          dependencies,
+          authenticatedWindowId,
+          canvasId,
+        );
+        if (context.kind === "unauthorized") {
+          return jsonResponse(
+            decodeCanvasDiagramLayoutReviseResult({
+              kind: "denied",
+              denialCode: "unauthorized",
+              message: "Canvas layout revision is not authorized in this workspace.",
+            }),
+            200,
+            origin,
+          );
+        }
+        if (context.kind === "unavailable") {
+          return jsonResponse(
+            decodeCanvasDiagramLayoutReviseResult({
+              kind: "denied",
+              denialCode: "unavailable",
+              message: context.reason,
+            }),
+            200,
+            origin,
+          );
+        }
+        const result = dependencies.canvasService.reviseDiagramLayout(
+          body.value,
+          {
+            mode: context.activeContext.mode,
+            projectId:
+              context.activeContext.projectId === null
+                ? null
+                : String(context.activeContext.projectId),
+          },
+          context.project,
+        );
+        return jsonResponse(decodeCanvasDiagramLayoutReviseResult(result), 200, origin);
       }
 
       if ((route === "refresh" || route === "refresh-cancel") && request.method === "POST") {

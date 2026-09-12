@@ -1048,7 +1048,9 @@ function approvalPrompt(
   const head =
     checkout.head.kind === "branch"
       ? `${checkout.head.name} @ ${checkout.head.oid}`
-      : `detached @ ${checkout.head.oid}`;
+      : checkout.head.kind === "detached"
+        ? `detached @ ${checkout.head.oid}`
+        : "no Git repository";
   const scope = [
     `Project: ${thread.projectId}`,
     `Thread: ${thread.title} (${thread.id})`,

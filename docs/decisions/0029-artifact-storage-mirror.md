@@ -118,3 +118,5 @@ reconcile, and what a bundle proves about who wrote it.
 - 0009 Sandbox confinement, approvals, and Plan mode
 - 0010 Secure file preview and canvas artifacts
 - 0028 The artifact library
+- 0118 Amends the default: files mirror under the default folder's
+  `Artifacts` subfolder until a mirror setting is chosen

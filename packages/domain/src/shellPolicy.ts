@@ -166,6 +166,7 @@ export function defaultShellSettings(): ShellSettings {
     voice: {},
     imageGeneration: { customSources: [] },
     userProfile: { accent: DEFAULT_AVATAR_ACCENT, avatar: DEFAULT_USER_AVATAR },
+    standaloneSkillActivations: {},
   };
 }
 
@@ -661,6 +662,8 @@ export function replaceShellSettings(
       MIN_CONTEXT_SIDEBAR_WIDTH,
       MAX_CONTEXT_SIDEBAR_WIDTH,
     ) as ShellSettings["contextSidebarWidth"],
+    standaloneSkillActivations:
+      replacement.standaloneSkillActivations ?? current.standaloneSkillActivations,
   };
 }
 

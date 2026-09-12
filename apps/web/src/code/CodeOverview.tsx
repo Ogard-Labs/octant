@@ -163,7 +163,7 @@ export function CodeOverview(props: CodeOverviewProps) {
       <section aria-label="Code status summary" className="code-overview__summary">
         <article className="code-overview__card code-overview__card--delivery">
           <div>
-            <span className="code-overview__eyebrow">Delivery target</span>
+            <span className="code-overview__eyebrow">Delivery</span>
             <h2>
               <GitBranch aria-hidden="true" size={16} strokeWidth={1.8} />
               {thread.deliveryTarget.branchIntent}
@@ -878,9 +878,16 @@ function capitalize(value: string): string {
 }
 
 function headLabel(
-  head: { readonly kind: "branch"; readonly name: string } | { readonly kind: "detached" },
+  head:
+    | { readonly kind: "branch"; readonly name: string }
+    | { readonly kind: "detached" }
+    | { readonly kind: "none" },
 ): string {
-  return head.kind === "branch" ? head.name : "Detached HEAD";
+  return head.kind === "branch"
+    ? head.name
+    : head.kind === "detached"
+      ? "Detached HEAD"
+      : "No Git repository";
 }
 
 function lifecycleLabel(lifecycle: "waiting" | "interrupted"): string {

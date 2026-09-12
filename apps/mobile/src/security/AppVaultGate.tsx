@@ -105,20 +105,19 @@ export function AppVaultGate(props: {
         eyebrow: {
           color: colors.accent,
           fontSize: typography.caption.fontSize,
-          fontWeight: "700",
+          fontWeight: "500",
           letterSpacing: 1,
-          textTransform: "uppercase",
         },
         title: {
           color: colors.textPrimary,
           fontSize: 30,
-          fontWeight: "700",
+          fontWeight: "500",
           letterSpacing: -0.7,
         },
         body: {
           color: colors.textSecondary,
           fontSize: typography.body.fontSize,
-          lineHeight: 22,
+          lineHeight: 20,
         },
         button: {
           alignItems: "center",
@@ -131,7 +130,7 @@ export function AppVaultGate(props: {
         buttonLabel: {
           color: colors.sendLabel,
           fontSize: typography.body.fontSize,
-          fontWeight: "700",
+          fontWeight: "500",
         },
       }),
     [colors],

@@ -37,6 +37,7 @@ import {
   type CodeNavigationRuntime,
   type CodeApprovalEffect,
   type CodeCheckoutId,
+  type CodeCheckoutHead,
   type CodeCheckoutIdentity,
   type CodeCommandResult,
   type CodeThreadCheckoutRebindRefusal,
@@ -227,11 +228,23 @@ function sameAvailableCheckout(
   ) {
     return false;
   }
-  return current.head.kind === "detached"
-    ? current.head.oid === observed.head.oid
-    : observed.head.kind === "branch" &&
-        current.head.name === observed.head.name &&
-        current.head.oid === observed.head.oid;
+  return sameHead(current.head, observed.head);
+}
+
+/**
+ * Two heads name the same state. A plain folder's `none` head matches only
+ * another `none`: with no revision there is nothing else to compare.
+ */
+function sameHead(current: CodeCheckoutHead, observed: CodeCheckoutHead): boolean {
+  if (current.kind === "none" || observed.kind === "none") {
+    return current.kind === observed.kind;
+  }
+  if (current.kind === "detached") {
+    return observed.kind === "detached" && current.oid === observed.oid;
+  }
+  return (
+    observed.kind === "branch" && current.name === observed.name && current.oid === observed.oid
+  );
 }
 
 /**
@@ -263,11 +276,7 @@ function repeatsJournaledCheckout(
   ) {
     return false;
   }
-  return current.head.kind === "detached"
-    ? observed.head.kind === "detached" && current.head.oid === observed.head.oid
-    : observed.head.kind === "branch" &&
-        current.head.name === observed.head.name &&
-        current.head.oid === observed.head.oid;
+  return sameHead(current.head, observed.head);
 }
 
 /**
@@ -1371,9 +1380,21 @@ export class CodeService {
           ...(command.externalEditor === undefined
             ? {}
             : { externalEditor: command.externalEditor }),
+          requireGitRepository: command.requireGitRepository ?? current.requireGitRepository,
+          allowDefaultFolderThreads:
+            command.allowDefaultFolderThreads ?? current.allowDefaultFolderThreads,
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
+        // The default folder is not a repository, so a thread there can only
+        // start while Git is not required. Refuse the pair rather than store a
+        // switch whose thread would never start.
+        if (settings.allowDefaultFolderThreads && settings.requireGitRepository) {
+          throw this.#failure(
+            "invalid",
+            "Threads without a Project need the Git requirement turned off first.",
+          );
+        }
         this.#append(
           "code-settings",
           CODE_SETTINGS_AGGREGATE_ID,
@@ -2621,6 +2642,8 @@ export class CodeService {
     return {
       defaultExecutionPolicy: "approval-gated",
       defaultPermissionPersistence: "current-session",
+      requireGitRepository: true,
+      allowDefaultFolderThreads: false,
       version: 0 as AggregateVersion,
       updatedAt: decodeTimestamp(this.#clock()),
     };

@@ -1,17 +1,17 @@
 /**
- * Octant Distilled mobile tokens.
- * Warm, high-contrast palette: cream canvas, warm ink, and orange primary voltage.
- * Dark mode mirrors the same warm roles on a charcoal canvas.
+ * Octant mobile tokens, aligned to the desktop/web palette.
+ * Neutral greys, hairline borders, monochrome accent; status colours map to the
+ * web palette roles so the phone reads as the same product as the desktop.
  * Owned Octant roles — not a third-party clone.
  */
 
 export type ThemeScheme = "light" | "dark";
 
 export type ThemeColors = {
-  /** Warm cream (light) / charcoal (dark) canvas. */
+  /** Workspace canvas (light) / app ground (dark). */
   canvas: string;
   canvasSoft: string;
-  /** Warm near-black / cream ink. */
+  /** Primary ink. */
   ink: string;
   body: string;
   bodyStrong: string;
@@ -20,7 +20,7 @@ export type ThemeColors = {
   hairline: string;
   hairlineSoft: string;
   hairlineStrong: string;
-  /** Brand voltage — Distilled primary. */
+  /** Brand accent — desktop-consistent neutral. */
   primary: string;
   primaryActive: string;
   primarySoft: string;
@@ -48,6 +48,10 @@ export type ThemeColors = {
   sendLabel: string;
   userBubble: string;
   userBubbleText: string;
+  /** Overlays drawn on the user bubble follow the bubble text, not the canvas. */
+  onBubbleMuted: string;
+  onBubbleFill: string;
+  onBubbleStroke: string;
   assistantBubble: string;
   accent: string;
   accentMuted: string;
@@ -77,126 +81,132 @@ export type ThemeColors = {
 };
 
 export const lightColors: ThemeColors = {
-  canvas: "#F7F7F4",
-  canvasSoft: "#FAFAF7",
-  ink: "#26251E",
-  body: "#5A5852",
-  bodyStrong: "#26251E",
-  muted: "#807D72",
-  mutedSoft: "#A09C92",
-  hairline: "#E6E5E0",
-  hairlineSoft: "#EFEEE8",
-  hairlineStrong: "#CFCDC4",
-  primary: "#F54E00",
-  primaryActive: "#D04200",
-  primarySoft: "#FFE8DE",
-  stageThinking: "#FFD6C9",
-  stageReading: "#B8E8D4",
-  stageEditing: "#BFD9FF",
-  stageGrepping: "#D9CFF5",
-  stageDone: "#F2DFA0",
-  atmospherePrimary: "rgba(245, 78, 0, 0.10)",
-  atmosphereSecondary: "rgba(38, 37, 30, 0.04)",
-  /** More transparent fills so atmosphere photos read through glass. */
-  glassFillThin: "rgba(255, 255, 255, 0.28)",
-  glassFillRegular: "rgba(255, 255, 255, 0.42)",
-  glassFillThick: "rgba(255, 255, 255, 0.58)",
-  glassFillChrome: "rgba(255, 255, 255, 0.50)",
-  glassStroke: "rgba(38, 37, 30, 0.10)",
-  glassStrokeStrong: "rgba(38, 37, 30, 0.16)",
-  glassHighlight: "rgba(255, 255, 255, 0.85)",
-  textPrimary: "#26251E",
-  textSecondary: "#5A5852",
-  textTertiary: "#807D72",
-  send: "#F54E00",
+  canvas: "#FFFFFF",
+  canvasSoft: "#FAFAF9",
+  ink: "#1B1B1B",
+  body: "#4F4F4F",
+  bodyStrong: "#1B1B1B",
+  muted: "#666666",
+  mutedSoft: "#8F8F8D",
+  hairline: "#E0E0DE",
+  hairlineSoft: "#E8E8E6",
+  hairlineStrong: "#BDBDBB",
+  primary: "#1B1B1B",
+  primaryActive: "#3A3A3A",
+  primarySoft: "rgba(27, 27, 27, 0.08)",
+  stageThinking: "#1E5FAE",
+  stageReading: "#41761C",
+  stageEditing: "#8A6218",
+  stageGrepping: "#5B4BB0",
+  stageDone: "#0F6144",
+  atmospherePrimary: "rgba(27, 27, 27, 0.03)",
+  atmosphereSecondary: "rgba(27, 27, 27, 0.02)",
+  /** Translucent glass keeps a quiet neutral read over the canvas. */
+  glassFillThin: "rgba(255, 255, 255, 0.55)",
+  glassFillRegular: "rgba(255, 255, 255, 0.68)",
+  glassFillThick: "rgba(253, 253, 252, 0.82)",
+  glassFillChrome: "rgba(250, 250, 249, 0.76)",
+  glassStroke: "#E0E0DE",
+  glassStrokeStrong: "#BDBDBB",
+  glassHighlight: "rgba(255, 255, 255, 0.65)",
+  textPrimary: "#1B1B1B",
+  textSecondary: "#4F4F4F",
+  textTertiary: "#666666",
+  send: "#1B1B1B",
   sendLabel: "#FFFFFF",
-  userBubble: "#26251E",
-  userBubbleText: "#F7F7F4",
-  assistantBubble: "rgba(255, 255, 255, 0.48)",
-  accent: "#F54E00",
-  accentMuted: "#D04200",
-  danger: "#E11D48",
-  success: "#16A34A",
-  warning: "#CA8A04",
-  merged: "#7C3AED",
-  attention: "#2563EB",
-  backdrop: "rgba(38, 37, 30, 0.35)",
-  background: "#F7F7F4",
-  surface: "rgba(255, 255, 255, 0.42)",
-  surfaceElevated: "rgba(255, 255, 255, 0.58)",
-  border: "#E6E5E0",
-  separator: "#CFCDC4",
-  surfaceSolid: "#F0EFEA",
-  surfaceElevatedSolid: "#EBEAE4",
-  customDim: "rgba(247, 247, 244, 0.55)",
-  customScrimTop: "rgba(247,247,244,0.72)",
-  customScrimMid: "rgba(247,247,244,0.35)",
-  customScrimBottom: "rgba(247,247,244,0.82)",
-  canvasMid: "#F3F1EA",
-  atmosphereGradientStart: "rgba(245,78,0,0.12)",
-  atmosphereGradientEnd: "rgba(38,37,30,0.04)",
+  userBubble: "#1B1B1B",
+  userBubbleText: "#FFFFFF",
+  onBubbleMuted: "rgba(255, 255, 255, 0.72)",
+  onBubbleFill: "rgba(255, 255, 255, 0.12)",
+  onBubbleStroke: "rgba(255, 255, 255, 0.18)",
+  assistantBubble: "rgba(255, 255, 255, 0.68)",
+  accent: "#1B1B1B",
+  accentMuted: "#4F4F4F",
+  danger: "#A8102F",
+  success: "#0F6144",
+  warning: "#6F5300",
+  merged: "#5B4BB0",
+  attention: "#1E5FAE",
+  backdrop: "rgba(0, 0, 0, 0.30)",
+  background: "#FFFFFF",
+  surface: "rgba(255, 255, 255, 0.68)",
+  surfaceElevated: "rgba(253, 253, 252, 0.82)",
+  border: "#E0E0DE",
+  separator: "#BDBDBB",
+  surfaceSolid: "#FFFFFF",
+  surfaceElevatedSolid: "#FDFDFC",
+  customDim: "rgba(255, 255, 255, 0.60)",
+  customScrimTop: "rgba(255,255,255,0.74)",
+  customScrimMid: "rgba(255,255,255,0.36)",
+  customScrimBottom: "rgba(255,255,255,0.84)",
+  canvasMid: "#F2F2F1",
+  atmosphereGradientStart: "rgba(27,27,27,0.04)",
+  atmosphereGradientEnd: "rgba(27,27,27,0.02)",
 };
 
-/** Warm charcoal Distilled dark — same orange voltage, inverted ink/canvas roles. */
+/** Neutral Octant dark — mirrors the desktop workspace greys. */
 export const darkColors: ThemeColors = {
-  canvas: "#141310",
-  canvasSoft: "#1A1914",
-  ink: "#F7F7F4",
-  body: "#C4C2B8",
-  bodyStrong: "#F7F7F4",
-  muted: "#9A978C",
-  mutedSoft: "#6E6B62",
-  hairline: "#2E2C26",
-  hairlineSoft: "#25231E",
-  hairlineStrong: "#3D3A32",
-  primary: "#F54E00",
-  primaryActive: "#FF6A2A",
-  primarySoft: "rgba(245, 78, 0, 0.22)",
-  stageThinking: "#5C2E22",
-  stageReading: "#1F4A3A",
-  stageEditing: "#243B5C",
-  stageGrepping: "#3A2F55",
-  stageDone: "#4A4020",
-  atmospherePrimary: "rgba(245, 78, 0, 0.18)",
-  atmosphereSecondary: "rgba(247, 247, 244, 0.04)",
-  /** Dark glass stays translucent over the aurora atmosphere. */
-  glassFillThin: "rgba(38, 37, 30, 0.28)",
-  glassFillRegular: "rgba(38, 37, 30, 0.40)",
-  glassFillThick: "rgba(45, 43, 36, 0.55)",
-  glassFillChrome: "rgba(45, 43, 36, 0.48)",
-  glassStroke: "rgba(247, 247, 244, 0.14)",
-  glassStrokeStrong: "rgba(247, 247, 244, 0.22)",
-  glassHighlight: "rgba(255, 255, 255, 0.10)",
-  textPrimary: "#F7F7F4",
-  textSecondary: "#C4C2B8",
-  textTertiary: "#9A978C",
-  send: "#F54E00",
-  sendLabel: "#FFFFFF",
-  userBubble: "#F7F7F4",
-  userBubbleText: "#26251E",
-  assistantBubble: "rgba(38, 37, 30, 0.48)",
-  accent: "#F54E00",
-  accentMuted: "#FF6A2A",
-  danger: "#FB7185",
-  success: "#4ADE80",
-  warning: "#FACC15",
-  merged: "#A78BFA",
-  attention: "#60A5FA",
+  canvas: "#1A1A1A",
+  canvasSoft: "#151515",
+  ink: "#F0F0F0",
+  body: "#A9A9A9",
+  bodyStrong: "#F0F0F0",
+  muted: "#949494",
+  mutedSoft: "#707070",
+  hairline: "#303030",
+  hairlineSoft: "#282828",
+  hairlineStrong: "#4D4D4D",
+  primary: "#F0F0F0",
+  primaryActive: "#D0D0D0",
+  primarySoft: "rgba(240, 240, 240, 0.10)",
+  stageThinking: "#74B0F3",
+  stageReading: "#93CB58",
+  stageEditing: "#D9A441",
+  stageGrepping: "#AB98F2",
+  stageDone: "#6BB299",
+  atmospherePrimary: "rgba(240, 240, 240, 0.03)",
+  atmosphereSecondary: "rgba(240, 240, 240, 0.02)",
+  /** Neutral dark glass over the application ground. */
+  glassFillThin: "rgba(35, 35, 35, 0.55)",
+  glassFillRegular: "rgba(35, 35, 35, 0.70)",
+  glassFillThick: "rgba(43, 43, 43, 0.82)",
+  glassFillChrome: "rgba(43, 43, 43, 0.76)",
+  glassStroke: "#303030",
+  glassStrokeStrong: "#4D4D4D",
+  glassHighlight: "rgba(255, 255, 255, 0.07)",
+  textPrimary: "#F0F0F0",
+  textSecondary: "#A9A9A9",
+  textTertiary: "#949494",
+  send: "#F0F0F0",
+  sendLabel: "#171717",
+  userBubble: "#F0F0F0",
+  userBubbleText: "#171717",
+  onBubbleMuted: "rgba(23, 23, 23, 0.66)",
+  onBubbleFill: "rgba(23, 23, 23, 0.08)",
+  onBubbleStroke: "rgba(23, 23, 23, 0.16)",
+  assistantBubble: "rgba(35, 35, 35, 0.70)",
+  accent: "#F0F0F0",
+  accentMuted: "#A9A9A9",
+  danger: "#E17D96",
+  success: "#6BB299",
+  warning: "#EDBC26",
+  merged: "#AB98F2",
+  attention: "#74B0F3",
   backdrop: "rgba(0, 0, 0, 0.55)",
-  background: "#141310",
-  surface: "rgba(38, 37, 30, 0.40)",
-  surfaceElevated: "rgba(45, 43, 36, 0.55)",
-  border: "#2E2C26",
-  separator: "#3D3A32",
-  surfaceSolid: "#1F1E19",
-  surfaceElevatedSolid: "#25231E",
-  customDim: "rgba(20, 19, 16, 0.62)",
-  customScrimTop: "rgba(20,19,16,0.78)",
-  customScrimMid: "rgba(20,19,16,0.40)",
-  customScrimBottom: "rgba(20,19,16,0.85)",
-  canvasMid: "#1C1B16",
-  atmosphereGradientStart: "rgba(245,78,0,0.20)",
-  atmosphereGradientEnd: "rgba(247,247,244,0.04)",
+  background: "#1A1A1A",
+  surface: "rgba(35, 35, 35, 0.70)",
+  surfaceElevated: "rgba(43, 43, 43, 0.82)",
+  border: "#303030",
+  separator: "#4D4D4D",
+  surfaceSolid: "#232323",
+  surfaceElevatedSolid: "#2B2B2B",
+  customDim: "rgba(26, 26, 26, 0.64)",
+  customScrimTop: "rgba(26,26,26,0.80)",
+  customScrimMid: "rgba(26,26,26,0.42)",
+  customScrimBottom: "rgba(26,26,26,0.88)",
+  canvasMid: "#1F1F1F",
+  atmosphereGradientStart: "rgba(240,240,240,0.04)",
+  atmosphereGradientEnd: "rgba(240,240,240,0.02)",
 };
 
 /** @deprecated Prefer useTheme().colors — static light fallback for tests. */
@@ -212,14 +222,14 @@ export const space = {
   md: 16,
   lg: 24,
   xl: 32,
-  xxl: 40,
+  xxl: 48,
 } as const;
 
 export const spacing = space;
 
 export const radii = {
-  sm: 12,
-  md: 20,
+  sm: 10,
+  md: 22,
   lg: 26,
   composer: 30,
   bubble: 22,
@@ -227,7 +237,7 @@ export const radii = {
   circle: 999,
 } as const;
 
-/** Distilled UI type — system for display, Nerd Font for mono/code. */
+/** Octant UI type — system stack for display, Nerd Font for mono/code. */
 export const fonts = {
   /** JetBrainsMono Nerd Font — code pattern + mono chrome. */
   mono: "JetBrainsMonoNerdFont",
@@ -237,37 +247,35 @@ export const fonts = {
 
 export const typography = {
   hero: {
-    fontSize: 34,
-    fontWeight: "400" as const,
-    letterSpacing: -0.8,
+    fontSize: 28,
+    fontWeight: "500" as const,
+    letterSpacing: -0.7,
   },
   brand: {
-    fontSize: 28,
-    fontWeight: "400" as const,
-    letterSpacing: -0.6,
-  },
-  title: {
     fontSize: 17,
-    fontWeight: "600" as const,
+    fontWeight: "500" as const,
     letterSpacing: -0.2,
   },
+  title: {
+    fontSize: 20,
+    fontWeight: "600" as const,
+    letterSpacing: -0.5,
+  },
   body: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "400" as const,
-    letterSpacing: -0.1,
   },
   caption: {
     fontSize: 13,
     fontWeight: "400" as const,
   },
   section: {
-    fontSize: 12,
-    fontWeight: "600" as const,
-    letterSpacing: 0.6,
-    textTransform: "uppercase" as const,
+    fontSize: 14,
+    fontWeight: "500" as const,
+    letterSpacing: -0.1,
   },
   mono: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: "400" as const,
     letterSpacing: 0.2,
     fontFamily: fonts.mono,

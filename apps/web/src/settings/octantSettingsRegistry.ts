@@ -49,6 +49,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "update updates upgrade version release automatic check download install relaunch privacy signed notarized what's new notes",
         },
         {
+          id: settingId("default-folder"),
+          label: "Default folder",
+          scope: "host",
+          keywords:
+            "default folder documents octant projectless folderless no project quick task files artifacts location path",
+        },
+        {
           id: settingId("completed-thread-archive"),
           label: "Archive completed threads",
           scope: "host",
@@ -355,6 +362,34 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       keywords:
         "usage operational dashboard provider model host mode project thread request shape attribution filters totals daily weekly cumulative top consumers measurement quality exact estimated reconciled stale unavailable export reset retention purge spend ceiling token budget",
       settings: [],
+    },
+    {
+      id: "remote-access",
+      label: "Remote access",
+      scope: "host",
+      keywords:
+        "remote access private listener lan tailscale https certificate pairing pair link ticket code approve deny device browser phone revoke rename origin port exposure",
+      settings: [
+        {
+          id: settingId("remote-listener"),
+          label: "Remote listener",
+          scope: "host",
+          keywords:
+            "remote listener enable disable restart hostname port origin certificate tls https lan tailscale exposure",
+        },
+        {
+          id: settingId("remote-pairing"),
+          label: "Pair a device",
+          scope: "host",
+          keywords: "pair pairing link code ticket approve deny comparison browser phone request",
+        },
+        {
+          id: settingId("remote-devices"),
+          label: "Paired devices",
+          scope: "host",
+          keywords: "paired devices inventory rename revoke revoke all browser phone",
+        },
+      ],
     },
     {
       id: "host",

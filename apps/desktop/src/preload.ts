@@ -56,6 +56,7 @@ export const IPC_CHANNELS = {
   privateListenerEnable: "octant:private-listener:enable",
   privateListenerDisable: "octant:private-listener:disable",
   privateListenerRestart: "octant:private-listener:restart",
+  remotePairingTicket: "octant:remote-device:pairing-ticket",
   remotePairingRequests: "octant:remote-device:pairing-requests",
   remotePairingApprove: "octant:remote-device:pairing-approve",
   remotePairingDeny: "octant:remote-device:pairing-deny",
@@ -212,7 +213,16 @@ export interface PrivateListenerEnableBridgeRequest {
 }
 
 export type RemoteDeviceSourceClass = "loopback" | "lan-private" | "tailscale" | "unknown";
+export type RemotePairingTicketSourceClass = Exclude<RemoteDeviceSourceClass, "unknown">;
 export type RemoteDeviceState = "active" | "revoked" | "expired";
+
+export interface RemoteMintedPairingTicket {
+  readonly ticketId: string;
+  readonly ticketProof: string;
+  /** Epoch milliseconds. */
+  readonly expiresAt: number;
+  readonly sourceClass: RemotePairingTicketSourceClass;
+}
 
 export interface RemotePendingPairingRequest {
   readonly kind: "pending";
@@ -435,6 +445,9 @@ export interface OctantHostBridge {
     request: PrivateListenerEnableBridgeRequest,
   ) => Promise<PrivateListenerPublicStatus>;
   readonly disablePrivateListener: () => Promise<PrivateListenerPublicStatus>;
+  readonly mintRemotePairingTicket: (
+    sourceClass: RemotePairingTicketSourceClass,
+  ) => Promise<RemoteMintedPairingTicket>;
   readonly listRemotePairingRequests: () => Promise<ReadonlyArray<RemotePendingPairingRequest>>;
   readonly approveRemotePairingRequest: (ticketId: string) => Promise<RemotePairingApprovalResult>;
   readonly denyRemotePairingRequest: (
@@ -835,6 +848,18 @@ export function createHostBridge(
         throw new Error("Octant could not disable the private listener.");
       }
     },
+    mintRemotePairingTicket: async (sourceClass: RemotePairingTicketSourceClass) => {
+      if (
+        sourceClass !== "loopback" &&
+        sourceClass !== "lan-private" &&
+        sourceClass !== "tailscale"
+      ) {
+        throw new TypeError("Invalid pairing source class.");
+      }
+      return decodeRemoteMintedTicket(
+        await invokeRemote(IPC_CHANNELS.remotePairingTicket, sourceClass),
+      );
+    },
     listRemotePairingRequests: async () =>
       decodeRemotePendingList(await invokeRemote(IPC_CHANNELS.remotePairingRequests)),
     approveRemotePairingRequest: async (ticketId: string) => {
@@ -881,6 +906,27 @@ const REMOTE_UUID_PATTERN =
 const REMOTE_FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/;
 const REMOTE_LABEL_PATTERN = /^(?!.*[\\/])[^\r\n]{1,128}$/;
 const REMOTE_REASON_PATTERN = /^[a-z0-9][a-z0-9._-]{0,127}$/;
+
+function decodeRemoteMintedTicket(value: unknown): RemoteMintedPairingTicket {
+  requireRemoteExactKeys(value, ["expiresAt", "sourceClass", "ticketId", "ticketProof"]);
+  if (
+    !REMOTE_UUID_PATTERN.test(String(value.ticketId)) ||
+    typeof value.ticketProof !== "string" ||
+    value.ticketProof.length === 0 ||
+    !Number.isSafeInteger(value.expiresAt) ||
+    (value.sourceClass !== "loopback" &&
+      value.sourceClass !== "lan-private" &&
+      value.sourceClass !== "tailscale")
+  ) {
+    throw new TypeError("Invalid pairing ticket.");
+  }
+  return Object.freeze({
+    ticketId: value.ticketId as string,
+    ticketProof: value.ticketProof,
+    expiresAt: value.expiresAt as number,
+    sourceClass: value.sourceClass,
+  });
+}
 
 function decodeRemotePendingList(value: unknown): ReadonlyArray<RemotePendingPairingRequest> {
   if (!Array.isArray(value)) throw new TypeError("Invalid local pairing request list.");

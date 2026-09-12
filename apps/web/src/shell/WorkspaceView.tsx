@@ -364,6 +364,11 @@ export interface WorkspaceViewProps {
     receiptId?: string,
     initializeGit?: boolean,
   ) => Promise<ProjectId | undefined>;
+  readonly defaultFolder?: string;
+  readonly codeDefaultFolderThreads?: boolean;
+  readonly onEnsureDefaultProject?: (
+    mode: "work" | "code",
+  ) => Promise<{ readonly projectId: ProjectId; readonly name: string } | undefined>;
   readonly onDraftCreating?: boolean;
   readonly onDraftError?: string;
   readonly onDraftPendingMessage?: string;
@@ -1129,6 +1134,13 @@ function renderNonCodeTab(
           );
         }}
         {...(props.onCreateProject === undefined ? {} : { onCreateProject: props.onCreateProject })}
+        {...(props.defaultFolder === undefined ? {} : { defaultFolder: props.defaultFolder })}
+        {...(props.codeDefaultFolderThreads === undefined
+          ? {}
+          : { codeDefaultFolderThreads: props.codeDefaultFolderThreads })}
+        {...(props.onEnsureDefaultProject === undefined
+          ? {}
+          : { onEnsureDefaultProject: props.onEnsureDefaultProject })}
         onCancel={() => {
           void props.onClosePane(paneId);
         }}

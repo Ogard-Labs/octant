@@ -1,6 +1,8 @@
 import {
+  ApplicationMentionTypeahead,
   BrowserUseMention,
   ComputerUseMention,
+  useApplicationMentionTypeahead,
   useBrowserUseMention,
   useComputerUseMention,
 } from "../computerUse/ComputerUseMention";
@@ -301,6 +303,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     },
     onResolveExtensionReference: extensionDraft.resolveReference,
   });
+  const appMentions = useApplicationMentionTypeahead([
+    { controller: computer, kind: "computer" },
+    { controller: browser, kind: "browser" },
+  ]);
   const activeThreadKeyRef = useRef(String(props.threadId));
   activeThreadKeyRef.current = String(props.threadId);
   const [providerChanging, setProviderChanging] = useState(false);
@@ -768,6 +774,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (appMentions.handleKeyDown(event)) return;
     if (computer.handleKeyDown(event)) return;
     if (browser.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
@@ -1477,31 +1484,35 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         input={
           <OctantTextarea
             aria-activedescendant={
-              computer.open
-                ? `${computer.listId}-computer`
-                : browser.open
-                  ? `${browser.listId}-browser`
-                  : slash.active !== undefined
-                    ? `${slash.listId}-${slash.active.id}`
-                    : mention.activeCandidate !== undefined
-                      ? `${mentionListId}-${String(mention.activeCandidate.threadId)}`
-                      : pathMentionOpen && pathMentions.activeCandidate !== undefined
-                        ? `${pathMentionListId}-${pathMentions.activeCandidate.path}`
-                        : undefined
+              appMentions.open.length > 1
+                ? `${appMentions.listId}-${appMentions.open[appMentions.active]?.kind ?? ""}`
+                : computer.open
+                  ? `${computer.listId}-computer`
+                  : browser.open
+                    ? `${browser.listId}-browser`
+                    : slash.active !== undefined
+                      ? `${slash.listId}-${slash.active.id}`
+                      : mention.activeCandidate !== undefined
+                        ? `${mentionListId}-${String(mention.activeCandidate.threadId)}`
+                        : pathMentionOpen && pathMentions.activeCandidate !== undefined
+                          ? `${pathMentionListId}-${pathMentions.activeCandidate.path}`
+                          : undefined
             }
             aria-autocomplete="list"
             aria-controls={
-              computer.open
-                ? computer.listId
-                : browser.open
-                  ? browser.listId
-                  : slash.open
-                    ? slash.listId
-                    : mention.open
-                      ? mentionListId
-                      : pathMentionOpen
-                        ? pathMentionListId
-                        : undefined
+              appMentions.open.length > 1
+                ? appMentions.listId
+                : computer.open
+                  ? computer.listId
+                  : browser.open
+                    ? browser.listId
+                    : slash.open
+                      ? slash.listId
+                      : mention.open
+                        ? mentionListId
+                        : pathMentionOpen
+                          ? pathMentionListId
+                          : undefined
             }
             aria-expanded={
               computer.open || browser.open || slash.open || mention.open || pathMentionOpen
@@ -1557,7 +1568,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           />
         }
         typeahead={
-          computer.open ? (
+          appMentions.open.length > 1 ? (
+            <ApplicationMentionTypeahead typeahead={appMentions} />
+          ) : computer.open ? (
             <ComputerUseMention controller={computer} surface="typeahead" />
           ) : browser.open ? (
             <BrowserUseMention controller={browser} surface="typeahead" />

@@ -27,6 +27,7 @@ describe("SettingsSectionId", () => {
       "harness",
       "skills",
       "usage",
+      "remote-access",
       "host",
       "github",
       "linear",

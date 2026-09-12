@@ -22,7 +22,7 @@ function buildGlassMaterials(
 ): Record<GlassMaterial, GlassMaterialRecipe> {
   return {
     ultraThin: {
-      fill: blurTint === "light" ? "rgba(255, 255, 255, 0.22)" : "rgba(38, 37, 30, 0.22)",
+      fill: blurTint === "light" ? "rgba(255, 255, 255, 0.22)" : "rgba(35, 35, 35, 0.22)",
       blurIntensity: 22,
       blurTint,
       borderColor: c.glassStroke,
@@ -108,7 +108,7 @@ export function glassChromeStyle(
 }
 
 export function glassPressedOverlayFor(scheme: ThemeScheme): string {
-  return scheme === "dark" ? "rgba(247, 247, 244, 0.06)" : "rgba(38, 37, 30, 0.04)";
+  return scheme === "dark" ? "rgba(240, 240, 240, 0.06)" : "rgba(27, 27, 27, 0.04)";
 }
 
 /** @deprecated Prefer glassPressedOverlayFor(scheme). */

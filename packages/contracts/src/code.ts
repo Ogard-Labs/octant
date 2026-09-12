@@ -97,6 +97,13 @@ export const CodeRelativePath = Schema.String.pipe(
 export type CodeRelativePath = typeof CodeRelativePath.Type;
 
 const GitObjectId = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/));
+/**
+ * What a checkout's HEAD points at. `none` is the head of a plain folder: a
+ * Code Project bound to a directory that is not a Git repository, allowed when
+ * Code settings do not require one. It carries no object id, so every path
+ * that needs a revision — branches, worktrees, diffs, pushes, pull requests —
+ * has to say what it does without one rather than invent one.
+ */
 export const CodeCheckoutHead = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("branch"),
@@ -104,6 +111,7 @@ export const CodeCheckoutHead = Schema.Union(
     oid: GitObjectId,
   }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("detached"), oid: GitObjectId }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("none") }).annotations(strict),
 );
 export type CodeCheckoutHead = typeof CodeCheckoutHead.Type;
 
@@ -114,6 +122,19 @@ export const CodeCheckoutIdentity = Schema.Union(
     kind: Schema.Literal("existing-worktree"),
     availability: Schema.Literal("available", "unavailable", "waiting"),
     head: CodeCheckoutHead,
+    observedAt: UtcTimestamp,
+  }).annotations(strict),
+  /**
+   * The bound folder itself, with no repository behind it. Its identity is a
+   * digest of the canonical root rather than of a Git common directory, since
+   * there is none; a relink to another folder is a different checkout.
+   */
+  Schema.Struct({
+    id: CodeCheckoutId,
+    repositoryId: CodeRepositoryId,
+    kind: Schema.Literal("plain-folder"),
+    availability: Schema.Literal("available", "unavailable", "waiting"),
+    head: Schema.Struct({ kind: Schema.Literal("none") }).annotations(strict),
     observedAt: UtcTimestamp,
   }).annotations(strict),
   Schema.Struct({
@@ -329,6 +350,22 @@ export const CodeSettings = Schema.Struct({
   defaultExecutionPolicy: ProviderExecutionPolicy,
   defaultPermissionPersistence: PermissionPersistence,
   externalEditor: Schema.optional(CodeExternalEditor),
+  /**
+   * Whether a Code thread may only start in a folder that is a Git repository.
+   * On, a non-repository folder refuses thread start with the `git init`
+   * advice; off, the thread starts on a plain-folder checkout and every
+   * Git-backed feature reports itself unavailable. A store persisted before
+   * the switch existed decodes to on, which is what it always did.
+   */
+  requireGitRepository: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /**
+   * Whether a Code thread may start without a chosen Project, in the default
+   * Project the host provisions under `<default folder>/Code`. That folder is
+   * not a repository, so this can only be on while `requireGitRepository` is
+   * off; the host refuses the other combination instead of storing a switch
+   * whose thread could never start. Off for a store persisted before it existed.
+   */
+  allowDefaultFolderThreads: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
 }).annotations(strict);
@@ -497,6 +534,8 @@ export const CodeCommand = Schema.Union(
     defaultExecutionPolicy: ProviderExecutionPolicy,
     defaultPermissionPersistence: PermissionPersistence,
     externalEditor: Schema.optional(CodeExternalEditor),
+    requireGitRepository: Schema.optional(Schema.Boolean),
+    allowDefaultFolderThreads: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   CreateCodeThreadCommand,
   Schema.Struct({

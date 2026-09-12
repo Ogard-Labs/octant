@@ -13,6 +13,7 @@ import {
   type ProjectActor,
   type ProjectId,
   type ProjectLifecycle,
+  type ProjectOrigin,
   type ProjectRank,
 } from "@octant/contracts/projects";
 
@@ -112,6 +113,7 @@ type CreateBoundProjectFields = CreateProjectFields & {
   readonly binding: CanonicalProjectBinding;
   readonly revisionId: BindingRevisionId;
   readonly actor: ProjectActor;
+  readonly origin?: ProjectOrigin;
 };
 type CreateWorkProjectInput = CreateBoundProjectFields & { readonly type: "work" };
 type CreateCodeProjectInput = CreateBoundProjectFields & { readonly type: "code" };
@@ -152,14 +154,16 @@ export function createProject(input: CreateProjectInput): Project {
       changedAt: input.createdAt,
     },
   ] as const;
+  const origin = input.origin === undefined ? {} : { origin: input.origin };
   if (input.type === "work") {
-    return { ...common, type: "work", binding: input.binding, bindingHistory };
+    return { ...common, type: "work", binding: input.binding, bindingHistory, ...origin };
   }
   return {
     ...common,
     type: "code",
     binding: input.binding,
     bindingHistory,
+    ...origin,
     codeAccessPersistence: "current-session",
   };
 }

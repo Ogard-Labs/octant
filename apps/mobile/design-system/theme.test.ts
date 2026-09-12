@@ -11,11 +11,11 @@ describe("mobile theme resolution", () => {
     expect(resolveThemeScheme("dark", "light")).toBe("dark");
   });
 
-  it("keeps Distilled orange voltage across schemes", () => {
-    expect(lightColors.primary).toBe("#F54E00");
-    expect(darkColors.primary).toBe("#F54E00");
+  it("keeps the desktop-aligned neutral palette across schemes", () => {
+    expect(lightColors.primary).toBe("#1B1B1B");
+    expect(darkColors.primary).toBe("#F0F0F0");
     expect(colorsForScheme("dark").canvas).toBe(darkColors.canvas);
     expect(colorsForScheme("light").canvas).toBe(lightColors.canvas);
-    expect(darkColors.textPrimary).toBe(lightColors.canvas);
+    expect(darkColors.textPrimary).toBe(darkColors.primary);
   });
 });

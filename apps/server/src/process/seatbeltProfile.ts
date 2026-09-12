@@ -106,6 +106,8 @@ export interface SeatbeltConfinementPrepareInput {
   readonly networkEgress: OsNetworkEgress;
   readonly additionalWriteRoots?: ReadonlyArray<string>;
   readonly readRoots?: ReadonlyArray<string>;
+  /** PATH-style string used to resolve `#!/usr/bin/env` interpreters for this launch. */
+  readonly interpreterSearchPath?: string;
   readonly allowProcessExec?: boolean;
   readonly allowProcessFork?: boolean;
   readonly allowFileReadStar?: boolean;
@@ -506,12 +508,19 @@ function prepareDarwinSeatbelt(
 ): ConfinedProcessLaunch {
   const sandboxPath = options.sandboxPath ?? DEFAULT_SANDBOX_PATH;
   requireSandboxExec({ platform: "darwin", sandboxPath });
-  const privateHomeAllowPaths = input.privateHomeAllowPaths ?? [
-    input.boundRoot,
-    input.temporaryDirectory,
-    ...(input.additionalWriteRoots ?? []),
-    ...(input.readRoots ?? []),
-  ];
+  const interpreterSearchPath =
+    input.interpreterSearchPath ?? options.interpreterSearchPath ?? process.env.PATH;
+  const executablePaths = confinedExecutableExecPaths(input.executable, interpreterSearchPath);
+  const executableDirectories = uniqueAbsolutePaths(executablePaths.map(dirname));
+  const readRoots = [...(input.readRoots ?? []), ...executableDirectories];
+  const privateHomeAllowPaths = uniqueAbsolutePaths([
+    ...(input.privateHomeAllowPaths ?? [
+      input.boundRoot,
+      input.temporaryDirectory,
+      ...(input.additionalWriteRoots ?? []),
+    ]),
+    ...readRoots,
+  ]);
   const profile = buildDenyDefaultSeatbeltProfile({
     boundRoot: input.boundRoot,
     temporaryDirectory: input.temporaryDirectory,
@@ -519,16 +528,9 @@ function prepareDarwinSeatbelt(
     ...(input.additionalWriteRoots === undefined
       ? {}
       : { additionalWriteRoots: input.additionalWriteRoots }),
-    ...(input.readRoots === undefined ? {} : { readRoots: input.readRoots }),
+    readRoots,
     ...(input.allowProcessExec === undefined ? {} : { allowProcessExec: input.allowProcessExec }),
-    ...(input.allowProcessExec === false
-      ? {
-          execAllowPaths: confinedExecutableExecPaths(
-            input.executable,
-            options.interpreterSearchPath ?? process.env.PATH,
-          ),
-        }
-      : {}),
+    execAllowPaths: executablePaths,
     ...(input.allowProcessFork === undefined ? {} : { allowProcessFork: input.allowProcessFork }),
     ...(input.allowFileReadStar === undefined
       ? {}

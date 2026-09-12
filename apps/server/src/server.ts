@@ -41,7 +41,9 @@ import {
   ReplayCursor,
   type AgentRun,
   type AgentRunParentThreadId,
+  type CodeCheckoutId,
   type CodeCheckoutIdentity,
+  type CodeRepositoryId,
   type PermissionPersistence,
   type ProviderDriverKind,
   type ProviderInstance,
@@ -356,6 +358,7 @@ import { FolderBrowseService } from "./folderBrowseService";
 import { ProjectService } from "./projectService";
 import { windowCanAccessCodeProject } from "./windowCodeProjectAccess";
 import { ProjectRootPort } from "./projectRootPort";
+import { DEFAULT_FOLDER_ARTIFACTS_SUBFOLDER, effectiveDefaultFolder } from "./defaultFolder";
 import { createArtifactLibraryRouteHandler } from "./artifactLibraryRoutes";
 import { createArtifactMirrorRouteHandler } from "./artifactMirrorRoutes";
 import { ArtifactLibraryService } from "./canvas/artifactLibraryService";
@@ -534,6 +537,7 @@ import {
   StandaloneSkillService,
   type SkillMarketplacePort,
 } from "./extensions/standaloneSkillService";
+import { ShellSettingsStandaloneSkillActivationStore } from "./extensions/standaloneSkillActivationStore";
 import { createCompositeSkillMarketplace } from "./extensions/compositeSkillMarketplace";
 import {
   CodexPluginPackageResolver,
@@ -1003,6 +1007,29 @@ export function createExistingWorktreeCodeFileRootAuthority(options: {
       }
       const repositoryRoot = project.binding.canonicalRoot;
       let rootPath: string;
+      if (checkout.kind === "plain-folder") {
+        // No repository to observe: the folder is the checkout. Its identity
+        // must still be the one this root derives, so a checkout journaled
+        // for another folder cannot reach this one.
+        const plain = plainFolderCheckoutIdentity({
+          projectId: thread.projectId,
+          bindingRevisionId: thread.bindingRevisionId,
+          canonicalRoot: repositoryRoot,
+        });
+        if (
+          checkout.id !== plain.checkoutId ||
+          checkout.repositoryId !== plain.repositoryId ||
+          thread.repositoryId !== plain.repositoryId
+        ) {
+          return undefined;
+        }
+        const rootIdentity = await options.statIdentity(repositoryRoot);
+        return {
+          fileId: stableCodeFileId(thread.id, checkout.id, relativePath),
+          rootPath: repositoryRoot,
+          rootIdentity,
+        };
+      }
       if (checkout.kind === "existing-worktree") {
         const expectedCheckoutId = deriveExistingWorktreeCheckoutId({
           projectId: thread.projectId,
@@ -1081,7 +1108,7 @@ function unavailableCheckoutMessage(
   }
   if (observation.status === "unavailable") {
     return observation.reason === "not-repository"
-      ? "This folder is not a Git repository. Run git init in it, or choose another Project."
+      ? "This folder is not a Git repository. Run git init in it, choose another Project, or turn off the Git requirement in Code settings."
       : "The bound Code folder is missing or has moved. Rebind the Project to its current location.";
   }
   switch (observation.reason) {
@@ -1100,6 +1127,12 @@ export function createExistingWorktreeCodeCheckoutObservation(options: {
   readonly repository: ManagedWorktreeRepositoryPort;
   readonly clock: () => string;
   readonly gitObservationPort?: GitObservationPort;
+  /**
+   * Whether a thread may start in a folder that is not a Git repository.
+   * Read per observation so the Code setting applies without a restart.
+   * Absent means required, which is what Code always demanded.
+   */
+  readonly requireGitRepository?: () => boolean;
 }): CodeCheckoutObservationPort {
   return {
     observe: async (windowId, projectId) => {
@@ -1122,6 +1155,30 @@ export function createExistingWorktreeCodeCheckoutObservation(options: {
 
       const root = project.binding.canonicalRoot;
       const observation = await options.repository.observe(root, new AbortController().signal);
+      if (
+        observation.status === "unavailable" &&
+        observation.reason === "not-repository" &&
+        options.requireGitRepository?.() === false
+      ) {
+        // The folder is the checkout. Everything Git-backed reads the `none`
+        // head and reports itself unavailable instead of pretending.
+        const plain = plainFolderCheckoutIdentity({
+          projectId,
+          bindingRevisionId: revision.revisionId,
+          canonicalRoot: root,
+        });
+        return {
+          bindingRevisionId: revision.revisionId,
+          checkout: decodeCodeCheckoutIdentity({
+            id: plain.checkoutId,
+            repositoryId: plain.repositoryId,
+            kind: "plain-folder",
+            availability: "available",
+            head: { kind: "none" },
+            observedAt: options.clock(),
+          }),
+        };
+      }
       // Say which of these it is. Every one of them used to arrive at the
       // composer as "this folder has no Git checkout, run git init", which is
       // true of exactly one and misleading advice for the rest.
@@ -1217,6 +1274,29 @@ export function deriveExistingWorktreeCheckoutId(input: {
 }
 
 /**
+ * Identity of a folder that stands in for a repository. There is no Git
+ * common directory to digest, so the repository id digests the canonical
+ * root instead, and the checkout id follows the same derivation the existing
+ * worktree uses so both are reproducible from the Project binding alone.
+ */
+export function plainFolderCheckoutIdentity(input: {
+  readonly projectId: string;
+  readonly bindingRevisionId: string;
+  readonly canonicalRoot: string;
+}): { readonly repositoryId: CodeRepositoryId; readonly checkoutId: CodeCheckoutId } {
+  const repositoryId = decodeCodeRepositoryId(
+    `repo_${createHash("sha256")
+      .update("octant.plain-folder-repository.v1\0")
+      .update(input.canonicalRoot)
+      .digest("hex")}`,
+  );
+  return {
+    repositoryId,
+    checkoutId: deriveExistingWorktreeCheckoutId({ ...input, repositoryId }),
+  };
+}
+
+/**
  * A branch checkout is identified by its branch; HEAD advancing through
  * ordinary commits keeps it the same checkout. A detached checkout has no
  * name, so its OID is its identity and must match exactly.
@@ -1225,6 +1305,7 @@ function observedCheckoutHeadMatches(
   observed: { readonly detached: boolean; readonly head: string; readonly branch?: string },
   expected: CodeCheckoutIdentity["head"],
 ): boolean {
+  if (expected.kind === "none") return false;
   return expected.kind === "detached"
     ? observed.detached && observed.head === expected.oid
     : !observed.detached && observed.branch === `refs/heads/${expected.name}`;
@@ -2698,6 +2779,8 @@ export function startOctantServer(
       repository,
       clock: () => new Date().toISOString(),
       gitObservationPort,
+      requireGitRepository: () =>
+        persistence.readCodeSettings()?.settings.requireGitRepository ?? true,
     });
     const roots = createExistingWorktreeCodeFileRootAuthority({
       projects: projectService,
@@ -3049,6 +3132,7 @@ export function startOctantServer(
       discovery: skillDiscoveryService,
       lifecycle: extensionLifecycleService,
       marketplace: skillMarketplace,
+      activationStore: new ShellSettingsStandaloneSkillActivationStore({ persistence }),
     });
     refreshStandaloneSkills = async () => {
       await standaloneSkillService.reconcile();
@@ -4032,6 +4116,8 @@ export function startOctantServer(
         thread.repositoryId !== checkout.repositoryId ||
         thread.lifecycle !== "active" ||
         checkout.availability !== "available" ||
+        // Apple evidence is pinned to a source revision; a plain folder has none.
+        checkout.head.kind === "none" ||
         scope.authority.hostId !== LOCAL_TOOL_HOST_ID ||
         scope.authority.mode !== "code" ||
         scope.authority.projectId !== thread.projectId ||
@@ -5028,7 +5114,7 @@ export function startOctantServer(
               return { kind: "unauthorized" };
             }
             let rootPath: string;
-            if (view.checkout.kind === "existing-worktree") {
+            if (view.checkout.kind !== "managed-worktree") {
               rootPath = project.binding.canonicalRoot;
             } else {
               const receipt = await managedWorktreeReceipts.load(view.checkout.ownershipReceiptId);
@@ -5997,6 +6083,15 @@ export function startOctantServer(
       outsideRootApproved: (destination) =>
         destination.kind !== "global-folder" ||
         isInsideHomeDirectory(destination.canonicalRoot, homedir()),
+      defaultFallback: () => ({
+        kind: "global-folder",
+        canonicalRoot: join(
+          effectiveDefaultFolder(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          ),
+          DEFAULT_FOLDER_ARTIFACTS_SUBFOLDER,
+        ),
+      }),
       // Read-only is a promise about the disk as well as the journal, so a
       // Code thread under Plan mode writes no files. Only Code carries an
       // execution policy; Chat and Work threads have no read-only posture to
@@ -7833,6 +7928,7 @@ function appleRestartContext(
     thread.lifecycle !== "active" ||
     thread.checkoutId !== checkout.id ||
     thread.repositoryId !== checkout.repositoryId ||
+    checkout.head.kind === "none" ||
     receipt.authority.hostId !== LOCAL_TOOL_HOST_ID ||
     receipt.authority.mode !== "code" ||
     receipt.authority.projectId !== thread.projectId ||

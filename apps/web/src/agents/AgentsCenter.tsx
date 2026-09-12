@@ -63,7 +63,7 @@ export function AgentsCenter(props: AgentsCenterProps) {
   const hideListForNarrow = props.narrow === true && detailOpen;
 
   return (
-    <Surface ariaLabel="Agents Center" className="agents-center">
+    <Surface ariaLabel="Agents" className="agents-center">
       <SurfaceHeader
         subtitle="Child runs across Chat, Work, and Code."
         title="Agents"
@@ -187,23 +187,18 @@ function AgentsCenterListBody(props: {
   const { controller } = props;
   if (controller.list.status === "loading") {
     return (
-      <ShellState
-        eyebrow="Agents Center"
-        message="Loading agent runs."
-        state="loading"
-        title="Loading"
-      />
+      <ShellState eyebrow="Agents" message="Loading agent runs." state="loading" title="Loading" />
     );
   }
   if (controller.list.status === "unavailable") {
     return (
       <ShellState
         action={{ label: "Retry", onClick: controller.retryList }}
-        eyebrow="Agents Center"
+        eyebrow="Agents"
         message={controller.list.message}
         role="alert"
         state="disconnected"
-        title="Agents Center is unavailable"
+        title="Agents are unavailable"
       />
     );
   }
