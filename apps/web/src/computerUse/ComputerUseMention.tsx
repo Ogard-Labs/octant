@@ -189,6 +189,100 @@ export function BrowserUseMention({
   return <ApplicationMention controller={controller} kind="browser" surface={surface} />;
 }
 
+type ApplicationMentionController = ReturnType<typeof useApplicationMention>;
+
+/**
+ * Every application whose mention token matched, as one list.
+ *
+ * Each mention hook watches the same `@` prefix, so a bare `@` opens them all
+ * at once. The composers used to render the first open one, which left the
+ * others unreachable until the query already named them — the point of the
+ * typeahead defeated. With more than one open this becomes the shared list:
+ * arrows move, Enter chooses, Escape dismisses each.
+ */
+export function useApplicationMentionTypeahead(
+  mentions: ReadonlyArray<{
+    readonly controller: ApplicationMentionController;
+    readonly kind: "computer" | "browser";
+  }>,
+) {
+  const listId = useId();
+  const [active, setActive] = useState(0);
+  const open = mentions.filter((entry) => entry.controller.open);
+  const clamped = Math.max(0, Math.min(active, open.length - 1));
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
+      if (open.length < 2 || event.nativeEvent.isComposing) return false;
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setActive((current) => (current + 1) % open.length);
+        return true;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setActive((current) => (current - 1 + open.length) % open.length);
+        return true;
+      }
+      if ((event.key === "Enter" || event.key === "Tab") && !event.shiftKey) {
+        event.preventDefault();
+        open[clamped]?.controller.choose();
+        return true;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        for (const entry of open) entry.controller.handleKeyDown(event);
+        return true;
+      }
+      return false;
+    },
+    [open, clamped],
+  );
+  return { active: clamped, handleKeyDown, listId, open, setActive };
+}
+
+export function ApplicationMentionTypeahead(props: {
+  readonly typeahead: ReturnType<typeof useApplicationMentionTypeahead>;
+}) {
+  const { typeahead } = props;
+  if (typeahead.open.length < 2) return null;
+  return (
+    <div className="thread-mention__typeahead">
+      <ul
+        aria-label="Applications"
+        className="thread-mention__list"
+        id={typeahead.listId}
+        role="listbox"
+      >
+        {typeahead.open.map((entry, index) => (
+          <li className="thread-mention__option" key={entry.kind} role="presentation">
+            <OctantButton
+              aria-selected={index === typeahead.active}
+              id={`${typeahead.listId}-${entry.kind}`}
+              onClick={entry.controller.choose}
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseEnter={() => typeahead.setActive(index)}
+              role="option"
+              size="sm"
+              type="button"
+              variant={index === typeahead.active ? "secondary" : "ghost"}
+            >
+              {entry.kind === "computer" ? (
+                <Monitor aria-hidden="true" size={16} />
+              ) : (
+                <Globe2 aria-hidden="true" size={16} />
+              )}
+              <span>{entry.kind === "computer" ? "Computer" : "Browser"}</span>
+              <span className="thread-mention__meta">
+                {entry.kind === "computer" ? "Computer use" : "Built-in browser"}
+              </span>
+            </OctantButton>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function ApplicationMention({
   controller,
   kind,
