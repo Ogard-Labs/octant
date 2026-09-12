@@ -547,7 +547,7 @@
 }
 
 .shell--app-backdrop.shell-frame > .workspace-layer {
-  background: var(--octant-workspace-translucent-subtle);
+  background: color-mix(in srgb, var(--octant-workspace) 88%, transparent);
 }
 
 .shell--app-backdrop.shell-frame .workspace,
@@ -568,7 +568,7 @@
 .shell--app-backdrop.shell-frame .chat-workspace,
 .shell--app-backdrop.shell-frame .work-thread-workspace,
 .shell--app-backdrop.shell-frame .code-thread-workspace {
-  background: var(--octant-workspace-translucent);
+  background: color-mix(in srgb, var(--octant-workspace) 94%, transparent);
 }
 
 /* A terminal is a plate of its own: the engine paints the workspace ground
@@ -582,5 +582,5 @@
    sidebars already have one: overriding it here replaced Strong vibrancy with
    Subtle in the main window while Settings retained the selected material. */
 .shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-opaque.shell-frame > .sidebar {
-  background: var(--octant-sidebar-translucent-subtle);
+  background: color-mix(in srgb, var(--octant-sidebar) 88%, transparent);
 }
