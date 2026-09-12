@@ -267,7 +267,6 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     };
   }, [props.client]);
 
-
   // The revise context already carries exactly the provenance a reauthorizable
   // action request needs, so actions reuse it rather than minting a second one.
   // The server re-checks every field before any side effect.
