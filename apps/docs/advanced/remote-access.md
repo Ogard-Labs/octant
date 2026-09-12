@@ -10,12 +10,11 @@ client serves the web renderer over an authenticated HTTPS connection.
 
 Remote access is **disabled by default** and opt-in. The current technical
 preview provides the security foundation — typed dual-listener gateway,
-authenticated self-service routes, and hostile-environment evidence — and a
+authenticated self-service routes, and hostile-environment evidence — a
 paired browser that opens the host's Chat, Work, and Code threads and sends
-turns to them. Enabling the listener and approving devices still happen on the
-host through the `octant` CLI; an in-app Settings section for that is planned.
-This page documents the designed behavior; where a control is not yet
-available, it says so explicitly.
+turns to them, and Settings → Remote access on the host for the listener,
+pairing, and paired devices. This page documents the designed behavior;
+where a control is not yet available, it says so explicitly.
 
 ## What a paired browser can do
 
@@ -83,10 +82,33 @@ recovery phrase, or localStorage fallback.
   and relink, remembered Full access, extension trust and install, provider
   credentials, and host-key rotation require a local user on the host.
 
+## Enabling the listener and pairing from Settings
+
+On the host, **Settings → Remote access** administers everything a paired
+device depends on. It is only offered in the desktop app; a paired browser
+sees an explanation instead, and the server refuses the same routes for a
+remote principal.
+
+- **Remote listener.** Enter the private LAN or Tailscale hostname, port, and
+  the certificate and private key PEMs browsers will trust. Loopback and
+  public addresses are refused before anything reaches the host. Enabling or
+  moving the listener asks for confirmation that names the address, origin,
+  and reach (Private LAN or Tailscale); cancelling changes nothing. Key
+  material is sent once and is not kept in the page.
+- **Pair a device.** With the listener up, create a single-use pairing link
+  for the network the device will claim it over; it expires in five minutes.
+  The claim then appears with its device label, origin, key fingerprint, and
+  six-digit comparison code. Approve only when the code matches the device.
+- **Paired devices.** Rename, revoke one, or revoke all. Revocation cancels
+  that device's sessions and streams immediately.
+
+The `octant pair`, `octant auth list`, and `octant auth revoke` commands remain
+the equivalent path for a headless host.
+
 ## Device management
 
 The host can rename or revoke devices, revoke all devices, and rotate host
-identity from a local packaged device panel. Remote clients see only their
+identity from Settings → Remote access. Remote clients see only their
 own metadata and can sign out or self-revoke.
 
 ## Replay and reconnect
@@ -121,8 +143,8 @@ overlapping gateways. The browser-trusted Tailscale certificate, keychain-broker
 host-identity signing, and full macOS packaged listener QA remain environment
 gates. Product dispatch to a paired browser is live for Chat, Work, and Code
 threads; the desktop's sidebar, dock, and Settings are not yet served to a
-remote browser, and listener and device administration from in-app Settings
-remains planned.
+remote browser. Listener and pairing administration lives in Settings →
+Remote access on the host.
 
 ## Next steps
 

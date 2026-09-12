@@ -57,7 +57,8 @@ approval.
 - App-managed browser and computer-use runtime with server-authoritative
   policy.
 - Optional authenticated remote access (LAN or Tailscale) to a single host with
-  device pairing, key rotation, and revocation.
+  device pairing, key rotation, and revocation, administered from Settings →
+  Remote access on the host or the `octant pair` / `octant auth` commands.
 - Semantic themes, presets, and font controls.
 - Native macOS shell: borderless window, a split-tree workspace with one
   surface per pane, translucent sidebar, command palette, and slash commands.
