@@ -160,8 +160,14 @@ every moved node must exist, the sequence must be the head, budgets stand).
 Agent revisions and user layout share one history; a stale drag is refused and
 the renderer reloads rather than overwriting a newer version. Only the head
 version is editable. The route is host-window only; a paired browser reads
-boards but does not move nodes. Comments are contracted and admitted in the
-same policy but not yet journaled or rendered
+boards but does not move nodes. Comments are journaled facts of one
+`canvas-comments` aggregate per Canvas (`canvas.comment-added@1`, `-replied`,
+`-resolved`, `-deleted`), whose version is the board's comment sequence, so
+concurrent comments conflict on the journal instead of both winning; the
+service rebuilds them with the pure `applyCanvasCommentEvent` reducer, refuses
+unauthorized reads with no bodies, and stamps each comment's origin (`host` or
+the authenticated `remote-device`) beside its `local-user` author. Shared
+snapshots serialise the definition and so never carry comments
 ([decisions/0052-canvas-boards.md](decisions/0052-canvas-boards.md)).
 
 The local-server provider adapter owns a separate process for each acquired

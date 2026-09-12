@@ -384,6 +384,7 @@ import { createUnavailablePushDeliveryTransport } from "./automation/pushDeliver
 import { createPushNotificationTokenStore } from "./remote/pushNotificationTokenStore";
 import { CanvasEventStore } from "./canvas/canvasEventStore";
 import { CanvasService, type CanvasServiceDependencies } from "./canvas/canvasService";
+import { CanvasCommentService } from "./canvas/canvasCommentService";
 import { CanvasShareEventStore } from "./canvas/canvasShareEventStore";
 import { CanvasShareService } from "./canvas/canvasShareService";
 import { createCanvasRefreshSourceResolver } from "./canvas/canvasRefreshSourceResolver";
@@ -6517,10 +6518,23 @@ export function startOctantServer(
       service: threadHandOffService,
       windowAuthorityStore,
     });
+    // Comments are journaled facts of the Canvas, authored as the local user
+    // with the originating device recorded beside the author; the service
+    // rebuilds them from the journal and refuses reads a workspace may not make.
+    const canvasCommentService = new CanvasCommentService(
+      {
+        journal: persistence.journal,
+        projection: persistence.canvasProjection,
+        uuid: randomUUID,
+        actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      },
+      { authorize: authorizeCanvas },
+    );
     const canvasRoutes = createCanvasRouteHandler({
       canvasProjection: persistence.canvasProjection,
       canvasService,
       canvasShareService,
+      canvasCommentService,
       windowAuthorityStore,
       projects: projectService,
       activeContextResolver: (windowId) =>

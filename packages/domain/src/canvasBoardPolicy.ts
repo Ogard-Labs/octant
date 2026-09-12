@@ -14,6 +14,8 @@ import {
   CanvasCommentAdded,
   CanvasCommentCommand,
   CanvasCommentDeleted,
+  CanvasCommentEvent,
+  CanvasCommentOrigin,
   CanvasCommentReplied,
   CanvasCommentReply,
   CanvasCommentReplyCommand,
@@ -94,11 +96,14 @@ function countReplies(replies: ReadonlyArray<CanvasCommentReply>, commentId: str
  * The result is a value, not an exception, so callers must handle refused,
  * stale, or oversized inputs before journaling any event. Authority checks
  * (host, project, thread) happen upstream on the server; this pure policy
- * validates shape, sequence, budgets, and referential integrity.
+ * validates shape, sequence, budgets, and referential integrity. `origin` is
+ * the device the server authenticated the command from; it is recorded on
+ * the comment beside the author, never taken from the command.
  */
 export function admitCanvasCommentCommand(
   input: unknown,
   state: CanvasCommentState,
+  origin?: CanvasCommentOrigin,
 ): CanvasCommentAdmitResult {
   const decodedCommand = decodeCanvasCommentCommand(input);
   if (decodedCommand._tag === "Left") {
@@ -133,6 +138,7 @@ export function admitCanvasCommentCommand(
           commentId: command.commentId,
           anchor: command.anchor,
           author: command.author,
+          ...(origin === undefined ? {} : { origin }),
           body: command.body,
           createdAt: command.issuedAt,
         });
@@ -180,6 +186,7 @@ export function admitCanvasCommentCommand(
           replyId: command.replyId,
           commentId: command.commentId,
           author: command.author,
+          ...(origin === undefined ? {} : { origin }),
           body: command.body,
           createdAt: command.issuedAt,
         });
@@ -232,6 +239,59 @@ export function admitCanvasCommentCommand(
         sequence: state.sequence + 1,
       };
       return { kind: "accepted", event };
+    }
+  }
+}
+
+export const EMPTY_CANVAS_COMMENT_STATE: CanvasCommentState = {
+  comments: [],
+  replies: [],
+  sequence: 0,
+};
+
+/**
+ * Fold one journaled comment event into board state.
+ *
+ * Replay applies events in journal order; an event whose sequence is not the
+ * next one is ignored, so re-applying a frame or replaying a stale batch never
+ * duplicates a comment or moves the sequence backwards. A delete removes the
+ * comment and its replies: the journal keeps the fact, the projection does
+ * not keep the text.
+ */
+export function applyCanvasCommentEvent(
+  state: CanvasCommentState,
+  event: CanvasCommentEvent,
+): CanvasCommentState {
+  if (event.event.sequence !== state.sequence + 1) return state;
+  const sequence = event.event.sequence;
+  switch (event.kind) {
+    case "added":
+      return { ...state, sequence, comments: [...state.comments, event.event.comment] };
+    case "replied":
+      return { ...state, sequence, replies: [...state.replies, event.event.reply] };
+    case "resolved": {
+      const commentId = String(event.event.commentId);
+      return {
+        ...state,
+        sequence,
+        comments: state.comments.map((comment) =>
+          String(comment.commentId) === commentId
+            ? {
+                ...comment,
+                resolvedAt: event.event.resolvedAt,
+                resolvedBy: event.event.resolvedBy,
+              }
+            : comment,
+        ),
+      };
+    }
+    case "deleted": {
+      const commentId = String(event.event.commentId);
+      return {
+        sequence,
+        comments: state.comments.filter((comment) => String(comment.commentId) !== commentId),
+        replies: state.replies.filter((reply) => String(reply.commentId) !== commentId),
+      };
     }
   }
 }

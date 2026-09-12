@@ -12,6 +12,7 @@ import type {
   CanvasReviseRequest,
   CanvasVersionHistoryEntry,
 } from "@octant/contracts/canvas-revision";
+import type { CanvasCommentCommand } from "@octant/contracts/canvas-board";
 import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
 import type {
   CanvasRefreshCancelRequest,
@@ -30,6 +31,7 @@ import type {
 } from "@octant/contracts/canvas-share-snapshot";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import { ShellState } from "../shell/ShellState";
+import { CanvasCommentsPanel } from "./CanvasCommentsPanel";
 import { CanvasSharePanel } from "./CanvasSharePanel";
 import {
   CanvasRefreshPanel,
@@ -253,6 +255,18 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     tipVersionId,
   ]);
 
+  // Comments are offered only when the host journals them; the transport's
+  // methods are bound once so the panel's effects do not re-run per render.
+  const commentsClient = useMemo(() => {
+    const comments = props.client?.comments;
+    const comment = props.client?.comment;
+    if (comments === undefined || comment === undefined) return undefined;
+    return {
+      load: (canvasId: CanvasId) => comments(canvasId),
+      send: (command: CanvasCommentCommand) => comment(command),
+    };
+  }, [props.client]);
+
   // The revise context already carries exactly the provenance a reauthorizable
   // action request needs, so actions reuse it rather than minting a second one.
   // The server re-checks every field before any side effect.
@@ -448,6 +462,15 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               onRefresh={handleRefresh}
               skillOptions={refreshSkills}
               {...(cancelRefresh === undefined ? {} : { onCancel: handleCancelRefresh })}
+            />
+          ) : null}
+          {commentsClient !== undefined && reviseBase !== null ? (
+            <CanvasCommentsPanel
+              author={reviseBase.actor}
+              canvasId={props.tab.canvasId}
+              definition={definition}
+              load={commentsClient.load}
+              send={commentsClient.send}
             />
           ) : null}
           {shares !== undefined && selectedVersionId !== undefined ? (
