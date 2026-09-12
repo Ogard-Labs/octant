@@ -1260,6 +1260,12 @@ describe("local remote device IPC handlers", () => {
       handlers.set(channel, handler);
     });
     const service: RemoteDeviceControlService = {
+      mintPairingTicket: vi.fn(async (sourceClass) => ({
+        ticketId,
+        ticketProof: "p".repeat(43),
+        expiresAt: 1_785_000_000_000,
+        sourceClass: sourceClass as "lan-private",
+      })),
       listPairingRequests: vi.fn(async () => []),
       approvePairingRequest: vi.fn(async () => ({ decision: "approved" as const, device })),
       denyPairingRequest: vi.fn(async () => ({ decision: "denied" as const })),
@@ -1289,6 +1295,9 @@ describe("local remote device IPC handlers", () => {
       service,
     });
 
+    await expect(
+      handlers.get("octant:remote-device:pairing-ticket")?.("owned", "lan-private"),
+    ).resolves.toMatchObject({ ticketId, sourceClass: "lan-private" });
     await expect(handlers.get("octant:remote-device:pairing-requests")?.("owned")).resolves.toEqual(
       [],
     );

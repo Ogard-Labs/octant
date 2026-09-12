@@ -1,4 +1,5 @@
 import type { OctantMode } from "@octant/contracts/modes";
+import { MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
 
 export type RightUtilityDockSurfaceId =
   | "environment"
@@ -113,6 +114,16 @@ export type RightUtilityDockResolution =
  * view of a thing and a duplicate tab would say nothing new.
  */
 export const MULTI_INSTANCE_DOCK_SURFACES: ReadonlySet<string> = new Set(["browser", "terminal"]);
+
+export function resolveDockPresentationWidth(input: {
+  readonly configuredWidth: number;
+  readonly resolution: RightUtilityDockResolution;
+  readonly tabCount: number;
+}): number {
+  return input.tabCount === 0 && input.resolution.kind === "closed"
+    ? MIN_CONTEXT_SIDEBAR_WIDTH
+    : input.configuredWidth;
+}
 
 export const RIGHT_UTILITY_DOCK_SURFACES = [
   {

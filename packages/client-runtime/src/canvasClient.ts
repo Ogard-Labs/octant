@@ -3,6 +3,9 @@ import {
   decodeCanvasGetOutcome,
   decodeCanvasHistoryOutcome,
   decodeCanvasCreateResult,
+  decodeCanvasCommentCommandResult,
+  decodeCanvasCommentsOutcome,
+  decodeCanvasDiagramLayoutReviseResult,
   decodeCanvasInventoryList,
   decodeCanvasThreadReferenceCardsOutcome,
   decodeCanvasReviseResult,
@@ -18,6 +21,11 @@ import {
   type CanvasId,
   type CanvasCreateRequest,
   type CanvasCreateResult,
+  type CanvasCommentCommand,
+  type CanvasCommentCommandResult,
+  type CanvasCommentsOutcome,
+  type CanvasDiagramLayoutReviseCommand,
+  type CanvasDiagramLayoutReviseResult,
   type CanvasInventoryList,
   type CanvasReviseRequest,
   type CanvasReviseResult,
@@ -46,6 +54,17 @@ export interface CanvasClient {
   get(canvasId: CanvasId, versionId?: string): Promise<CanvasGetOutcome>;
   history(canvasId: CanvasId): Promise<CanvasHistoryOutcome>;
   revise(request: CanvasReviseRequest): Promise<CanvasReviseResult>;
+  /**
+   * Journal a user's node positions as a new immutable version of a board.
+   * Optional like the other board-era methods: a transport whose host serves
+   * no layout route leaves the board readable but not draggable.
+   */
+  reviseDiagramLayout?(
+    command: CanvasDiagramLayoutReviseCommand,
+  ): Promise<CanvasDiagramLayoutReviseResult>;
+  /** Comments on a Canvas and the commands that change them; host-journaled. */
+  comments?(canvasId: CanvasId): Promise<CanvasCommentsOutcome>;
+  comment?(command: CanvasCommentCommand): Promise<CanvasCommentCommandResult>;
   refresh?(request: CanvasRefreshRequest, signal?: AbortSignal): Promise<CanvasRefreshResult>;
   cancelRefresh?(request: CanvasRefreshCancelRequest): Promise<CanvasRefreshResult>;
   executeAction?(request: CanvasActionRequest, signal?: AbortSignal): Promise<CanvasActionResult>;
@@ -123,6 +142,40 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           body: JSON.stringify(body),
         },
         decodeCanvasReviseResult,
+      );
+    },
+    comments(canvasId) {
+      const url = new URL("/api/canvas/comments", options.baseUrl);
+      url.searchParams.set("canvasId", String(canvasId));
+      return request(
+        options.fetch,
+        url.toString(),
+        { method: "GET", headers },
+        decodeCanvasCommentsOutcome,
+      );
+    },
+    comment(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/comment", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeCanvasCommentCommandResult,
+      );
+    },
+    reviseDiagramLayout(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/layout-revise", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeCanvasDiagramLayoutReviseResult,
       );
     },
     refresh(body, signal) {

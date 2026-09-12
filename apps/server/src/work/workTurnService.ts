@@ -230,7 +230,7 @@ export interface WorkTurnServiceDependencies {
    */
   readonly turnFileObserver?: WorkTurnFileObserver;
   /**
-   * The Project's `AGENTS.md` and `STATUS.md` (`docs/decisions/0118`). Absent
+   * The Project's `AGENTS.md` and `STATUS.md` (`docs/decisions/0119`). Absent
    * on a host that keeps no brief files, which sends the turn with only its
    * own transcript as before.
    */

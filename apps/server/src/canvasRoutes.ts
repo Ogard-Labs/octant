@@ -8,6 +8,9 @@ import {
   decodeCanvasOriginThreadId,
   decodeCanvasThreadReferenceCardsOutcome,
   decodeCanvasCreateResult,
+  decodeCanvasCommentCommandResult,
+  decodeCanvasCommentsOutcome,
+  decodeCanvasDiagramLayoutReviseResult,
   decodeCanvasReviseResult,
   decodeCanvasRefreshResult,
   decodeCanvasShareAccessResult,
@@ -27,6 +30,7 @@ import {
   projectInventoryEntryFromProjection,
 } from "@octant/domain";
 import type { CanvasService } from "./canvas/canvasService";
+import type { CanvasCommentService } from "./canvas/canvasCommentService";
 import type { CanvasShareService } from "./canvas/canvasShareService";
 import type { CanvasProjection, CanvasProjectionEntry } from "./canvas/canvasProjection";
 import type { ClientPrincipal } from "./clientPrincipal";
@@ -47,6 +51,8 @@ export interface CanvasRouteDependencies {
    * surface at all rather than a surface whose revocation would be decorative.
    */
   readonly canvasShareService?: CanvasShareService;
+  /** Comment journal; a host without it serves boards without a conversation. */
+  readonly canvasCommentService?: CanvasCommentService;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly projects: Pick<ProjectService, "bootstrap">;
   readonly activeContextResolver: (
@@ -106,6 +112,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "get" &&
       route !== "history" &&
       route !== "revise" &&
+      route !== "layout-revise" &&
+      route !== "comments" &&
+      route !== "comment" &&
       route !== "refresh" &&
       route !== "refresh-cancel" &&
       route !== "action" &&
@@ -322,6 +331,178 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           context.project,
         );
         return jsonResponse(decodeCanvasReviseResult(result), 200, origin);
+      }
+
+      if (route === "layout-revise" && request.method === "POST") {
+        const body = await readJson(request);
+        const malformed = () =>
+          jsonResponse(
+            decodeCanvasDiagramLayoutReviseResult({
+              kind: "denied",
+              denialCode: "malformed-request",
+              message: "Canvas layout revision is malformed.",
+            }),
+            200,
+            origin,
+          );
+        if (body.kind === "too-large" || body.kind === "invalid") return malformed();
+        let canvasId;
+        try {
+          canvasId = decodeCanvasId((body.value as { canvasId?: unknown }).canvasId ?? "");
+        } catch {
+          return malformed();
+        }
+        const context = await resolveAuthorizedContext(
+          dependencies,
+          authenticatedWindowId,
+          canvasId,
+        );
+        if (context.kind === "unauthorized") {
+          return jsonResponse(
+            decodeCanvasDiagramLayoutReviseResult({
+              kind: "denied",
+              denialCode: "unauthorized",
+              message: "Canvas layout revision is not authorized in this workspace.",
+            }),
+            200,
+            origin,
+          );
+        }
+        if (context.kind === "unavailable") {
+          return jsonResponse(
+            decodeCanvasDiagramLayoutReviseResult({
+              kind: "denied",
+              denialCode: "unavailable",
+              message: context.reason,
+            }),
+            200,
+            origin,
+          );
+        }
+        const result = dependencies.canvasService.reviseDiagramLayout(
+          body.value,
+          {
+            mode: context.activeContext.mode,
+            projectId:
+              context.activeContext.projectId === null
+                ? null
+                : String(context.activeContext.projectId),
+          },
+          context.project,
+        );
+        return jsonResponse(decodeCanvasDiagramLayoutReviseResult(result), 200, origin);
+      }
+
+      if (route === "comments" && request.method === "GET") {
+        if (url.searchParams.size !== 1 || !url.searchParams.has("canvasId")) {
+          return failureResponse("Canvas comments request is invalid.", 400, origin);
+        }
+        let canvasId;
+        try {
+          canvasId = decodeCanvasId(url.searchParams.get("canvasId") ?? "");
+        } catch {
+          return failureResponse("Canvas ID is invalid.", 400, origin);
+        }
+        const comments = dependencies.canvasCommentService;
+        if (comments === undefined) {
+          return jsonResponse(
+            decodeCanvasCommentsOutcome({
+              kind: "unavailable",
+              canvasId,
+              reason: "Canvas comments are unavailable on this host.",
+            }),
+            200,
+            origin,
+          );
+        }
+        const context = await resolveAuthorizedContext(
+          dependencies,
+          authenticatedWindowId,
+          canvasId,
+        );
+        if (context.kind === "unauthorized") {
+          return jsonResponse(
+            decodeCanvasCommentsOutcome({ kind: "unauthorized", canvasId }),
+            200,
+            origin,
+          );
+        }
+        if (context.kind === "unavailable") {
+          return jsonResponse(
+            decodeCanvasCommentsOutcome({ kind: "unavailable", canvasId, reason: context.reason }),
+            200,
+            origin,
+          );
+        }
+        return jsonResponse(
+          comments.comments(
+            canvasId,
+            {
+              mode: context.activeContext.mode,
+              projectId:
+                context.activeContext.projectId === null
+                  ? null
+                  : String(context.activeContext.projectId),
+            },
+            context.project,
+          ),
+          200,
+          origin,
+        );
+      }
+
+      if (route === "comment" && request.method === "POST") {
+        const body = await readJson(request);
+        const denied = (
+          denialCode: "malformed-request" | "unauthorized" | "unavailable",
+          message: string,
+        ) =>
+          jsonResponse(
+            decodeCanvasCommentCommandResult({ kind: "denied", denialCode, message }),
+            200,
+            origin,
+          );
+        if (body.kind === "too-large" || body.kind === "invalid") {
+          return denied("malformed-request", "Canvas comment command is malformed.");
+        }
+        let canvasId;
+        try {
+          canvasId = decodeCanvasId((body.value as { canvasId?: unknown }).canvasId ?? "");
+        } catch {
+          return denied("malformed-request", "Canvas comment command is malformed.");
+        }
+        const comments = dependencies.canvasCommentService;
+        if (comments === undefined) {
+          return denied("unavailable", "Canvas comments are unavailable on this host.");
+        }
+        const context = await resolveAuthorizedContext(
+          dependencies,
+          authenticatedWindowId,
+          canvasId,
+        );
+        if (context.kind === "unauthorized") {
+          return denied("unauthorized", "Canvas comments are not authorized in this workspace.");
+        }
+        if (context.kind === "unavailable") return denied("unavailable", context.reason);
+        // The device is what this host authenticated the request from, never a
+        // field the client wrote; a comment from a paired phone says so.
+        const commentOrigin =
+          principal.kind === "remote-device"
+            ? { kind: "remote-device" as const, deviceId: String(principal.deviceId) }
+            : { kind: "host" as const };
+        const result = comments.comment(
+          body.value,
+          {
+            mode: context.activeContext.mode,
+            projectId:
+              context.activeContext.projectId === null
+                ? null
+                : String(context.activeContext.projectId),
+          },
+          context.project,
+          commentOrigin,
+        );
+        return jsonResponse(decodeCanvasCommentCommandResult(result), 200, origin);
       }
 
       if ((route === "refresh" || route === "refresh-cancel") && request.method === "POST") {

@@ -178,7 +178,145 @@ export interface AttentionNotificationRequest {
   readonly detail?: string;
 }
 
-export interface OctantHostBridge {
+export type PrivateListenerExposureClass = "lan-private" | "tailscale";
+
+export interface PrivateListenerPublicStatus {
+  readonly enabled: boolean;
+  readonly state: "disabled" | "ready" | "failed";
+  readonly hostname: string | null;
+  readonly port: number | null;
+  readonly origin: string | null;
+  readonly exposureClass: PrivateListenerExposureClass | null;
+  readonly certificateFingerprint: string | null;
+  readonly certificateReady: boolean;
+  readonly errorCode?: string;
+}
+
+export interface PrivateListenerEnableRequest {
+  readonly hostname: string;
+  readonly port: number;
+  readonly origin: string;
+  readonly certificatePem: string;
+  readonly privateKeyPem: string;
+  readonly localConfirmation: true;
+}
+
+export type RemotePairingTicketSourceClass = "loopback" | "lan-private" | "tailscale";
+
+export interface RemoteMintedPairingTicket {
+  readonly ticketId: string;
+  readonly ticketProof: string;
+  /** Epoch milliseconds. */
+  readonly expiresAt: number;
+  readonly sourceClass: RemotePairingTicketSourceClass;
+}
+
+export interface RemotePendingPairingRequest {
+  readonly kind: "pending";
+  readonly ticketId: string;
+  readonly hostId: string;
+  readonly deviceLabel: string;
+  readonly deviceKeyFingerprint: string;
+  readonly origin: string;
+  readonly sourceClass: RemotePairingTicketSourceClass | "unknown";
+  readonly comparisonCode: string;
+  readonly claimedAt: string;
+  readonly expiresAt: string;
+}
+
+export interface RemoteDeviceInventoryEntry {
+  readonly hostId: string;
+  readonly deviceId: string;
+  readonly deviceKeyFingerprint: string;
+  readonly deviceLabel: string;
+  readonly origin: string;
+  readonly protocolFloor: number;
+  readonly credentialGeneration: number;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+  readonly lastSeenAt: string;
+  readonly state: "active" | "revoked" | "expired";
+  readonly revokedAt?: string;
+  readonly revokedReason?: string;
+}
+
+export interface RemoteCredentialOperationReceipt {
+  readonly commandId: string;
+  readonly result: "applied" | "already-applied";
+  readonly occurredAt: string;
+}
+
+/**
+ * Listener and paired-device administration. Present only on the packaged
+ * desktop host: these are `desktop.*` actions the server refuses for a
+ * remote principal, so a paired browser never receives them.
+ */
+export interface RemoteAccessAdministrationBridge {
+  readonly getPrivateListenerStatus: () => Promise<PrivateListenerPublicStatus>;
+  readonly enablePrivateListener: (
+    request: PrivateListenerEnableRequest,
+  ) => Promise<PrivateListenerPublicStatus>;
+  readonly restartPrivateListener: (
+    request: PrivateListenerEnableRequest,
+  ) => Promise<PrivateListenerPublicStatus>;
+  readonly disablePrivateListener: () => Promise<PrivateListenerPublicStatus>;
+  readonly mintRemotePairingTicket: (
+    sourceClass: RemotePairingTicketSourceClass,
+  ) => Promise<RemoteMintedPairingTicket>;
+  readonly listRemotePairingRequests: () => Promise<ReadonlyArray<RemotePendingPairingRequest>>;
+  readonly approveRemotePairingRequest: (
+    ticketId: string,
+  ) => Promise<{ readonly decision: "approved"; readonly device: RemoteDeviceInventoryEntry }>;
+  readonly denyRemotePairingRequest: (
+    ticketId: string,
+    reasonCode: string,
+  ) => Promise<{ readonly decision: "denied" }>;
+  readonly getRemoteDeviceInventory: () => Promise<ReadonlyArray<RemoteDeviceInventoryEntry>>;
+  readonly renameRemoteDevice: (
+    deviceId: string,
+    deviceLabel: string,
+  ) => Promise<RemoteDeviceInventoryEntry>;
+  readonly revokeRemoteDevice: (deviceId: string) => Promise<RemoteCredentialOperationReceipt>;
+  readonly revokeAllRemoteDevices: () => Promise<RemoteCredentialOperationReceipt>;
+}
+
+/** The administration bridge when the host exposes every part of it, else nothing. */
+export function remoteAccessAdministrationOf(
+  bridge: OctantHostBridge | undefined,
+): RemoteAccessAdministrationBridge | undefined {
+  if (
+    bridge?.getPrivateListenerStatus === undefined ||
+    bridge.enablePrivateListener === undefined ||
+    bridge.restartPrivateListener === undefined ||
+    bridge.disablePrivateListener === undefined ||
+    bridge.mintRemotePairingTicket === undefined ||
+    bridge.listRemotePairingRequests === undefined ||
+    bridge.approveRemotePairingRequest === undefined ||
+    bridge.denyRemotePairingRequest === undefined ||
+    bridge.getRemoteDeviceInventory === undefined ||
+    bridge.renameRemoteDevice === undefined ||
+    bridge.revokeRemoteDevice === undefined ||
+    bridge.revokeAllRemoteDevices === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    getPrivateListenerStatus: bridge.getPrivateListenerStatus,
+    enablePrivateListener: bridge.enablePrivateListener,
+    restartPrivateListener: bridge.restartPrivateListener,
+    disablePrivateListener: bridge.disablePrivateListener,
+    mintRemotePairingTicket: bridge.mintRemotePairingTicket,
+    listRemotePairingRequests: bridge.listRemotePairingRequests,
+    approveRemotePairingRequest: bridge.approveRemotePairingRequest,
+    denyRemotePairingRequest: bridge.denyRemotePairingRequest,
+    getRemoteDeviceInventory: bridge.getRemoteDeviceInventory,
+    renameRemoteDevice: bridge.renameRemoteDevice,
+    revokeRemoteDevice: bridge.revokeRemoteDevice,
+    revokeAllRemoteDevices: bridge.revokeAllRemoteDevices,
+  };
+}
+
+export interface OctantHostBridge extends Partial<RemoteAccessAdministrationBridge> {
   readonly getComputerUseStatus?: () => Promise<unknown>;
   readonly requestComputerUsePermissions?: () => Promise<unknown>;
   readonly openComputerUsePermissionSettings?: () => Promise<void>;

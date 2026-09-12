@@ -157,8 +157,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
       },
       (error: unknown) => {
         if (!active) return;
-        const message =
-          error instanceof Error ? error.message : "The Code Thread Board is unavailable.";
+        const message = error instanceof Error ? error.message : "The thread board is unavailable.";
         setBoard((previous) => {
           const view = lastUsefulView(previous);
           return view === undefined
@@ -193,7 +192,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
   ).length;
 
   return (
-    <Surface ariaLabel="Code Thread Board" className="code-board" measure="wide">
+    <Surface ariaLabel="Thread board" className="code-board" measure="wide">
       <SurfaceHeader
         subtitle="Your Code threads by status, with the agents working on them."
         title="Board"
@@ -481,7 +480,7 @@ function CodeBoardBody(props: {
     return (
       <div className="code-board__body">
         <ShellState
-          eyebrow="Code Thread Board"
+          eyebrow="Thread board"
           message="Loading the board."
           state="loading"
           title="Loading"
@@ -494,7 +493,7 @@ function CodeBoardBody(props: {
     return (
       <div className="code-board__body">
         <ShellState
-          eyebrow="Code Thread Board"
+          eyebrow="Thread board"
           message={
             props.board.status === "error" ? props.board.message : "The board is unavailable"
           }
@@ -1004,7 +1003,7 @@ function cardDetailRows(
   });
   rows.push({ label: "Model", value: card.modelId });
   rows.push({
-    label: "Delivery target",
+    label: "Delivery",
     value: `${deliveryTargetLabel(card.outcomeKind)} · ${card.deliverySatisfaction}`,
   });
   rows.push({ label: "Reason", value: codeBoardStatusReasonLabel(card.statusReason) });

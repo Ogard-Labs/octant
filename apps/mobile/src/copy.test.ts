@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   collectMobileUserFacingCopy,
-  mobileThreadReadOnlyCopy,
+  mobileThreadComposerCopy,
   MOBILE_PRODUCT_NAME,
   MOBILE_ROUTE_IDS,
   MOBILE_TAB_LABELS,
@@ -15,23 +15,25 @@ describe("mobile package identity", () => {
     expect(collectMobileUserFacingCopy()).not.toContain(retiredProductName);
   });
 
-  it("exposes Inbox home, All Agents, Thread, and Hosts routes", () => {
+  it("exposes Inbox home, Agents, Thread, and Hosts routes", () => {
     expect([...MOBILE_ROUTE_IDS]).toEqual(["home", "agents", "thread", "hosts"]);
     expect(MOBILE_TAB_LABELS).toEqual({
       home: "Inbox",
-      agents: "All Agents",
+      agents: "Agents",
       thread: "Thread",
       hosts: "Hosts",
     });
   });
 
-  it("keeps Work and Code read-only guidance mode-specific", () => {
-    expect(mobileThreadReadOnlyCopy("work")).toMatchObject({
-      footerHint: expect.stringContaining("Work"),
+  it("keeps Work and Code follow-up guidance mode-specific and honest about host-only steps", () => {
+    expect(mobileThreadComposerCopy("work")).toMatchObject({
+      placeholder: expect.stringContaining("Work"),
     });
-    expect(mobileThreadReadOnlyCopy("code")).toMatchObject({
-      footerHint: expect.stringContaining("Code"),
+    expect(mobileThreadComposerCopy("code")).toMatchObject({
+      placeholder: expect.stringContaining("Code"),
     });
-    expect(mobileThreadReadOnlyCopy("code")).not.toEqual(mobileThreadReadOnlyCopy("work"));
+    expect(mobileThreadComposerCopy("code").footerHint).toMatch(/approve/i);
+    expect(mobileThreadComposerCopy("work").footerHint).toMatch(/desktop/i);
+    expect(mobileThreadComposerCopy("code")).not.toEqual(mobileThreadComposerCopy("work"));
   });
 });

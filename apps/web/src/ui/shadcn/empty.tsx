@@ -48,10 +48,7 @@ export function EmptyHeader({ className, ...props }: ComponentProps<"div">) {
 export function EmptyEyebrow({ className, ...props }: ComponentProps<"span">) {
   return (
     <span
-      className={cn(
-        "mb-1 block text-[10px] font-semibold tracking-[0.06em] text-muted-foreground uppercase",
-        className,
-      )}
+      className={cn("mb-1 block font-mono text-xs text-muted-foreground", className)}
       data-slot="empty-eyebrow"
       {...props}
     />

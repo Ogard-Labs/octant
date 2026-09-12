@@ -1,6 +1,7 @@
 import type { CanvasDefinition } from "@octant/contracts/canvas";
 import type { CanvasActionBlock } from "@octant/contracts/canvas-actions";
 import { CanvasBlockRenderer } from "./blocks/CanvasBlock";
+import type { DiagramBoardLayoutRuntime } from "./blocks/DiagramBoard";
 import { CanvasActionPanel } from "./CanvasActionPanel";
 import type { CanvasActionRuntime } from "./canvasActionRuntime";
 
@@ -12,9 +13,14 @@ export interface CanvasDocumentProps {
    * no control is rendered, because the renderer never mints authority.
    */
   readonly actionRuntime?: CanvasActionRuntime;
+  /**
+   * Host-owned journaling for a board drag. Without it a diagram still zooms
+   * and pans but its nodes stay where the version put them.
+   */
+  readonly layoutRuntime?: DiagramBoardLayoutRuntime;
 }
 
-export function CanvasDocument({ definition, actionRuntime }: CanvasDocumentProps) {
+export function CanvasDocument({ definition, actionRuntime, layoutRuntime }: CanvasDocumentProps) {
   // Action blocks are collected out of the inline flow into one panel so the
   // document reads as content and every offered action sits under a single
   // labeled group, rather than a heading repeating per block.
@@ -31,7 +37,10 @@ export function CanvasDocument({ definition, actionRuntime }: CanvasDocumentProp
       <div className="canvas-view__body">
         {content.map((block) => (
           <section key={block.blockId} className="canvas-block" data-block-kind={block.kind}>
-            <CanvasBlockRenderer block={block} />
+            <CanvasBlockRenderer
+              block={block}
+              {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
+            />
           </section>
         ))}
       </div>

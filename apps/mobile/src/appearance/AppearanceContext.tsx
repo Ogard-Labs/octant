@@ -26,6 +26,7 @@ export interface AppearanceContextValue {
   readonly setCustomBackground: (dataUri: string) => Promise<void>;
   readonly clearCustomBackground: () => Promise<void>;
   readonly useCodeGradient: () => Promise<void>;
+  readonly useAtmosphere: () => Promise<void>;
   readonly setColorSchemePreference: (preference: ColorSchemePreference) => Promise<void>;
   readonly setSurfaceStyle: (style: SurfaceStylePreference) => Promise<void>;
 }
@@ -72,6 +73,11 @@ export function AppearanceProvider(props: {
     await clearCustomBackground();
   }, [clearCustomBackground]);
 
+  const useAtmosphere = useCallback(async () => {
+    const next = await store.setBackgroundMode("atmosphere");
+    setPreferences(next);
+  }, [store]);
+
   const setColorSchemePreference = useCallback(
     async (preference: ColorSchemePreference) => {
       const next = await store.setColorSchemePreference(preference);
@@ -95,6 +101,7 @@ export function AppearanceProvider(props: {
       setCustomBackground,
       clearCustomBackground,
       useCodeGradient,
+      useAtmosphere,
       setColorSchemePreference,
       setSurfaceStyle,
     }),
@@ -104,6 +111,7 @@ export function AppearanceProvider(props: {
       setCustomBackground,
       clearCustomBackground,
       useCodeGradient,
+      useAtmosphere,
       setColorSchemePreference,
       setSurfaceStyle,
     ],

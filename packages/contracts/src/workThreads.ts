@@ -208,7 +208,7 @@ export const WorkThreadNavigationRuntime = Schema.Struct({
   /**
    * A dated line in the Project's `STATUS.md` that has passed or is near,
    * carried on the Project's newest open thread so the inbox can surface the
-   * reminder (decision 0118). Optional so an older host's payload still
+   * reminder (decision 0119). Optional so an older host's payload still
    * decodes; absent reads as nothing due.
    */
   followUpDue: Schema.optional(WorkStatusDatedItem),

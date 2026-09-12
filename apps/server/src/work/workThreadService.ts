@@ -143,7 +143,7 @@ export interface WorkThreadServiceDependencies {
   ) => WorkThreadRuntimeActivity | Promise<WorkThreadRuntimeActivity>;
   /**
    * Reads the most urgent dated line in a Work Project's `STATUS.md`, when
-   * one has passed or is near (decision 0118). Optional so unit tests that
+   * one has passed or is near (decision 0119). Optional so unit tests that
    * only exercise thread CRUD need not wire status files; an absent reader
    * leaves no follow-up marks on the navigation payload.
    */
@@ -605,7 +605,7 @@ export class WorkThreadService {
   /**
    * A due date belongs to the Project, but the reminder lands on its newest
    * open thread — the place the person would pick the work up, the same rule
-   * the Work board follows (decision 0118). A Project whose status cannot be
+   * the Work board follows (decision 0119). A Project whose status cannot be
    * read simply carries no mark; it must not empty the sidebar.
    */
   async #dueRemindersByThread(

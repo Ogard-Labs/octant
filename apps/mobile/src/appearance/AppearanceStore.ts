@@ -21,7 +21,7 @@ export interface AppearancePreferences {
 export const DEFAULT_APPEARANCE: AppearancePreferences = {
   backgroundMode: "code-gradient",
   colorSchemePreference: "system",
-  surfaceStyle: "glass",
+  surfaceStyle: "flat",
 };
 
 function parseColorSchemePreference(value: unknown): ColorSchemePreference {
@@ -31,7 +31,7 @@ function parseColorSchemePreference(value: unknown): ColorSchemePreference {
 
 function parseSurfaceStyle(value: unknown): SurfaceStylePreference {
   if (value === "flat" || value === "glass") return value;
-  return "glass";
+  return "flat";
 }
 
 export function parseAppearancePreferences(raw: string | null): AppearancePreferences {
@@ -40,7 +40,10 @@ export function parseAppearancePreferences(raw: string | null): AppearancePrefer
     const parsed = JSON.parse(raw) as Partial<AppearancePreferences>;
     const colorSchemePreference = parseColorSchemePreference(parsed.colorSchemePreference);
     const surfaceStyle = parseSurfaceStyle(parsed.surfaceStyle);
-    const mode = parsed.backgroundMode === "custom" ? "custom" : "code-gradient";
+    const mode: CanvasBackgroundMode =
+      parsed.backgroundMode === "custom" || parsed.backgroundMode === "atmosphere"
+        ? parsed.backgroundMode
+        : "code-gradient";
     if (mode === "custom" && typeof parsed.customImageUri === "string") {
       return {
         backgroundMode: "custom",
@@ -50,7 +53,7 @@ export function parseAppearancePreferences(raw: string | null): AppearancePrefer
       };
     }
     return {
-      backgroundMode: "code-gradient",
+      backgroundMode: mode === "custom" ? "code-gradient" : mode,
       colorSchemePreference,
       surfaceStyle,
     };
@@ -68,6 +71,9 @@ export interface AppearanceStore {
     preference: ColorSchemePreference,
   ) => Promise<AppearancePreferences>;
   readonly setSurfaceStyle: (style: SurfaceStylePreference) => Promise<AppearancePreferences>;
+  readonly setBackgroundMode: (
+    mode: Exclude<CanvasBackgroundMode, "custom">,
+  ) => Promise<AppearancePreferences>;
 }
 
 /**
@@ -75,6 +81,18 @@ export interface AppearanceStore {
  * so preference JSON stays small (SecureStore-friendly).
  */
 export function createAppearanceStore(storage: ExpoSecureStringStorage): AppearanceStore {
+  // Overlapping load-then-save writes can persist the earlier tap. Queue them
+  // so the last requested mode is the one that remains.
+  let writeTail: Promise<void> = Promise.resolve();
+  const runExclusive = <T>(work: () => Promise<T>): Promise<T> => {
+    const run = writeTail.then(work, work);
+    writeTail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
+
   const writeMeta = async (prefs: AppearancePreferences): Promise<void> => {
     const meta: Record<string, string> = {
       backgroundMode: prefs.backgroundMode,
@@ -90,11 +108,7 @@ export function createAppearanceStore(storage: ExpoSecureStringStorage): Appeara
   const load = async (): Promise<AppearancePreferences> => {
     const prefs = parseAppearancePreferences(await storage.getItem(PREFS_KEY));
     if (prefs.backgroundMode !== "custom") {
-      return {
-        backgroundMode: "code-gradient",
-        colorSchemePreference: prefs.colorSchemePreference,
-        surfaceStyle: prefs.surfaceStyle,
-      };
+      return prefs;
     }
     const image = await storage.getItem(IMAGE_KEY);
     if (image === null || image.length === 0) {
@@ -120,7 +134,7 @@ export function createAppearanceStore(storage: ExpoSecureStringStorage): Appeara
     }
     await storage.deleteItem(IMAGE_KEY);
     await writeMeta({
-      backgroundMode: "code-gradient",
+      backgroundMode: prefs.backgroundMode === "custom" ? "code-gradient" : prefs.backgroundMode,
       colorSchemePreference: prefs.colorSchemePreference,
       surfaceStyle: prefs.surfaceStyle,
     });
@@ -130,43 +144,63 @@ export function createAppearanceStore(storage: ExpoSecureStringStorage): Appeara
     load,
     save,
     async saveCustomImage(dataUri) {
-      const current = await load();
-      const next: AppearancePreferences = {
-        backgroundMode: "custom",
-        customImageUri: dataUri,
-        colorSchemePreference: current.colorSchemePreference,
-        surfaceStyle: current.surfaceStyle,
-      };
-      await save(next);
-      return next;
+      return runExclusive(async () => {
+        const current = await load();
+        const next: AppearancePreferences = {
+          backgroundMode: "custom",
+          customImageUri: dataUri,
+          colorSchemePreference: current.colorSchemePreference,
+          surfaceStyle: current.surfaceStyle,
+        };
+        await save(next);
+        return next;
+      });
     },
     async clearCustomImage() {
-      const current = await load();
-      const next: AppearancePreferences = {
-        backgroundMode: "code-gradient",
-        colorSchemePreference: current.colorSchemePreference,
-        surfaceStyle: current.surfaceStyle,
-      };
-      await save(next);
-      return next;
+      return runExclusive(async () => {
+        const current = await load();
+        const next: AppearancePreferences = {
+          backgroundMode: "code-gradient",
+          colorSchemePreference: current.colorSchemePreference,
+          surfaceStyle: current.surfaceStyle,
+        };
+        await save(next);
+        return next;
+      });
     },
     async setColorSchemePreference(preference) {
-      const current = await load();
-      const next: AppearancePreferences = {
-        ...current,
-        colorSchemePreference: preference,
-      };
-      await save(next);
-      return next;
+      return runExclusive(async () => {
+        const current = await load();
+        const next: AppearancePreferences = {
+          ...current,
+          colorSchemePreference: preference,
+        };
+        await save(next);
+        return next;
+      });
     },
     async setSurfaceStyle(style) {
-      const current = await load();
-      const next: AppearancePreferences = {
-        ...current,
-        surfaceStyle: style,
-      };
-      await save(next);
-      return next;
+      return runExclusive(async () => {
+        const current = await load();
+        const next: AppearancePreferences = {
+          ...current,
+          surfaceStyle: style,
+        };
+        await save(next);
+        return next;
+      });
+    },
+    async setBackgroundMode(mode) {
+      return runExclusive(async () => {
+        const current = await load();
+        const next: AppearancePreferences = {
+          backgroundMode: mode,
+          colorSchemePreference: current.colorSchemePreference,
+          surfaceStyle: current.surfaceStyle,
+        };
+        await save(next);
+        return next;
+      });
     },
   };
 }

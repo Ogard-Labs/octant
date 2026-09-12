@@ -281,9 +281,11 @@ describe("WorkspaceView Code tab registration", () => {
       />,
     );
 
-    expect(await screen.findByRole("img", { name: "Preview page browser activity" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Open Browser tab" }));
-    expect(onOpenSurface).toHaveBeenCalledWith("browser", ids.pane);
+    const preview = await screen.findByRole("img", { name: "Preview page browser activity" });
+    expect(preview).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Open Browser tab" })).toBeNull();
+    fireEvent.click(preview);
+    expect(onOpenSurface).not.toHaveBeenCalled();
   });
 
   it("keeps Code auxiliary probes off when conversation history is unavailable", async () => {

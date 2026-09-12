@@ -238,7 +238,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
   }
 
   return (
-    <Surface ariaLabel="Automation Center" className="automation-center">
+    <Surface ariaLabel="Automations" className="automation-center">
       <SurfaceHeader
         subtitle="Recurring and event-driven Work and Code threads."
         title="Automations"

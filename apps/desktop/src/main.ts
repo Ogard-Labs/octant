@@ -221,6 +221,7 @@ const IPC_CHANNELS = {
   privateListenerEnable: "octant:private-listener:enable",
   privateListenerDisable: "octant:private-listener:disable",
   privateListenerRestart: "octant:private-listener:restart",
+  remotePairingTicket: "octant:remote-device:pairing-ticket",
   remotePairingRequests: "octant:remote-device:pairing-requests",
   remotePairingApprove: "octant:remote-device:pairing-approve",
   remotePairingDeny: "octant:remote-device:pairing-deny",
@@ -494,6 +495,9 @@ export function installRemoteDeviceIpcHandlers(options: {
     }
   };
 
+  options.handle(IPC_CHANNELS.remotePairingTicket, (event, sourceClass) =>
+    run(event, (service) => service.mintPairingTicket(sourceClass as string)),
+  );
   options.handle(IPC_CHANNELS.remotePairingRequests, (event) =>
     run(event, (service) => service.listPairingRequests()),
   );

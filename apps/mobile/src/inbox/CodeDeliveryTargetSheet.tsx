@@ -58,8 +58,7 @@ export function CodeDeliveryTargetSheet(props: CodeDeliveryTargetSheetProps) {
         label: {
           color: colors.textSecondary,
           ...mobileTypography.caption,
-          fontWeight: "700",
-          textTransform: "uppercase",
+          fontWeight: "500",
         },
         input: {
           color: colors.textPrimary,
@@ -83,7 +82,7 @@ export function CodeDeliveryTargetSheet(props: CodeDeliveryTargetSheetProps) {
           backgroundColor: colors.surface,
         },
         outcomeText: { color: colors.textPrimary, ...mobileTypography.body },
-        outcomeTextSelected: { color: colors.accent, fontWeight: "700" },
+        outcomeTextSelected: { color: colors.accent, fontWeight: "500" },
         validationError: { color: colors.danger, ...mobileTypography.caption, lineHeight: 18 },
         confirm: {
           alignItems: "center",
@@ -93,7 +92,7 @@ export function CodeDeliveryTargetSheet(props: CodeDeliveryTargetSheetProps) {
           paddingVertical: mobileSpacing.md,
         },
         confirmDisabled: { opacity: 0.45 },
-        confirmText: { color: colors.sendLabel, ...mobileTypography.body, fontWeight: "700" },
+        confirmText: { color: colors.sendLabel, ...mobileTypography.body, fontWeight: "500" },
       }),
     [colors],
   );

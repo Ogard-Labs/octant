@@ -389,6 +389,7 @@ import { createUnavailablePushDeliveryTransport } from "./automation/pushDeliver
 import { createPushNotificationTokenStore } from "./remote/pushNotificationTokenStore";
 import { CanvasEventStore } from "./canvas/canvasEventStore";
 import { CanvasService, type CanvasServiceDependencies } from "./canvas/canvasService";
+import { CanvasCommentService } from "./canvas/canvasCommentService";
 import { CanvasShareEventStore } from "./canvas/canvasShareEventStore";
 import { CanvasShareService } from "./canvas/canvasShareService";
 import { createCanvasRefreshSourceResolver } from "./canvas/canvasRefreshSourceResolver";
@@ -539,6 +540,7 @@ import {
   StandaloneSkillService,
   type SkillMarketplacePort,
 } from "./extensions/standaloneSkillService";
+import { ShellSettingsStandaloneSkillActivationStore } from "./extensions/standaloneSkillActivationStore";
 import { createCompositeSkillMarketplace } from "./extensions/compositeSkillMarketplace";
 import {
   CodexPluginPackageResolver,
@@ -3142,6 +3144,7 @@ export function startOctantServer(
       discovery: skillDiscoveryService,
       lifecycle: extensionLifecycleService,
       marketplace: skillMarketplace,
+      activationStore: new ShellSettingsStandaloneSkillActivationStore({ persistence }),
     });
     refreshStandaloneSkills = async () => {
       await standaloneSkillService.reconcile();
@@ -6642,10 +6645,23 @@ export function startOctantServer(
       service: threadHandOffService,
       windowAuthorityStore,
     });
+    // Comments are journaled facts of the Canvas, authored as the local user
+    // with the originating device recorded beside the author; the service
+    // rebuilds them from the journal and refuses reads a workspace may not make.
+    const canvasCommentService = new CanvasCommentService(
+      {
+        journal: persistence.journal,
+        projection: persistence.canvasProjection,
+        uuid: randomUUID,
+        actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      },
+      { authorize: authorizeCanvas },
+    );
     const canvasRoutes = createCanvasRouteHandler({
       canvasProjection: persistence.canvasProjection,
       canvasService,
       canvasShareService,
+      canvasCommentService,
       windowAuthorityStore,
       projects: projectService,
       activeContextResolver: (windowId) =>
@@ -7077,7 +7093,7 @@ export function startOctantServer(
             (thread) => thread.lifecycle !== "archived" && thread.completedAt === undefined,
           );
           // A due date in a Project's STATUS.md raises the follow-up mark on
-          // that Project's most recent open thread (decision 0118): the
+          // that Project's most recent open thread (decision 0119): the
           // reminder belongs to the work, and that thread is where the person
           // would pick it up.
           const dueByProject = new Map<string, boolean>();

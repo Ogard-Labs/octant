@@ -48,10 +48,8 @@ function AppShell(props: {
         },
         mockBannerText: {
           color: colors.warning,
-          fontSize: 11,
-          fontWeight: "700",
-          letterSpacing: 0.4,
-          textTransform: "uppercase",
+          fontSize: 12,
+          fontWeight: "500",
         },
       }),
     [colors],

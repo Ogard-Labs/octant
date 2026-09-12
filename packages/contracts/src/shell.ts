@@ -349,6 +349,19 @@ export const DefaultFolder = Schema.NonEmptyTrimmedString.pipe(
 );
 export type DefaultFolder = typeof DefaultFolder.Type;
 
+export const StandaloneSkillActivationState = Schema.Struct({
+  reviewed: Schema.Boolean,
+  trusted: Schema.Boolean,
+  desiredEnabled: Schema.Boolean,
+}).annotations(strict);
+export type StandaloneSkillActivationState = typeof StandaloneSkillActivationState.Type;
+
+export const StandaloneSkillActivationMap = Schema.Record({
+  key: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024)),
+  value: StandaloneSkillActivationState,
+}).annotations(strict);
+export type StandaloneSkillActivationMap = typeof StandaloneSkillActivationMap.Type;
+
 export const ShellSettings = Schema.Struct({
   chatEnabled: Schema.Boolean,
   workEnabled: Schema.Boolean,
@@ -469,6 +482,14 @@ export const ShellSettings = Schema.Struct({
   // host was never asked, and saying so is the honest reading.
   userProfile: Schema.optionalWith(UserProfile, {
     default: () => ({ accent: DEFAULT_AVATAR_ACCENT, avatar: DEFAULT_USER_AVATAR }),
+  }),
+  // Review, trust, and enablement state for discovered/bundled skills.
+  // Persisted before this shipped decodes to empty, so skills remain unavailable
+  // until explicitly reviewed. The key is the source-qualified skill identity,
+  // which embeds its content digest; any content change produces a new key and
+  // the prior activation is automatically revoked.
+  standaloneSkillActivations: Schema.optionalWith(StandaloneSkillActivationMap, {
+    default: () => ({}),
   }),
 }).annotations(strict);
 export type ShellSettings = typeof ShellSettings.Type;

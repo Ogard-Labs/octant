@@ -4,7 +4,7 @@ import type { ComputerUseClient } from "@octant/client-runtime/computer-use-clie
 import type { BrowserThreadId } from "@octant/contracts/browser-automation";
 import type { BrowserAutomationSnapshot } from "@octant/contracts/browser-automation-rpc";
 import type { ComputerUseSessionView } from "@octant/contracts/computer-use";
-import { ExternalLink, Eye, EyeOff, Globe2, MonitorUp, Square } from "lucide-react";
+import { Eye, EyeOff, Globe2, MonitorUp, Square } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { IconButton } from "../shell/IconButton";
@@ -326,10 +326,7 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
           className="thread-activity-pip__card"
           data-kind="browser"
         >
-          <BrowserActivityPreview
-            {...(props.onOpenBrowser === undefined ? {} : { onOpenBrowser: props.onOpenBrowser })}
-            snapshot={currentBrowserSnapshot}
-          />
+          <BrowserActivityPreview snapshot={currentBrowserSnapshot} />
           <div className="thread-activity-pip__controls">
             <span className="thread-activity-pip__identity">
               <span className="thread-activity-pip__pulse" />
@@ -340,13 +337,6 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
               </span>
             </span>
             <span className="thread-activity-pip__header-actions">
-              {props.onOpenBrowser === undefined ? null : (
-                <IconButton
-                  icon={ExternalLink}
-                  label="Open Browser tab"
-                  onClick={props.onOpenBrowser}
-                />
-              )}
               <IconButton
                 icon={EyeOff}
                 label="Hide activity preview"
@@ -421,25 +411,50 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
   );
 }
 
-function BrowserActivityPreview(props: {
-  readonly onOpenBrowser?: () => void;
-  readonly snapshot: BrowserAutomationSnapshot;
-}) {
+function BrowserActivityPreview(props: { readonly snapshot: BrowserAutomationSnapshot }) {
+  const contexts = props.snapshot.contexts;
+  if (contexts !== undefined && contexts.length > 1) {
+    return (
+      <div
+        aria-label="Browser windows"
+        className="thread-activity-pip__visual thread-activity-pip__visual--stack"
+      >
+        {contexts.map((entry, index) => {
+          const observation = entry.observation;
+          const screenshot =
+            observation?.stale === false ? observation.screenshotDataUrl : undefined;
+          const title = observation?.title ?? `Browser ${index + 1}`;
+          const offset = (index - (contexts.length - 1) / 2) * 10;
+          const rotation = -3 + index * 2;
+          return (
+            <div
+              key={String(entry.context.contextId)}
+              className="thread-activity-pip__card thread-activity-pip__stack-card"
+              style={{
+                transform: `rotate(${rotation}deg) translate(${offset}px, ${Math.abs(offset) * 0.4}px)`,
+                zIndex: contexts.length - index,
+              }}
+              title={title}
+            >
+              {screenshot !== undefined ? (
+                <img alt={`${title} browser activity`} src={screenshot} />
+              ) : (
+                <span className="thread-activity-pip__stack-placeholder">{title}</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
   const observation = props.snapshot.observation;
   const screenshot = observation?.stale === false ? observation.screenshotDataUrl : undefined;
   const title = observation?.title ?? "Browser";
   if (screenshot !== undefined) {
     return (
-      <OctantButton
-        aria-label="Open Browser from preview"
-        className="thread-activity-pip__visual thread-activity-pip__visual--interactive"
-        disabled={props.onOpenBrowser === undefined}
-        onClick={props.onOpenBrowser}
-        type="button"
-        variant="ghost"
-      >
+      <div className="thread-activity-pip__visual">
         <img alt={`${title} browser activity`} src={screenshot} />
-      </OctantButton>
+      </div>
     );
   }
   // Without a picture there is nothing to frame: a box holding an icon and
@@ -447,11 +462,9 @@ function BrowserActivityPreview(props: {
   // line says where the page is, and the header already offers the way there.
   return (
     <p className="thread-activity-pip__note">
-      {props.snapshot.context?.presentation === "native-live"
-        ? "Live in the Browser tab."
-        : observation?.stale === true
-          ? "Preview is stale; waiting for the next page snapshot."
-          : "Waiting for the next page snapshot."}
+      {observation?.stale === true
+        ? "Preview is stale; waiting for the next page snapshot."
+        : "Waiting for the next page snapshot."}
     </p>
   );
 }
@@ -491,8 +504,12 @@ function ComputerUseActivityPreview(props: {
 }
 
 function isBrowserActivity(snapshot: BrowserAutomationSnapshot): boolean {
-  const state = snapshot.context?.state;
-  return state === "creating" || state === "active" || state === "stopping" || state === "failed";
+  const active = (state: string | undefined) =>
+    state === "creating" || state === "active" || state === "stopping" || state === "failed";
+  if (snapshot.contexts !== undefined && snapshot.contexts.length > 0) {
+    return snapshot.contexts.some((entry) => active(entry.context.state));
+  }
+  return active(snapshot.context?.state);
 }
 
 function isComputerUseActivity(session: ComputerUseSessionView): boolean {

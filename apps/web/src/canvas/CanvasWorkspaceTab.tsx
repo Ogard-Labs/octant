@@ -1,10 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
-import type { CanvasDefinition, CanvasId, CanvasVersionId } from "@octant/contracts/canvas";
+import {
+  CANVAS_SCHEMA_VERSION,
+  decodeCanvasVersionId,
+  type CanvasDefinition,
+  type CanvasId,
+  type CanvasVersionId,
+} from "@octant/contracts/canvas";
+import { decodeUtcTimestamp } from "@octant/contracts/events";
 import type {
   CanvasReviseRequest,
   CanvasVersionHistoryEntry,
 } from "@octant/contracts/canvas-revision";
+import type { CanvasCommentCommand } from "@octant/contracts/canvas-board";
 import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
 import type {
   CanvasRefreshCancelRequest,
@@ -23,6 +31,7 @@ import type {
 } from "@octant/contracts/canvas-share-snapshot";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import { ShellState } from "../shell/ShellState";
+import { CanvasCommentsPanel } from "./CanvasCommentsPanel";
 import { CanvasSharePanel } from "./CanvasSharePanel";
 import {
   CanvasRefreshPanel,
@@ -30,6 +39,7 @@ import {
   type CanvasRefreshRequestBase,
 } from "./CanvasRefreshPanel";
 import { CanvasVersionHistoryPanel, ReviseCanvasDraft } from "./CanvasRevisionPanel";
+import type { DiagramBoardLayoutRuntime } from "./blocks/DiagramBoard";
 import { createCanvasActionRuntime } from "./canvasActionRuntime";
 import { CanvasView } from "./CanvasView";
 import { CanvasWorkspaceTabActions } from "./CanvasWorkspaceTabActions";
@@ -189,6 +199,73 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     },
     [props.client, loadCanvas, loadHistory],
   );
+
+  // A drag is a version of the selected head only: editing an older version
+  // would fork history the surface has no way to show, and the server would
+  // refuse it as stale anyway. When the host moved on, reload so the user
+  // drags the version that exists.
+  const layoutRuntime = useMemo<DiagramBoardLayoutRuntime | undefined>(() => {
+    const reviseDiagramLayout = props.client?.reviseDiagramLayout;
+    if (
+      reviseDiagramLayout === undefined ||
+      reviseBase === null ||
+      selectedVersionId === undefined ||
+      String(selectedVersionId) !== tipVersionId
+    ) {
+      return undefined;
+    }
+    return {
+      onRevise: async (blockId, positions) => {
+        const result = await reviseDiagramLayout({
+          kind: "canvas-diagram-layout-revise",
+          canvasId: props.tab.canvasId,
+          versionId: decodeCanvasVersionId(globalThis.crypto.randomUUID()),
+          blockId,
+          positions,
+          actor: reviseBase.actor,
+          expectedSequence,
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          issuedAt: decodeUtcTimestamp(new Date().toISOString()),
+        });
+        if (result.kind === "accepted") {
+          await loadCanvas();
+          await loadHistory();
+          return { kind: "accepted" };
+        }
+        if (result.denialCode === "stale-version") {
+          await loadCanvas();
+          await loadHistory();
+          return {
+            kind: "denied",
+            message:
+              "The board changed on the host and was reloaded. Drag again to keep the change.",
+          };
+        }
+        return { kind: "denied", message: result.message };
+      },
+    };
+  }, [
+    expectedSequence,
+    loadCanvas,
+    loadHistory,
+    props.client,
+    props.tab.canvasId,
+    reviseBase,
+    selectedVersionId,
+    tipVersionId,
+  ]);
+
+  // Comments are offered only when the host journals them; the transport's
+  // methods are bound once so the panel's effects do not re-run per render.
+  const commentsClient = useMemo(() => {
+    const comments = props.client?.comments;
+    const comment = props.client?.comment;
+    if (comments === undefined || comment === undefined) return undefined;
+    return {
+      load: (canvasId: CanvasId) => comments(canvasId),
+      send: (command: CanvasCommentCommand) => comment(command),
+    };
+  }, [props.client]);
 
   // The revise context already carries exactly the provenance a reauthorizable
   // action request needs, so actions reuse it rather than minting a second one.
@@ -367,6 +444,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           <CanvasView
             input={definition}
             {...(actionRuntime === undefined ? {} : { actionRuntime })}
+            {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
           />
         </div>
         <aside className="canvas-workspace-tab__sidebar">
@@ -384,6 +462,15 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               onRefresh={handleRefresh}
               skillOptions={refreshSkills}
               {...(cancelRefresh === undefined ? {} : { onCancel: handleCancelRefresh })}
+            />
+          ) : null}
+          {commentsClient !== undefined && reviseBase !== null ? (
+            <CanvasCommentsPanel
+              author={reviseBase.actor}
+              canvasId={props.tab.canvasId}
+              definition={definition}
+              load={commentsClient.load}
+              send={commentsClient.send}
             />
           ) : null}
           {shares !== undefined && selectedVersionId !== undefined ? (

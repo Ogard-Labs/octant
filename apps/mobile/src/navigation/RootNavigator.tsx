@@ -85,7 +85,7 @@ function HostsBody(props: {
         sectionBody: {
           color: colors.textSecondary,
           fontSize: mobileTypography.body.fontSize,
-          lineHeight: 22,
+          lineHeight: 20,
         },
         mockNotice: {
           gap: mobileSpacing.xs,
@@ -98,7 +98,7 @@ function HostsBody(props: {
         mockTitle: {
           color: colors.textPrimary,
           fontSize: mobileTypography.title.fontSize,
-          fontWeight: "700",
+          fontWeight: "500",
         },
         hostRow: {
           borderBottomWidth: StyleSheet.hairlineWidth,
@@ -107,7 +107,7 @@ function HostsBody(props: {
         },
         hostLabel: {
           color: colors.textPrimary,
-          fontWeight: "600",
+          fontWeight: "500",
         },
         hostOrigin: {
           color: colors.textSecondary,

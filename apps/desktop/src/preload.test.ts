@@ -102,6 +102,7 @@ describe("desktop preload bridge", () => {
       "listRemotePairingRequests",
       "maximizeOrRestore",
       "minimize",
+      "mintRemotePairingTicket",
       "notifyAttention",
       "openBrowserExternal",
       "openCodeCheckoutInApplication",
@@ -799,6 +800,12 @@ describe("desktop preload bridge", () => {
     };
     const invoke = vi
       .fn()
+      .mockResolvedValueOnce({
+        ticketId,
+        ticketProof: "p".repeat(43),
+        expiresAt: 1_785_000_000_000,
+        sourceClass: "lan-private",
+      })
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ decision: "approved", device })
       .mockResolvedValueOnce({ decision: "denied" })
@@ -814,6 +821,10 @@ describe("desktop preload bridge", () => {
       projectWindowCapability,
     );
 
+    await expect(bridge.mintRemotePairingTicket("lan-private")).resolves.toMatchObject({
+      ticketId,
+      sourceClass: "lan-private",
+    });
     await expect(bridge.listRemotePairingRequests()).resolves.toEqual([]);
     await expect(bridge.approveRemotePairingRequest(ticketId)).resolves.toMatchObject({
       decision: "approved",
@@ -829,7 +840,8 @@ describe("desktop preload bridge", () => {
     await expect(bridge.reconcileExpiredRemoteDevices()).resolves.toMatchObject({
       result: "applied",
     });
-    expect(invoke.mock.calls.slice(0, 8)).toEqual([
+    expect(invoke.mock.calls.slice(0, 9)).toEqual([
+      [IPC_CHANNELS.remotePairingTicket, "lan-private"],
       [IPC_CHANNELS.remotePairingRequests],
       [IPC_CHANNELS.remotePairingApprove, ticketId],
       [IPC_CHANNELS.remotePairingDeny, ticketId, "user-denied"],

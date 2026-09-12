@@ -11,16 +11,28 @@ import {
   latestActiveChatAttempt,
   latestRetryableChatAttempt,
   loadMobileChatThread,
+  loadMobileCodeConversation,
   loadMobileCodeThread,
+  loadMobileWorkThread,
+  loadMobileWorkTranscript,
   MobileInboxFailure,
   retryMobileChatTurn,
   sendMobileChatTurn,
+  sendMobileCodeTurn,
+  sendMobileWorkTurn,
   subscribeMobileChatEvents,
   uploadMobileChatAttachment,
+  type MobileCodeConversationTurn,
   type MobileInboxRow,
 } from "@octant/client-runtime";
 import { useConnectionStatus } from "@octant/client-runtime/use-connection-status";
-import type { ChatThreadView, ThreadFollowUp, ThreadWorkItem } from "@octant/contracts";
+import type {
+  ChatThreadView,
+  ThreadFollowUp,
+  ThreadWorkItem,
+  WorkThread,
+  WorkTurnState,
+} from "@octant/contracts";
 import { presentStaleHostSecurity } from "@octant/domain";
 import type { RemoteThreadSurfaceKind } from "@octant/client-runtime";
 import { ApprovalDeferralSheet } from "../approvals/ApprovalDeferralSheet";
@@ -28,7 +40,7 @@ import { BrowserSurfacePanel } from "../surfaces/BrowserSurfacePanel";
 import { ThreadSurfaceSwitcher } from "../surfaces/ThreadSurfaceSwitcher";
 import { NativeHarnessSessionPanel } from "../surfaces/NativeHarnessSessionPanel";
 import { listMobileThreadSurfaces } from "../surfaces/threadSurfacePresentation";
-import { MOBILE_COPY, mobileThreadReadOnlyCopy } from "../copy";
+import { MOBILE_COPY, mobileThreadComposerCopy } from "../copy";
 import { PullRequestReviewPanel } from "../review/PullRequestReviewPanel";
 import { createExpoBiometricAuthenticator } from "../security/expoBiometricAuthenticator";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
@@ -140,6 +152,11 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const models = usePlacementHostModels(transport);
   const [view, setView] = useState<ChatThreadView | undefined>();
   const [codePolicy, setCodePolicy] = useState<string | undefined>();
+  const [workThread, setWorkThread] = useState<WorkThread | undefined>();
+  const [workTurns, setWorkTurns] = useState<ReadonlyArray<WorkTurnState> | undefined>();
+  const [codeTurns, setCodeTurns] = useState<
+    ReadonlyArray<MobileCodeConversationTurn> | undefined
+  >();
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
@@ -168,40 +185,91 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const activeAttempt = view === undefined ? undefined : latestActiveChatAttempt(view);
   const retryableAttempt = view === undefined ? undefined : latestRetryableChatAttempt(view);
   const liveBusy = busy || activeAttempt !== undefined;
+  const selectedIdentity =
+    props.selected === undefined
+      ? undefined
+      : `${props.selected.hostId}:${props.selected.threadId}`;
+  const selectedIdentityRef = useRef(selectedIdentity);
+  selectedIdentityRef.current = selectedIdentity;
 
   const refresh = useCallback(
     async (options?: { readonly quiet?: boolean }) => {
       if (transport === undefined || props.selected === undefined) {
         setView(undefined);
         setCodePolicy(undefined);
+        setWorkThread(undefined);
+        setWorkTurns(undefined);
+        setCodeTurns(undefined);
         return;
       }
+      // Quiet polling and a later inbox selection can overlap. An older
+      // Code/Work load that commits after the selection changes would paint
+      // the previous transcript, or leave that thread's workThread mounted
+      // so a follow-up sends under the previous Project and binding.
+      const identity = `${props.selected.hostId}:${props.selected.threadId}`;
+      const stillSelected = () => selectedIdentityRef.current === identity;
       if (props.selected.mode === "code") {
         setView(undefined);
-        setError(undefined);
-        if (options?.quiet !== true) setBusy(true);
+        setWorkThread(undefined);
+        setWorkTurns(undefined);
+        if (options?.quiet !== true) {
+          setBusy(true);
+          setError(undefined);
+        }
         try {
-          const thread = await loadMobileCodeThread(transport, props.selected.threadId);
+          const [thread, turns] = await Promise.all([
+            loadMobileCodeThread(transport, props.selected.threadId),
+            loadMobileCodeConversation(transport, props.selected.threadId),
+          ]);
+          if (!stillSelected()) return;
           setCodePolicy(thread.executionPolicy);
+          setCodeTurns(turns);
         } catch (cause) {
+          if (!stillSelected() || options?.quiet === true) return;
           setCodePolicy(undefined);
+          setCodeTurns(undefined);
           setError(
             cause instanceof MobileInboxFailure ? cause.message : "Could not load the Code thread.",
           );
         } finally {
-          if (options?.quiet !== true) setBusy(false);
+          if (options?.quiet !== true && stillSelected()) setBusy(false);
         }
         return;
       }
-      if (props.selected.mode !== "chat") {
+      if (props.selected.mode === "work") {
         setView(undefined);
         setCodePolicy(undefined);
-        setError(MOBILE_COPY.workInventoryOnly);
+        setCodeTurns(undefined);
+        if (options?.quiet !== true) {
+          setBusy(true);
+          setError(undefined);
+        }
+        try {
+          const [thread, transcript] = await Promise.all([
+            loadMobileWorkThread(transport, props.selected.threadId),
+            loadMobileWorkTranscript(transport, props.selected.threadId),
+          ]);
+          if (!stillSelected()) return;
+          setWorkThread(thread);
+          setWorkTurns(transcript.turns);
+        } catch (cause) {
+          if (!stillSelected() || options?.quiet === true) return;
+          setWorkThread(undefined);
+          setWorkTurns(undefined);
+          setError(
+            cause instanceof MobileInboxFailure ? cause.message : "Could not load the Work thread.",
+          );
+        } finally {
+          if (options?.quiet !== true && stillSelected()) setBusy(false);
+        }
         return;
       }
       if (options?.quiet !== true) setBusy(true);
       setError(undefined);
       setCodePolicy(undefined);
+      setWorkThread(undefined);
+      setWorkTurns(undefined);
+      setCodeTurns(undefined);
       try {
         const next = await loadMobileChatThread(transport, props.selected.threadId);
         setView(next);
@@ -223,12 +291,19 @@ export function ThreadScreen(props: ThreadScreenProps) {
   );
 
   useEffect(() => {
+    setWorkThread(undefined);
+    setWorkTurns(undefined);
+    setCodeTurns(undefined);
+    setCodePolicy(undefined);
+  }, [selectedIdentity]);
+
+  useEffect(() => {
     void refresh();
     setPendingAttachments([]);
   }, [refresh]);
 
   useEffect(() => {
-    if (props.selected?.mode !== "chat") return;
+    if (props.selected === undefined) return;
     let previous = AppState.currentState;
     const subscription = AppState.addEventListener("change", (next) => {
       const returnedToForeground = enteredMobileForeground(previous, next);
@@ -239,7 +314,22 @@ export function ThreadScreen(props: ThreadScreenProps) {
       }
     });
     return () => subscription.remove();
-  }, [props.selected?.mode, refresh, supervisor]);
+  }, [props.selected, refresh, supervisor]);
+
+  // A Work or Code turn streams nowhere on the phone yet; while one is live the
+  // durable transcript is re-read on a short cadence so the reply grows in
+  // place, and the polling stops the moment the turn settles.
+  const workTurnLive = (workTurns ?? []).some(
+    (turn) => turn.status === "accepted" || turn.status === "running" || turn.status === "waiting",
+  );
+  const codeTurnLive = (codeTurns ?? []).some((turn) => turn.status === "waiting");
+  useEffect(() => {
+    if (props.selected?.mode === "chat" || (!workTurnLive && !codeTurnLive)) return;
+    const timer = setInterval(() => {
+      if (AppState.currentState === "active") void refresh({ quiet: true });
+    }, MOBILE_CHAT_IDLE_REFRESH_INITIAL_DELAY_MS);
+    return () => clearInterval(timer);
+  }, [codeTurnLive, props.selected?.mode, refresh, workTurnLive]);
 
   useEffect(() => {
     if (transport === undefined || props.selected?.mode !== "chat") {
@@ -314,10 +404,47 @@ export function ThreadScreen(props: ThreadScreenProps) {
     () => models.options.find((option) => option.id === modelOptionId),
     [modelOptionId, models.options],
   );
-  const readOnlyComposerCopy =
+  const followUpComposerCopy =
     props.selected?.mode === "code" || props.selected?.mode === "work"
-      ? mobileThreadReadOnlyCopy(props.selected.mode)
+      ? mobileThreadComposerCopy(props.selected.mode)
       : undefined;
+
+  const sendFollowUp = async () => {
+    if (transport === undefined || props.selected === undefined) return;
+    if (!staleGate.allowProductMutations) {
+      setError(staleGate.message);
+      return;
+    }
+    const identity = `${props.selected.hostId}:${props.selected.threadId}`;
+    const stillSelected = () => selectedIdentityRef.current === identity;
+    setBusy(true);
+    setError(undefined);
+    try {
+      if (props.selected.mode === "work") {
+        if (workThread === undefined || String(workThread.id) !== props.selected.threadId) {
+          return;
+        }
+        const turn = await sendMobileWorkTurn({ transport, thread: workThread, prompt });
+        if (!stillSelected()) return;
+        setWorkTurns((current) => [...(current ?? []), turn]);
+      } else if (props.selected.mode === "code") {
+        const threadId = props.selected.threadId;
+        await sendMobileCodeTurn({ transport, threadId, prompt });
+        const turns = await loadMobileCodeConversation(transport, threadId);
+        if (!stillSelected()) return;
+        setCodeTurns(turns);
+      } else {
+        return;
+      }
+      if (!stillSelected()) return;
+      setPrompt("");
+    } catch (cause) {
+      if (!stillSelected()) return;
+      setError(cause instanceof MobileInboxFailure ? cause.message : "Follow-up failed.");
+    } finally {
+      if (stillSelected()) setBusy(false);
+    }
+  };
 
   const attach = async () => {
     if (transport === undefined || view === undefined || props.selected?.mode !== "chat") return;
@@ -551,7 +678,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
         help: {
           color: colors.textSecondary,
           paddingHorizontal: mobileSpacing.md,
-          lineHeight: 22,
+          lineHeight: 20,
         },
         error: { color: colors.danger },
         connectionStatus: {
@@ -578,7 +705,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
         emptyBody: {
           color: colors.textSecondary,
           fontSize: mobileTypography.body.fontSize,
-          lineHeight: 22,
+          lineHeight: 20,
           textAlign: "center",
           maxWidth: 280,
         },
@@ -695,6 +822,72 @@ export function ThreadScreen(props: ThreadScreenProps) {
             ) : null}
             {props.selected.mode === "code" && transport !== undefined ? (
               <PullRequestReviewPanel threadId={props.selected.threadId} transport={transport} />
+            ) : null}
+            {workTurns !== undefined ? (
+              <View style={styles.transcript} testID="mobile-work-transcript">
+                {workTurns.length === 0 ? (
+                  <Text style={styles.metaText}>{MOBILE_COPY.transcriptEmpty}</Text>
+                ) : (
+                  workTurns.map((turn) => (
+                    <View key={String(turn.turnId)} style={styles.transcript}>
+                      <MessageBubble
+                        body={turn.prompt}
+                        role="user"
+                        showActions={false}
+                        testID={`mobile-work-prompt-${String(turn.turnId)}`}
+                      />
+                      {turn.response !== undefined && turn.response.length > 0 ? (
+                        <MessageBubble
+                          body={turn.response}
+                          role="assistant"
+                          testID={`mobile-work-reply-${String(turn.turnId)}`}
+                        />
+                      ) : turn.failure !== undefined ? (
+                        <Text style={styles.warningText}>{turn.failure.message}</Text>
+                      ) : turn.status === "accepted" ||
+                        turn.status === "running" ||
+                        turn.status === "waiting" ? (
+                        <Text style={styles.metaText}>{MOBILE_COPY.turnRunning}</Text>
+                      ) : null}
+                    </View>
+                  ))
+                )}
+              </View>
+            ) : null}
+            {codeTurns !== undefined ? (
+              <View style={styles.transcript} testID="mobile-code-transcript">
+                {codeTurns.length === 0 ? (
+                  <Text style={styles.metaText}>{MOBILE_COPY.transcriptEmpty}</Text>
+                ) : (
+                  codeTurns.map((turn) => (
+                    <View key={turn.operationId} style={styles.transcript}>
+                      {turn.prompt.length === 0 ? null : (
+                        <MessageBubble
+                          body={turn.prompt}
+                          role="user"
+                          showActions={false}
+                          testID={`mobile-code-prompt-${turn.operationId}`}
+                        />
+                      )}
+                      {turn.assistant.map((part, index) => (
+                        <MessageBubble
+                          body={part}
+                          key={`${turn.operationId}-${index}`}
+                          role="assistant"
+                          testID={`mobile-code-reply-${turn.operationId}-${index}`}
+                        />
+                      ))}
+                      {turn.status === "waiting" ? (
+                        <Text style={styles.metaText}>{MOBILE_COPY.turnRunning}</Text>
+                      ) : turn.status === "failed" || turn.status === "interrupted" ? (
+                        <Text style={styles.warningText}>
+                          {chatAttemptStatusLabel(turn.status)}
+                        </Text>
+                      ) : null}
+                    </View>
+                  ))
+                )}
+              </View>
             ) : null}
             {view !== undefined ? (
               <View style={styles.transcript} testID="mobile-thread-transcript">
@@ -828,10 +1021,25 @@ export function ThreadScreen(props: ThreadScreenProps) {
         </>
       ) : (
         <FloatingComposer
-          footerHint={readOnlyComposerCopy?.footerHint ?? MOBILE_COPY.workInventoryOnly}
-          modelLabel={MOBILE_COPY.modelHostOnly}
-          onPressModel={() => setModelOpen(true)}
-          placeholder={readOnlyComposerCopy?.placeholder ?? MOBILE_COPY.composerFollowUp}
+          busy={busy || workTurnLive || codeTurnLive}
+          busyLabel={MOBILE_COPY.turnRunning}
+          editable={
+            staleGate.allowProductMutations &&
+            !workTurnLive &&
+            !codeTurnLive &&
+            (props.selected.mode === "code" || workThread !== undefined)
+          }
+          footerHint={followUpComposerCopy?.footerHint ?? MOBILE_COPY.hostOwnedThread}
+          modelLabel={
+            props.selected.mode === "work" && workThread !== undefined
+              ? String(workThread.modelId)
+              : MOBILE_COPY.modelHostOnly
+          }
+          onChangeText={setPrompt}
+          onSubmit={() => void sendFollowUp()}
+          placeholder={followUpComposerCopy?.placeholder ?? MOBILE_COPY.composerFollowUp}
+          testID="mobile-thread-composer"
+          value={prompt}
         />
       )}
       <ModelPickerSheet

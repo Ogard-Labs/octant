@@ -135,14 +135,18 @@ describe("DraftThreadWorkspace", () => {
       }
     },
   );
-  it("keeps new Chat context below the prompt with model controls inside the composer", () => {
+  it("keeps the context pickers above the composer with model controls inside it", () => {
     const { container } = render(<DraftThreadWorkspace {...baseProps} />);
     const composer = container.querySelector(".composer");
+    const contextBar = container.querySelector(".composer-tray");
     expect(
       screen.getByRole("button", { name: "Provider and model" }).closest(".composer-row"),
     ).not.toBeNull();
-    expect(container.querySelector(".composer-tray")).not.toBeNull();
-    expect(composer?.contains(container.querySelector(".composer-tray"))).toBe(true);
+    expect(contextBar).not.toBeNull();
+    expect(composer?.contains(contextBar)).toBe(false);
+    expect(contextBar?.compareDocumentPosition(composer as Element)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
   });
 
   it("renders mode-specific welcome copy for chat", () => {
@@ -737,7 +741,7 @@ describe("DraftThreadWorkspace", () => {
     const prompt = screen.getByRole("textbox", { name: "First message" });
     await user.type(prompt, "Keep this exact prompt");
     await user.click(screen.getByRole("button", { name: "Access policy" }));
-    await user.click(screen.getByRole("option", { name: /Full access/ }));
+    await user.click(await screen.findByRole("menuitemradio", { name: /Full access/ }));
 
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(screen.getByRole("option", { name: "New Project from folder…" }));

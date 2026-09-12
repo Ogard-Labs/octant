@@ -46,13 +46,13 @@ export function PairingPanel(props: PairingPanelProps) {
         headline: {
           color: colors.textPrimary,
           fontSize: 28,
-          fontWeight: "700",
+          fontWeight: "500",
           letterSpacing: -0.3,
         },
         subhead: {
           color: colors.textSecondary,
           fontSize: mobileTypography.body.fontSize,
-          lineHeight: 22,
+          lineHeight: 20,
           marginBottom: mobileSpacing.sm,
         },
         title: {
@@ -73,7 +73,7 @@ export function PairingPanel(props: PairingPanelProps) {
         label: {
           color: colors.textSecondary,
           fontSize: mobileTypography.caption.fontSize,
-          fontWeight: "600",
+          fontWeight: "500",
         },
         inputRow: {
           flexDirection: "row",
@@ -98,7 +98,7 @@ export function PairingPanel(props: PairingPanelProps) {
         },
         buttonLabel: {
           color: colors.sendLabel,
-          fontWeight: "700",
+          fontWeight: "500",
           fontSize: mobileTypography.body.fontSize,
         },
         buttonSecondary: {
@@ -111,7 +111,7 @@ export function PairingPanel(props: PairingPanelProps) {
         },
         buttonSecondaryLabel: {
           color: colors.accent,
-          fontWeight: "600",
+          fontWeight: "500",
         },
         note: {
           color: colors.textTertiary,
@@ -127,7 +127,7 @@ export function PairingPanel(props: PairingPanelProps) {
         },
         statusTitle: {
           color: colors.textPrimary,
-          fontWeight: "600",
+          fontWeight: "500",
         },
         statusBody: {
           color: colors.textSecondary,

@@ -130,7 +130,7 @@ export interface ChatThreadNavigationItem {
   /**
    * A dated line in a Work Project's `STATUS.md` that has passed or is near,
    * carried on the Project's newest open thread so the inbox can surface the
-   * reminder (decision 0118). Absent on Chat and Code rows.
+   * reminder (decision 0119). Absent on Chat and Code rows.
    */
   readonly followUpDue?: {
     readonly text: string;

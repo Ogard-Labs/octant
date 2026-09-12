@@ -52,7 +52,7 @@ export function ModelPickerSheet(props: ModelPickerSheetProps) {
         label: {
           color: colors.textPrimary,
           fontSize: mobileTypography.body.fontSize,
-          fontWeight: "600",
+          fontWeight: "500",
         },
         detail: {
           color: colors.textSecondary,

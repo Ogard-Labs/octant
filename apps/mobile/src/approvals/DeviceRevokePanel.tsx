@@ -94,7 +94,7 @@ export function DeviceRevokePanel(props: DeviceRevokePanelProps) {
         buttonLabel: {
           ...mobileTypography.body,
           color: colors.sendLabel,
-          fontWeight: "600",
+          fontWeight: "500",
         },
         message: {
           ...mobileTypography.body,

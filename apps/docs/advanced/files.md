@@ -88,7 +88,26 @@ JavaScript, CSS, and invented file or artifact references are not Canvas
 content.
 
 A created Canvas appears as a card in its Chat with **Open Canvas**. Octant
-can also offer newly authored documents beside the conversation. Revisions
+can also offer newly authored documents beside the conversation.
+
+### Diagrams as boards
+
+A diagram block opens as a board. Zoom with the `+` and `−` controls, `⌘`/`Ctrl`
+plus scroll, or the `+`, `-`, and `0` keys; drag the background to pan; **Fit**
+returns to the whole picture. Dragging a node, or nudging a focused node with
+the arrow keys (`Shift` for larger steps), saves the new position as a new
+immutable version authored by you, listed in the version history beside the
+agent's revisions. Older versions stay intact and can still be opened; a board
+opened at an older version is read-only. If the host has moved on since you
+opened the board, the drag is refused, the board reloads, and you drag again on
+the current version. Boards keep the diagram budgets (512 nodes, 1,024 edges).
+**Comments** live beside the Canvas in the sidebar. A comment is anchored to a
+block or to a board node; replies, resolving, and deleting are journaled by
+the host, so they survive restart and reload. Every comment is authored as you,
+with the device it came through noted ("paired device" when it arrived from a
+paired phone or browser). A comment whose block has since left the canvas is
+kept and marked rather than dropped. Shared snapshots never include comments.
+Board templates are not available yet. Revisions
 do not force a document the user closed to reopen. Agents should identify the
 created document rather than invent a download URL or claim a preview opened
 without evidence. Canvas authoring through this tool currently requires a

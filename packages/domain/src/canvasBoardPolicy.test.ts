@@ -9,11 +9,14 @@ import {
   CANVAS_MAX_COMMENTS_PER_CANVAS,
   CANVAS_MAX_REPLIES_PER_COMMENT,
   decodeCanvasCommentReply,
+  type CanvasCommentOrigin,
   type CanvasCommentReply,
 } from "@octant/contracts/canvas-board";
 import {
+  EMPTY_CANVAS_COMMENT_STATE,
   admitCanvasCommentCommand,
   admitCanvasDiagramLayoutRevision,
+  applyCanvasCommentEvent,
   type CanvasCommentState,
 } from "./canvasBoardPolicy";
 
@@ -533,5 +536,103 @@ describe("Canvas diagram layout revision policy", () => {
       "2026-08-01T21:00:01.000Z" as never,
     );
     expect(result).toMatchObject({ kind: "rejected", code: "unauthorized" });
+  });
+});
+
+describe("Canvas comment replay", () => {
+  const empty = EMPTY_CANVAS_COMMENT_STATE;
+
+  function admitted(input: unknown, state: CanvasCommentState, origin?: CanvasCommentOrigin) {
+    const result = admitCanvasCommentCommand(input, state, origin);
+    if (result.kind !== "accepted") throw new Error(`expected accepted, got ${result.code}`);
+    return result.event;
+  }
+
+  it("records the device a comment came through beside its author, never from the command", () => {
+    const event = admitted(
+      {
+        kind: "canvas-comment-add",
+        canvasId: ids.canvas,
+        commentId: ids.comment,
+        anchor: { kind: "block", blockId: "heading-block" as never },
+        author: actor,
+        body: "From the phone",
+        expectedSequence: 0,
+        issuedAt: now,
+      },
+      empty,
+      { kind: "remote-device", deviceId: "device-1" },
+    );
+    expect("comment" in event ? event.comment.origin : undefined).toEqual({
+      kind: "remote-device",
+      deviceId: "device-1",
+    });
+    expect("comment" in event ? event.comment.author : undefined).toEqual(actor);
+  });
+
+  it("rebuilds the same threads from the journal whether frames are applied once or twice", () => {
+    const added = admitted(
+      {
+        kind: "canvas-comment-add",
+        canvasId: ids.canvas,
+        commentId: ids.comment,
+        anchor: { kind: "block", blockId: "heading-block" as never },
+        author: actor,
+        body: "Rename this",
+        expectedSequence: 0,
+        issuedAt: now,
+      },
+      empty,
+    );
+    if (!("comment" in added)) throw new Error("expected comment");
+    const afterAdd = applyCanvasCommentEvent(empty, { kind: "added", event: added });
+    const replied = admitted(
+      {
+        kind: "canvas-comment-reply",
+        canvasId: ids.canvas,
+        commentId: ids.comment,
+        replyId: ids.reply,
+        author: agent,
+        body: "Done",
+        expectedSequence: 1,
+        issuedAt: now,
+      },
+      afterAdd,
+    );
+    if (!("reply" in replied)) throw new Error("expected reply");
+    const afterReply = applyCanvasCommentEvent(afterAdd, { kind: "replied", event: replied });
+    const resolved = admitted(
+      {
+        kind: "canvas-comment-resolve",
+        canvasId: ids.canvas,
+        commentId: ids.comment,
+        resolvedBy: actor,
+        expectedSequence: 2,
+        issuedAt: now,
+      },
+      afterReply,
+    );
+    if (!("resolvedBy" in resolved)) throw new Error("expected resolution");
+    const once = applyCanvasCommentEvent(afterReply, { kind: "resolved", event: resolved });
+    const twice = applyCanvasCommentEvent(once, { kind: "resolved", event: resolved });
+    expect(twice).toEqual(once);
+    expect(once.sequence).toBe(3);
+    expect(once.comments[0]?.resolvedBy).toEqual(actor);
+    expect(once.replies).toHaveLength(1);
+
+    const deleted = admitted(
+      {
+        kind: "canvas-comment-delete",
+        canvasId: ids.canvas,
+        commentId: ids.comment,
+        deletedBy: actor,
+        expectedSequence: 3,
+        issuedAt: now,
+      },
+      once,
+    );
+    if (!("deletedBy" in deleted)) throw new Error("expected deletion");
+    const gone = applyCanvasCommentEvent(once, { kind: "deleted", event: deleted });
+    expect(gone).toEqual({ sequence: 4, comments: [], replies: [] });
   });
 });

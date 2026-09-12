@@ -18,7 +18,7 @@ export function StatusCard(props: StatusCardProps) {
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        card: { minHeight: 144, padding: space.md },
+        card: { minHeight: 96, padding: space.md },
         icon: { marginTop: 2 },
         labelRow: { flexDirection: "row", alignItems: "baseline", gap: 6 },
         title: {
@@ -50,7 +50,7 @@ export function StatusCard(props: StatusCardProps) {
       <Ionicons
         color={props.iconColor ?? colors.textPrimary}
         name={props.icon}
-        size={22}
+        size={19}
         style={styles.icon}
       />
       <View style={styles.labelRow}>

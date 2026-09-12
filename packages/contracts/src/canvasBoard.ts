@@ -82,10 +82,27 @@ export type CanvasCommentAnchor = typeof CanvasCommentAnchor.Type;
 
 // ── Comment entities ───────────────────────────────────────────────────────
 
+/**
+ * Where a comment was written from. On a local-only host every comment is
+ * authored as the single local user; the device it came through is recorded
+ * beside the author rather than becoming a second author. The server stamps
+ * it from the principal it authenticated — a client never names its own
+ * origin.
+ */
+export const CanvasCommentOrigin = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("host") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("remote-device"),
+    deviceId: boundedNonEmptyText(128),
+  }).annotations(strict),
+);
+export type CanvasCommentOrigin = typeof CanvasCommentOrigin.Type;
+
 export const CanvasComment = Schema.Struct({
   commentId: CanvasCommentId,
   anchor: CanvasCommentAnchor,
   author: CanvasActor,
+  origin: Schema.optional(CanvasCommentOrigin),
   body: boundedNonEmptyText(CANVAS_COMMENT_BODY_MAX_CHARS),
   createdAt: UtcTimestamp,
   resolvedAt: Schema.optional(UtcTimestamp),
@@ -97,6 +114,7 @@ export const CanvasCommentReply = Schema.Struct({
   replyId: CanvasCommentReplyId,
   commentId: CanvasCommentId,
   author: CanvasActor,
+  origin: Schema.optional(CanvasCommentOrigin),
   body: boundedNonEmptyText(CANVAS_COMMENT_REPLY_BODY_MAX_CHARS),
   createdAt: UtcTimestamp,
 }).annotations(strict);
@@ -195,6 +213,81 @@ export const CANVAS_COMMENT_REPLIED = "canvas.comment-replied@1";
 export const CANVAS_COMMENT_RESOLVED = "canvas.comment-resolved@1";
 export const CANVAS_COMMENT_DELETED = "canvas.comment-deleted@1";
 
+export const CanvasCommentEvent = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("added"), event: CanvasCommentAdded }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("replied"), event: CanvasCommentReplied }).annotations(
+    strict,
+  ),
+  Schema.Struct({ kind: Schema.Literal("resolved"), event: CanvasCommentResolved }).annotations(
+    strict,
+  ),
+  Schema.Struct({ kind: Schema.Literal("deleted"), event: CanvasCommentDeleted }).annotations(
+    strict,
+  ),
+);
+export type CanvasCommentEvent = typeof CanvasCommentEvent.Type;
+
+// ── Comment reads and command results ────────────────────────────────────────
+
+/** One comment with its replies, as the conversation panel shows it. */
+export const CanvasCommentThread = Schema.Struct({
+  comment: CanvasComment,
+  replies: Schema.Array(CanvasCommentReply).pipe(Schema.maxItems(CANVAS_MAX_REPLIES_PER_COMMENT)),
+}).annotations(strict);
+export type CanvasCommentThread = typeof CanvasCommentThread.Type;
+
+/**
+ * The comments on a Canvas at one sequence. `unauthorized` carries no bodies:
+ * a workspace that may not read the Canvas learns nothing about what was said
+ * on it, not even how much.
+ */
+export const CanvasCommentsOutcome = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("ready"),
+    canvasId: CanvasId,
+    sequence: Schema.Int.pipe(Schema.nonNegative()),
+    threads: Schema.Array(CanvasCommentThread).pipe(
+      Schema.maxItems(CANVAS_MAX_COMMENTS_PER_CANVAS),
+    ),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("unavailable"),
+    canvasId: CanvasId,
+    reason: boundedNonEmptyText(1_024),
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("unauthorized"), canvasId: CanvasId }).annotations(strict),
+);
+export type CanvasCommentsOutcome = typeof CanvasCommentsOutcome.Type;
+
+export const CanvasCommentDenialCode = Schema.Literal(
+  "malformed-request",
+  "stale-version",
+  "unauthorized",
+  "unavailable",
+  "oversized-payload",
+  "comment-budget-exceeded",
+  "unknown-comment",
+  "duplicate-comment",
+  "duplicate-reply",
+  "reply-budget-exceeded",
+  "unknown-reply-target",
+);
+export type CanvasCommentDenialCode = typeof CanvasCommentDenialCode.Type;
+
+export const CanvasCommentCommandResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("accepted"),
+    canvasId: CanvasId,
+    sequence: Schema.Int.pipe(Schema.positive()),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("denied"),
+    denialCode: CanvasCommentDenialCode,
+    message: boundedNonEmptyText(1_024),
+  }).annotations(strict),
+);
+export type CanvasCommentCommandResult = typeof CanvasCommentCommandResult.Type;
+
 // ── Layout revision ────────────────────────────────────────────────────────────
 //
 // A layout revision is an immutable Canvas version whose diagram nodes carry
@@ -235,6 +328,37 @@ export type CanvasDiagramLayoutRevised = typeof CanvasDiagramLayoutRevised.Type;
 
 export const CANVAS_DIAGRAM_LAYOUT_REVISED = "canvas.diagram-layout-revised@1";
 
+/**
+ * Why a board command was refused. Mirrors the domain policy's rejection codes
+ * plus the two the server adds when it cannot reach the policy at all.
+ */
+export const CanvasBoardDenialCode = Schema.Literal(
+  "malformed-request",
+  "stale-version",
+  "unauthorized",
+  "unavailable",
+  "oversized-payload",
+  "not-a-diagram",
+  "unknown-node",
+  "missing-position",
+);
+export type CanvasBoardDenialCode = typeof CanvasBoardDenialCode.Type;
+
+export const CanvasDiagramLayoutReviseResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("accepted"),
+    canvasId: CanvasId,
+    versionId: CanvasVersionId,
+    sequence: Schema.Int.pipe(Schema.positive()),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("denied"),
+    denialCode: CanvasBoardDenialCode,
+    message: boundedNonEmptyText(1_024),
+  }).annotations(strict),
+);
+export type CanvasDiagramLayoutReviseResult = typeof CanvasDiagramLayoutReviseResult.Type;
+
 // ── Decoders ─────────────────────────────────────────────────────────────────
 
 export const decodeCanvasCommentId = Schema.decodeUnknownSync(CanvasCommentId);
@@ -261,4 +385,13 @@ export const decodeCanvasDiagramLayoutReviseCommand = Schema.decodeUnknownSync(
 );
 export const decodeCanvasDiagramLayoutRevised = Schema.decodeUnknownSync(
   CanvasDiagramLayoutRevised,
+);
+export const decodeCanvasDiagramLayoutReviseResult = Schema.decodeUnknownSync(
+  CanvasDiagramLayoutReviseResult,
+);
+export const decodeCanvasCommentOrigin = Schema.decodeUnknownSync(CanvasCommentOrigin);
+export const decodeCanvasCommentEvent = Schema.decodeUnknownSync(CanvasCommentEvent);
+export const decodeCanvasCommentsOutcome = Schema.decodeUnknownSync(CanvasCommentsOutcome);
+export const decodeCanvasCommentCommandResult = Schema.decodeUnknownSync(
+  CanvasCommentCommandResult,
 );
