@@ -14,6 +14,7 @@ import { useProviderController } from "../providers/useProviderController";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
 import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
+import { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
 import type { RemoteProductClients } from "./remoteProductClients";
 
 export interface RemoteWorkspaceProps {
@@ -165,34 +166,29 @@ function RemoteChatSurface(
 }
 
 function RemoteWorkSurface(props: RemoteSurfaceProps) {
-  const [threads, setThreads] = useState<ReadonlyArray<WorkThread>>();
-  const [status, setStatus] = useState<"loading" | "ready" | "disconnected">("loading");
-  const [activeThread, setActiveThread] = useState<WorkThread>();
-  useEffect(() => {
-    let cancelled = false;
-    setStatus("loading");
-    void props.clients.workThread
-      .bootstrap()
-      .then((bootstrap) => {
-        if (cancelled) return;
-        setThreads(bootstrap.threads.filter((thread) => thread.lifecycle === "active"));
-        setStatus("ready");
-      })
-      .catch(() => {
-        if (!cancelled) setStatus("disconnected");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [props.clients.workThread]);
+  const [activeThreadId, setActiveThreadId] = useState<WorkThread["id"]>();
+  const workNavigation = useWorkThreadNavigation(props.clients.workThread, {
+    navigationRefreshMs: 5_000,
+  });
+  const threads = (workNavigation.bootstrap?.threads ?? []).filter(
+    (thread) => thread.lifecycle === "active",
+  );
+  const activeThread = threads.find((thread) => String(thread.id) === String(activeThreadId));
+  const status =
+    workNavigation.status === "unavailable"
+      ? "disconnected"
+      : workNavigation.status === "loading"
+        ? "loading"
+        : "ready";
 
   return (
     <RemoteThreadPane
       mode="work"
-      threads={threads ?? []}
-      activeThreadId={activeThread?.id}
-      onSelect={setActiveThread}
+      threads={threads}
+      activeThreadId={activeThreadId}
+      onSelect={(thread) => setActiveThreadId(thread.id)}
       status={status}
+      errorMessage={workNavigation.errorMessage}
       emptyMessage="No Work threads on this host yet. Start one from the host; it will appear here."
     >
       {activeThread === undefined ? null : (
@@ -206,12 +202,7 @@ function RemoteWorkSurface(props: RemoteSurfaceProps) {
           mutationClient={props.clients.workMutation}
           requestClient={props.clients.workRequest}
           providerGroups={props.providerGroups}
-          onThreadUpdated={(thread) => {
-            setActiveThread(thread);
-            setThreads((current) =>
-              current?.map((candidate) => (candidate.id === thread.id ? thread : candidate)),
-            );
-          }}
+          onThreadUpdated={workNavigation.applyThread}
         />
       )}
     </RemoteThreadPane>

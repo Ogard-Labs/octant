@@ -158,21 +158,24 @@ function answerProduct(seen: ProductRequest[]) {
         { status: 400 },
       );
     }
-    if (method === "GET" && path === "/api/work/threads/bootstrap") {
+    if (
+      method === "GET" &&
+      (path === "/api/work/threads/bootstrap" || path === "/api/work/navigation")
+    ) {
+      const workThread = {
+        id: "20000000-0000-4000-8000-000000000001",
+        projectId: "30000000-0000-4000-8000-000000000002",
+        title: "Remote Work",
+        lifecycle: "active",
+        providerInstanceId,
+        modelId: "model-a",
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      };
       return Response.json({
-        threads: [
-          {
-            id: "20000000-0000-4000-8000-000000000001",
-            projectId: "30000000-0000-4000-8000-000000000002",
-            title: "Remote Work",
-            lifecycle: "active",
-            providerInstanceId,
-            modelId: "model-a",
-            version: 1,
-            createdAt: now,
-            updatedAt: now,
-          },
-        ],
+        threads: [workThread],
+        runtime: [],
       });
     }
     if (method === "GET" && path === "/api/code/bootstrap") {
