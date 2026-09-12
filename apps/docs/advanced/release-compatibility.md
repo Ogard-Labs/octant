@@ -20,8 +20,9 @@ Your data directory is `~/Library/Application Support/Octant` on macOS,
 overridable with the `OCTANT_DATA_DIR` environment variable. The directory
 and its database are created owner-only (mode 0700). Releases on other
 platforms are not shipped in the preview. The source headless runtime now uses
-safe XDG defaults on Linux, but packaged Linux artifacts and real-host release
-validation remain post-preview work.
+safe XDG defaults on Linux, but signed or maintainer-published Linux release
+artifacts and real-host release validation remain post-preview work. The local
+unsigned x64 AppImage is a dogfood exception, not that release channel.
 
 ## Compatibility notes
 
