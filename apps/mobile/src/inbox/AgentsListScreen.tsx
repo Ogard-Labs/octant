@@ -252,10 +252,10 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
         topActions: { flexDirection: "row", gap: mobileSpacing.sm },
         hero: {
           color: colors.textPrimary,
-          fontSize: mobileTypography.hero.fontSize,
-          fontWeight: mobileTypography.hero.fontWeight,
+          fontSize: mobileTypography.title.fontSize,
+          fontWeight: mobileTypography.title.fontWeight,
           paddingHorizontal: mobileSpacing.md,
-          marginTop: mobileSpacing.lg,
+          marginTop: mobileSpacing.sm,
           marginBottom: mobileSpacing.md,
         },
         search: {
@@ -328,13 +328,13 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
         },
         statusPill: {
           fontSize: 12,
-          fontWeight: "600",
+          fontWeight: "500",
           textTransform: "capitalize",
         },
         rowTitle: {
           color: colors.textPrimary,
           fontSize: mobileTypography.body.fontSize,
-          fontWeight: "600",
+          fontWeight: "500",
         },
         rowMeta: {
           fontSize: mobileTypography.caption.fontSize,
@@ -365,7 +365,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
           accessibilityLabel="Back"
           name="chevron-back"
           onPress={props.onBack}
-          size={52}
+          size={44}
           testID="mobile-agents-back"
         />
         <View style={styles.topActions}>
@@ -376,14 +376,14 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
               setSearchOpen((open) => !open);
               if (searchOpen) setQuery("");
             }}
-            size={52}
+            size={44}
             testID="mobile-agents-search"
           />
           <IconButton
             accessibilityLabel="Filter hosts"
             name="options-outline"
             onPress={() => setFiltersOpen((open) => !open)}
-            size={52}
+            size={44}
             testID="mobile-agents-filter"
           />
         </View>

@@ -90,7 +90,7 @@ export function PrivacySecurityPanel(props: PrivacySecurityPanelProps) {
         subtitle: {
           ...mobileTypography.body,
           color: colors.textPrimary,
-          fontWeight: "600",
+          fontWeight: "500",
           marginTop: mobileSpacing.sm,
         },
         help: {
@@ -103,7 +103,7 @@ export function PrivacySecurityPanel(props: PrivacySecurityPanelProps) {
         },
         warn: {
           color: colors.textPrimary,
-          fontWeight: "600",
+          fontWeight: "500",
         },
         button: {
           backgroundColor: colors.accent,
@@ -115,10 +115,10 @@ export function PrivacySecurityPanel(props: PrivacySecurityPanelProps) {
         buttonLabel: {
           ...mobileTypography.body,
           color: colors.sendLabel,
-          fontWeight: "600",
+          fontWeight: "500",
         },
         secondary: { alignItems: "center", paddingVertical: mobileSpacing.sm },
-        secondaryLabel: { color: colors.accent, fontWeight: "600" },
+        secondaryLabel: { color: colors.accent, fontWeight: "500" },
         meta: { ...mobileTypography.body, color: colors.textSecondary },
         message: { ...mobileTypography.body, color: colors.textPrimary },
       }),
