@@ -41,6 +41,12 @@ const device: DeviceInventoryEntry = {
 
 function runtime(): RemoteDeviceControlRuntime & Record<string, ReturnType<typeof vi.fn>> {
   return {
+    mintPairingTicket: vi.fn(async (input) => ({
+      ticketId,
+      ticketProof: "p".repeat(43),
+      expiresAt: Date.parse("2026-08-01T10:05:00.000Z"),
+      sourceClass: input.sourceClass,
+    })),
     listPairingRequests: vi.fn(async () => [pending]),
     approvePairingRequest: vi.fn(async () => ({ decision: "approved" as const, device })),
     denyPairingRequest: vi.fn(async () => ({ decision: "denied" as const })),
@@ -95,6 +101,51 @@ describe("remote device control service", () => {
     expect(JSON.stringify(await service.getDeviceInventory())).not.toMatch(
       /PRIVATE KEY|cookie|csrf|session secret/i,
     );
+  });
+
+  it("mints a pairing ticket for a network class the host can pair over and refuses the rest", async () => {
+    const port = runtime();
+    const service = createRemoteDeviceControlService({ runtime: port });
+
+    await expect(service.mintPairingTicket("lan-private")).resolves.toMatchObject({
+      ticketId,
+      sourceClass: "lan-private",
+    });
+    expect(port.mintPairingTicket).toHaveBeenCalledWith({ sourceClass: "lan-private" });
+    await expect(service.mintPairingTicket("unknown")).rejects.toMatchObject({ code: "invalid" });
+    await expect(service.mintPairingTicket("public")).rejects.toMatchObject({ code: "invalid" });
+    expect(port.mintPairingTicket).toHaveBeenCalledTimes(1);
+  });
+
+  it("posts the pairing ticket request over the loopback bridge and decodes the minted ticket", async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe("http://127.0.0.1:13773/api/desktop/remote/pairing-tickets");
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({ sourceClass: "tailscale" });
+      return Response.json(
+        {
+          ticket: {
+            ticketId,
+            ticketProof: "p".repeat(43),
+            expiresAt: 1_785_000_000_000,
+            sourceClass: "tailscale",
+          },
+        },
+        { status: 201 },
+      );
+    });
+    const runtime = createRemoteDeviceControlHttpRuntime({
+      serverUrl: "http://127.0.0.1:13773",
+      desktopBridgeSecret: "bridge-secret",
+      windowCapability: "C".repeat(43),
+      fetch,
+    });
+    await expect(runtime.mintPairingTicket({ sourceClass: "tailscale" })).resolves.toEqual({
+      ticketId,
+      ticketProof: "p".repeat(43),
+      expiresAt: 1_785_000_000_000,
+      sourceClass: "tailscale",
+    });
   });
 
   it("rejects malformed identities and preserves typed unavailable failures", async () => {

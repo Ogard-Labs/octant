@@ -36,8 +36,8 @@ const KNOWN_HOSTS: ReadonlyMap<string, HostIdentity> = new Map([[LOCAL_HOST_ID, 
  * Pure host-selection policy for the v1 single-implicit-host server model.
  *
  * Client create surfaces use `hostCreateSelectionPolicy` for multi-host
- * destination choice (Post-preview B4). This module remains the server-side
- * fail-closed registry until federation routes commands to remote hosts.
+ * destination choice. This module remains the server-side fail-closed
+ * registry: a host executes only commands addressed to itself.
  *
  * - Returns exactly one healthy implicit local host when no specific
  *   host is requested or when the local host is requested.

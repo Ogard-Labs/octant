@@ -223,7 +223,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
 
   const title =
     props.view === "all"
-      ? "All Agents"
+      ? MOBILE_COPY.allAgents
       : props.view === "attention"
         ? MOBILE_COPY.needsAttention
         : props.view === "working"

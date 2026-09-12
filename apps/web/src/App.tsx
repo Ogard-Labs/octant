@@ -276,6 +276,7 @@ import { ThreadUtilityDockContent } from "./shell/ThreadUtilityDockContent";
 import {
   MULTI_INSTANCE_DOCK_SURFACES,
   RIGHT_UTILITY_DOCK_SURFACES,
+  resolveDockPresentationWidth,
   resolveRightUtilityDockSurface,
   type RightUtilityDockResolution,
   type RightUtilityDockSurfaceId,
@@ -2267,8 +2268,12 @@ function LaunchedShell(
         providerOrder: providerController.defaults.providerOrder,
         hiddenModels: providerController.defaults.hiddenModels,
         mode: "chat",
+        // A saved Oh My Pi default is discovery-only: without this, the
+        // unavailable group is dropped and new Chat binds a different model.
+        ...(firstRunChatDefault === undefined ? {} : { currentSelection: firstRunChatDefault }),
       }),
     [
+      firstRunChatDefault,
       providerController.instances,
       providerController.observedByInstance,
       providerController.defaults.providerOrder,
@@ -3635,6 +3640,11 @@ function LaunchedShell(
   // opens its Review beside that list, so the detail must remain visible.
   const dockPresentedOpen =
     dockOpen && (!readerOpen || (codePullRequestsOpen && projectPullRequestReviewOpen));
+  const dockPresentationWidth = resolveDockPresentationWidth({
+    configuredWidth: contextSidebarWidth,
+    resolution: dockResolution,
+    tabCount: dockTabs.length,
+  });
   // The bottom panel steps aside for the same reason, and it had not been:
   // a terminal opened on a thread kept a quarter of the viewport on Board,
   // Inbox, and the pull request list, pages that are about many threads and
@@ -4927,7 +4937,7 @@ function LaunchedShell(
             zenRecoveryNeeded={zen.recoveryNeeded}
           />
         }
-        contextSidebarWidth={contextSidebarWidth}
+        contextSidebarWidth={dockPresentationWidth}
         bottomPanelHeight={bottomPanelHeight}
         bottomPanelOpen={bottomPanelPresentedOpen}
         material={material}
@@ -5893,7 +5903,7 @@ function LaunchedShell(
                   : threadUtility("tests")
               }
               tabs={dockTabs}
-              width={contextSidebarWidth}
+              width={dockPresentationWidth}
             />
             {bottomPanelPresentedOpen && activeBottomSurface !== undefined ? (
               <BottomUtilityPanel

@@ -7,6 +7,8 @@ import {
   fetchMobileCodeProjects,
   fetchMobileWorkProjects,
   loadMobileChatThread,
+  loadMobileCodeConversation,
+  sendMobileCodeTurn,
 } from "@octant/client-runtime";
 import {
   createMobileMockScenario,
@@ -86,7 +88,7 @@ describe("mobile mock scenarios", () => {
     });
   });
 
-  it("persists mock Work creation data from the command", async () => {
+  it("persists mock Work creation data from the command and starts the prompt as its first turn", async () => {
     const scenario = createMobileMockScenario("full");
     const transport = scenario.transports[0]!;
     const projects = await fetchMobileWorkProjects(transport);
@@ -112,6 +114,13 @@ describe("mobile mock scenarios", () => {
           title: "Prepare release notes",
         }),
       ]),
+    });
+    const transcript = await transport.authenticatedFetch({
+      method: "GET",
+      path: `/api/work/turns/transcript/${String(row.threadId)}`,
+    });
+    await expect(transcript.json()).resolves.toMatchObject({
+      turns: [expect.objectContaining({ prompt: "Prepare release notes" })],
     });
   });
 
@@ -150,5 +159,40 @@ describe("mobile mock scenarios", () => {
       title: "Polish the phone Code flow",
       threadId: "60000000-0000-4000-8000-000000000099",
     });
+  });
+
+  it("persists a Code follow-up so a later conversation load still shows the prompt", async () => {
+    const scenario = createMobileMockScenario("full");
+    const transport = scenario.transports[0]!;
+    const projects = await fetchMobileCodeProjects(transport);
+    const threadId = "60000000-0000-4000-8000-000000000099";
+
+    await createMobileCodeFromPrompt({
+      transport,
+      prompt: "Polish the phone Code flow",
+      project: projects[0]!,
+      providerInstanceId: "10000000-0000-4000-8000-000000000001",
+      modelId: "gpt-5.6",
+      threadId,
+      confirmDeliveryTarget: async (proposal) =>
+        decodeCodeDeliveryTarget({
+          branchIntent: proposal.branchIntent,
+          remoteName: proposal.remoteName,
+          proposedBaseRepository: "octocat/octant",
+          proposedBaseBranch: proposal.proposedBaseBranch,
+          outcomeKind: proposal.suggestedOutcomeKind,
+          confirmedAt: "2026-08-10T09:30:00.000Z",
+        }),
+    });
+    await sendMobileCodeTurn({
+      transport,
+      threadId,
+      prompt: "Also lint the new screen",
+    });
+
+    await expect(loadMobileCodeConversation(transport, threadId)).resolves.toEqual([
+      expect.objectContaining({ prompt: "Polish the phone Code flow" }),
+      expect.objectContaining({ prompt: "Also lint the new screen" }),
+    ]);
   });
 });

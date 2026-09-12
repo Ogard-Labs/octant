@@ -242,10 +242,10 @@ describe("the public-block visual language", () => {
     expect(emptyPicker).toMatch(/background:\s*transparent/);
   });
 
-  it("attaches the shared context strip beneath the prompt on every welcome", () => {
+  it("holds the shared context row above the composer on every welcome", () => {
     const surface = readFileSync(join(webRoot, "styles/surface.css"), "utf8");
     const stack = surface.match(/\.composer-stack \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
-    const strip = surface.match(/\.composer > \.composer-tray \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
+    const strip = surface.match(/\.composer-tray--above \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
     const prompt =
       surface.match(/\.composer-stack > \.composer > \.composer-input \{\n(?:.*\n)*?\}/m)?.[0] ??
       "";
@@ -256,18 +256,19 @@ describe("the public-block visual language", () => {
     ].map((path) => readFileSync(join(webRoot, path), "utf8"));
 
     expect(stack).toMatch(/flex-direction:\s*column/);
-    // One card: the strip is the composer's own lower band, ruled off by a
-    // hairline and rounded only where the card ends, never a second object
-    // peeking out above the prompt.
-    expect(strip).toMatch(/border-top:\s*1px solid var\(--oct-border\)/);
-    expect(strip).toMatch(/border-radius:\s*0 0 var\(--oct-radius-lg\) var\(--oct-radius-lg\)/);
-    expect(strip).toMatch(/margin:\s*0/);
+    // One card: where the thread runs is a quiet row above the composer, so
+    // the card stays a single object — prompt and send row — and a control
+    // opening a list can never push the prompt down the page.
+    expect(strip).toMatch(/display:\s*flex/);
     expect(strip).not.toMatch(/box-shadow/);
     expect(strip).not.toMatch(/position:\s*absolute/);
+    expect(strip).not.toMatch(/background/);
+    expect(strip).not.toMatch(/border-top/);
     // A prompt is a paragraph: four lines before the box grows.
     expect(prompt).toMatch(/min-height:\s*96px/);
     for (const source of welcomes) {
-      expect(source).toMatch(/footer=\{\s*<div className="composer-tray"/);
+      expect(source).toMatch(/className="composer-tray composer-tray--above"/);
+      expect(source).not.toMatch(/footer=\{\s*<div className="composer-tray"/);
       expect(source).not.toContain("context-strip");
     }
   });

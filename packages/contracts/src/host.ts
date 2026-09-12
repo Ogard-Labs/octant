@@ -7,8 +7,9 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 export const HostId = Schema.NonEmptyTrimmedString.pipe(Schema.brand("HostId"));
 export type HostId = typeof HostId.Type;
 
-/** The single implicit v1 host. Every thread-creation command and event
- *  envelope carries this value until multi-host federation lands. */
+/** The host's own identity as seen from itself. Commands that execute on the
+ *  host carry this value; a remote client's host registry keys entries by the
+ *  paired host's real `HostId`, and the federation registry admits several. */
 export const LOCAL_HOST_ID: HostId = Schema.decodeUnknownSync(HostId)("local");
 
 /** Neutral fallback; host-owned surfaces resolve the platform-specific label. */

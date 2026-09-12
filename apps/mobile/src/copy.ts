@@ -7,7 +7,7 @@ export type MobileRouteId = (typeof MOBILE_ROUTE_IDS)[number];
 
 export const MOBILE_TAB_LABELS = {
   home: "Inbox",
-  agents: "All Agents",
+  agents: "Agents",
   thread: "Thread",
   hosts: "Hosts",
 } as const satisfies Record<MobileRouteId, string>;
@@ -34,10 +34,10 @@ export const MOBILE_COPY = {
   pairHostSubhead: "Use the short-lived ticket from desktop Remote Access.",
   pairBeforeCreate: "Pair a host before starting a thread.",
   pairRevokeNote: "Other paired devices stay connected if you revoke later.",
-  allHosts: "All Hosts",
-  allAgents: "All Agents",
-  workspaces: "Workspaces",
-  addWorkspace: "Add Workspace",
+  allHosts: "All hosts",
+  allAgents: "Agents",
+  workspaces: "Hosts",
+  addWorkspace: "Add host",
   composerHome: "Plan, ask, build…",
   composerChat: "Ask your host…",
   composerWork: "Plan work in this project…",
@@ -64,8 +64,8 @@ export const MOBILE_COPY = {
   attachPermissionDenied: "Photo library permission is required to attach images.",
   attachFailed: "Could not attach that image.",
   attachPending: "Attached",
-  needsAttention: "Needs Attention",
-  inReview: "In Review",
+  needsAttention: "Needs you",
+  inReview: "In review",
   read: "Read",
   placementHint: "New threads use the placement host.",
   createModeChat: "Chat",
@@ -74,14 +74,18 @@ export const MOBILE_COPY = {
   createModeCodeHelp: "Start approval-gated Code tasks on a bound repository.",
   codeNoProject: "No available Code project on this host. Bind a repository on the host first.",
   workNoProject: "No active Work project on this host. Create one on the desktop first.",
-  workInventoryOnly: "Work steering from mobile uses inventory only in this slice.",
-  workReadOnlyPlaceholder: "Continue this Work thread on the desktop host.",
-  codeReviewOnly: "Code review is available here; steering and edits stay on the desktop host.",
+  workFollowUpHint:
+    "Runs on the host in this thread's bound folder. Files and shell stay on the desktop.",
+  workFollowUpPlaceholder: "Follow up on this Work thread…",
+  codeFollowUpHint:
+    "Runs approval-gated on the host. Approve tool use and edit files on the desktop.",
   codeReviewTitle: "Review Code on mobile",
   codeReviewEntryBody:
-    "Inspect host-owned changes and checks here. Start, steer, and edit on desktop.",
+    "Inspect host-owned changes and checks here. Start and follow up on Code from here; approvals and edits stay on the desktop.",
   codeBrowseThreads: "Browse Code threads",
-  codeReadOnlyPlaceholder: "Continue this Code thread on the desktop host.",
+  codeFollowUpPlaceholder: "Follow up on this Code thread…",
+  transcriptEmpty: "No turns yet.",
+  turnRunning: "Working on the host…",
   hostsUnavailable: "hosts unavailable",
   approvalDesktopOnly:
     "Approve or reject on the desktop host. High-risk approval challenges stay local-host-only.",
@@ -117,19 +121,24 @@ export const MOBILE_COPY = {
     "Prefer hide-in-recents on travel phones. Native capture blocking needs a device build.",
 } as const;
 
-export function mobileThreadReadOnlyCopy(mode: "work" | "code"): {
+/**
+ * What the composer promises for a Work or Code follow-up: the turn runs on
+ * the host under the thread's own authority, and the parts a phone cannot do
+ * — approvals, file edits, shell — are named rather than implied.
+ */
+export function mobileThreadComposerCopy(mode: "work" | "code"): {
   readonly placeholder: string;
   readonly footerHint: string;
 } {
   if (mode === "code") {
     return {
-      placeholder: MOBILE_COPY.codeReadOnlyPlaceholder,
-      footerHint: MOBILE_COPY.codeReviewOnly,
+      placeholder: MOBILE_COPY.codeFollowUpPlaceholder,
+      footerHint: MOBILE_COPY.codeFollowUpHint,
     };
   }
   return {
-    placeholder: MOBILE_COPY.workReadOnlyPlaceholder,
-    footerHint: MOBILE_COPY.workInventoryOnly,
+    placeholder: MOBILE_COPY.workFollowUpPlaceholder,
+    footerHint: MOBILE_COPY.workFollowUpHint,
   };
 }
 

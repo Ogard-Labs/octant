@@ -51,7 +51,7 @@ export interface InboxHomeScreenProps {
 }
 
 const VIEW_TITLES: Record<Exclude<MobileHomeView, "inbox">, string> = {
-  chat: "Chats",
+  chat: "Chat",
   work: "Work",
   code: "Code",
 };
