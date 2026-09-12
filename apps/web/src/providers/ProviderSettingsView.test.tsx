@@ -655,20 +655,28 @@ describe("ProviderSettingsView", () => {
     expect(card.textContent).not.toMatch(/auth\.json|oauth token|raw rpc/i);
   });
 
-  it("renders Oh My Pi identity as distinct from Pi with pinned version and no secrets", async () => {
-    const user = userEvent.setup();
+  it("renders Oh My Pi identity as distinct from Pi with pinned version and no secrets", () => {
     renderExpanded(
       <ProviderSettingsView
         {...fixture({
           instance: ohMyPiProvider(),
-          observed: observation({ readiness: "ready" }),
+          observed: observation({
+            readiness: "unavailable",
+            message: "Oh My Pi reported 1 model, but Octant cannot start turns on it yet.",
+          }),
         })}
       />,
     );
 
     const card = screen.getByRole("article", { name: "Oh My Pi local" });
     expect(within(card).getByText("Oh My Pi RPC")).toBeVisible();
-    await user.click(within(card).getByRole("button", { name: "Connection details" }));
+    expect(card.querySelector(".prov-state")).toHaveTextContent("Unavailable");
+    expect(within(card).getByText(/cannot start turns on it yet/i)).toBeVisible();
+    expect(card.textContent).not.toMatch(/verify the binary path/i);
+    expect(within(card).getByRole("button", { name: "Connection details" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
     expect(within(card).getByText(/provider-owned Oh My Pi credentials/i)).toBeVisible();
     expect(within(card).getByText(/Supported version: 17.2.1/)).toBeVisible();
     expect(within(card).getByLabelText("Binary path for Oh My Pi local")).toHaveValue(

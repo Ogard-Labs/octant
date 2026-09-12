@@ -589,7 +589,9 @@ modelId }`, and the model picker is provider-first. Discovery can find
   compatible, Azure AI Foundry API-key, Ollama), image HTTP profiles
   (OpenAI Image and Gemini native image — never selectable as Chat, Work, or
   Code turn drivers), SDK/RPC drivers (Claude Agent SDK, Codex app-server,
-  OpenCode, Pi and Oh My Pi), and ACP-based agent CLIs
+  OpenCode, Pi, and Oh My Pi — whose driver discovers models but refuses
+  `acquire`, so its probe reports `unavailable` and it never reaches a
+  picker), and ACP-based agent CLIs
   (Kilo, Devin, Mistral Vibe, Kimi Code, Grok Build, Goose, GLM Agent, Gemini CLI,
   GitHub Copilot, Cline, Qwen Code). fx ACP was probed and remains unselectable;
   see [fx-acp-compatibility.md](fx-acp-compatibility.md). Image profiles are

@@ -2268,8 +2268,12 @@ function LaunchedShell(
         providerOrder: providerController.defaults.providerOrder,
         hiddenModels: providerController.defaults.hiddenModels,
         mode: "chat",
+        // A saved Oh My Pi default is discovery-only: without this, the
+        // unavailable group is dropped and new Chat binds a different model.
+        ...(firstRunChatDefault === undefined ? {} : { currentSelection: firstRunChatDefault }),
       }),
     [
+      firstRunChatDefault,
       providerController.instances,
       providerController.observedByInstance,
       providerController.defaults.providerOrder,

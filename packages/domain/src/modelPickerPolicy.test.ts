@@ -620,6 +620,55 @@ describe("model picker policy", () => {
       expect(unavailable?.unavailableCurrent).toBeDefined();
     });
 
+    it("retains the current selection when its provider reports unavailable", () => {
+      const ready = openAiInstance({
+        id: "00000000-0000-4000-8000-000000000101",
+        displayName: "Ready",
+      });
+      const down = openAiInstance({
+        id: "00000000-0000-4000-8000-000000000102",
+        displayName: "Down",
+      });
+      const observedByInstance = new Map([
+        [ready.id, observed(ready.id, [model({ id: "ready-m", displayName: "Ready M" })])],
+        [
+          down.id,
+          observed(down.id, [model({ id: "down-m", displayName: "Down M" })], {
+            readiness: "unavailable",
+          }),
+        ],
+      ]);
+      const dropped = buildModelPickerGroups(
+        input({ instances: [ready, down], observedByInstance }),
+      );
+      expect(dropped.map((group) => group.instance.displayName)).toEqual(["Ready"]);
+      expect(
+        resolveDraftProviderSelection(dropped, {
+          providerInstanceId: down.id,
+          modelId: decodeProviderModelId("down-m"),
+        }),
+      ).toBeUndefined();
+
+      const kept = buildModelPickerGroups(
+        input({
+          instances: [ready, down],
+          observedByInstance,
+          currentSelection: {
+            providerInstanceId: down.id,
+            modelId: decodeProviderModelId("down-m"),
+          },
+        }),
+      );
+      const unavailable = kept.find((group) => group.instance.id === down.id);
+      expect(unavailable?.unavailableCurrent).toBeDefined();
+      expect(
+        resolveDraftProviderSelection(kept, {
+          providerInstanceId: down.id,
+          modelId: decodeProviderModelId("down-m"),
+        }),
+      ).toBeUndefined();
+    });
+
     it("only includes enabled, ready or degraded providers as selectable groups", () => {
       const ready = openAiInstance({
         id: "00000000-0000-4000-8000-000000000101",
