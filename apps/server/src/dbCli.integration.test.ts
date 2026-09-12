@@ -433,13 +433,17 @@ describe("database CLI runtime composition", () => {
             persistence,
             uuid: () => "00000000-0000-4000-8000-000000001205",
             clock: () => now,
+            home: "/Users/ada",
           }).bootstrap(decodeWindowId("00000000-0000-4000-8000-000000001206")).settings;
         }).pipe(
           Effect.provide(makePersistenceLive({ dataDirectory: directory, clock: () => now })),
         ),
       ),
     );
-    expect(settings).toEqual(decodePersistedShellSettings(legacySettings));
+    expect(settings).toEqual({
+      ...decodePersistedShellSettings(legacySettings),
+      defaultFolder: "/Users/ada/Documents/Octant",
+    });
   });
 });
 

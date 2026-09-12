@@ -24,9 +24,10 @@ const GitHubRepositoryOnboardingFlow = lazy(() =>
 
 /**
  * One row in the composer's Project picker: a Project already saved on this
- * host, or the control that creates one from a folder. There is no "no folder"
- * row — a Work or Code thread belongs to a Project (decision 0037), so the
- * composer's job is to make choosing one easy, not optional.
+ * host, the control that creates one from a folder, or the default folder.
+ * A Work or Code thread still belongs to a Project (decision 0037); the
+ * default-folder row is how a thread gets one without the person choosing a
+ * folder — the host provisions a Project under the default folder for it.
  */
 export type ComposerProjectEntry =
   | {
@@ -35,7 +36,8 @@ export type ComposerProjectEntry =
       readonly displayName: string;
       readonly rootPath: string;
     }
-  | { readonly kind: "add-folder" };
+  | { readonly kind: "add-folder" }
+  | { readonly kind: "default-folder"; readonly rootPath: string };
 
 /** The Project the composer will start the thread in, if the person picked one. */
 export interface ComposerProjectSelection {
@@ -69,6 +71,7 @@ type MenuEntry = ComposerProjectEntry | { readonly kind: "add-github" };
 
 export const NEW_PROJECT_FROM_FOLDER_LABEL = "New Project from folder…";
 export const NEW_PROJECT_FROM_GITHUB_LABEL = "New Project from GitHub repository…";
+export const START_IN_DEFAULT_FOLDER_LABEL = "No Project — use the default folder";
 
 /**
  * The composer's one Project menu: saved Projects to search, then the two
@@ -98,7 +101,9 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
     );
   }, [props.entries, query]);
   const actionEntries = useMemo((): ReadonlyArray<MenuEntry> => {
-    const actions: MenuEntry[] = props.entries.filter((entry) => entry.kind === "add-folder");
+    const actions: MenuEntry[] = props.entries.filter(
+      (entry) => entry.kind === "default-folder" || entry.kind === "add-folder",
+    );
     if (github !== undefined) actions.push({ kind: "add-github" });
     return actions;
   }, [github, props.entries]);
@@ -318,7 +323,9 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                   const label =
                     entry.kind === "add-github"
                       ? NEW_PROJECT_FROM_GITHUB_LABEL
-                      : NEW_PROJECT_FROM_FOLDER_LABEL;
+                      : entry.kind === "default-folder"
+                        ? START_IN_DEFAULT_FOLDER_LABEL
+                        : NEW_PROJECT_FROM_FOLDER_LABEL;
                   return (
                     <OctantButton
                       aria-selected={false}
@@ -327,16 +334,24 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                       key={entry.kind}
                       onClick={() => activate(entry)}
                       role="option"
+                      {...(entry.kind === "default-folder" ? { title: entry.rootPath } : {})}
                       type="button"
                       variant="ghost"
                     >
                       {entry.kind === "add-github" ? (
                         <FolderGit2 aria-hidden="true" size={14} strokeWidth={1.8} />
+                      ) : entry.kind === "default-folder" ? (
+                        <FolderOpen aria-hidden="true" size={14} strokeWidth={1.8} />
                       ) : (
                         <FolderPlus aria-hidden="true" size={14} strokeWidth={1.8} />
                       )}
                       <span className="composer-folder-selector__option-copy">
                         <span className="composer-folder-selector__option-name">{label}</span>
+                        {entry.kind === "default-folder" ? (
+                          <span className="composer-folder-selector__option-path">
+                            {entry.rootPath}
+                          </span>
+                        ) : null}
                       </span>
                     </OctantButton>
                   );

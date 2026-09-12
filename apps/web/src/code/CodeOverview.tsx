@@ -878,9 +878,16 @@ function capitalize(value: string): string {
 }
 
 function headLabel(
-  head: { readonly kind: "branch"; readonly name: string } | { readonly kind: "detached" },
+  head:
+    | { readonly kind: "branch"; readonly name: string }
+    | { readonly kind: "detached" }
+    | { readonly kind: "none" },
 ): string {
-  return head.kind === "branch" ? head.name : "Detached HEAD";
+  return head.kind === "branch"
+    ? head.name
+    : head.kind === "detached"
+      ? "Detached HEAD"
+      : "No Git repository";
 }
 
 function lifecycleLabel(lifecycle: "waiting" | "interrupted"): string {

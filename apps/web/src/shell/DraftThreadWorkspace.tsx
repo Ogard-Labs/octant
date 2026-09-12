@@ -165,6 +165,20 @@ export interface DraftThreadWorkspaceProps {
     receiptId?: string,
     initializeGit?: boolean,
   ) => Promise<ProjectId | undefined>;
+  /**
+   * The default folder in effect and the way to get the Project the host keeps
+   * under it. Both present is what puts the "No Project" row in the menu.
+   */
+  readonly defaultFolder?: string;
+  /**
+   * Whether Code may start a thread without a Project. Work always may; Code
+   * has its own switch beside the Git requirement, because the default folder
+   * is not a repository.
+   */
+  readonly codeDefaultFolderThreads?: boolean;
+  readonly onEnsureDefaultProject?: (
+    mode: "work" | "code",
+  ) => Promise<{ readonly projectId: ProjectId; readonly name: string } | undefined>;
   readonly onCancel: () => void;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
@@ -391,6 +405,12 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           projectId: selectedProjectId,
           displayName: selectedProject?.name ?? selectedProjectLabel ?? "Selected Project",
         };
+  const defaultFolderRoot =
+    props.defaultFolder !== undefined &&
+    props.onEnsureDefaultProject !== undefined &&
+    (props.mode === "work" || (props.mode === "code" && props.codeDefaultFolderThreads === true))
+      ? `${props.defaultFolder}/${props.mode === "work" ? "Work" : "Code"}`
+      : undefined;
   const projectEntries: ReadonlyArray<ComposerProjectEntry> = [
     ...compatibleProjects.map(
       (project): ComposerProjectEntry => ({
@@ -400,6 +420,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         rootPath: project.type === "chat" ? "" : project.binding.canonicalRoot,
       }),
     ),
+    ...(defaultFolderRoot === undefined
+      ? []
+      : [{ kind: "default-folder", rootPath: defaultFolderRoot } as const]),
     { kind: "add-folder" },
   ];
   const selectedProjectName =
@@ -471,6 +494,16 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           if (entry.kind === "saved-project") {
             selectProject(entry.projectId);
             setSelectedProjectLabel(entry.displayName);
+          } else if (
+            entry.kind === "default-folder" &&
+            props.onEnsureDefaultProject !== undefined &&
+            (props.mode === "work" || props.mode === "code")
+          ) {
+            void props.onEnsureDefaultProject(props.mode).then((ensured) => {
+              if (ensured === undefined) return;
+              selectProject(ensured.projectId);
+              setSelectedProjectLabel(ensured.name);
+            });
           }
         }}
         {...(projectSelection === undefined ? {} : { selection: projectSelection })}

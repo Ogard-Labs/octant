@@ -48,7 +48,9 @@ import {
   transferMemoryEntry,
 } from "@octant/domain";
 import { Schema } from "effect";
+import { mkdir } from "node:fs/promises";
 import { BindingReceiptError, type BindingReceiptStorePort } from "./bindingReceiptStore";
+import { defaultFolderProjectRoot, effectiveDefaultFolder } from "./defaultFolder";
 import { ConcurrencyConflict, JournalWriteFailed } from "./persistence/journalErrors";
 import type { PersistenceService } from "./persistence/persistenceService";
 import { ProjectionApplicationFailed } from "./persistence/projection";
@@ -95,7 +97,18 @@ export interface ProjectServiceOptions {
   readonly initializeGitRepository?: (
     canonicalRoot: string,
   ) => Promise<InitializeGitRepositoryResult>;
+  /**
+   * The folder in effect for threads started without a Project. Read per
+   * command, not at construction, so a settings change applies to the next
+   * ensure without a restart.
+   */
+  readonly defaultFolder?: () => string;
+  /** Creates a directory and its parents; a directory that exists is fine. */
+  readonly ensureDirectory?: (path: string) => Promise<void>;
 }
+
+/** What the host names the Project it provisions under the default folder. */
+export const DEFAULT_FOLDER_PROJECT_NAME = "Octant folder";
 
 export class ProjectServiceError extends Error {
   override readonly name = "ProjectServiceError";
@@ -126,6 +139,8 @@ export class ProjectService implements ProjectServiceApi {
     | ((canonicalRoot: string) => Promise<ConnectedGitHubRepository | undefined>)
     | undefined;
   readonly #initializeGitRepository: NonNullable<ProjectServiceOptions["initializeGitRepository"]>;
+  readonly #defaultFolder: () => string;
+  readonly #ensureDirectory: (path: string) => Promise<void>;
   readonly #archiveListeners = new Set<
     (project: Extract<Project, { readonly type: "work" }>) => void
   >();
@@ -142,6 +157,17 @@ export class ProjectService implements ProjectServiceApi {
     this.#now = options.now ?? Date.now;
     this.#observeCodeProjectRepository = options.observeCodeProjectRepository;
     this.#initializeGitRepository = options.initializeGitRepository ?? initializeGitRepository;
+    this.#defaultFolder =
+      options.defaultFolder ??
+      (() =>
+        effectiveDefaultFolder(
+          this.#persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+        ));
+    this.#ensureDirectory =
+      options.ensureDirectory ??
+      (async (path) => {
+        await mkdir(path, { recursive: true });
+      });
   }
 
   hasActiveProject(projectId: ProjectId, requiredType: ProjectType): boolean {
@@ -446,7 +472,68 @@ export class ProjectService implements ProjectServiceApi {
       let kind: ProjectCommandResult["kind"];
       let eventName: string;
 
-      if (
+      if (command.kind === "ensure-default-project") {
+        const type = command.projectType;
+        this.#assertModeEnabled(type);
+        // Work always may; Code only once its own switch says so, because the
+        // default folder is not a repository and the switch is what proves the
+        // Git requirement was turned off with it.
+        if (
+          type === "code" &&
+          this.#persistence.readCodeSettings?.()?.settings.allowDefaultFolderThreads !== true
+        ) {
+          throw new ProjectServiceError({
+            category: "unsupported",
+            message: "Code threads without a Project are turned off in Code settings.",
+          });
+        }
+        // The one folder Octant creates on its own: the mode's subfolder of
+        // the default folder. The default folder itself was judged against
+        // the home boundary when it was set.
+        const root = defaultFolderProjectRoot(this.#defaultFolder(), type);
+        let binding;
+        try {
+          await this.#ensureDirectory(root);
+          binding = await this.#roots.validate(type, root);
+        } catch {
+          throw new ProjectServiceError({
+            category: "unavailable",
+            message: "The default folder could not be created or is not a directory.",
+          });
+        }
+        const existing = this.#persistence
+          .readProjects({ type, lifecycle: "active" })
+          .find(
+            (candidate): candidate is BoundProject =>
+              candidate.type === type &&
+              candidate.origin === "default-folder" &&
+              candidate.binding.canonicalRoot === binding.canonicalRoot,
+          );
+        if (existing !== undefined) {
+          return decodeProjectCommandResult({
+            kind: "default-project-ensured",
+            project: existing,
+            created: false,
+          });
+        }
+        const sameLane = this.#persistence
+          .readProjects({ type, lifecycle: "active" })
+          .filter((candidate) => !candidate.pinned);
+        const common = {
+          id: command.projectId,
+          name: DEFAULT_FOLDER_PROJECT_NAME,
+          rank: rankBetween(sameLane.at(-1)?.rank, undefined),
+          createdAt: timestamp,
+          binding,
+          revisionId: decodeBindingRevisionId(this.#uuid()),
+          actor,
+          origin: "default-folder" as const,
+        };
+        project =
+          type === "work" ? createProject({ ...common, type }) : createProject({ ...common, type });
+        kind = "default-project-ensured";
+        eventName = "project.created@1";
+      } else if (
         command.kind === "create-chat-project" ||
         command.kind === "create-work-project" ||
         command.kind === "create-code-project"
@@ -641,7 +728,11 @@ export class ProjectService implements ProjectServiceApi {
           }
         }
       }
-      return decodeProjectCommandResult({ kind, project: authoritative });
+      return decodeProjectCommandResult(
+        kind === "default-project-ensured"
+          ? { kind, project: authoritative, created: true }
+          : { kind, project: authoritative },
+      );
     } catch (error) {
       throw this.#mapFailure(error);
     }

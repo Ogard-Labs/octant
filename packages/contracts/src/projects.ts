@@ -116,9 +116,19 @@ const ProjectFields = {
   updatedAt: UtcTimestamp,
 } as const;
 
+/**
+ * How a bound Project came to exist. Absent on every Project a person made
+ * from a folder they picked. `default-folder` marks the Project the host
+ * provisioned itself under the default folder so a thread could start without
+ * one being chosen; it is an ordinary Project in every other respect.
+ */
+export const ProjectOrigin = Schema.Literal("default-folder");
+export type ProjectOrigin = typeof ProjectOrigin.Type;
+
 const BoundProjectFields = {
   binding: CanonicalProjectBinding,
   bindingHistory: Schema.NonEmptyArray(BindingRevision),
+  origin: Schema.optional(ProjectOrigin),
 } as const;
 
 export const ChatProject = Schema.Struct({
@@ -170,6 +180,7 @@ const WorkProjectSummary = Schema.Struct({
   binding: CanonicalProjectBinding,
   /** Exact current binding revision the renderer must send on create/first turn. */
   bindingRevisionId: BindingRevisionId,
+  origin: Schema.optional(ProjectOrigin),
 }).annotations(strict);
 
 const CodeProjectSummary = Schema.Struct({
@@ -177,6 +188,7 @@ const CodeProjectSummary = Schema.Struct({
   type: Schema.Literal("code"),
   binding: CanonicalProjectBinding,
   bindingRevisionId: BindingRevisionId,
+  origin: Schema.optional(ProjectOrigin),
   codeAccessPersistence: CodeAccessPersistence,
   newThreadWorkspace: Schema.optional(CodeNewThreadWorkspace),
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
@@ -323,6 +335,19 @@ export const ProjectCommand = Schema.Union(
      */
     initializeGit: Schema.optional(Schema.Boolean),
   }).annotations(strict),
+  /**
+   * The Project a thread starts in when nobody chose one: `<default
+   * folder>/Work` or `<default folder>/Code`, created by the host on first
+   * use and reused after. `projectId` names the Project if one has to be
+   * created; when one already exists for the current default folder, that
+   * one is returned and the id is unused.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("ensure-default-project"),
+    ...ProjectCommandFields,
+    projectType: Schema.Literal("work", "code"),
+    hostId: HostId,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("rename-project"),
     ...ProjectCommandFields,
@@ -374,6 +399,11 @@ export const ProjectCommandResult = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("code-project-created"), project: CodeProject }).annotations(
     strict,
   ),
+  Schema.Struct({
+    kind: Schema.Literal("default-project-ensured"),
+    project: BoundProject,
+    created: Schema.Boolean,
+  }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("project-renamed"), project: Project }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("project-moved"), project: Project }).annotations(strict),
   Schema.Struct({

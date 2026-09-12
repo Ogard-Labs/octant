@@ -49,6 +49,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "update updates upgrade version release automatic check download install relaunch privacy signed notarized what's new notes",
         },
         {
+          id: settingId("default-folder"),
+          label: "Default folder",
+          scope: "host",
+          keywords:
+            "default folder documents octant projectless folderless no project quick task files artifacts location path",
+        },
+        {
           id: settingId("completed-thread-archive"),
           label: "Archive completed threads",
           scope: "host",

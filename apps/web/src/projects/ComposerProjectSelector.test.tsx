@@ -26,6 +26,28 @@ const projectSelection: ComposerProjectSelection = {
 };
 
 describe("ComposerProjectSelector", () => {
+  it("offers the default folder as a way to start without choosing a Project", async () => {
+    const onSelect = vi.fn();
+    render(
+      <ComposerProjectSelector
+        entries={[
+          ...entries,
+          { kind: "default-folder", rootPath: "/Users/ada/Documents/Octant/Work" },
+        ]}
+        onSelect={onSelect}
+        onAddFolder={() => {}}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
+    const row = screen.getByRole("option", { name: /No Project — use the default folder/ });
+    expect(row).toHaveTextContent("/Users/ada/Documents/Octant/Work");
+    await userEvent.click(row);
+    expect(onSelect).toHaveBeenCalledWith({
+      kind: "default-folder",
+      rootPath: "/Users/ada/Documents/Octant/Work",
+    });
+  });
+
   it("asks for a Project until one is chosen", () => {
     render(
       <ComposerProjectSelector entries={entries} onSelect={() => {}} onAddFolder={() => {}} />,

@@ -196,6 +196,20 @@ deletes its data.
 | **Work** | Exactly one OS-confined project root                                                                                                | Confined reads and bounded, approval-gated writes inside that root; document adapters (docx, pptx, pdf, image); research with citations; server-authoritative board.                                                                                                                                                                                                                               |
 | **Code** | Exactly one directory, ideally a repository root; Code threads select a checkout (current checkout or a managed worktree) inside it | Starts approval-gated; Full access only when explicitly remembered for that Project. Plan mode is always read-only. Git, terminals, tests, PR observation, and managed subagents run inside the bound root. Creating a Code Project may explicitly initialize Git in that folder (`docs/decisions/0079`) so a Code thread can prepare a checkout immediately; binding without Git remains allowed. |
 
+A Work or Code thread started without a chosen Project lands in the mode's
+**default Project**: the host provisions `<default folder>/Work` or
+`<default folder>/Code` on first use, binds it as an ordinary Project marked
+`origin: "default-folder"`, and reuses it after. The default folder is the
+`defaultFolder` shell setting (`~/Documents/Octant` unless changed, always
+inside the user's home), and artifact files mirror under its `Artifacts`
+subfolder until a mirror setting says otherwise. With the Code setting
+`requireGitRepository` off, a Code thread may start in a folder that is not a
+repository on a `plain-folder` checkout whose head is `none`; every Git-backed
+feature reports itself unavailable there rather than inventing a revision. Code
+threads without a Project need the further `allowDefaultFolderThreads` switch,
+which the host accepts only while Git is not required. See
+[decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md](decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md).
+
 Work never silently becomes Code. When coding work is detected in a Work
 thread, the server records a **promotion proposal**; only explicit user approval
 creates a linked Code thread, and the new thread inherits no authority from the
