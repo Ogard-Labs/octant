@@ -869,6 +869,45 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("preserves provider context occupancy in live events and replayed conversation usage", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(29);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      const usage = {
+        kind: "usage" as const,
+        inputTokens: 135_224,
+        outputTokens: 364,
+        contextTokens: 27_600,
+        contextWindow: 258_400,
+      };
+      await Effect.runPromise(Queue.offer(queue, providerEvent(usage)));
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
+        expect(frames.find((frame) => frame.event.kind === "usage")?.event).toEqual(usage);
+      });
+      const page = await fixture.runtime.conversation(windowId, threadId, 0, 20);
+      expect(page.turns.find((turn) => turn.operationId === startOperation)?.usage).toEqual({
+        inputTokens: 135_224,
+        outputTokens: 364,
+        contextTokens: 27_600,
+        contextWindow: 258_400,
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("sanitizes provider claims before durable frames and authorizes subscriptions", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
