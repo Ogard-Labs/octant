@@ -1,4 +1,9 @@
-import type { WorkThread, WorkThreadBootstrap, WorkThreadNavigation } from "@octant/contracts";
+import type {
+  WorkStatusDatedItem,
+  WorkThread,
+  WorkThreadBootstrap,
+  WorkThreadNavigation,
+} from "@octant/contracts";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
@@ -12,6 +17,7 @@ export function buildWorkThreadNavigation(
     readonly threadId: WorkThread["id"];
     readonly executing: boolean;
     readonly awaitingInput?: boolean | undefined;
+    readonly followUpDue?: WorkStatusDatedItem | undefined;
   }> = [],
 ): ReadonlyArray<ChatThreadNavigationItem> {
   const runtimeByThread = new Map(runtime.map((entry) => [String(entry.threadId), entry] as const));
@@ -29,6 +35,7 @@ export function buildWorkThreadNavigation(
             : {}),
         threadId: String(thread.id),
         title: thread.title,
+        ...(live?.followUpDue === undefined ? {} : { followUpDue: live.followUpDue }),
         projectId: String(thread.projectId),
         providerInstanceId: String(thread.providerInstanceId),
         updatedAt: thread.updatedAt,

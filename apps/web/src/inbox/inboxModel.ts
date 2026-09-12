@@ -20,12 +20,14 @@ export interface InboxAttentionItem {
 const REASON_PRIORITY: Readonly<Record<ThreadAttentionSignal["reason"], number>> = {
   "approval-required": 0,
   "question-asked": 1,
-  "turn-finished": 2,
+  "follow-up-due": 2,
+  "turn-finished": 3,
 };
 
 export const ATTENTION_REASON_LABELS: Readonly<Record<ThreadAttentionSignal["reason"], string>> = {
   "approval-required": "Waiting for approval",
   "question-asked": "Asked a question",
+  "follow-up-due": "Follow-up due",
   "turn-finished": "Finished a turn",
 };
 

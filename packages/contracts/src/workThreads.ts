@@ -7,6 +7,7 @@ import { HostId } from "./host";
 import { ThreadWorkingDirectory } from "./workingDirectory";
 import { ProjectId } from "./projects";
 import { BindingRevisionId } from "./projects";
+import { WorkStatusDatedItem } from "./workProjectStatus";
 import { ProviderInstanceId, ProviderModelId, ThreadProviderHandoff } from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -204,6 +205,13 @@ export const WorkThreadNavigationRuntime = Schema.Struct({
    * still decodes; absent reads as not waiting.
    */
   awaitingInput: Schema.optional(Schema.Boolean),
+  /**
+   * A dated line in the Project's `STATUS.md` that has passed or is near,
+   * carried on the Project's newest open thread so the inbox can surface the
+   * reminder (decision 0118). Optional so an older host's payload still
+   * decodes; absent reads as nothing due.
+   */
+  followUpDue: Schema.optional(WorkStatusDatedItem),
 }).annotations(strict);
 export type WorkThreadNavigationRuntime = typeof WorkThreadNavigationRuntime.Type;
 

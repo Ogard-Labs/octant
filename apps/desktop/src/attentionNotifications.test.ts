@@ -40,6 +40,20 @@ describe("attention notifications", () => {
     expect(asked.silent).toBe(false);
   });
 
+  it("announces a due follow-up quietly, with the dated line in the body", () => {
+    expect(
+      attentionNotificationPresentation({
+        reason: "follow-up-due",
+        threadTitle: "Renewal prep",
+        detail: "Overdue 2026-07-20 — Offer v2 signature window closed",
+      }),
+    ).toEqual({
+      title: "Follow-up due",
+      body: "Renewal prep — Overdue 2026-07-20 — Offer v2 signature window closed",
+      silent: true,
+    });
+  });
+
   it("clamps an oversized body so the native banner stays readable", () => {
     const body = attentionNotificationPresentation({
       reason: "turn-finished",

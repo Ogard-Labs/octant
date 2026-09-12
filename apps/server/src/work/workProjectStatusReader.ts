@@ -10,6 +10,7 @@ import {
   isWorkStatusStale,
   parseWorkStatus,
 } from "@octant/domain/work-project-status-policy";
+import type { WorkStatusDatedItem } from "@octant/contracts/work-project-status";
 import type { WorkProjectStatusFiles } from "./workProjectStatusFiles";
 
 export interface WorkProjectStatusReaderOptions {
@@ -65,14 +66,40 @@ export class WorkProjectStatusReader {
 
   /** True when any dated line has passed or is due within days. */
   async hasDueItems(projectId: ProjectId, canonicalRoot: string): Promise<boolean> {
+    return (await this.dueReminder(projectId, canonicalRoot)) !== undefined;
+  }
+
+  /**
+   * The single most urgent dated line for a reminder: what is already overdue
+   * outranks what is only near, and within a state the earlier date wins. A
+   * folder that cannot be read answers undefined, the same closed door as a
+   * Project with nothing due.
+   */
+  async dueReminder(
+    projectId: ProjectId,
+    canonicalRoot: string,
+  ): Promise<WorkStatusDatedItem | undefined> {
     try {
       const status = await this.read(projectId, canonicalRoot);
-      return [...status.deadlines, ...status.followUps].some((item) => item.state !== "upcoming");
+      return [...status.deadlines, ...status.followUps]
+        .filter((item) => item.state !== "upcoming")
+        .sort(
+          (left, right) =>
+            DUE_STATE_RANK[left.state] - DUE_STATE_RANK[right.state] ||
+            left.date.localeCompare(right.date),
+        )
+        .at(0);
     } catch {
-      return false;
+      return undefined;
     }
   }
 }
+
+const DUE_STATE_RANK: Readonly<Record<WorkStatusDatedItem["state"], number>> = {
+  overdue: 0,
+  "due-soon": 1,
+  upcoming: 2,
+};
 
 const MAX_FOLDER_ITEMS = 64;
 
