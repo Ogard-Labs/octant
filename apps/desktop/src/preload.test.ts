@@ -332,10 +332,12 @@ describe("desktop preload bridge", () => {
     );
 
     await bridge.notifyAttention({ reason: "turn-finished", threadTitle: "Diff pane" });
+    await bridge.notifyAttention({ reason: "follow-up-due", threadTitle: "Renewal prep" });
     await bridge.setAttentionBadge(3);
 
     expect(invoke.mock.calls).toEqual([
       [IPC_CHANNELS.attentionNotify, { reason: "turn-finished", threadTitle: "Diff pane" }],
+      [IPC_CHANNELS.attentionNotify, { reason: "follow-up-due", threadTitle: "Renewal prep" }],
       [IPC_CHANNELS.attentionBadge, 3],
     ]);
 

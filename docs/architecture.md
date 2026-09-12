@@ -223,8 +223,9 @@ thread's transcript, with a standing instruction to keep `STATUS.md` current;
 a completed turn that changed files without touching it gets a `Recent
 changes` line appended from the 0083 record. A stale status or a near or passed
 date makes the next task open by taking stock and asking for an update. The
-Work Project page and the Work board's follow-up mark read the same file on
-demand; nothing about it is journaled. See
+Work Project page, the Work board's follow-up mark, and the inbox's
+`follow-up-due` attention signal all read the same file on demand; nothing
+about it is journaled. See
 [decisions/0119-a-work-project-keeps-its-status-in-its-folder.md](decisions/0119-a-work-project-keeps-its-status-in-its-folder.md).
 
 Work never silently becomes Code. When coding work is detected in a Work

@@ -43,6 +43,52 @@ describe("collecting thread attention", () => {
     ]);
   });
 
+  it("surfaces a due line in a Work Project's status as its own signal", () => {
+    expect(
+      collectThreadAttentionSignals({
+        chatThreads: [],
+        workThreads: [
+          {
+            threadId: "work-a",
+            title: "Renewal prep",
+            projectId: "project-1",
+            followUpDue: {
+              date: "2026-07-20",
+              text: "Offer v2 signature window closed",
+              state: "overdue",
+            },
+          },
+          {
+            threadId: "work-b",
+            title: "Kickoff notes",
+            followUpDue: {
+              date: "2026-07-28",
+              text: "Procurement portal opens",
+              state: "due-soon",
+            },
+          },
+        ],
+        codeThreads: [],
+      }),
+    ).toEqual([
+      {
+        threadId: "work-a",
+        reason: "follow-up-due",
+        title: "Renewal prep",
+        detail: "Overdue 2026-07-20 — Offer v2 signature window closed",
+        source: "work",
+        projectId: "project-1",
+      },
+      {
+        threadId: "work-b",
+        reason: "follow-up-due",
+        title: "Kickoff notes",
+        detail: "Due 2026-07-28 — Procurement portal opens",
+        source: "work",
+      },
+    ]);
+  });
+
   it("raises a live Code approval with the summary the workspace shows", () => {
     const threadId = "code-a" as CodeThreadId;
     expect(

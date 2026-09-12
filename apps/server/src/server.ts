@@ -647,6 +647,7 @@ import {
   decodeProjectId,
   type ProjectId,
   type UtcTimestamp,
+  type WorkStatusDatedItem,
 } from "@octant/contracts";
 import {
   activeChatTurns,
@@ -4982,6 +4983,25 @@ export function startOctantServer(
     let observeWorkThreadRuntime:
       | ((threadId: WorkThreadId) => WorkBoardRuntimeActivity)
       | undefined;
+    // The navigation poll runs about once a second while a date in STATUS.md
+    // moves at day granularity, so each Project's file is re-read at most this
+    // often; the inbox reminder freshens within the same window.
+    const workDueReminderCache = new Map<
+      string,
+      { readonly at: number; readonly item: WorkStatusDatedItem | undefined }
+    >();
+    const projectDueReminder = async (
+      projectId: ProjectId,
+      canonicalRoot: string,
+    ): Promise<WorkStatusDatedItem | undefined> => {
+      const key = String(projectId);
+      const cached = workDueReminderCache.get(key);
+      const now = Date.now();
+      if (cached !== undefined && now - cached.at < 30_000) return cached.item;
+      const item = await workProjectStatusReader.dueReminder(projectId, canonicalRoot);
+      workDueReminderCache.set(key, { at: now, item });
+      return item;
+    };
     const workThreadService = new WorkThreadService({
       persistence,
       projects: projectService,
@@ -4992,6 +5012,7 @@ export function startOctantServer(
       onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
       probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
       observeRuntime: (threadId) => observeWorkThreadRuntime?.(threadId) ?? { executing: false },
+      projectDueReminder,
       issueContext: githubIssueContextService,
       linearIssueContext: linearIssueContextService,
     });

@@ -53,6 +53,28 @@ describe("buildWorkThreadNavigation", () => {
       },
     ]);
   });
+
+  it("carries a due status line so the inbox can surface the reminder", () => {
+    const active = workThread();
+    const followUpDue = {
+      date: "2026-07-20",
+      text: "Offer v2 signature window closed",
+      state: "overdue" as const,
+    };
+
+    expect(
+      buildWorkThreadNavigation([active], [{ threadId, executing: false, followUpDue }]),
+    ).toEqual([
+      {
+        threadId: String(threadId),
+        title: "Research brief",
+        followUpDue,
+        projectId: "20000000-0000-4000-8000-000000000101",
+        providerInstanceId: "80000000-0000-4000-8000-0000000000b1",
+        updatedAt: "2026-08-01T20:00:00.000Z",
+      },
+    ]);
+  });
 });
 
 describe("useWorkThreadNavigation", () => {

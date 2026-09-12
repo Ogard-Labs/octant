@@ -128,6 +128,16 @@ export interface ChatThreadNavigationItem {
   readonly checkoutChip?: ThreadCheckoutChip;
   readonly followUp?: boolean;
   /**
+   * A dated line in a Work Project's `STATUS.md` that has passed or is near,
+   * carried on the Project's newest open thread so the inbox can surface the
+   * reminder (decision 0119). Absent on Chat and Code rows.
+   */
+  readonly followUpDue?: {
+    readonly text: string;
+    readonly date: string;
+    readonly state: "overdue" | "due-soon" | "upcoming";
+  };
+  /**
    * The visible thread this one was forked or branched from. Absent when the
    * thread started on its own. Work threads never carry this: they have no
    * fork provenance.

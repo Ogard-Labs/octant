@@ -10,7 +10,11 @@ export const ATTENTION_NOTIFICATION_TITLE_LIMIT = 120;
 export const ATTENTION_NOTIFICATION_BODY_LIMIT = 240;
 export const ATTENTION_BADGE_LIMIT = 99;
 
-export type AttentionReason = "turn-finished" | "approval-required" | "question-asked";
+export type AttentionReason =
+  | "turn-finished"
+  | "approval-required"
+  | "question-asked"
+  | "follow-up-due";
 
 export interface AttentionNotificationRequest {
   readonly reason: AttentionReason;
@@ -28,17 +32,26 @@ export interface AttentionNotificationPresentation {
 const REASON_TITLES: Readonly<Record<AttentionReason, string>> = {
   "approval-required": "Approval needed",
   "question-asked": "Question for you",
+  "follow-up-due": "Follow-up due",
   "turn-finished": "Turn finished",
 };
 
 const REASON_SILENT: Readonly<Record<AttentionReason, boolean>> = {
   "approval-required": false,
   "question-asked": false,
+  // A reminder waits on the person's calendar, not on the agent, so it stays
+  // quiet like a finished turn.
+  "follow-up-due": true,
   "turn-finished": true,
 };
 
 function isAttentionReason(value: unknown): value is AttentionReason {
-  return value === "turn-finished" || value === "approval-required" || value === "question-asked";
+  return (
+    value === "turn-finished" ||
+    value === "approval-required" ||
+    value === "question-asked" ||
+    value === "follow-up-due"
+  );
 }
 
 function clamp(value: string, limit: number): string {

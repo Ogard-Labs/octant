@@ -353,7 +353,11 @@ export interface ContextBridgePort {
   readonly exposeInMainWorld: (key: string, value: unknown) => void;
 }
 
-export type AttentionReason = "turn-finished" | "approval-required" | "question-asked";
+export type AttentionReason =
+  | "turn-finished"
+  | "approval-required"
+  | "question-asked"
+  | "follow-up-due";
 
 export interface AttentionNotificationBridgeRequest {
   readonly reason: AttentionReason;
@@ -1357,7 +1361,8 @@ function validateAttentionNotificationRequest(value: unknown): void {
   if (
     (value.reason !== "turn-finished" &&
       value.reason !== "approval-required" &&
-      value.reason !== "question-asked") ||
+      value.reason !== "question-asked" &&
+      value.reason !== "follow-up-due") ||
     typeof value.threadTitle !== "string" ||
     value.threadTitle.trim() === "" ||
     (value.detail !== undefined && typeof value.detail !== "string")
