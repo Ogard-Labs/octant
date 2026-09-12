@@ -1017,6 +1017,47 @@ describe("mapCodexMessage", () => {
     ]);
   });
 
+  it("reports the last request's occupancy when the app-server cannot name the window", () => {
+    const mapped = map(
+      context(),
+      notification("thread/tokenUsage/updated", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        tokenUsage: {
+          total: {
+            totalTokens: 20,
+            inputTokens: 12,
+            cachedInputTokens: 3,
+            outputTokens: 8,
+            reasoningOutputTokens: 2,
+          },
+          last: {
+            totalTokens: 7,
+            inputTokens: 4,
+            cachedInputTokens: 1,
+            outputTokens: 3,
+            reasoningOutputTokens: 1,
+          },
+          modelContextWindow: null,
+        },
+      }),
+    );
+    expect(mapped).toMatchObject([
+      {
+        kind: "event",
+        event: {
+          kind: "usage",
+          inputTokens: 12,
+          outputTokens: 8,
+          contextTokens: 6,
+        },
+      },
+    ]);
+    const usageEvent = mapped[0];
+    if (usageEvent?.kind !== "event") throw new Error("expected a usage event");
+    expect(usageEvent.event).not.toHaveProperty("contextWindow");
+  });
+
   it.each([
     {
       name: "command",
