@@ -1976,6 +1976,8 @@ function normalizedOperationEvent(
       inputTokens: event.inputTokens ?? 0,
       outputTokens: event.outputTokens ?? 0,
       ...(event.costUsd === undefined ? {} : { costUsd: event.costUsd }),
+      ...(event.contextWindow === undefined ? {} : { contextWindow: event.contextWindow }),
+      ...(event.contextTokens === undefined ? {} : { contextTokens: event.contextTokens }),
     };
   if (event.category === "provider-limit" && event.text !== undefined)
     return {
