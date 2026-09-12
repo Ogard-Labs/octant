@@ -111,7 +111,12 @@ desktop's window-bound sidebar, dock, and Settings are not served remotely.
 
 **Mobile (`apps/mobile`).** An Expo iOS/Android remote-control client. Threads
 are host-owned; the phone stores only device keys, a host registry, and session
-material. It uses the same contracts and client runtime as the browser.
+material. It uses the same contracts and client runtime as the browser. The
+phone creates Chat, Work, and Code threads, reads their transcripts, and sends
+follow-up turns under each thread's own authority (`start-work-thread-turn`
+with the thread's binding; `start-provider-turn` on the thread's checkout).
+Approvals, folder binding, file edits, and shell remain host-only and the
+composer says so.
 
 **Local client context.** Opening the canonical host URL directly creates a
 process-local client context through `/api/shell/local-session`; no launcher
