@@ -93,6 +93,25 @@
   font-size: var(--oct-text-xs);
 }
 
+.zen-surface__empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  display: grid;
+  max-width: 360px;
+  gap: var(--oct-space-2);
+  color: var(--oct-muted);
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+.zen-surface__empty strong {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-lg);
+  font-weight: 500;
+}
+
 /* ─── floating elements ────────────────────────────────────────────────
    The frame, head, body, and grip are the system's .zen-el anatomy. The
    system recipe positions itself from --x/--y/--w custom properties;

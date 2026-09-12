@@ -82,6 +82,23 @@ function makeSpace(
 }
 
 describe("ZenSurface", () => {
+  it("guides an empty focus space toward its first useful card", () => {
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        space={makeSpace()}
+      />,
+    );
+
+    expect(screen.getByText("Build your focus space")).toBeVisible();
+    expect(screen.getByText(/Open Threads to pin active work/)).toBeVisible();
+  });
+
   it("keeps the docked research browser out of the transformed canvas", () => {
     // The docked page is a native view the host places by absolute window
     // bounds. Inside the canvas it would be positioned by however far the

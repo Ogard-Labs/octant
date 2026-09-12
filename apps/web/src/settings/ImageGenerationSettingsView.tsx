@@ -15,6 +15,7 @@ import {
 import { useState, type ReactNode } from "react";
 import type { ProviderController } from "../providers/useProviderController";
 import { ProviderCreateForm } from "../providers/ProviderSettingsConfiguration";
+import { ProviderSettingsList } from "../providers/ProviderSettingsList";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -62,9 +63,9 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
   const apply = (customSources: ReadonlyArray<ImageGenerationCustomSource>) =>
     props.onSettingsChange({ imageGeneration: { customSources } });
 
-  const imageProviderForm =
+  const imageProviderSettings =
     props.providerController === undefined ? null : (
-      <ImageProviderCreateForm controller={props.providerController} />
+      <ImageProviderSettings controller={props.providerController} />
     );
 
   return (
@@ -75,24 +76,10 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
     >
       {!hasImageProvider ? (
         <p className="settings-state settings-state--empty" role="status">
-          No image providers are enabled. Add one below, or enable an existing provider in Providers
-          &amp; Models.
+          No image providers are enabled. Add a dedicated provider or custom endpoint below.
         </p>
       ) : null}
-      {imageProviderForm === null ? null : (
-        <section
-          aria-label="Image providers"
-          className="settings-card-section settings-card-section--open image-generation-settings__providers"
-        >
-          <div className="settings-section-head">
-            <h2>Image providers</h2>
-          </div>
-          <p className="settings-section-note">
-            Connect an image API with the same credential flow used by Providers &amp; Models.
-          </p>
-          <div className="image-generation-settings__provider-form">{imageProviderForm}</div>
-        </section>
-      )}
+      {imageProviderSettings}
       <div className="settings-card-section settings-card-section--open">
         <div className="setgroup">
           <SettingRow
@@ -107,8 +94,7 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
             </p>
             {eligible.length === 0 ? (
               <p className="provider-settings__field-guidance" role="status">
-                To add a custom source, connect an OpenAI-compatible HTTP provider in Providers
-                &amp; Models.
+                Add an OpenAI-compatible custom endpoint above, then choose its model here.
               </p>
             ) : null}
             {resolved.length === 0 && eligible.length > 0 ? (
@@ -165,11 +151,77 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
   );
 }
 
+function ImageProviderSettings(props: { readonly controller: ProviderController }): ReactNode {
+  const controller = props.controller;
+  const imageInstances = controller.instances.filter(
+    (instance) =>
+      isImageProfileDriverKind(instance.driverKind) || instance.driverKind === "openai-compatible",
+  );
+  return (
+    <ProviderSettingsList
+      busy={controller.busy}
+      createForm={<ImageProviderCreateForm controller={controller} />}
+      credentialManagementAvailable={controller.credentialManagementAvailable}
+      defaults={controller.defaults}
+      discoverySnapshot={undefined}
+      heading="Image providers"
+      instances={imageInstances}
+      note="Connect, configure, and choose models for dedicated image APIs or custom endpoints."
+      observedByInstance={controller.observedByInstance}
+      onAgentEligibleModelsChange={controller.updateAgentEligibleModels}
+      onBeginProviderAuthentication={controller.beginProviderAuthentication}
+      onChangeAnthropicCompatibleConfiguration={controller.changeAnthropicCompatibleConfiguration}
+      onChangeAzureFoundryConfiguration={controller.changeAzureFoundryConfiguration}
+      onChangeBflImageConfiguration={controller.changeBflImageConfiguration}
+      onChangeBinary={controller.changeBinary}
+      onChangeClaudeConfiguration={controller.changeClaudeConfiguration}
+      onChangeClineConfiguration={controller.changeClineConfiguration}
+      onChangeCopilotConfiguration={controller.changeCopilotConfiguration}
+      onChangeDevinConfiguration={controller.changeDevinConfiguration}
+      onChangeGeminiConfiguration={controller.changeGeminiConfiguration}
+      onChangeGeminiImageConfiguration={controller.changeGeminiImageConfiguration}
+      onChangeGlmConfiguration={controller.changeGlmConfiguration}
+      onChangeGooseConfiguration={controller.changeGooseConfiguration}
+      onChangeGrokConfiguration={controller.changeGrokConfiguration}
+      onChangeIdeogramImageConfiguration={controller.changeIdeogramImageConfiguration}
+      onChangeKiloConfiguration={controller.changeKiloConfiguration}
+      onChangeMistralVibeConfiguration={controller.changeMistralVibeConfiguration}
+      onChangeOhMyPiConfiguration={controller.changeOhMyPiConfiguration}
+      onChangeOllamaConfiguration={controller.changeOllamaConfiguration}
+      onChangeOpenAiCompatibleConfiguration={controller.changeOpenAiCompatibleConfiguration}
+      onChangeOpenAiImageConfiguration={controller.changeOpenAiImageConfiguration}
+      onChangePiConfiguration={controller.changePiConfiguration}
+      onChangeQwenConfiguration={controller.changeQwenConfiguration}
+      onClearProviderCredential={controller.clearProviderCredential}
+      onCompleteProviderAuthentication={controller.completeProviderAuthentication}
+      onHiddenModelsChange={controller.updateHiddenModels}
+      onProbe={controller.probe}
+      onProviderCredentialStatus={controller.providerCredentialStatus}
+      onProviderOrderChange={controller.updateProviderOrder}
+      onRemove={controller.remove}
+      onRename={controller.rename}
+      onSetEnabled={controller.setEnabled}
+      onVerifyFoundryTools={controller.verifyFoundryTools}
+      presentationObservedByInstance={controller.presentationObservedByInstance}
+      probingIds={controller.probingIds}
+      showAgentEligibleModels={false}
+      showReorder={false}
+      status={controller.status}
+    />
+  );
+}
+
 function ImageProviderCreateForm(props: { readonly controller: ProviderController }): ReactNode {
   const controller = props.controller;
   return (
     <ProviderCreateForm
-      allowedProviderTypes={["openai-image", "gemini-native-image", "bfl-image", "ideogram-image"]}
+      allowedProviderTypes={[
+        "openai-image",
+        "gemini-native-image",
+        "bfl-image",
+        "ideogram-image",
+        "openai-compatible",
+      ]}
       busy={controller.busy}
       credentialManagementAvailable={controller.credentialManagementAvailable}
       heading="Connect an image provider"
