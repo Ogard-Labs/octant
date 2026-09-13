@@ -1,4 +1,5 @@
 import type { AgentRunCenterSummary } from "@octant/contracts";
+import { isAgentRunActiveStatus } from "@octant/domain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentMessageClient } from "@octant/client-runtime/agent-message-client";
 import { Search } from "lucide-react";
@@ -104,6 +105,10 @@ export function AgentsCenter(props: AgentsCenterProps) {
         {selected === undefined ? null : (
           <div className="agents-center__detail-pane">
             <AgentsCenterDetail
+              // A different run is a different pane: without the key, a Stop
+              // confirmation raised for one run carried over to the next and
+              // its handler cancelled the newly selected run.
+              key={String(selected.runId)}
               controls={controls}
               controller={controller}
               narrow={props.narrow === true}
@@ -330,6 +335,16 @@ function AgentsCenterDetail(props: {
   readonly providerLabels: ReadonlyMap<string, string>;
 }) {
   const [steerMessage, setSteerMessage] = useState("");
+  const [confirmingStop, setConfirmingStop] = useState(false);
+  const { lifecycleStatus } = props.summary;
+  // The server refuses most of these anyway; offering every control on every
+  // run asked the reader to discover which ones apply by failing.
+  const stoppable = isAgentRunActiveStatus(lifecycleStatus);
+  const canRetry = lifecycleStatus === "failed" || lifecycleStatus === "interrupted";
+  const canResume =
+    lifecycleStatus === "waiting" ||
+    (lifecycleStatus === "interrupted" &&
+      props.summary.recoveryReason === "provider-session-resumable");
   const recovery = agentRunRecoveryLabel(props.summary.recoveryReason);
   return (
     <section aria-label="Agent run details" className="agents-center-detail">
@@ -358,29 +373,55 @@ function AgentsCenterDetail(props: {
       )}
 
       <div className="agents-center-detail__actions">
-        <OctantButton
-          onClick={() =>
-            props.onOpenThread?.({
-              ...agentRunCenterThreadTarget(props.summary),
-              title: props.summary.parentThreadTitle,
-            })
-          }
-          type="button"
-          variant="secondary"
-        >
-          Open thread
-        </OctantButton>
-        <OctantButton
-          onClick={() =>
-            void props.controls.cancel({ runId: String(props.summary.runId) }).then((message) => {
-              if (message !== undefined) props.controller.setNotice(message);
-            })
-          }
-          type="button"
-          variant="secondary"
-        >
-          Stop subtree
-        </OctantButton>
+        {props.onOpenThread === undefined ? null : (
+          <OctantButton
+            onClick={() =>
+              props.onOpenThread?.({
+                ...agentRunCenterThreadTarget(props.summary),
+                title: props.summary.parentThreadTitle,
+              })
+            }
+            type="button"
+            variant="default"
+          >
+            Open thread
+          </OctantButton>
+        )}
+        {stoppable ? (
+          <OctantButton onClick={() => setConfirmingStop(true)} type="button" variant="secondary">
+            Stop child agents
+          </OctantButton>
+        ) : null}
+        {canRetry ? (
+          <OctantButton
+            onClick={() =>
+              void props.controls
+                .retry({ runId: String(props.summary.runId), version: props.summary.version })
+                .then((message) => {
+                  if (message !== undefined) props.controller.setNotice(message);
+                })
+            }
+            type="button"
+            variant="secondary"
+          >
+            Retry
+          </OctantButton>
+        ) : null}
+        {canResume ? (
+          <OctantButton
+            onClick={() =>
+              void props.controls
+                .resume({ runId: String(props.summary.runId), version: props.summary.version })
+                .then((message) => {
+                  if (message !== undefined) props.controller.setNotice(message);
+                })
+            }
+            type="button"
+            variant="secondary"
+          >
+            Resume
+          </OctantButton>
+        ) : null}
         {props.summary.resultAcknowledgement.required &&
         !props.summary.resultAcknowledgement.acknowledged ? (
           <OctantButton
@@ -400,33 +441,39 @@ function AgentsCenterDetail(props: {
             Acknowledge
           </OctantButton>
         ) : null}
-        <OctantButton
-          onClick={() =>
-            void props.controls
-              .retry({ runId: String(props.summary.runId), version: props.summary.version })
-              .then((message) => {
-                if (message !== undefined) props.controller.setNotice(message);
-              })
-          }
-          type="button"
-          variant="secondary"
-        >
-          Retry
-        </OctantButton>
-        <OctantButton
-          onClick={() =>
-            void props.controls
-              .resume({ runId: String(props.summary.runId), version: props.summary.version })
-              .then((message) => {
-                if (message !== undefined) props.controller.setNotice(message);
-              })
-          }
-          type="button"
-          variant="secondary"
-        >
-          Resume
-        </OctantButton>
       </div>
+
+      {confirmingStop && stoppable ? (
+        <div
+          aria-label="Confirm stopping this run"
+          className="agents-center-detail__confirm"
+          role="group"
+        >
+          <p>
+            Stop this run and any child agents it started? Their work is cancelled and cannot be
+            resumed.
+          </p>
+          <div>
+            <OctantButton
+              onClick={() => {
+                setConfirmingStop(false);
+                void props.controls
+                  .cancel({ runId: String(props.summary.runId) })
+                  .then((message) => {
+                    if (message !== undefined) props.controller.setNotice(message);
+                  });
+              }}
+              type="button"
+              variant="destructive"
+            >
+              Stop this run
+            </OctantButton>
+            <OctantButton onClick={() => setConfirmingStop(false)} type="button" variant="ghost">
+              Keep running
+            </OctantButton>
+          </div>
+        </div>
+      ) : null}
 
       <label className="agents-center-detail__steer">
         <span>Steer message</span>

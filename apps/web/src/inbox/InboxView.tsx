@@ -71,14 +71,20 @@ export function InboxView(props: InboxViewProps) {
         } else if (response.kind === "unavailable") {
           setGithub({ kind: "failed", message: "GitHub is unavailable right now." });
         } else {
-          setGithub({ kind: "failed", message: "GitHub returned an unexpected response." });
+          setGithub({
+            kind: "failed",
+            message: "GitHub returned a response Octant could not read. Refresh to try again.",
+          });
         }
       },
       (error: unknown) => {
         if (cancelled) return;
         setGithub({
           kind: "failed",
-          message: error instanceof Error ? error.message : "GitHub request failed.",
+          message:
+            error instanceof Error && error.message !== ""
+              ? error.message
+              : "GitHub could not be reached. Refresh to try again.",
         });
       },
     );
@@ -101,7 +107,10 @@ export function InboxView(props: InboxViewProps) {
         if (cancelled) return;
         setLinear({
           kind: "failed",
-          message: error instanceof Error ? error.message : "Linear request failed.",
+          message:
+            error instanceof Error && error.message !== ""
+              ? error.message
+              : "Linear could not be reached. Refresh to try again.",
         });
       },
     );

@@ -235,7 +235,7 @@ export function AgentRunHierarchy(props: {
   );
 
   if (status === "loading") {
-    return <ShellState state="loading" title="Loading Agents" />;
+    return <ShellState state="loading" title="Loading agents" />;
   }
   if (status === "error" && entries.length === 0) {
     return (

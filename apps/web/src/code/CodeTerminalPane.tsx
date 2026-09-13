@@ -308,7 +308,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
           output={output}
         />
       ) : (
-        <ShellState state="loading" title="Loading Terminal" />
+        <ShellState state="loading" title="Loading terminal" />
       )}
     </section>
   );

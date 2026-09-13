@@ -1409,7 +1409,7 @@ describe("ProjectSidebarSection search", () => {
 
     const empty = screen.getByRole("status");
     expect(empty).toHaveTextContent(/nothing was deleted/i);
-    expect(empty).toHaveTextContent(/clear search or change environment filters/i);
+    expect(empty).toHaveTextContent(/clear search or filters/i);
     expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Unfiled" })).not.toBeInTheDocument();
   });
@@ -1460,7 +1460,7 @@ describe("ProjectSidebarSection search", () => {
 
     const empty = screen.getByRole("status");
     expect(empty).toHaveTextContent(/nothing was deleted/i);
-    expect(empty).toHaveTextContent(/change environment filters/i);
+    expect(empty).toHaveTextContent(/clear search or filters/i);
     expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
   });
 

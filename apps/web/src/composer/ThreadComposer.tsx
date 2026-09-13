@@ -207,7 +207,7 @@ function ThreadComposerTrailing(props: {
           onClick={stop.onStop}
           size="icon"
           type="button"
-          variant="default"
+          variant="secondary"
         >
           <Square aria-hidden="true" fill="currentColor" size={12} strokeWidth={1.5} />
         </OctantButton>

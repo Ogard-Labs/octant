@@ -50,7 +50,7 @@ export function CodeCheckoutBar(props: { readonly onCreatePullRequest?: () => vo
       ) : null}
       {props.onCreatePullRequest === undefined ? null : (
         <OctantButton
-          aria-label="Create PR"
+          aria-label="Create pull request"
           title="Create pull request"
           className="code-checkout-bar__action window-no-drag"
           onClick={props.onCreatePullRequest}
@@ -59,7 +59,7 @@ export function CodeCheckoutBar(props: { readonly onCreatePullRequest?: () => vo
           variant="ghost"
         >
           <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.7} />
-          <span>Create PR</span>
+          <span>Create pull request</span>
         </OctantButton>
       )}
     </div>

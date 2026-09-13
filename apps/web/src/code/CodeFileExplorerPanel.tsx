@@ -73,7 +73,7 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
       </div>
 
       {controller.status === "loading" ? (
-        <ShellState state="loading" title="Loading Files" />
+        <ShellState state="loading" title="Loading files" />
       ) : null}
 
       {controller.status === "error" ? (

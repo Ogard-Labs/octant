@@ -12,6 +12,22 @@ import { OctantTextarea } from "../ui/base/OctantTextarea";
 type GitObservation = Extract<CodeOperationResult, { readonly kind: "git-observed" }>;
 type ApprovalAction = "stage" | "unstage" | "discard" | "commit" | "push";
 
+/**
+ * Git reports a two-character porcelain code. A person reads a word, so the
+ * row shows one beside the code rather than asking the reader to know `??`.
+ */
+function gitStatusLabel(index: string, worktree: string): string {
+  if (index === "?" || worktree === "?") return "Untracked";
+  if (index === "U" || worktree === "U") return "Conflict";
+  if (index === "R") return "Renamed";
+  if (index === "A") return "Added";
+  if (index === "D" || worktree === "D") return "Deleted";
+  if (index === "M" && worktree === "M") return "Staged and modified";
+  if (index === "M") return "Staged";
+  if (worktree === "M") return "Modified";
+  return "Changed";
+}
+
 export interface CodeGitPaneProps {
   readonly client: Pick<CodeClient, "executeOperation">;
   readonly createGitOperationId: () => CodeGitOperationId;
@@ -154,7 +170,14 @@ export function CodeGitPane(props: CodeGitPaneProps) {
       </header>
       <ul className="code-git-pane__status">
         {props.observation.status.map((entry) => (
-          <li key={entry.path}>
+          <li
+            className={
+              props.executionPolicy === "plan"
+                ? "code-git-pane__status-row"
+                : "code-git-pane__status-row code-git-pane__status-row--selectable"
+            }
+            key={entry.path}
+          >
             {props.executionPolicy === "plan" ? null : (
               <OctantCheckbox
                 aria-label={`Select ${entry.path}`}
@@ -172,6 +195,9 @@ export function CodeGitPane(props: CodeGitPaneProps) {
               {entry.index}
               {entry.worktree}
             </code>
+            <span className="code-git-pane__status-label">
+              {gitStatusLabel(entry.index, entry.worktree)}
+            </span>
             <span>{entry.path}</span>
           </li>
         ))}
@@ -198,7 +224,7 @@ export function CodeGitPane(props: CodeGitPaneProps) {
             type="button"
             variant="secondary"
           >
-            Stage {selected.length} {selected.length === 1 ? "path" : "paths"}
+            Stage {selected.length} {selected.length === 1 ? "file" : "files"}
           </OctantButton>
           <OctantButton
             disabled={selectedStaged.length === 0}
@@ -216,7 +242,7 @@ export function CodeGitPane(props: CodeGitPaneProps) {
             type="button"
             variant="secondary"
           >
-            Unstage {selectedStaged.length} {selectedStaged.length === 1 ? "path" : "paths"}
+            Unstage {selectedStaged.length} {selectedStaged.length === 1 ? "file" : "files"}
           </OctantButton>
           {/* Discarding removes work no commit can bring back, so it asks once
               before it runs rather than relying on the approval prompt alone. */}
@@ -224,7 +250,7 @@ export function CodeGitPane(props: CodeGitPaneProps) {
             <div className="code-git-pane__confirm" role="alertdialog" aria-label="Confirm discard">
               <p>
                 Throw away uncommitted changes to {selectedTracked.length}{" "}
-                {selectedTracked.length === 1 ? "path" : "paths"}? This cannot be undone.
+                {selectedTracked.length === 1 ? "file" : "files"}? This cannot be undone.
               </p>
               <OctantButton
                 onClick={() => {
@@ -261,7 +287,7 @@ export function CodeGitPane(props: CodeGitPaneProps) {
               type="button"
               variant="ghost"
             >
-              Discard {selectedTracked.length} {selectedTracked.length === 1 ? "path" : "paths"}
+              Discard {selectedTracked.length} {selectedTracked.length === 1 ? "file" : "files"}
             </OctantButton>
           )}
           <label className="code-delivery-pane__field">
@@ -301,7 +327,7 @@ export function CodeGitPane(props: CodeGitPaneProps) {
             type="button"
             variant="secondary"
           >
-            Commit {staged.length} staged {staged.length === 1 ? "path" : "paths"}
+            Commit {staged.length} staged {staged.length === 1 ? "file" : "files"}
           </OctantButton>
           <OctantButton
             disabled={head.kind !== "branch" || remote === undefined}

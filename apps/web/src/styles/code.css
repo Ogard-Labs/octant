@@ -161,11 +161,24 @@
 
 .code-git-pane__status li {
   display: grid;
-  grid-template-columns: auto 24px minmax(0, 1fr);
   align-items: center;
   gap: var(--oct-space-2);
   min-height: 28px;
   padding: var(--oct-space-1) var(--oct-space-2);
+}
+
+/* Plan mode has no select checkbox, so the status code leads the row. */
+.code-git-pane__status-row {
+  grid-template-columns: 24px auto minmax(0, 1fr);
+}
+
+.code-git-pane__status-row--selectable {
+  grid-template-columns: auto 24px auto minmax(0, 1fr);
+}
+
+.code-git-pane__status-label {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
 }
 
 .code-review-pane__findings li {

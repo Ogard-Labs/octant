@@ -197,7 +197,7 @@ function BoundHistory(props: GitHistoryPanelProps) {
         <div className="git-history__status" role="status">
           {busy
             ? "Loading commits…"
-            : `${commits.length.toLocaleString()} ${search === "" ? (commits.length === 1 ? "commit" : "commits") : commits.length === 1 ? "match" : "matches"} loaded`}
+            : `${commits.length.toLocaleString()} ${search === "" ? (commits.length === 1 ? "commit" : "commits") : commits.length === 1 ? "match" : "matches"}`}
           {page?.branch ? ` · ${page.branch}` : page?.head ? " · Detached HEAD" : ""}
         </div>
         {page?.shallow ? (
@@ -291,7 +291,7 @@ function BoundHistory(props: GitHistoryPanelProps) {
                           selection.current = commit.oid;
                           setSelected(commit.oid);
                         }}
-                        title={`${commit.subject}\n${commit.parents.length} ${commit.parents.length === 1 ? "parent" : "parents"}`}
+                        title={commit.subject}
                         aria-label={`Open commit ${commit.oid.slice(0, 7)}: ${commit.subject}`}
                       >
                         {commit.subject}

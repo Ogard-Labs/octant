@@ -15,7 +15,7 @@ export default function ReviewModule(props: Props) {
     return unavailable("Review", "Review opens from a Code thread.");
   }
   return (
-    <Suspense fallback={<ShellState state="loading" title="Loading Review" />}>
+    <Suspense fallback={<ShellState state="loading" title="Loading review" />}>
       <ReviewWorkspace
         {...(props.codeController === undefined ? {} : { controller: props.codeController })}
         threadId={decodeCodeThreadId(props.subject.threadId)}

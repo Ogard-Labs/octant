@@ -101,7 +101,7 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
   }
 
   if (workspace.status === "loading") {
-    return <ShellState state="loading" title="Loading Review" />;
+    return <ShellState state="loading" title="Loading review" />;
   }
 
   const view =

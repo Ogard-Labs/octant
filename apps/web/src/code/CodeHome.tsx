@@ -492,11 +492,17 @@ async function readAssignedGithub(
       };
     }
     if (response.kind === "unavailable") return { kind: "hidden" };
-    return { kind: "failed", message: "GitHub returned an unexpected response." };
+    return {
+      kind: "failed",
+      message: "GitHub returned a response Octant could not read. Refresh to try again.",
+    };
   } catch (error) {
     return {
       kind: "failed",
-      message: error instanceof Error ? error.message : "GitHub could not be reached.",
+      message:
+        error instanceof Error && error.message !== ""
+          ? error.message
+          : "GitHub could not be reached. Refresh to try again.",
     };
   }
 }

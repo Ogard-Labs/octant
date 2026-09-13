@@ -31,7 +31,7 @@ export default function FilesModule(props: Props) {
     return unavailable("Files", "Files opens from a Code thread.");
   }
   return (
-    <Suspense fallback={<ShellState state="loading" title="Loading Files" />}>
+    <Suspense fallback={<ShellState state="loading" title="Loading files" />}>
       <CodeFileExplorerPanel
         {...(props.subject.checkoutId === undefined
           ? {}

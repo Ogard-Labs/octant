@@ -12,7 +12,7 @@ const modeLabels: Record<OctantMode, string> = {
   code: "Code",
 };
 const modeDescriptions: Record<OctantMode, string> = {
-  chat: "Conversation with shared virtual context",
+  chat: "Talk through questions with your models",
   work: "Work with local files and documents",
   code: "Build, debug, and ship software",
 };
