@@ -309,7 +309,6 @@ export class WorkThreadService {
         if (command.hostId !== "local") {
           throw this.#failure("unauthorized", "Work thread host is not authorized.");
         }
-        await this.#requireAccessibleActiveWorkProject(authenticatedWindowId, command.projectId);
         const project = await this.#requireAccessibleActiveWorkProject(
           authenticatedWindowId,
           command.projectId,

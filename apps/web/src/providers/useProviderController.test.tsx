@@ -3,6 +3,7 @@ import {
   decodeProviderInstanceId,
   decodeProviderModelId,
   type ProviderInstance,
+  type ProviderCatalogSnapshot,
   type ProviderObservedState,
   type ProviderRegistrySnapshot,
 } from "@octant/contracts";
@@ -516,6 +517,26 @@ describe("useProviderController", () => {
       await checks[1];
     });
     expect(result.current.observedByInstance.size).toBe(2);
+  });
+
+  it("folds catalog model data tags into the observations every picker reads", async () => {
+    const api = client();
+    vi.mocked(api.bootstrap).mockResolvedValue(
+      snapshot([provider()], [observation()], [catalogWithModelTags(["eu"])]),
+    );
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.observedByInstance.get(id)?.readiness).toBe("ready"));
+
+    // Project provider policy reads model dataTags from the picker groups,
+    // which are built from these observations.
+    expect(result.current.observedByInstance.get(id)?.models[0]?.dataTags).toEqual(["eu"]);
+    expect(result.current.presentationObservedByInstance.get(id)?.models[0]?.dataTags).toEqual([
+      "eu",
+    ]);
+    // The tag projection does not widen what a probe reported about capability.
+    expect(result.current.observedByInstance.get(id)?.capabilities).toEqual(
+      observation().capabilities,
+    );
   });
 
   it("clears prior discovery immediately and installs authoritative probe failure", async () => {
@@ -2634,11 +2655,39 @@ function transientCredential(value: string, calls: string[] = []) {
 function snapshot(
   instances: ReadonlyArray<ProviderInstance> = [provider()],
   observedStates: ReadonlyArray<ProviderObservedState> = [],
+  catalogs?: ReadonlyArray<ProviderCatalogSnapshot>,
 ): ProviderRegistrySnapshot {
   return {
     instances,
     defaults: { permissionPersistence: "current-session", version: 0 as never },
     observedStates,
+    ...(catalogs === undefined ? {} : { catalogs }),
+  };
+}
+
+function catalogWithModelTags(
+  dataTags: ReadonlyArray<"eu" | "zdr">,
+  patch: Partial<ProviderCatalogSnapshot> = {},
+): ProviderCatalogSnapshot {
+  return {
+    instanceId: id,
+    version: 1 as never,
+    models: [
+      {
+        id: decodeProviderModelId("model-1"),
+        displayName: "Model One",
+        source: "discovered" as const,
+        verification: "verified" as const,
+        reasoning: "supported" as const,
+        inputModalities: ["text"],
+        options: [],
+        dataTags,
+      },
+    ],
+    manualModelOrder: [],
+    invalidated: false,
+    updatedAt: "2026-07-14T10:00:00.000Z" as never,
+    ...patch,
   };
 }
 

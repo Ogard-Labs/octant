@@ -1,7 +1,7 @@
 import type { ProjectProviderPolicy, ProjectSummary } from "@octant/contracts/projects";
 import type { ProviderInstance, ProviderModel } from "@octant/contracts/providers";
 import type { PickerGroup } from "@octant/domain";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -121,5 +121,38 @@ describe("ProjectProviderPolicySection", () => {
       mode: "whitelist",
       providerInstanceIds: [first.id],
     });
+  });
+
+  it("disables the controls while a policy change is in flight", async () => {
+    const user = userEvent.setup();
+    let settle!: (accepted: boolean) => void;
+    const onChange = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          settle = resolve;
+        }),
+    );
+    const target = provider("80000000-0000-4000-8000-000000000010");
+    render(
+      <ProjectProviderPolicySection
+        onChange={onChange}
+        project={project({ mode: "whitelist", providerInstanceIds: [] })}
+        providerInstances={[target]}
+      />,
+    );
+
+    const section = screen.getByRole("region", { name: "Provider access" });
+    const checkbox = within(section).getByRole("checkbox", { name: /^Gateway/ });
+    await user.click(checkbox);
+
+    // A second toggle sent before the first command returns would carry the
+    // same Project version and be refused as a conflict.
+    expect(checkbox).toBeDisabled();
+    expect(
+      within(section).getByRole("combobox", { name: "Project provider policy" }),
+    ).toBeDisabled();
+
+    settle(true);
+    await waitFor(() => expect(checkbox).toBeEnabled());
   });
 });

@@ -1,7 +1,7 @@
 import type { ProjectProviderPolicy, ProjectSummary } from "@octant/contracts/projects";
 import type { ProviderInstance } from "@octant/contracts/providers";
 import { isProviderAllowedByProjectPolicy, type PickerGroup } from "@octant/domain";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -54,10 +54,24 @@ export function ProjectProviderPolicySection(props: ProjectProviderPolicySection
     () => new Set(policy.providerInstanceIds.map((id) => String(id))),
     [policy.providerInstanceIds],
   );
+  // Each command asserts the Project version it read. A second toggle sent
+  // before the first command returns would carry the stale version and be
+  // refused as a conflict, losing the selection; the controls wait instead.
+  const [pending, setPending] = useState(false);
+  const controlsDisabled = props.disabled === true || pending;
+
+  async function commitPolicy(next: ProjectProviderPolicy): Promise<void> {
+    setPending(true);
+    try {
+      await props.onChange(next);
+    } finally {
+      setPending(false);
+    }
+  }
 
   async function changeMode(mode: ProjectProviderPolicy["mode"]) {
     if (mode === policy.mode) return;
-    await props.onChange({
+    await commitPolicy({
       mode,
       providerInstanceIds: mode === "whitelist" ? policy.providerInstanceIds : [],
     });
@@ -70,7 +84,7 @@ export function ProjectProviderPolicySection(props: ProjectProviderPolicySection
     const providerInstanceIds = props.providerInstances
       .filter((candidate) => next.has(String(candidate.id)))
       .map((candidate) => candidate.id);
-    await props.onChange({ mode: "whitelist", providerInstanceIds });
+    await commitPolicy({ mode: "whitelist", providerInstanceIds });
   }
 
   return (
@@ -92,7 +106,7 @@ export function ProjectProviderPolicySection(props: ProjectProviderPolicySection
         <span>Policy</span>
         <OctantSelectField
           aria-label="Project provider policy"
-          disabled={props.disabled === true}
+          disabled={controlsDisabled}
           onValueChange={(value) => {
             if (value === "all" || value === "eu-zdr" || value === "whitelist") {
               void changeMode(value);
@@ -115,7 +129,7 @@ export function ProjectProviderPolicySection(props: ProjectProviderPolicySection
               <label className="project-provider-policy__provider" key={String(provider.id)}>
                 <OctantCheckbox
                   checked={selected.has(String(provider.id))}
-                  disabled={props.disabled === true}
+                  disabled={controlsDisabled}
                   onChange={() => void toggleProvider(provider)}
                 />
                 <span>{provider.displayName}</span>
@@ -137,11 +151,11 @@ export function ProjectProviderPolicySection(props: ProjectProviderPolicySection
         </p>
       ) : null}
       <OctantButton
-        disabled={props.disabled === true}
+        disabled={controlsDisabled}
         size="sm"
         type="button"
         variant="ghost"
-        onClick={() => void props.onChange(DEFAULT_POLICY)}
+        onClick={() => void commitPolicy(DEFAULT_POLICY)}
       >
         Reset to allow all
       </OctantButton>
