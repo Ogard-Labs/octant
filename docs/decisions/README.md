@@ -133,6 +133,7 @@ distilled successor of the earlier long-form design specifications.
 | [0119](0119-a-work-project-keeps-its-status-in-its-folder.md) | A Work Project keeps its status in its folder | Accepted |
 | [0120](0120-clean-application-background-controls.md) | Clean application background controls | Accepted |
 | [0121](0121-provider-owned-cli-runtime-and-updates.md) | Provider-owned CLI runtimes, profiles, and updates | Accepted |
+| [0122](0122-provider-readiness-probes-reach-provider-endpoints.md) | Provider readiness probes reach provider endpoints | Accepted |
 
 ## Adding an ADR
 

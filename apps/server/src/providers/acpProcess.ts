@@ -29,6 +29,7 @@ import { buildLinuxAllowDefaultDenyLaunch } from "../process/linuxConfinement";
 import {
   materializeOsNetworkEgress,
   resolveDefaultThreadEgressPolicy,
+  resolveProbeEgressPolicy,
 } from "../process/threadEgressPolicy";
 
 export type { AcpSessionMode } from "./acpProfiles";
@@ -435,15 +436,14 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
         // Connection checks are not Chat threads. They must reach the
         // provider's own control plane to authenticate and discover models,
         // while remaining read-only and rooted in the managed home.
-        const networkEgress =
+        const networkEgress = materializeOsNetworkEgress(
           input.purpose === "probe"
-            ? "allow"
-            : materializeOsNetworkEgress(
-                resolveDefaultThreadEgressPolicy({
-                  mode: input.mode,
-                  executionPolicy: input.executionPolicy,
-                }),
-              );
+            ? resolveProbeEgressPolicy()
+            : resolveDefaultThreadEgressPolicy({
+                mode: input.mode,
+                executionPolicy: input.executionPolicy,
+              }),
+        );
         const confinement = makeSeatbeltConfinementLive({
           platform,
           sandboxPath,

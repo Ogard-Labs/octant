@@ -1042,13 +1042,43 @@ describe("WindowChrome", () => {
 
   it("hides native pane tabs while a reader rail replaces the workspace", () => {
     const readerHeader =
-      /html\[data-octant-native-host="true"\]\s+\.primary-workspace-layer:has\([\s\S]*?\)\s+\.workspace-pane__header\s*\{([^}]*)\}/.exec(
+      /html\[data-octant-native-host="true"\]\s+\.primary-workspace-layer:has\(([\s\S]*?)\)\s+\.workspace-pane__header\s*\{([^}]*)\}/.exec(
         styles,
       );
     expect(readerHeader, "missing native reader header rule").not.toBeNull();
 
-    expect(readerHeader?.[1]).toContain("visibility: hidden;");
-    expect(readerHeader?.[1]).toContain("pointer-events: none;");
+    expect(readerHeader?.[2]).toContain("visibility: hidden;");
+    expect(readerHeader?.[2]).toContain("pointer-events: none;");
+
+    // Every rail layer the renderer can mount must be inside :has(...). A rail
+    // class the rule does not list lets the pane tab bleed through its top edge
+    // on native windows, which is the defect this rule exists to prevent.
+    const railSource = readFileSync(
+      resolve(process.cwd(), "src/shell/WorkspaceRailLayers.tsx"),
+      "utf8",
+    );
+    const railClasses = [
+      ...new Set(
+        [...railSource.matchAll(/className="(rail-placeholder|[a-z-]+-layer)"/g)].map(
+          (match) => match[1] ?? "",
+        ),
+      ),
+    ];
+    expect(railClasses).toEqual(
+      expect.arrayContaining([
+        "rail-placeholder",
+        "inbox-layer",
+        "code-board-layer",
+        "archive-layer",
+        "artifact-library-layer",
+        "automation-center-layer",
+        "agents-center-layer",
+      ]),
+    );
+    const covered = (readerHeader?.[1] ?? "")
+      .split(",")
+      .map((selector) => selector.trim().replace(/^>\s*\./u, ""));
+    expect(covered).toEqual(expect.arrayContaining(railClasses));
   });
 
   it("keeps the native drag overlay away from split-pane pointer controls", () => {

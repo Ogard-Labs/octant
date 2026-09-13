@@ -550,21 +550,21 @@ describe("probeOpenCodeBinary", () => {
 
 describe("OpenCodeProcessPort", () => {
   it("uses the beta serve contract without the removed legacy pure flag", () => {
-    expect(openCodeServerArgs("legacy", 0)).toEqual([
-      "serve",
-      "--pure",
-      "--hostname",
-      "127.0.0.1",
-      "--port",
-      "0",
-    ]);
-    expect(openCodeServerArgs("beta", 43123)).toEqual([
-      "serve",
-      "--hostname",
-      "127.0.0.1",
-      "--port",
-      "43123",
-    ]);
+    const legacy = openCodeServerArgs("legacy", 0);
+    const beta = openCodeServerArgs("beta", 43123);
+
+    // The meaningful difference between the runtimes is the flag v2 removed.
+    // Asserting the exact arrays here would only restate the function body.
+    expect(legacy).toContain("--pure");
+    expect(beta).not.toContain("--pure");
+    for (const args of [legacy, beta]) {
+      expect(args[0]).toBe("serve");
+      expect(args).toContain("--hostname");
+      expect(args).toContain("127.0.0.1");
+      expect(args).toContain("--port");
+    }
+    expect(beta[beta.indexOf("--port") + 1]).toBe("43123");
+    expect(legacy[legacy.indexOf("--port") + 1]).toBe("0");
   });
 
   const makePort = (

@@ -68,6 +68,18 @@ export function materializeOsNetworkEgress(policy: ThreadEgressPolicy): OsNetwor
   return policy === "none" ? "none" : "allow";
 }
 
+/**
+ * The egress a provider readiness probe may have.
+ *
+ * A probe is not a thread: it authenticates against the provider's own control
+ * plane to read the model catalog before any thread exists. Resolving the
+ * policy here instead of writing `allow` at the launch site keeps this one
+ * exception named and in the same module as the thread defaults.
+ */
+export function resolveProbeEgressPolicy(): ThreadEgressPolicy {
+  return "provider-endpoints-only";
+}
+
 export function clampChildThreadEgressPolicy(
   input: ClampChildThreadEgressPolicyInput,
 ): ThreadEgressPolicy {

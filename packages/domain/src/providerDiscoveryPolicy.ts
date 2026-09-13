@@ -114,12 +114,22 @@ export function selectPreferredCandidate(
   // runtime's ACP/catalog driver.
   const openCode2 = candidates.find(
     (candidate) =>
-      candidate.driverKind === "opencode" &&
-      (candidate.displayName === "OpenCode 2 preview" ||
-        candidate.binaryPath.endsWith("/opencode2") ||
-        candidate.binaryPath.endsWith("/opencode2.exe")),
+      candidate.driverKind === "opencode" && isOpenCode2BinaryPath(candidate.binaryPath),
   );
   return openCode2 ?? candidates[0];
+}
+
+/**
+ * The `opencode2` executable names the beta runtime wherever it is installed.
+ *
+ * Discovery's preference and the server's driver routing read this one rule,
+ * so the candidate this policy prefers is the candidate the factory routes to
+ * the OpenCode 2 profile. A display name is deliberately not consulted: it is
+ * user-editable and would let a renamed row change which driver runs.
+ */
+export function isOpenCode2BinaryPath(binaryPath: string): boolean {
+  const name = binaryPath.toLowerCase().split(/[\\/]/u).at(-1) ?? "";
+  return name === "opencode2" || name === "opencode2.exe";
 }
 
 /**
