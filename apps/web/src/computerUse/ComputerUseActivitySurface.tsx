@@ -61,6 +61,7 @@ export function ComputerUseActivitySurface(props: {
         <ComputerUseLifecycleSurface
           client={props.client}
           key={session.sessionId}
+          revision={session.sequence}
           scope={{
             sessionId: session.sessionId,
             threadId: session.threadId,

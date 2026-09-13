@@ -3,7 +3,7 @@ import type {
   ComputerUseSessionScope,
   ComputerUseSessionView,
 } from "@octant/contracts/computer-use";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface ComputerUseLifecycleController {
   readonly status: "loading" | "ready" | "unavailable" | "interrupted" | "failed";
@@ -20,6 +20,12 @@ export function useComputerUseLifecycle(options: {
   readonly client: ComputerUseClient;
   readonly scope: ComputerUseSessionScope;
   readonly enabled?: boolean;
+  /**
+   * The host's own session sequence. A new value means the host has new
+   * session content — an approval request, a state change — even though the
+   * scope is unchanged, so the pane must re-inspect.
+   */
+  readonly revision?: number;
 }): ComputerUseLifecycleController {
   const [status, setStatus] = useState<ComputerUseLifecycleController["status"]>("loading");
   const [view, setView] = useState<ComputerUseSessionView | undefined>();
@@ -44,16 +50,39 @@ export function useComputerUseLifecycle(options: {
 
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
 
+  // The activity surface polls and rebuilds each session's scope object every
+  // tick. Depending only on that object re-inspected once per poll and reset
+  // the pane to "Loading computer use…" while its view was still in memory;
+  // depending only on the scope's content missed a pending approval that
+  // arrives without an authority change. Key on the session, its authority,
+  // and the host's own sequence: the effect re-runs exactly when the host has
+  // new content, and a same-session refresh keeps the current view on screen.
+  const scope = options.scope;
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
+  const sessionId = String(scope.sessionId);
+  const scopeKey = `${sessionId}\0${String(scope.threadId)}\0${JSON.stringify(scope.authority)}\0${String(options.revision ?? 0)}`;
+  const currentSessionRef = useRef(sessionId);
+
   useEffect(() => {
     if (!enabled) {
       setStatus("unavailable");
       return;
     }
     const controller = new AbortController();
-    setStatus("loading");
-    setErrorMessage(undefined);
+    const sameSession = currentSessionRef.current === sessionId;
+    currentSessionRef.current = sessionId;
+    if (sameSession) {
+      // Keep the view we hold while the re-inspection runs, so approval
+      // controls already on screen stay until the host's update lands.
+      setErrorMessage(undefined);
+    } else {
+      setView(undefined);
+      setStatus("loading");
+      setErrorMessage(undefined);
+    }
     options.client
-      .inspect(options.scope, controller.signal)
+      .inspect(scopeRef.current, controller.signal)
       .then((next) => {
         if (controller.signal.aborted) return;
         setView(next);
@@ -64,7 +93,7 @@ export function useComputerUseLifecycle(options: {
         fail(error);
       });
     return () => controller.abort();
-  }, [attempt, enabled, fail, options.client, options.scope]);
+  }, [attempt, enabled, fail, options.client, scopeKey, sessionId]);
 
   const decide = useCallback(
     async (decision: "approved" | "denied") => {

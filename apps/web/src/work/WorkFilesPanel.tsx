@@ -86,7 +86,9 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
     }
     const controller = new AbortController();
     let cancelled = false;
-    setStatus("loading");
+    // Keep the rows already on screen during a refresh; the loading line is for
+    // the first read, not for every reload.
+    setStatus((current) => (current === "ready" ? "ready" : "loading"));
     setMessage(undefined);
     void client
       .list({ threadId: props.threadId, projectId }, controller.signal)

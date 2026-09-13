@@ -205,7 +205,9 @@ export function FolderPicker(props: FolderPickerProps) {
       ) : null}
       <div className="folder-picker__list" role="listbox" aria-label="Folders">
         {status === "loading" || searching ? (
-          <p className="folder-picker__status">Loading…</p>
+          <p className="folder-picker__status" role="status">
+            Loading…
+          </p>
         ) : status === "error" ? (
           <div className="folder-picker__status folder-picker__status--error">
             <p>{errorMessage}</p>

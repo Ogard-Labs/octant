@@ -100,6 +100,33 @@ describe("AgentsCenter", () => {
     expect(screen.getByRole("button", { name: "Clear filters" })).toBeVisible();
   });
 
+  it("keeps the rows on screen while a changed filter is in flight", async () => {
+    const user = userEvent.setup();
+    let settleSecond: ((value: { readonly items: readonly [] }) => void) | undefined;
+    const center = vi
+      .fn()
+      .mockResolvedValueOnce({ items: [summary] })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            settleSecond = resolve as never;
+          }),
+      );
+    render(<AgentsCenter client={createClient({ center })} />);
+    expect(await screen.findByText(summary.task)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "History" }));
+
+    // The previous answer stays until the new one arrives; marking the list
+    // busy is the feedback, not a full-pane loading screen.
+    expect(screen.getByText(summary.task)).toBeInTheDocument();
+    expect(screen.queryByText("Loading agent runs.")).not.toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Agent runs" })).toHaveAttribute("aria-busy", "true");
+
+    settleSecond?.({ items: [] });
+    expect(await screen.findByText("No agent runs match these filters")).toBeInTheDocument();
+  });
+
   it("shows unavailable copy when the center query fails", async () => {
     render(
       <AgentsCenter

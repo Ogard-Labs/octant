@@ -188,7 +188,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
     return (
       <section aria-label="Conversation" className="chat-transcript transcript-scroll">
         {lead}
-        <div className="chat-transcript__empty" role="status">
+        <div className="chat-transcript__empty">
           <h2>Start the conversation</h2>
           <p>Ask a question, draft something, or explore an idea.</p>
         </div>
