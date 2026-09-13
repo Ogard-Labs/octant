@@ -1,3 +1,4 @@
+import { useComposerTip } from "../../composer/useComposerTip";
 import {
   ApplicationMentionTypeahead,
   BrowserUseMention,
@@ -30,7 +31,6 @@ import {
   type ReactNode,
 } from "react";
 import { ComposerModelPicker } from "../../providers/ComposerModelPicker";
-import { composerPlaceholder, THREAD_HINT } from "../../composer/composerPlaceholder";
 import { HostSelector } from "../../shell/HostSelector";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
@@ -135,6 +135,13 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft: prompt,
+  });
+  const tip = useComposerTip({
+    scopeKey: "work-draft",
+    threads: threadMentions.composer !== undefined,
+    commands: slash.commandIds,
+    browser: browser.available,
+    computer: computer.available,
   });
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
@@ -363,9 +370,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 }}
                 onKeyDown={handleKeyDown}
                 onPaste={onDraftPaste}
-                placeholder={composerPlaceholder("Describe the work", [
-                  threadMentions.composer === undefined ? undefined : THREAD_HINT,
-                ])}
+                placeholder={tip}
                 rows={3}
                 value={prompt}
               />

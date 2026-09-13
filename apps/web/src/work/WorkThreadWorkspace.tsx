@@ -1,3 +1,4 @@
+import { useComposerTip } from "../composer/useComposerTip";
 import {
   BrowserUseMention,
   ComputerUseMention,
@@ -26,7 +27,6 @@ import type { ProjectId } from "@octant/contracts/projects";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
 import type { PickerGroup } from "@octant/domain";
 import type { ChatComposerThreadMentionChip } from "../chat/ChatComposer";
-import { composerPlaceholder, FILE_HINT, THREAD_HINT } from "../composer/composerPlaceholder";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
@@ -432,6 +432,14 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft: prompt,
+  });
+  const tip = useComposerTip({
+    scopeKey: String(props.threadId),
+    files: props.fileMentionClient !== undefined,
+    threads: threadMentions.composer !== undefined,
+    commands: slash.commandIds,
+    browser: browser.available,
+    computer: computer.available,
   });
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
@@ -1449,14 +1457,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               if (creating || completionLocked) return;
               if (attachFromTransfer(event.clipboardData)) event.preventDefault();
             }}
-            placeholder={
-              turnRunning
-                ? "Send the next message…"
-                : composerPlaceholder("Describe the deliverable or paste a draft", [
-                    props.fileMentionClient === undefined ? undefined : FILE_HINT,
-                    threadMentions.composer === undefined ? undefined : THREAD_HINT,
-                  ])
-            }
+            placeholder={turnRunning ? "Send the next message…" : tip}
             ref={textareaRef}
             rows={4}
             value={prompt}

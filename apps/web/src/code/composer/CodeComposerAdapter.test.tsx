@@ -125,7 +125,7 @@ describe("CodeComposerAdapter", () => {
     render(<CodeComposerAdapter {...defaultProps} />);
     expect(
       screen.getByRole("textbox", { name: "First message" }).getAttribute("placeholder"),
-    ).toMatch(/^Describe what to build/);
+    ).toMatch(/^Tip: /);
   });
 
   it("puts Project, branch, and Environment on the context row above the composer", () => {

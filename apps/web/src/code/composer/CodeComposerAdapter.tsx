@@ -1,3 +1,4 @@
+import { useComposerTip } from "../../composer/useComposerTip";
 import {
   ApplicationMentionTypeahead,
   BrowserUseMention,
@@ -52,7 +53,6 @@ import {
   type ReactNode,
 } from "react";
 import { ComposerModelPicker } from "../../providers/ComposerModelPicker";
-import { composerPlaceholder, THREAD_HINT } from "../../composer/composerPlaceholder";
 import { ThreadComposer } from "../../composer/ThreadComposer";
 import { WelcomeHeading } from "../../composer/WelcomeHeading";
 import { ComposerVoiceButton } from "../../voice/ComposerVoiceButton";
@@ -308,6 +308,14 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft: prompt,
+  });
+  const tip = useComposerTip({
+    scopeKey: "code-draft",
+    threads: threadMentions.composer !== undefined,
+    commands: slash.commandIds,
+    browser: browser.available,
+    computer: computer.available,
+    plan: true,
   });
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
@@ -745,9 +753,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   if (props.creating === true) return;
                   if (attachFromTransfer(event.clipboardData)) event.preventDefault();
                 }}
-                placeholder={composerPlaceholder("Describe what to build", [
-                  threadMentions.composer === undefined ? undefined : THREAD_HINT,
-                ])}
+                placeholder={tip}
                 ref={textareaRef}
                 rows={3}
                 value={prompt}

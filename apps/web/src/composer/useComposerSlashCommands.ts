@@ -98,7 +98,18 @@ export function useComposerSlashCommands(input: {
     }
     return false;
   };
-  return { active, activeIndex, choose, handleKeyDown, listId, matches, open, resolving, sync };
+  return {
+    active,
+    activeIndex,
+    commandIds: commands.map((command) => command.id),
+    choose,
+    handleKeyDown,
+    listId,
+    matches,
+    open,
+    resolving,
+    sync,
+  };
 }
 
 export function ComposerSlashTypeahead(props: {

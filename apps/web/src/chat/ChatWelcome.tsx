@@ -1,3 +1,4 @@
+import { useComposerTip } from "../composer/useComposerTip";
 import { Compass, GraduationCap, ListChecks, PenLine } from "lucide-react";
 import { useCallback, useRef, useState, type KeyboardEvent } from "react";
 import type { ChatControllerStatus } from "./useChatController";
@@ -69,6 +70,7 @@ const starterIdeas = [
 export function ChatWelcome(props: ChatWelcomeProps) {
   const ready = props.status === undefined || props.status === "ready";
   const presentation = draftThreadModePresentation("chat");
+  const tip = useComposerTip({ scopeKey: "chat-welcome" });
   const [prompt, setPrompt] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const trimmed = prompt.trim();
@@ -130,7 +132,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                 disabled={!ready || props.creating}
                 onChange={(event) => setPrompt(event.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={presentation.composerPlaceholder}
+                placeholder={tip}
                 ref={textareaRef}
                 rows={3}
                 value={prompt}
