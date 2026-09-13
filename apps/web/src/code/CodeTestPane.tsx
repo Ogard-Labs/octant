@@ -137,9 +137,14 @@ export function CodeTestPane(props: CodeTestPaneProps) {
     // Entering the cancelling phase before the approval prompt keeps a second
     // click from raising a second cancellation; a refusal puts the run back.
     beginRun({ ...current, state: "cancelling" });
+    const isStillThisRun = () => activeRunRef.current?.operationId === current.operationId;
     const resumeRunning = () => {
       const after = activeRunRef.current;
-      if (after !== undefined && after.state === "cancelling") {
+      if (
+        after !== undefined &&
+        after.operationId === current.operationId &&
+        after.state === "cancelling"
+      ) {
         beginRun({ ...after, state: "running" });
       }
     };
@@ -160,19 +165,20 @@ export function CodeTestPane(props: CodeTestPaneProps) {
     // The run may have settled while the approval was open; a cancellation for
     // a run that already finished would only report it as unavailable.
     if (activeRunRef.current?.state !== "cancelling") return;
+    let cancellationFailure: string | undefined;
     try {
       const next = await props.client.executeOperation(command);
-      if (next.kind === "operation-failed") setFailure(next.failure.message);
+      if (next.kind === "operation-failed") cancellationFailure = next.failure.message;
     } catch {
-      setFailure("Repository test cancellation failed. Reconnect and retry.");
-    } finally {
-      // The run's own call settles the pane's result. A cancel that returns
-      // without the run having stopped leaves the run active so Cancel stays
-      // available; the run clearing the ref is what ends the phase.
-      const after = activeRunRef.current;
-      if (after !== undefined && after.state === "cancelling") {
-        beginRun({ ...after, state: "running" });
-      }
+      cancellationFailure = "Repository test cancellation failed. Reconnect and retry.";
+    }
+    // A delivered cancellation keeps the cancelling phase until the run's own
+    // call ends it, so the pane cannot briefly offer a second Cancel for a run
+    // that is already stopping. Only a refusal or failure returns the run to
+    // running, and only while this run is still the active one.
+    if (cancellationFailure !== undefined && isStillThisRun()) {
+      setFailure(cancellationFailure);
+      resumeRunning();
     }
   };
 

@@ -237,7 +237,11 @@ function useCodeTestResult(options: {
   readonly threadId?: NonNullable<CodeController["activeView"]>["thread"]["id"];
   readonly checkoutId?: NonNullable<CodeController["activeView"]>["checkout"]["id"];
 }): RepositoryTestResult | undefined {
-  const [result, setResult] = useState<RepositoryTestResult>();
+  const [cached, setCached] = useState<{
+    readonly threadId: NonNullable<CodeController["activeView"]>["thread"]["id"];
+    readonly checkoutId: NonNullable<CodeController["activeView"]>["checkout"]["id"];
+    readonly result?: RepositoryTestResult;
+  }>();
   const { client, enabled, threadId, checkoutId } = options;
 
   useEffect(() => {
@@ -248,21 +252,37 @@ function useCodeTestResult(options: {
       threadId === undefined ||
       checkoutId === undefined
     ) {
-      setResult(undefined);
+      setCached(undefined);
       return;
     }
     let active = true;
     void readTestStatus(threadId, checkoutId)
       .then((status) => {
-        if (active) setResult(status.result);
+        if (active)
+          setCached({
+            threadId,
+            checkoutId,
+            ...(status.result === undefined ? {} : { result: status.result }),
+          });
       })
       .catch(() => {
-        if (active) setResult(undefined);
+        if (active) setCached({ threadId, checkoutId });
       });
     return () => void (active = false);
   }, [checkoutId, client, enabled, threadId]);
 
-  return result;
+  // A result is only this checkout's result. When the scope moves, the previous
+  // answer is withheld for the render before the new fetch lands rather than
+  // shown under the new checkout's name.
+  if (
+    !enabled ||
+    cached === undefined ||
+    cached.threadId !== threadId ||
+    cached.checkoutId !== checkoutId
+  ) {
+    return undefined;
+  }
+  return cached.result;
 }
 
 /**

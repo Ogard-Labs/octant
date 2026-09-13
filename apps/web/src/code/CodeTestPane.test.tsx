@@ -4,8 +4,6 @@ import { describe, expect, it, vi } from "vitest";
 import { CodeTestPane } from "./CodeTestPane";
 import { codeClient, evidence, ids, scope, testDefinition } from "./CodeDeliveryPane.test-fixtures";
 
-type TestResult = Extract<CodeOperationResult, { readonly kind: "repository-test-state" }>;
-
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -256,6 +254,12 @@ describe("CodeTestPane", () => {
       }),
     );
 
+    // A delivered cancellation keeps the pane in the cancelling phase until the
+    // run's own call settles, rather than offering a second Cancel for a run
+    // that is already stopping.
+    expect(screen.getByText(/Cancelling Web tests/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Cancel test" })).not.toBeInTheDocument();
+
     pending.resolve({
       kind: "repository-test-state",
       operationId: ids.operation,
@@ -292,6 +296,37 @@ describe("CodeTestPane", () => {
     // The refused cancel approval never reached the host; the run is still
     // cancellable and the pane did not claim it stopped.
     expect(vi.mocked(client.executeOperation)).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Cancel test" })).toBeVisible();
+  });
+
+  it("returns Cancel and reports the host's reason when a cancellation fails", async () => {
+    const client = codeClient();
+    const pending = deferred<CodeOperationResult>();
+    vi.mocked(client.executeOperation).mockImplementation((command) =>
+      command.kind === "cancel-repository-test"
+        ? Promise.resolve({
+            kind: "operation-failed",
+            operationId: command.operationId,
+            failure: { category: "unavailable", message: "Repository test is unavailable." },
+          } as unknown as CodeOperationResult)
+        : pending.promise,
+    );
+    render(
+      <CodeTestPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        createTestRunId={() => ids.testRun as never}
+        definitions={[testDefinition]}
+        executionPolicy="full-access"
+        scope={scope}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Run Web tests" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel test" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Repository test is unavailable/);
+    // The run never stopped, so Cancel is offered again.
     expect(screen.getByRole("button", { name: "Cancel test" })).toBeVisible();
   });
 
