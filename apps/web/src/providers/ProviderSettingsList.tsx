@@ -8,7 +8,7 @@ import type {
   ProviderObservedState,
 } from "@octant/contracts";
 import { isImageProfileDriverKind, supportsProviderCliUpdate } from "@octant/domain";
-import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
@@ -505,6 +505,8 @@ function ProviderRow(props: ProviderRowProps) {
     props.instance,
     props.discoverySnapshot,
   );
+  const detectedLocally = isDetectedLocally(props.instance, props.discoverySnapshot);
+  const canEnable = canEnableProvider(props.instance, props.discoverySnapshot, detectedLocally);
   const isCli =
     props.instance.driverKind === "codex" ||
     props.instance.driverKind === "opencode" ||
@@ -614,7 +616,18 @@ function ProviderRow(props: ProviderRowProps) {
         <ProviderGlyph displayName={name} driverKind={props.instance.driverKind} size={16} />
       </span>
       <span className="prov-main">
-        <span className="prov-name oct-row-label">{name}</span>
+        <span className="prov-name oct-row-label">
+          {name}
+          {detectedLocally ? (
+            <span
+              aria-label="Detected locally"
+              className="provider-settings__local-mark"
+              title="Detected locally on this host"
+            >
+              <CheckCircle2 aria-hidden="true" size={13} strokeWidth={2} />
+            </span>
+          ) : null}
+        </span>
         <span className="prov-meta oct-meta">
           {label} {runtimeLabel}
         </span>
@@ -656,7 +669,7 @@ function ProviderRow(props: ProviderRowProps) {
         </OctantButton>
         <OctantSwitch
           checked={props.instance.enabled}
-          disabled={disabled}
+          disabled={disabled || (!props.instance.enabled && !canEnable)}
           label={`Enable ${name}`}
           onCheckedChange={() => void toggleEnabled()}
         />
@@ -1391,6 +1404,40 @@ function isDisabledDiscoveryInstance(
         candidate.driverKind === instance.driverKind && candidate.binaryPath === binaryPath,
     )
   );
+}
+
+function isDetectedLocally(
+  instance: ProviderInstance,
+  snapshot: DiscoverySnapshot | undefined,
+): boolean {
+  if (snapshot === undefined) return false;
+  if (snapshot.autoRegisteredInstanceIds?.includes(instance.id) === true) return true;
+  if (
+    instance.driverKind === "ollama" &&
+    snapshot.candidates.some((candidate) => candidate.driverKind === "ollama")
+  ) {
+    return true;
+  }
+  const binaryPath = providerBinaryPath(instance);
+  return (
+    binaryPath !== undefined &&
+    snapshot.candidates.some(
+      (candidate) =>
+        candidate.driverKind === instance.driverKind && candidate.binaryPath === binaryPath,
+    )
+  );
+}
+
+function canEnableProvider(
+  instance: ProviderInstance,
+  snapshot: DiscoverySnapshot | undefined,
+  detectedLocally: boolean,
+): boolean {
+  if (!("binaryPath" in instance.configuration)) return true;
+  if (detectedLocally || snapshot === undefined) return true;
+  // A failed or cancelled scan does not prove absence. A completed or partial
+  // scan does, so keep the switch fail-closed until the binary is detected.
+  return snapshot.status === "failed" || snapshot.status === "cancelled";
 }
 
 function providerBinaryPath(instance: ProviderInstance): string | undefined {

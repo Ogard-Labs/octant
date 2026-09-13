@@ -405,6 +405,28 @@ describe("ProviderService", () => {
     expect(acquire).not.toHaveBeenCalled();
   });
 
+  it("refuses to enable a local CLI that the host no longer has", async () => {
+    const fixture = serviceFixture({
+      instances: [provider({ enabled: false })],
+      isProviderExecutableAvailable: () => false,
+    });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-provider-enabled",
+        instanceId,
+        expectedVersion: 1,
+        enabled: true,
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "invalid-configuration",
+        message: expect.stringMatching(/not available on this host/i),
+      },
+    });
+    expect(fixture.append).not.toHaveBeenCalled();
+  });
+
   it("rejects ambiguous duplicate normalized smoke requests", async () => {
     const sessionId = "80000000-0000-4000-8000-000000000021";
     const answerApproval = vi.fn(() => Effect.void);
@@ -2998,6 +3020,7 @@ function serviceFixture(
     readonly withCatalogPersistence?: boolean;
     readonly initialCatalog?: ProviderCatalogSnapshot;
     readonly isDriverPluginEffective?: (driverKind: ProviderInstance["driverKind"]) => boolean;
+    readonly isProviderExecutableAvailable?: (instance: ProviderInstance) => boolean;
     readonly runCliUpdate?: ProviderServiceOptions["runCliUpdate"];
   } = {},
 ) {
@@ -3077,6 +3100,9 @@ function serviceFixture(
       ...(options.isDriverPluginEffective === undefined
         ? {}
         : { isDriverPluginEffective: options.isDriverPluginEffective }),
+      ...(options.isProviderExecutableAvailable === undefined
+        ? {}
+        : { isProviderExecutableAvailable: options.isProviderExecutableAvailable }),
       ...(options.runCliUpdate === undefined ? {} : { runCliUpdate: options.runCliUpdate }),
       uuid: () => crypto.randomUUID(),
       clock: () => now,

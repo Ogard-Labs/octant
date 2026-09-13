@@ -440,7 +440,7 @@ import {
   slowRequestRoute,
   withServerTiming,
 } from "./latencyStatsProjection";
-import { ProviderService } from "./providers/providerService";
+import { isProviderExecutableAvailable, ProviderService } from "./providers/providerService";
 import {
   CANONICAL_REVIEWED_MODEL_MANIFEST,
   refreshReviewedModelManifest,
@@ -3405,6 +3405,7 @@ export function startOctantServer(
     const providerService = new ProviderService({
       persistence,
       runtimeRegistry: providerRuntimeRegistry,
+      isProviderExecutableAvailable,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       clearResumeIdentities: (instanceId) =>

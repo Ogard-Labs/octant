@@ -86,7 +86,7 @@ import {
   isImageProfileDriverKind,
   type CapabilityEvidenceChange,
 } from "@octant/domain";
-import { realpathSync } from "node:fs";
+import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -190,6 +190,8 @@ export interface ProviderServiceOptions {
   /** Clears process-local provider limit evidence when identity/configuration changes. */
   readonly clearRuntimeUsageLimits?: (instanceId: ProviderInstanceId) => void;
   readonly runCliUpdate?: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
+  /** Read-only host fact used to refuse enabling a missing local CLI. */
+  readonly isProviderExecutableAvailable?: (instance: ProviderInstance) => boolean;
   readonly uuid: () => string;
   readonly clock: () => string;
 }
@@ -214,6 +216,7 @@ export class ProviderService implements ProviderServiceApi {
   readonly #clearResumeIdentities: ProviderServiceOptions["clearResumeIdentities"];
   readonly #clearRuntimeUsageLimits: ProviderServiceOptions["clearRuntimeUsageLimits"];
   readonly #runCliUpdate: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
+  readonly #isProviderExecutableAvailable: (instance: ProviderInstance) => boolean;
 
   constructor(options: ProviderServiceOptions) {
     this.#persistence = options.persistence;
@@ -247,6 +250,7 @@ export class ProviderService implements ProviderServiceApi {
     this.#clearResumeIdentities = options.clearResumeIdentities;
     this.#clearRuntimeUsageLimits = options.clearRuntimeUsageLimits;
     this.#runCliUpdate = options.runCliUpdate ?? runProviderCliUpdate;
+    this.#isProviderExecutableAvailable = options.isProviderExecutableAvailable ?? (() => true);
   }
 
   async bootstrap(_authenticatedWindowId: WindowId): Promise<ProviderRegistrySnapshot> {
@@ -1050,6 +1054,15 @@ export class ProviderService implements ProviderServiceApi {
           await this.#runtime.invalidateRuntime(current.id);
           eventName = "provider.instance-configuration-changed@1";
         } else {
+          if (
+            command.kind === "set-provider-enabled" &&
+            command.enabled &&
+            !this.#isProviderExecutableAvailable(current)
+          ) {
+            throw this.#invalid(
+              "This provider CLI is not available on this host. Run discovery again or update its binary path before enabling it.",
+            );
+          }
           instance = setProviderEnabled(current, { enabled: command.enabled, updatedAt });
           if (!instance.enabled && this.#runtime.activeSessionCount(instance.id) === 0) {
             await this.#runtime.invalidateRuntime(instance.id);
@@ -1693,6 +1706,22 @@ function providerBinaryPath(instance: ProviderInstance): string {
     });
   }
   return instance.configuration.binaryPath;
+}
+
+/**
+ * Check the configured executable without starting it. This is deliberately
+ * narrower than a provider probe: enabling a missing binary should fail
+ * immediately, while authentication and catalog readiness remain probe facts.
+ */
+export function isProviderExecutableAvailable(instance: ProviderInstance): boolean {
+  if (!("binaryPath" in instance.configuration)) return true;
+  try {
+    if (!statSync(instance.configuration.binaryPath).isFile()) return false;
+    accessSync(instance.configuration.binaryPath, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

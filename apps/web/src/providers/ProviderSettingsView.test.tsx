@@ -2072,6 +2072,7 @@ describe("ProviderSettingsView", () => {
 
     const card = screen.getByRole("article", { name: "Detected Codex" });
     expect(within(card).getByText("Detected on this host — enable to use")).toBeVisible();
+    expect(within(card).getByLabelText("Detected locally")).toBeVisible();
   });
 
   it("exposes detected-provider enablement without opening Details", () => {
@@ -2154,6 +2155,23 @@ describe("ProviderSettingsView", () => {
     expect(props.onSetEnabled).toHaveBeenCalledWith(id, true);
     expect(props.onProbe).toHaveBeenCalledWith(id, { quiet: true });
     expect(props.onProbe).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a local CLI disabled when the completed scan cannot find its binary", () => {
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture({
+          instance: provider({ enabled: false }),
+          discoverySnapshot: discoverySnapshot({ candidates: [] }),
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("switch", { name: "Enable Existing CLI" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.queryByLabelText("Detected locally")).toBeNull();
   });
 
   it("renders the Bedrock Mantle setup guide only for an OpenAI-compatible endpoint", async () => {
