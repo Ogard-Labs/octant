@@ -19,6 +19,7 @@ import {
   captureOpenCodeRuntimeConfig,
   createPrivateOpenCodeProfile,
   makeOpenCodeProcessLive,
+  openCodeServerArgs,
   projectOpenCodeRuntimeConfig,
   probeOpenCodeBinary,
   resolveOpenCodeRuntimeConfig,
@@ -357,6 +358,16 @@ describe("probeOpenCodeBinary", () => {
     }
   });
 
+  it("makes OpenCode's default provider data root explicit for confinement", () => {
+    const root = fixtureRoot();
+    const profile = createPrivateOpenCodeProfile({ content: "{}" }, { HOME: root }, () => root);
+    try {
+      expect(profile.environment.XDG_DATA_HOME).toBe(join(root, ".local", "share"));
+    } finally {
+      profile.cleanup();
+    }
+  });
+
   it("does not persist raw provider credentials from a routing projection", () => {
     const root = fixtureRoot();
     const profile = createPrivateOpenCodeProfile(
@@ -538,6 +549,24 @@ describe("probeOpenCodeBinary", () => {
 });
 
 describe("OpenCodeProcessPort", () => {
+  it("uses the beta serve contract without the removed legacy pure flag", () => {
+    expect(openCodeServerArgs("legacy", 0)).toEqual([
+      "serve",
+      "--pure",
+      "--hostname",
+      "127.0.0.1",
+      "--port",
+      "0",
+    ]);
+    expect(openCodeServerArgs("beta", 43123)).toEqual([
+      "serve",
+      "--hostname",
+      "127.0.0.1",
+      "--port",
+      "43123",
+    ]);
+  });
+
   const makePort = (
     overrides: OpenCodeProcessOptions = {},
     dependencies: OpenCodeProcessDependencies = {},
@@ -550,7 +579,7 @@ describe("OpenCodeProcessPort", () => {
         confinement: passthroughConfinement,
         ...overrides,
       },
-      dependencies,
+      { reserveLoopbackPort: async () => 43123, ...dependencies },
     );
 
   it("passes the explicit mode and policy to the OS confinement port before spawning", async () => {

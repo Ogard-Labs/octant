@@ -14,7 +14,8 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { randomBytes } from "node:crypto";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
+import { createServer } from "node:net";
 import type { Readable } from "node:stream";
 import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
 import { Cause, Effect, Exit, Option, type Scope } from "effect";
@@ -80,6 +81,7 @@ export interface OpenCodeProcessOptions {
 
 export interface OpenCodeProcessDependencies {
   readonly terminateProcessGroup?: (pid: number) => Promise<void>;
+  readonly reserveLoopbackPort?: () => Promise<number>;
 }
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 2_000;
@@ -107,6 +109,7 @@ interface ResolvedOpenCodeProcessOptions {
   readonly shutdownTimeoutMs: number;
   readonly startupTimeoutMs: number;
   readonly terminateProcessGroup: ((pid: number) => Promise<void>) | undefined;
+  readonly reserveLoopbackPort: () => Promise<number>;
 }
 
 interface ManagedOpenCodeServer {
@@ -569,6 +572,12 @@ export function createPrivateOpenCodeProfile(
     const environment = scrubOpenCodeConfigEnvironment(
       childProcessEnvironment(inheritedEnvironment),
     );
+    // OpenCode defaults to `$HOME/.local/share` when XDG_DATA_HOME is absent.
+    // Make that default explicit so the Seatbelt profile can grant only the
+    // provider-owned `opencode` child instead of accidentally denying logs and
+    // credentials or reopening the whole data directory.
+    const dataHome =
+      environment.XDG_DATA_HOME ?? join(environment.HOME ?? homedir(), ".local", "share");
     Object.assign(environment, {
       OPENCODE_CONFIG: configPath,
       OPENCODE_CONFIG_DIR: configDirectory,
@@ -584,6 +593,7 @@ export function createPrivateOpenCodeProfile(
       TMPDIR: tempHome,
       XDG_CACHE_HOME: cacheHome,
       XDG_CONFIG_HOME: configHome,
+      XDG_DATA_HOME: dataHome,
       XDG_STATE_HOME: stateHome,
     });
     const bounded = projectOpenCodeRuntimeConfig(parsed);
@@ -740,14 +750,48 @@ interface OpenCodeLaunch {
   readonly environment: NodeJS.ProcessEnv;
 }
 
+export function openCodeServerArgs(runtime: OpenCodeRuntime, port: number): ReadonlyArray<string> {
+  return [
+    "serve",
+    ...(runtime === "legacy" ? ["--pure"] : []),
+    "--hostname",
+    "127.0.0.1",
+    "--port",
+    String(port),
+  ];
+}
+
+function reserveLoopbackPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    const fail = (error: Error) => {
+      server.close(() => reject(error));
+    };
+    server.once("error", fail);
+    server.listen({ host: "127.0.0.1", port: 0 }, () => {
+      const address = server.address();
+      const port = typeof address === "object" && address !== null ? address.port : undefined;
+      if (port === undefined || port < 1 || port > 65_535) {
+        fail(new Error("OpenCode loopback port could not be reserved."));
+        return;
+      }
+      server.close((error) => (error === undefined ? resolve(port) : reject(error)));
+    });
+  });
+}
+
 function prepareOpenCodeLaunch(
   input: OpenCodeProcessStartInput,
   profile: PrivateOpenCodeProfile,
   confinement: SeatbeltConfinementPort,
+  runtime: OpenCodeRuntime,
+  port: number,
 ): Effect.Effect<OpenCodeLaunch, ProviderFailure> {
   const mode = input.mode ?? "code";
   const executionPolicy = input.executionPolicy ?? "approval-gated";
-  const args = ["serve", "--pure", "--hostname", "127.0.0.1", "--port", "0"];
+  // OpenCode 2 removed the legacy `--pure` serve flag. Keep the runtime
+  // protocol selected by the version probe aligned with its CLI contract.
+  const args = openCodeServerArgs(runtime, port);
   return Effect.try({
     try: () => {
       const root = realpathSync(input.cwd);
@@ -946,203 +990,224 @@ function acquireOpenCodeServer(
   const invalid = validateBinaryPath(input.binaryPath);
   if (invalid !== undefined) return Effect.fail(invalid);
 
-  return Effect.async<ManagedOpenCodeServer, ProviderFailure>((resume) => {
-    let profile: PrivateOpenCodeProfile;
-    try {
-      profile = createPrivateOpenCodeProfile(
-        options.runtimeConfig,
-        options.inheritedEnvironment ?? process.env,
-      );
-    } catch {
-      resume(
-        Effect.fail(
-          failure(
-            "invalid-configuration",
-            "OpenCode private runtime profile could not be created.",
-          ),
-        ),
-      );
-      return cleanupDefect(async () => undefined);
-    }
-    const password = randomBytes(32).toString("base64url");
-    const username = runtime === "beta" ? "opencode" : "octant";
-    const authorization = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
-    const prepared = Effect.runSyncExit(prepareOpenCodeLaunch(input, profile, options.confinement));
-    if (Exit.isFailure(prepared)) {
-      profile.cleanup();
-      resume(
-        Effect.fail(
-          Option.getOrElse(Cause.failureOption(prepared.cause), () =>
-            failure("incompatible", "OpenCode process confinement could not be prepared."),
-          ),
-        ),
-      );
-      return cleanupDefect(async () => undefined);
-    }
-    const launch = prepared.value;
-    let child: OpenCodeChild;
-    try {
-      child = spawn(launch.command, launch.args, {
-        cwd: launch.cwd,
-        detached: process.platform !== "win32",
-        env: {
-          ...launch.environment,
-          OPENCODE_SERVER_USERNAME: username,
-          OPENCODE_SERVER_PASSWORD: password,
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch {
-      profile.cleanup();
-      resume(Effect.fail(failure("unavailable", "OpenCode server could not be started.")));
-      return cleanupDefect(async () => undefined);
-    }
-    const childExited = new Promise<void>((resolveExit) => child.once("exit", () => resolveExit()));
-    let ownershipReady: Promise<void> = Promise.resolve();
-    if (child.pid !== undefined && onProcessStarted !== undefined) {
-      ownershipReady = onProcessStarted({ pid: child.pid, exited: childExited }).then(
-        () => undefined,
-      );
-      void ownershipReady.catch(() => undefined);
-    }
-    const terminate = makeProcessTerminator(
-      child,
-      options.shutdownTimeoutMs,
-      options.terminateProcessGroup,
-    );
-    let settled = false;
-    let stdout = "";
-    let stderr = "";
-
-    const cleanup = () => {
-      clearTimeout(timeout);
-      child.stdout.off("data", onStdout);
-      child.stderr.off("data", onStderr);
-      child.off("error", onError);
-      child.off("exit", onExit);
-    };
-    const cleanupProfile = () => {
+  return Effect.gen(function* () {
+    // OpenCode 2 rejects port 0, unlike the legacy server. Reserve an
+    // ephemeral loopback port before launch so every v2 connection remains
+    // isolated without relying on the provider's fixed default port.
+    const port =
+      runtime === "beta"
+        ? yield* Effect.tryPromise({
+            try: options.reserveLoopbackPort,
+            catch: () => failure("unavailable", "OpenCode loopback port could not be reserved."),
+          })
+        : 0;
+    return yield* Effect.async<ManagedOpenCodeServer, ProviderFailure>((resume) => {
+      let profile: PrivateOpenCodeProfile;
       try {
-        profile.cleanup();
-      } catch {
-        // Profile cleanup is best effort after the owned process is gone.
-      }
-    };
-    const terminateOwned = () => terminate().finally(cleanupProfile);
-    const finishFailure = (providerFailure: ProviderFailure) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      void terminateOwned().then(
-        () => {
-          cleanupProfile();
-          resume(Effect.fail(providerFailure));
-        },
-        () => resume(Effect.fail(cleanupFailure())),
-      );
-    };
-    const acceptLine = (line: string) => {
-      const match = READINESS_PATTERN.exec(line);
-      if (match === null) return;
-      let url: URL;
-      try {
-        url = new URL(match[1]!);
-      } catch {
-        finishFailure(failure("protocol", "OpenCode server reported invalid readiness data."));
-        return;
-      }
-      if (url.hostname !== "127.0.0.1") {
-        finishFailure(
-          failure("protocol", "OpenCode server reported a non-loopback readiness endpoint."),
+        profile = createPrivateOpenCodeProfile(
+          options.runtimeConfig,
+          options.inheritedEnvironment ?? process.env,
         );
-        return;
+      } catch {
+        resume(
+          Effect.fail(
+            failure(
+              "invalid-configuration",
+              "OpenCode private runtime profile could not be created.",
+            ),
+          ),
+        );
+        return cleanupDefect(async () => undefined);
       }
-      if (
-        url.protocol !== "http:" ||
-        url.username !== "" ||
-        url.password !== "" ||
-        url.pathname !== "/" ||
-        url.search !== "" ||
-        url.hash !== "" ||
-        url.port === "" ||
-        Number(url.port) < 1 ||
-        Number(url.port) > 65_535
-      ) {
-        finishFailure(failure("protocol", "OpenCode server reported invalid readiness data."));
-        return;
+      const password = randomBytes(32).toString("base64url");
+      const username = runtime === "beta" ? "opencode" : "octant";
+      const authorization = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+      const prepared = Effect.runSyncExit(
+        prepareOpenCodeLaunch(input, profile, options.confinement, runtime, port),
+      );
+      if (Exit.isFailure(prepared)) {
+        profile.cleanup();
+        resume(
+          Effect.fail(
+            Option.getOrElse(Cause.failureOption(prepared.cause), () =>
+              failure("incompatible", "OpenCode process confinement could not be prepared."),
+            ),
+          ),
+        );
+        return cleanupDefect(async () => undefined);
       }
-      if (settled || child.pid === undefined) return;
-      settled = true;
-      cleanup();
-      void ownershipReady.then(
-        () =>
-          resume(
-            Effect.succeed({
-              connection: {
-                authorization,
-                pid: child.pid!,
-                ...(isolationAttested && launch.command !== input.binaryPath
-                  ? { isolatedConfiguration: true as const }
-                  : {}),
-                runtime,
-                version,
-                url,
+      const launch = prepared.value;
+      let child: OpenCodeChild;
+      try {
+        child = spawn(launch.command, launch.args, {
+          cwd: launch.cwd,
+          detached: process.platform !== "win32",
+          env: {
+            ...launch.environment,
+            OPENCODE_SERVER_USERNAME: username,
+            OPENCODE_SERVER_PASSWORD: password,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      } catch {
+        profile.cleanup();
+        resume(Effect.fail(failure("unavailable", "OpenCode server could not be started.")));
+        return cleanupDefect(async () => undefined);
+      }
+      const childExited = new Promise<void>((resolveExit) =>
+        child.once("exit", () => resolveExit()),
+      );
+      let ownershipReady: Promise<void> = Promise.resolve();
+      if (child.pid !== undefined && onProcessStarted !== undefined) {
+        ownershipReady = onProcessStarted({ pid: child.pid, exited: childExited }).then(
+          () => undefined,
+        );
+        void ownershipReady.catch(() => undefined);
+      }
+      const terminate = makeProcessTerminator(
+        child,
+        options.shutdownTimeoutMs,
+        options.terminateProcessGroup,
+      );
+      let settled = false;
+      let stdout = "";
+      let stderr = "";
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        child.stdout.off("data", onStdout);
+        child.stderr.off("data", onStderr);
+        child.off("error", onError);
+        child.off("exit", onExit);
+      };
+      const cleanupProfile = () => {
+        try {
+          profile.cleanup();
+        } catch {
+          // Profile cleanup is best effort after the owned process is gone.
+        }
+      };
+      const terminateOwned = () => terminate().finally(cleanupProfile);
+      const finishFailure = (providerFailure: ProviderFailure) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        void terminateOwned().then(
+          () => {
+            cleanupProfile();
+            resume(Effect.fail(providerFailure));
+          },
+          () => resume(Effect.fail(cleanupFailure())),
+        );
+      };
+      const acceptLine = (line: string) => {
+        const match = READINESS_PATTERN.exec(line);
+        if (match === null) return;
+        let url: URL;
+        try {
+          url = new URL(match[1]!);
+        } catch {
+          finishFailure(failure("protocol", "OpenCode server reported invalid readiness data."));
+          return;
+        }
+        if (url.hostname !== "127.0.0.1") {
+          finishFailure(
+            failure("protocol", "OpenCode server reported a non-loopback readiness endpoint."),
+          );
+          return;
+        }
+        if (
+          url.protocol !== "http:" ||
+          url.username !== "" ||
+          url.password !== "" ||
+          url.pathname !== "/" ||
+          url.search !== "" ||
+          url.hash !== "" ||
+          url.port === "" ||
+          Number(url.port) < 1 ||
+          Number(url.port) > 65_535
+        ) {
+          finishFailure(failure("protocol", "OpenCode server reported invalid readiness data."));
+          return;
+        }
+        if (settled || child.pid === undefined) return;
+        settled = true;
+        cleanup();
+        void ownershipReady.then(
+          () =>
+            resume(
+              Effect.succeed({
+                connection: {
+                  authorization,
+                  pid: child.pid!,
+                  ...(isolationAttested && launch.command !== input.binaryPath
+                    ? { isolatedConfiguration: true as const }
+                    : {}),
+                  runtime,
+                  version,
+                  url,
+                },
+                terminate: terminateOwned,
+              }),
+            ),
+          () =>
+            void terminateOwned().then(
+              () => {
+                cleanupProfile();
+                resume(
+                  Effect.fail(
+                    failure("provider-failed", "OpenCode process receipt is unavailable."),
+                  ),
+                );
               },
-              terminate: terminateOwned,
-            }),
+              () => resume(Effect.fail(cleanupFailure())),
+            ),
+        );
+      };
+      const consumeLines = (source: "stdout" | "stderr", chunk: Buffer) => {
+        let pending = source === "stdout" ? stdout : stderr;
+        pending += chunk.toString("utf8");
+        if (pending.length > 16_384) pending = pending.slice(-16_384);
+        let newline = pending.indexOf("\n");
+        while (newline !== -1) {
+          const rawLine = pending.slice(0, newline);
+          acceptLine(rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine);
+          pending = pending.slice(newline + 1);
+          newline = pending.indexOf("\n");
+        }
+        if (source === "stdout") stdout = pending;
+        else stderr = pending;
+      };
+      const onStdout = (chunk: Buffer) => consumeLines("stdout", chunk);
+      const onStderr = (chunk: Buffer) => consumeLines("stderr", chunk);
+      const onError = () => {
+        safeDiagnostic(options.onDiagnostic, "OpenCode server failed to start.");
+        finishFailure(failure("unavailable", "OpenCode server could not be started."));
+      };
+      const onExit = () => {
+        safeDiagnostic(options.onDiagnostic, "OpenCode server exited before readiness.");
+        finishFailure(failure("unavailable", "OpenCode server exited before becoming ready."));
+      };
+      const timeout = setTimeout(() => {
+        safeDiagnostic(options.onDiagnostic, "OpenCode server readiness timed out.");
+        finishFailure(
+          failure(
+            "unavailable",
+            "OpenCode server did not become ready before the startup timeout.",
           ),
-        () =>
-          void terminateOwned().then(
-            () => {
-              cleanupProfile();
-              resume(
-                Effect.fail(failure("provider-failed", "OpenCode process receipt is unavailable.")),
-              );
-            },
-            () => resume(Effect.fail(cleanupFailure())),
-          ),
-      );
-    };
-    const consumeLines = (source: "stdout" | "stderr", chunk: Buffer) => {
-      let pending = source === "stdout" ? stdout : stderr;
-      pending += chunk.toString("utf8");
-      if (pending.length > 16_384) pending = pending.slice(-16_384);
-      let newline = pending.indexOf("\n");
-      while (newline !== -1) {
-        const rawLine = pending.slice(0, newline);
-        acceptLine(rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine);
-        pending = pending.slice(newline + 1);
-        newline = pending.indexOf("\n");
-      }
-      if (source === "stdout") stdout = pending;
-      else stderr = pending;
-    };
-    const onStdout = (chunk: Buffer) => consumeLines("stdout", chunk);
-    const onStderr = (chunk: Buffer) => consumeLines("stderr", chunk);
-    const onError = () => {
-      safeDiagnostic(options.onDiagnostic, "OpenCode server failed to start.");
-      finishFailure(failure("unavailable", "OpenCode server could not be started."));
-    };
-    const onExit = () => {
-      safeDiagnostic(options.onDiagnostic, "OpenCode server exited before readiness.");
-      finishFailure(failure("unavailable", "OpenCode server exited before becoming ready."));
-    };
-    const timeout = setTimeout(() => {
-      safeDiagnostic(options.onDiagnostic, "OpenCode server readiness timed out.");
-      finishFailure(
-        failure("unavailable", "OpenCode server did not become ready before the startup timeout."),
-      );
-    }, options.startupTimeoutMs);
+        );
+      }, options.startupTimeoutMs);
 
-    child.stdout.on("data", onStdout);
-    child.stderr.on("data", onStderr);
-    child.once("error", onError);
-    child.once("exit", onExit);
+      child.stdout.on("data", onStdout);
+      child.stderr.on("data", onStderr);
+      child.once("error", onError);
+      child.once("exit", onExit);
 
-    return cleanupDefect(async () => {
-      if (!settled) settled = true;
-      cleanup();
-      await terminateOwned();
+      return cleanupDefect(async () => {
+        if (!settled) settled = true;
+        cleanup();
+        await terminateOwned();
+      });
     });
   });
 }
@@ -1157,6 +1222,7 @@ export function makeOpenCodeProcessLive(
     shutdownTimeoutMs: options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
     startupTimeoutMs: options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS,
     terminateProcessGroup: dependencies.terminateProcessGroup,
+    reserveLoopbackPort: dependencies.reserveLoopbackPort ?? reserveLoopbackPort,
     confinement: options.confinement ?? makeSeatbeltConfinementLive(),
   };
 

@@ -110,6 +110,7 @@ describe("makeProviderDriver", () => {
         managedHome: `/managed/${driverKind}/${instanceId}`,
         mode: "chat",
         executionPolicy: "approval-gated",
+        purpose: "probe",
         onProcessStarted: expect.any(Function),
       });
       expect(fixture.codexStart).not.toHaveBeenCalled();
@@ -145,6 +146,7 @@ describe("makeProviderDriver", () => {
         managedHome: `/managed/${driverKind}/${instanceId}`,
         mode: "chat",
         executionPolicy: "approval-gated",
+        purpose: "probe",
         onProcessStarted: expect.any(Function),
       });
       expect(fixture.acpStart.mock.calls[0]?.[0]).not.toHaveProperty("apiKey");

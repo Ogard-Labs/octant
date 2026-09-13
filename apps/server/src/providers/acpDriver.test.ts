@@ -265,7 +265,7 @@ async function collectTerminal(
 
 describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
   it("probes through the managed home and discovers models without a prompt", async () => {
-    const { driver, client, registry, active, released } = fixture(profile);
+    const { driver, client, registry, active, released, starts } = fixture(profile);
     const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
     expect(result).toMatchObject({
       instanceId,
@@ -291,6 +291,11 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     });
     expect(client.newSession).toHaveBeenCalledOnce();
     expect(client.newSession).toHaveBeenCalledWith(managedHome);
+    expect(starts[0]).toMatchObject({
+      mode: "chat",
+      executionPolicy: "approval-gated",
+      purpose: "probe",
+    });
     expect(client.prompt).not.toHaveBeenCalled();
     expect(client.authenticate).toHaveBeenCalledTimes(profile.authenticateOnProbe ? 1 : 0);
     if (profile.closesSessions) {
@@ -1026,6 +1031,7 @@ describe("ACP provider driver profile quirks", () => {
         managedHome,
         mode: "chat",
         executionPolicy: "approval-gated",
+        purpose: "probe",
         apiKey: "secret-provider-key",
         onProcessStarted: expect.any(Function),
       },
