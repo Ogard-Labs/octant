@@ -114,7 +114,7 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
               {PR_STATE_LABELS[detail.pullRequestState]}
             </OctantBadge>
             <span className="code-pr-review__meta-item">
-              <GitBranch aria-hidden="true" size={13} strokeWidth={1.8} />
+              <GitBranch aria-hidden="true" size={14} strokeWidth={1.8} />
               {detail.headBranch} → {detail.baseRepository}:{detail.baseBranch}
             </span>
             {detail.author.length === 0 ? null : (
@@ -122,7 +122,7 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
             )}
           </p>
           <p className="code-project-pull-requests__status code-pr-review__freshness" role="status">
-            <Activity aria-hidden="true" size={13} strokeWidth={1.8} />
+            <Activity aria-hidden="true" size={14} strokeWidth={1.8} />
             {freshnessCopy(props.freshness)}
           </p>
         </div>
@@ -189,7 +189,7 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
               type="button"
               variant="ghost"
             >
-              <RefreshCw aria-hidden="true" size={13} strokeWidth={1.8} />
+              <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
               Refresh detail
             </OctantButton>
           )}

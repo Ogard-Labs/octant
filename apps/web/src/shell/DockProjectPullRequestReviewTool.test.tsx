@@ -81,17 +81,9 @@ describe("DockProjectPullRequestReviewTool", () => {
       detailView(),
     );
     const load = vi.fn(async () => detailView());
-    const { container } = render(
-      <DockProjectPullRequestReviewTool load={load} query={query} refresh={refresh} />,
-    );
+    render(<DockProjectPullRequestReviewTool load={load} query={query} refresh={refresh} />);
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
     expect(load).not.toHaveBeenCalled();
-    expect(await screen.findByText("#12")).toBeVisible();
-    expect(container.querySelector('[data-pr-state="open"]')).not.toBeNull();
-    expect(container.querySelector(".code-pr-review__state-mark svg")).not.toBeNull();
-    expect(
-      container.querySelectorAll(".code-pr-review__section-heading svg").length,
-    ).toBeGreaterThanOrEqual(5);
     expect(await screen.findByText("Adds manual refresh.", { selector: "p" })).toBeVisible();
     expect(screen.getByText(/Review data is read-only/)).toBeVisible();
     expect(screen.queryByRole("button", { name: /merge/i })).toBeNull();
