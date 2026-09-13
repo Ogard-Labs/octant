@@ -2201,7 +2201,25 @@ function ensureHostTray(): void {
   }
   updateHostTray();
   if (hostStatusPoll === undefined) {
-    hostStatusPoll = setInterval(() => void refreshHostActivity(), 2_000);
+    // The tray is often the only visible surface, so it cannot stop probing
+    // when every window is closed. It can probe less often: 2 s while a window
+    // is visible, 10 s when the app is only in the menu bar.
+    let idleTicks = 0;
+    let probing = false;
+    hostStatusPoll = setInterval(() => {
+      const visible = BrowserWindow.getAllWindows().some((window) => window.isVisible());
+      if (visible) {
+        idleTicks = 0;
+      } else {
+        idleTicks += 1;
+        if (idleTicks % 5 !== 0) return;
+      }
+      if (probing) return;
+      probing = true;
+      void refreshHostActivity().finally(() => {
+        probing = false;
+      });
+    }, 2_000);
     hostStatusPoll.unref?.();
   }
 }

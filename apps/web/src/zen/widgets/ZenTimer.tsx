@@ -1,6 +1,7 @@
 import type { ZenTimerAction, ZenTimerElementPayload } from "@octant/contracts/zen";
 import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
+import { scheduleVisibleInterval } from "../../polling/documentVisibility";
 
 export interface ZenTimerProps {
   readonly timer: ZenTimerElementPayload;
@@ -10,13 +11,15 @@ export interface ZenTimerProps {
 }
 
 export function ZenTimer({ timer, reducedMotion, onAction, onElapsed }: ZenTimerProps) {
-  const [displayRemainingMs, setDisplayRemainingMs] = useState(timer.remainingMs);
+  const [displayRemainingSeconds, setDisplayRemainingSeconds] = useState(() =>
+    Math.ceil(timer.remainingMs / 1_000),
+  );
   const elapsedReported = useRef(false);
 
   useEffect(() => {
     elapsedReported.current = false;
     if (timer.status !== "running") {
-      setDisplayRemainingMs(timer.remainingMs);
+      setDisplayRemainingSeconds(Math.ceil(timer.remainingMs / 1_000));
       return;
     }
 
@@ -33,19 +36,19 @@ export function ZenTimer({ timer, reducedMotion, onAction, onElapsed }: ZenTimer
         deadline === null
           ? monotonicRemaining
           : Math.max(0, Math.min(monotonicRemaining, deadline - Date.now()));
-      setDisplayRemainingMs(next);
+      const nextSeconds = Math.ceil(next / 1_000);
+      // The face shows whole seconds; a quarter-second tick that changes no
+      // digit should not re-render the widget.
+      setDisplayRemainingSeconds((current) => (current === nextSeconds ? current : nextSeconds));
       if (next === 0 && !elapsedReported.current) {
         elapsedReported.current = true;
         onElapsed?.();
       }
     };
     update();
-    const interval = setInterval(update, reducedMotion ? 1_000 : 250);
-    document.addEventListener("visibilitychange", update);
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener("visibilitychange", update);
-    };
+    // Hidden windows do not need a running timer face; becoming visible ticks
+    // once so the face is correct before the person sees it.
+    return scheduleVisibleInterval(update, reducedMotion ? 1_000 : 250);
   }, [
     onElapsed,
     reducedMotion,
@@ -56,7 +59,7 @@ export function ZenTimer({ timer, reducedMotion, onAction, onElapsed }: ZenTimer
     timer.status,
   ]);
 
-  const roundedSeconds = Math.ceil(displayRemainingMs / 1_000);
+  const roundedSeconds = displayRemainingSeconds;
   const minutes = Math.floor(roundedSeconds / 60);
   const seconds = roundedSeconds % 60;
   const statusLabel =

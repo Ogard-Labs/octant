@@ -1,6 +1,7 @@
 import type { AgentMessageMessagingFacts } from "@octant/contracts";
 import type { AgentMessageClient } from "@octant/client-runtime/agent-message-client";
 import { useEffect, useState } from "react";
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 
 export interface AgentMessagingFactsRowProps {
   readonly client: AgentMessageClient | undefined;
@@ -42,10 +43,12 @@ export function AgentMessagingFactsRow(props: AgentMessagingFactsRowProps) {
         });
     };
     read();
-    const timer = window.setInterval(read, REFRESH_MS);
+    // A hidden window should not keep asking the host for a status row nobody
+    // can see; becoming visible refreshes it before the person reads it.
+    const stop = scheduleVisibleInterval(read, REFRESH_MS);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      stop();
     };
     // The client identity is stable for the surface's lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { CornerDownLeft, Search } from "lucide-react";
 import {
   describeChord,
@@ -53,7 +53,11 @@ export function isCommandPaletteEvent(
  * visible `Enter` affordance on screen, so its state never rests on colour.
  */
 export function CommandPalette() {
-  const commands = useOctantCommands().filter((command) => command.action.kind === "run");
+  const registryCommands = useOctantCommands();
+  const commands = useMemo(
+    () => registryCommands.filter((command) => command.action.kind === "run"),
+    [registryCommands],
+  );
   const { keybindings } = useKeybindings();
   const apple = isApplePlatform();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -82,16 +86,30 @@ export function CommandPalette() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [available, keybindings, open]);
 
-  if (!open) return null;
-
   // One order for everything. Grouping is the palette's affordance — a query
   // that matches a Project and a thread says so — but it reorders the ranked
   // results, so the grouped order is flattened and *that* is what the arrow
   // keys move through and what Enter runs. Indexing the ranked list instead
   // would run a different command than the row drawn as active.
-  const groups = groupOctantCommands(filterOctantCommands(commands, query));
-  const results = groups.flatMap((group) => group.commands);
-  const indexOfCommand = new Map(results.map((command, index) => [command.id, index]));
+  const { groups, results, indexOfCommand } = useMemo(() => {
+    if (!open) {
+      return {
+        groups: [],
+        results: [],
+        indexOfCommand: new Map<string, number>(),
+      };
+    }
+    const nextGroups = groupOctantCommands(filterOctantCommands(commands, query));
+    const nextResults = nextGroups.flatMap((group) => group.commands);
+    return {
+      groups: nextGroups,
+      results: nextResults,
+      indexOfCommand: new Map(nextResults.map((command, index) => [command.id, index])),
+    };
+  }, [commands, open, query]);
+
+  if (!open) return null;
+
   const active = results.length === 0 ? -1 : Math.min(activeIndex, results.length - 1);
   const statusMessage =
     results.length === 0

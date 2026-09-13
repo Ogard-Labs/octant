@@ -1,5 +1,6 @@
 import { welcomeGreeting } from "@octant/domain";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 
 export interface WelcomeHeadingProps {
   /** The mode's question: the one title the start screen has. */
@@ -15,12 +16,15 @@ const MINUTE_MS = 60_000;
 /** The hour of the day, refreshed each minute so a screen left open crosses noon on its own. */
 function useHour(now: () => Date): number {
   const [hour, setHour] = useState(() => now().getHours());
+  // An inline `now` prop is a new function each render; holding it in a ref
+  // keeps that from restarting the minute interval.
+  const nowRef = useRef(now);
+  nowRef.current = now;
   useEffect(() => {
-    const tick = () => setHour(now().getHours());
+    const tick = () => setHour(nowRef.current().getHours());
     tick();
-    const timer = setInterval(tick, MINUTE_MS);
-    return () => clearInterval(timer);
-  }, [now]);
+    return scheduleVisibleInterval(tick, MINUTE_MS);
+  }, []);
   return hour;
 }
 
