@@ -5,9 +5,11 @@ import { AppBackdrop } from "./AppBackdrop";
 afterEach(cleanup);
 
 const dials = {
+  patternEnabled: true,
   patternOpacity: 0.55,
   patternSpeed: 1,
   patternIntensity: 0.6,
+  photoDithered: true,
   photoOpacity: 0.42,
   scope: "welcome",
   coversSidebar: false,
@@ -91,5 +93,27 @@ describe("AppBackdrop", () => {
     await waitFor(() => {
       expect(fetcher).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000b01");
     });
+  });
+
+  it("marks a photo as clean when dithering and the pattern are disabled", () => {
+    const { container } = render(
+      <AppBackdrop
+        fetcher={vi.fn(async () => new Blob([new Uint8Array([0x89, 0x50])], { type: "image/png" }))}
+        placement="welcome"
+        resolved={{
+          ...dials,
+          kind: "photo",
+          backgroundId: "00000000-0000-4000-8000-000000000b01",
+          animated: false,
+          patternEnabled: false,
+          photoDithered: false,
+        }}
+      />,
+    );
+    expect(container.querySelector(".app-backdrop__pattern")).toBeNull();
+    expect(container.querySelector(".app-backdrop__photo")).toHaveAttribute(
+      "data-dithered",
+      "false",
+    );
   });
 });

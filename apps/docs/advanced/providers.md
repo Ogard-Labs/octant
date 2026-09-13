@@ -56,15 +56,43 @@ one instance per driver family for the preferred safe candidate. On first run,
 a detected Claude Code or Codex CLI instance is created enabled; every other
 detected runtime is created disabled. After first run, auto-registration
 always creates a disabled instance. Auto-registration never toggles an
-existing instance, never stores credentials, never logs in, and never
-installs or updates CLIs. Disabled auto-registered rows show **"Detected on
-this host — enable to use"**; enabling runs the Connection Check first.
+existing instance, never stores credentials, never logs in, and never installs
+or automatically updates CLIs. Explicit **Update CLI** actions are separate
+and only invoke a verified provider-owned updater. Disabled auto-registered
+rows show **"Detected on this host — enable to use"**; enabling runs the
+Connection Check first.
 Enabled is not ready: detection does not assert authentication.
+
+Discovery also recognizes a narrowly parsed alias declaration for a supported
+executable in `~/.bash_aliases`, `~/.bash_profile`, `~/.bashrc`, `~/.zprofile`,
+or `~/.zshrc`. Octant reads those files without sourcing them, accepts only a
+single executable token or absolute executable path, then applies the same
+absolute-path, executable-file, symlink, probe-timeout, and output-size checks
+as ordinary `PATH` results. Shell functions, aliases with arguments, command
+substitution, and aliases that exist only in an already-running interactive
+shell are intentionally ignored; add a persistent alias declaration or use the
+manual binary path field for those cases.
 
 Local CLI and SDK providers include Codex CLI, Claude Agent SDK,
 OpenCode CLI, Kilo ACP, Pi RPC, Oh My Pi, Devin ACP, Mistral Vibe ACP,
 Ollama, Kimi Code ACP, Grok Build ACP, Goose ACP, GLM Agent, Gemini CLI ACP,
 GitHub Copilot ACP, Cline ACP, and Qwen Code ACP.
+
+Provider-owned CLI login is the default. Octant launches the configured
+provider executable at its stored absolute path and points it at the provider's
+documented native profile (for example `~/.vibe`, `~/.grok`, `~/.gemini`,
+`~/.cline/data`, or `~/.qwen`). It does not copy the binary, create a second
+login, or read credentials from another desktop app. Run the provider's login
+command in a terminal, then use **Check connection** in Octant. Explicit
+API-key mode remains available for profiles that support it.
+
+The **Update CLI** action is shown only for providers with a verified native
+update command. It runs that command against the same configured executable,
+when no active session is using it, and checks the new version. Stop active
+sessions before updating. Octant never silently replaces a CLI or updates
+providers without an explicit action. On a headless
+host, use the provider's device/non-interactive login when available; no
+desktop browser window is required by the architecture.
 
 Oh My Pi is discovery-only in this release. Its Connection Check verifies the
 pinned version and lists the models it reports, but Octant cannot start a turn

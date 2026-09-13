@@ -36,9 +36,11 @@ const LIMITS = "PNG, JPEG, or WebP up to 8 MiB and 4096×4096";
  * switch between pattern, photo, and none never loses them. */
 function carry(background: AppBackground) {
   return {
+    patternEnabled: background.patternEnabled,
     patternOpacity: background.patternOpacity,
     patternSpeed: background.patternSpeed,
     patternIntensity: background.patternIntensity,
+    photoDithered: background.photoDithered,
     photoOpacity: background.photoOpacity,
     scope: background.scope,
     coversSidebar: background.coversSidebar,
@@ -230,6 +232,16 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               />
             </div>
           ) : null}
+          <div className="settings-view__field">
+            <span>Show pattern</span>
+            <OctantSwitch
+              checked={background.patternEnabled}
+              label="Show pattern"
+              onCheckedChange={(patternEnabled) =>
+                props.onChange({ ...background, patternEnabled })
+              }
+            />
+          </div>
           <label className="settings-view__field">
             <span>Pattern opacity</span>
             <SliderField
@@ -270,19 +282,31 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
             />
           </label>
           {background.kind === "photo" ? (
-            <label className="settings-view__field">
-              <span>Photo opacity</span>
-              <SliderField
-                aria-label="Photo opacity"
-                className="settings-view__range"
-                max={100}
-                min={0}
-                onChange={(event) => dial("photoOpacity", Number(event.currentTarget.value))}
-                step={1}
-                format={(value) => `${String(value)}%`}
-                value={background.photoOpacity}
-              />
-            </label>
+            <>
+              <div className="settings-view__field">
+                <span>Dither photo</span>
+                <OctantSwitch
+                  checked={background.photoDithered}
+                  label="Dither photo"
+                  onCheckedChange={(photoDithered) =>
+                    props.onChange({ ...background, photoDithered })
+                  }
+                />
+              </div>
+              <label className="settings-view__field">
+                <span>Photo opacity</span>
+                <SliderField
+                  aria-label="Photo opacity"
+                  className="settings-view__range"
+                  max={100}
+                  min={0}
+                  onChange={(event) => dial("photoOpacity", Number(event.currentTarget.value))}
+                  step={1}
+                  format={(value) => `${String(value)}%`}
+                  value={background.photoOpacity}
+                />
+              </label>
+            </>
           ) : null}
         </>
       ) : null}

@@ -15,9 +15,13 @@ import {
   type GeminiImageResolution,
   type GrokAuthentication,
   type GrokProviderConfiguration,
+  type GeminiAuthentication,
+  type GlmAuthentication,
   type GlmProviderConfiguration,
   type GeminiProviderConfiguration,
+  type ClineAuthentication,
   type ClineProviderConfiguration,
+  type QwenAuthentication,
   type QwenProviderConfiguration,
   type IdeogramImageProviderConfiguration,
   type MistralVibeAuthentication,
@@ -27,7 +31,6 @@ import {
   type OpenAiImageProviderConfiguration,
   type OpenAiImageQuality,
   type OpenAiImageSize,
-  type ProviderAuthenticationAttempt,
   type ProviderInstance,
 } from "@octant/contracts";
 import { ChevronDown } from "lucide-react";
@@ -124,6 +127,13 @@ export function ProviderCreateForm(
   const [vibeAuthentication, setVibeAuthentication] =
     useState<MistralVibeAuthentication>("subscription");
   const [grokAuthentication, setGrokAuthentication] = useState<GrokAuthentication>("subscription");
+  const [glmAuthentication, setGlmAuthentication] = useState<GlmAuthentication>("provider-owned");
+  const [geminiAuthentication, setGeminiAuthentication] =
+    useState<GeminiAuthentication>("provider-owned");
+  const [clineAuthentication, setClineAuthentication] =
+    useState<ClineAuthentication>("provider-owned");
+  const [qwenAuthentication, setQwenAuthentication] =
+    useState<QwenAuthentication>("provider-owned");
   const credentialInput = useRef<HTMLInputElement>(null);
   const selectedDriverLabel = driverLabel(providerType);
   const allowedProviderTypes = props.allowedProviderTypes;
@@ -257,45 +267,53 @@ export function ProviderCreateForm(
                 const configuration: GlmProviderConfiguration = {
                   kind: "glm-acp",
                   binaryPath: String(data.get("binaryPath") ?? ""),
-                  authentication: "api-key",
+                  authentication: glmAuthentication,
                 };
                 operation = props.onCreateGlm(
                   String(data.get("displayName") ?? ""),
                   configuration,
-                  transientCredential(credentialInput.current),
+                  glmAuthentication === "api-key"
+                    ? transientCredential(credentialInput.current)
+                    : emptyTransientCredential(transientCredential(credentialInput.current)),
                 );
               } else if (providerType === "gemini") {
                 const configuration: GeminiProviderConfiguration = {
                   kind: "gemini-acp",
                   binaryPath: String(data.get("binaryPath") ?? ""),
-                  authentication: "api-key",
+                  authentication: geminiAuthentication,
                 };
                 operation = props.onCreateGemini(
                   String(data.get("displayName") ?? ""),
                   configuration,
-                  transientCredential(credentialInput.current),
+                  geminiAuthentication === "api-key"
+                    ? transientCredential(credentialInput.current)
+                    : emptyTransientCredential(transientCredential(credentialInput.current)),
                 );
               } else if (providerType === "cline") {
                 const configuration: ClineProviderConfiguration = {
                   kind: "cline-acp",
                   binaryPath: String(data.get("binaryPath") ?? ""),
-                  authentication: "api-key",
+                  authentication: clineAuthentication,
                 };
                 operation = props.onCreateCline(
                   String(data.get("displayName") ?? ""),
                   configuration,
-                  transientCredential(credentialInput.current),
+                  clineAuthentication === "api-key"
+                    ? transientCredential(credentialInput.current)
+                    : emptyTransientCredential(transientCredential(credentialInput.current)),
                 );
               } else if (providerType === "qwen") {
                 const configuration: QwenProviderConfiguration = {
                   kind: "qwen-acp",
                   binaryPath: String(data.get("binaryPath") ?? ""),
-                  authentication: "api-key",
+                  authentication: qwenAuthentication,
                 };
                 operation = props.onCreateQwen(
                   String(data.get("displayName") ?? ""),
                   configuration,
-                  transientCredential(credentialInput.current),
+                  qwenAuthentication === "api-key"
+                    ? transientCredential(credentialInput.current)
+                    : emptyTransientCredential(transientCredential(credentialInput.current)),
                 );
               } else if (providerType === "ollama") {
                 operation = props.onCreateOllama(String(data.get("displayName") ?? ""), {
@@ -740,64 +758,40 @@ export function ProviderCreateForm(
               />
             ) : null}
             {providerType === "glm" ? (
-              <label>
-                <span>Z.AI API key</span>
-                <OctantInput
-                  aria-label="Z.AI API key"
-                  autoComplete="off"
-                  className="settings-view__text-input window-no-drag"
-                  name="apiKey"
-                  ref={credentialInput}
-                  required
-                  spellCheck={false}
-                  type="password"
-                />
-              </label>
+              <ProviderOwnedApiKeyCreateFields
+                apiKeyLabel="Z.AI API key"
+                authentication={glmAuthentication}
+                credentialInput={credentialInput}
+                credentialManagementAvailable={props.credentialManagementAvailable}
+                onAuthenticationChange={setGlmAuthentication}
+              />
             ) : null}
             {providerType === "gemini" ? (
-              <label>
-                <span>Gemini API key</span>
-                <OctantInput
-                  aria-label="Gemini API key"
-                  autoComplete="off"
-                  className="settings-view__text-input window-no-drag"
-                  name="apiKey"
-                  ref={credentialInput}
-                  required
-                  spellCheck={false}
-                  type="password"
-                />
-              </label>
+              <ProviderOwnedApiKeyCreateFields
+                apiKeyLabel="Gemini API key"
+                authentication={geminiAuthentication}
+                credentialInput={credentialInput}
+                credentialManagementAvailable={props.credentialManagementAvailable}
+                onAuthenticationChange={setGeminiAuthentication}
+              />
             ) : null}
             {providerType === "cline" ? (
-              <label>
-                <span>Cline API key</span>
-                <OctantInput
-                  aria-label="Cline API key"
-                  autoComplete="off"
-                  className="settings-view__text-input window-no-drag"
-                  name="apiKey"
-                  ref={credentialInput}
-                  required
-                  spellCheck={false}
-                  type="password"
-                />
-              </label>
+              <ProviderOwnedApiKeyCreateFields
+                apiKeyLabel="Cline API key"
+                authentication={clineAuthentication}
+                credentialInput={credentialInput}
+                credentialManagementAvailable={props.credentialManagementAvailable}
+                onAuthenticationChange={setClineAuthentication}
+              />
             ) : null}
             {providerType === "qwen" ? (
-              <label>
-                <span>OpenAI-compatible API key</span>
-                <OctantInput
-                  aria-label="OpenAI-compatible API key"
-                  autoComplete="off"
-                  className="settings-view__text-input window-no-drag"
-                  name="apiKey"
-                  ref={credentialInput}
-                  required
-                  spellCheck={false}
-                  type="password"
-                />
-              </label>
+              <ProviderOwnedApiKeyCreateFields
+                apiKeyLabel="OpenAI-compatible API key"
+                authentication={qwenAuthentication}
+                credentialInput={credentialInput}
+                credentialManagementAvailable={props.credentialManagementAvailable}
+                onAuthenticationChange={setQwenAuthentication}
+              />
             ) : null}
             {providerType === "goose" ? (
               <p className="provider-settings__field-guidance">
@@ -850,10 +844,15 @@ export function ProviderCreateForm(
                 (providerType === "grok" &&
                   grokAuthentication === "api-key" &&
                   !props.credentialManagementAvailable) ||
-                (providerType === "glm" && !props.credentialManagementAvailable) ||
+                (providerType === "glm" &&
+                  glmAuthentication === "api-key" &&
+                  !props.credentialManagementAvailable) ||
                 ((providerType === "gemini" ||
                   providerType === "cline" ||
                   providerType === "qwen") &&
+                  ((providerType === "gemini" && geminiAuthentication === "api-key") ||
+                    (providerType === "cline" && clineAuthentication === "api-key") ||
+                    (providerType === "qwen" && qwenAuthentication === "api-key")) &&
                   !props.credentialManagementAvailable) ||
                 ((providerType === "openai-image" ||
                   providerType === "gemini-native-image" ||
@@ -886,6 +885,59 @@ export function ProviderCreateForm(
         </div>
       ) : null}
     </section>
+  );
+}
+
+function ProviderOwnedApiKeyCreateFields(props: {
+  readonly apiKeyLabel: string;
+  readonly authentication:
+    | GlmAuthentication
+    | GeminiAuthentication
+    | ClineAuthentication
+    | QwenAuthentication;
+  readonly credentialInput: RefObject<HTMLInputElement | null>;
+  readonly credentialManagementAvailable: boolean;
+  readonly onAuthenticationChange: (value: "provider-owned" | "api-key") => void;
+}) {
+  return (
+    <>
+      <label>
+        <span>Authentication</span>
+        <OctantSelectField
+          aria-label="Provider authentication"
+          className="settings-view__select window-no-drag"
+          onValueChange={(value) =>
+            props.onAuthenticationChange(value as "provider-owned" | "api-key")
+          }
+          options={[
+            { id: "provider-owned", label: "Provider CLI login (recommended)" },
+            { id: "api-key", label: props.apiKeyLabel },
+          ]}
+          value={props.authentication}
+        />
+      </label>
+      {props.authentication === "api-key" ? (
+        <label>
+          <span>{props.apiKeyLabel}</span>
+          <OctantInput
+            aria-label={props.apiKeyLabel}
+            autoComplete="off"
+            className="settings-view__text-input window-no-drag"
+            disabled={!props.credentialManagementAvailable}
+            name="apiKey"
+            ref={props.credentialInput}
+            required
+            spellCheck={false}
+            type="password"
+          />
+        </label>
+      ) : (
+        <p className="provider-settings__field-guidance">
+          Authenticate with the provider-owned CLI in your terminal. Octant will reuse its native
+          profile and binary.
+        </p>
+      )}
+    </>
   );
 }
 
@@ -1247,11 +1299,9 @@ export function GlmConfigurationForm(props: {
   readonly credentialManagementAvailable: boolean;
   readonly credential: CredentialStatusController;
   readonly onChange: ProviderSettingsViewProps["onChangeGlmConfiguration"];
-  readonly onBeginAuthentication: ProviderSettingsViewProps["onBeginProviderAuthentication"];
-  readonly onCompleteAuthentication: ProviderSettingsViewProps["onCompleteProviderAuthentication"];
 }) {
   const credentialInput = useRef<HTMLInputElement>(null);
-  const [attempt, setAttempt] = useState<ProviderAuthenticationAttempt>();
+  const [authentication, setAuthentication] = useState(props.instance.configuration.authentication);
   return (
     <form
       className="provider-card__edit provider-card__edit--glm"
@@ -1261,12 +1311,14 @@ export function GlmConfigurationForm(props: {
         const configuration: GlmProviderConfiguration = {
           kind: "glm-acp",
           binaryPath: String(new FormData(event.currentTarget).get("binaryPath") ?? ""),
-          authentication: "api-key",
+          authentication,
         };
         void props.onChange(
           props.instance.id,
           configuration,
-          transientCredential(credentialInput.current),
+          authentication === "api-key"
+            ? transientCredential(credentialInput.current)
+            : emptyTransientCredential(transientCredential(credentialInput.current)),
         );
       }}
     >
@@ -1281,49 +1333,37 @@ export function GlmConfigurationForm(props: {
         />
       </label>
       <label>
-        <span>Z.AI API key (leave blank to preserve)</span>
-        <OctantInput
-          aria-label={`Z.AI API key for ${props.instance.displayName}`}
-          autoComplete="off"
-          className="settings-view__text-input"
-          disabled={!props.credentialManagementAvailable}
-          name="apiKey"
-          ref={credentialInput}
-          spellCheck={false}
-          type="password"
+        <span>Authentication</span>
+        <OctantSelectField
+          aria-label={`GLM authentication for ${props.instance.displayName}`}
+          className="settings-view__select"
+          onValueChange={(value) => setAuthentication(value as typeof authentication)}
+          options={[
+            { id: "provider-owned", label: "Provider CLI login (recommended)" },
+            { id: "api-key", label: "Z.AI API key" },
+          ]}
+          value={authentication}
         />
       </label>
-      <OctantButton
-        disabled={props.disabled}
-        onClick={() =>
-          void props.onBeginAuthentication(props.instance.id).then((started) => {
-            if (started !== undefined) setAttempt(started);
-          })
-        }
-        type="button"
-        variant="secondary"
-      >
-        Start GLM browser sign-in for {props.instance.displayName}
-      </OctantButton>
-      {attempt === undefined ? null : (
-        <>
-          <a href={attempt.signInUrl} rel="noreferrer" target="_blank">
-            Open GLM sign-in
-          </a>
-          <OctantButton
-            disabled={props.disabled}
-            onClick={() =>
-              void props
-                .onCompleteAuthentication(props.instance.id, attempt.attemptId)
-                .then((completed) => {
-                  if (completed) setAttempt(undefined);
-                })
-            }
-            type="button"
-          >
-            Complete GLM browser sign-in for {props.instance.displayName}
-          </OctantButton>
-        </>
+      {authentication === "api-key" ? (
+        <label>
+          <span>Z.AI API key (leave blank to preserve)</span>
+          <OctantInput
+            aria-label={`Z.AI API key for ${props.instance.displayName}`}
+            autoComplete="off"
+            className="settings-view__text-input"
+            disabled={!props.credentialManagementAvailable}
+            name="apiKey"
+            ref={credentialInput}
+            spellCheck={false}
+            type="password"
+          />
+        </label>
+      ) : (
+        <p className="provider-settings__field-guidance">
+          Run the provider-owned GLM Agent CLI login in your terminal. Octant reuses its native
+          profile and binary.
+        </p>
       )}
       <OctantButton
         disabled={props.disabled}
@@ -1388,18 +1428,15 @@ function ApiKeyAcpConfigurationForm<
   readonly driverLabel: string;
   readonly binaryLabel: string;
   readonly apiKeyLabel: string;
-  readonly signInLabel: string;
   readonly configuration: T;
   readonly onChange: (
     instanceId: ProviderInstance["id"],
     configuration: T,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
-  readonly onBeginAuthentication: ProviderSettingsViewProps["onBeginProviderAuthentication"];
-  readonly onCompleteAuthentication: ProviderSettingsViewProps["onCompleteProviderAuthentication"];
 }) {
   const credentialInput = useRef<HTMLInputElement>(null);
-  const [attempt, setAttempt] = useState<ProviderAuthenticationAttempt>();
+  const [authentication, setAuthentication] = useState(props.configuration.authentication);
   return (
     <form
       className="provider-card__edit"
@@ -1409,11 +1446,14 @@ function ApiKeyAcpConfigurationForm<
         const configuration = {
           ...props.configuration,
           binaryPath: String(new FormData(event.currentTarget).get("binaryPath") ?? ""),
+          authentication,
         } as T;
         void props.onChange(
           props.instance.id,
           configuration,
-          transientCredential(credentialInput.current),
+          authentication === "api-key"
+            ? transientCredential(credentialInput.current)
+            : emptyTransientCredential(transientCredential(credentialInput.current)),
         );
       }}
     >
@@ -1428,49 +1468,37 @@ function ApiKeyAcpConfigurationForm<
         />
       </label>
       <label>
-        <span>{props.apiKeyLabel}</span>
-        <OctantInput
-          aria-label={`${props.apiKeyLabel} for ${props.instance.displayName}`}
-          autoComplete="off"
-          className="settings-view__text-input"
-          disabled={!props.credentialManagementAvailable}
-          name="apiKey"
-          ref={credentialInput}
-          spellCheck={false}
-          type="password"
+        <span>Authentication</span>
+        <OctantSelectField
+          aria-label={`Authentication for ${props.instance.displayName}`}
+          className="settings-view__select"
+          onValueChange={(value) => setAuthentication(value as typeof authentication)}
+          options={[
+            { id: "provider-owned", label: "Provider CLI login (recommended)" },
+            { id: "api-key", label: props.apiKeyLabel },
+          ]}
+          value={authentication}
         />
       </label>
-      <OctantButton
-        disabled={props.disabled}
-        onClick={() =>
-          void props.onBeginAuthentication(props.instance.id).then((started) => {
-            if (started !== undefined) setAttempt(started);
-          })
-        }
-        type="button"
-        variant="secondary"
-      >
-        {props.signInLabel}
-      </OctantButton>
-      {attempt === undefined ? null : (
-        <>
-          <a href={attempt.signInUrl} rel="noreferrer" target="_blank">
-            Open sign-in
-          </a>
-          <OctantButton
-            disabled={props.disabled}
-            onClick={() =>
-              void props
-                .onCompleteAuthentication(props.instance.id, attempt.attemptId)
-                .then((completed) => {
-                  if (completed) setAttempt(undefined);
-                })
-            }
-            type="button"
-          >
-            Complete browser sign-in for {props.instance.displayName}
-          </OctantButton>
-        </>
+      {authentication === "api-key" ? (
+        <label>
+          <span>{props.apiKeyLabel} (leave blank to preserve)</span>
+          <OctantInput
+            aria-label={`${props.apiKeyLabel} for ${props.instance.displayName}`}
+            autoComplete="off"
+            className="settings-view__text-input"
+            disabled={!props.credentialManagementAvailable}
+            name="apiKey"
+            ref={credentialInput}
+            spellCheck={false}
+            type="password"
+          />
+        </label>
+      ) : (
+        <p className="provider-settings__field-guidance">
+          Authenticate with the provider-owned CLI in your terminal. Octant launches this same
+          binary and reuses its native profile; it does not create a second login.
+        </p>
       )}
       <OctantButton
         disabled={props.disabled}
@@ -1490,8 +1518,6 @@ export function GeminiConfigurationForm(props: {
   readonly disabled: boolean;
   readonly credentialManagementAvailable: boolean;
   readonly onChange: ProviderSettingsViewProps["onChangeGeminiConfiguration"];
-  readonly onBeginAuthentication: ProviderSettingsViewProps["onBeginProviderAuthentication"];
-  readonly onCompleteAuthentication: ProviderSettingsViewProps["onCompleteProviderAuthentication"];
 }) {
   return (
     <ApiKeyAcpConfigurationForm
@@ -1502,10 +1528,7 @@ export function GeminiConfigurationForm(props: {
       disabled={props.disabled}
       driverLabel="Gemini CLI"
       instance={props.instance}
-      onBeginAuthentication={props.onBeginAuthentication}
       onChange={props.onChange}
-      onCompleteAuthentication={props.onCompleteAuthentication}
-      signInLabel={`Start Gemini browser sign-in for ${props.instance.displayName}`}
     />
   );
 }
@@ -1515,8 +1538,6 @@ export function ClineConfigurationForm(props: {
   readonly disabled: boolean;
   readonly credentialManagementAvailable: boolean;
   readonly onChange: ProviderSettingsViewProps["onChangeClineConfiguration"];
-  readonly onBeginAuthentication: ProviderSettingsViewProps["onBeginProviderAuthentication"];
-  readonly onCompleteAuthentication: ProviderSettingsViewProps["onCompleteProviderAuthentication"];
 }) {
   return (
     <ApiKeyAcpConfigurationForm
@@ -1527,10 +1548,7 @@ export function ClineConfigurationForm(props: {
       disabled={props.disabled}
       driverLabel="Cline"
       instance={props.instance}
-      onBeginAuthentication={props.onBeginAuthentication}
       onChange={props.onChange}
-      onCompleteAuthentication={props.onCompleteAuthentication}
-      signInLabel={`Start Cline browser sign-in for ${props.instance.displayName}`}
     />
   );
 }
@@ -1540,8 +1558,6 @@ export function QwenConfigurationForm(props: {
   readonly disabled: boolean;
   readonly credentialManagementAvailable: boolean;
   readonly onChange: ProviderSettingsViewProps["onChangeQwenConfiguration"];
-  readonly onBeginAuthentication: ProviderSettingsViewProps["onBeginProviderAuthentication"];
-  readonly onCompleteAuthentication: ProviderSettingsViewProps["onCompleteProviderAuthentication"];
 }) {
   return (
     <ApiKeyAcpConfigurationForm
@@ -1552,10 +1568,7 @@ export function QwenConfigurationForm(props: {
       disabled={props.disabled}
       driverLabel="Qwen Code"
       instance={props.instance}
-      onBeginAuthentication={props.onBeginAuthentication}
       onChange={props.onChange}
-      onCompleteAuthentication={props.onCompleteAuthentication}
-      signInLabel={`Start Qwen browser sign-in for ${props.instance.displayName}`}
     />
   );
 }
@@ -1611,8 +1624,6 @@ interface VibeConfigurationFormProps {
   readonly credentialManagementAvailable: boolean;
   readonly credential: CredentialStatusController;
   readonly onChange: ProviderSettingsViewProps["onChangeMistralVibeConfiguration"];
-  readonly onBeginAuthentication: ProviderSettingsViewProps["onBeginProviderAuthentication"];
-  readonly onCompleteAuthentication: ProviderSettingsViewProps["onCompleteProviderAuthentication"];
 }
 
 export function VibeConfigurationForm(props: VibeConfigurationFormProps) {
@@ -1620,7 +1631,6 @@ export function VibeConfigurationForm(props: VibeConfigurationFormProps) {
   const [authentication, setAuthentication] = useState<MistralVibeAuthentication>(
     props.instance.configuration.authentication,
   );
-  const [attempt, setAttempt] = useState<ProviderAuthenticationAttempt>();
   return (
     <form
       className="provider-card__edit provider-card__edit--vibe"
@@ -1660,11 +1670,10 @@ export function VibeConfigurationForm(props: VibeConfigurationFormProps) {
             if (next === "subscription" && credentialInput.current !== null) {
               credentialInput.current.value = "";
             }
-            setAttempt(undefined);
             setAuthentication(next);
           }}
           options={[
-            { id: "subscription", label: "Mistral subscription" },
+            { id: "subscription", label: "Provider CLI login (recommended)" },
             { id: "api-key", label: "Mistral API key" },
           ]}
           value={authentication}
@@ -1684,35 +1693,10 @@ export function VibeConfigurationForm(props: VibeConfigurationFormProps) {
           />
         </label>
       ) : (
-        <div className="provider-card__credential-actions">
-          <OctantButton
-            disabled={props.disabled}
-            onClick={() => void props.onBeginAuthentication(props.instance.id).then(setAttempt)}
-            type="button"
-          >
-            Start Mistral browser sign-in for {props.instance.displayName}
-          </OctantButton>
-          {attempt === undefined ? null : (
-            <>
-              <a href={attempt.signInUrl} rel="noreferrer" target="_blank">
-                Open Mistral sign-in
-              </a>
-              <OctantButton
-                disabled={props.disabled}
-                onClick={() =>
-                  void props
-                    .onCompleteAuthentication(props.instance.id, attempt.attemptId)
-                    .then((completed) => {
-                      if (completed) setAttempt(undefined);
-                    })
-                }
-                type="button"
-              >
-                Complete Mistral browser sign-in for {props.instance.displayName}
-              </OctantButton>
-            </>
-          )}
-        </div>
+        <p className="provider-settings__field-guidance">
+          Run the provider-owned Vibe CLI login in your terminal. Octant reuses the same Vibe
+          profile and binary.
+        </p>
       )}
       <OctantButton
         disabled={props.disabled}
@@ -1733,8 +1717,6 @@ interface GrokConfigurationFormProps {
   readonly credentialManagementAvailable: boolean;
   readonly credential: CredentialStatusController;
   readonly onChange: ProviderSettingsViewProps["onChangeGrokConfiguration"];
-  readonly onBeginAuthentication: ProviderSettingsViewProps["onBeginProviderAuthentication"];
-  readonly onCompleteAuthentication: ProviderSettingsViewProps["onCompleteProviderAuthentication"];
 }
 
 export function GrokConfigurationForm(props: GrokConfigurationFormProps) {
@@ -1742,7 +1724,6 @@ export function GrokConfigurationForm(props: GrokConfigurationFormProps) {
   const [authentication, setAuthentication] = useState<GrokAuthentication>(
     props.instance.configuration.authentication,
   );
-  const [attempt, setAttempt] = useState<ProviderAuthenticationAttempt>();
   return (
     <form
       className="provider-card__edit provider-card__edit--grok"
@@ -1782,11 +1763,10 @@ export function GrokConfigurationForm(props: GrokConfigurationFormProps) {
             if (next === "subscription" && credentialInput.current !== null) {
               credentialInput.current.value = "";
             }
-            setAttempt(undefined);
             setAuthentication(next);
           }}
           options={[
-            { id: "subscription", label: "xAI subscription" },
+            { id: "subscription", label: "Provider CLI login (recommended)" },
             { id: "api-key", label: "xAI API key" },
           ]}
           value={authentication}
@@ -1806,35 +1786,10 @@ export function GrokConfigurationForm(props: GrokConfigurationFormProps) {
           />
         </label>
       ) : (
-        <div className="provider-card__credential-actions">
-          <OctantButton
-            disabled={props.disabled}
-            onClick={() => void props.onBeginAuthentication(props.instance.id).then(setAttempt)}
-            type="button"
-          >
-            Start xAI browser sign-in for {props.instance.displayName}
-          </OctantButton>
-          {attempt === undefined ? null : (
-            <>
-              <a href={attempt.signInUrl} rel="noreferrer" target="_blank">
-                Open xAI sign-in
-              </a>
-              <OctantButton
-                disabled={props.disabled}
-                onClick={() =>
-                  void props
-                    .onCompleteAuthentication(props.instance.id, attempt.attemptId)
-                    .then((completed) => {
-                      if (completed) setAttempt(undefined);
-                    })
-                }
-                type="button"
-              >
-                Complete xAI browser sign-in for {props.instance.displayName}
-              </OctantButton>
-            </>
-          )}
-        </div>
+        <p className="provider-settings__field-guidance">
+          Run <code>grok login</code> in your terminal, or <code>grok login --device-auth</code> on
+          a headless host. Octant reuses the same Grok profile and binary.
+        </p>
       )}
       <OctantButton
         disabled={props.disabled}

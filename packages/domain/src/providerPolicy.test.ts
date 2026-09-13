@@ -42,6 +42,8 @@ import {
   renameProvider,
   setProviderEnabled,
   normalizeOpenAiCompatibleBaseUrl,
+  providerCliUpdateArgs,
+  supportsProviderCliUpdate,
   updateProviderDefaults,
 } from "./providerPolicy";
 import * as providerPolicy from "./providerPolicy";
@@ -390,6 +392,16 @@ function ollamaProvider(): Extract<ProviderInstance, { driverKind: "ollama" }> {
   if (instance.driverKind !== "ollama") throw new Error("expected Ollama provider fixture");
   return instance;
 }
+
+describe("provider CLI update policy", () => {
+  it("keeps update command support shared by server and renderer", () => {
+    expect(providerCliUpdateArgs("devin")).toEqual(["update"]);
+    expect(providerCliUpdateArgs("kimi-code")).toEqual(["upgrade"]);
+    expect(supportsProviderCliUpdate("copilot")).toBe(true);
+    expect(supportsProviderCliUpdate("goose")).toBe(false);
+    expect(providerCliUpdateArgs("openai-compatible")).toBeUndefined();
+  });
+});
 
 describe("provider instance policy", () => {
   it.each([
@@ -1497,7 +1509,7 @@ describe("provider instance policy", () => {
         expectedVersion: version(0),
         createdAt,
       }),
-    ).toThrow("GLM Agent authentication must be api-key.");
+    ).toThrow("GLM Agent authentication must be provider-owned or api-key.");
   });
 
   it("creates and immutably updates Gemini CLI with api-key authentication", () => {
@@ -1521,6 +1533,72 @@ describe("provider instance policy", () => {
       binaryPath: "/Users/example/.local/bin/gemini",
       authentication: "api-key",
     });
+  });
+
+  it("preserves provider-owned authentication for CLI configuration normalizers", () => {
+    const policy = providerPolicy as unknown as {
+      createGlmProvider: (input: Record<string, unknown>) => ProviderInstance;
+      createGeminiProvider: (input: Record<string, unknown>) => ProviderInstance;
+      createClineProvider: (input: Record<string, unknown>) => ProviderInstance;
+      createQwenProvider: (input: Record<string, unknown>) => ProviderInstance;
+    };
+    const configurations = [
+      policy.createGlmProvider({
+        id: ids.local,
+        displayName: "GLM local",
+        configuration: {
+          kind: "glm-acp",
+          binaryPath: "/Users/example/.local/bin/glm-acp-agent",
+          authentication: "provider-owned",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }).configuration,
+      policy.createGeminiProvider({
+        id: ids.local,
+        displayName: "Gemini local",
+        configuration: {
+          kind: "gemini-acp",
+          binaryPath: "/Users/example/.local/bin/gemini",
+          authentication: "provider-owned",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }).configuration,
+      policy.createClineProvider({
+        id: ids.local,
+        displayName: "Cline local",
+        configuration: {
+          kind: "cline-acp",
+          binaryPath: "/Users/example/.local/bin/cline",
+          authentication: "provider-owned",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }).configuration,
+      policy.createQwenProvider({
+        id: ids.local,
+        displayName: "Qwen local",
+        configuration: {
+          kind: "qwen-acp",
+          binaryPath: "/Users/example/.local/bin/qwen",
+          authentication: "provider-owned",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }).configuration,
+    ];
+
+    expect(
+      configurations.every(
+        (configuration) =>
+          "authentication" in configuration && configuration.authentication === "provider-owned",
+      ),
+    ).toBe(true);
   });
 
   it("creates and immutably updates GitHub Copilot with provider-owned configuration", () => {

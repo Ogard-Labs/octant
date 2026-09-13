@@ -43,6 +43,7 @@ import type {
 } from "@octant/contracts/apple-toolchain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
+import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type { ImageGenerationProfileView } from "@octant/contracts";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
@@ -106,6 +107,8 @@ export interface CodeWorkspaceProps {
   readonly approvals?: CodeWorkspaceApprovals;
   readonly client: CodeClient;
   readonly controller: CodeController;
+  readonly extensionClient?: ExtensionClient;
+  readonly browserAvailable?: boolean;
   readonly createUuid?: () => string;
   readonly projections?: CodeWorkspaceProjections;
   readonly hostBridge?: OctantHostBridge;
@@ -178,6 +181,10 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
         {...(props.onAddAgent === undefined ? {} : { onAddAgent: props.onAddAgent })}
         controller={props.controller}
+        {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+        {...(props.browserAvailable === undefined
+          ? {}
+          : { browserAvailable: props.browserAvailable })}
         {...(props.providerGroups === undefined ? {} : { providerGroups: props.providerGroups })}
         {...(props.harnessAutoReviewSupported === undefined
           ? {}

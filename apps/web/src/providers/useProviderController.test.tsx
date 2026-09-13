@@ -284,6 +284,73 @@ describe("useProviderController", () => {
     expect(result.current.message).toMatch(/authoritative provider state/i);
   });
 
+  it("updates a provider CLI and refreshes the native provider snapshot", async () => {
+    const api = client();
+    vi.mocked(api.execute).mockResolvedValue({
+      kind: "provider-cli-updated",
+      instanceId: id,
+      status: "updated",
+      previousVersion: "1.0.0",
+      currentVersion: "1.1.0",
+    });
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(result.current.updateProviderCli(id)).resolves.toBe(true);
+    });
+
+    expect(api.execute).toHaveBeenCalledWith({ kind: "update-provider-cli", instanceId: id });
+    expect(api.bootstrap).toHaveBeenCalledTimes(2);
+    expect(result.current.message).toMatch(/provider CLI updated/i);
+  });
+
+  it("keeps a successful CLI update successful when its refresh fails", async () => {
+    const api = client();
+    vi.mocked(api.execute).mockResolvedValue({
+      kind: "provider-cli-updated",
+      instanceId: id,
+      status: "updated",
+      previousVersion: "1.0.0",
+      currentVersion: "1.1.0",
+    });
+    vi.mocked(api.bootstrap)
+      .mockResolvedValueOnce(snapshot([provider()], [observation()]))
+      .mockRejectedValueOnce({
+        category: "unavailable",
+        message: "refresh unavailable",
+      });
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(result.current.updateProviderCli(id)).resolves.toBe(true);
+    });
+
+    expect(result.current.message).toMatch(/provider CLI updated/i);
+    expect(result.current.observedByInstance.get(id)).toBeUndefined();
+  });
+
+  it("refreshes provider state when a CLI update fails", async () => {
+    const api = client();
+    vi.mocked(api.execute).mockRejectedValueOnce({
+      category: "provider-failed",
+      message: "provider updater failed",
+    });
+    vi.mocked(api.bootstrap)
+      .mockResolvedValueOnce(snapshot())
+      .mockResolvedValueOnce(snapshot([provider({ version: 2 as never })]));
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(result.current.updateProviderCli(id)).resolves.toBe(false);
+    });
+
+    expect(api.bootstrap).toHaveBeenCalledTimes(2);
+    expect(result.current.instances[0]?.version).toBe(2);
+  });
+
   it("shows probe progress and keeps normalized results only", async () => {
     const pending = deferred<Awaited<ReturnType<ProviderClient["probe"]>>>();
     const api = client();
@@ -384,6 +451,51 @@ describe("useProviderController", () => {
     );
     expect(result.current.message).not.toContain("secret provider diagnostic");
     expect(api.bootstrap).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps an automatic probe failure out of the page alert when quiet", async () => {
+    const pending = deferred<Awaited<ReturnType<ProviderClient["probe"]>>>();
+    const api = client();
+    vi.mocked(api.probe).mockReturnValueOnce(pending.promise);
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let check!: Promise<boolean>;
+    act(() => {
+      check = result.current.probe(id, { quiet: true });
+    });
+    pending.reject({ category: "provider-failed", message: "provider setup is incomplete" });
+    await expect(check).resolves.toBe(false);
+    await waitFor(() => expect(result.current.probingIds.has(id)).toBe(false));
+
+    expect(result.current.message).toBeUndefined();
+  });
+
+  it("preserves an existing page alert during a quiet probe", async () => {
+    const pending = deferred<Awaited<ReturnType<ProviderClient["probe"]>>>();
+    const api = client();
+    vi.mocked(api.probe)
+      .mockRejectedValueOnce({
+        category: "provider-failed",
+        message: "provider setup is incomplete",
+      })
+      .mockReturnValueOnce(pending.promise);
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(result.current.probe(id)).resolves.toBe(false);
+    });
+    const existingMessage = result.current.message;
+    expect(existingMessage).toBe("Provider operation failed.");
+
+    let check!: Promise<boolean>;
+    act(() => {
+      check = result.current.probe(id, { quiet: true });
+    });
+    expect(result.current.message).toBe(existingMessage);
+    pending.resolve(observation());
+    await expect(check).resolves.toBe(true);
   });
 
   it("keeps prior discovery cleared when probe failure refresh is unavailable", async () => {

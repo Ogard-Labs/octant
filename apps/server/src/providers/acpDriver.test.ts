@@ -1050,41 +1050,19 @@ describe("ACP provider driver profile quirks", () => {
     }
   });
 
-  it("delegates Mistral Vibe subscription browser authentication without returning credentials", async () => {
-    const { driver, client, starts } = fixture(vibe, { authentication: "subscription" });
-    if (driver.beginAuthentication === undefined || driver.completeAuthentication === undefined) {
-      throw new Error("Missing provider authentication operations.");
-    }
-    const attempt = await Effect.runPromise(
-      Effect.scoped(driver.beginAuthentication({ instanceId })),
-    );
-    expect(attempt).toEqual({
-      attemptId: "provider-attempt-1",
-      signInUrl: "https://auth.mistral.example/attempt",
-      expiresAt: "2026-07-17T11:00:00.123Z",
-    });
-    await Effect.runPromise(
-      Effect.scoped(driver.completeAuthentication({ instanceId, attemptId: attempt.attemptId })),
-    );
-    expect(client.startBrowserAuthentication).toHaveBeenCalledOnce();
-    expect(client.completeBrowserAuthentication).toHaveBeenCalledWith("provider-attempt-1");
-    expect(starts).toHaveLength(2);
-    expect(JSON.stringify(attempt)).not.toMatch(/token|key|credential/i);
-  });
-
-  it("rejects delegated browser authentication for API-key instances", async () => {
-    const { driver } = fixture(vibe, { authentication: "api-key" });
-    if (driver.beginAuthentication === undefined) {
-      throw new Error("Missing provider authentication operation.");
-    }
-    const failure = await Effect.runPromise(
-      Effect.scoped(Effect.flip(driver.beginAuthentication({ instanceId }))),
-    );
-    expect(failure.category).toBe("unsupported");
-  });
-
   it("does not offer browser authentication for provider-owned profiles", () => {
-    for (const kind of ["kilo", "devin", "kimi-code"] as const satisfies AcpProviderKind[]) {
+    for (const kind of [
+      "kilo",
+      "devin",
+      "mistral-vibe",
+      "grok",
+      "glm",
+      "gemini",
+      "copilot",
+      "cline",
+      "qwen",
+      "kimi-code",
+    ] as const satisfies AcpProviderKind[]) {
       const { driver } = fixture(acpProviderProfiles[kind]);
       expect(driver.beginAuthentication).toBeUndefined();
       expect(driver.completeAuthentication).toBeUndefined();

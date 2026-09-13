@@ -10,7 +10,7 @@
  */
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { ProviderDriverKind, ProviderExecutionPolicy } from "@octant/contracts";
 import type { AcpInitializeResult } from "./acpProtocol";
 
@@ -38,12 +38,20 @@ export interface AcpManagedFile {
 
 /**
  * Provider-owned authentication state that lives outside the managed home.
- * `directory` (Kilo) must already exist unless overridden and gets read+write
- * authority; `credential-file` (Devin) is symlinked into the managed home and
- * gets read authority when present.
+ * A directory gets read+write authority only for the provider's documented
+ * profile root; a credential file (Devin) is symlinked into the managed home
+ * and gets read authority when present.
  */
 export type AcpHostAuthentication =
-  | { readonly kind: "directory"; readonly defaultPath: string; readonly loginHint: string }
+  | {
+      readonly kind: "directory";
+      readonly defaultPath: string;
+      readonly loginHint: string;
+      /** Environment variables that point the real CLI at this host profile. */
+      readonly environment?: (path: string) => Readonly<Record<string, string>>;
+      /** Provider-owned entries that must remain outside the ACP process authority. */
+      readonly forbiddenEntries?: ReadonlyArray<string>;
+    }
   | {
       readonly kind: "credential-file";
       readonly defaultPath: string;
@@ -54,10 +62,12 @@ export type AcpConfinementStrategy =
   /** Shared deny-default Seatbelt profile; explicit Full access runs unconfined. */
   | { readonly kind: "deny-default-seatbelt" }
   /**
-   * Immutable managed profile (Kimi Code): the managed home is the agent's
-   * config home, a synthetic `HOME` and private `TMPDIR` live under it, the
-   * generated configuration is integrity-checked, extension entries are
-   * forbidden, and even Full access keeps immutable deny rules.
+   * Immutable managed profile for a provider that cannot safely reuse its
+   * native profile: the managed home is the agent's config home, a synthetic
+   * `HOME` and private `TMPDIR` live under it, the generated configuration is
+   * integrity-checked, extension entries are forbidden, and even Full access
+   * keeps immutable deny rules. Provider profiles should prefer the native
+   * provider-owned path whenever the CLI supports it.
    */
   | {
       readonly kind: "immutable-managed-profile";
@@ -135,7 +145,7 @@ export interface AcpProviderProfile {
    * rejected before reaching the agent.
    */
   readonly reviewedCommands?: ReadonlyArray<string>;
-  /** Delegated browser sign-in plus API-key launch injection (Mistral Vibe). */
+  /** Provider-owned CLI login, with delegated browser auth reserved for legacy profiles. */
   readonly authentication:
     | { readonly kind: "provider-owned" }
     | { readonly kind: "delegated-browser"; readonly apiKeyVariable: string };
@@ -230,6 +240,7 @@ const opencodeProfile: AcpProviderProfile = {
       kind: "directory",
       defaultPath: join(homedir(), ".local/share/opencode"),
       loginHint: "Run opencode2 auth login, then retry.",
+      environment: (path) => ({ OPENCODE_DATA_DIR: path }),
     },
     confinement: { kind: "deny-default-seatbelt" },
   },
@@ -264,7 +275,7 @@ const kiloProfile: AcpProviderProfile = {
   closesSessions: true,
   authenticateOnProbe: false,
   authentication: { kind: "provider-owned" },
-  unauthenticatedMessage: "Kilo is not authenticated. Sign in from Provider Settings, then retry.",
+  unauthenticatedMessage: "Kilo is not authenticated. Run kilo auth login, then retry.",
   process: {
     agentName: "Kilo",
     versionPattern:
@@ -303,6 +314,7 @@ const kiloProfile: AcpProviderProfile = {
       kind: "directory",
       defaultPath: join(homedir(), ".local/share/kilo"),
       loginHint: "Run kilo auth login, then retry.",
+      environment: (path) => ({ KILO_CONFIG_DIR: path }),
     },
     confinement: { kind: "deny-default-seatbelt" },
   },
@@ -353,7 +365,8 @@ const devinProfile: AcpProviderProfile = {
   closesSessions: true,
   authenticateOnProbe: false,
   authentication: { kind: "provider-owned" },
-  unauthenticatedMessage: "Devin is not authenticated. Sign in from Provider Settings, then retry.",
+  unauthenticatedMessage:
+    "Devin is not authenticated. Run the provider-owned Devin login, then retry.",
   process: {
     agentName: "affogato",
     versionPattern: /^devin (0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*) \([0-9a-f]+\)\r?\n?$/,
@@ -414,9 +427,9 @@ const vibeProfile: AcpProviderProfile = {
   resumeMethod: "session/load",
   closesSessions: true,
   authenticateOnProbe: false,
-  authentication: { kind: "delegated-browser", apiKeyVariable: "MISTRAL_API_KEY" },
+  authentication: { kind: "provider-owned" },
   unauthenticatedMessage:
-    "Mistral Vibe is not authenticated. Sign in from Provider Settings, then retry.",
+    "Mistral Vibe is not authenticated. Run the provider-owned Vibe CLI login, then retry.",
   process: {
     agentName: "@mistralai/mistral-vibe",
     versionPattern:
@@ -457,6 +470,12 @@ const vibeProfile: AcpProviderProfile = {
     }),
     args: () => [],
     managedFiles: () => [],
+    hostAuthentication: {
+      kind: "directory",
+      defaultPath: join(homedir(), ".vibe"),
+      loginHint: "Run the provider-owned Vibe CLI login, then retry.",
+      environment: (path) => ({ VIBE_HOME: path }),
+    },
     confinement: { kind: "deny-default-seatbelt" },
   },
 };
@@ -498,9 +517,9 @@ const grokProfile: AcpProviderProfile = {
     method: "session/set_mode",
     params: { sessionId, modeId: mode },
   }),
-  authentication: { kind: "delegated-browser", apiKeyVariable: "XAI_API_KEY" },
+  authentication: { kind: "provider-owned" },
   unauthenticatedMessage:
-    "Grok Build is not authenticated. Sign in from Provider Settings, then retry.",
+    "Grok Build is not authenticated. Run grok login (or grok login --device-auth on a headless host), then retry.",
   process: {
     // display-only now; identity is verified via verifyAgentInfo below (real
     // initialize responses have no agentInfo field)
@@ -533,6 +552,12 @@ const grokProfile: AcpProviderProfile = {
         content: `${GROK_CONFIGURATION_TOML}\n`,
       },
     ],
+    hostAuthentication: {
+      kind: "directory",
+      defaultPath: join(homedir(), ".grok"),
+      loginHint: "Run `grok login` (or `grok login --device-auth` on a headless host), then retry.",
+      environment: (path) => ({ GROK_HOME: path }),
+    },
     confinement: { kind: "deny-default-seatbelt" },
   },
 };
@@ -558,7 +583,7 @@ const gooseProfile: AcpProviderProfile = {
   authenticateOnProbe: false,
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage:
-    "Goose is not authenticated. Run `goose configure`, then sign in from Provider Settings and retry.",
+    "Goose is not authenticated. Run `goose configure` in your terminal, then retry.",
   process: {
     agentName: "goose",
     versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,
@@ -575,6 +600,7 @@ const gooseProfile: AcpProviderProfile = {
       kind: "directory",
       defaultPath: join(homedir(), ".config/goose"),
       loginHint: "Run `goose configure`, then retry.",
+      environment: (path) => ({ HOME: dirname(dirname(path)), XDG_CONFIG_HOME: dirname(path) }),
     },
     confinement: { kind: "deny-default-seatbelt" },
   },
@@ -603,9 +629,9 @@ const glmProfile: AcpProviderProfile = {
   resumeMethod: "session/load",
   closesSessions: true,
   authenticateOnProbe: false,
-  authentication: { kind: "delegated-browser", apiKeyVariable: "Z_AI_API_KEY" },
+  authentication: { kind: "provider-owned" },
   unauthenticatedMessage:
-    "GLM Agent is not authenticated. Sign in from Provider Settings, then retry.",
+    "GLM Agent is not authenticated. Run the provider-owned GLM Agent CLI login, then retry.",
   process: {
     agentName: "glm-acp-agent",
     npmPackageName: "glm-acp-agent",
@@ -625,9 +651,10 @@ const glmProfile: AcpProviderProfile = {
     args: () => [],
     managedFiles: () => [],
     hostAuthentication: {
-      kind: "credential-file",
-      defaultPath: join(homedir(), ".config/glm-acp-agent/credentials.json"),
-      managedRelativePath: ".config/glm-acp-agent/credentials.json",
+      kind: "directory",
+      defaultPath: join(homedir(), ".config/glm-acp-agent"),
+      loginHint: "Run the provider-owned GLM Agent CLI login, then retry.",
+      environment: (path) => ({ HOME: dirname(dirname(path)), XDG_CONFIG_HOME: dirname(path) }),
     },
     confinement: { kind: "deny-default-seatbelt" },
   },
@@ -654,9 +681,9 @@ const geminiProfile: AcpProviderProfile = {
   resumeMethod: "session/load",
   closesSessions: true,
   authenticateOnProbe: false,
-  authentication: { kind: "delegated-browser", apiKeyVariable: "GEMINI_API_KEY" },
+  authentication: { kind: "provider-owned" },
   unauthenticatedMessage:
-    "Gemini CLI is not authenticated. Sign in from Provider Settings, then retry.",
+    "Gemini CLI is not authenticated. Run gemini and complete its provider-owned CLI login, then retry.",
   process: {
     agentName: "gemini-cli",
     versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,
@@ -672,6 +699,12 @@ const geminiProfile: AcpProviderProfile = {
     }),
     args: () => ["--acp"],
     managedFiles: () => [],
+    hostAuthentication: {
+      kind: "directory",
+      defaultPath: join(homedir(), ".gemini"),
+      loginHint: "Run `gemini` and complete its provider-owned CLI login, then retry.",
+      environment: (path) => ({ GEMINI_CLI_HOME: dirname(path) }),
+    },
     confinement: { kind: "deny-default-seatbelt" },
   },
 };
@@ -704,6 +737,7 @@ const copilotProfile: AcpProviderProfile = {
       kind: "directory",
       defaultPath: join(homedir(), ".copilot"),
       loginHint: "Run `copilot login`, then retry.",
+      environment: (path) => ({ COPILOT_HOME: path }),
     },
     confinement: { kind: "deny-default-seatbelt" },
   },
@@ -726,8 +760,8 @@ const clineProfile: AcpProviderProfile = {
   resumeMethod: "session/load",
   closesSessions: true,
   authenticateOnProbe: false,
-  authentication: { kind: "delegated-browser", apiKeyVariable: "CLINE_API_KEY" },
-  unauthenticatedMessage: "Cline is not authenticated. Sign in from Provider Settings, then retry.",
+  authentication: { kind: "provider-owned" },
+  unauthenticatedMessage: "Cline is not authenticated. Run cline auth, then retry.",
   process: {
     agentName: "cline",
     versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,
@@ -743,8 +777,9 @@ const clineProfile: AcpProviderProfile = {
     managedFiles: () => [],
     hostAuthentication: {
       kind: "directory",
-      defaultPath: join(homedir(), ".cline"),
+      defaultPath: join(homedir(), ".cline", "data"),
       loginHint: "Run `cline auth`, then retry.",
+      environment: (path) => ({ CLINE_DATA_DIR: path }),
     },
     confinement: { kind: "deny-default-seatbelt" },
   },
@@ -771,9 +806,9 @@ const qwenProfile: AcpProviderProfile = {
   resumeMethod: "session/load",
   closesSessions: true,
   authenticateOnProbe: false,
-  authentication: { kind: "delegated-browser", apiKeyVariable: "OPENAI_API_KEY" },
+  authentication: { kind: "provider-owned" },
   unauthenticatedMessage:
-    "Qwen Code is not authenticated. Sign in from Provider Settings, then retry.",
+    "Qwen Code is not authenticated. Run the provider-owned Qwen CLI login, then retry.",
   process: {
     agentName: "qwen-code",
     versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,
@@ -787,6 +822,12 @@ const qwenProfile: AcpProviderProfile = {
     }),
     args: () => ["--acp"],
     managedFiles: () => [],
+    hostAuthentication: {
+      kind: "directory",
+      defaultPath: join(homedir(), ".qwen"),
+      loginHint: "Run the provider-owned Qwen CLI login, then retry.",
+      environment: (path) => ({ QWEN_HOME: path }),
+    },
     confinement: { kind: "deny-default-seatbelt" },
   },
 };
@@ -808,34 +849,6 @@ const KIMI_REVIEWED_COMMANDS = [
   "sub-skill.review",
   "sub-skill.consolidate",
 ] as const;
-const KIMI_DENIED_TOOLS = [
-  "Skill",
-  "Agent",
-  "AgentSwarm",
-  "CreateGoal",
-  "GetGoal",
-  "SetGoalBudget",
-  "UpdateGoal",
-  "TaskList",
-  "TaskOutput",
-  "TaskStop",
-] as const;
-const KIMI_CONFIGURATION = `${[
-  'default_permission_mode = "manual"',
-  "default_plan_mode = false",
-  "merge_all_available_skills = false",
-  "telemetry = false",
-  "",
-  "[background]",
-  "keep_alive_on_exit = false",
-  ...KIMI_DENIED_TOOLS.flatMap((tool) => [
-    "",
-    "[[permission.rules]]",
-    'decision = "deny"',
-    `pattern = "${tool}"`,
-  ]),
-].join("\n")}\n`;
-
 const kimiProfile: AcpProviderProfile = {
   kind: "kimi-code",
   displayName: "Kimi Code",
@@ -852,8 +865,7 @@ const kimiProfile: AcpProviderProfile = {
   authenticateOnProbe: true,
   reviewedCommands: KIMI_REVIEWED_COMMANDS,
   authentication: { kind: "provider-owned" },
-  unauthenticatedMessage:
-    "Kimi Code is not authenticated. Run kimi login for its Octant-managed profile, then retry.",
+  unauthenticatedMessage: "Kimi Code is not authenticated. Run kimi login, then retry.",
   process: {
     agentName: "Kimi Code CLI",
     versionPattern:
@@ -872,14 +884,17 @@ const kimiProfile: AcpProviderProfile = {
     environment: () => ({}),
     args: () => ["acp"],
     managedFiles: () => [],
-    confinement: {
-      kind: "immutable-managed-profile",
-      homeVariable: "KIMI_CODE_HOME",
-      configurationFileName: "config.toml",
-      configuration: KIMI_CONFIGURATION,
+    hostAuthentication: {
+      kind: "directory",
+      defaultPath: join(homedir(), ".kimi-code"),
+      loginHint: "Run `kimi login` in your terminal, then retry.",
+      environment: (path) => ({ KIMI_CODE_HOME: path }),
       forbiddenEntries: ["AGENTS.md", "mcp.json", "skills", "plugins", "hooks"],
-      forbiddenRootEntries: [".kimi-code", ".agents"],
     },
+    // Authentication lives in the provider-owned Kimi data root. The process
+    // still runs inside Octant's project/managed-home Seatbelt boundary and
+    // the reviewed command inventory remains the authority for ACP commands.
+    confinement: { kind: "deny-default-seatbelt" },
   },
 };
 

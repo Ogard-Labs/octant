@@ -405,11 +405,18 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           projectId: selectedProjectId,
           displayName: selectedProject?.name ?? selectedProjectLabel ?? "Selected Project",
         };
-  const defaultFolderRoot =
-    props.defaultFolder !== undefined &&
-    props.onEnsureDefaultProject !== undefined &&
-    (props.mode === "work" || (props.mode === "code" && props.codeDefaultFolderThreads === true))
-      ? `${props.defaultFolder}/${props.mode === "work" ? "Work" : "Code"}`
+  const defaultFolderEntry =
+    props.defaultFolder !== undefined && props.onEnsureDefaultProject !== undefined
+      ? ({
+          kind: "default-folder" as const,
+          rootPath: `${props.defaultFolder}/${props.mode === "work" ? "Work" : "Code"}`,
+          ...(props.mode === "code" && props.codeDefaultFolderThreads !== true
+            ? {
+                disabled: true,
+                disabledReason: "Enable Threads without a Project in Code settings",
+              }
+            : {}),
+        } satisfies ComposerProjectEntry)
       : undefined;
   const projectEntries: ReadonlyArray<ComposerProjectEntry> = [
     ...compatibleProjects.map(
@@ -420,9 +427,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         rootPath: project.type === "chat" ? "" : project.binding.canonicalRoot,
       }),
     ),
-    ...(defaultFolderRoot === undefined
-      ? []
-      : [{ kind: "default-folder", rootPath: defaultFolderRoot } as const]),
+    ...(defaultFolderEntry === undefined ? [] : [defaultFolderEntry]),
     { kind: "add-folder" },
   ];
   const selectedProjectName =

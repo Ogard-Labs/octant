@@ -101,6 +101,7 @@ import {
   ProviderRuntimeInvalidationRejected,
   type ProviderRuntimeRegistry,
 } from "./providerRuntimeRegistry";
+import { providerCliUpdateArgs, runProviderCliUpdate } from "./providerCliUpdate";
 
 const decodeActorId = Schema.decodeUnknownSync(ActorId);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
@@ -404,6 +405,49 @@ export class ProviderService implements ProviderServiceApi {
       const result = await this.probe(authenticatedWindowId, command.instanceId);
       return decodeProviderRegistryCommandResult({ kind: "provider-probed", result });
     }
+    if (command.kind === "update-provider-cli") {
+      this.#assertReady();
+      try {
+        const previousVersion = await this.#withInstanceOperation(command.instanceId, async () => {
+          const instance = this.#persistence.readProviderInstance(command.instanceId);
+          if (instance === undefined) throw this.#invalid("Provider instance was not found.");
+          if (!instance.enabled) throw this.#invalid("Enable this provider before updating it.");
+          this.#assertDriverPluginEffective(instance);
+          const args = providerCliUpdateArgs(instance.driverKind);
+          if (args === undefined) {
+            throw this.#unsupported(
+              "This provider does not expose a safe provider-owned CLI update command.",
+            );
+          }
+          if (this.#runtime.activeSessionCount(instance.id) !== 0) {
+            throw this.#invalid("Stop active sessions before updating this provider CLI.");
+          }
+          const previousVersion = this.#runtime.observedState(instance.id)?.detectedVersion;
+          await this.#runtime.invalidateRuntime(instance.id);
+          await runProviderCliUpdate({
+            binaryPath: providerBinaryPath(instance),
+            args,
+          });
+          return previousVersion;
+        });
+        // Probe after releasing the per-instance mutation queue. Probing takes
+        // the same queue and would otherwise wait on itself forever.
+        const current = await this.probe(authenticatedWindowId, command.instanceId);
+        const currentVersion = current.detectedVersion;
+        return decodeProviderRegistryCommandResult({
+          kind: "provider-cli-updated",
+          instanceId: command.instanceId,
+          status:
+            previousVersion !== undefined && currentVersion === previousVersion
+              ? "already-current"
+              : "updated",
+          ...(previousVersion === undefined ? {} : { previousVersion }),
+          ...(currentVersion === undefined ? {} : { currentVersion }),
+        });
+      } catch (error) {
+        throw this.#mapFailure(error);
+      }
+    }
     if (command.kind === "verify-foundry-tools") {
       const result = await this.verifyFoundryTools(
         authenticatedWindowId,
@@ -436,7 +480,7 @@ export class ProviderService implements ProviderServiceApi {
             if (driver.beginAuthentication === undefined) {
               throw this.#unsupported("This provider does not support browser authentication.");
             }
-            const attempt = await Effect.runPromise(
+            const attempt = await runProviderEffect(
               Effect.scoped(driver.beginAuthentication({ instanceId: instance.id })),
             );
             return decodeProviderRegistryCommandResult({
@@ -448,7 +492,7 @@ export class ProviderService implements ProviderServiceApi {
           if (driver.completeAuthentication === undefined) {
             throw this.#unsupported("This provider does not support browser authentication.");
           }
-          await Effect.runPromise(
+          await runProviderEffect(
             Effect.scoped(
               driver.completeAuthentication({
                 instanceId: instance.id,
@@ -1579,6 +1623,30 @@ function providerFailureOfError(error: unknown): ProviderFailure | undefined {
     return decodeProviderFailure(error.failure);
   }
   return undefined;
+}
+
+function providerBinaryPath(instance: ProviderInstance): string {
+  if (!("binaryPath" in instance.configuration)) {
+    throw new ProviderServiceError({
+      category: "unsupported",
+      message: "This provider does not have a provider-owned CLI binary.",
+    });
+  }
+  return instance.configuration.binaryPath;
+}
+
+/**
+ * Preserve a typed provider refusal when an Effect boundary rejects. Plain
+ * `Effect.runPromise` wraps failures in a FiberFailure, which made actionable
+ * authentication and compatibility errors look like a generic 503 to the
+ * renderer.
+ */
+async function runProviderEffect<A>(effect: Effect.Effect<A, ProviderFailure>): Promise<A> {
+  const exit = await Effect.runPromiseExit(effect);
+  if (Exit.isSuccess(exit)) return exit.value;
+  const refused = Cause.failureOption(exit.cause);
+  if (Option.isSome(refused)) throw refused.value;
+  throw Cause.squash(exit.cause);
 }
 
 function isProviderFailure(value: unknown): value is ProviderFailure {

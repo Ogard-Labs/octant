@@ -104,6 +104,27 @@ export function isImageProfileDriverKind(
   );
 }
 
+const PROVIDER_CLI_UPDATE_COMMANDS: Partial<Record<ProviderDriverKind, ReadonlyArray<string>>> = {
+  devin: ["update"],
+  "mistral-vibe": ["update"],
+  grok: ["update"],
+  "kimi-code": ["upgrade"],
+  gemini: ["update"],
+  cline: ["update"],
+  copilot: ["update"],
+};
+
+/** Returns the provider-owned update command, when the CLI documents one. */
+export function providerCliUpdateArgs(
+  driverKind: ProviderDriverKind,
+): ReadonlyArray<string> | undefined {
+  return PROVIDER_CLI_UPDATE_COMMANDS[driverKind];
+}
+
+export function supportsProviderCliUpdate(driverKind: ProviderDriverKind): boolean {
+  return providerCliUpdateArgs(driverKind) !== undefined;
+}
+
 /**
  * The providers Octant drives with its own agent loop. They are inference
  * transports only: every tool they are offered is app-managed and every call
@@ -516,26 +537,35 @@ function normalizeGooseConfiguration(
 }
 
 function normalizeGlmConfiguration(configuration: GlmConfigurationInput): GlmProviderConfiguration {
-  if (configuration.authentication !== "api-key") {
-    reject("invalid-authentication", "GLM Agent authentication must be api-key.");
+  if (
+    configuration.authentication !== "provider-owned" &&
+    configuration.authentication !== "api-key"
+  ) {
+    reject("invalid-authentication", "GLM Agent authentication must be provider-owned or api-key.");
   }
   return {
     kind: "glm-acp",
     binaryPath: normalizeBinaryPath(configuration.binaryPath),
-    authentication: "api-key",
+    authentication: configuration.authentication,
   };
 }
 
 function normalizeGeminiConfiguration(
   configuration: GeminiConfigurationInput,
 ): GeminiProviderConfiguration {
-  if (configuration.authentication !== "api-key") {
-    reject("invalid-authentication", "Gemini CLI authentication must be api-key.");
+  if (
+    configuration.authentication !== "provider-owned" &&
+    configuration.authentication !== "api-key"
+  ) {
+    reject(
+      "invalid-authentication",
+      "Gemini CLI authentication must be provider-owned or api-key.",
+    );
   }
   return {
     kind: "gemini-acp",
     binaryPath: normalizeBinaryPath(configuration.binaryPath),
-    authentication: "api-key",
+    authentication: configuration.authentication,
   };
 }
 
@@ -551,26 +581,32 @@ function normalizeCopilotConfiguration(
 function normalizeClineConfiguration(
   configuration: ClineConfigurationInput,
 ): ClineProviderConfiguration {
-  if (configuration.authentication !== "api-key") {
-    reject("invalid-authentication", "Cline authentication must be api-key.");
+  if (
+    configuration.authentication !== "provider-owned" &&
+    configuration.authentication !== "api-key"
+  ) {
+    reject("invalid-authentication", "Cline authentication must be provider-owned or api-key.");
   }
   return {
     kind: "cline-acp",
     binaryPath: normalizeBinaryPath(configuration.binaryPath),
-    authentication: "api-key",
+    authentication: configuration.authentication,
   };
 }
 
 function normalizeQwenConfiguration(
   configuration: QwenConfigurationInput,
 ): QwenProviderConfiguration {
-  if (configuration.authentication !== "api-key") {
-    reject("invalid-authentication", "Qwen Code authentication must be api-key.");
+  if (
+    configuration.authentication !== "provider-owned" &&
+    configuration.authentication !== "api-key"
+  ) {
+    reject("invalid-authentication", "Qwen Code authentication must be provider-owned or api-key.");
   }
   return {
     kind: "qwen-acp",
     binaryPath: normalizeBinaryPath(configuration.binaryPath),
-    authentication: "api-key",
+    authentication: configuration.authentication,
   };
 }
 

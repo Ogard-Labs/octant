@@ -131,6 +131,8 @@ distilled successor of the earlier long-form design specifications.
 | [0117](0117-the-welcome-composer-lets-its-context-ride-above-the-card.md) | The welcome composer lets its context ride above the card | Accepted |
 | [0118](0118-a-default-folder-for-what-nobody-gave-a-home.md) | A default folder for what nobody gave a home | Accepted |
 | [0119](0119-a-work-project-keeps-its-status-in-its-folder.md) | A Work Project keeps its status in its folder | Accepted |
+| [0120](0120-clean-application-background-controls.md) | Clean application background controls | Accepted |
+| [0121](0121-provider-owned-cli-runtime-and-updates.md) | Provider-owned CLI runtimes, profiles, and updates | Accepted |
 
 ## Adding an ADR
 

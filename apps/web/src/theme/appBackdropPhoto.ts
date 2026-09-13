@@ -64,6 +64,18 @@ export function drawDitheredPhoto(
   viewport: PhotoSize,
   cell: number = PHOTO_CELL_PX,
 ): boolean {
+  return drawPhoto(target, image, imageSize, viewport, cell, true);
+}
+
+/** Draws the photo at full viewport resolution without quantizing its pixels. */
+export function drawPhoto(
+  target: HTMLCanvasElement,
+  image: CanvasImageSource,
+  imageSize: PhotoSize,
+  viewport: PhotoSize,
+  cell = 1,
+  dithered = false,
+): boolean {
   const width = Math.max(1, Math.ceil(viewport.width / cell));
   const height = Math.max(1, Math.ceil(viewport.height / cell));
   if (target.width !== width || target.height !== height) {
@@ -83,9 +95,11 @@ export function drawDitheredPhoto(
     drawnWidth,
     drawnHeight,
   );
-  const frame = context.getImageData(0, 0, width, height);
-  ditherPixels(frame.data, width, height);
-  context.putImageData(frame, 0, 0);
+  if (dithered) {
+    const frame = context.getImageData(0, 0, width, height);
+    ditherPixels(frame.data, width, height);
+    context.putImageData(frame, 0, 0);
+  }
   return true;
 }
 

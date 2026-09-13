@@ -79,6 +79,8 @@ export function resolveEffectiveSidebarBackground(
 export interface ResolvedAppBackground {
   readonly kind: "theme" | "photo" | "none";
   readonly backgroundId: string | null;
+  /** Whether the pattern layer is enabled independent of its opacity dial. */
+  readonly patternEnabled: boolean;
   /** The pattern drifts only while nothing has asked Octant to hold still. */
   readonly animated: boolean;
   /** 0..1, ready for the renderer. */
@@ -87,6 +89,8 @@ export interface ResolvedAppBackground {
   readonly patternSpeed: number;
   /** 0..1: how much of the field the pattern fills at its densest. */
   readonly patternIntensity: number;
+  /** Whether the photo keeps the ordered-dither print treatment. */
+  readonly photoDithered: boolean;
   /** 0..1, ready for the renderer. */
   readonly photoOpacity: number;
   readonly scope: "welcome" | "everywhere";
@@ -103,9 +107,11 @@ export function resolveAppBackground(
 ): ResolvedAppBackground {
   const background = settings.appBackground;
   const tuning = {
+    patternEnabled: background.patternEnabled,
     patternOpacity: background.patternOpacity / 100,
     patternSpeed: background.patternSpeed / 50,
     patternIntensity: background.patternIntensity / 100,
+    photoDithered: background.photoDithered,
     photoOpacity: background.photoOpacity / 100,
     scope: background.scope,
     coversSidebar: background.scope === "everywhere" && background.coversSidebar,
@@ -114,7 +120,10 @@ export function resolveAppBackground(
     return { ...tuning, kind: "none", backgroundId: null, animated: false };
   }
   const animated =
-    !settings.reducedMotion && !systemPrefersReducedMotion && background.patternSpeed > 0;
+    background.patternEnabled &&
+    !settings.reducedMotion &&
+    !systemPrefersReducedMotion &&
+    background.patternSpeed > 0;
   if (background.kind === "photo") {
     return { ...tuning, kind: "photo", backgroundId: background.backgroundId, animated };
   }

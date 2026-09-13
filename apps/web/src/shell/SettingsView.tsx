@@ -103,6 +103,7 @@ import {
 import { OpenInApplicationSettings } from "../settings/OpenInApplicationSettings";
 import { ProviderUsageLimitsPanel } from "../usage/ProviderUsageLimitsPanel";
 import { remoteAccessAdministrationOf, type OctantHostBridge } from "./hostBridge";
+import { openExternalUrl } from "./openExternalUrl";
 import "../styles/settings.css";
 import "../styles/settings-specialty.css";
 import "../styles/extensions-settings.css";
@@ -580,6 +581,7 @@ function ActiveSectionContent({
       return props.providerController !== undefined ? (
         <ProvidersSection
           discoveryController={props.discoveryController}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
           providerController={props.providerController}
         />
       ) : null;
@@ -695,6 +697,7 @@ function ActiveSectionContent({
 function ProvidersSection(props: {
   readonly providerController: ProviderController;
   readonly discoveryController: DiscoveryController | undefined;
+  readonly hostBridge?: OctantHostBridge;
 }) {
   const discoveryController = props.discoveryController;
   const scan = discoveryController?.scan;
@@ -751,6 +754,7 @@ function ProvidersSection(props: {
           : { message: props.providerController.message })}
         observedByInstance={props.providerController.observedByInstance}
         presentationObservedByInstance={props.providerController.presentationObservedByInstance}
+        onOpenExternalUrl={(url) => openExternalUrl(props.hostBridge, url)}
         onChangeBinary={props.providerController.changeBinary}
         onChangeClaudeConfiguration={props.providerController.changeClaudeConfiguration}
         onChangeDevinConfiguration={props.providerController.changeDevinConfiguration}
@@ -782,6 +786,7 @@ function ProvidersSection(props: {
         onClearProviderCredential={props.providerController.clearProviderCredential}
         onBeginProviderAuthentication={props.providerController.beginProviderAuthentication}
         onCompleteProviderAuthentication={props.providerController.completeProviderAuthentication}
+        onUpdateProviderCli={props.providerController.updateProviderCli}
         onCreate={props.providerController.create}
         onCreateClaude={props.providerController.createClaude}
         onCreateMistralVibe={props.providerController.createMistralVibe}

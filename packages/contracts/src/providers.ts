@@ -258,7 +258,7 @@ export const GooseProviderConfiguration = Schema.Struct({
 }).annotations(strict);
 export type GooseProviderConfiguration = typeof GooseProviderConfiguration.Type;
 
-export const GlmAuthentication = Schema.Literal("api-key");
+export const GlmAuthentication = Schema.Literal("provider-owned", "api-key");
 export type GlmAuthentication = typeof GlmAuthentication.Type;
 export const GlmProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("glm-acp"),
@@ -267,7 +267,7 @@ export const GlmProviderConfiguration = Schema.Struct({
 }).annotations(strict);
 export type GlmProviderConfiguration = typeof GlmProviderConfiguration.Type;
 
-export const GeminiAuthentication = Schema.Literal("api-key");
+export const GeminiAuthentication = Schema.Literal("provider-owned", "api-key");
 export type GeminiAuthentication = typeof GeminiAuthentication.Type;
 export const GeminiProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("gemini-acp"),
@@ -282,7 +282,7 @@ export const CopilotProviderConfiguration = Schema.Struct({
 }).annotations(strict);
 export type CopilotProviderConfiguration = typeof CopilotProviderConfiguration.Type;
 
-export const ClineAuthentication = Schema.Literal("api-key");
+export const ClineAuthentication = Schema.Literal("provider-owned", "api-key");
 export type ClineAuthentication = typeof ClineAuthentication.Type;
 export const ClineProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("cline-acp"),
@@ -291,7 +291,7 @@ export const ClineProviderConfiguration = Schema.Struct({
 }).annotations(strict);
 export type ClineProviderConfiguration = typeof ClineProviderConfiguration.Type;
 
-export const QwenAuthentication = Schema.Literal("api-key");
+export const QwenAuthentication = Schema.Literal("provider-owned", "api-key");
 export type QwenAuthentication = typeof QwenAuthentication.Type;
 export const QwenProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("qwen-acp"),
@@ -1419,6 +1419,10 @@ export const ProviderRegistryCommand = Schema.Union(
     instanceId: ProviderInstanceId,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("update-provider-cli"),
+    instanceId: ProviderInstanceId,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("verify-foundry-tools"),
     instanceId: ProviderInstanceId,
     modelId: ProviderModelId,
@@ -1459,6 +1463,14 @@ export const ProviderRegistryCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("provider-probed"),
     result: ProviderProbeResult,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("provider-cli-updated"),
+    instanceId: ProviderInstanceId,
+    status: Schema.Literal("updated", "already-current"),
+    previousVersion: Schema.optional(Schema.NonEmptyTrimmedString),
+    currentVersion: Schema.optional(Schema.NonEmptyTrimmedString),
+    message: Schema.optional(Schema.NonEmptyTrimmedString),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("foundry-tools-verified"),

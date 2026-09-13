@@ -147,8 +147,9 @@ conversation. The Code Environment panel has a **Picture in Picture** control
 for showing or hiding that preview. Hiding it changes presentation only; it
 does not stop the browser or computer-use session.
 
-Point at the preview or focus it with the keyboard to reveal its controls.
-A browser preview opens the same thread-owned Browser tab. Stop remains
+When agent-owned Browser activity appears, Octant opens the same thread-owned
+Browser tab and keeps the compact preview over the conversation. Point at the
+preview or focus it with the keyboard to reveal its controls. Stop remains
 available, and computer-use approvals stay visible when they need a decision.
 The preview does not live inside Environment and does not open a separate OS
 window.

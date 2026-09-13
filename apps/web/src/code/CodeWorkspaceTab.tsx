@@ -14,6 +14,7 @@ import { noticeTouches, useCodeFileChangeWatch } from "./useCodeFileChangeWatch"
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
+import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type { ImageGenerationProfileView } from "@octant/contracts";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
@@ -26,6 +27,8 @@ export default function CodeWorkspaceTab(props: {
   readonly agentRunClient?: AgentRunClient;
   readonly onAddAgent?: () => void;
   readonly appleToolchainClient?: AppleToolchainClient;
+  readonly extensionClient?: ExtensionClient;
+  readonly browserAvailable?: boolean;
   readonly tab: CodeWorkspaceTab;
   readonly hostBridge?: OctantHostBridge;
   readonly onOpenBrowser?: () => void;
@@ -122,6 +125,10 @@ export default function CodeWorkspaceTab(props: {
         {...(props.appleToolchainClient === undefined
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}
+        {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+        {...(props.browserAvailable === undefined
+          ? {}
+          : { browserAvailable: props.browserAvailable })}
         {...(approvals === undefined ? {} : { approvals })}
         client={props.controller.client}
         controller={props.controller}

@@ -18,9 +18,11 @@ live `fx acp` binary.
   shipped ACP stack (`acpDriver.ts`, `acpProcess.ts`, `acpProtocol.ts`,
   `acpProfiles.ts`).
 
-ACP availability is not attestation. The existing isolation pattern is Kimi
-Code's `immutable-managed-profile` (`KIMI_CODE_HOME`, generated config,
-forbidden `AGENTS.md` / `mcp.json` / `skills` / `plugins` / `hooks`).
+ACP availability is not attestation. The shipped ACP profiles now reuse each
+provider's documented native login profile when one exists; Kimi Code's former
+`immutable-managed-profile` is no longer the generic isolation pattern. fx is
+still blocked because its ACP command exposes no supported host-profile override
+and documents the interactive profile and workspace instructions as shared.
 
 ## Verdict
 

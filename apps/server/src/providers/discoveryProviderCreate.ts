@@ -153,7 +153,7 @@ export function createProviderFromDiscoveryCandidate(
           configuration: {
             kind: "glm-acp",
             binaryPath: candidate.binaryPath,
-            authentication: "api-key",
+            authentication: "provider-owned",
           },
           enabled: options.enabled,
         },
@@ -169,7 +169,7 @@ export function createProviderFromDiscoveryCandidate(
           configuration: {
             kind: "gemini-acp",
             binaryPath: candidate.binaryPath,
-            authentication: "api-key",
+            authentication: "provider-owned",
           },
           enabled: options.enabled,
         },
@@ -200,7 +200,7 @@ export function createProviderFromDiscoveryCandidate(
           configuration: {
             kind: "cline-acp",
             binaryPath: candidate.binaryPath,
-            authentication: "api-key",
+            authentication: "provider-owned",
           },
           enabled: options.enabled,
         },
@@ -216,7 +216,7 @@ export function createProviderFromDiscoveryCandidate(
           configuration: {
             kind: "qwen-acp",
             binaryPath: candidate.binaryPath,
-            authentication: "api-key",
+            authentication: "provider-owned",
           },
           enabled: options.enabled,
         },

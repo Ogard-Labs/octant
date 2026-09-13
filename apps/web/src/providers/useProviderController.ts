@@ -1195,6 +1195,56 @@ export function useProviderController(options: ProviderControllerOptions) {
     },
     [client],
   );
+  const updateProviderCli = useCallback(
+    (instanceId: ProviderInstanceId): Promise<boolean> =>
+      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, async () => {
+        if (client === undefined) return false;
+        const clearObservation = () => {
+          const current = authoritative.current;
+          if (current === undefined) return;
+          install({
+            ...current,
+            observedStates: current.observedStates.filter(
+              (value) => value.instanceId !== instanceId,
+            ),
+          });
+        };
+        let result: Extract<
+          Awaited<ReturnType<ProviderClient["execute"]>>,
+          { kind: "provider-cli-updated" }
+        >;
+        try {
+          const executed = await client.execute({ kind: "update-provider-cli", instanceId });
+          if (executed.kind !== "provider-cli-updated") {
+            throw new Error("Provider returned an invalid CLI update result.");
+          }
+          result = executed;
+        } catch (error) {
+          try {
+            install(await client.bootstrap());
+          } catch {
+            clearObservation();
+          }
+          if (mounted.current) setMessage(failureMessage(error));
+          return false;
+        }
+        try {
+          install(await client.bootstrap());
+        } catch {
+          // The provider update succeeded; clear stale readiness if authority is unavailable.
+          clearObservation();
+        }
+        if (mounted.current) {
+          setMessage(
+            result.status === "already-current"
+              ? "The provider CLI is already up to date."
+              : "Provider CLI updated. The native login profile was preserved.",
+          );
+        }
+        return true;
+      }),
+    [client, install],
+  );
   const changeClaudeConfiguration = useCallback(
     (
       instanceId: ProviderInstanceId,
@@ -2589,7 +2639,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     [execute],
   );
   const probe = useCallback(
-    async (instanceId: ProviderInstanceId) => {
+    async (instanceId: ProviderInstanceId, options?: { readonly quiet?: boolean }) => {
       if (client === undefined) return false;
       pendingProbes.current.add(instanceId);
       const current = authoritative.current;
@@ -2600,7 +2650,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         });
       }
       setProbingIds((current) => new Set(current).add(instanceId));
-      setMessage(undefined);
+      if (!options?.quiet) setMessage(undefined);
       try {
         const observed = await client.probe(instanceId);
         const current = authoritative.current;
@@ -2626,7 +2676,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         // page-level alert after the next registry snapshot is ready. Other
         // probe failures remain visible through the shared alert and the row's
         // authoritative readiness details.
-        if (mounted.current && !isInterruptedFailure(error)) {
+        if (mounted.current && !options?.quiet && !isInterruptedFailure(error)) {
           setMessage(redactedProbeFailureMessage(error));
         }
         return false;
@@ -2769,6 +2819,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     clearProviderCredential,
     beginProviderAuthentication,
     completeProviderAuthentication,
+    updateProviderCli,
     probe,
     verifyFoundryTools,
     updatePermissionPersistence,

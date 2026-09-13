@@ -79,7 +79,7 @@ export function VibeCreateAuthenticationFields(props: {
             props.onAuthenticationChange(value as MistralVibeAuthentication)
           }
           options={[
-            { id: "subscription", label: "Mistral subscription" },
+            { id: "subscription", label: "Provider CLI login (recommended)" },
             { id: "api-key", label: "Mistral API key" },
           ]}
           value={props.authentication}
@@ -100,8 +100,8 @@ export function VibeCreateAuthenticationFields(props: {
         </label>
       ) : (
         <p className="provider-settings__field-guidance">
-          Create the provider, then use its browser sign-in action. Octant never receives the
-          resulting OAuth credential.
+          Run the provider-owned Vibe CLI login in your terminal. Octant reuses the same Vibe
+          profile and binary.
         </p>
       )}
     </>
@@ -123,7 +123,7 @@ export function GrokCreateAuthenticationFields(props: {
           className="settings-view__select window-no-drag"
           onValueChange={(value) => props.onAuthenticationChange(value as GrokAuthentication)}
           options={[
-            { id: "subscription", label: "xAI subscription" },
+            { id: "subscription", label: "Provider CLI login (recommended)" },
             { id: "api-key", label: "xAI API key" },
           ]}
           value={props.authentication}
@@ -144,8 +144,8 @@ export function GrokCreateAuthenticationFields(props: {
         </label>
       ) : (
         <p className="provider-settings__field-guidance">
-          Create the provider, then use its browser sign-in action. Octant never receives the
-          resulting OAuth credential.
+          Run grok login in your terminal. On a headless host, use grok login --device-auth. Octant
+          reuses the provider-owned Grok profile and binary.
         </p>
       )}
     </>
