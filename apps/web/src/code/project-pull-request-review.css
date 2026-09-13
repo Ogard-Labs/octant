@@ -88,7 +88,7 @@
   margin: 0;
   color: var(--code-pr-state-fg);
   font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-medium);
   line-height: 1.3;
 }
 
@@ -106,7 +106,7 @@
   margin: 0;
   color: var(--oct-fg);
   font-size: var(--oct-text-lg);
-  font-weight: var(--oct-weight-strong);
+  font-weight: var(--oct-weight-display);
   line-height: var(--oct-leading-snug);
   text-wrap: pretty;
 }
