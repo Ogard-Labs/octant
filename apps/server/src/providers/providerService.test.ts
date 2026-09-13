@@ -2953,7 +2953,9 @@ describe("ProviderService", () => {
       runCliUpdate: async () => ({ output: "", exitCode: 0 }),
     });
     fixture.runtime.setObservedState(observation({ detectedVersion: "0.26.0" }));
-    fixture.runtime.setObservedState(observation({ instanceId: otherId, detectedVersion: "0.26.0" }));
+    fixture.runtime.setObservedState(
+      observation({ instanceId: otherId, detectedVersion: "0.26.0" }),
+    );
     const invalidate = vi.spyOn(fixture.runtime, "invalidateRuntime");
 
     await expect(
