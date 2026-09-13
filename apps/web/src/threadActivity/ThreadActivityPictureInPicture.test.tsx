@@ -205,7 +205,7 @@ describe("ThreadActivityPictureInPicture", () => {
     );
 
     expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
-    expect(onOpenBrowser).toHaveBeenCalledOnce();
+    await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledOnce());
     expect(onOpenBrowser).toHaveBeenCalledWith({ sessionIds: [contextId] });
   });
 
@@ -227,6 +227,7 @@ describe("ThreadActivityPictureInPicture", () => {
     );
 
     expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
+    await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledOnce());
     await waitFor(() =>
       expect(vi.mocked(browser.inspectThread).mock.calls.length).toBeGreaterThanOrEqual(2),
     );
@@ -252,7 +253,7 @@ describe("ThreadActivityPictureInPicture", () => {
 
     const { unmount } = render(ui);
     expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
-    expect(onOpenBrowser).toHaveBeenCalledOnce();
+    await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledOnce());
     unmount();
 
     render(ui);
@@ -297,7 +298,7 @@ describe("ThreadActivityPictureInPicture", () => {
       await first.promise;
     });
     expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
-    expect(onOpenBrowser).toHaveBeenCalledOnce();
+    await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledOnce());
 
     await waitFor(() => expect(inspectThread.mock.calls.length).toBeGreaterThanOrEqual(2));
     await act(async () => {
