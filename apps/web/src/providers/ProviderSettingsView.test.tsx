@@ -494,6 +494,89 @@ describe("ProviderSettingsView", () => {
     expect(screen.queryByRole("button", { name: /browser sign-in/i })).not.toBeInTheDocument();
   });
 
+  it.each([
+    {
+      label: "GLM Agent",
+      typeLabel: "GLM Agent ACP",
+      formName: "Add GLM Agent provider",
+      submitName: "Add GLM Agent ACP",
+      binaryLabel: "GLM Agent ACP binary",
+      binaryPath: "/Users/example/.local/bin/glm-acp-agent",
+      displayName: "GLM local",
+      create: "onCreateGlm",
+      kind: "glm-acp",
+    },
+    {
+      label: "Gemini CLI",
+      typeLabel: "Gemini CLI ACP",
+      formName: "Add provider",
+      submitName: "Add Gemini CLI",
+      binaryLabel: "Gemini CLI binary",
+      binaryPath: "/Users/example/.local/bin/gemini",
+      displayName: "Gemini local",
+      create: "onCreateGemini",
+      kind: "gemini-acp",
+    },
+    {
+      label: "Cline",
+      typeLabel: "Cline ACP",
+      formName: "Add provider",
+      submitName: "Add Cline",
+      binaryLabel: "Cline binary",
+      binaryPath: "/Users/example/.local/bin/cline",
+      displayName: "Cline local",
+      create: "onCreateCline",
+      kind: "cline-acp",
+    },
+    {
+      label: "Qwen Code",
+      typeLabel: "Qwen Code ACP",
+      formName: "Add provider",
+      submitName: "Add Qwen Code",
+      binaryLabel: "Qwen Code binary",
+      binaryPath: "/Users/example/.local/bin/qwen",
+      displayName: "Qwen local",
+      create: "onCreateQwen",
+      kind: "qwen-acp",
+    },
+  ] as const)(
+    "creates $label with provider-owned authentication and no API key",
+    async ({
+      typeLabel,
+      formName,
+      submitName,
+      binaryLabel,
+      binaryPath,
+      displayName,
+      create,
+      kind,
+    }) => {
+      const user = userEvent.setup();
+      const props = fixture();
+      renderExpanded(<ProviderSettingsView {...props} />);
+
+      await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), typeLabel);
+      const createForm = screen.getByRole("form", { name: formName });
+      await user.type(within(createForm).getByLabelText("Provider name"), displayName);
+      await user.type(within(createForm).getByLabelText(binaryLabel), binaryPath);
+      expect(within(createForm).getByLabelText("Provider authentication")).toHaveTextContent(
+        "Provider CLI login (recommended)",
+      );
+      expect(within(createForm).queryByLabelText(/API key/i)).not.toBeInTheDocument();
+      await user.click(within(createForm).getByRole("button", { name: submitName }));
+
+      expect(props[create]).toHaveBeenCalledWith(
+        displayName,
+        {
+          kind,
+          binaryPath,
+          authentication: "provider-owned",
+        },
+        expect.objectContaining({ value: "" }),
+      );
+    },
+  );
+
   it("disables only Claude API-key creation when host credential operations are unavailable", async () => {
     const user = userEvent.setup();
     const props = fixture({ credentialManagementAvailable: false });
@@ -598,6 +681,74 @@ describe("ProviderSettingsView", () => {
     ).not.toBeInTheDocument();
     expect(within(card).queryByRole("button", { name: /log in|oauth/i })).not.toBeInTheDocument();
     expect(card.textContent).not.toMatch(/account identity|oauth token|KIMI_CODE_HOME|transcript/i);
+  });
+
+  it("offers Update CLI only for providers with a verified updater and shows a scoped Updating state", async () => {
+    const user = userEvent.setup();
+    const onUpdateProviderCli = vi.fn(async () => true);
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: kimiProvider(),
+          observed: observation({ readiness: "ready", detectedVersion: "0.26.0" }),
+        })}
+        onUpdateProviderCli={onUpdateProviderCli}
+      />,
+    );
+
+    const update = screen.getByRole("button", { name: "Update Kimi local CLI" });
+    expect(update).toHaveTextContent("Update CLI");
+    await user.click(update);
+    expect(onUpdateProviderCli).toHaveBeenCalledWith(id);
+    expect(screen.queryByText(/login profile was preserved/i)).not.toBeInTheDocument();
+  });
+
+  it("replaces a ready badge with a scoped Updating state during a CLI update", () => {
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: kimiProvider(),
+          observed: observation({ readiness: "ready" }),
+        })}
+        updatingIds={new Set([id])}
+        onUpdateProviderCli={vi.fn(async () => true)}
+      />,
+    );
+
+    expect(screen.getByText("Updating")).toBeVisible();
+    expect(screen.queryByText("Ready")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Update Kimi local CLI" })).toBeDisabled();
+    expect(screen.getByRole("status", { name: "Provider readiness summary" })).toHaveTextContent(
+      /0 ready/,
+    );
+  });
+
+  it("does not offer Update CLI for providers without a verified updater", () => {
+    renderExpanded(
+      <ProviderSettingsView {...fixture()} onUpdateProviderCli={vi.fn(async () => true)} />,
+    );
+    expect(screen.queryByRole("button", { name: /Update .* CLI/ })).not.toBeInTheDocument();
+  });
+
+  it("offers Check connection with failed-auth guidance without opening Details first", () => {
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture({
+          instance: kimiProvider(),
+          observed: observation({ readiness: "unauthenticated" }),
+        })}
+      />,
+    );
+
+    const card = screen.getByRole("article", { name: "Kimi local" });
+    expect(within(card).getByText(/kimi login/i)).toBeVisible();
+    const check = within(card).getByRole("button", { name: "Check connection for Kimi local" });
+    expect(check).toBeVisible();
+    expect(check).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Details for Kimi local" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
   });
 
   it("renders Devin identity, provider-owned login guidance, and no secret surface", () => {
@@ -2090,6 +2241,7 @@ function ControllerBackedProviderSettings(props: {
       onRetry={controller.retry}
       onSetEnabled={controller.setEnabled}
       probingIds={controller.probingIds}
+      updatingIds={controller.updatingIds}
       status={controller.status}
     />
   );
@@ -2162,6 +2314,7 @@ function fixture(
     defaults: { permissionPersistence: "current-session", version: 0 as never },
     observedByInstance: new Map(options.observed ? [[id, options.observed]] : []),
     probingIds: new Set(),
+    updatingIds: new Set(),
     busy: false,
     ...(options.error ? { message: options.error } : {}),
     ...(options.onOpenExternalUrl === undefined

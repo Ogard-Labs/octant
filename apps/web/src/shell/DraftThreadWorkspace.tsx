@@ -48,16 +48,8 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import { FolderOpen, GitBranch, ShieldCheck } from "lucide-react";
-import {
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { joinDefaultFolderDisplayPath } from "../settings/defaultFolderDisplay";
 import { CodeHome, type CodeHomeProps } from "../code/CodeHome";
 import {
   CodeComposerAdapter,
@@ -409,7 +401,10 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     props.defaultFolder !== undefined && props.onEnsureDefaultProject !== undefined
       ? ({
           kind: "default-folder" as const,
-          rootPath: `${props.defaultFolder}/${props.mode === "work" ? "Work" : "Code"}`,
+          rootPath: joinDefaultFolderDisplayPath(
+            props.defaultFolder,
+            props.mode === "work" ? "Work" : "Code",
+          ),
           ...(props.mode === "code" && props.codeDefaultFolderThreads !== true
             ? {
                 disabled: true,

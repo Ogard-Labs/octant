@@ -9,7 +9,7 @@ import type {
 } from "@octant/contracts";
 import { isImageProfileDriverKind, supportsProviderCliUpdate } from "@octant/domain";
 import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -57,6 +57,7 @@ export type ProviderSettingsListProps = Pick<
   | "defaults"
   | "observedByInstance"
   | "probingIds"
+  | "updatingIds"
   | "busy"
   | "credentialManagementAvailable"
   | "onRename"
@@ -130,14 +131,17 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
     for (const instance of ordered) {
       if (!instance.enabled) {
         off += 1;
-      } else if (presentationObserved.get(instance.id)?.readiness === "ready") {
+      } else if (
+        !props.updatingIds?.has(instance.id) &&
+        presentationObserved.get(instance.id)?.readiness === "ready"
+      ) {
         ready += 1;
       } else {
         needsSetup += 1;
       }
     }
     return { ready, needsSetup, off };
-  }, [ordered, presentationObserved]);
+  }, [ordered, presentationObserved, props.updatingIds]);
 
   function move(index: number, direction: -1 | 1) {
     const next = index + direction;
@@ -232,6 +236,9 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
                 onBeginProviderAuthentication={props.onBeginProviderAuthentication}
                 onOpenExternalUrl={props.onOpenExternalUrl}
                 onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}
+                {...(props.onUpdateProviderCli === undefined
+                  ? {}
+                  : { onUpdateProviderCli: props.onUpdateProviderCli })}
                 onMove={move}
                 onProbe={props.onProbe}
                 onVerifyFoundryTools={props.onVerifyFoundryTools}
@@ -242,6 +249,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
                 onRename={props.onRename}
                 onSetEnabled={props.onSetEnabled}
                 probing={props.probingIds.has(instance.id)}
+                updating={props.updatingIds?.has(instance.id) === true}
                 reordering={reordering}
               />
             ))}
@@ -422,6 +430,7 @@ interface ProviderRowProps {
   readonly discoverySnapshot?: DiscoverySnapshot;
   readonly busy: boolean;
   readonly probing: boolean;
+  readonly updating: boolean;
   readonly reordering: boolean;
   readonly credentialManagementAvailable: boolean;
   readonly index: number;
@@ -466,7 +475,9 @@ interface ProviderRowProps {
 
 function ProviderRow(props: ProviderRowProps) {
   const [configurationOpen, setConfigurationOpen] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(
+    () => !props.probing && props.observed?.readiness === "unauthenticated",
+  );
   const [modelQuery, setModelQuery] = useState("");
   const hiddenModelIds = useMemo(
     () =>
@@ -484,9 +495,12 @@ function ProviderRow(props: ProviderRowProps) {
     props.observed?.models.filter((model) =>
       `${model.displayName} ${model.id}`.toLowerCase().includes(modelSearch),
     ) ?? [];
-  const disabled = props.busy || props.probing;
-  const readiness = props.probing ? "checking" : props.observed?.readiness;
+  const disabled = props.busy || props.probing || props.updating;
+  const readiness = props.updating || props.probing ? "checking" : props.observed?.readiness;
   const [connectionDetailsOpen, setConnectionDetailsOpen] = useState(() => readiness !== "ready");
+  useEffect(() => {
+    if (readiness === "unauthenticated") setDetailsOpen(true);
+  }, [readiness]);
   const autoRegisteredDisabled = isDisabledDiscoveryInstance(
     props.instance,
     props.discoverySnapshot,
@@ -619,9 +633,11 @@ function ProviderRow(props: ProviderRowProps) {
           >
             {!props.instance.enabled
               ? "Off"
-              : readiness === undefined
-                ? "Not checked"
-                : providerRowReadinessLabel(readiness, props.observed?.models.length ?? 0)}
+              : props.updating
+                ? "Updating"
+                : readiness === undefined
+                  ? "Not checked"
+                  : providerRowReadinessLabel(readiness, props.observed?.models.length ?? 0)}
           </span>
         </span>
       </span>
@@ -707,7 +723,7 @@ function ProviderRow(props: ProviderRowProps) {
                 type="button"
                 variant="outline"
               >
-                Update CLI
+                {props.updating ? "Updating…" : "Update CLI"}
               </OctantButton>
             ) : null}
             <OctantButton

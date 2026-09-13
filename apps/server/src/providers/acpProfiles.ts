@@ -60,25 +60,7 @@ export type AcpHostAuthentication =
 
 export type AcpConfinementStrategy =
   /** Shared deny-default Seatbelt profile; explicit Full access runs unconfined. */
-  | { readonly kind: "deny-default-seatbelt" }
-  /**
-   * Immutable managed profile for a provider that cannot safely reuse its
-   * native profile: the managed home is the agent's config home, a synthetic
-   * `HOME` and private `TMPDIR` live under it, the generated configuration is
-   * integrity-checked, extension entries are forbidden, and even Full access
-   * keeps immutable deny rules. Provider profiles should prefer the native
-   * provider-owned path whenever the CLI supports it.
-   */
-  | {
-      readonly kind: "immutable-managed-profile";
-      readonly homeVariable: string;
-      readonly configurationFileName: string;
-      readonly configuration: string;
-      /** Managed-home entries that must not exist (executable extension surfaces). */
-      readonly forbiddenEntries: ReadonlyArray<string>;
-      /** Project-root entries the agent may neither read nor write. */
-      readonly forbiddenRootEntries: ReadonlyArray<string>;
-    };
+  { readonly kind: "deny-default-seatbelt" };
 
 export interface AcpProcessProfile {
   /** `agentInfo.name` the ACP `initialize` response must report. */
@@ -110,6 +92,14 @@ export interface AcpProcessProfile {
     readonly executionPolicy: ProviderExecutionPolicy;
   }) => ReadonlyArray<AcpManagedFile>;
   readonly hostAuthentication?: AcpHostAuthentication;
+  /**
+   * Host-profile entries the process may neither read nor write. Used for
+   * executable extension surfaces that a reused native profile would otherwise
+   * load (MCP, skills, plugins, hooks).
+   */
+  readonly hostDeniedEntries?: ReadonlyArray<string>;
+  /** Project-root entries the agent may neither read nor write. */
+  readonly forbiddenRootEntries?: ReadonlyArray<string>;
   readonly confinement: AcpConfinementStrategy;
 }
 
@@ -480,19 +470,19 @@ const vibeProfile: AcpProviderProfile = {
   },
 };
 
-const GROK_CONFIGURATION_TOML = [
-  "[cli]",
-  "auto_update = false",
-  "",
-  "[features]",
-  "telemetry = false",
-  "feedback = false",
-  "codebase_indexing = false",
-  "remote_fetch = false",
-  "",
-  "[session]",
-  "load_envrc = false",
-].join("\n");
+/**
+ * Allowlisted `GROK_CONFIG` overlay. `grok inspect --json` on 1.0.30 accepts a
+ * `features` section and ignores `cli` / `session` overlays. Auto-update is
+ * suppressed with `GROK_DISABLE_AUTOUPDATER` instead of writing `config.toml`.
+ */
+const GROK_FEATURE_OVERLAY = {
+  features: {
+    telemetry: false,
+    feedback: false,
+    codebase_indexing: false,
+    remote_fetch: false,
+  },
+} as const;
 
 const grokProfile: AcpProviderProfile = {
   kind: "grok",
@@ -535,23 +525,21 @@ const grokProfile: AcpProviderProfile = {
       GROK_TELEMETRY_TRACE_UPLOAD: "0",
       GROK_TELEMETRY_MIXPANEL_ENABLED: "0",
       GROK_FEEDBACK_ENABLED: "0",
+      GROK_DISABLE_AUTOUPDATER: "1",
       GROK_MEMORY: "0",
       GROK_SUBAGENTS: "0",
       GROK_WORKFLOWS: "0",
       GROK_SANDBOX: "off",
       NO_COLOR: "1",
     },
-    environment: ({ managedHome, apiKey }) => ({
-      GROK_HOME: managedHome,
+    // GROK_HOME is the native profile via hostAuthentication. A managed
+    // config.toml is not read once GROK_HOME points at ~/.grok.
+    environment: ({ apiKey }) => ({
+      GROK_CONFIG: JSON.stringify(GROK_FEATURE_OVERLAY),
       ...(apiKey === undefined ? {} : { XAI_API_KEY: apiKey }),
     }),
     args: () => ["agent", "stdio"],
-    managedFiles: ({ managedHome }) => [
-      {
-        path: join(managedHome, "config.toml"),
-        content: `${GROK_CONFIGURATION_TOML}\n`,
-      },
-    ],
+    managedFiles: () => [],
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".grok"),
@@ -593,6 +581,9 @@ const gooseProfile: AcpProviderProfile = {
     environment: ({ managedHome }) => ({
       HOME: managedHome,
       XDG_CONFIG_HOME: join(managedHome, ".config"),
+      XDG_CACHE_HOME: join(managedHome, ".cache"),
+      XDG_DATA_HOME: join(managedHome, ".local/share"),
+      XDG_STATE_HOME: join(managedHome, ".local/state"),
     }),
     args: () => ["acp"],
     managedFiles: () => [],
@@ -600,7 +591,7 @@ const gooseProfile: AcpProviderProfile = {
       kind: "directory",
       defaultPath: join(homedir(), ".config/goose"),
       loginHint: "Run `goose configure`, then retry.",
-      environment: (path) => ({ HOME: dirname(dirname(path)), XDG_CONFIG_HOME: dirname(path) }),
+      environment: (path) => ({ XDG_CONFIG_HOME: dirname(path) }),
     },
     confinement: { kind: "deny-default-seatbelt" },
   },
@@ -645,6 +636,8 @@ const glmProfile: AcpProviderProfile = {
     environment: ({ managedHome, apiKey }) => ({
       HOME: managedHome,
       XDG_CONFIG_HOME: join(managedHome, ".config"),
+      XDG_CACHE_HOME: join(managedHome, ".cache"),
+      XDG_STATE_HOME: join(managedHome, ".local/state"),
       ACP_GLM_SESSION_DIR: join(managedHome, ".local/state/glm-acp-agent/sessions"),
       ...(apiKey === undefined ? {} : { Z_AI_API_KEY: apiKey }),
     }),
@@ -654,7 +647,7 @@ const glmProfile: AcpProviderProfile = {
       kind: "directory",
       defaultPath: join(homedir(), ".config/glm-acp-agent"),
       loginHint: "Run the provider-owned GLM Agent CLI login, then retry.",
-      environment: (path) => ({ HOME: dirname(dirname(path)), XDG_CONFIG_HOME: dirname(path) }),
+      environment: (path) => ({ XDG_CONFIG_HOME: dirname(path) }),
     },
     confinement: { kind: "deny-default-seatbelt" },
   },
@@ -703,6 +696,8 @@ const geminiProfile: AcpProviderProfile = {
       kind: "directory",
       defaultPath: join(homedir(), ".gemini"),
       loginHint: "Run `gemini` and complete its provider-owned CLI login, then retry.",
+      // Official Gemini CLI treats GEMINI_CLI_HOME as os.homedir() and creates
+      // `.gemini` inside it, so dirname(~/.gemini) is the native login root.
       environment: (path) => ({ GEMINI_CLI_HOME: dirname(path) }),
     },
     confinement: { kind: "deny-default-seatbelt" },
@@ -891,6 +886,11 @@ const kimiProfile: AcpProviderProfile = {
       environment: (path) => ({ KIMI_CODE_HOME: path }),
       forbiddenEntries: ["AGENTS.md", "mcp.json", "skills", "plugins", "hooks"],
     },
+    // Native KIMI_CODE_HOME loads mcp.json, skills, plugins, hooks, and
+    // AGENTS.md. Deny those surfaces in the OS profile so reused login cannot
+    // start extra executables; config.toml and credentials stay readable.
+    hostDeniedEntries: ["AGENTS.md", "mcp.json", "skills", "plugins", "hooks"],
+    forbiddenRootEntries: [".kimi-code", ".agents"],
     // Authentication lives in the provider-owned Kimi data root. The process
     // still runs inside Octant's project/managed-home Seatbelt boundary and
     // the reviewed command inventory remains the authority for ACP commands.

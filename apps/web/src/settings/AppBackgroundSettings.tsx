@@ -4,7 +4,7 @@ import type {
   SidebarBackgroundMetadata,
 } from "@octant/contracts/theme";
 import { Image as ImageIcon, Images, Upload } from "lucide-react";
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useId, useRef, useState, type ChangeEvent } from "react";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -62,6 +62,8 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   const selectedId = background.kind === "photo" ? String(background.backgroundId) : null;
   const showPhoto = choice === "photo" || selectedId !== null;
   const showDials = background.kind !== "none";
+  const patternDialsActive = background.patternEnabled;
+  const patternDialsHintId = useId();
 
   useEffect(() => {
     setChoice(background.kind);
@@ -242,11 +244,18 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               }
             />
           </div>
+          {patternDialsActive ? null : (
+            <p className="settings-app-background__note" id={patternDialsHintId}>
+              Pattern opacity, speed, and intensity apply when Show pattern is on.
+            </p>
+          )}
           <label className="settings-view__field">
             <span>Pattern opacity</span>
             <SliderField
+              {...(patternDialsActive ? {} : { "aria-describedby": patternDialsHintId })}
               aria-label="Pattern opacity"
               className="settings-view__range"
+              disabled={!patternDialsActive}
               max={100}
               min={0}
               onChange={(event) => dial("patternOpacity", Number(event.currentTarget.value))}
@@ -258,8 +267,10 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
           <label className="settings-view__field">
             <span>Pattern speed</span>
             <SliderField
+              {...(patternDialsActive ? {} : { "aria-describedby": patternDialsHintId })}
               aria-label="Pattern speed"
               className="settings-view__range"
+              disabled={!patternDialsActive}
               max={100}
               min={0}
               onChange={(event) => dial("patternSpeed", Number(event.currentTarget.value))}
@@ -271,8 +282,10 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
           <label className="settings-view__field">
             <span>Pattern intensity</span>
             <SliderField
+              {...(patternDialsActive ? {} : { "aria-describedby": patternDialsHintId })}
               aria-label="Pattern intensity"
               className="settings-view__range"
+              disabled={!patternDialsActive}
               max={100}
               min={0}
               onChange={(event) => dial("patternIntensity", Number(event.currentTarget.value))}

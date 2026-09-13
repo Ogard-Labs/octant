@@ -68,8 +68,15 @@ describe("ComposerProjectSelector", () => {
     );
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     const row = screen.getByRole("option", { name: /^No project/ });
-    expect(row).toBeDisabled();
+    // Native `disabled` drops the option from keyboard/activedescendant
+    // discovery; aria-disabled keeps the inline reason reachable without hover.
+    expect(row).toHaveAttribute("aria-disabled", "true");
+    expect(row).not.toBeDisabled();
+    expect(row).toHaveAccessibleName(/Enable Threads without a Project in Code settings/);
     expect(row).toHaveAttribute("title", "Enable Threads without a Project in Code settings");
+    await user.keyboard("{ArrowDown}");
+    expect(row).toHaveClass("composer-folder-selector__option--active");
+    await user.keyboard("{Enter}");
     expect(onSelect).not.toHaveBeenCalled();
   });
 

@@ -20,3 +20,6 @@ core
 
 # Local Claude Code session state and agent worktrees; never product code
 .claude/
+
+# Agent and review working notes; never product code
+.scratch/

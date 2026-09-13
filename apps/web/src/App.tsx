@@ -5579,6 +5579,7 @@ function LaunchedShell(
                     onOpenSurface={(surface, paneId, browserContextId) =>
                       controller.openSurface(surface, paneId, browserContextId)
                     }
+                    onRevealBrowserActivity={(input) => controller.revealBrowserActivity(input)}
                     environmentDockOpen={dockOpen && dockSurface === "environment"}
                     onDismissCrossContextOffer={controller.dismissCrossContextOffer}
                     onOpenCrossContextInNewWindow={() =>

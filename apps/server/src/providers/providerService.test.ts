@@ -1166,6 +1166,185 @@ describe("ProviderService", () => {
     );
   });
 
+  it.each([
+    {
+      label: "GLM Agent",
+      driverKind: "glm",
+      createKind: "create-glm-provider",
+      changeKind: "change-glm-configuration",
+      configurationKind: "glm-acp",
+      displayName: "GLM local",
+      binaryPath: "/Users/example/.local/bin/glm-acp-agent",
+      updatedBinaryPath: "/opt/homebrew/bin/glm-acp-agent",
+    },
+    {
+      label: "Gemini CLI",
+      driverKind: "gemini",
+      createKind: "create-gemini-provider",
+      changeKind: "change-gemini-configuration",
+      configurationKind: "gemini-acp",
+      displayName: "Gemini local",
+      binaryPath: "/Users/example/.local/bin/gemini",
+      updatedBinaryPath: "/opt/homebrew/bin/gemini",
+    },
+    {
+      label: "Cline",
+      driverKind: "cline",
+      createKind: "create-cline-provider",
+      changeKind: "change-cline-configuration",
+      configurationKind: "cline-acp",
+      displayName: "Cline local",
+      binaryPath: "/Users/example/.local/bin/cline",
+      updatedBinaryPath: "/opt/homebrew/bin/cline",
+    },
+    {
+      label: "Qwen Code",
+      driverKind: "qwen",
+      createKind: "create-qwen-provider",
+      changeKind: "change-qwen-configuration",
+      configurationKind: "qwen-acp",
+      displayName: "Qwen local",
+      binaryPath: "/Users/example/.local/bin/qwen",
+      updatedBinaryPath: "/opt/homebrew/bin/qwen",
+    },
+  ] as const)(
+    "creates, replays, and reconfigures $label without rewriting selected authentication",
+    async ({
+      createKind,
+      changeKind,
+      configurationKind,
+      driverKind,
+      displayName,
+      binaryPath,
+      updatedBinaryPath,
+    }) => {
+      for (const authentication of ["provider-owned", "api-key"] as const) {
+        const fixture = serviceFixture();
+        await expect(
+          fixture.service.execute(windowId, {
+            kind: createKind,
+            instanceId,
+            expectedVersion: 0,
+            displayName,
+            configuration: {
+              kind: configurationKind,
+              binaryPath,
+              authentication,
+            },
+          }),
+        ).resolves.toMatchObject({
+          kind: "provider-created",
+          instance: {
+            driverKind,
+            configuration: { kind: configurationKind, binaryPath, authentication },
+            version: 1,
+          },
+        });
+
+        const created = await fixture.service.bootstrap(windowId);
+        expect(created.instances).toEqual([
+          expect.objectContaining({
+            driverKind,
+            configuration: { kind: configurationKind, binaryPath, authentication },
+          }),
+        ]);
+        if (authentication === "api-key") {
+          expect(created.observedStates[0]).toEqual(
+            expect.objectContaining({ instanceId, credentialStatus: "missing" }),
+          );
+        } else {
+          expect(created.observedStates[0]).not.toHaveProperty("credentialStatus");
+        }
+
+        await expect(
+          fixture.service.execute(windowId, {
+            kind: changeKind,
+            instanceId,
+            expectedVersion: 1,
+            configuration: {
+              kind: configurationKind,
+              binaryPath: updatedBinaryPath,
+              authentication,
+            },
+          }),
+        ).resolves.toMatchObject({
+          kind: "provider-updated",
+          instance: {
+            driverKind,
+            configuration: {
+              kind: configurationKind,
+              binaryPath: updatedBinaryPath,
+              authentication,
+            },
+            version: 2,
+          },
+        });
+        expect(JSON.stringify(fixture.append.mock.calls)).not.toMatch(
+          /apiKey|oauthToken|credential|account|rawAcp/,
+        );
+      }
+    },
+  );
+
+  it.each([
+    {
+      label: "GLM Agent",
+      driverKind: "glm",
+      configurationKind: "glm-acp",
+      displayName: "GLM local",
+      binaryPath: "/Users/example/.local/bin/glm-acp-agent",
+    },
+    {
+      label: "Gemini CLI",
+      driverKind: "gemini",
+      configurationKind: "gemini-acp",
+      displayName: "Gemini local",
+      binaryPath: "/Users/example/.local/bin/gemini",
+    },
+    {
+      label: "Cline",
+      driverKind: "cline",
+      configurationKind: "cline-acp",
+      displayName: "Cline local",
+      binaryPath: "/Users/example/.local/bin/cline",
+    },
+    {
+      label: "Qwen Code",
+      driverKind: "qwen",
+      configurationKind: "qwen-acp",
+      displayName: "Qwen local",
+      binaryPath: "/Users/example/.local/bin/qwen",
+    },
+  ] as const)(
+    "bootstraps an existing $label API-key instance without rewriting it to provider-owned",
+    async ({ driverKind, configurationKind, displayName, binaryPath }) => {
+      const instance = decodeProviderInstance({
+        id: instanceId,
+        displayName,
+        driverKind,
+        configuration: {
+          kind: configurationKind,
+          binaryPath,
+          authentication: "api-key",
+        },
+        enabled: true,
+        environmentPolicy: "inherit-host",
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const fixture = serviceFixture({ instances: [instance] });
+      await expect(fixture.service.bootstrap(windowId)).resolves.toMatchObject({
+        instances: [
+          expect.objectContaining({
+            configuration: expect.objectContaining({ authentication: "api-key" }),
+          }),
+        ],
+      });
+      expect(fixture.append).not.toHaveBeenCalled();
+    },
+  );
+
   it("creates, replays, and reconfigures a strict Devin subscription provider", async () => {
     const fixture = serviceFixture();
     await expect(
@@ -2651,6 +2830,130 @@ describe("ProviderService", () => {
       currentVersion: "0.27.0",
     });
   });
+
+  it("reports an unchanged known version instead of treating exit zero as a replacement", async () => {
+    const fixture = serviceFixture({
+      instances: [kimiProvider()],
+      probe: async (instance) =>
+        observation({ instanceId: instance.id, detectedVersion: "0.27.0" }),
+      runCliUpdate: async () => ({ output: "already latest", exitCode: 0 }),
+    });
+    fixture.runtime.setObservedState(observation({ detectedVersion: "0.27.0" }));
+
+    await expect(
+      fixture.service.execute(windowId, { kind: "update-provider-cli", instanceId }),
+    ).resolves.toMatchObject({
+      kind: "provider-cli-updated",
+      status: "already-current",
+      previousVersion: "0.27.0",
+      currentVersion: "0.27.0",
+    });
+  });
+
+  it("reports an unknown version change when the follow-up probe has no comparable versions", async () => {
+    const fixture = serviceFixture({
+      instances: [kimiProvider()],
+      probe: async (instance) =>
+        observation({
+          instanceId: instance.id,
+          readiness: "unavailable",
+        }),
+      runCliUpdate: async () => ({ output: "", exitCode: 0 }),
+    });
+
+    await expect(
+      fixture.service.execute(windowId, { kind: "update-provider-cli", instanceId }),
+    ).resolves.toMatchObject({
+      kind: "provider-cli-updated",
+      status: "version-unknown",
+    });
+  });
+
+  it("keeps a completed updater successful when the follow-up probe fails", async () => {
+    const fixture = serviceFixture({
+      instances: [kimiProvider()],
+      probe: async () => {
+        throw { category: "unavailable", message: "secret provider diagnostic" };
+      },
+      runCliUpdate: async () => ({ output: "secret-token-value", exitCode: 0 }),
+    });
+    fixture.runtime.setObservedState(observation({ detectedVersion: "0.26.0" }));
+
+    await expect(
+      fixture.service.execute(windowId, { kind: "update-provider-cli", instanceId }),
+    ).resolves.toMatchObject({
+      kind: "provider-cli-updated",
+      status: "probe-failed",
+      previousVersion: "0.26.0",
+    });
+  });
+
+  it("refuses a CLI update while an alias instance still has an active session", async () => {
+    const fixture = serviceFixture({
+      instances: [
+        kimiProvider({ configuration: { kind: "kimi-code-acp", binaryPath: "/usr/bin/true" } }),
+        kimiProvider({
+          id: otherId,
+          displayName: "Kimi alias",
+          configuration: { kind: "kimi-code-acp", binaryPath: "/usr/bin/true" },
+        }),
+      ],
+      runCliUpdate: async () => ({ output: "", exitCode: 0 }),
+    });
+    fixture.runtime.setActiveSessionCount(otherId, 1);
+
+    await expect(
+      fixture.service.execute(windowId, { kind: "update-provider-cli", instanceId }),
+    ).rejects.toMatchObject({ failure: { category: "invalid-configuration" } });
+  });
+
+  it("refuses a second updater against the same executable until the first process tree exits", async () => {
+    const release = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const fixture = serviceFixture({
+      instances: [
+        kimiProvider({ configuration: { kind: "kimi-code-acp", binaryPath: "/usr/bin/true" } }),
+        kimiProvider({
+          id: otherId,
+          displayName: "Kimi alias",
+          configuration: { kind: "kimi-code-acp", binaryPath: "/usr/bin/true" },
+        }),
+      ],
+      probe: async (instance) =>
+        observation({ instanceId: instance.id, detectedVersion: "0.27.0" }),
+      runCliUpdate: async () => {
+        started.resolve();
+        await release.promise;
+        return { output: "", exitCode: 0 };
+      },
+    });
+    fixture.runtime.setObservedState(observation({ detectedVersion: "0.26.0" }));
+
+    const first = fixture.service.execute(windowId, { kind: "update-provider-cli", instanceId });
+    await started.promise;
+    await expect(
+      fixture.service.execute(windowId, { kind: "update-provider-cli", instanceId: otherId }),
+    ).rejects.toMatchObject({ failure: { category: "invalid-configuration" } });
+    release.resolve();
+    await expect(first).resolves.toMatchObject({ status: "updated" });
+  });
+
+  it("keeps the executable unavailable when updater termination cannot be confirmed", async () => {
+    const fixture = serviceFixture({
+      instances: [kimiProvider()],
+      runCliUpdate: async () => {
+        throw {
+          category: "unavailable",
+          message: "Provider CLI update did not confirm that the updater process tree exited.",
+        };
+      },
+    });
+
+    await expect(
+      fixture.service.execute(windowId, { kind: "update-provider-cli", instanceId }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    expect(() => fixture.runtime.setActiveSessionCount(instanceId, 1)).toThrow(/CLI update/i);
+  });
 });
 
 function serviceFixture(
@@ -2665,6 +2968,7 @@ function serviceFixture(
     readonly withCatalogPersistence?: boolean;
     readonly initialCatalog?: ProviderCatalogSnapshot;
     readonly isDriverPluginEffective?: (driverKind: ProviderInstance["driverKind"]) => boolean;
+    readonly runCliUpdate?: ProviderServiceOptions["runCliUpdate"];
   } = {},
 ) {
   let instances = [...(options.instances ?? [])];
@@ -2743,6 +3047,7 @@ function serviceFixture(
       ...(options.isDriverPluginEffective === undefined
         ? {}
         : { isDriverPluginEffective: options.isDriverPluginEffective }),
+      ...(options.runCliUpdate === undefined ? {} : { runCliUpdate: options.runCliUpdate }),
       uuid: () => crypto.randomUUID(),
       clock: () => now,
     }),

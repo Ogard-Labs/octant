@@ -1039,6 +1039,10 @@ describe("ACP provider driver profile quirks", () => {
       [vibe, "subscription"],
       [kilo, undefined],
       [kimi, undefined],
+      [acpProviderProfiles.glm, "provider-owned"],
+      [acpProviderProfiles.gemini, "provider-owned"],
+      [acpProviderProfiles.cline, "provider-owned"],
+      [acpProviderProfiles.qwen, "provider-owned"],
     ] as const) {
       const { driver, credentialResolver } = fixture(
         profile,

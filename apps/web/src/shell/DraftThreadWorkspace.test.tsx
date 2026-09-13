@@ -566,6 +566,23 @@ describe("DraftThreadWorkspace", () => {
     },
   );
 
+  it("shows the default-folder child path without a doubled trailing separator", async () => {
+    const user = userEvent.setup();
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        defaultFolder="/Users/ada/Documents/Octant/"
+        mode="work"
+        onEnsureDefaultProject={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
+    const row = screen.getByRole("option", { name: /^No project/ });
+    expect(row).toHaveTextContent("/Users/ada/Documents/Octant/Work");
+    expect(row.textContent ?? "").not.toContain("//Work");
+  });
+
   /**
    * The Code Project habit is only worth storing if the surface a user
    * actually reaches consumes it. These pin the reachable draft composer to

@@ -117,6 +117,70 @@ describe("makeProviderDriver", () => {
     },
   );
 
+  it.each([
+    ["glm", "glm-acp", "/missing/glm"],
+    ["gemini", "gemini-acp", "/missing/gemini"],
+    ["cline", "cline-acp", "/missing/cline"],
+    ["qwen", "qwen-acp", "/missing/qwen"],
+  ] as const)(
+    "reaches the ACP process for a provider-owned %s instance without consulting the credential broker",
+    async (driverKind, configurationKind, binaryPath) => {
+      const fixture = factoryFixture();
+      const credentialResolver = {
+        has: vi.fn(async () => true),
+        resolve: vi.fn(async () => "secret-provider-key"),
+      };
+      const driver = makeProviderDriver(
+        dualAuthCliInstance(driverKind, configurationKind, binaryPath, "provider-owned"),
+        { ...fixture.options, credentialResolver },
+      );
+
+      await expect(runProbe(driver)).rejects.toThrow(/ACP process selected/);
+      expect(credentialResolver.has).not.toHaveBeenCalled();
+      expect(credentialResolver.resolve).not.toHaveBeenCalled();
+      expect(fixture.acpStart).toHaveBeenCalledWith({
+        profile: expect.objectContaining({ kind: driverKind }),
+        binaryPath,
+        root: `/managed/${driverKind}/${instanceId}`,
+        managedHome: `/managed/${driverKind}/${instanceId}`,
+        mode: "chat",
+        executionPolicy: "approval-gated",
+        onProcessStarted: expect.any(Function),
+      });
+      expect(fixture.acpStart.mock.calls[0]?.[0]).not.toHaveProperty("apiKey");
+    },
+  );
+
+  it.each([
+    ["glm", "glm-acp", "/missing/glm"],
+    ["gemini", "gemini-acp", "/missing/gemini"],
+    ["cline", "cline-acp", "/missing/cline"],
+    ["qwen", "qwen-acp", "/missing/qwen"],
+  ] as const)(
+    "resolves a broker API key only for an explicit %s api-key instance",
+    async (driverKind, configurationKind, binaryPath) => {
+      const fixture = factoryFixture();
+      const credentialResolver = {
+        has: vi.fn(async () => true),
+        resolve: vi.fn(async () => "secret-provider-key"),
+      };
+      const driver = makeProviderDriver(
+        dualAuthCliInstance(driverKind, configurationKind, binaryPath, "api-key"),
+        { ...fixture.options, credentialResolver },
+      );
+
+      await expect(runProbe(driver)).rejects.toThrow(/ACP process selected/);
+      expect(credentialResolver.has).toHaveBeenCalledWith(instanceId);
+      expect(credentialResolver.resolve).toHaveBeenCalledWith(instanceId);
+      expect(fixture.acpStart).toHaveBeenCalledWith(
+        expect.objectContaining({
+          binaryPath,
+          apiKey: "secret-provider-key",
+        }),
+      );
+    },
+  );
+
   it("selects the Pi process and managed home only for a Pi instance", async () => {
     const fixture = factoryFixture();
     const driver = makeProviderDriver(provider("pi"), fixture.options);
@@ -355,6 +419,25 @@ function provider(
                           kind: "ollama-native-http",
                           baseUrl: "http://127.0.0.1:11434",
                         },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+}
+
+function dualAuthCliInstance(
+  driverKind: "glm" | "gemini" | "cline" | "qwen",
+  configurationKind: "glm-acp" | "gemini-acp" | "cline-acp" | "qwen-acp",
+  binaryPath: string,
+  authentication: "provider-owned" | "api-key",
+): ProviderInstance {
+  return decodeProviderInstance({
+    id: instanceId,
+    displayName: `${driverKind} local`,
+    driverKind,
+    configuration: { kind: configurationKind, binaryPath, authentication },
     enabled: true,
     environmentPolicy: "inherit-host",
     version: 1,

@@ -228,6 +228,36 @@ describe("ProviderRuntimeRegistry", () => {
     });
   });
 
+  it("refuses a second updater and new sessions against the same executable until the first update releases", async () => {
+    const registry = new ProviderRuntimeRegistry();
+    registry.claimExecutableUpdate("/opt/homebrew/bin/kimi", [instanceId, otherId]);
+    expect(() => registry.claimExecutableUpdate("/opt/homebrew/bin/kimi", [otherId])).toThrow(
+      /already running/i,
+    );
+    expect(() => registry.setActiveSessionCount(otherId, 1)).toThrow(/CLI update/i);
+    await expect(
+      Effect.runPromise(
+        Effect.scoped(
+          registry.acquireRuntime(instanceId, {
+            idleMs: 0,
+            start: async () => ({ value: "should-not-start", close: async () => undefined }),
+          }),
+        ),
+      ),
+    ).rejects.toMatchObject({ message: /CLI update/i });
+    registry.releaseExecutableUpdate("/opt/homebrew/bin/kimi");
+    registry.setActiveSessionCount(otherId, 1);
+    expect(registry.activeSessionCount(otherId)).toBe(1);
+  });
+
+  it("refuses an executable update while any alias instance still has an active session", () => {
+    const registry = new ProviderRuntimeRegistry();
+    registry.setActiveSessionCount(otherId, 1);
+    expect(() =>
+      registry.claimExecutableUpdate("/opt/homebrew/bin/kimi", [instanceId, otherId]),
+    ).toThrow(/active sessions/i);
+  });
+
   it("persists provider process ownership and removes it on close", async () => {
     const receiptDirectory = await mkdtemp(join(tmpdir(), "octant-provider-receipts-"));
     try {

@@ -1467,7 +1467,7 @@ export const ProviderRegistryCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("provider-cli-updated"),
     instanceId: ProviderInstanceId,
-    status: Schema.Literal("updated", "already-current"),
+    status: Schema.Literal("updated", "already-current", "version-unknown", "probe-failed"),
     previousVersion: Schema.optional(Schema.NonEmptyTrimmedString),
     currentVersion: Schema.optional(Schema.NonEmptyTrimmedString),
     message: Schema.optional(Schema.NonEmptyTrimmedString),

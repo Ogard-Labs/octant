@@ -1573,6 +1573,11 @@ html[data-octant-native-host="true"]
   background: var(--oct-fg-soft);
 }
 
+.composer-folder-selector__option[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .composer-folder-selector__option--selected {
   background: var(--octant-selection);
 }

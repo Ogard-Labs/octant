@@ -1,10 +1,35 @@
 /**
- * A person's photo behind the welcome screen is drawn once, small, through
- * an ordered dither with four levels per channel and its own colours, then
- * scaled up with nearest-neighbour sampling. That is the same halftone the
- * theme pattern uses, so the two read as one print rather than a photo with
- * a texture laid over it.
+ * A person's photo behind the welcome screen is either printed through an
+ * ordered dither — one cell per two CSS pixels, four levels per channel,
+ * then nearest-neighbour upscale, the same halftone the theme pattern uses —
+ * or drawn at the display's device pixels with ordinary sampling when dither
+ * is off. The coarse path is a choice, not a ceiling on the clean one.
  */
+
+function displayPixelRatio(): number {
+  if (typeof window === "undefined") return 1;
+  const ratio = window.devicePixelRatio;
+  return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+}
+
+/** Re-runs `onChange` when the window moves to a display with a different DPR. */
+export function watchDisplayPixelRatio(onChange: () => void): () => void {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return () => undefined;
+  }
+  let media: MediaQueryList | undefined;
+  const handle = () => {
+    onChange();
+    listen();
+  };
+  const listen = () => {
+    media?.removeEventListener("change", handle);
+    media = window.matchMedia(`(resolution: ${String(displayPixelRatio())}dppx)`);
+    media.addEventListener("change", handle);
+  };
+  listen();
+  return () => media?.removeEventListener("change", handle);
+}
 
 /** One photo cell spans two CSS pixels; finer than the pattern, still a grid. */
 export const PHOTO_CELL_PX = 2;
@@ -53,8 +78,9 @@ export interface PhotoSize {
 }
 
 /**
- * Draws `image` into `target` at one cell per `cell` CSS pixels, covering
- * `viewport` the way `object-fit: cover` would, and dithers the result.
+ * Draws `image` into `target` covering `viewport` the way `object-fit: cover`
+ * would. A dithered photo is one cell per `cell` CSS pixels, quantized in
+ * place; a clean photo uses the display's device pixels and is not quantized.
  * Returns false when the canvas cannot give a 2D context.
  */
 export function drawDitheredPhoto(
@@ -67,7 +93,7 @@ export function drawDitheredPhoto(
   return drawPhoto(target, image, imageSize, viewport, cell, true);
 }
 
-/** Draws the photo at full viewport resolution without quantizing its pixels. */
+/** Draws the photo at physical display resolution without quantizing its pixels. */
 export function drawPhoto(
   target: HTMLCanvasElement,
   image: CanvasImageSource,
@@ -76,13 +102,23 @@ export function drawPhoto(
   cell = 1,
   dithered = false,
 ): boolean {
-  const width = Math.max(1, Math.ceil(viewport.width / cell));
-  const height = Math.max(1, Math.ceil(viewport.height / cell));
+  let width: number;
+  let height: number;
+  if (dithered) {
+    width = Math.max(1, Math.ceil(viewport.width / cell));
+    height = Math.max(1, Math.ceil(viewport.height / cell));
+  } else {
+    const ratio = displayPixelRatio();
+    width = Math.max(1, Math.ceil(viewport.width * ratio));
+    height = Math.max(1, Math.ceil(viewport.height * ratio));
+  }
   if (target.width !== width || target.height !== height) {
     target.width = width;
     target.height = height;
   }
-  const context = target.getContext("2d", { willReadFrequently: true });
+  const context = dithered
+    ? target.getContext("2d", { willReadFrequently: true })
+    : target.getContext("2d");
   if (context === null) return false;
   const scale = Math.max(width / imageSize.width, height / imageSize.height);
   const drawnWidth = imageSize.width * scale;

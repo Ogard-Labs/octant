@@ -111,6 +111,7 @@ export function useProviderController(options: ProviderControllerOptions) {
   const [message, setMessage] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [probingIds, setProbingIds] = useState<ReadonlySet<ProviderInstanceId>>(new Set());
+  const [updatingIds, setUpdatingIds] = useState<ReadonlySet<ProviderInstanceId>>(new Set());
 
   const install = useCallback((value: ProviderRegistrySnapshot) => {
     for (const instanceId of credentialStatusUnconfirmed.current) {
@@ -931,13 +932,13 @@ export function useProviderController(options: ProviderControllerOptions) {
       const instanceId = decodeProviderInstanceId(crypto.randomUUID());
       return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
         withTransientCredential(credential, async (credentialValue) => {
-          if (hostBridge === undefined) {
+          if (configuration.authentication === "api-key" && hostBridge === undefined) {
             if (mounted.current) {
               setMessage("Provider credential management is unavailable on this host.");
             }
             return false;
           }
-          if (credentialValue.length === 0) {
+          if (configuration.authentication === "api-key" && credentialValue.length === 0) {
             if (mounted.current) {
               setMessage("Enter a Z.AI API key before creating this provider.");
             }
@@ -945,6 +946,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           const current = authoritative.current;
           if (client === undefined || current === undefined) return false;
+          const apiKeyHost = configuration.authentication === "api-key" ? hostBridge : undefined;
           let created = false;
           try {
             applyResult(
@@ -959,10 +961,12 @@ export function useProviderController(options: ProviderControllerOptions) {
               install,
             );
             created = true;
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            if (apiKeyHost !== undefined) {
+              await apiKeyHost.setProviderCredential(instanceId, credentialValue);
+            }
             return true;
           } catch (error) {
-            if (created) {
+            if (configuration.authentication === "api-key" && created) {
               if (mounted.current) {
                 setMessage("The provider was created, but its credential could not be stored.");
               }
@@ -986,13 +990,13 @@ export function useProviderController(options: ProviderControllerOptions) {
       const instanceId = decodeProviderInstanceId(crypto.randomUUID());
       return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
         withTransientCredential(credential, async (credentialValue) => {
-          if (hostBridge === undefined) {
+          if (configuration.authentication === "api-key" && hostBridge === undefined) {
             if (mounted.current) {
               setMessage("Provider credential management is unavailable on this host.");
             }
             return false;
           }
-          if (credentialValue.length === 0) {
+          if (configuration.authentication === "api-key" && credentialValue.length === 0) {
             if (mounted.current) {
               setMessage("Enter a Gemini API key before creating this provider.");
             }
@@ -1000,6 +1004,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           const current = authoritative.current;
           if (client === undefined || current === undefined) return false;
+          const apiKeyHost = configuration.authentication === "api-key" ? hostBridge : undefined;
           let created = false;
           try {
             applyResult(
@@ -1014,10 +1019,12 @@ export function useProviderController(options: ProviderControllerOptions) {
               install,
             );
             created = true;
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            if (apiKeyHost !== undefined) {
+              await apiKeyHost.setProviderCredential(instanceId, credentialValue);
+            }
             return true;
           } catch (error) {
-            if (created) {
+            if (configuration.authentication === "api-key" && created) {
               if (mounted.current) {
                 setMessage("The provider was created, but its credential could not be stored.");
               }
@@ -1040,13 +1047,13 @@ export function useProviderController(options: ProviderControllerOptions) {
       const instanceId = decodeProviderInstanceId(crypto.randomUUID());
       return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
         withTransientCredential(credential, async (credentialValue) => {
-          if (hostBridge === undefined) {
+          if (configuration.authentication === "api-key" && hostBridge === undefined) {
             if (mounted.current) {
               setMessage("Provider credential management is unavailable on this host.");
             }
             return false;
           }
-          if (credentialValue.length === 0) {
+          if (configuration.authentication === "api-key" && credentialValue.length === 0) {
             if (mounted.current) {
               setMessage("Enter a Cline API key before creating this provider.");
             }
@@ -1054,6 +1061,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           const current = authoritative.current;
           if (client === undefined || current === undefined) return false;
+          const apiKeyHost = configuration.authentication === "api-key" ? hostBridge : undefined;
           let created = false;
           try {
             applyResult(
@@ -1068,10 +1076,12 @@ export function useProviderController(options: ProviderControllerOptions) {
               install,
             );
             created = true;
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            if (apiKeyHost !== undefined) {
+              await apiKeyHost.setProviderCredential(instanceId, credentialValue);
+            }
             return true;
           } catch (error) {
-            if (created) {
+            if (configuration.authentication === "api-key" && created) {
               if (mounted.current) {
                 setMessage("The provider was created, but its credential could not be stored.");
               }
@@ -1094,13 +1104,13 @@ export function useProviderController(options: ProviderControllerOptions) {
       const instanceId = decodeProviderInstanceId(crypto.randomUUID());
       return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
         withTransientCredential(credential, async (credentialValue) => {
-          if (hostBridge === undefined) {
+          if (configuration.authentication === "api-key" && hostBridge === undefined) {
             if (mounted.current) {
               setMessage("Provider credential management is unavailable on this host.");
             }
             return false;
           }
-          if (credentialValue.length === 0) {
+          if (configuration.authentication === "api-key" && credentialValue.length === 0) {
             if (mounted.current) {
               setMessage("Enter an OpenAI-compatible API key before creating this provider.");
             }
@@ -1108,6 +1118,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           const current = authoritative.current;
           if (client === undefined || current === undefined) return false;
+          const apiKeyHost = configuration.authentication === "api-key" ? hostBridge : undefined;
           let created = false;
           try {
             applyResult(
@@ -1122,10 +1133,12 @@ export function useProviderController(options: ProviderControllerOptions) {
               install,
             );
             created = true;
-            await hostBridge.setProviderCredential(instanceId, credentialValue);
+            if (apiKeyHost !== undefined) {
+              await apiKeyHost.setProviderCredential(instanceId, credentialValue);
+            }
             return true;
           } catch (error) {
-            if (created) {
+            if (configuration.authentication === "api-key" && created) {
               if (mounted.current) {
                 setMessage("The provider was created, but its credential could not be stored.");
               }
@@ -1196,19 +1209,23 @@ export function useProviderController(options: ProviderControllerOptions) {
     [client],
   );
   const updateProviderCli = useCallback(
-    (instanceId: ProviderInstanceId): Promise<boolean> =>
-      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, async () => {
-        if (client === undefined) return false;
-        const clearObservation = () => {
-          const current = authoritative.current;
-          if (current === undefined) return;
-          install({
-            ...current,
-            observedStates: current.observedStates.filter(
-              (value) => value.instanceId !== instanceId,
-            ),
-          });
-        };
+    async (instanceId: ProviderInstanceId): Promise<boolean> => {
+      if (client === undefined) return false;
+      const clearObservation = () => {
+        const current = authoritative.current;
+        if (current === undefined) return;
+        install({
+          ...current,
+          observedStates: current.observedStates.filter((value) => value.instanceId !== instanceId),
+        });
+      };
+      clearObservation();
+      presentationObserved.current.delete(instanceId);
+      if (mounted.current) {
+        setUpdatingIds((ids) => new Set(ids).add(instanceId));
+        setPresentationObservedSnapshot(new Map(presentationObserved.current));
+      }
+      try {
         let result: Extract<
           Awaited<ReturnType<ProviderClient["execute"]>>,
           { kind: "provider-cli-updated" }
@@ -1225,7 +1242,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           } catch {
             clearObservation();
           }
-          if (mounted.current) setMessage(failureMessage(error));
+          if (mounted.current) setMessage(redactedProbeFailureMessage(error));
           return false;
         }
         try {
@@ -1234,15 +1251,18 @@ export function useProviderController(options: ProviderControllerOptions) {
           // The provider update succeeded; clear stale readiness if authority is unavailable.
           clearObservation();
         }
-        if (mounted.current) {
-          setMessage(
-            result.status === "already-current"
-              ? "The provider CLI is already up to date."
-              : "Provider CLI updated. The native login profile was preserved.",
-          );
-        }
+        if (mounted.current) setMessage(cliUpdateMessage(result));
         return true;
-      }),
+      } finally {
+        if (mounted.current) {
+          setUpdatingIds((ids) => {
+            const next = new Set(ids);
+            next.delete(instanceId);
+            return next;
+          });
+        }
+      }
+    },
     [client, install],
   );
   const changeClaudeConfiguration = useCallback(
@@ -1599,7 +1619,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (client === undefined || current === undefined || instance?.driverKind !== "glm") {
             return false;
           }
-          const mustSet = credentialValue.length > 0;
+          const mustSet = configuration.authentication === "api-key" && credentialValue.length > 0;
           if (mustSet && hostBridge === undefined) {
             if (mounted.current) {
               setMessage("Provider credential management is unavailable on this host.");
@@ -1684,7 +1704,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (client === undefined || current === undefined || instance?.driverKind !== "gemini") {
             return false;
           }
-          const mustSet = credentialValue.length > 0;
+          const mustSet = configuration.authentication === "api-key" && credentialValue.length > 0;
           if (mustSet && hostBridge === undefined) {
             if (mounted.current) {
               setMessage("Provider credential management is unavailable on this host.");
@@ -1769,7 +1789,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (client === undefined || current === undefined || instance?.driverKind !== "cline") {
             return false;
           }
-          const mustSet = credentialValue.length > 0;
+          const mustSet = configuration.authentication === "api-key" && credentialValue.length > 0;
           if (mustSet && hostBridge === undefined) {
             if (mounted.current) {
               setMessage("Provider credential management is unavailable on this host.");
@@ -1854,7 +1874,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (client === undefined || current === undefined || instance?.driverKind !== "qwen") {
             return false;
           }
-          const mustSet = credentialValue.length > 0;
+          const mustSet = configuration.authentication === "api-key" && credentialValue.length > 0;
           if (mustSet && hostBridge === undefined) {
             if (mounted.current) {
               setMessage("Provider credential management is unavailable on this host.");
@@ -2771,6 +2791,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     presentationObservedByInstance: presentationObservedSnapshot,
     busy,
     probingIds,
+    updatingIds,
     credentialManagementAvailable: hostBridge !== undefined,
     ...(message === undefined ? {} : { message }),
     retry: load,
@@ -2916,6 +2937,26 @@ function applyResult(
       ],
     });
   }
+}
+
+function cliUpdateMessage(
+  result: Extract<ProviderRegistryCommandResult, { kind: "provider-cli-updated" }>,
+): string {
+  if (result.status === "already-current") {
+    return result.currentVersion === undefined
+      ? "The provider CLI is already up to date."
+      : `The provider CLI is already up to date (${result.currentVersion}).`;
+  }
+  if (result.status === "probe-failed") {
+    return "Provider CLI update finished, but the follow-up connection check failed.";
+  }
+  if (result.status === "version-unknown") {
+    return "Provider CLI update finished. The installed version could not be compared.";
+  }
+  if (result.previousVersion !== undefined && result.currentVersion !== undefined) {
+    return `Provider CLI updated from ${result.previousVersion} to ${result.currentVersion}.`;
+  }
+  return "Provider CLI updated.";
 }
 
 function failureMessage(error: unknown): string {

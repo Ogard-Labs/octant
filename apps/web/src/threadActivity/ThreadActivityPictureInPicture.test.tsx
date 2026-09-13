@@ -206,6 +206,139 @@ describe("ThreadActivityPictureInPicture", () => {
 
     expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
     expect(onOpenBrowser).toHaveBeenCalledOnce();
+    expect(onOpenBrowser).toHaveBeenCalledWith({ sessionIds: [contextId] });
+  });
+
+  it("does not ask the shell to reopen while the same Browser session keeps polling", async () => {
+    const onOpenBrowser = vi.fn();
+    const browser = {
+      inspectThread: vi.fn(async () => browserSnapshot()),
+    } as unknown as BrowserAutomationClient;
+
+    render(
+      <ThreadActivityPictureInPicture
+        browserClient={browser}
+        onOpenBrowser={onOpenBrowser}
+        pollIntervalMs={10}
+        threadId={threadId as never}
+      >
+        <div>Conversation</div>
+      </ThreadActivityPictureInPicture>,
+    );
+
+    expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
+    await waitFor(() =>
+      expect(vi.mocked(browser.inspectThread).mock.calls.length).toBeGreaterThanOrEqual(2),
+    );
+    expect(onOpenBrowser).toHaveBeenCalledOnce();
+    expect(onOpenBrowser).toHaveBeenCalledWith({ sessionIds: [contextId] });
+  });
+
+  it("notifies the shell again after remounting the same live Browser session", async () => {
+    const onOpenBrowser = vi.fn();
+    const browser = {
+      inspectThread: vi.fn(async () => browserSnapshot()),
+    } as unknown as BrowserAutomationClient;
+    const ui = (
+      <ThreadActivityPictureInPicture
+        browserClient={browser}
+        onOpenBrowser={onOpenBrowser}
+        pollIntervalMs={60_000}
+        threadId={threadId as never}
+      >
+        <div>Conversation</div>
+      </ThreadActivityPictureInPicture>
+    );
+
+    const { unmount } = render(ui);
+    expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
+    expect(onOpenBrowser).toHaveBeenCalledOnce();
+    unmount();
+
+    render(ui);
+    expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
+    await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledTimes(2));
+    expect(onOpenBrowser).toHaveBeenNthCalledWith(2, { sessionIds: [contextId] });
+  });
+
+  it("asks the shell to surface a later Browser session after the previous one ends", async () => {
+    const onOpenBrowser = vi.fn();
+    const nextContextId = "31000000-0000-4000-8000-000000000002";
+    const ready = {
+      status: "ready",
+      threadId,
+      evidence: [],
+    } as unknown as BrowserAutomationSnapshot;
+    const nextSession = browserSnapshot(threadId, nextContextId);
+    const browser = {
+      inspectThread: vi
+        .fn()
+        .mockResolvedValueOnce(browserSnapshot())
+        .mockResolvedValueOnce(ready)
+        .mockResolvedValue(nextSession),
+    } as unknown as BrowserAutomationClient;
+
+    render(
+      <ThreadActivityPictureInPicture
+        browserClient={browser}
+        onOpenBrowser={onOpenBrowser}
+        pollIntervalMs={10}
+        threadId={threadId as never}
+      >
+        <div>Conversation</div>
+      </ThreadActivityPictureInPicture>,
+    );
+
+    expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("complementary", { name: "Thread activity preview" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
+    await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledTimes(2));
+    expect(onOpenBrowser).toHaveBeenNthCalledWith(1, { sessionIds: [contextId] });
+    expect(onOpenBrowser).toHaveBeenNthCalledWith(2, { sessionIds: [nextContextId] });
+  });
+
+  it("names each thread's Browser session without sharing one callback payload", async () => {
+    const onOpenFirst = vi.fn();
+    const onOpenSecond = vi.fn();
+    const firstBrowser = {
+      inspectThread: vi.fn(async () => browserSnapshot()),
+    } as unknown as BrowserAutomationClient;
+    const secondContextId = "32000000-0000-4000-8000-000000000003";
+    const secondBrowser = {
+      inspectThread: vi.fn(async () => browserSnapshot(otherThreadId, secondContextId)),
+    } as unknown as BrowserAutomationClient;
+
+    render(
+      <>
+        <ThreadActivityPictureInPicture
+          browserClient={firstBrowser}
+          onOpenBrowser={onOpenFirst}
+          pollIntervalMs={60_000}
+          threadId={threadId as never}
+        >
+          <div>First conversation</div>
+        </ThreadActivityPictureInPicture>
+        <ThreadActivityPictureInPicture
+          browserClient={secondBrowser}
+          onOpenBrowser={onOpenSecond}
+          pollIntervalMs={60_000}
+          threadId={otherThreadId as never}
+        >
+          <div>Second conversation</div>
+        </ThreadActivityPictureInPicture>
+      </>,
+    );
+
+    await waitFor(() => expect(onOpenFirst).toHaveBeenCalledWith({ sessionIds: [contextId] }));
+    await waitFor(() =>
+      expect(onOpenSecond).toHaveBeenCalledWith({ sessionIds: [secondContextId] }),
+    );
+    expect(onOpenFirst).toHaveBeenCalledOnce();
+    expect(onOpenSecond).toHaveBeenCalledOnce();
   });
 
   it("shows, hides, restores, and stops the exact thread Browser preview", async () => {
@@ -498,13 +631,16 @@ function deferred<T>() {
   return { promise, reject, resolve };
 }
 
-function browserSnapshot(): BrowserAutomationSnapshot {
+function browserSnapshot(
+  ownedThreadId: string = threadId,
+  ownedContextId: string = contextId,
+): BrowserAutomationSnapshot {
   return {
     status: "running",
-    threadId: threadId as never,
+    threadId: ownedThreadId as never,
     context: {
-      contextId: contextId as never,
-      threadId: threadId as never,
+      contextId: ownedContextId as never,
+      threadId: ownedThreadId as never,
       actionId: "40000000-0000-4000-8000-000000000001" as never,
       correlationId: "50000000-0000-4000-8000-000000000001" as never,
       authority: {
@@ -526,7 +662,7 @@ function browserSnapshot(): BrowserAutomationSnapshot {
       createdAt: "2026-08-10T12:00:00.000Z" as never,
     },
     observation: {
-      contextId: contextId as never,
+      contextId: ownedContextId as never,
       actionId: "40000000-0000-4000-8000-000000000001" as never,
       correlationId: "50000000-0000-4000-8000-000000000001" as never,
       authority: {

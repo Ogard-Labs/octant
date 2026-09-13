@@ -737,6 +737,50 @@ describe("provider registry contracts", () => {
     ).toThrow();
   });
 
+  it("distinguishes CLI update outcomes without carrying raw updater output", () => {
+    expect(
+      decodeProviderRegistryCommandResult({
+        kind: "provider-cli-updated",
+        instanceId: ids.instance,
+        status: "updated",
+        previousVersion: "1.0.0",
+        currentVersion: "1.1.0",
+      }),
+    ).toMatchObject({ status: "updated" });
+    expect(
+      decodeProviderRegistryCommandResult({
+        kind: "provider-cli-updated",
+        instanceId: ids.instance,
+        status: "already-current",
+        previousVersion: "1.1.0",
+        currentVersion: "1.1.0",
+      }),
+    ).toMatchObject({ status: "already-current" });
+    expect(
+      decodeProviderRegistryCommandResult({
+        kind: "provider-cli-updated",
+        instanceId: ids.instance,
+        status: "version-unknown",
+      }),
+    ).toMatchObject({ status: "version-unknown" });
+    expect(
+      decodeProviderRegistryCommandResult({
+        kind: "provider-cli-updated",
+        instanceId: ids.instance,
+        status: "probe-failed",
+        previousVersion: "1.0.0",
+      }),
+    ).toMatchObject({ status: "probe-failed" });
+    expect(() =>
+      decodeProviderRegistryCommandResult({
+        kind: "provider-cli-updated",
+        instanceId: ids.instance,
+        status: "updated",
+        output: "secret-token-value",
+      }),
+    ).toThrow();
+  });
+
   it("decodes only strict non-secret Goose instances, events, and commands", () => {
     const goose = {
       id: ids.instance,

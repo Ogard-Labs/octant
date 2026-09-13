@@ -214,6 +214,66 @@ describe("AppBackgroundSettings", () => {
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ photoDithered: false }));
   });
 
+  it("disables the pattern dials while the pattern is off, keeps their values, and says when they apply", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const saved = {
+      ...DEFAULT_APP_BACKGROUND,
+      kind: "photo" as const,
+      backgroundId: PHOTO_ID as never,
+      patternEnabled: false,
+      patternOpacity: 20,
+      patternSpeed: 80,
+      patternIntensity: 100,
+    };
+    render(<AppBackgroundSettings background={saved} library={library()} onChange={onChange} />);
+
+    const opacity = screen.getByRole("slider", { name: "Pattern opacity" });
+    const speed = screen.getByRole("slider", { name: "Pattern speed" });
+    const intensity = screen.getByRole("slider", { name: "Pattern intensity" });
+    expect(opacity).toBeDisabled();
+    expect(speed).toBeDisabled();
+    expect(intensity).toBeDisabled();
+    expect(opacity).toHaveValue("20");
+    expect(speed).toHaveValue("80");
+    expect(intensity).toHaveValue("100");
+
+    const hint = screen.getByText(
+      "Pattern opacity, speed, and intensity apply when Show pattern is on.",
+    );
+    expect(opacity).toHaveAttribute("aria-describedby", hint.id);
+    expect(speed).toHaveAttribute("aria-describedby", hint.id);
+    expect(intensity).toHaveAttribute("aria-describedby", hint.id);
+
+    await user.click(screen.getByRole("switch", { name: "Show pattern" }));
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        patternEnabled: true,
+        patternOpacity: 20,
+        patternSpeed: 80,
+        patternIntensity: 100,
+      }),
+    );
+    expect(screen.getByRole("slider", { name: "Photo opacity" })).not.toBeDisabled();
+  });
+
+  it("leaves the pattern dials usable while the pattern is on", () => {
+    render(
+      <AppBackgroundSettings
+        background={DEFAULT_APP_BACKGROUND}
+        library={library()}
+        onChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("slider", { name: "Pattern opacity" })).not.toBeDisabled();
+    expect(screen.getByRole("slider", { name: "Pattern speed" })).not.toBeDisabled();
+    expect(screen.getByRole("slider", { name: "Pattern intensity" })).not.toBeDisabled();
+    expect(
+      screen.queryByText("Pattern opacity, speed, and intensity apply when Show pattern is on."),
+    ).not.toBeInTheDocument();
+  });
+
   it("offers the sidebar only once the ground is behind everything", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();

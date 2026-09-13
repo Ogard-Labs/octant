@@ -57,6 +57,7 @@ export interface ProviderSettingsViewProps {
    */
   readonly presentationObservedByInstance?: ReadonlyMap<ProviderInstanceId, ProviderObservedState>;
   readonly probingIds: ReadonlySet<ProviderInstanceId>;
+  readonly updatingIds?: ReadonlySet<ProviderInstanceId>;
   readonly busy: boolean;
   readonly credentialManagementAvailable: boolean;
   readonly message?: string;
@@ -378,6 +379,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
           ? {}
           : { presentationObservedByInstance: props.presentationObservedByInstance })}
         probingIds={props.probingIds}
+        {...(props.updatingIds === undefined ? {} : { updatingIds: props.updatingIds })}
         status={props.status}
         onAgentEligibleModelsChange={props.onAgentEligibleModelsChange}
         onHiddenModelsChange={props.onHiddenModelsChange}

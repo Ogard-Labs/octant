@@ -86,6 +86,7 @@ import {
   isImageProfileDriverKind,
   type CapabilityEvidenceChange,
 } from "@octant/domain";
+import { realpathSync } from "node:fs";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -98,10 +99,17 @@ import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { PROVIDER_DEFAULTS_AGGREGATE_ID } from "./providerProjection";
 import {
+  ProviderExecutableUpdateRejected,
   ProviderRuntimeInvalidationRejected,
   type ProviderRuntimeRegistry,
 } from "./providerRuntimeRegistry";
-import { providerCliUpdateArgs, runProviderCliUpdate } from "./providerCliUpdate";
+import {
+  isProviderCliUpdateTerminationUnconfirmed,
+  providerCliUpdateArgs,
+  runProviderCliUpdate,
+  type ProviderCliUpdateInput,
+  type ProviderCliUpdateOutput,
+} from "./providerCliUpdate";
 
 const decodeActorId = Schema.decodeUnknownSync(ActorId);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
@@ -181,6 +189,7 @@ export interface ProviderServiceOptions {
   readonly clearResumeIdentities?: (instanceId: ProviderInstanceId) => Promise<void>;
   /** Clears process-local provider limit evidence when identity/configuration changes. */
   readonly clearRuntimeUsageLimits?: (instanceId: ProviderInstanceId) => void;
+  readonly runCliUpdate?: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
   readonly uuid: () => string;
   readonly clock: () => string;
 }
@@ -204,6 +213,7 @@ export class ProviderService implements ProviderServiceApi {
   readonly #isDriverPluginEffective: (driverKind: ProviderDriverKind) => boolean;
   readonly #clearResumeIdentities: ProviderServiceOptions["clearResumeIdentities"];
   readonly #clearRuntimeUsageLimits: ProviderServiceOptions["clearRuntimeUsageLimits"];
+  readonly #runCliUpdate: (input: ProviderCliUpdateInput) => Promise<ProviderCliUpdateOutput>;
 
   constructor(options: ProviderServiceOptions) {
     this.#persistence = options.persistence;
@@ -236,6 +246,7 @@ export class ProviderService implements ProviderServiceApi {
       ((driverKind) => admittedBundledProviderDriverKinds().has(driverKind));
     this.#clearResumeIdentities = options.clearResumeIdentities;
     this.#clearRuntimeUsageLimits = options.clearRuntimeUsageLimits;
+    this.#runCliUpdate = options.runCliUpdate ?? runProviderCliUpdate;
   }
 
   async bootstrap(_authenticatedWindowId: WindowId): Promise<ProviderRegistrySnapshot> {
@@ -407,6 +418,8 @@ export class ProviderService implements ProviderServiceApi {
     }
     if (command.kind === "update-provider-cli") {
       this.#assertReady();
+      let claimedExecutable: string | undefined;
+      let terminationUnconfirmed = false;
       try {
         const previousVersion = await this.#withInstanceOperation(command.instanceId, async () => {
           const instance = this.#persistence.readProviderInstance(command.instanceId);
@@ -419,33 +432,52 @@ export class ProviderService implements ProviderServiceApi {
               "This provider does not expose a safe provider-owned CLI update command.",
             );
           }
-          if (this.#runtime.activeSessionCount(instance.id) !== 0) {
-            throw this.#invalid("Stop active sessions before updating this provider CLI.");
-          }
+          const binaryPath = providerBinaryPath(instance);
+          const executableKey = resolveProviderExecutableKey(binaryPath);
+          const peers = this.#instancesSharingExecutable(executableKey);
+          this.#runtime.claimExecutableUpdate(
+            executableKey,
+            peers.map((peer) => peer.id),
+          );
+          claimedExecutable = executableKey;
           const previousVersion = this.#runtime.observedState(instance.id)?.detectedVersion;
           await this.#runtime.invalidateRuntime(instance.id);
-          await runProviderCliUpdate({
-            binaryPath: providerBinaryPath(instance),
-            args,
-          });
+          try {
+            await this.#runCliUpdate({ binaryPath, args });
+          } catch (error) {
+            if (isProviderCliUpdateTerminationUnconfirmed(error)) terminationUnconfirmed = true;
+            throw error;
+          }
           return previousVersion;
         });
         // Probe after releasing the per-instance mutation queue. Probing takes
-        // the same queue and would otherwise wait on itself forever.
-        const current = await this.probe(authenticatedWindowId, command.instanceId);
-        const currentVersion = current.detectedVersion;
-        return decodeProviderRegistryCommandResult({
-          kind: "provider-cli-updated",
-          instanceId: command.instanceId,
-          status:
-            previousVersion !== undefined && currentVersion === previousVersion
-              ? "already-current"
-              : "updated",
-          ...(previousVersion === undefined ? {} : { previousVersion }),
-          ...(currentVersion === undefined ? {} : { currentVersion }),
-        });
+        // the same queue and would otherwise wait on itself forever. Keep the
+        // executable claim until the probe returns so a session cannot start
+        // against a binary that has not been re-observed.
+        try {
+          const current = await this.probe(authenticatedWindowId, command.instanceId);
+          const currentVersion = current.detectedVersion;
+          return decodeProviderRegistryCommandResult({
+            kind: "provider-cli-updated",
+            instanceId: command.instanceId,
+            status: classifyProviderCliUpdateStatus(previousVersion, currentVersion),
+            ...(previousVersion === undefined ? {} : { previousVersion }),
+            ...(currentVersion === undefined ? {} : { currentVersion }),
+          });
+        } catch {
+          return decodeProviderRegistryCommandResult({
+            kind: "provider-cli-updated",
+            instanceId: command.instanceId,
+            status: "probe-failed",
+            ...(previousVersion === undefined ? {} : { previousVersion }),
+          });
+        }
       } catch (error) {
         throw this.#mapFailure(error);
+      } finally {
+        if (claimedExecutable !== undefined && !terminationUnconfirmed) {
+          this.#runtime.releaseExecutableUpdate(claimedExecutable);
+        }
       }
     }
     if (command.kind === "verify-foundry-tools") {
@@ -1352,6 +1384,13 @@ export class ProviderService implements ProviderServiceApi {
     if (authoritative?.version !== snapshot.version) throw this.#unavailable();
   }
 
+  #instancesSharingExecutable(executableKey: string): ReadonlyArray<ProviderInstance> {
+    return this.#persistence.readProviderInstances().filter((instance) => {
+      if (!("binaryPath" in instance.configuration)) return false;
+      return resolveProviderExecutableKey(instance.configuration.binaryPath) === executableKey;
+    });
+  }
+
   async #withInstanceOperation<T>(instanceId: ProviderInstanceId, operation: () => Promise<T>) {
     const previous = this.#instanceOperationTails.get(instanceId) ?? Promise.resolve();
     let release!: () => void;
@@ -1454,6 +1493,7 @@ export class ProviderService implements ProviderServiceApi {
     if (error instanceof ProviderServiceError) return error;
     if (error instanceof ProviderPolicyRejected) return this.#invalid(error.message);
     if (error instanceof ProviderRuntimeInvalidationRejected) return this.#invalid(error.message);
+    if (error instanceof ProviderExecutableUpdateRejected) return this.#invalid(error.message);
     if (error instanceof ConcurrencyConflict) {
       return this.#invalid("Provider configuration changed; reload and retry.");
     }
@@ -1623,6 +1663,24 @@ function providerFailureOfError(error: unknown): ProviderFailure | undefined {
     return decodeProviderFailure(error.failure);
   }
   return undefined;
+}
+
+function resolveProviderExecutableKey(binaryPath: string): string {
+  try {
+    return realpathSync(binaryPath);
+  } catch {
+    return binaryPath;
+  }
+}
+
+function classifyProviderCliUpdateStatus(
+  previousVersion: string | undefined,
+  currentVersion: string | undefined,
+): "updated" | "already-current" | "version-unknown" {
+  if (previousVersion !== undefined && currentVersion !== undefined) {
+    return previousVersion === currentVersion ? "already-current" : "updated";
+  }
+  return "version-unknown";
 }
 
 function providerBinaryPath(instance: ProviderInstance): string {

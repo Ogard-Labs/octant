@@ -63,9 +63,10 @@ expressed with those primitives, but the _mechanism_ is different.
   confinement through the same shared builder on Linux, so Devin, Codex,
   OpenCode, Kilo, Grok, Mistral Vibe, and the bounded `pi` path are confined
   consistently with Work and Code.
-- `immutable-managed-profile` (Kimi Code's managed profile mode) remains
-  macOS-only and fails closed on Linux; it is not replaced by an unconfined
-  alternative.
+- 0121 supersedes this record's Kimi-specific `immutable-managed-profile`
+  bullet: Kimi Code reuses the provider-owned host profile inside the shared
+  deny-default Seatbelt/Bubblewrap builder. The remaining Bubblewrap and
+  Seatbelt confinement rules in this record still stand.
 - 0054's consequence that Work and Code remain incompatible on Linux is
   superseded for this Seatbelt-equivalent path. This backend is interim:
   0048 capsules remain the stronger Station isolation layer and stay unwired.
@@ -92,3 +93,4 @@ expressed with those primitives, but the _mechanism_ is different.
 - 0048 Linux Stations isolate Code work in execution capsules
 - 0031 Hosts as environments
 - 0006 ACP agent drivers as one generic stack with per-provider profiles
+- 0121 Provider-owned CLI runtimes, profiles, and updates

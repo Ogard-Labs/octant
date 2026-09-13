@@ -101,11 +101,10 @@ describe("remote route policy", () => {
   });
 
   it("refuses framing of the served document through a response header", async () => {
-    // The document carries the same policy in a `meta` element, but user agents
-    // ignore `frame-ancestors` there by specification, so the header is the only
-    // thing that actually refuses the frame. Web assets are the surface that
-    // serves that document, and the other header cases here cover a preflight
-    // and a product route instead.
+    // User agents ignore `frame-ancestors` in a `meta` element, so the header
+    // is the only thing that actually refuses the frame. Web assets are the
+    // surface that serves that document, and the other header cases here cover
+    // a preflight and a product route instead.
     const fixture = handler();
 
     const response = await fixture.route(request("/"));

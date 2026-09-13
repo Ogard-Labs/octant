@@ -43,6 +43,7 @@ function providerControllerFixture(): ProviderController {
     observedByInstance: new Map(),
     busy: false,
     probingIds: new Set(),
+    updatingIds: new Set(),
     credentialManagementAvailable: false,
     retry: vi.fn(async () => true),
   } as unknown as ProviderController;

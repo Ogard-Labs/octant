@@ -302,11 +302,12 @@ describe("useProviderController", () => {
 
     expect(api.execute).toHaveBeenCalledWith({ kind: "update-provider-cli", instanceId: id });
     expect(api.bootstrap).toHaveBeenCalledTimes(2);
-    expect(result.current.message).toMatch(/provider CLI updated/i);
+    expect(result.current.message).toBe("Provider CLI updated from 1.0.0 to 1.1.0.");
+    expect(result.current.message).not.toMatch(/login profile was preserved/i);
   });
 
   it("keeps a successful CLI update successful when its refresh fails", async () => {
-    const api = client();
+    const api = client(snapshot([provider()], [observation()]));
     vi.mocked(api.execute).mockResolvedValue({
       kind: "provider-cli-updated",
       instanceId: id,
@@ -321,21 +322,22 @@ describe("useProviderController", () => {
         message: "refresh unavailable",
       });
     const { result } = renderHook(() => useProviderController({ client: api }));
-    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await waitFor(() => expect(result.current.observedByInstance.get(id)?.readiness).toBe("ready"));
 
     await act(async () => {
       await expect(result.current.updateProviderCli(id)).resolves.toBe(true);
     });
 
-    expect(result.current.message).toMatch(/provider CLI updated/i);
+    expect(result.current.message).toBe("Provider CLI updated from 1.0.0 to 1.1.0.");
     expect(result.current.observedByInstance.get(id)).toBeUndefined();
+    expect(result.current.presentationObservedByInstance.get(id)).toBeUndefined();
   });
 
   it("refreshes provider state when a CLI update fails", async () => {
     const api = client();
     vi.mocked(api.execute).mockRejectedValueOnce({
       category: "provider-failed",
-      message: "provider updater failed",
+      message: "secret-token-value updater failed",
     });
     vi.mocked(api.bootstrap)
       .mockResolvedValueOnce(snapshot())
@@ -349,6 +351,81 @@ describe("useProviderController", () => {
 
     expect(api.bootstrap).toHaveBeenCalledTimes(2);
     expect(result.current.instances[0]?.version).toBe(2);
+    expect(result.current.message).toBe("Provider operation failed.");
+    expect(result.current.message).not.toMatch(/secret-token-value/i);
+  });
+
+  it("shows a scoped updating state and reports unknown, unchanged, and failed follow-up checks", async () => {
+    const pending =
+      deferred<
+        Extract<Awaited<ReturnType<ProviderClient["execute"]>>, { kind: "provider-cli-updated" }>
+      >();
+    const api = client(snapshot([provider()], [observation()]));
+    vi.mocked(api.execute).mockReturnValueOnce(pending.promise);
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.observedByInstance.get(id)?.readiness).toBe("ready"));
+
+    let updating!: Promise<boolean>;
+    act(() => {
+      updating = result.current.updateProviderCli(id);
+    });
+    expect(result.current.updatingIds.has(id)).toBe(true);
+    expect(result.current.observedByInstance.get(id)).toBeUndefined();
+    expect(result.current.busy).toBe(false);
+
+    pending.resolve({
+      kind: "provider-cli-updated",
+      instanceId: id,
+      status: "version-unknown",
+    });
+    await expect(updating).resolves.toBe(true);
+    await waitFor(() => expect(result.current.updatingIds.has(id)).toBe(false));
+    expect(result.current.message).toMatch(/could not be compared/i);
+
+    vi.mocked(api.execute).mockResolvedValueOnce({
+      kind: "provider-cli-updated",
+      instanceId: id,
+      status: "already-current",
+      previousVersion: "1.1.0",
+      currentVersion: "1.1.0",
+    });
+    await act(async () => {
+      await expect(result.current.updateProviderCli(id)).resolves.toBe(true);
+    });
+    expect(result.current.message).toBe("The provider CLI is already up to date (1.1.0).");
+
+    vi.mocked(api.execute).mockResolvedValueOnce({
+      kind: "provider-cli-updated",
+      instanceId: id,
+      status: "probe-failed",
+      previousVersion: "1.1.0",
+    });
+    await act(async () => {
+      await expect(result.current.updateProviderCli(id)).resolves.toBe(true);
+    });
+    expect(result.current.message).toMatch(/follow-up connection check failed/i);
+  });
+
+  it("keeps an explicit CLI update message when a quiet probe runs", async () => {
+    const api = client();
+    vi.mocked(api.execute).mockResolvedValue({
+      kind: "provider-cli-updated",
+      instanceId: id,
+      status: "updated",
+      previousVersion: "1.0.0",
+      currentVersion: "1.1.0",
+    });
+    vi.mocked(api.probe).mockResolvedValue(observation());
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await act(async () => {
+      await expect(result.current.updateProviderCli(id)).resolves.toBe(true);
+    });
+
+    await act(async () => {
+      await expect(result.current.probe(id, { quiet: true })).resolves.toBe(true);
+    });
+    expect(result.current.message).toBe("Provider CLI updated from 1.0.0 to 1.1.0.");
   });
 
   it("shows probe progress and keeps normalized results only", async () => {
@@ -752,6 +829,293 @@ describe("useProviderController", () => {
     expect(host.setProviderCredential).not.toHaveBeenCalled();
     expect(host.clearProviderCredential).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      label: "GLM Agent",
+      create: "createGlm",
+      commandKind: "create-glm-provider",
+      driverKind: "glm",
+      configuration: {
+        kind: "glm-acp",
+        binaryPath: "/Users/example/.local/bin/glm-acp-agent",
+        authentication: "provider-owned",
+      },
+      displayName: "GLM local",
+    },
+    {
+      label: "Gemini CLI",
+      create: "createGemini",
+      commandKind: "create-gemini-provider",
+      driverKind: "gemini",
+      configuration: {
+        kind: "gemini-acp",
+        binaryPath: "/Users/example/.local/bin/gemini",
+        authentication: "provider-owned",
+      },
+      displayName: "Gemini local",
+    },
+    {
+      label: "Cline",
+      create: "createCline",
+      commandKind: "create-cline-provider",
+      driverKind: "cline",
+      configuration: {
+        kind: "cline-acp",
+        binaryPath: "/Users/example/.local/bin/cline",
+        authentication: "provider-owned",
+      },
+      displayName: "Cline local",
+    },
+    {
+      label: "Qwen Code",
+      create: "createQwen",
+      commandKind: "create-qwen-provider",
+      driverKind: "qwen",
+      configuration: {
+        kind: "qwen-acp",
+        binaryPath: "/Users/example/.local/bin/qwen",
+        authentication: "provider-owned",
+      },
+      displayName: "Qwen local",
+    },
+  ] as const)(
+    "creates $label provider-owned configuration without credential mutation",
+    async ({ create, commandKind, driverKind, configuration, displayName }) => {
+      const calls: string[] = [];
+      const api = client();
+      vi.mocked(api.execute).mockImplementation(async (command) => {
+        calls.push("provider.create");
+        expect(command).toMatchObject({
+          kind: commandKind,
+          configuration: { authentication: "provider-owned" },
+        });
+        return {
+          kind: "provider-created",
+          instance: dualAuthCliProvider({
+            id: "instanceId" in command ? command.instanceId : id,
+            driverKind,
+            displayName,
+            configuration,
+          }),
+        };
+      });
+      const host = credentialHost(calls);
+      const credential = transientCredential("", calls);
+      const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
+      await waitFor(() => expect(result.current.status).toBe("ready"));
+
+      await act(async () => {
+        await expect(
+          createDualAuthCliProvider(result.current, create, displayName, configuration, credential),
+        ).resolves.toBe(true);
+      });
+
+      expect(calls).toEqual(["provider.create", "field.clear"]);
+      expect(host.setProviderCredential).not.toHaveBeenCalled();
+      expect(host.clearProviderCredential).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    {
+      label: "GLM Agent",
+      create: "createGlm",
+      commandKind: "create-glm-provider",
+      driverKind: "glm",
+      configuration: {
+        kind: "glm-acp",
+        binaryPath: "/Users/example/.local/bin/glm-acp-agent",
+        authentication: "api-key",
+      },
+      displayName: "GLM local",
+    },
+    {
+      label: "Gemini CLI",
+      create: "createGemini",
+      commandKind: "create-gemini-provider",
+      driverKind: "gemini",
+      configuration: {
+        kind: "gemini-acp",
+        binaryPath: "/Users/example/.local/bin/gemini",
+        authentication: "api-key",
+      },
+      displayName: "Gemini local",
+    },
+    {
+      label: "Cline",
+      create: "createCline",
+      commandKind: "create-cline-provider",
+      driverKind: "cline",
+      configuration: {
+        kind: "cline-acp",
+        binaryPath: "/Users/example/.local/bin/cline",
+        authentication: "api-key",
+      },
+      displayName: "Cline local",
+    },
+    {
+      label: "Qwen Code",
+      create: "createQwen",
+      commandKind: "create-qwen-provider",
+      driverKind: "qwen",
+      configuration: {
+        kind: "qwen-acp",
+        binaryPath: "/Users/example/.local/bin/qwen",
+        authentication: "api-key",
+      },
+      displayName: "Qwen local",
+    },
+  ] as const)(
+    "creates $label API-key configuration before write-only credential storage",
+    async ({ create, driverKind, configuration, displayName }) => {
+      const calls: string[] = [];
+      const api = client();
+      vi.mocked(api.execute).mockImplementation(async (command) => {
+        calls.push("provider.create");
+        return {
+          kind: "provider-created",
+          instance: dualAuthCliProvider({
+            id: "instanceId" in command ? command.instanceId : id,
+            driverKind,
+            displayName,
+            configuration,
+          }),
+        };
+      });
+      const host = credentialHost(calls);
+      const credential = transientCredential("private-value", calls);
+      const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
+      await waitFor(() => expect(result.current.status).toBe("ready"));
+
+      await act(async () => {
+        await expect(
+          createDualAuthCliProvider(result.current, create, displayName, configuration, credential),
+        ).resolves.toBe(true);
+      });
+
+      expect(calls).toEqual(["provider.create", "credential.set", "field.clear"]);
+      expect(JSON.stringify(result.current)).not.toContain("private-value");
+    },
+  );
+
+  it.each([
+    {
+      label: "GLM Agent",
+      change: "changeGlmConfiguration",
+      commandKind: "change-glm-configuration",
+      driverKind: "glm",
+      configuration: {
+        kind: "glm-acp",
+        binaryPath: "/Users/example/.local/bin/glm-acp-agent",
+        authentication: "provider-owned",
+      },
+      updatedConfiguration: {
+        kind: "glm-acp",
+        binaryPath: "/opt/homebrew/bin/glm-acp-agent",
+        authentication: "provider-owned",
+      },
+      displayName: "GLM local",
+    },
+    {
+      label: "Gemini CLI",
+      change: "changeGeminiConfiguration",
+      commandKind: "change-gemini-configuration",
+      driverKind: "gemini",
+      configuration: {
+        kind: "gemini-acp",
+        binaryPath: "/Users/example/.local/bin/gemini",
+        authentication: "provider-owned",
+      },
+      updatedConfiguration: {
+        kind: "gemini-acp",
+        binaryPath: "/opt/homebrew/bin/gemini",
+        authentication: "provider-owned",
+      },
+      displayName: "Gemini local",
+    },
+    {
+      label: "Cline",
+      change: "changeClineConfiguration",
+      commandKind: "change-cline-configuration",
+      driverKind: "cline",
+      configuration: {
+        kind: "cline-acp",
+        binaryPath: "/Users/example/.local/bin/cline",
+        authentication: "provider-owned",
+      },
+      updatedConfiguration: {
+        kind: "cline-acp",
+        binaryPath: "/opt/homebrew/bin/cline",
+        authentication: "provider-owned",
+      },
+      displayName: "Cline local",
+    },
+    {
+      label: "Qwen Code",
+      change: "changeQwenConfiguration",
+      commandKind: "change-qwen-configuration",
+      driverKind: "qwen",
+      configuration: {
+        kind: "qwen-acp",
+        binaryPath: "/Users/example/.local/bin/qwen",
+        authentication: "provider-owned",
+      },
+      updatedConfiguration: {
+        kind: "qwen-acp",
+        binaryPath: "/opt/homebrew/bin/qwen",
+        authentication: "provider-owned",
+      },
+      displayName: "Qwen local",
+    },
+  ] as const)(
+    "updates $label provider-owned configuration without credential mutation",
+    async ({
+      change,
+      commandKind,
+      driverKind,
+      configuration,
+      updatedConfiguration,
+      displayName,
+    }) => {
+      const calls: string[] = [];
+      const instance = dualAuthCliProvider({
+        driverKind,
+        displayName,
+        configuration,
+      });
+      const api = client(snapshot([instance]));
+      vi.mocked(api.execute).mockImplementation(async (command) => {
+        calls.push("provider.update");
+        expect(command).toMatchObject({
+          kind: commandKind,
+          configuration: { authentication: "provider-owned" },
+        });
+        return {
+          kind: "provider-updated",
+          instance: dualAuthCliProvider({
+            driverKind,
+            displayName,
+            configuration: updatedConfiguration,
+            id,
+          }),
+        };
+      });
+      const host = credentialHost(calls);
+      const credential = transientCredential("must-not-be-used", calls);
+      const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
+      await waitFor(() => expect(result.current.status).toBe("ready"));
+
+      await act(async () => {
+        await expect(
+          changeDualAuthCliConfiguration(result.current, change, updatedConfiguration, credential),
+        ).resolves.toBe(true);
+      });
+
+      expect(calls).toEqual(["provider.update", "field.clear"]);
+      expect(host.setProviderCredential).not.toHaveBeenCalled();
+    },
+  );
 
   it("creates Claude API-key configuration before write-only credential storage", async () => {
     const calls: string[] = [];
@@ -2399,6 +2763,86 @@ function kiloProvider(
     updatedAt: "2026-07-18T10:00:00.000Z" as ProviderInstance["updatedAt"],
     ...patch,
   } as Extract<ProviderInstance, { driverKind: "kilo" }>;
+}
+
+function dualAuthCliProvider(input: {
+  readonly id?: ProviderInstance["id"];
+  readonly driverKind: "glm" | "gemini" | "cline" | "qwen";
+  readonly displayName: string;
+  readonly configuration:
+    | Extract<ProviderInstance, { driverKind: "glm" }>["configuration"]
+    | Extract<ProviderInstance, { driverKind: "gemini" }>["configuration"]
+    | Extract<ProviderInstance, { driverKind: "cline" }>["configuration"]
+    | Extract<ProviderInstance, { driverKind: "qwen" }>["configuration"];
+}): ProviderInstance {
+  return decodeProviderInstance({
+    id: input.id ?? id,
+    displayName: input.displayName,
+    driverKind: input.driverKind,
+    configuration: input.configuration,
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt: "2026-07-18T10:00:00.000Z",
+    updatedAt: "2026-07-18T10:00:00.000Z",
+  });
+}
+
+async function createDualAuthCliProvider(
+  controller: ReturnType<typeof useProviderController>,
+  create: "createGlm" | "createGemini" | "createCline" | "createQwen",
+  displayName: string,
+  configuration:
+    | Extract<ProviderInstance, { driverKind: "glm" }>["configuration"]
+    | Extract<ProviderInstance, { driverKind: "gemini" }>["configuration"]
+    | Extract<ProviderInstance, { driverKind: "cline" }>["configuration"]
+    | Extract<ProviderInstance, { driverKind: "qwen" }>["configuration"],
+  credential: ReturnType<typeof transientCredential>,
+): Promise<boolean> {
+  switch (create) {
+    case "createGlm":
+      if (configuration.kind !== "glm-acp") throw new Error("expected GLM configuration");
+      return controller.createGlm(displayName, configuration, credential);
+    case "createGemini":
+      if (configuration.kind !== "gemini-acp") throw new Error("expected Gemini configuration");
+      return controller.createGemini(displayName, configuration, credential);
+    case "createCline":
+      if (configuration.kind !== "cline-acp") throw new Error("expected Cline configuration");
+      return controller.createCline(displayName, configuration, credential);
+    case "createQwen":
+      if (configuration.kind !== "qwen-acp") throw new Error("expected Qwen configuration");
+      return controller.createQwen(displayName, configuration, credential);
+  }
+}
+
+async function changeDualAuthCliConfiguration(
+  controller: ReturnType<typeof useProviderController>,
+  change:
+    | "changeGlmConfiguration"
+    | "changeGeminiConfiguration"
+    | "changeClineConfiguration"
+    | "changeQwenConfiguration",
+  configuration:
+    | Extract<ProviderInstance, { driverKind: "glm" }>["configuration"]
+    | Extract<ProviderInstance, { driverKind: "gemini" }>["configuration"]
+    | Extract<ProviderInstance, { driverKind: "cline" }>["configuration"]
+    | Extract<ProviderInstance, { driverKind: "qwen" }>["configuration"],
+  credential: ReturnType<typeof transientCredential>,
+): Promise<boolean> {
+  switch (change) {
+    case "changeGlmConfiguration":
+      if (configuration.kind !== "glm-acp") throw new Error("expected GLM configuration");
+      return controller.changeGlmConfiguration(id, configuration, credential);
+    case "changeGeminiConfiguration":
+      if (configuration.kind !== "gemini-acp") throw new Error("expected Gemini configuration");
+      return controller.changeGeminiConfiguration(id, configuration, credential);
+    case "changeClineConfiguration":
+      if (configuration.kind !== "cline-acp") throw new Error("expected Cline configuration");
+      return controller.changeClineConfiguration(id, configuration, credential);
+    case "changeQwenConfiguration":
+      if (configuration.kind !== "qwen-acp") throw new Error("expected Qwen configuration");
+      return controller.changeQwenConfiguration(id, configuration, credential);
+  }
 }
 
 function ollamaProvider(

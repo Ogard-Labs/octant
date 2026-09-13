@@ -9,9 +9,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ProviderFailure } from "@octant/contracts";
+import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
 import { Effect, Either } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
@@ -747,36 +747,355 @@ describe("Kilo provider-owned data directory", () => {
   });
 });
 
-describe("Goose provider-owned profile", () => {
-  it("points the CLI at the native config directory instead of the managed home", async () => {
-    const target = fixture(goose);
-    const managedHome = join(target.canonicalRoot, "managed-goose");
-    const hostHome = join(target.canonicalRoot, "host-home");
-    const hostAuthentication = join(hostHome, ".config", "goose");
-    mkdirSync(hostAuthentication, { recursive: true });
+const directoryHostProfiles = Object.values(acpProviderProfiles).filter(
+  (profile) => profile.process.hostAuthentication?.kind === "directory",
+);
+const apiKeyVariables: Partial<Record<AcpProviderProfile["kind"], string>> = {
+  grok: "XAI_API_KEY",
+  glm: "Z_AI_API_KEY",
+  gemini: "GEMINI_API_KEY",
+  cline: "CLINE_API_KEY",
+  qwen: "OPENAI_API_KEY",
+  "mistral-vibe": "MISTRAL_API_KEY",
+};
+
+function directoryHostAuthentication(profile: AcpProviderProfile) {
+  const auth = profile.process.hostAuthentication;
+  expect(auth?.kind).toBe("directory");
+  if (auth?.kind !== "directory") {
+    throw new Error("Expected a directory host profile.");
+  }
+  return auth;
+}
+
+function nativeHostProfilePath(hostHome: string, profile: AcpProviderProfile): string {
+  return join(hostHome, relative(homedir(), directoryHostAuthentication(profile).defaultPath));
+}
+
+function seatbeltProfile(launch: { readonly args: ReadonlyArray<string> }): string {
+  const profile = launch.args[1];
+  expect(typeof profile).toBe("string");
+  return typeof profile === "string" ? profile : "";
+}
+
+function seatbeltLines(launch: { readonly args: ReadonlyArray<string> }): ReadonlyArray<string> {
+  return seatbeltProfile(launch).split("\n");
+}
+
+describe.each(directoryHostProfiles)("ACP host-profile contract ($displayName)", (profile) => {
+  async function prepareHostLaunch(input: {
+    readonly executionPolicy: ProviderExecutionPolicy;
+    readonly apiKey?: string;
+    readonly hostPresent?: boolean;
+  }) {
+    const target = fixture(profile);
+    const managedHome = join(target.canonicalRoot, "managed-home");
+    const hostHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-host-")));
+    directories.push(hostHome);
+    const requestedHostPath = nativeHostProfilePath(hostHome, profile);
+    if (input.hostPresent !== false) mkdirSync(requestedHostPath, { recursive: true });
+    const hostAuthenticationPath =
+      input.hostPresent === false ? requestedHostPath : realpathSync(requestedHostPath);
+    const environment = sanitizeAcpEnvironment(
+      profile,
+      { PATH: "/usr/bin", HOME: "/Users/octant-test" },
+      {
+        managedHome,
+        executionPolicy: input.executionPolicy,
+        ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
+      },
+    );
+    const result = await Effect.runPromise(
+      Effect.either(
+        makeAcpConfinementLive({
+          platform: "darwin",
+          sandboxPath: target.sandboxPath,
+          temporaryDirectory: join(target.canonicalRoot, "tmp"),
+          ...(input.hostPresent === false
+            ? {}
+            : { hostAuthenticationPath: hostAuthenticationPath }),
+        }).prepare({
+          profile:
+            input.hostPresent === false
+              ? {
+                  ...profile,
+                  process: {
+                    ...profile.process,
+                    hostAuthentication: {
+                      kind: "directory",
+                      defaultPath: hostAuthenticationPath,
+                      loginHint: directoryHostAuthentication(profile).loginHint,
+                      ...(directoryHostAuthentication(profile).environment === undefined
+                        ? {}
+                        : {
+                            environment: directoryHostAuthentication(profile).environment,
+                          }),
+                    },
+                  },
+                }
+              : profile,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome,
+          mode: "code",
+          executionPolicy: input.executionPolicy,
+          environment,
+        }),
+      ),
+    );
+    return { target, managedHome, hostHome, hostAuthenticationPath, environment, result };
+  }
+
+  it("points the child at the native profile without granting the real home", async () => {
+    const prepared = await prepareHostLaunch({ executionPolicy: "approval-gated" });
+    expect(Either.isRight(prepared.result)).toBe(true);
+    if (Either.isLeft(prepared.result)) throw new Error("Expected a confined host-profile launch.");
+    const launch = prepared.result.right;
+    const hostEnv =
+      directoryHostAuthentication(profile).environment?.(prepared.hostAuthenticationPath) ?? {};
+    expect(launch.environment).toMatchObject(hostEnv);
+    expect(launch.environment.HOME).not.toBe(prepared.hostHome);
+    expect(launch.environment.HOME).not.toBe(homedir());
+    expect(launch.command).toBe(prepared.target.sandboxPath);
+    const lines = seatbeltLines(launch);
+    expect(lines).toContain(`(allow file-read* (subpath "${prepared.hostAuthenticationPath}"))`);
+    expect(lines).toContain(`(allow file-write* (subpath "${prepared.hostAuthenticationPath}"))`);
+    expect(lines).toContain(`(allow file-write* (subpath "${prepared.managedHome}"))`);
+    expect(lines).not.toContain(`(allow file-write* (subpath "${prepared.hostHome}"))`);
+    expect(lines).not.toContain(`(allow file-write* (subpath "${homedir()}"))`);
+    const configParent = dirname(prepared.hostAuthenticationPath);
+    if (configParent !== prepared.hostAuthenticationPath) {
+      expect(lines).not.toContain(`(allow file-write* (subpath "${configParent}"))`);
+    }
+  });
+
+  it("refuses to launch when the native profile directory is missing", async () => {
+    const prepared = await prepareHostLaunch({
+      executionPolicy: "approval-gated",
+      hostPresent: false,
+    });
+    expect(prepared.result).toEqual(
+      Either.left({
+        category: "unauthenticated",
+        message: `${profile.displayName} provider-owned authentication is unavailable. ${directoryHostAuthentication(profile).loginHint}`,
+      }),
+    );
+  });
+
+  it("keeps the native profile environment for explicit Full access", async () => {
+    const prepared = await prepareHostLaunch({ executionPolicy: "full-access" });
+    expect(Either.isRight(prepared.result)).toBe(true);
+    if (Either.isLeft(prepared.result))
+      throw new Error("Expected a Full access host-profile launch.");
+    const launch = prepared.result.right;
+    const hostEnv =
+      directoryHostAuthentication(profile).environment?.(prepared.hostAuthenticationPath) ?? {};
+    const deniesHostExtensions =
+      (profile.process.hostDeniedEntries?.length ?? 0) > 0 ||
+      (profile.process.forbiddenRootEntries?.length ?? 0) > 0 ||
+      (profile.process.hostAuthentication?.kind === "directory" &&
+        (profile.process.hostAuthentication.forbiddenEntries?.length ?? 0) > 0);
+    expect(launch.command).toBe(
+      deniesHostExtensions ? prepared.target.sandboxPath : prepared.target.binaryPath,
+    );
+    expect(launch.environment).toMatchObject(hostEnv);
+    expect(launch.environment.HOME).not.toBe(prepared.hostHome);
+    expect(launch.environment.HOME).not.toBe(homedir());
+  });
+
+  it("injects an API key only when that mode is selected", async () => {
+    const variable = apiKeyVariables[profile.kind];
+    const withoutKey = await prepareHostLaunch({ executionPolicy: "approval-gated" });
+    expect(Either.isRight(withoutKey.result)).toBe(true);
+    if (Either.isLeft(withoutKey.result)) throw new Error("Expected a host-profile launch.");
+    if (variable === undefined) {
+      expect(JSON.stringify(withoutKey.result.right.environment)).not.toContain("selected-key");
+      return;
+    }
+    expect(withoutKey.result.right.environment[variable]).toBeUndefined();
+    const withKey = await prepareHostLaunch({
+      executionPolicy: "approval-gated",
+      apiKey: "selected-key",
+    });
+    expect(Either.isRight(withKey.result)).toBe(true);
+    if (Either.isLeft(withKey.result)) throw new Error("Expected an API-key host-profile launch.");
+    expect(withKey.result.right.environment[variable]).toBe("selected-key");
+    const redacted = { ...withKey.result.right.environment, [variable]: "redacted" };
+    expect(JSON.stringify(redacted)).not.toContain("selected-key");
+  });
+});
+
+describe("Grok Build consumed configuration", () => {
+  it("applies documented process overlays against GROK_HOME instead of an unread managed config", async () => {
+    const target = fixture(grok);
+    const managedHome = join(target.canonicalRoot, "managed-grok");
+    const hostHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-host-")));
+    directories.push(hostHome);
+    const hostAuthenticationPath = join(hostHome, ".grok");
+    mkdirSync(hostAuthenticationPath, { recursive: true });
+    const canonicalHostPath = realpathSync(hostAuthenticationPath);
+    const environment = sanitizeAcpEnvironment(
+      grok,
+      { PATH: "/usr/bin", HOME: "/Users/octant-test" },
+      { managedHome, executionPolicy: "approval-gated" },
+    );
     const launch = await Effect.runPromise(
       makeAcpConfinementLive({
         platform: "darwin",
         sandboxPath: target.sandboxPath,
         temporaryDirectory: join(target.canonicalRoot, "tmp"),
-        hostAuthenticationPath: hostAuthentication,
+        hostAuthenticationPath: canonicalHostPath,
       }).prepare({
-        profile: goose,
+        profile: grok,
         binaryPath: target.binaryPath,
         root: target.canonicalRoot,
         managedHome,
         mode: "code",
         executionPolicy: "approval-gated",
-        environment: { PATH: "/usr/bin" },
+        environment,
       }),
     );
 
-    expect(launch.environment).toMatchObject({
-      HOME: hostHome,
-      XDG_CONFIG_HOME: join(hostHome, ".config"),
+    expect(launch.environment.GROK_HOME).toBe(canonicalHostPath);
+    expect(launch.environment.GROK_HOME).not.toBe(managedHome);
+    expect(launch.environment.GROK_DISABLE_AUTOUPDATER).toBe("1");
+    expect(JSON.parse(launch.environment.GROK_CONFIG ?? "{}")).toEqual({
+      features: {
+        telemetry: false,
+        feedback: false,
+        codebase_indexing: false,
+        remote_fetch: false,
+      },
     });
-    expect(launch.environment.HOME).not.toBe(managedHome);
+    expect(existsSync(join(managedHome, "config.toml"))).toBe(false);
   });
+});
+
+describe("Kimi Code host-profile extension surfaces", () => {
+  it("denies reused MCP, skills, plugins, and hooks after granting the native profile", async () => {
+    const target = fixture(kimi);
+    const managedHome = join(target.canonicalRoot, "managed-kimi");
+    const hostHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-host-")));
+    directories.push(hostHome);
+    const hostAuthenticationPath = join(hostHome, ".kimi-code");
+    mkdirSync(join(hostAuthenticationPath, "skills"), { recursive: true });
+    mkdirSync(join(hostAuthenticationPath, "plugins"), { recursive: true });
+    mkdirSync(join(hostAuthenticationPath, "hooks"), { recursive: true });
+    mkdirSync(join(hostAuthenticationPath, "credentials"), { recursive: true });
+    writeFileSync(join(hostAuthenticationPath, "mcp.json"), "{}\n");
+    writeFileSync(join(hostAuthenticationPath, "AGENTS.md"), "hostile\n");
+    writeFileSync(join(hostAuthenticationPath, "config.toml"), "telemetry = false\n");
+    const canonicalHostPath = realpathSync(hostAuthenticationPath);
+    mkdirSync(join(target.canonicalRoot, ".kimi-code"));
+    mkdirSync(join(target.canonicalRoot, ".agents"));
+    const environment = sanitizeAcpEnvironment(
+      kimi,
+      { PATH: "/usr/bin", HOME: "/Users/octant-test" },
+      { managedHome, executionPolicy: "approval-gated" },
+    );
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: canonicalHostPath,
+      }).prepare({
+        profile: kimi,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome,
+        mode: "code",
+        executionPolicy: "approval-gated",
+        environment,
+      }),
+    );
+
+    expect(launch.environment.KIMI_CODE_HOME).toBe(canonicalHostPath);
+    const profileText = seatbeltProfile(launch);
+    const allowHost = profileText.lastIndexOf(
+      `(allow file-read* (subpath "${canonicalHostPath}"))`,
+    );
+    expect(allowHost).toBeGreaterThan(-1);
+    for (const entry of ["mcp.json", "skills", "plugins", "hooks", "AGENTS.md"]) {
+      const denied = join(canonicalHostPath, entry);
+      const denyRead = profileText.lastIndexOf(`(deny file-read* (subpath "${denied}"))`);
+      const denyWrite = profileText.lastIndexOf(`(deny file-write* (subpath "${denied}"))`);
+      expect(denyRead).toBeGreaterThan(allowHost);
+      expect(denyWrite).toBeGreaterThan(allowHost);
+    }
+    expect(profileText).not.toContain(
+      `(deny file-read* (subpath "${join(canonicalHostPath, "config.toml")}"))`,
+    );
+    expect(profileText).not.toContain(
+      `(deny file-read* (subpath "${join(canonicalHostPath, "credentials")}"))`,
+    );
+    expect(profileText).toContain(
+      `(deny file-read* (subpath "${join(target.canonicalRoot, ".kimi-code")}"))`,
+    );
+    expect(profileText).toContain(
+      `(deny file-read* (subpath "${join(target.canonicalRoot, ".agents")}"))`,
+    );
+  });
+
+  it("still denies reused MCP, skills, plugins, and hooks under Full access", async () => {
+    const target = fixture(kimi);
+    const managedHome = join(target.canonicalRoot, "managed-kimi");
+    const hostHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-host-")));
+    directories.push(hostHome);
+    const hostAuthenticationPath = join(hostHome, ".kimi-code");
+    mkdirSync(join(hostAuthenticationPath, "skills"), { recursive: true });
+    mkdirSync(join(hostAuthenticationPath, "plugins"), { recursive: true });
+    mkdirSync(join(hostAuthenticationPath, "hooks"), { recursive: true });
+    writeFileSync(join(hostAuthenticationPath, "mcp.json"), "{}\n");
+    writeFileSync(join(hostAuthenticationPath, "AGENTS.md"), "hostile\n");
+    const canonicalHostPath = realpathSync(hostAuthenticationPath);
+    mkdirSync(join(target.canonicalRoot, ".kimi-code"));
+    mkdirSync(join(target.canonicalRoot, ".agents"));
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: canonicalHostPath,
+      }).prepare({
+        profile: kimi,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome,
+        mode: "code",
+        executionPolicy: "full-access",
+        environment: sanitizeAcpEnvironment(
+          kimi,
+          { PATH: "/usr/bin", HOME: "/Users/octant-test" },
+          { managedHome, executionPolicy: "full-access" },
+        ),
+      }),
+    );
+
+    expect(launch.command).toBe(target.sandboxPath);
+    expect(launch.environment.KIMI_CODE_HOME).toBe(canonicalHostPath);
+    const profileText = seatbeltProfile(launch);
+    expect(profileText).toContain("(allow default)");
+    expect(profileText).not.toContain("(deny default)");
+    for (const entry of ["mcp.json", "skills", "plugins", "hooks", "AGENTS.md"]) {
+      const denied = join(canonicalHostPath, entry);
+      expect(profileText).toContain(`(deny file-read* (subpath "${denied}"))`);
+      expect(profileText).toContain(`(deny file-write* (subpath "${denied}"))`);
+    }
+    expect(profileText).toContain(
+      `(deny file-read* (subpath "${join(target.canonicalRoot, ".kimi-code")}"))`,
+    );
+    expect(profileText).toContain(
+      `(deny file-read* (subpath "${join(target.canonicalRoot, ".agents")}"))`,
+    );
+  });
+});
+
+it("ships every ACP profile through deny-default confinement", () => {
+  for (const profile of Object.values(acpProviderProfiles)) {
+    expect(profile.process.confinement.kind).toBe("deny-default-seatbelt");
+    expect(profile.authentication.kind).toBe("provider-owned");
+  }
 });
 
 describe("Kimi Code provider-owned profile", () => {
@@ -1003,6 +1322,8 @@ describe("Kimi Code provider-owned profile", () => {
         }),
       ),
     );
-    expect(spawnRecord(target.root)).toMatchObject({ args: ["acp"], cwd: root });
+    const spawned = spawnRecord(target.root);
+    expect(spawned?.cwd).toBe(root);
+    expect(spawned?.args.at(-1)).toBe("acp");
   });
 });

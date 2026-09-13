@@ -20,19 +20,27 @@ import {
   changeAzureFoundryConfiguration,
   changeBflImageConfiguration,
   changeClaudeConfiguration,
+  changeClineConfiguration,
+  changeGeminiConfiguration,
   changeGeminiImageConfiguration,
+  changeGlmConfiguration,
   changeIdeogramImageConfiguration,
   changeOpenAiCompatibleConfiguration,
   changeOpenAiImageConfiguration,
   changeProviderBinary,
+  changeQwenConfiguration,
   createAnthropicCompatibleProvider,
   createAzureFoundryProvider,
   createBflImageProvider,
   createClaudeProvider,
+  createClineProvider,
   createGeminiImageProvider,
+  createGeminiProvider,
+  createGlmProvider,
   createIdeogramImageProvider,
   createOpenAiCompatibleProvider,
   createOpenAiImageProvider,
+  createQwenProvider,
   createCodexProvider,
   createKimiCodeProvider,
   createOpenCodeProvider,
@@ -393,11 +401,156 @@ function ollamaProvider(): Extract<ProviderInstance, { driverKind: "ollama" }> {
   return instance;
 }
 
+const dualAuthCliProviders = [
+  {
+    label: "GLM Agent",
+    kind: "glm-acp",
+    displayName: "GLM local",
+    binaryPath: "/Users/example/.local/bin/glm-acp-agent",
+    updatedBinaryPath: "/opt/homebrew/bin/glm-acp-agent",
+    rejection: "GLM Agent authentication must be provider-owned or api-key.",
+  },
+  {
+    label: "Gemini CLI",
+    kind: "gemini-acp",
+    displayName: "Gemini local",
+    binaryPath: "/Users/example/.local/bin/gemini",
+    updatedBinaryPath: "/opt/homebrew/bin/gemini",
+    rejection: "Gemini CLI authentication must be provider-owned or api-key.",
+  },
+  {
+    label: "Cline",
+    kind: "cline-acp",
+    displayName: "Cline local",
+    binaryPath: "/Users/example/.local/bin/cline",
+    updatedBinaryPath: "/opt/homebrew/bin/cline",
+    rejection: "Cline authentication must be provider-owned or api-key.",
+  },
+  {
+    label: "Qwen Code",
+    kind: "qwen-acp",
+    displayName: "Qwen local",
+    binaryPath: "/Users/example/.local/bin/qwen",
+    updatedBinaryPath: "/opt/homebrew/bin/qwen",
+    rejection: "Qwen Code authentication must be provider-owned or api-key.",
+  },
+] as const;
+
+type DualAuthCliKind = (typeof dualAuthCliProviders)[number]["kind"];
+type DualAuthCliMode = "provider-owned" | "api-key";
+
+function createDualAuthCliProvider(
+  kind: DualAuthCliKind,
+  authentication: DualAuthCliMode,
+  binaryPath: string,
+  displayName: string,
+) {
+  const input = {
+    id: ids.local,
+    displayName,
+    existingInstances: [],
+    expectedVersion: version(0),
+    createdAt,
+  };
+  switch (kind) {
+    case "glm-acp":
+      return createGlmProvider({
+        ...input,
+        configuration: { kind, binaryPath, authentication },
+      });
+    case "gemini-acp":
+      return createGeminiProvider({
+        ...input,
+        configuration: { kind, binaryPath, authentication },
+      });
+    case "cline-acp":
+      return createClineProvider({
+        ...input,
+        configuration: { kind, binaryPath, authentication },
+      });
+    case "qwen-acp":
+      return createQwenProvider({
+        ...input,
+        configuration: { kind, binaryPath, authentication },
+      });
+  }
+}
+
+function changeDualAuthCliConfiguration(
+  instance: ReturnType<typeof createDualAuthCliProvider>,
+  authentication: DualAuthCliMode,
+  binaryPath: string,
+) {
+  switch (instance.driverKind) {
+    case "glm":
+      return changeGlmConfiguration(
+        instance,
+        { kind: "glm-acp", binaryPath, authentication },
+        updatedAt,
+      );
+    case "gemini":
+      return changeGeminiConfiguration(
+        instance,
+        { kind: "gemini-acp", binaryPath, authentication },
+        updatedAt,
+      );
+    case "cline":
+      return changeClineConfiguration(
+        instance,
+        { kind: "cline-acp", binaryPath, authentication },
+        updatedAt,
+      );
+    case "qwen":
+      return changeQwenConfiguration(
+        instance,
+        { kind: "qwen-acp", binaryPath, authentication },
+        updatedAt,
+      );
+  }
+}
+
+function createDualAuthCliProviderWithInvalidAuthentication(
+  kind: DualAuthCliKind,
+  binaryPath: string,
+  displayName: string,
+) {
+  const input = {
+    id: ids.local,
+    displayName,
+    existingInstances: [],
+    expectedVersion: version(0),
+    createdAt,
+  };
+  switch (kind) {
+    case "glm-acp":
+      return createGlmProvider({
+        ...input,
+        configuration: { kind, binaryPath, authentication: "subscription" as never },
+      });
+    case "gemini-acp":
+      return createGeminiProvider({
+        ...input,
+        configuration: { kind, binaryPath, authentication: "subscription" as never },
+      });
+    case "cline-acp":
+      return createClineProvider({
+        ...input,
+        configuration: { kind, binaryPath, authentication: "subscription" as never },
+      });
+    case "qwen-acp":
+      return createQwenProvider({
+        ...input,
+        configuration: { kind, binaryPath, authentication: "subscription" as never },
+      });
+  }
+}
+
 describe("provider CLI update policy", () => {
   it("keeps update command support shared by server and renderer", () => {
     expect(providerCliUpdateArgs("devin")).toEqual(["update"]);
     expect(providerCliUpdateArgs("kimi-code")).toEqual(["upgrade"]);
     expect(supportsProviderCliUpdate("copilot")).toBe(true);
+    expect(supportsProviderCliUpdate("gemini")).toBe(false);
     expect(supportsProviderCliUpdate("goose")).toBe(false);
     expect(providerCliUpdateArgs("openai-compatible")).toBeUndefined();
   });
@@ -1469,137 +1622,66 @@ describe("provider instance policy", () => {
     });
   });
 
-  it("creates and immutably updates GLM Agent with api-key authentication", () => {
-    const policy = providerPolicy as unknown as {
-      createGlmProvider: (input: Record<string, unknown>) => ProviderInstance;
-      changeGlmConfiguration: (
-        provider: Extract<ProviderInstance, { driverKind: "glm" }>,
-        configuration: Record<string, unknown>,
-        updatedAt: UtcTimestamp,
-        activeSessionCount?: number,
-      ) => ProviderInstance;
-    };
-    const original = policy.createGlmProvider({
-      id: ids.local,
-      displayName: "  GLM local  ",
-      configuration: {
-        kind: "glm-acp",
-        binaryPath: " /Users/example/.local/bin/glm-acp-agent ",
-        authentication: "api-key",
-      },
-      existingInstances: [],
-      expectedVersion: version(0),
-      createdAt,
-    });
-    expect(original.configuration).toEqual({
-      kind: "glm-acp",
-      binaryPath: "/Users/example/.local/bin/glm-acp-agent",
-      authentication: "api-key",
-    });
-    expect(() =>
-      policy.createGlmProvider({
-        id: ids.local,
-        displayName: "GLM local",
-        configuration: {
-          kind: "glm-acp",
-          binaryPath: "/Users/example/.local/bin/glm-acp-agent",
-          authentication: "subscription",
-        },
-        existingInstances: [],
-        expectedVersion: version(0),
-        createdAt,
-      }),
-    ).toThrow("GLM Agent authentication must be provider-owned or api-key.");
-  });
+  it.each(
+    dualAuthCliProviders.flatMap((provider) =>
+      (["provider-owned", "api-key"] as const).map((authentication) => ({
+        ...provider,
+        authentication,
+      })),
+    ),
+  )(
+    "creates and immutably updates $label with $authentication authentication",
+    ({ kind, displayName, binaryPath, updatedBinaryPath, authentication }) => {
+      const original = createDualAuthCliProvider(
+        kind,
+        authentication,
+        ` ${binaryPath} `,
+        `  ${displayName}  `,
+      );
+      expect(original.configuration).toEqual({
+        kind,
+        binaryPath,
+        authentication,
+      });
+      expect(original.displayName).toBe(displayName);
 
-  it("creates and immutably updates Gemini CLI with api-key authentication", () => {
-    const policy = providerPolicy as unknown as {
-      createGeminiProvider: (input: Record<string, unknown>) => ProviderInstance;
-    };
-    const original = policy.createGeminiProvider({
-      id: ids.local,
-      displayName: "  Gemini local  ",
-      configuration: {
-        kind: "gemini-acp",
-        binaryPath: " /Users/example/.local/bin/gemini ",
-        authentication: "api-key",
-      },
-      existingInstances: [],
-      expectedVersion: version(0),
-      createdAt,
-    });
-    expect(original.configuration).toEqual({
-      kind: "gemini-acp",
-      binaryPath: "/Users/example/.local/bin/gemini",
-      authentication: "api-key",
-    });
-  });
+      const changed = changeDualAuthCliConfiguration(original, authentication, updatedBinaryPath);
+      expect(changed).toEqual({
+        ...original,
+        configuration: {
+          kind,
+          binaryPath: updatedBinaryPath,
+          authentication,
+        },
+        version: 2,
+        updatedAt,
+      });
+      expect(original.configuration).toEqual({
+        kind,
+        binaryPath,
+        authentication,
+      });
+    },
+  );
 
-  it("preserves provider-owned authentication for CLI configuration normalizers", () => {
-    const policy = providerPolicy as unknown as {
-      createGlmProvider: (input: Record<string, unknown>) => ProviderInstance;
-      createGeminiProvider: (input: Record<string, unknown>) => ProviderInstance;
-      createClineProvider: (input: Record<string, unknown>) => ProviderInstance;
-      createQwenProvider: (input: Record<string, unknown>) => ProviderInstance;
-    };
-    const configurations = [
-      policy.createGlmProvider({
-        id: ids.local,
-        displayName: "GLM local",
-        configuration: {
-          kind: "glm-acp",
-          binaryPath: "/Users/example/.local/bin/glm-acp-agent",
-          authentication: "provider-owned",
-        },
-        existingInstances: [],
-        expectedVersion: version(0),
-        createdAt,
-      }).configuration,
-      policy.createGeminiProvider({
-        id: ids.local,
-        displayName: "Gemini local",
-        configuration: {
-          kind: "gemini-acp",
-          binaryPath: "/Users/example/.local/bin/gemini",
-          authentication: "provider-owned",
-        },
-        existingInstances: [],
-        expectedVersion: version(0),
-        createdAt,
-      }).configuration,
-      policy.createClineProvider({
-        id: ids.local,
-        displayName: "Cline local",
-        configuration: {
-          kind: "cline-acp",
-          binaryPath: "/Users/example/.local/bin/cline",
-          authentication: "provider-owned",
-        },
-        existingInstances: [],
-        expectedVersion: version(0),
-        createdAt,
-      }).configuration,
-      policy.createQwenProvider({
-        id: ids.local,
-        displayName: "Qwen local",
-        configuration: {
-          kind: "qwen-acp",
-          binaryPath: "/Users/example/.local/bin/qwen",
-          authentication: "provider-owned",
-        },
-        existingInstances: [],
-        expectedVersion: version(0),
-        createdAt,
-      }).configuration,
-    ];
+  it.each(dualAuthCliProviders)(
+    "refuses $label authentication that is neither provider-owned nor api-key",
+    ({ kind, binaryPath, displayName, rejection }) => {
+      expect(() =>
+        createDualAuthCliProviderWithInvalidAuthentication(kind, binaryPath, displayName),
+      ).toThrow(rejection);
+    },
+  );
 
-    expect(
-      configurations.every(
-        (configuration) =>
-          "authentication" in configuration && configuration.authentication === "provider-owned",
-      ),
-    ).toBe(true);
-  });
+  it.each(dualAuthCliProviders)(
+    "keeps the selected $label authentication when an update switches from api-key to provider-owned",
+    ({ kind, displayName, binaryPath, updatedBinaryPath }) => {
+      const original = createDualAuthCliProvider(kind, "api-key", binaryPath, displayName);
+      const changed = changeDualAuthCliConfiguration(original, "provider-owned", updatedBinaryPath);
+      expect(changed.configuration.authentication).toBe("provider-owned");
+      expect(original.configuration.authentication).toBe("api-key");
+    },
+  );
 
   it("creates and immutably updates GitHub Copilot with provider-owned configuration", () => {
     const policy = providerPolicy as unknown as {
@@ -1619,52 +1701,6 @@ describe("provider instance policy", () => {
     expect(original.configuration).toEqual({
       kind: "copilot-acp",
       binaryPath: "/Users/example/.local/bin/copilot",
-    });
-  });
-
-  it("creates and immutably updates Cline with api-key authentication", () => {
-    const policy = providerPolicy as unknown as {
-      createClineProvider: (input: Record<string, unknown>) => ProviderInstance;
-    };
-    const original = policy.createClineProvider({
-      id: ids.local,
-      displayName: "  Cline local  ",
-      configuration: {
-        kind: "cline-acp",
-        binaryPath: " /Users/example/.local/bin/cline ",
-        authentication: "api-key",
-      },
-      existingInstances: [],
-      expectedVersion: version(0),
-      createdAt,
-    });
-    expect(original.configuration).toEqual({
-      kind: "cline-acp",
-      binaryPath: "/Users/example/.local/bin/cline",
-      authentication: "api-key",
-    });
-  });
-
-  it("creates and immutably updates Qwen Code with api-key authentication", () => {
-    const policy = providerPolicy as unknown as {
-      createQwenProvider: (input: Record<string, unknown>) => ProviderInstance;
-    };
-    const original = policy.createQwenProvider({
-      id: ids.local,
-      displayName: "  Qwen local  ",
-      configuration: {
-        kind: "qwen-acp",
-        binaryPath: " /Users/example/.local/bin/qwen ",
-        authentication: "api-key",
-      },
-      existingInstances: [],
-      expectedVersion: version(0),
-      createdAt,
-    });
-    expect(original.configuration).toEqual({
-      kind: "qwen-acp",
-      binaryPath: "/Users/example/.local/bin/qwen",
-      authentication: "api-key",
     });
   });
 
