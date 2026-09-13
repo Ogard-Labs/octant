@@ -100,14 +100,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "packages/provider-sdk/src/contextFactsConformance.ts",
     "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
   ],
-  [
-    "apps/server/src/agentRun/agentRunWorktreeReceiptPort.ts",
-    "Code child isolation adapter used by the creation-command builder's receipt port tests. Product admission now goes through AgentRunWorkspaceService. Remove once those builder tests use admitted workspace grants only.",
-  ],
-  [
-    "packages/domain/src/cursorAcpPolicy.ts",
-    "Residual Cursor ACP connection-check policy kept for cursorAcpPolicy.test.ts and future probe wiring; production runtime and settings paths were removed. Remove once a product caller imports runCursorAcpConnectionCheck or the probe suite is retired.",
-  ],
 ]);
 
 /** Route modules exempt from Rule A, with the reason they are not registered. */

@@ -64,7 +64,6 @@
     "./tool-call-policy": "./src/toolCallPolicy.ts",
     "./untrusted-content-policy": "./src/untrustedContentPolicy.ts",
     "./thread-work-policy": "./src/threadWorkPolicy.ts",
-    "./cursor-acp-policy": "./src/cursorAcpPolicy.ts",
     "./github-capability-policy": "./src/githubCapabilityPolicy.ts",
     "./github-repository-read-policy": "./src/githubRepositoryReadPolicy.ts",
     "./github-remote-identity": "./src/githubRemoteIdentity.ts",
