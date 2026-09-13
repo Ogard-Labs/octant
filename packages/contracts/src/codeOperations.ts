@@ -767,6 +767,22 @@ const RepositoryTestResult = Schema.Union(
     state: Schema.Literal("running", "interrupted", "unavailable", "failed"),
   }).annotations(strict),
 );
+/**
+ * The newest repository test result the host still holds for a thread's
+ * checkout, read when the Tests surface mounts.
+ *
+ * The result is the same `repository-test-state` an in-flight run resolves to;
+ * the host replays it from the operation journal rather than keeping a second
+ * history beside it. `result` is absent when the thread has run no test, and
+ * the renderer shows "Not run" rather than inventing a remembered one.
+ */
+export const CodeRepositoryTestStatus = Schema.Struct({
+  kind: Schema.Literal("code-repository-test-status"),
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  result: Schema.optional(RepositoryTestResult),
+}).annotations(strict);
+export type CodeRepositoryTestStatus = typeof CodeRepositoryTestStatus.Type;
 const ScaffoldResult = Schema.Struct({
   kind: Schema.Literal("scaffold-run"),
   operationId: CodeOperationId,
@@ -1883,6 +1899,7 @@ export const decodeCodeFileOpenResultEnvelope = Schema.decodeUnknownSync(
 export const decodeCodeOperationCommand = Schema.decodeUnknownSync(CodeOperationCommand);
 export const decodeCodeRunOutcome = Schema.decodeUnknownSync(CodeRunOutcome);
 export const decodeCodeOperationResult = Schema.decodeUnknownSync(CodeOperationResult);
+export const decodeCodeRepositoryTestStatus = Schema.decodeUnknownSync(CodeRepositoryTestStatus);
 export const decodeCodeOperationEvent = Schema.decodeUnknownSync(CodeOperationEvent);
 export const decodeCodeOperationEventFrame = Schema.decodeUnknownSync(CodeOperationEventFrame);
 export const decodeCodeOperationStreamFrame = Schema.decodeUnknownSync(CodeOperationStreamFrame);

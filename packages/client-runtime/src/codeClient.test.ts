@@ -1001,4 +1001,29 @@ describe("code client", () => {
       expect.objectContaining({ method: "GET" }),
     );
   });
+
+  it("reads the host's newest repository test result for a checkout", async () => {
+    const status = {
+      kind: "code-repository-test-status",
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      result: {
+        kind: "repository-test-state",
+        operationId: "70000000-0000-4000-8000-000000000001",
+        testRunId: "a0000000-0000-4000-8000-000000000001",
+        state: "interrupted",
+        concerns: [],
+      },
+    };
+    const fetch = vi.fn().mockResolvedValue(Response.json(status));
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+
+    await expect(
+      client.readTestStatus?.(ids.thread as never, ids.checkout as never),
+    ).resolves.toEqual(status);
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/code/tests/status?threadId=${ids.thread}&checkoutId=${ids.checkout}`,
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
 });

@@ -52,6 +52,7 @@ import {
   decodeCodePlannerProposalOutcome,
   decodeCodePlannerView,
   decodeCodeRepositoryTestListing,
+  decodeCodeRepositoryTestStatus,
   decodeCodeRelativePath,
   decodeCodeThreadFollowUpUpdated,
   decodeCodeThreadFollowUpView,
@@ -98,6 +99,7 @@ import {
   type CodeFileSaveResultEnvelope,
   type CodeRelativePath,
   type CodeRepositoryTestListing,
+  type CodeRepositoryTestStatus,
   type CodeThreadFollowUpUpdated,
   type CodeThreadFollowUpView,
   type CodeThreadId,
@@ -352,6 +354,17 @@ export interface CodeRouteService {
     authenticatedWindowId: WindowId,
     input: CodeTestListingInput,
   ) => Promise<CodeRepositoryTestListing> | CodeRepositoryTestListing;
+  /**
+   * The newest repository test result the thread's checkout still holds, so a
+   * reopened Tests surface shows the run that already happened instead of "Not
+   * run". Optional for the same reason as `listTests`: a host without the
+   * operation journal answers `unavailable` rather than claiming the thread
+   * never ran a test.
+   */
+  readonly readRepositoryTestStatus?: (
+    authenticatedWindowId: WindowId,
+    input: CodeTestListingInput,
+  ) => Promise<CodeRepositoryTestStatus> | CodeRepositoryTestStatus;
   readonly stageEvidence?: (
     authenticatedWindowId: WindowId,
     threadId: CodeThreadId,
@@ -1165,6 +1178,28 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             origin,
           );
         }
+        case "test-status": {
+          if (request.method !== "GET") {
+            throw new CodeRouteRejected("Code request is invalid.", 400);
+          }
+          if (dependencies.service.readRepositoryTestStatus === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Code repository test status is unavailable." },
+              503,
+              origin,
+            );
+          }
+          return jsonResponse(
+            decodeCodeRepositoryTestStatus(
+              await dependencies.service.readRepositoryTestStatus(
+                authenticatedWindowId,
+                decodeTestListingQuery(url),
+              ),
+            ),
+            200,
+            origin,
+          );
+        }
         case "stage-evidence": {
           requireMethodAndEmptyQuery(request, url, "PUT");
           requireTextContentType(request);
@@ -1322,6 +1357,7 @@ type MatchedRoute =
         | "file-search"
         | "file-watch"
         | "test-listing"
+        | "test-status"
         | "stage-evidence"
         | "evidence-batch"
         | "attachment"
@@ -1464,6 +1500,7 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
   if (pathname === "/api/code/files/search") return { kind: "file-search" };
   if (pathname === "/api/code/files/watch") return { kind: "file-watch" };
   if (pathname === "/api/code/tests/listing") return { kind: "test-listing" };
+  if (pathname === "/api/code/tests/status") return { kind: "test-status" };
   if (pathname === "/api/code/evidence") return { kind: "stage-evidence" };
   if (pathname === "/api/code/evidence/batch") return { kind: "evidence-batch" };
   if (pathname === "/api/code/attachments") return { kind: "attachment" };

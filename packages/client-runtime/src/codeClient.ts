@@ -37,6 +37,7 @@ import {
   decodeCodeFileSaveResultEnvelope,
   decodeCodeRelativePath,
   decodeCodeRepositoryTestListing,
+  decodeCodeRepositoryTestStatus,
   decodeCodeSettings,
   decodeCodeThread,
   decodeCodeNavigation,
@@ -88,6 +89,7 @@ import {
   type CodeFileSavePublicResult,
   type CodeRelativePath,
   type CodeRepositoryTestListing,
+  type CodeRepositoryTestStatus,
   type CodeThreadId,
   type CodeThreadView,
   MAX_CODE_OPERATION_EVIDENCE_BYTES,
@@ -224,6 +226,16 @@ export interface CodeClient {
     threadId: CodeThreadId,
     checkoutId: CodeCheckoutId,
   ): Promise<CodeRepositoryTestListing>;
+  /**
+   * The newest repository test result the host still holds for a checkout.
+   *
+   * Optional like `listTests`: a caller without it renders no remembered
+   * result rather than inventing one.
+   */
+  readTestStatus?(
+    threadId: CodeThreadId,
+    checkoutId: CodeCheckoutId,
+  ): Promise<CodeRepositoryTestStatus>;
   subscribe(
     threadId: CodeThreadId,
     afterSequence: number,
@@ -754,6 +766,23 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         url.toString(),
         { method: "GET", headers },
         decodeCodeRepositoryTestListing,
+      );
+    },
+    readTestStatus(threadId, checkoutId) {
+      try {
+        decodeCodeThreadId(threadId);
+        decodeCodeCheckoutId(checkoutId);
+      } catch {
+        throw invalidCommand();
+      }
+      const url = new URL("/api/code/tests/status", options.baseUrl);
+      url.searchParams.set("threadId", String(threadId));
+      url.searchParams.set("checkoutId", String(checkoutId));
+      return request(
+        fetch,
+        url.toString(),
+        { method: "GET", headers },
+        decodeCodeRepositoryTestStatus,
       );
     },
     subscribe(threadId, afterSequence, signal) {
