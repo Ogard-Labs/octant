@@ -828,8 +828,6 @@ function LaunchedShell(
     useState<import("@octant/contracts/providers").ProviderInstanceId>();
   const [draftModelId, setDraftModelId] =
     useState<import("@octant/contracts/providers").ProviderModelId>();
-  const [draftComposerExecutionPolicy, setDraftComposerExecutionPolicy] =
-    useState<import("@octant/contracts/providers").ProviderExecutionPolicy>();
   const [searchOpen, setSearchOpen] = useState(false);
   // The Thread Search query lives here as well as in the overlay, because the
   // archived half of the Chat listing is fetched from the host per query.
@@ -4128,6 +4126,11 @@ function LaunchedShell(
     linearIssueContext?: import("@octant/contracts").LinearIssueContextRequest,
     computerUseSelection?: import("@octant/contracts/extensions").ExtensionSelection,
     extensionSelections?: ReadonlyArray<import("@octant/contracts/extensions").ExtensionSelection>,
+    // The access posture the composer submitted with. Absent only on paths
+    // that do not offer the choice; a Project default is not a substitute for
+    // a posture the user explicitly changed.
+    executionPolicy?: import("@octant/contracts/providers").ProviderExecutionPolicy,
+    permissionPersistence?: import("@octant/contracts/providers").PermissionPersistence,
   ): Promise<boolean | void> {
     setDraftCreating(true);
     setDraftError(undefined);
@@ -4294,8 +4297,10 @@ function LaunchedShell(
           lifecycle: "active",
           providerInstanceId,
           modelId,
-          executionPolicy: codeController.bootstrap.settings.defaultExecutionPolicy,
-          permissionPersistence: codeController.bootstrap.settings.defaultPermissionPersistence,
+          executionPolicy:
+            executionPolicy ?? codeController.bootstrap.settings.defaultExecutionPolicy,
+          permissionPersistence:
+            permissionPersistence ?? codeController.bootstrap.settings.defaultPermissionPersistence,
           deliveryTarget: {
             branchIntent: prepared.checkout.head.name,
             remoteName: "origin",
@@ -5640,7 +5645,6 @@ function LaunchedShell(
                       setDraftProviderInstanceId(selection.providerInstanceId);
                       setDraftModelId(selection.modelId);
                     }}
-                    onDraftRequestedExecutionPolicyChange={setDraftComposerExecutionPolicy}
                     onDraftCreateThread={handleDraftCreateThread}
                     githubPluginEnabled={
                       FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") === true

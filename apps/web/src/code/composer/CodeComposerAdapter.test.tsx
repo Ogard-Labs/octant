@@ -362,31 +362,29 @@ describe("CodeComposerAdapter interactions", () => {
     container.remove();
   });
 
-  it("reports the requested access policy when the composer access dropdown changes", async () => {
-    const onExecutionPolicyChange = vi.fn();
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(
-        <CodeComposerAdapter
-          {...defaultProps}
-          defaultExecutionPolicy="approval-gated"
-          onExecutionPolicyChange={onExecutionPolicyChange}
-        />,
-      );
+  it("submits the access posture the composer chose", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        defaultExecutionPolicy="approval-gated"
+        onCreateThread={onCreateThread}
+      />,
+    );
+
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Plan this change");
+    await user.click(screen.getByRole("button", { name: "Access policy" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: /Plan/ }));
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+    // The posture rides on the create command; a callback the shell merely
+    // observes would leave the thread created with the Project default.
+    expect(onCreateThread.mock.calls[0]?.[0]).toMatchObject({
+      prompt: "Plan this change",
+      executionPolicy: "plan",
     });
-    expect(onExecutionPolicyChange).toHaveBeenCalledWith("approval-gated");
-    const access = screen.getByRole("button", { name: "Access policy" });
-    await act(async () => {
-      fireEvent.click(access);
-    });
-    await act(async () => {
-      fireEvent.click(await screen.findByRole("menuitemradio", { name: /Plan/ }));
-    });
-    expect(onExecutionPolicyChange).toHaveBeenCalledWith("plan");
-    root.unmount();
-    container.remove();
   });
 
   it("submits on Enter and cancels on Escape", async () => {
