@@ -1199,6 +1199,16 @@ export function useProviderController(options: ProviderControllerOptions) {
     (instanceId: ProviderInstanceId): Promise<boolean> =>
       queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, async () => {
         if (client === undefined) return false;
+        const clearObservation = () => {
+          const current = authoritative.current;
+          if (current === undefined) return;
+          install({
+            ...current,
+            observedStates: current.observedStates.filter(
+              (value) => value.instanceId !== instanceId,
+            ),
+          });
+        };
         let result: Extract<
           Awaited<ReturnType<ProviderClient["execute"]>>,
           { kind: "provider-cli-updated" }
@@ -1213,7 +1223,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           try {
             install(await client.bootstrap());
           } catch {
-            // Keep the locally cleared snapshot when authority is unavailable.
+            clearObservation();
           }
           if (mounted.current) setMessage(failureMessage(error));
           return false;
@@ -1221,7 +1231,8 @@ export function useProviderController(options: ProviderControllerOptions) {
         try {
           install(await client.bootstrap());
         } catch {
-          // The provider update succeeded; only the follow-up refresh failed.
+          // The provider update succeeded; clear stale readiness if authority is unavailable.
+          clearObservation();
         }
         if (mounted.current) {
           setMessage(
@@ -2639,7 +2650,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         });
       }
       setProbingIds((current) => new Set(current).add(instanceId));
-      setMessage(undefined);
+      if (!options?.quiet) setMessage(undefined);
       try {
         const observed = await client.probe(instanceId);
         const current = authoritative.current;

@@ -314,10 +314,12 @@ describe("useProviderController", () => {
       previousVersion: "1.0.0",
       currentVersion: "1.1.0",
     });
-    vi.mocked(api.bootstrap).mockResolvedValueOnce(snapshot()).mockRejectedValueOnce({
-      category: "unavailable",
-      message: "refresh unavailable",
-    });
+    vi.mocked(api.bootstrap)
+      .mockResolvedValueOnce(snapshot([provider()], [observation()]))
+      .mockRejectedValueOnce({
+        category: "unavailable",
+        message: "refresh unavailable",
+      });
     const { result } = renderHook(() => useProviderController({ client: api }));
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
@@ -326,6 +328,7 @@ describe("useProviderController", () => {
     });
 
     expect(result.current.message).toMatch(/provider CLI updated/i);
+    expect(result.current.observedByInstance.get(id)).toBeUndefined();
   });
 
   it("refreshes provider state when a CLI update fails", async () => {
@@ -466,6 +469,33 @@ describe("useProviderController", () => {
     await waitFor(() => expect(result.current.probingIds.has(id)).toBe(false));
 
     expect(result.current.message).toBeUndefined();
+  });
+
+  it("preserves an existing page alert during a quiet probe", async () => {
+    const pending = deferred<Awaited<ReturnType<ProviderClient["probe"]>>>();
+    const api = client();
+    vi.mocked(api.probe)
+      .mockRejectedValueOnce({
+        category: "provider-failed",
+        message: "provider setup is incomplete",
+      })
+      .mockReturnValueOnce(pending.promise);
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(result.current.probe(id)).resolves.toBe(false);
+    });
+    const existingMessage = result.current.message;
+    expect(existingMessage).toBe("Provider operation failed.");
+
+    let check!: Promise<boolean>;
+    act(() => {
+      check = result.current.probe(id, { quiet: true });
+    });
+    expect(result.current.message).toBe(existingMessage);
+    pending.resolve(observation());
+    await expect(check).resolves.toBe(true);
   });
 
   it("keeps prior discovery cleared when probe failure refresh is unavailable", async () => {
