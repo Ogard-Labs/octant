@@ -15,6 +15,7 @@ const windowId = decodeWindowId("00000000-0000-4000-8000-000000000911");
 const threadId = "00000000-0000-4000-8000-000000000912";
 const checkoutId = "00000000-0000-4000-8000-000000000913";
 const listingUrl = `http://127.0.0.1/api/code/tests/listing?threadId=${threadId}&checkoutId=${checkoutId}`;
+const statusUrl = `http://127.0.0.1/api/code/tests/status?threadId=${threadId}&checkoutId=${checkoutId}`;
 
 function listing() {
   return {
@@ -46,6 +47,11 @@ function createRoute(overrides: Record<string, unknown> = {}) {
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 0 });
   const listTests = vi.fn().mockResolvedValue(listing());
+  const readRepositoryTestStatus = vi.fn().mockResolvedValue({
+    kind: "code-repository-test-status",
+    threadId,
+    checkoutId,
+  });
   const service = {
     bootstrap: vi.fn(),
     read: vi.fn(),
@@ -54,11 +60,13 @@ function createRoute(overrides: Record<string, unknown> = {}) {
     readContent: vi.fn(),
     saveFile: vi.fn(),
     listTests,
+    readRepositoryTestStatus,
     ...overrides,
   } as unknown as CodeRouteService;
   return {
     handler: createCodeRouteHandler({ service, windowAuthorityStore: store, now: () => 1 }),
     listTests,
+    readRepositoryTestStatus,
   };
 }
 
@@ -105,6 +113,44 @@ describe("Code repository test listing route", () => {
   it("answers unavailable when the host wired no discovery", async () => {
     const { handler } = createRoute({ listTests: undefined });
     const response = await handler(get());
+    expect(response?.status).toBe(503);
+    expect(await response?.json()).toMatchObject({ category: "unavailable" });
+  });
+});
+
+describe("Code repository test status route", () => {
+  it("returns the host's typed newest result", async () => {
+    const { handler, readRepositoryTestStatus } = createRoute();
+    const response = await handler(get(statusUrl));
+
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({
+      kind: "code-repository-test-status",
+      threadId,
+      checkoutId,
+    });
+    expect(readRepositoryTestStatus.mock.calls[0]?.[1]).toEqual({ threadId, checkoutId });
+  });
+
+  it("rejects an unauthenticated request and a mutating method", async () => {
+    const { handler, readRepositoryTestStatus } = createRoute();
+    expect((await handler(new Request(statusUrl, { method: "GET" })))?.status).toBe(401);
+    expect(
+      (
+        await handler(
+          new Request(statusUrl, {
+            method: "PUT",
+            headers: { "x-octant-window-capability": capability },
+          }),
+        )
+      )?.status,
+    ).toBe(400);
+    expect(readRepositoryTestStatus).not.toHaveBeenCalled();
+  });
+
+  it("answers unavailable when the host cannot read the journal", async () => {
+    const { handler } = createRoute({ readRepositoryTestStatus: undefined });
+    const response = await handler(get(statusUrl));
     expect(response?.status).toBe(503);
     expect(await response?.json()).toMatchObject({ category: "unavailable" });
   });

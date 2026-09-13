@@ -1,5 +1,6 @@
 import type { CodeClient, CodeFileOpenResult } from "@octant/client-runtime/code-client";
 import type { WorkspaceTab } from "@octant/contracts/shell";
+import type { CodeOperationResult } from "@octant/contracts/code-operations";
 import type { CodeRelativePath, CodeThread } from "@octant/contracts/code";
 import type { CodeRepositoryTestDefinition } from "@octant/contracts/code-test-definitions";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -75,6 +76,11 @@ export default function CodeWorkspaceTab(props: {
     enabled: props.tab.kind === "code-test" && view?.thread.id === props.tab.threadId,
     ...(view === undefined ? {} : { threadId: view.thread.id, checkoutId: view.checkout.id }),
   });
+  const testResult = useCodeTestResult({
+    client: props.controller.client,
+    enabled: props.tab.kind === "code-test" && view?.thread.id === props.tab.threadId,
+    ...(view === undefined ? {} : { threadId: view.thread.id, checkoutId: view.checkout.id }),
+  });
   const editorFile = useCodeEditorFile({
     client: props.controller.client,
     enabled: props.tab.kind === "code-file" && view?.thread.id === props.tab.threadId,
@@ -106,7 +112,14 @@ export default function CodeWorkspaceTab(props: {
   });
   const projections = {
     ...(editorFile.file === undefined ? {} : { file: editorFile.file }),
-    ...(definitions === undefined ? {} : { tests: { definitions } }),
+    ...(definitions === undefined
+      ? {}
+      : {
+          tests: {
+            definitions,
+            ...(testResult === undefined ? {} : { result: testResult }),
+          },
+        }),
   };
   return (
     <div
@@ -203,6 +216,73 @@ function useCodeTestDefinitions(options: {
   }, [checkoutId, client, enabled, threadId]);
 
   return definitions;
+}
+
+type RepositoryTestResult = Extract<
+  CodeOperationResult,
+  { readonly kind: "repository-test-state" }
+>;
+
+/**
+ * The newest repository test result the host holds for the tab's checkout.
+ *
+ * A run's result is journaled by the host, so reopening the Tests tab shows the
+ * run that already happened instead of "Not run". The renderer never remembers
+ * one itself: no answer means no result to show. Loading is scoped to the Tests
+ * tab because the status belongs to that surface alone.
+ */
+function useCodeTestResult(options: {
+  readonly client: CodeClient;
+  readonly enabled: boolean;
+  readonly threadId?: NonNullable<CodeController["activeView"]>["thread"]["id"];
+  readonly checkoutId?: NonNullable<CodeController["activeView"]>["checkout"]["id"];
+}): RepositoryTestResult | undefined {
+  const [cached, setCached] = useState<{
+    readonly threadId: NonNullable<CodeController["activeView"]>["thread"]["id"];
+    readonly checkoutId: NonNullable<CodeController["activeView"]>["checkout"]["id"];
+    readonly result?: RepositoryTestResult;
+  }>();
+  const { client, enabled, threadId, checkoutId } = options;
+
+  useEffect(() => {
+    const readTestStatus = client.readTestStatus?.bind(client);
+    if (
+      !enabled ||
+      readTestStatus === undefined ||
+      threadId === undefined ||
+      checkoutId === undefined
+    ) {
+      setCached(undefined);
+      return;
+    }
+    let active = true;
+    void readTestStatus(threadId, checkoutId)
+      .then((status) => {
+        if (active)
+          setCached({
+            threadId,
+            checkoutId,
+            ...(status.result === undefined ? {} : { result: status.result }),
+          });
+      })
+      .catch(() => {
+        if (active) setCached({ threadId, checkoutId });
+      });
+    return () => void (active = false);
+  }, [checkoutId, client, enabled, threadId]);
+
+  // A result is only this checkout's result. When the scope moves, the previous
+  // answer is withheld for the render before the new fetch lands rather than
+  // shown under the new checkout's name.
+  if (
+    !enabled ||
+    cached === undefined ||
+    cached.threadId !== threadId ||
+    cached.checkoutId !== checkoutId
+  ) {
+    return undefined;
+  }
+  return cached.result;
 }
 
 /**

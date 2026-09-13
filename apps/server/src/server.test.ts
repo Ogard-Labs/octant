@@ -1046,6 +1046,11 @@ describe("startOctantServer", () => {
         threadId: input.threadId,
         items: [],
       })),
+      readRepositoryTestStatus: vi.fn(async (_windowId, threadId, checkoutId) => ({
+        kind: "code-repository-test-status" as const,
+        threadId,
+        checkoutId,
+      })),
       close: vi.fn(async () => undefined),
     };
 

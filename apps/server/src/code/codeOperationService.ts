@@ -3,9 +3,11 @@ import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import {
   decodeCodeOperationCommand,
   decodeCodeOperationResult,
+  decodeCodeRepositoryTestStatus,
   type CodeApprovalEffect,
   type CodeAttachmentId,
   type CodeAttachmentReference,
+  type CodeCheckoutId,
   type CodeCheckpoint,
   type CodeCheckoutIdentity,
   type CodeEvidenceReference,
@@ -19,6 +21,7 @@ import {
   type CodeTerminalId,
   type CodeRepositoryTestDefinition,
   type CodeRepositoryTestRun,
+  type CodeRepositoryTestStatus,
   type CodeReviewFinding,
   type CodeThread,
   type CodeThreadForkOrigin,
@@ -125,6 +128,18 @@ export interface CodeOperationEventPort {
     readonly afterCursor: number;
     readonly limit: number;
   }) => CodeOperationReplay;
+  /**
+   * Every operation result this thread has journaled, in journal order. A host
+   * that cannot read the whole stream answers `rebuild-required`, and the
+   * callers that project a single newest result fail closed rather than
+   * reporting a truncated history as the whole one.
+   */
+  readonly historyForThread: (threadId: CodeThreadId) =>
+    | {
+        readonly status: "ok";
+        readonly frames: ReadonlyArray<CodeOperationEventFrame>;
+      }
+    | { readonly status: "rebuild-required" };
 }
 
 export class CodeOperationSnapshotRequiredError extends Error {
@@ -1092,6 +1107,55 @@ export class CodeOperationService {
       throw new CodeOperationServiceError("unauthorized");
     this.#noteTerminalRead(operationId);
     return this.#replay(threadId, operationId, afterCursor, limit).frames;
+  }
+
+  /**
+   * The newest repository test result the thread's checkout still holds.
+   *
+   * The operation journal is the authority: a run's result is appended once it
+   * settles, and the Tests surface reads it back on mount so a reopened tab
+   * shows the run that already happened rather than "Not run". A thread that is
+   * no longer bound to the requested checkout, or a history the store cannot
+   * read whole, answers with the ids and no result instead of a stale one.
+   */
+  async readRepositoryTestStatus(
+    windowId: WindowId,
+    threadId: CodeThreadId,
+    checkoutId: CodeCheckoutId,
+  ): Promise<CodeRepositoryTestStatus> {
+    const thread = this.#options.authority.readThread(threadId);
+    if (thread === undefined || thread.id !== threadId)
+      throw new CodeOperationServiceError("invalid");
+    if (!(await this.#options.authority.canAccessProject(windowId, thread.projectId)))
+      throw new CodeOperationServiceError("unauthorized");
+    if (thread.checkoutId !== checkoutId)
+      return decodeCodeRepositoryTestStatus({
+        kind: "code-repository-test-status",
+        threadId,
+        checkoutId,
+      });
+    const history = this.#options.events.historyForThread(threadId);
+    if (history.status !== "ok")
+      return decodeCodeRepositoryTestStatus({
+        kind: "code-repository-test-status",
+        threadId,
+        checkoutId,
+      });
+    let result: Extract<CodeOperationResult, { kind: "repository-test-state" }> | undefined;
+    for (const frame of history.frames) {
+      if (
+        frame.event.kind === "operation-result" &&
+        frame.event.result.kind === "repository-test-state"
+      ) {
+        result = frame.event.result;
+      }
+    }
+    return decodeCodeRepositoryTestStatus({
+      kind: "code-repository-test-status",
+      threadId,
+      checkoutId,
+      ...(result === undefined ? {} : { result }),
+    });
   }
 
   /** Record that whoever follows this operation is still reading it. */

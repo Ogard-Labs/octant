@@ -317,6 +317,11 @@ export interface CodeOperationRuntime {
     afterCursor: number,
     limit: number,
   ): Promise<readonly import("@octant/contracts").CodeOperationEventFrame[]>;
+  readRepositoryTestStatus(
+    windowId: WindowId,
+    threadId: CodeThreadId,
+    checkoutId: import("@octant/contracts").CodeCheckoutId,
+  ): Promise<import("@octant/contracts").CodeRepositoryTestStatus>;
   conversation(
     windowId: WindowId,
     threadId: CodeThreadId,
@@ -900,6 +905,8 @@ export function createCodeOperationRuntime(
     raiseHarnessQuestion: (input) => turns.raiseHarnessQuestion(input),
     subscribe: (windowId, threadId, operationId, afterCursor, limit) =>
       service.subscribe(windowId, threadId, operationId, afterCursor, limit),
+    readRepositoryTestStatus: (windowId, threadId, checkoutId) =>
+      service.readRepositoryTestStatus(windowId, threadId, checkoutId),
     conversation: async (windowId, threadId, afterCursor, limit) => {
       const thread = options.persistence.readCodeThread(threadId);
       if (thread === undefined || thread.id !== threadId) {

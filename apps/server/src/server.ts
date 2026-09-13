@@ -1455,6 +1455,8 @@ function withCodeOperationRuntime(
       : { readGitHistory: service.readGitHistory.bind(service) }),
     ...(service.listFiles === undefined ? {} : { listFiles: service.listFiles.bind(service) }),
     ...(service.listTests === undefined ? {} : { listTests: service.listTests.bind(service) }),
+    readRepositoryTestStatus: (windowId, input) =>
+      runtime.readRepositoryTestStatus(windowId, input.threadId, input.checkoutId),
     ...(service.watchFiles === undefined ? {} : { watchFiles: service.watchFiles.bind(service) }),
     ...(service.searchFiles === undefined
       ? {}
@@ -1533,6 +1535,9 @@ function withCodeBoard(
       : { readGitHistory: service.readGitHistory.bind(service) }),
     ...(service.listFiles === undefined ? {} : { listFiles: service.listFiles.bind(service) }),
     ...(service.listTests === undefined ? {} : { listTests: service.listTests.bind(service) }),
+    ...(service.readRepositoryTestStatus === undefined
+      ? {}
+      : { readRepositoryTestStatus: service.readRepositoryTestStatus.bind(service) }),
     ...(service.watchFiles === undefined ? {} : { watchFiles: service.watchFiles.bind(service) }),
     ...(service.searchFiles === undefined
       ? {}

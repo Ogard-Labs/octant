@@ -157,6 +157,21 @@ describe("Code execution lifecycle", () => {
       state: "interrupted",
     });
 
+    // The Tests surface reads this back when it mounts, so a run that already
+    // happened is shown instead of "Not run".
+    expect(
+      await fixture.runtime.readRepositoryTestStatus(windowId, threadId, checkoutId),
+    ).toMatchObject({
+      kind: "code-repository-test-status",
+      threadId,
+      checkoutId,
+      result: {
+        kind: "repository-test-state",
+        state: "interrupted",
+        testRunId: cancellableRunId,
+      },
+    });
+
     writeFileSync(join(checkoutRoot, "README.md"), "delivered\n");
     const observed = await fixture.runtime.execute(windowId, observeCommand(12));
     expect(observed).toMatchObject({ kind: "git-observed", changedPaths: ["README.md"] });
@@ -255,6 +270,17 @@ describe("Code execution lifecycle", () => {
     expect(replay.at(-1)?.event).toMatchObject({
       kind: "operation-result",
       result: { kind: "pull-request-state", number: 42 },
+    });
+    // A reopened Tests surface after a restart reads the same result from the
+    // journal rather than remembering it in the renderer.
+    expect(
+      await restarted.runtime.readRepositoryTestStatus(windowId, threadId, checkoutId),
+    ).toMatchObject({
+      kind: "code-repository-test-status",
+      result: {
+        kind: "repository-test-state",
+        testRunId: "91000000-0000-4000-8000-000000000021",
+      },
     });
     await restarted.runtime.close();
     second.connection.close();

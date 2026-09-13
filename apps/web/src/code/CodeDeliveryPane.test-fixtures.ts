@@ -61,6 +61,11 @@ export function codeClient(options: { readonly evidence?: string } = {}): CodeCl
       definitions: [testDefinition],
       observedAt: "2026-08-15T08:00:00.000Z" as never,
     })),
+    readTestStatus: vi.fn(async (threadId, checkoutId) => ({
+      kind: "code-repository-test-status" as const,
+      threadId,
+      checkoutId,
+    })),
     openFile: vi.fn(async () => ({
       status: "editable" as const,
       fileId: ids.file as never,
