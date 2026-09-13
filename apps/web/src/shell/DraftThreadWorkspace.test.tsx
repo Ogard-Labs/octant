@@ -348,6 +348,31 @@ describe("DraftThreadWorkspace", () => {
     );
   });
 
+  it("forwards the access posture the code composer submitted with", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        mode="code"
+        projectId={codeProjectId}
+        projects={projects}
+        onCreateThread={onCreateThread}
+      />,
+    );
+
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Plan this change");
+    await user.click(screen.getByRole("button", { name: "Access policy" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: /Plan/ }));
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+
+    expect(onCreateThread).toHaveBeenCalledOnce();
+    const forwarded = onCreateThread.mock.calls[0];
+    expect(forwarded?.[0]).toBe("Plan this change");
+    expect(forwarded?.[9]).toBe("plan");
+    expect(forwarded?.[10]).toBe("current-session");
+  });
+
   it("shows the authoritative Environment health in the context strip", () => {
     render(
       <DraftThreadWorkspace

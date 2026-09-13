@@ -132,6 +132,9 @@ export interface DraftThreadWorkspaceProps {
     linearIssueContext?: LinearIssueContextRequest,
     computerUseSelection?: ExtensionSelection,
     extensionSelections?: ReadonlyArray<ExtensionSelection>,
+    /** The access posture the composer submitted with, not a project default. */
+    executionPolicy?: ProviderExecutionPolicy,
+    permissionPersistence?: PermissionPersistence,
   ) => boolean | void | Promise<boolean | void>;
   readonly onCreateCodeThread?: (
     input: CodeComposerSubmitInput,
@@ -143,7 +146,6 @@ export interface DraftThreadWorkspaceProps {
   ) => Promise<CodeCommandResult | undefined>;
   readonly defaultExecutionPolicy?: ProviderExecutionPolicy;
   readonly defaultPermissionPersistence?: PermissionPersistence;
-  readonly onExecutionPolicyChange?: (executionPolicy: ProviderExecutionPolicy) => void;
   readonly onAttachFolder?: () => void;
   /**
    * Reports the Project the composer now targets. The draft is unmounted
@@ -621,9 +623,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(worktreeRemoteFacts === undefined ? {} : { worktreeRemoteFacts })}
           defaultExecutionPolicy={props.defaultExecutionPolicy ?? "approval-gated"}
           defaultPermissionPersistence={props.defaultPermissionPersistence ?? "current-session"}
-          {...(props.onExecutionPolicyChange === undefined
-            ? {}
-            : { onExecutionPolicyChange: props.onExecutionPolicyChange })}
           folderControl={folderControl}
           {...(createFromControl === null ? {} : { createFromControl })}
           {...(props.codeExecute === undefined ? {} : { execute: props.codeExecute })}
@@ -655,50 +654,22 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             if (props.onCreateCodeThread !== undefined && selectedProjectId !== undefined) {
               return props.onCreateCodeThread(submitted, selectedProjectId);
             }
-            // Carry the outcome the user confirmed in the composer so the
-            // fallback path never re-derives or auto-confirms a suggestion.
-            if (submitted.computerUseSelection !== undefined)
-              return props.onCreateThread(
-                submitted.prompt,
-                selectedProjectId,
-                submitted.deliveryTarget.outcomeKind,
-                submitted.images,
-                submitted.threadMentionIds,
-                issueContext,
-                linearIssueContext,
-                submitted.computerUseSelection,
-                submitted.extensionSelections,
-              );
-            if (
-              submitted.extensionSelections !== undefined &&
-              submitted.extensionSelections.length > 0
-            )
-              return props.onCreateThread(
-                submitted.prompt,
-                selectedProjectId,
-                submitted.deliveryTarget.outcomeKind,
-                submitted.images,
-                submitted.threadMentionIds,
-                issueContext,
-                linearIssueContext,
-                undefined,
-                submitted.extensionSelections,
-              );
-            return issueContext === undefined && linearIssueContext === undefined
-              ? props.onCreateThread(
-                  submitted.prompt,
-                  selectedProjectId,
-                  submitted.deliveryTarget.outcomeKind,
-                )
-              : props.onCreateThread(
-                  submitted.prompt,
-                  selectedProjectId,
-                  submitted.deliveryTarget.outcomeKind,
-                  submitted.images,
-                  submitted.threadMentionIds,
-                  issueContext,
-                  linearIssueContext,
-                );
+            // Carry the outcome the user confirmed in the composer, and the
+            // access posture they submitted with, so the fallback path never
+            // re-derives a suggestion or falls back to a Project default.
+            return props.onCreateThread(
+              submitted.prompt,
+              selectedProjectId,
+              submitted.deliveryTarget.outcomeKind,
+              submitted.images,
+              submitted.threadMentionIds,
+              issueContext,
+              linearIssueContext,
+              submitted.computerUseSelection,
+              submitted.extensionSelections,
+              submitted.executionPolicy,
+              submitted.permissionPersistence,
+            );
           }}
           onCancel={props.onCancel}
           {...(props.onCancelFirstTurn === undefined

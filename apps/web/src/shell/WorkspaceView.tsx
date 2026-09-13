@@ -330,9 +330,6 @@ export interface WorkspaceViewProps {
     readonly providerInstanceId: import("@octant/contracts/providers").ProviderInstanceId;
     readonly modelId: import("@octant/contracts/providers").ProviderModelId;
   }) => void;
-  readonly onDraftRequestedExecutionPolicyChange?: (
-    executionPolicy: import("@octant/contracts/providers").ProviderExecutionPolicy,
-  ) => void;
   readonly onDraftCreateThread?: (
     mode: string,
     prompt: string,
@@ -344,6 +341,8 @@ export interface WorkspaceViewProps {
     linearIssueContext?: import("@octant/contracts").LinearIssueContextRequest,
     computerUseSelection?: import("@octant/contracts/extensions").ExtensionSelection,
     extensionSelections?: ReadonlyArray<import("@octant/contracts/extensions").ExtensionSelection>,
+    executionPolicy?: import("@octant/contracts/providers").ProviderExecutionPolicy,
+    permissionPersistence?: import("@octant/contracts/providers").PermissionPersistence,
   ) => boolean | void | Promise<boolean | void>;
   readonly githubPluginEnabled?: boolean;
   readonly linearClient?: import("@octant/client-runtime/integration-client").IntegrationClient;
@@ -1092,9 +1091,6 @@ function renderNonCodeTab(
           ? {}
           : { defaultExecutionPolicy: props.draftDefaultExecutionPolicy })}
         onSelectProvider={props.onDraftSelectProvider ?? (() => {})}
-        {...(props.onDraftRequestedExecutionPolicyChange === undefined
-          ? {}
-          : { onExecutionPolicyChange: props.onDraftRequestedExecutionPolicyChange })}
         {...(props.draftCodeExecute === undefined ? {} : { codeExecute: props.draftCodeExecute })}
         {...(props.onDraftCreateCodeThread === undefined
           ? {}
@@ -1113,6 +1109,8 @@ function renderNonCodeTab(
           linearIssueContext,
           computerUseSelection,
           extensionSelections,
+          executionPolicy,
+          permissionPersistence,
         ) => {
           // Returning quietly here made a wired-up composer look dead: the user
           // pressed Create thread and nothing happened anywhere. A missing
@@ -1129,12 +1127,10 @@ function renderNonCodeTab(
             threadMentionIds,
             issueContext,
             linearIssueContext,
-            ...(computerUseSelection === undefined
-              ? ([] as const)
-              : ([computerUseSelection] as const)),
-            ...(extensionSelections === undefined
-              ? ([] as const)
-              : ([extensionSelections] as const)),
+            computerUseSelection,
+            extensionSelections,
+            executionPolicy,
+            permissionPersistence,
           );
         }}
         {...(props.onCreateProject === undefined ? {} : { onCreateProject: props.onCreateProject })}

@@ -109,8 +109,6 @@ export interface CodeComposerAdapterProps {
   readonly baseBranch?: string;
   readonly defaultExecutionPolicy: ProviderExecutionPolicy;
   readonly defaultPermissionPersistence: PermissionPersistence;
-  /** Reports the composer-local access posture to the shell. */
-  readonly onExecutionPolicyChange?: (executionPolicy: ProviderExecutionPolicy) => void;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
   readonly selectedProviderInstanceId?: ProviderInstanceId;
   readonly selectedModelId?: ProviderModelId;
@@ -319,10 +317,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     ...(props.creating === true ? { disabled: true } : {}),
   });
   const [executionPolicy, setExecutionPolicy] = useState(props.defaultExecutionPolicy);
-  const onExecutionPolicyChange = props.onExecutionPolicyChange;
-  useEffect(() => {
-    onExecutionPolicyChange?.(executionPolicy);
-  }, [executionPolicy, onExecutionPolicyChange]);
   const [permissionPersistence, setPermissionPersistence] = useState(
     props.defaultPermissionPersistence,
   );
