@@ -1619,8 +1619,22 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (client === undefined || current === undefined || instance?.driverKind !== "glm") {
             return false;
           }
-          const mustSet = configuration.authentication === "api-key" && credentialValue.length > 0;
-          if (mustSet && hostBridge === undefined) {
+          const previousAuthentication = instance.configuration.authentication;
+          const nextAuthentication = configuration.authentication;
+          if (
+            nextAuthentication === "api-key" &&
+            previousAuthentication === "provider-owned" &&
+            credentialValue.length === 0
+          ) {
+            if (mounted.current) {
+              setMessage("Enter an API key before switching authentication modes.");
+            }
+            return false;
+          }
+          const mustClear =
+            previousAuthentication === "api-key" && nextAuthentication === "provider-owned";
+          const mustSet = nextAuthentication === "api-key" && credentialValue.length > 0;
+          if ((mustClear || mustSet) && hostBridge === undefined) {
             if (mounted.current) {
               setMessage("Provider credential management is unavailable on this host.");
             }
@@ -1686,6 +1700,11 @@ export function useProviderController(options: ProviderControllerOptions) {
               return false;
             }
           }
+          if (mustClear) {
+            await hostBridge!
+              .clearProviderCredential(instanceId)
+              .catch(() => void credentialCleanupRequired.current.add(instanceId));
+          }
           return true;
         }),
       ),
@@ -1704,8 +1723,22 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (client === undefined || current === undefined || instance?.driverKind !== "gemini") {
             return false;
           }
-          const mustSet = configuration.authentication === "api-key" && credentialValue.length > 0;
-          if (mustSet && hostBridge === undefined) {
+          const previousAuthentication = instance.configuration.authentication;
+          const nextAuthentication = configuration.authentication;
+          if (
+            nextAuthentication === "api-key" &&
+            previousAuthentication === "provider-owned" &&
+            credentialValue.length === 0
+          ) {
+            if (mounted.current) {
+              setMessage("Enter an API key before switching authentication modes.");
+            }
+            return false;
+          }
+          const mustClear =
+            previousAuthentication === "api-key" && nextAuthentication === "provider-owned";
+          const mustSet = nextAuthentication === "api-key" && credentialValue.length > 0;
+          if ((mustClear || mustSet) && hostBridge === undefined) {
             if (mounted.current) {
               setMessage("Provider credential management is unavailable on this host.");
             }
@@ -1771,6 +1804,11 @@ export function useProviderController(options: ProviderControllerOptions) {
               return false;
             }
           }
+          if (mustClear) {
+            await hostBridge!
+              .clearProviderCredential(instanceId)
+              .catch(() => void credentialCleanupRequired.current.add(instanceId));
+          }
           return true;
         }),
       ),
@@ -1789,8 +1827,22 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (client === undefined || current === undefined || instance?.driverKind !== "cline") {
             return false;
           }
-          const mustSet = configuration.authentication === "api-key" && credentialValue.length > 0;
-          if (mustSet && hostBridge === undefined) {
+          const previousAuthentication = instance.configuration.authentication;
+          const nextAuthentication = configuration.authentication;
+          if (
+            nextAuthentication === "api-key" &&
+            previousAuthentication === "provider-owned" &&
+            credentialValue.length === 0
+          ) {
+            if (mounted.current) {
+              setMessage("Enter an API key before switching authentication modes.");
+            }
+            return false;
+          }
+          const mustClear =
+            previousAuthentication === "api-key" && nextAuthentication === "provider-owned";
+          const mustSet = nextAuthentication === "api-key" && credentialValue.length > 0;
+          if ((mustClear || mustSet) && hostBridge === undefined) {
             if (mounted.current) {
               setMessage("Provider credential management is unavailable on this host.");
             }
@@ -1856,6 +1908,11 @@ export function useProviderController(options: ProviderControllerOptions) {
               return false;
             }
           }
+          if (mustClear) {
+            await hostBridge!
+              .clearProviderCredential(instanceId)
+              .catch(() => void credentialCleanupRequired.current.add(instanceId));
+          }
           return true;
         }),
       ),
@@ -1874,8 +1931,22 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (client === undefined || current === undefined || instance?.driverKind !== "qwen") {
             return false;
           }
-          const mustSet = configuration.authentication === "api-key" && credentialValue.length > 0;
-          if (mustSet && hostBridge === undefined) {
+          const previousAuthentication = instance.configuration.authentication;
+          const nextAuthentication = configuration.authentication;
+          if (
+            nextAuthentication === "api-key" &&
+            previousAuthentication === "provider-owned" &&
+            credentialValue.length === 0
+          ) {
+            if (mounted.current) {
+              setMessage("Enter an API key before switching authentication modes.");
+            }
+            return false;
+          }
+          const mustClear =
+            previousAuthentication === "api-key" && nextAuthentication === "provider-owned";
+          const mustSet = nextAuthentication === "api-key" && credentialValue.length > 0;
+          if ((mustClear || mustSet) && hostBridge === undefined) {
             if (mounted.current) {
               setMessage("Provider credential management is unavailable on this host.");
             }
@@ -1940,6 +2011,11 @@ export function useProviderController(options: ProviderControllerOptions) {
               }
               return false;
             }
+          }
+          if (mustClear) {
+            await hostBridge!
+              .clearProviderCredential(instanceId)
+              .catch(() => void credentialCleanupRequired.current.add(instanceId));
           }
           return true;
         }),

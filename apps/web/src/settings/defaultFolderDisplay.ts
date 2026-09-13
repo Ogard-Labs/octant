@@ -8,7 +8,7 @@ export function joinDefaultFolderDisplayPath(folder: string, child: string): str
   const windows = folder.includes("\\") && !folder.includes("/");
   const separator = windows ? "\\" : "/";
   let base = folder;
-  while (base.endsWith("/") || base.endsWith("\\")) {
+  while (base.endsWith(separator)) {
     base = base.slice(0, -1);
   }
   return `${base}${separator}${child}`;

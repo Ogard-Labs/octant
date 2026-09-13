@@ -94,6 +94,24 @@ describe("Linux Full access extension denials", () => {
     expect(launch.args.at(-2)).toBe("/bin/true");
     expect(launch.args.at(-1)).toBe("acp");
   });
+
+  it("fails closed when a deny file cannot be overlaid", () => {
+    const { boundRoot, bwrapPath, root } = fixture();
+    const fifo = join(root, "mcp.json");
+    spawnSync("mkfifo", [fifo], { stdio: "ignore" });
+    if (!existsSync(fifo)) return;
+    expect(() =>
+      buildLinuxAllowDefaultDenyLaunch(
+        {
+          executable: "/bin/true",
+          args: ["acp"],
+          cwd: boundRoot,
+          denyPaths: [fifo],
+        },
+        { bwrapPath },
+      ),
+    ).toThrow(/could not be overlaid/);
+  });
 });
 
 describe("Linux Bubblewrap confinement", () => {

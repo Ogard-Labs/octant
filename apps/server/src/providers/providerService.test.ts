@@ -2938,6 +2938,33 @@ describe("ProviderService", () => {
     await expect(first).resolves.toMatchObject({ status: "updated" });
   });
 
+  it("invalidates every runtime that shares the updated executable", async () => {
+    const fixture = serviceFixture({
+      instances: [
+        kimiProvider({ configuration: { kind: "kimi-code-acp", binaryPath: "/usr/bin/true" } }),
+        kimiProvider({
+          id: otherId,
+          displayName: "Kimi alias",
+          configuration: { kind: "kimi-code-acp", binaryPath: "/usr/bin/true" },
+        }),
+      ],
+      probe: async (instance) =>
+        observation({ instanceId: instance.id, detectedVersion: "0.27.0" }),
+      runCliUpdate: async () => ({ output: "", exitCode: 0 }),
+    });
+    fixture.runtime.setObservedState(observation({ detectedVersion: "0.26.0" }));
+    fixture.runtime.setObservedState(observation({ instanceId: otherId, detectedVersion: "0.26.0" }));
+    const invalidate = vi.spyOn(fixture.runtime, "invalidateRuntime");
+
+    await expect(
+      fixture.service.execute(windowId, { kind: "update-provider-cli", instanceId }),
+    ).resolves.toMatchObject({ status: "updated" });
+
+    expect(invalidate).toHaveBeenCalledWith(instanceId);
+    expect(invalidate).toHaveBeenCalledWith(otherId);
+    expect(fixture.runtime.observedState(otherId)).toBeUndefined();
+  });
+
   it("keeps the executable unavailable when updater termination cannot be confirmed", async () => {
     const fixture = serviceFixture({
       instances: [kimiProvider()],

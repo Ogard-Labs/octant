@@ -65,6 +65,10 @@ describe("default-folder display paths", () => {
     );
   });
 
+  it("keeps a trailing backslash that is part of a POSIX folder name", () => {
+    expect(joinDefaultFolderDisplayPath("/Volumes/work\\", "Work")).toBe("/Volumes/work\\/Work");
+  });
+
   it("keeps a Windows-style separator when the host path already uses one", () => {
     expect(joinDefaultFolderDisplayPath("C:\\Users\\ada\\Documents\\Octant", "Code")).toBe(
       "C:\\Users\\ada\\Documents\\Octant\\Code",

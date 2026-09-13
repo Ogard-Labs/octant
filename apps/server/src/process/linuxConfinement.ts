@@ -79,7 +79,13 @@ export function buildLinuxAllowDefaultDenyLaunch(
       continue;
     }
     const source = createEmptySourceForPath(path);
-    if (source !== undefined) args.push("--ro-bind", source, normalized);
+    if (source === undefined) {
+      throw new SeatbeltConfinementError(
+        "invalid-configuration",
+        `Linux Full access deny path "${path}" could not be overlaid.`,
+      );
+    }
+    args.push("--ro-bind", source, normalized);
   }
   args.push("--chdir", input.cwd, "--", input.executable, ...input.args);
   return { command: bwrapPath, args };

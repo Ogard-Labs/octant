@@ -1135,6 +1135,129 @@ describe("useProviderController", () => {
     },
   );
 
+  it.each([
+    {
+      label: "GLM Agent",
+      change: "changeGlmConfiguration" as const,
+      commandKind: "change-glm-configuration",
+      driverKind: "glm" as const,
+      apiKeyConfiguration: {
+        kind: "glm-acp" as const,
+        binaryPath: "/Users/example/.local/bin/glm-acp-agent",
+        authentication: "api-key" as const,
+      },
+      providerOwnedConfiguration: {
+        kind: "glm-acp" as const,
+        binaryPath: "/Users/example/.local/bin/glm-acp-agent",
+        authentication: "provider-owned" as const,
+      },
+      displayName: "GLM local",
+    },
+    {
+      label: "Gemini CLI",
+      change: "changeGeminiConfiguration" as const,
+      commandKind: "change-gemini-configuration",
+      driverKind: "gemini" as const,
+      apiKeyConfiguration: {
+        kind: "gemini-acp" as const,
+        binaryPath: "/Users/example/.local/bin/gemini",
+        authentication: "api-key" as const,
+      },
+      providerOwnedConfiguration: {
+        kind: "gemini-acp" as const,
+        binaryPath: "/Users/example/.local/bin/gemini",
+        authentication: "provider-owned" as const,
+      },
+      displayName: "Gemini local",
+    },
+    {
+      label: "Cline",
+      change: "changeClineConfiguration" as const,
+      commandKind: "change-cline-configuration",
+      driverKind: "cline" as const,
+      apiKeyConfiguration: {
+        kind: "cline-acp" as const,
+        binaryPath: "/Users/example/.local/bin/cline",
+        authentication: "api-key" as const,
+      },
+      providerOwnedConfiguration: {
+        kind: "cline-acp" as const,
+        binaryPath: "/Users/example/.local/bin/cline",
+        authentication: "provider-owned" as const,
+      },
+      displayName: "Cline local",
+    },
+    {
+      label: "Qwen Code",
+      change: "changeQwenConfiguration" as const,
+      commandKind: "change-qwen-configuration",
+      driverKind: "qwen" as const,
+      apiKeyConfiguration: {
+        kind: "qwen-acp" as const,
+        binaryPath: "/Users/example/.local/bin/qwen",
+        authentication: "api-key" as const,
+      },
+      providerOwnedConfiguration: {
+        kind: "qwen-acp" as const,
+        binaryPath: "/Users/example/.local/bin/qwen",
+        authentication: "provider-owned" as const,
+      },
+      displayName: "Qwen local",
+    },
+  ])(
+    "clears the stored $label API key after switching to provider-owned authentication",
+    async ({
+      change,
+      commandKind,
+      driverKind,
+      apiKeyConfiguration,
+      providerOwnedConfiguration,
+      displayName,
+    }) => {
+      const calls: string[] = [];
+      const instance = dualAuthCliProvider({
+        driverKind,
+        displayName,
+        configuration: apiKeyConfiguration,
+      });
+      const api = client(snapshot([instance]));
+      vi.mocked(api.execute).mockImplementation(async (command) => {
+        calls.push("provider.update");
+        expect(command).toMatchObject({
+          kind: commandKind,
+          configuration: { authentication: "provider-owned" },
+        });
+        return {
+          kind: "provider-updated",
+          instance: dualAuthCliProvider({
+            driverKind,
+            displayName,
+            configuration: providerOwnedConfiguration,
+            id,
+          }),
+        };
+      });
+      const host = credentialHost(calls);
+      const credential = transientCredential("", calls);
+      const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
+      await waitFor(() => expect(result.current.status).toBe("ready"));
+
+      await act(async () => {
+        await expect(
+          changeDualAuthCliConfiguration(
+            result.current,
+            change,
+            providerOwnedConfiguration,
+            credential,
+          ),
+        ).resolves.toBe(true);
+      });
+
+      expect(host.clearProviderCredential).toHaveBeenCalledWith(id);
+      expect(host.setProviderCredential).not.toHaveBeenCalled();
+    },
+  );
+
   it("creates Claude API-key configuration before write-only credential storage", async () => {
     const calls: string[] = [];
     const api = client();

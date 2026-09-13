@@ -441,7 +441,9 @@ export class ProviderService implements ProviderServiceApi {
           );
           claimedExecutable = executableKey;
           const previousVersion = this.#runtime.observedState(instance.id)?.detectedVersion;
-          await this.#runtime.invalidateRuntime(instance.id);
+          for (const peer of peers) {
+            await this.#runtime.invalidateRuntime(peer.id);
+          }
           try {
             await this.#runCliUpdate({ binaryPath, args });
           } catch (error) {
