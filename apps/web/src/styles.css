@@ -66,7 +66,7 @@
   --octant-border-soft: color-mix(in srgb, var(--octant-border) 60%, var(--octant-workspace));
   --octant-success-border: color-mix(in srgb, var(--octant-success-text) 55%, transparent);
   --octant-card: var(--octant-floating);
-  --octant-tray: var(--octant-workspace);
+  --octant-tray: color-mix(in srgb, var(--octant-control) 75%, var(--octant-workspace));
   --octant-text-primary: #f0f0f0;
   --octant-text-secondary: #a9a9a9;
   --octant-text-muted: #949494;
