@@ -73,7 +73,7 @@ export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> =
     displayName: "OpenCode CLI",
     displayNameForExecutable: (executableName) =>
       executableName === "opencode2" ? "OpenCode 2 preview" : "OpenCode CLI",
-    executableNames: ["opencode", "opencode2"],
+    executableNames: ["opencode2", "opencode"],
     approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
     versionProbeArgs: ["--version"],
     onboardingGuidance: "Authenticate with OpenCode, then check the connection again.",

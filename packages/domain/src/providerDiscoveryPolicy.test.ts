@@ -117,6 +117,24 @@ describe("selectPreferredCandidate", () => {
     ]);
     expect(preferred?.binaryPath).toBe("/opt/homebrew/bin/codex");
   });
+
+  it("prefers OpenCode 2 when both OpenCode runtimes are discovered", () => {
+    const preferred = selectPreferredCandidate([
+      makeCandidate({
+        driverKind: "opencode",
+        displayName: "OpenCode CLI",
+        binaryPath: "/usr/local/bin/opencode" as DiscoveryCandidate["binaryPath"],
+      }),
+      makeCandidate({
+        driverKind: "opencode",
+        displayName: "OpenCode 2 preview",
+        binaryPath: "/Users/test/.local/bin/opencode2" as DiscoveryCandidate["binaryPath"],
+      }),
+    ]);
+
+    expect(preferred?.displayName).toBe("OpenCode 2 preview");
+    expect(preferred?.binaryPath).toBe("/Users/test/.local/bin/opencode2");
+  });
 });
 
 describe("first-run discovery enablement", () => {

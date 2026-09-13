@@ -104,6 +104,9 @@ no Chat, Work, or Code picker offers its models. A saved default that points
 at it is kept and shown as unavailable rather than removed.
 
 The beta `opencode2` executable appears separately as **OpenCode 2 preview**.
+When both `opencode` and `opencode2` are installed, discovery and automatic
+registration prefer `opencode2` so the beta runtime is not shadowed by the
+legacy executable.
 Octant uses its bounded loopback HTTP API to discover the provider catalog and
 models, then uses the executable's ACP transport for Code and Work sessions.
 The ACP path carries `session/request_permission`, model and mode selection,

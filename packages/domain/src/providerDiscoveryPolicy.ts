@@ -109,7 +109,17 @@ export function isConnectCommand(
 export function selectPreferredCandidate(
   candidates: ReadonlyArray<DiscoveryCandidate>,
 ): DiscoveryCandidate | undefined {
-  return candidates[0];
+  // OpenCode 2 is the current provider runtime. Prefer it when discovery
+  // finds both names so an older `opencode` on PATH cannot shadow the beta
+  // runtime's ACP/catalog driver.
+  const openCode2 = candidates.find(
+    (candidate) =>
+      candidate.driverKind === "opencode" &&
+      (candidate.displayName === "OpenCode 2 preview" ||
+        candidate.binaryPath.endsWith("/opencode2") ||
+        candidate.binaryPath.endsWith("/opencode2.exe")),
+  );
+  return openCode2 ?? candidates[0];
 }
 
 /**
