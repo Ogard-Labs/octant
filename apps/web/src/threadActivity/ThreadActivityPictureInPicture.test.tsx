@@ -270,13 +270,15 @@ describe("ThreadActivityPictureInPicture", () => {
       evidence: [],
     } as unknown as BrowserAutomationSnapshot;
     const nextSession = browserSnapshot(threadId, nextContextId);
-    const browser = {
-      inspectThread: vi
-        .fn()
-        .mockResolvedValueOnce(browserSnapshot())
-        .mockResolvedValueOnce(ready)
-        .mockResolvedValue(nextSession),
-    } as unknown as BrowserAutomationClient;
+    const first = deferred<BrowserAutomationSnapshot>();
+    const idle = deferred<BrowserAutomationSnapshot>();
+    const later = deferred<BrowserAutomationSnapshot>();
+    const inspectThread = vi
+      .fn()
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => idle.promise)
+      .mockImplementation(() => later.promise);
+    const browser = { inspectThread } as unknown as BrowserAutomationClient;
 
     render(
       <ThreadActivityPictureInPicture
@@ -289,12 +291,30 @@ describe("ThreadActivityPictureInPicture", () => {
       </ThreadActivityPictureInPicture>,
     );
 
+    await waitFor(() => expect(inspectThread).toHaveBeenCalledOnce());
+    await act(async () => {
+      first.resolve(browserSnapshot());
+      await first.promise;
+    });
     expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
+    expect(onOpenBrowser).toHaveBeenCalledOnce();
+
+    await waitFor(() => expect(inspectThread.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await act(async () => {
+      idle.resolve(ready);
+      await idle.promise;
+    });
     await waitFor(() =>
       expect(
         screen.queryByRole("complementary", { name: "Thread activity preview" }),
       ).not.toBeInTheDocument(),
     );
+
+    await waitFor(() => expect(inspectThread.mock.calls.length).toBeGreaterThanOrEqual(3));
+    await act(async () => {
+      later.resolve(nextSession);
+      await later.promise;
+    });
     expect(await screen.findByRole("img", { name: /browser activity/ })).toBeVisible();
     await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledTimes(2));
     expect(onOpenBrowser).toHaveBeenNthCalledWith(1, { sessionIds: [contextId] });
