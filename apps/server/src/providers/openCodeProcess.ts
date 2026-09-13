@@ -979,6 +979,14 @@ export function probeOpenCodeBinary(
   });
 }
 
+/**
+ * A reserved loopback port is closed before the provider is launched, so
+ * another process can claim it in the gap and the provider exits before
+ * readiness. A second reservation is cheap next to reporting the provider
+ * unavailable, so the beta server gets one retry on a fresh port.
+ */
+const MAXIMUM_BETA_PORT_ATTEMPTS = 2;
+
 function acquireOpenCodeServer(
   input: OpenCodeProcessStartInput,
   options: ResolvedOpenCodeProcessOptions,
@@ -990,7 +998,7 @@ function acquireOpenCodeServer(
   const invalid = validateBinaryPath(input.binaryPath);
   if (invalid !== undefined) return Effect.fail(invalid);
 
-  return Effect.gen(function* () {
+  const launchOnReservedPort = Effect.gen(function* () {
     // OpenCode 2 rejects port 0, unlike the legacy server. Reserve an
     // ephemeral loopback port before launch so every v2 connection remains
     // isolated without relying on the provider's fixed default port.
@@ -1209,6 +1217,23 @@ function acquireOpenCodeServer(
         await terminateOwned();
       });
     });
+  });
+
+  return Effect.gen(function* () {
+    for (let attempt = 1; ; attempt += 1) {
+      const result = yield* Effect.exit(launchOnReservedPort);
+      if (Exit.isSuccess(result)) return result.value;
+      const providerFailure = Option.getOrElse(Cause.failureOption(result.cause), () =>
+        failure("provider-failed", "OpenCode server could not be started."),
+      );
+      const lostReservedPort =
+        runtime === "beta" &&
+        providerFailure.category === "unavailable" &&
+        providerFailure.message === "OpenCode server exited before becoming ready.";
+      if (!lostReservedPort || attempt >= MAXIMUM_BETA_PORT_ATTEMPTS) {
+        return yield* Effect.fail(providerFailure);
+      }
+    }
   });
 }
 

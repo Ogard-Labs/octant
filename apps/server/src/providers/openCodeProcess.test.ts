@@ -733,6 +733,46 @@ describe("OpenCodeProcessPort", () => {
     expect(observed.authorization).toMatch(/^Basic b3BlbmNvZGU6/);
   });
 
+  it("retries the beta server on a fresh port when the first launch exits before readiness", async () => {
+    const root = fixtureRoot("early-exit");
+    const binaryPath = join(root, "opencode-retry-fixture");
+    const invocationPath = join(root, ".fake-opencode-invocations");
+    writeFileSync(
+      binaryPath,
+      `#!/bin/sh
+cd '${root}'
+n=$(cat '${invocationPath}' 2>/dev/null || echo 0)
+n=$((n+1))
+echo "$n" > '${invocationPath}'
+if [ "$1" = "--version" ]; then exec env OCTANT_FAKE_OPENCODE_MODE=probe-v2 '${fakeCliPath}' "$@"; fi
+if [ "$n" -le 2 ]; then exec env OCTANT_FAKE_OPENCODE_MODE=early-exit '${fakeCliPath}' "$@"; fi
+exec env OCTANT_FAKE_OPENCODE_MODE=v2-ready '${fakeCliPath}' "$@"
+`,
+    );
+    chmodSync(binaryPath, 0o755);
+
+    const reservedPorts: number[] = [];
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        makePort(
+          {},
+          {
+            reserveLoopbackPort: async () => {
+              const port = 44_100 + reservedPorts.length;
+              reservedPorts.push(port);
+              return port;
+            },
+          },
+        ).start({ binaryPath, cwd: root }),
+      ),
+    );
+
+    // The first launch lost its reserved port and exited; the second got a
+    // fresh reservation instead of reporting the provider unavailable.
+    expect(reservedPorts).toEqual([44_100, 44_101]);
+    expect(observed.runtime).toBe("beta");
+  });
+
   it("does not expose managed-server authority to the provider session", async () => {
     const fixture = environmentRecordingWrapper();
     const inheritedEnvironment = {
