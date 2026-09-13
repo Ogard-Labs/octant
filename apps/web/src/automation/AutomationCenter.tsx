@@ -578,7 +578,11 @@ function AutomationListBody(props: {
     );
   }
   return (
-    <div className="automation-center__groups" ref={props.listRef}>
+    <div
+      aria-busy={controller.list.status === "refreshing"}
+      className="automation-center__groups"
+      ref={props.listRef}
+    >
       {groups.map((group) => (
         <section className="automation-center__group" key={group.heading}>
           {group.heading === "" ? null : (

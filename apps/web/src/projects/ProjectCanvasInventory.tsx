@@ -1,6 +1,7 @@
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasInventoryEntry, ProjectId } from "@octant/contracts";
 import { useEffect, useMemo, useState } from "react";
+import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 
@@ -14,6 +15,8 @@ export function ProjectCanvasInventory(props: ProjectCanvasInventoryProps) {
   const [query, setQuery] = useState("");
   const [entries, setEntries] = useState<ReadonlyArray<CanvasInventoryEntry>>([]);
   const [status, setStatus] = useState("");
+  // Filtering waits for typing to settle so each pause asks the host once.
+  const debouncedQuery = useDebouncedValue(query, 250);
   const hideWhenEmpty =
     query.trim() === "" && entries.length === 0 && status === "No canvases in this Project yet.";
 
@@ -28,7 +31,7 @@ export function ProjectCanvasInventory(props: ProjectCanvasInventoryProps) {
     }
     setStatus("Loading canvases…");
     void props.client
-      .inventory(props.projectId, query)
+      .inventory(props.projectId, debouncedQuery)
       .then((list) => {
         if (!alive) return;
         setEntries(list.entries);
@@ -42,7 +45,7 @@ export function ProjectCanvasInventory(props: ProjectCanvasInventoryProps) {
     return () => {
       alive = false;
     };
-  }, [props.client, props.projectId, query]);
+  }, [props.client, props.projectId, debouncedQuery]);
 
   const visibleEntries = useMemo(() => entries, [entries]);
 
@@ -62,7 +65,7 @@ export function ProjectCanvasInventory(props: ProjectCanvasInventoryProps) {
           value={query}
         />
       </header>
-      <p className="project-canvas-inventory__status" aria-live="polite">
+      <p className="project-canvas-inventory__status" aria-live="polite" role="status">
         {status}
       </p>
       <ul className="project-canvas-inventory__list">

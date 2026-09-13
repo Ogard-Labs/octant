@@ -7,6 +7,8 @@ import { useComputerUseLifecycle } from "./useComputerUseLifecycle";
 export function ComputerUseLifecycleSurface(props: {
   readonly client: ComputerUseClient;
   readonly scope: ComputerUseSessionScope;
+  /** The host's session sequence; a new value means new session content. */
+  readonly revision?: number;
 }) {
   const controller = useComputerUseLifecycle(props);
   if (controller.status === "loading") {

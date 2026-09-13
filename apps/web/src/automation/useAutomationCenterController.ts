@@ -11,6 +11,7 @@ import {
   type AutomationClientCommand,
 } from "@octant/client-runtime";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useDebouncedValue } from "../lib/useDebouncedValue";
 
 /**
  * Server-backed state for the Automation Center. The A2 client is the only
@@ -24,6 +25,12 @@ export type AutomationListState =
   | { readonly status: "loading" }
   | {
       readonly status: "ready";
+      readonly items: readonly AutomationSummary[];
+      readonly nextCursor?: string;
+    }
+  | {
+      /** A newer query is in flight; the previous rows stay on screen. */
+      readonly status: "refreshing";
       readonly items: readonly AutomationSummary[];
       readonly nextCursor?: string;
     }
@@ -105,6 +112,9 @@ export function useAutomationCenterController(
 
   const [filter, setFilter] = useState<AutomationCenterFilter>("all");
   const [search, setSearch] = useState("");
+  // The input keeps the immediate value; only the query waits for a pause, so
+  // typing a search term asks the host once rather than once per character.
+  const debouncedSearch = useDebouncedValue(search, 250);
   const [list, setList] = useState<AutomationListState>({ status: "loading" });
   const [detail, setDetail] = useState<AutomationDetailState>({ status: "idle" });
   const [history, setHistory] = useState<AutomationHistoryState>({ status: "collapsed" });
@@ -122,8 +132,18 @@ export function useAutomationCenterController(
     const controller = new AbortController();
     listAbort.current?.abort();
     listAbort.current = controller;
-    setList({ status: "loading" });
-    const trimmedSearch = search.trim();
+    // A filter or search change must not blank rows that are still a truthful
+    // answer to the previous query. Keep them and mark the list busy.
+    setList((previous) =>
+      previous.status === "ready" || previous.status === "refreshing"
+        ? {
+            status: "refreshing",
+            items: previous.items,
+            ...(previous.nextCursor === undefined ? {} : { nextCursor: previous.nextCursor }),
+          }
+        : { status: "loading" },
+    );
+    const trimmedSearch = debouncedSearch.trim();
     client
       .list(
         {
@@ -149,7 +169,7 @@ export function useAutomationCenterController(
         });
       });
     return () => controller.abort();
-  }, [client, filter, search, pageLimit, listGeneration]);
+  }, [client, filter, debouncedSearch, pageLimit, listGeneration]);
 
   useEffect(() => {
     detailAbort.current?.abort();

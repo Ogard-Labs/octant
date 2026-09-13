@@ -221,6 +221,10 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
 
 function useChatProjectOverviewModel(props: ChatProjectOverviewProps): ChatProjectOverviewModel {
   const [model, setModel] = useState<ChatProjectOverviewModel>(() => props.model ?? loadingModel());
+  // A Project switch must clear the previous Project's sections; anything else
+  // (a new navigation identity, a memory revision) keeps them while the read
+  // is in flight rather than flashing four "Loading…" placeholders.
+  const lastProjectId = useRef<string | undefined>(props.projectId);
 
   useEffect(() => {
     if (props.model !== undefined) {
@@ -291,13 +295,15 @@ function useChatProjectOverviewModel(props: ChatProjectOverviewProps): ChatProje
       activeThreads.length > overviewThreads.length
         ? `${activeThreads.length - overviewThreads.length} additional Project thread${activeThreads.length - overviewThreads.length === 1 ? " is" : "s are"} outside this compact Overview.`
         : undefined;
-    setModel({
-      attachmentsAndContext: loadingSection(),
-      memory: loadingSection(),
-      outcomesAndDecisions: loadingSection(),
+    const projectChanged = lastProjectId.current !== props.projectId;
+    lastProjectId.current = props.projectId;
+    setModel((current) => ({
+      attachmentsAndContext: projectChanged ? loadingSection() : current.attachmentsAndContext,
+      memory: projectChanged ? loadingSection() : current.memory,
+      outcomesAndDecisions: projectChanged ? loadingSection() : current.outcomesAndDecisions,
       threads,
-      unfinishedWork: loadingSection(),
-    });
+      unfinishedWork: projectChanged ? loadingSection() : current.unfinishedWork,
+    }));
 
     void Promise.allSettled(overviewThreads.map((thread) => props.client!.thread(thread.id))).then(
       (views) => {

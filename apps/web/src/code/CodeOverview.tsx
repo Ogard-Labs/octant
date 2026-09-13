@@ -18,7 +18,7 @@ import {
   RefreshCw,
   Terminal,
 } from "lucide-react";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import type { CodeController, CodeThreadNavigationItem } from "./useCodeController";
 import { OctantBadge } from "../ui/base/OctantBadge";
@@ -283,6 +283,10 @@ export type CodeOverviewSurfaceKind = "code-terminal" | "code-test" | "code-git"
 
 function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projectId: ProjectId }>) {
   const [boardState, setBoardState] = useState<ProjectBoardState>({ kind: "loading" });
+  // A Project switch clears the previous Project's board; a controller status or
+  // error-message change must not, or an unrelated reconnect blanks a board
+  // that is still the truthful answer for this Project.
+  const lastBoardProjectId = useRef<string | undefined>(props.projectId);
   const [reload, setReload] = useState(0);
   const ready = props.controller.status === "ready";
   const { remoteFacts } = useWorktreeRemoteFacts({
@@ -304,7 +308,11 @@ function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projec
       return;
     }
     let active = true;
-    setBoardState({ kind: "loading" });
+    const projectChanged = lastBoardProjectId.current !== props.projectId;
+    lastBoardProjectId.current = props.projectId;
+    setBoardState((previous) =>
+      !projectChanged && previous.kind === "ready" ? previous : { kind: "loading" },
+    );
     void props.controller.client.queryBoard({ version: 1, projectIds: [props.projectId] }).then(
       (view) => {
         if (active) setBoardState({ kind: "ready", view });

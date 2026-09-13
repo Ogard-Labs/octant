@@ -4,6 +4,7 @@ import {
   type AgentRunClient,
 } from "@octant/client-runtime/agent-run-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useDebouncedValue } from "../lib/useDebouncedValue";
 import {
   agentRunTransportFailureMessage,
   buildAgentsCenterServerQuery,
@@ -17,6 +18,12 @@ export type AgentsCenterListState =
   | { readonly status: "loading" }
   | {
       readonly status: "ready";
+      readonly items: readonly AgentRunCenterSummary[];
+      readonly nextCursor?: string;
+    }
+  | {
+      /** A newer query is in flight; the previous rows stay on screen. */
+      readonly status: "refreshing";
       readonly items: readonly AgentRunCenterSummary[];
       readonly nextCursor?: string;
     }
@@ -63,6 +70,9 @@ export function useAgentsCenterController(
   const [providerInstanceId, setProviderInstanceId] = useState<string | undefined>(undefined);
   const [parentThreadId, setParentThreadId] = useState<string | undefined>(undefined);
   const [search, setSearch] = useState("");
+  // The input keeps the immediate value; only the query and the local filter
+  // wait for typing to settle, so one pause produces one request.
+  const debouncedSearch = useDebouncedValue(search, 250);
   const [list, setList] = useState<AgentsCenterListState>({ status: "loading" });
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
@@ -73,19 +83,29 @@ export function useAgentsCenterController(
     () => ({
       status: statusFilter,
       mode: modeFilter,
-      search,
+      search: debouncedSearch,
       ...(projectId === undefined ? {} : { projectId }),
       ...(providerInstanceId === undefined ? {} : { providerInstanceId }),
       ...(parentThreadId === undefined ? {} : { parentThreadId }),
     }),
-    [modeFilter, parentThreadId, projectId, providerInstanceId, search, statusFilter],
+    [debouncedSearch, modeFilter, parentThreadId, projectId, providerInstanceId, statusFilter],
   );
 
   useEffect(() => {
     const controller = new AbortController();
     listAbort.current?.abort();
     listAbort.current = controller;
-    setList({ status: "loading" });
+    // A filter or search change must not blank rows that are still a truthful
+    // answer to the previous query. Keep them and mark the list busy.
+    setList((previous) =>
+      previous.status === "ready" || previous.status === "refreshing"
+        ? {
+            status: "refreshing",
+            items: previous.items,
+            ...(previous.nextCursor === undefined ? {} : { nextCursor: previous.nextCursor }),
+          }
+        : { status: "loading" },
+    );
     void client
       .center(buildAgentsCenterServerQuery(clientFilters, pageLimit))
       .then((response) => {
@@ -107,6 +127,9 @@ export function useAgentsCenterController(
   }, [client, clientFilters, pageLimit, listGeneration]);
 
   const visibleItems = useMemo(() => {
+    // While a changed query is in flight the rows on screen are the previous
+    // query's answer, not a partial reading of the new one.
+    if (list.status === "refreshing") return list.items;
     if (list.status !== "ready") return [];
     return filterAgentsCenterRows(list.items, clientFilters);
   }, [clientFilters, list]);

@@ -243,7 +243,12 @@ function AgentsCenterListBody(props: {
     );
   }
   return (
-    <ul aria-label="Agent runs" className="agents-center__rows">
+    <ul
+      aria-busy={controller.list.status === "refreshing"}
+      aria-label="Agent runs"
+      className="agents-center__rows"
+      data-refreshing={controller.list.status === "refreshing" ? "true" : undefined}
+    >
       {controller.visibleItems.map((summary) => (
         <li className="agents-center-row" key={String(summary.runId)}>
           <OctantButton

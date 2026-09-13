@@ -97,4 +97,34 @@ describe("useComputerUseLifecycle", () => {
     );
     await waitFor(() => expect(interruptedResult.result.current.status).toBe("interrupted"));
   });
+
+  it("re-inspects when the host's session sequence advances", async () => {
+    const { pendingApproval: _pending, ...runningBase } = view;
+    const running = decodeComputerUseSessionView({
+      ...runningBase,
+      state: "running",
+      sequence: 0,
+      events: [],
+    });
+    const client = fixture();
+    vi.mocked(client.inspect).mockResolvedValueOnce(running).mockResolvedValueOnce(view);
+
+    const { result, rerender } = renderHook(
+      ({ revision }: { readonly revision: number }) =>
+        useComputerUseLifecycle({ client, scope, revision }),
+      { initialProps: { revision: 0 } },
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current.view?.pendingApproval).toBeUndefined();
+
+    // The scope is unchanged; only the host's sequence says new content
+    // exists. A pending approval must still reach the pane.
+    rerender({ revision: 1 });
+
+    await waitFor(() => expect(result.current.view?.pendingApproval).toBeDefined());
+    expect(client.inspect).toHaveBeenCalledTimes(2);
+    // The pane never fell back to the loading screen while it held this
+    // session's view.
+    expect(result.current.status).toBe("ready");
+  });
 });

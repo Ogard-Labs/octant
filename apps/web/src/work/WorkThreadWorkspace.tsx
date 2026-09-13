@@ -1283,9 +1283,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             );
           }
           return (
-            <p className="oct-row-detail" role="status">
-              {row.text}
-            </p>
+            // The surrounding list is already a live region; a nested status
+            // here would announce the same trail line twice.
+            <p className="oct-row-detail">{row.text}</p>
           );
         }}
         restoreKey={`work:${String(props.threadId)}`}

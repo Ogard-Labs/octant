@@ -2506,9 +2506,9 @@ function LaunchedShell(
   );
   function threadUtility(surface: RightUtilityDockSurfaceId, utilityTab?: ThreadUtilityDockTab) {
     if (dockThread === undefined || dockThreadKey === undefined) return null;
-    if (dockThread.mode === "code" && !activeCodeThreadDisplayReady) {
-      return <ShellState state="loading" title="Loading thread" />;
-    }
+    // Each dock module owns its readiness: a terminal or file tool does not
+    // wait on the transcript, and gating every utility on it made those panels
+    // show "Loading thread" for work they never read.
     const sidecarThreadId = dockSidecarsByThread.get(dockThreadKey);
     const appleProjectPath = appleProjects[0]?.projectPath;
     const writtenDocument = writtenDocumentsByThread.get(dockThreadKey)?.current;

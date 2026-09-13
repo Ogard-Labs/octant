@@ -30,11 +30,13 @@ export interface InboxViewProps {
 type GithubSection =
   | { readonly kind: "loading" }
   | { readonly kind: "ready"; readonly page: GithubAssignedWorkPage }
+  | { readonly kind: "refreshing"; readonly page: GithubAssignedWorkPage }
   | { readonly kind: "failed"; readonly message: string };
 
 type LinearSection =
   | { readonly kind: "loading" }
   | { readonly kind: "ready"; readonly page: AssignedLinearIssuesList }
+  | { readonly kind: "refreshing"; readonly page: AssignedLinearIssuesList }
   | { readonly kind: "failed"; readonly message: string };
 
 /**
@@ -56,7 +58,11 @@ export function InboxView(props: InboxViewProps) {
   useEffect(() => {
     if (loadGithub === undefined) return;
     let cancelled = false;
-    setGithub({ kind: "loading" });
+    // A refresh keeps the rows already on screen; only the first read shows a
+    // loading line.
+    setGithub((previous) =>
+      previous.kind === "ready" ? { kind: "refreshing", page: previous.page } : previous,
+    );
     loadGithub().then(
       (response) => {
         if (cancelled) return;
@@ -84,7 +90,9 @@ export function InboxView(props: InboxViewProps) {
   useEffect(() => {
     if (loadLinear === undefined) return;
     let cancelled = false;
-    setLinear({ kind: "loading" });
+    setLinear((previous) =>
+      previous.kind === "ready" ? { kind: "refreshing", page: previous.page } : previous,
+    );
     loadLinear().then(
       (page) => {
         if (!cancelled) setLinear({ kind: "ready", page });
@@ -125,7 +133,9 @@ export function InboxView(props: InboxViewProps) {
                   variant="ghost"
                 >
                   <RefreshCw aria-hidden="true" className="icon" size={14} strokeWidth={1.5} />
-                  Refresh
+                  {github.kind === "refreshing" || linear.kind === "refreshing"
+                    ? "Refreshing…"
+                    : "Refresh"}
                 </OctantButton>
               ),
             }
