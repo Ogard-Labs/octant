@@ -1358,6 +1358,49 @@ describe("Code project pull-request detail routes", () => {
     expect(queryProjectPullRequestDetail).not.toHaveBeenCalled();
     expect(refreshProjectPullRequestDetail).not.toHaveBeenCalled();
   });
+
+  it("merges through the explicit local-user route and forwards the pinned command", async () => {
+    const outcome = {
+      status: "merged" as const,
+      number: detailQuery.number,
+      method: "squash" as const,
+      mergedAt: now,
+    };
+    const mergeProjectPullRequest = vi.fn(() => outcome);
+    const route = routeFixture({ mergeProjectPullRequest });
+
+    const response = await route(
+      request("/api/code/project-pull-requests/merge", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...detailQuery, method: "squash" }),
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(await response!.json()).toEqual(outcome);
+    expect(mergeProjectPullRequest).toHaveBeenCalledWith(
+      windowId,
+      { ...detailQuery, method: "squash" },
+      expect.any(AbortSignal),
+      "user",
+    );
+  });
+
+  it("refuses forged merge identities before invoking the merge service", async () => {
+    const mergeProjectPullRequest = vi.fn();
+    const route = routeFixture({ mergeProjectPullRequest });
+    const response = await route(
+      request("/api/code/project-pull-requests/merge", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...detailQuery, method: "squash", credentials: "secret" }),
+      }),
+    );
+
+    expect(response?.status).toBe(400);
+    expect(mergeProjectPullRequest).not.toHaveBeenCalled();
+  });
 });
 
 describe("Git history routes", () => {

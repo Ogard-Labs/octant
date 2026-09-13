@@ -68,6 +68,52 @@
   display: flex;
 }
 
+.code-pr-review__merge-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.code-pr-review__merge-method {
+  min-height: 28px;
+  max-width: 150px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface);
+  color: var(--oct-fg);
+  font: inherit;
+  font-size: var(--oct-text-xs);
+}
+
+.code-pr-review__merge-confirmation {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface);
+}
+
+.code-pr-review__merge-confirmation p,
+.code-pr-review__merge-result {
+  margin: 0;
+}
+
+.code-pr-review__merge-confirmation p {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-pr-review__merge-result--merged {
+  color: var(--oct-success-fg);
+}
+
+.code-pr-review__merge-result--refused,
+.code-pr-review__merge-result--unavailable {
+  color: var(--oct-danger-fg);
+}
+
 .code-pr-review__meta,
 .code-pr-review__section p {
   margin: 0;

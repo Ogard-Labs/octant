@@ -3,10 +3,14 @@ import type {
   CodeProjectPullRequestDetailSection,
   CodeProjectPullRequestFreshness,
   CodeProjectPullRequestLinkedThread,
+  CodeProjectPullRequestMergeMethod,
+  CodeProjectPullRequestMergeOutcome,
 } from "@octant/contracts";
 import { Activity, GitBranch, GitPullRequest, MessageSquare, RefreshCw } from "lucide-react";
+import { useState } from "react";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { Markdown } from "../markdown/Markdown";
 import { CodeBlock } from "../transcript/CodeBlock";
 import "./project-pull-request-review.css";
@@ -57,15 +61,44 @@ export interface ProjectPullRequestReviewPaneProps {
   readonly linkedThreads: ReadonlyArray<CodeProjectPullRequestLinkedThread>;
   readonly onOpenLinkedThread?: (thread: CodeProjectPullRequestLinkedThread) => void;
   readonly onOpenChat?: (detail: CodeProjectPullRequestDetailObserved) => void;
+  readonly onMerge?: (
+    method: CodeProjectPullRequestMergeMethod,
+  ) => Promise<CodeProjectPullRequestMergeOutcome>;
   readonly onRefresh?: () => void;
 }
 
 export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPaneProps) {
   const { detail } = props;
+  const [mergeMethod, setMergeMethod] = useState<CodeProjectPullRequestMergeMethod>("squash");
+  const [mergeConfirmationOpen, setMergeConfirmationOpen] = useState(false);
+  const [mergePending, setMergePending] = useState(false);
+  const [mergeOutcome, setMergeOutcome] = useState<CodeProjectPullRequestMergeOutcome>();
   const stale = (section: CodeProjectPullRequestDetailSection) =>
     detail.staleSections.includes(section);
   const waiting = detail.ambiguous || detail.freshness === "stale";
+  const mergeAvailable =
+    props.onMerge !== undefined &&
+    detail.pullRequestState === "open" &&
+    detail.mergeability === "mergeable" &&
+    props.freshness.status === "fresh" &&
+    !waiting;
   const githubUrl = safeGithubUrl(detail.url);
+
+  async function confirmMerge(): Promise<void> {
+    if (props.onMerge === undefined || !mergeAvailable) return;
+    setMergePending(true);
+    setMergeOutcome(undefined);
+    try {
+      const outcome = await props.onMerge(mergeMethod);
+      setMergeOutcome(outcome);
+      setMergeConfirmationOpen(false);
+      if (outcome.status === "merged") props.onRefresh?.();
+    } catch {
+      setMergeOutcome({ status: "unavailable", reason: "unavailable" });
+    } finally {
+      setMergePending(false);
+    }
+  }
 
   return (
     <section aria-label="Pull request review" className="code-pr-review">
@@ -105,6 +138,40 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
               Open chat
             </OctantButton>
           )}
+          {props.onMerge === undefined ? null : (
+            <div className="code-pr-review__merge-actions">
+              <OctantSelectField
+                aria-label="Merge method"
+                className="code-pr-review__merge-method"
+                disabled={!mergeAvailable || mergePending}
+                onValueChange={(value) => {
+                  if (isMergeMethod(value)) {
+                    setMergeMethod(value);
+                  }
+                }}
+                options={[
+                  { id: "merge", label: "Merge commit" },
+                  { id: "squash", label: "Squash and merge" },
+                  { id: "rebase", label: "Rebase and merge" },
+                ]}
+                value={mergeMethod}
+              />
+              <OctantButton
+                disabled={!mergeAvailable || mergePending}
+                onClick={() => setMergeConfirmationOpen(true)}
+                size="sm"
+                title={
+                  mergeAvailable
+                    ? "Merge this pull request after confirming the selected method."
+                    : "Merge is available after a fresh, mergeable pull-request observation."
+                }
+                type="button"
+                variant="secondary"
+              >
+                {mergePending ? "Merging…" : "Merge"}
+              </OctantButton>
+            </div>
+          )}
           {githubUrl === undefined ? null : (
             <a
               className="code-pr-review__github-link"
@@ -129,7 +196,51 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
         </div>
       </header>
 
-      <p className="code-pr-review__guardrail">Read-only review · use GitHub for review actions.</p>
+      {mergeConfirmationOpen ? (
+        <div
+          aria-label="Confirm pull-request merge"
+          className="code-pr-review__merge-confirmation"
+          role="alertdialog"
+        >
+          <strong>Merge pull request #{detail.number}?</strong>
+          <p>
+            This will use {mergeMethod === "merge" ? "a merge commit" : `${mergeMethod} and merge`}{" "}
+            on the currently observed head. GitHub will refuse if that head has changed.
+          </p>
+          <div className="code-pr-review__actions">
+            <OctantButton
+              disabled={mergePending}
+              onClick={() => setMergeConfirmationOpen(false)}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Cancel
+            </OctantButton>
+            <OctantButton
+              disabled={mergePending}
+              onClick={() => void confirmMerge()}
+              size="sm"
+              type="button"
+              variant="destructive"
+            >
+              Confirm merge
+            </OctantButton>
+          </div>
+        </div>
+      ) : null}
+      {mergeOutcome === undefined ? null : (
+        <p
+          className={`code-pr-review__merge-result code-pr-review__merge-result--${mergeOutcome.status}`}
+          role={mergeOutcome.status === "merged" ? "status" : "alert"}
+        >
+          {mergeOutcomeCopy(mergeOutcome)}
+        </p>
+      )}
+
+      <p className="code-pr-review__guardrail">
+        Review data is read-only; merging is explicit and approval-gated.
+      </p>
 
       {waiting ? (
         <div className="code-pr-review__waiting" role="alert">
@@ -331,4 +442,36 @@ function safeGithubUrl(value: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function mergeOutcomeCopy(outcome: CodeProjectPullRequestMergeOutcome): string {
+  if (outcome.status === "merged") {
+    return `Merged pull request #${outcome.number}. Refreshing its review state.`;
+  }
+  if (outcome.status === "unavailable") {
+    const reason =
+      outcome.reason === "unauthenticated"
+        ? "GitHub authentication is unavailable"
+        : outcome.reason === "disconnected"
+          ? "GitHub could not be reached"
+          : "the GitHub merge command is unavailable";
+    return `Merge unavailable: ${reason}.`;
+  }
+  const reason =
+    outcome.reason === "not-authorized"
+      ? "this Project is not authorized for that repository"
+      : outcome.reason === "not-open"
+        ? "the pull request is no longer open"
+        : outcome.reason === "not-mergeable"
+          ? "GitHub reports that it is not mergeable"
+          : outcome.reason === "stale"
+            ? "the pull request changed since this review"
+            : outcome.reason === "conflict"
+              ? "GitHub reported a merge conflict"
+              : "GitHub rejected the merge";
+  return `Merge refused: ${reason}.`;
+}
+
+function isMergeMethod(value: string): value is CodeProjectPullRequestMergeMethod {
+  return value === "merge" || value === "squash" || value === "rebase";
 }

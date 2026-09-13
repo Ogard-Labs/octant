@@ -7,6 +7,8 @@ import type {
   CodeProjectPullRequestDetailRefreshCommand,
   CodeProjectPullRequestDetailView,
   CodeProjectPullRequestFreshness,
+  CodeProjectPullRequestMergeCommand,
+  CodeProjectPullRequestMergeOutcome,
   CodeProjectPullRequestQuery,
   CodeProjectPullRequestRefreshCommand,
   CodeProjectPullRequestRow,
@@ -38,6 +40,7 @@ import { resolveConnectedGitHubRepository } from "./connectedRepository";
 import type {
   GhActivePullRequestListResult,
   GhActivePullRequestRow,
+  GhPullRequestMergeResult,
   GhPullRequestReviewResult,
 } from "./ghPullRequestPort";
 import { mapConcurrentOrdered } from "./boundedReads";
@@ -104,6 +107,18 @@ export interface CodeProjectPullRequestDetailPort {
   ): Promise<GhPullRequestReviewResult>;
 }
 
+export interface CodeProjectPullRequestMergePort {
+  mergeByIdentity(
+    request: {
+      readonly owner: string;
+      readonly name: string;
+      readonly number: number;
+      readonly method: CodeProjectPullRequestMergeCommand["method"];
+    },
+    signal: AbortSignal,
+  ): Promise<GhPullRequestMergeResult>;
+}
+
 /**
  * Host-wide linked-thread facts, deliberately not window-scoped. The snapshot
  * cache is shared by every window and by background refreshes, so building it
@@ -164,6 +179,7 @@ export class CodeProjectPullRequestService {
   readonly #remotes: CodeProjectPullRequestRemoteSource;
   readonly #list: CodeProjectPullRequestListPort;
   readonly #detail: CodeProjectPullRequestDetailPort;
+  readonly #merge: CodeProjectPullRequestMergePort;
   readonly #threads: CodeProjectLinkedThreadSource;
   readonly #clock: () => string;
   readonly #cacheStats: CacheStatsRecorder | undefined;
@@ -200,6 +216,7 @@ export class CodeProjectPullRequestService {
     readonly remotes: CodeProjectPullRequestRemoteSource;
     readonly list: CodeProjectPullRequestListPort;
     readonly detail: CodeProjectPullRequestDetailPort;
+    readonly merge?: CodeProjectPullRequestMergePort;
     readonly threads: CodeProjectLinkedThreadSource;
     readonly clock?: () => string;
     readonly cacheStats?: CacheStatsRecorder;
@@ -216,6 +233,11 @@ export class CodeProjectPullRequestService {
     this.#remotes = options.remotes;
     this.#list = options.list;
     this.#detail = options.detail;
+    this.#merge =
+      options.merge ??
+      ({
+        mergeByIdentity: async () => ({ status: "unavailable", reason: "unavailable" }),
+      } satisfies CodeProjectPullRequestMergePort);
     this.#threads = options.threads;
     this.#clock = options.clock ?? (() => new Date().toISOString());
     this.#cacheStats = options.cacheStats;
@@ -401,6 +423,39 @@ export class CodeProjectPullRequestService {
       freshness: { status: "fresh", lastSuccessfulRefreshAt: now },
       linkedThreads: this.#linkedThreads(authorized, detail, threads),
     });
+  }
+
+  async merge(
+    windowId: WindowId,
+    command: CodeProjectPullRequestMergeCommand,
+    signal: AbortSignal,
+  ): Promise<CodeProjectPullRequestMergeOutcome> {
+    const projects = await this.#resolveProjects(windowId);
+    const authorized = this.#authorizedConnection(projects, command);
+    if (authorized === undefined) return { status: "refused", reason: "not-authorized" };
+    if (this.#githubRevoked) return { status: "unavailable", reason: "disconnected" };
+    const result = await this.#merge.mergeByIdentity(
+      {
+        owner: command.repositoryOwner,
+        name: command.repositoryName,
+        number: command.number,
+        method: command.method,
+      },
+      signal,
+    );
+    if (result.status === "merged") {
+      const key = detailKey(command);
+      this.#detailCache.delete(key);
+      this.#detailFreshness.delete(key);
+      this.#navigationSnapshots.clear();
+      return {
+        status: "merged",
+        number: command.number,
+        method: command.method,
+        mergedAt: decodeUtcTimestamp(this.#clock()),
+      };
+    }
+    return result;
   }
 
   async refresh(
@@ -1161,6 +1216,9 @@ export class CodeProjectPullRequestService {
       headRepository: observed.pullRequest.headRepository,
       headBranch: observed.pullRequest.headBranch,
       author: observed.pullRequest.author,
+      ...(observed.pullRequest.mergeability === undefined
+        ? {}
+        : { mergeability: observed.pullRequest.mergeability }),
       matchesDeliveryBranch: false,
       description: observed.description,
       diff: observed.diff,

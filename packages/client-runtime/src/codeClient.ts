@@ -9,6 +9,8 @@ import {
   decodeCodeProjectPullRequestDetailQuery,
   decodeCodeProjectPullRequestDetailRefreshCommand,
   decodeCodeProjectPullRequestDetailView,
+  decodeCodeProjectPullRequestMergeCommand,
+  decodeCodeProjectPullRequestMergeOutcome,
   decodeCodeCommand,
   decodeCodeCommandResult,
   decodeCodeEvidenceContentId,
@@ -58,6 +60,8 @@ import {
   type CodeProjectPullRequestDetailQuery,
   type CodeProjectPullRequestDetailRefreshCommand,
   type CodeProjectPullRequestDetailView,
+  type CodeProjectPullRequestMergeCommand,
+  type CodeProjectPullRequestMergeOutcome,
   type CodeBootstrap,
   type CodeNavigation,
   type CodeCheckoutId,
@@ -159,6 +163,9 @@ export interface CodeClient {
   refreshProjectPullRequestDetail(
     command: CodeProjectPullRequestDetailRefreshCommand,
   ): Promise<CodeProjectPullRequestDetailView>;
+  mergeProjectPullRequest?(
+    command: CodeProjectPullRequestMergeCommand,
+  ): Promise<CodeProjectPullRequestMergeOutcome>;
   readFollowUp(threadId: CodeThreadId): Promise<CodeThreadFollowUpView>;
   executeFollowUp(command: CodeFollowUpCommand): Promise<CodeThreadFollowUpUpdated>;
   /**
@@ -451,6 +458,24 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           body: JSON.stringify(validated),
         },
         decodeCodeProjectPullRequestDetailView,
+      );
+    },
+    async mergeProjectPullRequest(command) {
+      let validated: CodeProjectPullRequestMergeCommand;
+      try {
+        validated = decodeCodeProjectPullRequestMergeCommand(command);
+      } catch {
+        throw invalidProjectPullRequestMerge();
+      }
+      return request(
+        fetch,
+        new URL("/api/code/project-pull-requests/merge", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+        decodeCodeProjectPullRequestMergeOutcome,
       );
     },
     readFollowUp(threadId) {
@@ -1306,6 +1331,13 @@ function invalidProjectPullRequestDetailRefresh(): CodeClientFailure {
   return new CodeClientFailure({
     category: "invalid",
     message: "Code project pull-request detail refresh is invalid.",
+  });
+}
+
+function invalidProjectPullRequestMerge(): CodeClientFailure {
+  return new CodeClientFailure({
+    category: "invalid",
+    message: "Code project pull-request merge is invalid.",
   });
 }
 

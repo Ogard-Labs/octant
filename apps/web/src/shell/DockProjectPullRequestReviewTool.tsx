@@ -4,6 +4,8 @@ import type {
   CodeProjectPullRequestDetailRefreshCommand,
   CodeProjectPullRequestDetailView,
   CodeProjectPullRequestLinkedThread,
+  CodeProjectPullRequestMergeMethod,
+  CodeProjectPullRequestMergeOutcome,
 } from "@octant/contracts";
 import { useEffect, useRef, useState } from "react";
 import { ProjectPullRequestReviewPane } from "../code/ProjectPullRequestReviewPane";
@@ -19,6 +21,9 @@ export interface DockProjectPullRequestReviewToolProps {
   ) => Promise<CodeProjectPullRequestDetailView>;
   readonly onOpenLinkedThread?: (thread: CodeProjectPullRequestLinkedThread) => void;
   readonly onOpenChat?: (detail: CodeProjectPullRequestDetailObserved) => void;
+  readonly onMerge?: (
+    method: CodeProjectPullRequestMergeMethod,
+  ) => Promise<CodeProjectPullRequestMergeOutcome>;
 }
 
 type DetailState =
@@ -158,6 +163,7 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
           ? {}
           : { onOpenLinkedThread: props.onOpenLinkedThread })}
         {...(props.onOpenChat === undefined ? {} : { onOpenChat: props.onOpenChat })}
+        {...(props.onMerge === undefined ? {} : { onMerge: props.onMerge })}
         onRefresh={() => void runRefresh()}
       />
     </>

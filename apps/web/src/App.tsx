@@ -81,6 +81,8 @@ import type {
   CodeBoardQuery,
   CodeProjectPullRequestDetailObserved,
   CodeProjectPullRequestDetailQuery,
+  CodeProjectPullRequestMergeMethod,
+  CodeProjectPullRequestMergeOutcome,
   CodeProjectPullRequestRow,
   ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
@@ -2644,6 +2646,7 @@ function LaunchedShell(
         <DockProjectPullRequestReviewTool
           key={`${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`}
           load={(query) => codeClient.queryProjectPullRequestDetail(query)}
+          onMerge={mergeProjectPullRequest}
           onOpenChat={openProjectPullRequestChat}
           onOpenLinkedThread={(thread) =>
             openLinkedProjectPullRequestThread(thread, selectedProjectPullRequest.projectId)
@@ -2943,10 +2946,9 @@ function LaunchedShell(
 
   function openProjectPullRequestChat(detail: CodeProjectPullRequestDetailObserved): void {
     const title = detail.title.length === 0 ? `Pull request #${detail.number}` : detail.title;
-    const prompt = [
-      `Help me understand pull request #${detail.number}: ${title}`,
-      detail.url,
-    ].join("\n");
+    const prompt = [`Help me understand pull request #${detail.number}: ${title}`, detail.url].join(
+      "\n",
+    );
     closeWorkspaceReaders();
     setDraftError(undefined);
     setDraftPendingMessage(prompt);
@@ -3067,6 +3069,17 @@ function LaunchedShell(
     providerController.instances,
     workNavigation.navigation,
   ]);
+
+  function mergeProjectPullRequest(
+    method: CodeProjectPullRequestMergeMethod,
+  ): Promise<CodeProjectPullRequestMergeOutcome> {
+    const selected = selectedProjectPullRequest;
+    const merge = codeClient.mergeProjectPullRequest;
+    if (selected === undefined || merge === undefined) {
+      return Promise.resolve({ status: "unavailable", reason: "unavailable" });
+    }
+    return merge({ ...selected, method });
+  }
 
   if (controller.status === "loading") {
     return (
@@ -5819,6 +5832,7 @@ function LaunchedShell(
                   <DockProjectPullRequestReviewTool
                     key={`${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`}
                     load={(query) => codeClient.queryProjectPullRequestDetail(query)}
+                    onMerge={mergeProjectPullRequest}
                     onOpenChat={openProjectPullRequestChat}
                     onOpenLinkedThread={(thread) =>
                       openLinkedProjectPullRequestThread(
@@ -5882,6 +5896,7 @@ function LaunchedShell(
                     <DockProjectPullRequestReviewTool
                       key={`${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`}
                       load={(query) => codeClient.queryProjectPullRequestDetail(query)}
+                      onMerge={mergeProjectPullRequest}
                       onOpenChat={openProjectPullRequestChat}
                       onOpenLinkedThread={(thread) =>
                         openLinkedProjectPullRequestThread(

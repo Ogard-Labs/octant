@@ -3,6 +3,8 @@ import {
   decodeCodeProjectPullRequestDetailQuery,
   decodeCodeProjectPullRequestDetailRefreshCommand,
   decodeCodeProjectPullRequestDetailView,
+  decodeCodeProjectPullRequestMergeCommand,
+  decodeCodeProjectPullRequestMergeOutcome,
   decodeCodeProjectPullRequestQuery,
   decodeCodeProjectPullRequestRefreshCommand,
   decodeCodeProjectPullRequestView,
@@ -243,6 +245,25 @@ describe("Code Project pull-request detail contracts", () => {
         credentials: "secret",
       }),
     ).toThrow();
+  });
+
+  it("models explicit merge methods and approval outcomes without accepting forged identity", () => {
+    const command = { ...detailQuery, method: "squash" as const };
+    expect(decodeCodeProjectPullRequestMergeCommand(command)).toEqual(command);
+    expect(() =>
+      decodeCodeProjectPullRequestMergeCommand({ ...command, credentials: "secret" }),
+    ).toThrow();
+    expect(
+      decodeCodeProjectPullRequestMergeOutcome({
+        status: "merged",
+        number: 12,
+        method: "squash",
+        mergedAt: generatedAt,
+      }),
+    ).toMatchObject({ status: "merged", method: "squash" });
+    expect(
+      decodeCodeProjectPullRequestMergeOutcome({ status: "refused", reason: "not-mergeable" }),
+    ).toEqual({ status: "refused", reason: "not-mergeable" });
   });
 
   it("decodes an observed detail with inline description and diff plus linked threads", () => {

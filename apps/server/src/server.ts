@@ -228,6 +228,7 @@ import {
   CodeProjectPullRequestService,
   type CodeProjectPullRequestDetailPort,
   type CodeProjectPullRequestListPort,
+  type CodeProjectPullRequestMergePort,
 } from "./code/codeProjectPullRequestService";
 import { CodeProjectPullRequestCadence } from "./code/codeProjectPullRequestCadence";
 import { CodeProjectPullRequestSnapshotStore } from "./code/codeProjectPullRequestSnapshotStore";
@@ -1470,12 +1471,16 @@ function withCodeOperationRuntime(
     ...(service.discardAttachment === undefined
       ? {}
       : { discardAttachment: service.discardAttachment.bind(service) }),
+    ...(service.mergeProjectPullRequest === undefined
+      ? {}
+      : { mergeProjectPullRequest: service.mergeProjectPullRequest.bind(service) }),
   };
 }
 
 function createProjectPullRequestPorts(ghExecutable: string | undefined): {
   readonly list: CodeProjectPullRequestListPort;
   readonly detail: CodeProjectPullRequestDetailPort;
+  readonly merge: CodeProjectPullRequestMergePort;
   /**
    * False when `gh` is missing or refused validation. The background refresh
    * cadence fails closed on this instead of polling ports that can only
@@ -1487,6 +1492,7 @@ function createProjectPullRequestPorts(ghExecutable: string | undefined): {
     return {
       list: { listActive: async () => ({ status: "disconnected" }) },
       detail: { observeReviewByIdentity: async () => ({ status: "unavailable" }) },
+      merge: { mergeByIdentity: async () => ({ status: "unavailable", reason: "unavailable" }) },
       ghAvailable: false,
     };
   }
@@ -1502,12 +1508,16 @@ function createProjectPullRequestPorts(ghExecutable: string | undefined): {
       detail: {
         observeReviewByIdentity: (request, signal) => port.observeReviewByIdentity(request, signal),
       },
+      merge: {
+        mergeByIdentity: (request, signal) => port.mergeByIdentity(request, signal),
+      },
       ghAvailable: true,
     };
   } catch {
     return {
       list: { listActive: async () => ({ status: "disconnected" }) },
       detail: { observeReviewByIdentity: async () => ({ status: "unavailable" }) },
+      merge: { mergeByIdentity: async () => ({ status: "unavailable", reason: "unavailable" }) },
       ghAvailable: false,
     };
   }
@@ -1570,6 +1580,9 @@ function withCodeBoard(
     ...(service.discardAttachment === undefined
       ? {}
       : { discardAttachment: service.discardAttachment.bind(service) }),
+    ...(service.mergeProjectPullRequest === undefined
+      ? {}
+      : { mergeProjectPullRequest: service.mergeProjectPullRequest.bind(service) }),
   };
 }
 
@@ -3006,6 +3019,7 @@ export function startOctantServer(
       remotes: { remotes: (root) => gitObservationPort.observeRemotes(root) },
       list: projectPullRequestPorts.list,
       detail: projectPullRequestPorts.detail,
+      merge: projectPullRequestPorts.merge,
       cacheStats,
       snapshotStore: new CodeProjectPullRequestSnapshotStore(
         join(persistence.dataDirectory, "code", "pull-request-snapshot.json"),
@@ -4082,6 +4096,15 @@ export function startOctantServer(
           command,
           signal ?? new AbortController().signal,
         ),
+      mergeProjectPullRequest: (windowId, command, signal, initiator) => {
+        if (initiator !== "user")
+          return Promise.resolve({ status: "refused", reason: "not-authorized" });
+        return projectPullRequestService.merge(
+          windowId,
+          command,
+          signal ?? new AbortController().signal,
+        );
+      },
     };
     const appleRuntimeStore = new AppleRuntimeStore(join(providerDataDirectory, "apple-runtime"));
     const appleProcess = new RepositoryTestProcessPort({

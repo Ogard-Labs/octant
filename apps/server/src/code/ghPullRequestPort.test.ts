@@ -458,6 +458,56 @@ describe("GhPullRequestPort.observeReviewByIdentity", () => {
   });
 });
 
+describe("GhPullRequestPort.mergeByIdentity", () => {
+  const mergeRequest = {
+    owner: "octant",
+    name: "octant",
+    number: 175,
+    method: "squash" as const,
+  };
+
+  it("re-reads the PR and pins the merge to the observed head SHA", async () => {
+    const { command, port } = fixture([
+      { exitCode: 0, stdout: detailJson },
+      { exitCode: 0, stdout: "" },
+    ]);
+
+    await expect(port.mergeByIdentity(mergeRequest, new AbortController().signal)).resolves.toEqual(
+      { status: "merged" },
+    );
+    expect(command.run).toHaveBeenNthCalledWith(
+      2,
+      ["pr", "merge", "175", "--repo", "octant/octant", "--squash", "--match-head-commit", headSha],
+      expect.objectContaining({ stdin: undefined }),
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("refuses a merge when the fresh observation is not mergeable", async () => {
+    const notMergeable = JSON.stringify({
+      ...JSON.parse(detailJson),
+      mergeable: "CONFLICTING",
+    });
+    const { command, port } = fixture([{ exitCode: 0, stdout: notMergeable }]);
+
+    await expect(port.mergeByIdentity(mergeRequest, new AbortController().signal)).resolves.toEqual(
+      { status: "refused", reason: "not-mergeable" },
+    );
+    expect(command.run).toHaveBeenCalledOnce();
+  });
+
+  it("turns a changed head reported by GitHub into a stale refusal", async () => {
+    const { port } = fixture([
+      { exitCode: 0, stdout: detailJson },
+      { exitCode: 1, stdout: "", stderr: "head commit is not at the expected revision" },
+    ]);
+
+    await expect(port.mergeByIdentity(mergeRequest, new AbortController().signal)).resolves.toEqual(
+      { status: "refused", reason: "stale" },
+    );
+  });
+});
+
 describe("GhPullRequestPort active list", () => {
   const activeRow = {
     number: 12,

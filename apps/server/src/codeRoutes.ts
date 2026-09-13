@@ -25,6 +25,8 @@ import {
   decodeCodeProjectPullRequestDetailQuery,
   decodeCodeProjectPullRequestDetailRefreshCommand,
   decodeCodeProjectPullRequestDetailView,
+  decodeCodeProjectPullRequestMergeCommand,
+  decodeCodeProjectPullRequestMergeOutcome,
   decodeCodeCommand,
   decodeCodeEvidenceReference,
   decodeCodeEvidenceBatchRequest,
@@ -65,6 +67,8 @@ import {
   type CodeProjectPullRequestDetailQuery,
   type CodeProjectPullRequestDetailRefreshCommand,
   type CodeProjectPullRequestDetailView,
+  type CodeProjectPullRequestMergeCommand,
+  type CodeProjectPullRequestMergeOutcome,
   type CodeAttachmentId,
   type CodeAttachmentMediaType,
   type CodeAttachmentReference,
@@ -257,6 +261,12 @@ export interface CodeRouteService {
     command: CodeProjectPullRequestDetailRefreshCommand,
     signal?: AbortSignal,
   ) => Promise<CodeProjectPullRequestDetailView> | CodeProjectPullRequestDetailView;
+  readonly mergeProjectPullRequest?: (
+    authenticatedWindowId: WindowId,
+    command: CodeProjectPullRequestMergeCommand,
+    signal?: AbortSignal,
+    initiator?: "user" | "agent",
+  ) => Promise<CodeProjectPullRequestMergeOutcome> | CodeProjectPullRequestMergeOutcome;
   /**
    * The Project's planner designation and proposals. Optional like the board:
    * a host without the planner capability answers `unavailable`, not 404.
@@ -1002,6 +1012,48 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             origin,
           );
         }
+        case "project-pull-requests-merge": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          if (operationInitiator !== "user") {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message: "Merging a pull request requires the local user.",
+              },
+              403,
+              origin,
+            );
+          }
+          if (dependencies.service.mergeProjectPullRequest === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Pull-request merge is unavailable." },
+              503,
+              origin,
+            );
+          }
+          const body = await readBoundedBytes(request, jsonLimit);
+          const value = parseJson(body);
+          refuseRendererAuthoredIdentity(value);
+          let command: CodeProjectPullRequestMergeCommand;
+          try {
+            command = decodeCodeProjectPullRequestMergeCommand(value);
+          } catch {
+            throw new CodeRouteRejected("Code project pull-request merge is invalid.", 400);
+          }
+          return jsonResponse(
+            decodeCodeProjectPullRequestMergeOutcome(
+              await dependencies.service.mergeProjectPullRequest(
+                authenticatedWindowId,
+                command,
+                request.signal,
+                operationInitiator,
+              ),
+            ),
+            200,
+            origin,
+          );
+        }
         case "operation-content": {
           requireMethodAndEmptyQuery(request, url, "GET");
           if (dependencies.service.readOperationContent === undefined) {
@@ -1367,7 +1419,8 @@ type MatchedRoute =
         | "project-pull-requests"
         | "project-pull-requests-refresh"
         | "project-pull-requests-detail"
-        | "project-pull-requests-detail-refresh";
+        | "project-pull-requests-detail-refresh"
+        | "project-pull-requests-merge";
     }>
   | Readonly<{ kind: "planner"; projectId: string }>
   | Readonly<{ kind: "thread" | "events" | "conversation" | "follow-up"; threadId: string }>
@@ -1492,6 +1545,9 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
   }
   if (pathname === "/api/code/project-pull-requests/detail/refresh") {
     return { kind: "project-pull-requests-detail-refresh" };
+  }
+  if (pathname === "/api/code/project-pull-requests/merge") {
+    return { kind: "project-pull-requests-merge" };
   }
   if (pathname === "/api/code/files/content") return { kind: "file-save" };
   if (pathname === "/api/code/files/open") return { kind: "file-open" };
