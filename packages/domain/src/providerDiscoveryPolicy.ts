@@ -109,7 +109,27 @@ export function isConnectCommand(
 export function selectPreferredCandidate(
   candidates: ReadonlyArray<DiscoveryCandidate>,
 ): DiscoveryCandidate | undefined {
-  return candidates[0];
+  // OpenCode 2 is the current provider runtime. Prefer it when discovery
+  // finds both names so an older `opencode` on PATH cannot shadow the beta
+  // runtime's ACP/catalog driver.
+  const openCode2 = candidates.find(
+    (candidate) =>
+      candidate.driverKind === "opencode" && isOpenCode2BinaryPath(candidate.binaryPath),
+  );
+  return openCode2 ?? candidates[0];
+}
+
+/**
+ * The `opencode2` executable names the beta runtime wherever it is installed.
+ *
+ * Discovery's preference and the server's driver routing read this one rule,
+ * so the candidate this policy prefers is the candidate the factory routes to
+ * the OpenCode 2 profile. A display name is deliberately not consulted: it is
+ * user-editable and would let a renamed row change which driver runs.
+ */
+export function isOpenCode2BinaryPath(binaryPath: string): boolean {
+  const name = binaryPath.toLowerCase().split(/[\\/]/u).at(-1) ?? "";
+  return name === "opencode2" || name === "opencode2.exe";
 }
 
 /**

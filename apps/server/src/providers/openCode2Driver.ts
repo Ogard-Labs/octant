@@ -3,6 +3,7 @@ import type {
   ProviderInstanceId,
   ProviderInstance,
 } from "@octant/contracts";
+import { isOpenCode2BinaryPath } from "@octant/domain";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { AcpProcessPort } from "./acpProcess";
 import { acpProviderProfiles } from "./acpProfiles";
@@ -55,6 +56,5 @@ export function makeOpenCode2Driver(options: OpenCode2DriverOptions): ProviderDr
 export function isOpenCode2Instance(
   instance: Extract<ProviderInstance, { readonly driverKind: "opencode" }>,
 ): boolean {
-  const name = instance.configuration.binaryPath.toLowerCase().split(/[\\/]/u).at(-1);
-  return name === "opencode2" || name === "opencode2.exe";
+  return isOpenCode2BinaryPath(instance.configuration.binaryPath);
 }

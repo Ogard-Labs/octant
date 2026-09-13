@@ -1,14 +1,15 @@
-/* The project reader can open without a Code thread. It owns its scroll and
-   header instead of borrowing the fixed-height Delivery toolbar. */
+/* The project reader is a narrow, read-only review surface. Keep its
+   hierarchy compact enough to scan while giving state and action affordances
+   a clear visual home. */
 .code-pr-review {
   height: 100%;
   min-height: 0;
   min-width: 0;
   overflow: auto;
-  padding: 16px;
+  padding: 16px 18px 28px;
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
-  line-height: 1.5;
+  line-height: var(--oct-leading-body);
   overflow-wrap: anywhere;
 }
 
@@ -19,14 +20,174 @@
   min-width: 0;
 }
 
-.code-pr-review__header h1,
-.code-pr-review__section-header h2 {
-  margin: 0;
-  font-size: var(--oct-text-sm);
-  font-weight: 500;
-  line-height: 1.4;
+/* New project-level detail header. The data attribute keeps state colour
+   semantic and scoped to this pane, without recolouring the older thread
+   review surface that shares the conversation stylesheet. */
+.code-pr-review[data-pr-state="open"] {
+  --code-pr-state-fg: var(--octant-success-text);
+  --code-pr-state-surface: var(--octant-success-surface);
+  --code-pr-state-border: var(--octant-success-border);
 }
 
+.code-pr-review[data-pr-state="draft"] {
+  --code-pr-state-fg: var(--oct-meta);
+  --code-pr-state-surface: var(--oct-fg-soft);
+  --code-pr-state-border: var(--oct-border);
+}
+
+.code-pr-review[data-pr-state="merged"] {
+  --code-pr-state-fg: var(--octant-accent-text);
+  --code-pr-state-surface: var(--octant-accent-tint);
+  --code-pr-state-border: color-mix(in srgb, var(--octant-accent-text) 45%, transparent);
+}
+
+.code-pr-review[data-pr-state="closed"] {
+  --code-pr-state-fg: var(--octant-danger-text);
+  --code-pr-state-surface: var(--oct-danger-soft);
+  --code-pr-state-border: color-mix(in srgb, var(--octant-danger-text) 45%, transparent);
+}
+
+.code-pr-review[data-pr-state] .code-pr-review__header {
+  display: grid;
+  gap: 10px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--oct-hairline);
+}
+
+.code-pr-review__headline {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.code-pr-review__state-mark {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  margin-top: 1px;
+  color: var(--code-pr-state-fg);
+  background: var(--code-pr-state-surface);
+  border: 1px solid var(--code-pr-state-border);
+  border-left: 2px solid var(--code-pr-state-fg);
+  border-radius: var(--oct-radius-sm);
+}
+
+.code-pr-review__title-block {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.code-pr-review__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--code-pr-state-fg);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+  line-height: 1.3;
+}
+
+.code-pr-review__eyebrow-label {
+  color: var(--oct-meta);
+  font-weight: var(--oct-weight-medium);
+}
+
+.code-pr-review__number {
+  font-family: var(--oct-font-mono);
+  letter-spacing: var(--oct-tracking-wide);
+}
+
+.code-pr-review[data-pr-state] .code-pr-review__header h1 {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-lg);
+  font-weight: var(--oct-weight-display);
+  line-height: var(--oct-leading-snug);
+  text-wrap: pretty;
+}
+
+.code-pr-review__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.code-pr-review__github-link {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-xs);
+  text-decoration: none;
+  white-space: nowrap;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+.code-pr-review__github-link:hover {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+}
+
+.code-pr-review__github-link:focus-visible {
+  outline: 2px solid var(--oct-focus);
+  outline-offset: 2px;
+}
+
+.code-pr-review[data-pr-state] .code-pr-review__meta {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  align-items: center;
+  gap: 7px 10px;
+  margin: 0;
+}
+
+.code-pr-review__route,
+.code-pr-review__author {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-pr-review__route code {
+  max-width: min(34ch, 100%);
+  overflow: hidden;
+  color: var(--oct-fg-2);
+  font-family: var(--oct-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-pr-review__route svg,
+.code-pr-review__author svg,
+.code-pr-review__freshness svg {
+  flex: 0 0 auto;
+  color: var(--oct-meta);
+}
+
+.code-pr-review__freshness {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+/* Legacy thread review header still uses a plain toolbar. */
 .code-pr-review__header > div > span,
 .code-pr-review__meta,
 .code-pr-review__guardrail,
@@ -37,13 +198,8 @@
   font-size: var(--oct-text-xs);
 }
 
-.code-pr-review__meta,
-.code-pr-review__actions,
-.code-pr-review__section-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
+.code-pr-review[data-pr-state] .code-pr-review__state-mark {
+  color: var(--code-pr-state-fg);
 }
 
 .code-pr-review__header .code-pr-review__actions {
@@ -55,17 +211,87 @@
   margin: 0;
 }
 
-.code-pr-review__guardrail {
-  margin: 12px 0;
+.code-pr-review[data-pr-state] .code-pr-review__guardrail {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 12px 0 0;
+}
+
+.code-pr-review__guardrail svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--oct-meta);
+}
+
+.code-pr-review__waiting {
+  display: grid;
+  gap: 4px;
+  margin: 12px 0 0;
+  padding: 9px 10px;
+  color: var(--oct-fg-2);
+  background: var(--oct-warn-soft);
+  border-left: 2px solid var(--oct-warn-fg);
+  border-radius: 0 var(--oct-radius-sm) var(--oct-radius-sm) 0;
+}
+
+.code-pr-review__waiting p {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
 .code-pr-review__section {
-  padding: 16px 0;
+  padding: 14px 0 16px;
   border-top: 1px solid var(--oct-hairline);
 }
 
+.code-pr-review[data-pr-state] .code-pr-review__section:first-of-type {
+  margin-top: 14px;
+}
+
 .code-pr-review__section-header {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin-bottom: 10px;
+}
+
+.code-pr-review__section-heading {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  color: var(--oct-fg);
+}
+
+.code-pr-review__section-heading > svg {
+  flex: 0 0 auto;
+  color: var(--oct-meta);
+}
+
+.code-pr-review__header h1,
+.code-pr-review__section-header h2 {
+  margin: 0;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  line-height: var(--oct-leading-snug);
+}
+
+.code-pr-review__section-heading h2 {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.code-pr-review__section-count {
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
 }
 
 .code-pr-review__commits,
@@ -74,7 +300,7 @@
 .code-pr-review__reviews,
 .code-pr-review__comments {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -84,14 +310,76 @@
 .code-pr-review__reviews > li,
 .code-pr-review__comments > li {
   display: grid;
-  gap: 6px;
+  gap: 5px;
+}
+
+.code-pr-review__commits > li code {
+  color: var(--oct-fg-2);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
 }
 
 .code-pr-review__files > li,
 .code-pr-review__checks > li {
   display: flex;
+  min-width: 0;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
+  padding: 4px 0;
+}
+
+.code-pr-review__files > li > span:first-child,
+.code-pr-review__checks > li > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-pr-review__checks > li {
+  padding-left: 8px;
+  border-left: 2px solid var(--oct-border);
+}
+
+.code-pr-review__checks > li[data-check-state="success"] {
+  border-left-color: var(--octant-success-text);
+}
+
+.code-pr-review__checks > li[data-check-state="failure"] {
+  border-left-color: var(--octant-danger-text);
+}
+
+.code-pr-review__checks > li[data-check-state="pending"] {
+  border-left-color: var(--octant-warning-text);
+}
+
+.code-pr-review__checks [data-status="pending"] svg {
+  animation: code-pr-review-spin var(--oct-motion-spin) linear infinite;
+}
+
+@keyframes code-pr-review-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.code-pr-review__diff-stat {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 7px;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
+}
+
+.code-pr-review__additions {
+  color: var(--octant-addition-text);
+}
+
+.code-pr-review__deletions {
+  color: var(--octant-deletion-text);
 }
 
 .code-pr-review__prose > * + * {
@@ -100,7 +388,7 @@
 
 .code-pr-review__prose :is(h2, h3, h4) {
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: var(--oct-weight-medium);
 }
 
 .code-pr-review__prose :is(ul, ol) {
@@ -143,4 +431,37 @@
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .code-pr-review__checks [data-status="pending"] svg {
+    animation: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .code-pr-review {
+    padding: 14px 14px 24px;
+  }
+
+  .code-pr-review__headline {
+    gap: 8px;
+  }
+
+  .code-pr-review__state-mark {
+    width: 30px;
+    height: 30px;
+  }
+
+  .code-pr-review__actions {
+    width: 100%;
+  }
+
+  .code-pr-review__route {
+    flex: 1 1 100%;
+  }
+
+  .code-pr-review__route code {
+    max-width: calc(50% - 22px);
+  }
 }

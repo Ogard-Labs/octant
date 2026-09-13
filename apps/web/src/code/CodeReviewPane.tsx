@@ -14,6 +14,7 @@ import type {
 } from "@octant/contracts/code-operations";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { decidesCodeEffectsByApproval } from "@octant/domain";
+import { ClipboardCheck, MessageCircle } from "lucide-react";
 import { Markdown } from "../markdown/Markdown";
 import "./project-pull-request-review.css";
 import { useState } from "react";
@@ -60,7 +61,12 @@ export function PullRequestConversation(props: PullRequestConversationProps) {
     <div className="code-pr-review__conversation">
       <section aria-label="Pull request reviews" className="code-pr-review__section">
         <header className="code-pr-review__section-header">
-          <h2>Reviews</h2>
+          <span className="code-pr-review__section-heading">
+            <ClipboardCheck aria-hidden="true" size={14} strokeWidth={1.8} />
+            <h2>
+              Reviews <span className="code-pr-review__section-count">{props.reviews.length}</span>
+            </h2>
+          </span>
           {props.staleReviews ? <StaleTag section="reviews" /> : null}
         </header>
         <p className="code-pr-review__readonly-note">
@@ -86,7 +92,13 @@ export function PullRequestConversation(props: PullRequestConversationProps) {
       </section>
       <section aria-label="Pull request comments" className="code-pr-review__section">
         <header className="code-pr-review__section-header">
-          <h2>Comments</h2>
+          <span className="code-pr-review__section-heading">
+            <MessageCircle aria-hidden="true" size={14} strokeWidth={1.8} />
+            <h2>
+              Comments{" "}
+              <span className="code-pr-review__section-count">{props.comments.length}</span>
+            </h2>
+          </span>
           {props.staleComments ? <StaleTag section="comments" /> : null}
         </header>
         {props.comments.length === 0 ? (

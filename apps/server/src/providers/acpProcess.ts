@@ -29,6 +29,7 @@ import { buildLinuxAllowDefaultDenyLaunch } from "../process/linuxConfinement";
 import {
   materializeOsNetworkEgress,
   resolveDefaultThreadEgressPolicy,
+  resolveProbeEgressPolicy,
 } from "../process/threadEgressPolicy";
 
 export type { AcpSessionMode } from "./acpProfiles";
@@ -47,6 +48,8 @@ export interface AcpConfinementInput {
   readonly managedHome: string;
   readonly mode: AcpSessionMode;
   readonly executionPolicy: ProviderExecutionPolicy;
+  /** A non-mutating readiness check may contact the provider without a thread. */
+  readonly purpose?: "probe" | "session";
   readonly environment: NodeJS.ProcessEnv;
   /** Exact loopback ports owned by app-managed ACP tool bridges for this process. */
   readonly loopbackPorts?: ReadonlyArray<number>;
@@ -72,6 +75,8 @@ export interface AcpProcessStartInput {
   readonly managedHome: string;
   readonly mode: AcpSessionMode;
   readonly executionPolicy: ProviderExecutionPolicy;
+  /** A non-mutating readiness check may contact the provider without a thread. */
+  readonly purpose?: "probe" | "session";
   readonly apiKey?: string;
   /** Exact loopback ports owned by app-managed ACP tool bridges for this process. */
   readonly loopbackPorts?: ReadonlyArray<number>;
@@ -428,11 +433,16 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
         const binaryDirectory = dirname(realpathSync(input.binaryPath));
         const binaryRuntimeDirectory = dirname(binaryDirectory);
         const configuredBinaryDirectory = dirname(input.binaryPath);
+        // Connection checks are not Chat threads. They must reach the
+        // provider's own control plane to authenticate and discover models,
+        // while remaining read-only and rooted in the managed home.
         const networkEgress = materializeOsNetworkEgress(
-          resolveDefaultThreadEgressPolicy({
-            mode: input.mode,
-            executionPolicy: input.executionPolicy,
-          }),
+          input.purpose === "probe"
+            ? resolveProbeEgressPolicy()
+            : resolveDefaultThreadEgressPolicy({
+                mode: input.mode,
+                executionPolicy: input.executionPolicy,
+              }),
         );
         const confinement = makeSeatbeltConfinementLive({
           platform,
@@ -979,6 +989,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           managedHome: input.managedHome,
           mode: input.mode,
           executionPolicy: input.executionPolicy,
+          ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
           environment,
           ...(input.loopbackPorts === undefined ? {} : { loopbackPorts: input.loopbackPorts }),
         });

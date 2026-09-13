@@ -376,6 +376,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
       managedHome: options.managedHome,
       mode: "chat",
       executionPolicy: "approval-gated",
+      purpose: "probe",
       ...(apiKey === undefined ? {} : { apiKey }),
       onProcessStarted: async (process) => {
         receipt = await options.runtimeRegistry.trackProcess(options.instanceId, process);

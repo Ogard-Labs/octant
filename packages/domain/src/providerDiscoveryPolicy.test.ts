@@ -117,6 +117,59 @@ describe("selectPreferredCandidate", () => {
     ]);
     expect(preferred?.binaryPath).toBe("/opt/homebrew/bin/codex");
   });
+
+  it("prefers OpenCode 2 when both OpenCode runtimes are discovered", () => {
+    const preferred = selectPreferredCandidate([
+      makeCandidate({
+        driverKind: "opencode",
+        displayName: "OpenCode CLI",
+        binaryPath: "/usr/local/bin/opencode" as DiscoveryCandidate["binaryPath"],
+      }),
+      makeCandidate({
+        driverKind: "opencode",
+        displayName: "OpenCode 2 preview",
+        binaryPath: "/Users/test/.local/bin/opencode2" as DiscoveryCandidate["binaryPath"],
+      }),
+    ]);
+
+    expect(preferred?.displayName).toBe("OpenCode 2 preview");
+    expect(preferred?.binaryPath).toBe("/Users/test/.local/bin/opencode2");
+  });
+
+  it("identifies OpenCode 2 by its executable name even after the row is renamed", () => {
+    const preferred = selectPreferredCandidate([
+      makeCandidate({
+        driverKind: "opencode",
+        displayName: "Renamed legacy runtime",
+        binaryPath: "/usr/local/bin/opencode" as DiscoveryCandidate["binaryPath"],
+      }),
+      makeCandidate({
+        driverKind: "opencode",
+        // A person renamed the instance; the display name is not identity.
+        displayName: "My beta runtime",
+        binaryPath: "C:\\tools\\OpenCode2.exe" as DiscoveryCandidate["binaryPath"],
+      }),
+    ]);
+
+    expect(preferred?.displayName).toBe("My beta runtime");
+  });
+
+  it("does not treat a legacy executable as OpenCode 2 because its row is named preview", () => {
+    const preferred = selectPreferredCandidate([
+      makeCandidate({
+        driverKind: "opencode",
+        displayName: "OpenCode 2 preview",
+        binaryPath: "/usr/local/bin/opencode" as DiscoveryCandidate["binaryPath"],
+      }),
+      makeCandidate({
+        driverKind: "opencode",
+        displayName: "OpenCode CLI",
+        binaryPath: "/opt/homebrew/bin/opencode" as DiscoveryCandidate["binaryPath"],
+      }),
+    ]);
+
+    expect(preferred?.binaryPath).toBe("/usr/local/bin/opencode");
+  });
 });
 
 describe("first-run discovery enablement", () => {

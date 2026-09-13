@@ -293,6 +293,38 @@ describe("discoveryService", () => {
     );
   });
 
+  it("orders OpenCode 2 before the legacy runtime when both are installed", async () => {
+    const fs = makeFakeFs(
+      new Map([
+        ["/usr/local/bin/opencode2", { file: true }],
+        ["/usr/local/bin/opencode", { file: true }],
+      ]),
+    );
+    const exec = makeFakeExec(
+      new Map([
+        [
+          "/usr/local/bin/opencode2 --version",
+          { stdout: "opencode2 v0.0.0-beta-19425\n", stderr: "" },
+        ],
+        ["/usr/local/bin/opencode --version", { stdout: "1.18.21\n", stderr: "" }],
+      ]),
+    );
+    const snapshot = await makeDiscoveryService({
+      exec,
+      fs,
+      environment: { PATH: "/usr/local/bin", HOME: "/Users/test" },
+      now: () => 1753430400000,
+    }).scan();
+
+    const openCodeCandidates = snapshot.candidates.filter(
+      (candidate) => candidate.driverKind === "opencode",
+    );
+    expect(openCodeCandidates.map((candidate) => candidate.displayName)).toEqual([
+      "OpenCode 2 preview",
+      "OpenCode CLI",
+    ]);
+  });
+
   it("discovers user-installed runtimes when a Finder launch PATH omits home bins", async () => {
     const fs = makeFakeFs(
       new Map([

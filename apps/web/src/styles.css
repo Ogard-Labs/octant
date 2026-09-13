@@ -1850,6 +1850,26 @@ html[data-octant-native-host="true"] .workspace-pane__header {
   padding-left: var(--oct-space-3);
 }
 
+/* Reader rails replace the pane rather than opening beside it. Their opaque
+   surface sits at z5, while the native pane tab must stay at z6 so it can
+   outrank the workspace in the normal view. Hide that tab while a rail is
+   open; otherwise the title/path pill bleeds through the rail's top edge on
+   native windows (most visibly on Image generator and Archive). */
+html[data-octant-native-host="true"]
+  .primary-workspace-layer:has(
+    > .rail-placeholder,
+    > .inbox-layer,
+    > .code-board-layer,
+    > .archive-layer,
+    > .artifact-library-layer,
+    > .automation-center-layer,
+    > .agents-center-layer
+  )
+  .workspace-pane__header {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 /* Published by WindowChrome from the leading cluster's measured width. The
    browser has no traffic-light reserve, but it still needs the Show sidebar
    and New thread cluster kept clear of the pane tab. */

@@ -1180,6 +1180,71 @@ describe("Kimi Code host-profile extension surfaces", () => {
   });
 });
 
+describe("ACP probe confinement", () => {
+  it("allows provider control-plane egress without granting Chat thread authority", async () => {
+    const target = fixture(kilo);
+    const managedHome = join(target.canonicalRoot, "managed-home");
+    const hostAuthenticationPath = join(target.canonicalRoot, "host-auth");
+    mkdirSync(hostAuthenticationPath, { recursive: true });
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath,
+      }).prepare({
+        profile: kilo,
+        binaryPath: target.binaryPath,
+        root: managedHome,
+        managedHome,
+        mode: "chat",
+        executionPolicy: "approval-gated",
+        purpose: "probe",
+        environment: sanitizeAcpEnvironment(
+          kilo,
+          { PATH: "/usr/bin", HOME: "/Users/octant-test" },
+          { managedHome, executionPolicy: "approval-gated" },
+        ),
+      }),
+    );
+    const profileText = seatbeltProfile(launch);
+    expect(profileText).toContain("(allow network*)");
+    expect(profileText).not.toContain("(allow process-exec)\n");
+    expect(profileText).not.toContain("(allow process-fork)");
+  });
+
+  it("keeps an ordinary Chat launch at no network egress", async () => {
+    const target = fixture(kilo);
+    const managedHome = join(target.canonicalRoot, "managed-home");
+    const hostAuthenticationPath = join(target.canonicalRoot, "host-auth");
+    mkdirSync(hostAuthenticationPath, { recursive: true });
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath,
+      }).prepare({
+        profile: kilo,
+        binaryPath: target.binaryPath,
+        root: managedHome,
+        managedHome,
+        mode: "chat",
+        executionPolicy: "approval-gated",
+        environment: sanitizeAcpEnvironment(
+          kilo,
+          { PATH: "/usr/bin", HOME: "/Users/octant-test" },
+          { managedHome, executionPolicy: "approval-gated" },
+        ),
+      }),
+    );
+    // The probe exception must not widen a thread launch: the same mode and
+    // policy without `purpose: "probe"` still gets no network at all.
+    const profileText = seatbeltProfile(launch);
+    expect(profileText).not.toContain("(allow network*)");
+  });
+});
+
 it("ships every ACP profile through deny-default confinement", () => {
   for (const profile of Object.values(acpProviderProfiles)) {
     expect(profile.process.confinement.kind).toBe("deny-default-seatbelt");

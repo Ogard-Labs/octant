@@ -19,6 +19,7 @@ import {
   captureOpenCodeRuntimeConfig,
   createPrivateOpenCodeProfile,
   makeOpenCodeProcessLive,
+  openCodeServerArgs,
   projectOpenCodeRuntimeConfig,
   probeOpenCodeBinary,
   resolveOpenCodeRuntimeConfig,
@@ -357,6 +358,16 @@ describe("probeOpenCodeBinary", () => {
     }
   });
 
+  it("makes OpenCode's default provider data root explicit for confinement", () => {
+    const root = fixtureRoot();
+    const profile = createPrivateOpenCodeProfile({ content: "{}" }, { HOME: root }, () => root);
+    try {
+      expect(profile.environment.XDG_DATA_HOME).toBe(join(root, ".local", "share"));
+    } finally {
+      profile.cleanup();
+    }
+  });
+
   it("does not persist raw provider credentials from a routing projection", () => {
     const root = fixtureRoot();
     const profile = createPrivateOpenCodeProfile(
@@ -538,6 +549,24 @@ describe("probeOpenCodeBinary", () => {
 });
 
 describe("OpenCodeProcessPort", () => {
+  it("uses the beta serve contract without the removed legacy pure flag", () => {
+    const legacy = openCodeServerArgs("legacy", 0);
+    const beta = openCodeServerArgs("beta", 43123);
+
+    // The meaningful difference between the runtimes is the flag v2 removed.
+    // Asserting the exact arrays here would only restate the function body.
+    expect(legacy).toContain("--pure");
+    expect(beta).not.toContain("--pure");
+    for (const args of [legacy, beta]) {
+      expect(args[0]).toBe("serve");
+      expect(args).toContain("--hostname");
+      expect(args).toContain("127.0.0.1");
+      expect(args).toContain("--port");
+    }
+    expect(beta[beta.indexOf("--port") + 1]).toBe("43123");
+    expect(legacy[legacy.indexOf("--port") + 1]).toBe("0");
+  });
+
   const makePort = (
     overrides: OpenCodeProcessOptions = {},
     dependencies: OpenCodeProcessDependencies = {},
@@ -550,7 +579,7 @@ describe("OpenCodeProcessPort", () => {
         confinement: passthroughConfinement,
         ...overrides,
       },
-      dependencies,
+      { reserveLoopbackPort: async () => 43123, ...dependencies },
     );
 
   it("passes the explicit mode and policy to the OS confinement port before spawning", async () => {
@@ -702,6 +731,46 @@ describe("OpenCodeProcessPort", () => {
     expect(observed.runtime).toBe("beta");
     expect(observed.version).toBe("opencode2 v0.0.0-beta-18721");
     expect(observed.authorization).toMatch(/^Basic b3BlbmNvZGU6/);
+  });
+
+  it("retries the beta server on a fresh port when the first launch exits before readiness", async () => {
+    const root = fixtureRoot("early-exit");
+    const binaryPath = join(root, "opencode-retry-fixture");
+    const invocationPath = join(root, ".fake-opencode-invocations");
+    writeFileSync(
+      binaryPath,
+      `#!/bin/sh
+cd '${root}'
+n=$(cat '${invocationPath}' 2>/dev/null || echo 0)
+n=$((n+1))
+echo "$n" > '${invocationPath}'
+if [ "$1" = "--version" ]; then exec env OCTANT_FAKE_OPENCODE_MODE=probe-v2 '${fakeCliPath}' "$@"; fi
+if [ "$n" -le 2 ]; then exec env OCTANT_FAKE_OPENCODE_MODE=early-exit '${fakeCliPath}' "$@"; fi
+exec env OCTANT_FAKE_OPENCODE_MODE=v2-ready '${fakeCliPath}' "$@"
+`,
+    );
+    chmodSync(binaryPath, 0o755);
+
+    const reservedPorts: number[] = [];
+    const observed = await Effect.runPromise(
+      Effect.scoped(
+        makePort(
+          {},
+          {
+            reserveLoopbackPort: async () => {
+              const port = 44_100 + reservedPorts.length;
+              reservedPorts.push(port);
+              return port;
+            },
+          },
+        ).start({ binaryPath, cwd: root }),
+      ),
+    );
+
+    // The first launch lost its reserved port and exited; the second got a
+    // fresh reservation instead of reporting the provider unavailable.
+    expect(reservedPorts).toEqual([44_100, 44_101]);
+    expect(observed.runtime).toBe("beta");
   });
 
   it("does not expose managed-server authority to the provider session", async () => {

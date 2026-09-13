@@ -238,6 +238,30 @@ describe("autoRegisterPreferredCandidates", () => {
     );
   });
 
+  it("auto-registers OpenCode 2 when both OpenCode runtimes are discovered", async () => {
+    const { createFromDiscovery } = await autoRegister({
+      candidates: [
+        opencodeCandidate(),
+        makeCandidate({
+          driverKind: "opencode",
+          displayName: "OpenCode 2 preview",
+          binaryPath: "/Users/test/.local/bin/opencode2",
+          pathSummary: "~/.local/bin/opencode2",
+        }),
+      ],
+    });
+
+    expect(createFromDiscovery).toHaveBeenCalledTimes(1);
+    expect(createFromDiscovery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        driverKind: "opencode",
+        displayName: "OpenCode 2 preview",
+        binaryPath: "/Users/test/.local/bin/opencode2",
+      }),
+      { enabled: false },
+    );
+  });
+
   it("leaves a non-default detected runtime off on first run", async () => {
     const created: Array<{ driverKind: string; enabled: boolean }> = [];
     await autoRegister({

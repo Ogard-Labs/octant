@@ -54,8 +54,12 @@ if (process.argv.slice(2).join(" ") === "--version") {
 
 const selectedMode = mode();
 const v2 = selectedMode === "v2-ready";
+const requestedPort = Number(process.argv.at(-1));
 if (
-  process.argv.slice(2).join(" ") !== "serve --pure --hostname 127.0.0.1 --port 0" ||
+  process.argv.slice(2, -1).join(" ") !==
+    (v2 ? "serve --hostname 127.0.0.1 --port" : "serve --pure --hostname 127.0.0.1 --port") ||
+  !Number.isInteger(requestedPort) ||
+  (v2 ? requestedPort < 1 : requestedPort !== 0) ||
   process.env.OPENCODE_SERVER_USERNAME !== (v2 ? "opencode" : "octant") ||
   !process.env.OPENCODE_SERVER_PASSWORD
 ) {
@@ -89,7 +93,9 @@ if (selectedMode === "non-loopback") {
   const expectedAuthorization = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
   const server = Bun.serve({
     hostname: "127.0.0.1",
-    port: 0,
+    // Bun's listener rejects port 0 in this fixture runtime just as the
+    // OpenCode 2 server does, so exercise the explicit reserved-port argv.
+    port: v2 ? requestedPort : 0,
     fetch(request) {
       return request.headers.get("authorization") === expectedAuthorization
         ? new Response("ok")
