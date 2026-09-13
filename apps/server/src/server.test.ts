@@ -689,6 +689,143 @@ describe("startOctantServer", () => {
     expect(MAX_JSON_REQUEST_BODY_SIZE).toBe(1_048_576);
   });
 
+  it("lets a fresh local-session browser reach Navigator after workspace registration, and refuses a denied principal", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-server-navigator-local-session-"));
+    directories.push(directory);
+    const desktopSecret = `${"B".repeat(42)}A`;
+    const rendererOrigin = "http://127.0.0.1:5173";
+    let routeHandler: ((request: Request) => Response | Promise<Response>) | undefined;
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const server = yield* startOctantServer({
+            hostname: "127.0.0.1",
+            port: 0,
+            desktopBridgeSecret: desktopSecret,
+            serve: (options) => {
+              routeHandler = options.fetch;
+              return {
+                url: new URL("http://127.0.0.1:13773"),
+                stop: () => undefined,
+              };
+            },
+          });
+
+          const fetchRoute = (request: Request) =>
+            Effect.promise(() => Promise.resolve(routeHandler?.(request)).then(assertResponse));
+
+          const session = yield* fetchRoute(
+            new Request(new URL("/api/shell/local-session", server.url), {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                origin: rendererOrigin,
+              },
+              body: "{}",
+            }),
+          );
+          expect(session.status).toBe(200);
+          const authority = (yield* Effect.promise(() => session.json())) as {
+            readonly windowId: string;
+            readonly capability: string;
+            readonly authentication: string;
+          };
+          expect(authority.authentication).toBe("local-session");
+          const capabilityHeaders = {
+            origin: rendererOrigin,
+            "x-octant-window-capability": authority.capability,
+          };
+
+          const unauthenticated = yield* fetchRoute(
+            new Request(new URL("/api/navigator-assistant/snapshot", server.url), {
+              headers: { origin: rendererOrigin },
+            }),
+          );
+          expect(unauthenticated.status).toBe(401);
+
+          const remote = yield* fetchRoute(
+            new Request("http://10.0.0.1:13773/api/navigator-assistant/snapshot", {
+              headers: capabilityHeaders,
+            }),
+          );
+          expect(remote.status).toBe(400);
+
+          const beforeBootstrap = yield* fetchRoute(
+            new Request(new URL("/api/navigator-assistant/snapshot", server.url), {
+              headers: capabilityHeaders,
+            }),
+          );
+          expect(beforeBootstrap.status).toBe(403);
+          expect(yield* Effect.promise(() => beforeBootstrap.json())).toMatchObject({
+            error: "Navigator is not authorized for this window.",
+          });
+
+          const bootstrap = yield* fetchRoute(
+            new Request(new URL("/api/shell/bootstrap", server.url), {
+              method: "POST",
+              headers: capabilityHeaders,
+            }),
+          );
+          expect(bootstrap.status).toBe(200);
+          expect(yield* Effect.promise(() => bootstrap.json())).toMatchObject({
+            connectionStatus: "connected",
+            workspaceVersion: 0,
+          });
+
+          const live = yield* fetchRoute(
+            new Request(new URL("/api/navigator-assistant/snapshot", server.url), {
+              headers: capabilityHeaders,
+            }),
+          );
+          expect(live.status).toBe(200);
+          expect(yield* Effect.promise(() => live.json())).toMatchObject({
+            status: "unconfigured",
+          });
+
+          const deniedSession = yield* fetchRoute(
+            new Request(new URL("/api/shell/local-session", server.url), {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                origin: rendererOrigin,
+              },
+              body: "{}",
+            }),
+          );
+          expect(deniedSession.status).toBe(200);
+          const denied = (yield* Effect.promise(() => deniedSession.json())) as {
+            readonly capability: string;
+          };
+          const deniedSnapshot = yield* fetchRoute(
+            new Request(new URL("/api/navigator-assistant/snapshot", server.url), {
+              headers: {
+                origin: rendererOrigin,
+                "x-octant-window-capability": denied.capability,
+              },
+            }),
+          );
+          expect(deniedSnapshot.status).toBe(403);
+
+          const revoked = yield* fetchRoute(
+            new Request(new URL("/api/desktop/window-authorities", server.url), {
+              method: "DELETE",
+              headers: { "x-octant-desktop-secret": desktopSecret },
+              body: JSON.stringify({ windowId: authority.windowId }),
+            }),
+          );
+          expect(revoked.status).toBe(204);
+          const stale = yield* fetchRoute(
+            new Request(new URL("/api/navigator-assistant/snapshot", server.url), {
+              headers: capabilityHeaders,
+            }),
+          );
+          expect(stale.status).toBe(401);
+        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
+      ),
+    );
+  });
+
   it("keeps JSON route handlers on the 1 MiB ceiling while transport allows attachments", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-server-json-limit-"));
     directories.push(directory);

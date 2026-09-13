@@ -45,10 +45,13 @@ describe("ShellService", () => {
     });
 
     expect(service.readBootstrap(ids.window)).toBeUndefined();
+    expect(service.hasLiveWindow(ids.window)).toBe(false);
     service.bootstrap(ids.window);
     expect(service.readBootstrap(ids.window)).toMatchObject({ connectionStatus: "connected" });
+    expect(service.hasLiveWindow(ids.window)).toBe(true);
     service.revokeWindow(ids.window);
     expect(service.readBootstrap(ids.window)).toBeUndefined();
+    expect(service.hasLiveWindow(ids.window)).toBe(false);
   });
 
   it("requires an active matching Project before appending a Project surface", () => {

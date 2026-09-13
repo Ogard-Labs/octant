@@ -1162,7 +1162,9 @@ function LaunchedShell(
   // One Navigator reader for the whole window: the dock panel and Zen's
   // assistant are two fronts on it, so a turn sent from either is immediately
   // on screen in both.
-  const navigatorAssistant = useNavigatorAssistant(navigatorAssistantClient);
+  const navigatorAssistant = useNavigatorAssistant(navigatorAssistantClient, {
+    enabled: controller.status === "ready",
+  });
   const chatReadCursorStore = useMemo(() => createChatReadCursorStore(), []);
   // Skills this host reports as installed and effective. They become the
   // Skills group of the `/` composer affordance; an unreachable extension

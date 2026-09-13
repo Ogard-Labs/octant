@@ -32,6 +32,16 @@ export interface NavigatorAssistantController {
   readonly refresh: () => Promise<void>;
 }
 
+export interface UseNavigatorAssistantOptions {
+  /**
+   * The window is a live workspace of this host. Snapshotting before that
+   * registration is 403, not 401: the capability already authenticates, but
+   * the host has not yet admitted the window. Wait rather than treating the
+   * first connect as a denied principal.
+   */
+  readonly enabled?: boolean;
+}
+
 /**
  * The controller for a surface that was given no Navigator at all. It reports
  * `unsupported` and does nothing, so a front rendered without one says so
@@ -56,7 +66,9 @@ export const UNSUPPORTED_NAVIGATOR_ASSISTANT: NavigatorAssistantController = {
  */
 export function useNavigatorAssistant(
   client: NavigatorAssistantClient | undefined,
+  options?: UseNavigatorAssistantOptions,
 ): NavigatorAssistantController {
+  const enabled = options?.enabled !== false;
   const [state, setState] = useState<NavigatorAssistantState>(
     client === undefined ? { kind: "unsupported" } : { kind: "loading" },
   );
@@ -75,6 +87,10 @@ export function useNavigatorAssistant(
       setState({ kind: "unsupported" });
       return;
     }
+    if (!enabled) {
+      setState({ kind: "loading" });
+      return;
+    }
     try {
       const snapshot = await client.snapshot();
       if (!mounted.current) return;
@@ -87,7 +103,7 @@ export function useNavigatorAssistant(
       if (!mounted.current) return;
       setState(failureState(error));
     }
-  }, [client]);
+  }, [client, enabled]);
 
   useEffect(() => {
     void read();
@@ -95,7 +111,7 @@ export function useNavigatorAssistant(
 
   const send = useCallback(
     async (prompt: string) => {
-      if (client === undefined) return;
+      if (client === undefined || !enabled) return;
       setBusy(true);
       try {
         const result = await client.execute({ kind: "send-message", prompt });
@@ -111,7 +127,7 @@ export function useNavigatorAssistant(
         if (mounted.current) setBusy(false);
       }
     },
-    [client],
+    [client, enabled],
   );
 
   return { state, busy, send, refresh: read };
