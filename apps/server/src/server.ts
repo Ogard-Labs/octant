@@ -5626,8 +5626,11 @@ export function startOctantServer(
       // authorize; what must be proven is that the authenticated window is a
       // live workspace of this host. A capability whose window the host no
       // longer tracks cannot open the conversation or spend a provider turn.
-      authorizeWindow: ({ windowId }) =>
-        persistence.readWindowWorkspace(windowId)?.workspace !== undefined,
+      // Fresh local-session browsers mint a new window id and POST bootstrap
+      // with workspaceVersion 0, so the durable projection is empty until a
+      // later layout command. Treating that empty row as 403 refused every
+      // first renderer connect after launch even though the window was live.
+      authorizeWindow: ({ windowId }) => shellService.hasLiveWindow(windowId),
     });
     const zenBackgroundRoutes = createZenBackgroundRouteHandler({
       store: new ZenBackgroundStore({ dataDirectory: providerDataDirectory }),

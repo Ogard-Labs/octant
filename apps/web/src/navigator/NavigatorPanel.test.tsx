@@ -21,9 +21,13 @@ afterEach(cleanup);
  */
 function Harness(props: {
   readonly client?: NavigatorAssistantClient;
+  readonly enabled?: boolean;
   readonly onOpenSettings?: (target: { readonly section: string }) => void;
 }) {
-  const controller = useNavigatorAssistant(props.client);
+  const controller = useNavigatorAssistant(
+    props.client,
+    props.enabled === undefined ? undefined : { enabled: props.enabled },
+  );
   return (
     <NavigatorPanel controller={controller} onOpenSettings={props.onOpenSettings ?? (() => {})} />
   );
@@ -146,6 +150,38 @@ describe("NavigatorPanel", () => {
 
     expect(await screen.findByText("Navigator has no default model")).toBeVisible();
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("waits to read Navigator until the window is a live workspace", async () => {
+    const snapshotFn = vi.fn(async () => snapshot());
+    const navigator = client({});
+    navigator.snapshot = snapshotFn;
+    const { rerender } = render(<Harness client={navigator} enabled={false} />);
+
+    expect(await screen.findByText("Reading Navigator readiness…")).toBeVisible();
+    expect(snapshotFn).not.toHaveBeenCalled();
+
+    rerender(<Harness client={navigator} enabled={true} />);
+    expect(await screen.findByText("Running on model-a")).toBeVisible();
+    expect(snapshotFn).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a live window's 403 as unauthorized rather than hiding it", async () => {
+    render(
+      <Harness
+        enabled={true}
+        client={client({
+          snapshotError: new NavigatorAssistantClientFailure(
+            "Navigator is not authorized for this window.",
+            403,
+          ),
+        })}
+      />,
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Navigator is unavailable");
+    expect(alert).toHaveTextContent("Navigator is not authorized for this window.");
   });
 
   it("renders an unavailable host distinctly from an empty conversation", async () => {

@@ -53,6 +53,13 @@ export const OCTANT_LOCAL_ACTOR_ID = decodeActorId("00000000-0000-4000-8000-0000
 export interface ShellServiceApi {
   readonly bootstrap: (windowId: WindowId) => ShellBootstrap;
   readonly readBootstrap: (windowId: WindowId) => ShellBootstrap | undefined;
+  /**
+   * Whether this window POSTed bootstrap in the current server session.
+   * A window capability can still authenticate after the host has stopped
+   * tracking the workspace; host-owned surfaces must not treat a durable
+   * layout row as that live proof.
+   */
+  readonly hasLiveWindow: (windowId: WindowId) => boolean;
   readonly revokeWindow: (windowId: WindowId) => void;
   readonly execute: (command: unknown) => ShellCommandResult;
 }
@@ -99,6 +106,10 @@ export class ShellService implements ShellServiceApi {
   readBootstrap(windowId: WindowId): ShellBootstrap | undefined {
     if (!this.#registeredWindowIds.has(windowId)) return undefined;
     return this.#readBootstrap(windowId);
+  }
+
+  hasLiveWindow(windowId: WindowId): boolean {
+    return this.#registeredWindowIds.has(windowId);
   }
 
   revokeWindow(windowId: WindowId): void {

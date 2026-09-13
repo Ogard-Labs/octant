@@ -499,6 +499,13 @@ function serviceStub(failure?: ConstructorParameters<typeof ShellServiceError>[0
     version: 1 as never,
   }));
   const readBootstrap = vi.fn(makeBootstrap);
+  const hasLiveWindow = vi.fn(() => true);
   const revokeWindow = vi.fn();
-  return { bootstrap, readBootstrap, execute, revokeWindow } satisfies ShellServiceApi;
+  return {
+    bootstrap,
+    readBootstrap,
+    hasLiveWindow,
+    execute,
+    revokeWindow,
+  } satisfies ShellServiceApi;
 }
