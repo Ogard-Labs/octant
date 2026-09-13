@@ -1286,7 +1286,7 @@ function diagnosticsFor(
     diagnostics.push({
       severity: match[4] as "error" | "warning" | "note",
       location: `${match[1]}:${match[2]}:${match[3]}`.slice(0, 512),
-      message: match[5]!.slice(0, MAX_DIAGNOSTIC_LENGTH),
+      message: (match[5] ?? "").slice(0, MAX_DIAGNOSTIC_LENGTH),
     });
     if (diagnostics.length >= MAX_DIAGNOSTICS) break;
   }

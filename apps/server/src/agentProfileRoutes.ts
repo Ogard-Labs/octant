@@ -97,9 +97,8 @@ export function createAgentProfileRouteHandler(dependencies: AgentProfileRouteDe
       body = read.value;
     }
 
-    let windowId;
     try {
-      windowId = authenticateProjectRequest({
+      authenticateProjectRequest({
         request,
         body,
         store: dependencies.windowAuthorityStore,

@@ -80,7 +80,7 @@ export function createComputerUseControlHost(options: {
     if (session === undefined || !sameOwner(session.owner, owner)) return;
     session.abort.abort();
     clearTimeout(session.timer);
-    await Promise.allSettled([...session.pending]);
+    await Promise.allSettled(session.pending);
     try {
       await options.endSession?.(session.id);
     } catch {

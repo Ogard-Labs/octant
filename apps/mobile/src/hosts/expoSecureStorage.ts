@@ -86,7 +86,6 @@ export function createExpoSecureStringStorage(
   }
 
   // Native Expo / React Native (no document, no Node).
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const SecureStore = require("expo-secure-store") as typeof import("expo-secure-store");
   return {
     async getItem(key) {

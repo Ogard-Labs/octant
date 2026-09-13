@@ -1,12 +1,6 @@
 import { Schema } from "effect";
 import { AgentRunAuthority } from "./agentRun";
-import {
-  CanvasActor,
-  CanvasId,
-  CanvasSchemaVersion,
-  CanvasVersion,
-  CanvasVersionId,
-} from "./canvas";
+import { CanvasActor, CanvasId, CanvasSchemaVersion, CanvasVersionId } from "./canvas";
 import {
   CANVAS_CREATE_PROMPT_MAX_CHARS,
   CanvasCardSchemaVersion,

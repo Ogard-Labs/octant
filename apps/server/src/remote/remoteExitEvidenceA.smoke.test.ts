@@ -350,7 +350,7 @@ interface TrustedCaKeychain {
 function parseKeychainPaths(output: string): string[] {
   return output
     .split("\n")
-    .map((line) => line.trim().replace(/^\"(.*)\"$/, "$1"))
+    .map((line) => line.trim().replace(/^"(.*)"$/, "$1"))
     .filter((line) => line.length > 0);
 }
 

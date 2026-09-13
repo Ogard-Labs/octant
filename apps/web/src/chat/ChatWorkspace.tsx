@@ -1587,9 +1587,12 @@ function branchTitle(sourceTitle: string): string {
 
 function latestActiveAttempt(view: ChatThreadView): ChatAttempt | undefined {
   for (let turnIndex = view.turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
-    const attempts = view.turns[turnIndex]!.attempts;
+    const turn = view.turns[turnIndex];
+    if (turn === undefined) continue;
+    const attempts = turn.attempts;
     for (let attemptIndex = attempts.length - 1; attemptIndex >= 0; attemptIndex -= 1) {
-      const attempt = attempts[attemptIndex]!;
+      const attempt = attempts[attemptIndex];
+      if (attempt === undefined) continue;
       if (attempt.outcome === "queued" || attempt.outcome === "streaming") return attempt;
     }
   }
@@ -1598,7 +1601,9 @@ function latestActiveAttempt(view: ChatThreadView): ChatAttempt | undefined {
 
 function latestAttempt(view: ChatThreadView): ChatAttempt | undefined {
   for (let turnIndex = view.turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
-    const attempts = view.turns[turnIndex]!.attempts;
+    const turn = view.turns[turnIndex];
+    if (turn === undefined) continue;
+    const attempts = turn.attempts;
     const attempt = attempts[attempts.length - 1];
     if (attempt !== undefined) return attempt;
   }

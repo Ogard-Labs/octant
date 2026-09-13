@@ -985,7 +985,6 @@ let computerUseBroker: ComputerUseBroker | undefined;
 let computerUseService: ComputerUseDesktopService | undefined;
 let browserSurfaceHost: ReturnTypeOfBrowserSurfaceHost | undefined;
 let appUpdateService: ReturnType<typeof createAppUpdateService> | undefined;
-let credentialBackend: DesktopCredentialBackend | undefined;
 let credentialBackendPromise: Promise<DesktopCredentialBackend> | undefined;
 let desktopBridgeSecret =
   readStoredDesktopBridgeSecret(desktopDataDirectory) ?? generateProjectBridgeToken(randomBytes);
@@ -1376,7 +1375,6 @@ function getCredentialBackend(): Promise<DesktopCredentialBackend> {
     }),
     storeScope: desktopHostId,
   }).then((backend) => {
-    credentialBackend = backend;
     return backend;
   });
   return credentialBackendPromise;

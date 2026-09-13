@@ -293,25 +293,6 @@ async function ensurePrivateMountedDirectory(
   }
 }
 
-async function ensurePrivateDirectory(
-  path: string,
-  expectedUid: number,
-  create: boolean,
-): Promise<void> {
-  if (create) await mkdir(path, { recursive: true, mode: 0o700 });
-  const metadata = await lstat(path);
-  if (
-    metadata.isSymbolicLink() ||
-    !metadata.isDirectory() ||
-    metadata.uid !== expectedUid ||
-    (metadata.mode & 0o077) !== 0
-  ) {
-    throw new Error(
-      `Execution capsule disk directory is not owner-only: ${path} uid=${String(metadata.uid)} mode=${(metadata.mode & 0o777).toString(8)}.`,
-    );
-  }
-}
-
 async function ensureProtectedPathDirectory(
   path: string,
   expectedUid: number,

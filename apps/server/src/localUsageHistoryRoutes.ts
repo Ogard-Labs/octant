@@ -78,7 +78,7 @@ export function createLocalUsageHistoryRouteHandler(
         signal: request.signal,
       });
       return json(response, 200, origin);
-    } catch (error) {
+    } catch {
       if (request.signal.aborted)
         return new Response(null, { status: 499, headers: corsHeaders(origin) });
       return failure("Usage history is unavailable.", 503, origin);

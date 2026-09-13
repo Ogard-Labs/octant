@@ -2,7 +2,6 @@ import type {
   ValidationEvidenceRecord,
   ValidationOutcome,
   ValidationPlan,
-  ValidationReport,
   ToolActionAuthority,
 } from "@octant/contracts";
 import { sameToolActionAuthority } from "@octant/contracts";

@@ -1128,7 +1128,7 @@ function activeFilterLabels(
   if (filters.checks !== "any") {
     active.push({
       kind: "checks",
-      label: `${filters.checks[0]!.toUpperCase()}${filters.checks.slice(1)} checks`,
+      label: `${filters.checks.charAt(0).toUpperCase()}${filters.checks.slice(1)} checks`,
     });
   }
   if (filters.followUp !== "any") {

@@ -545,7 +545,7 @@ export class ContextHarnessService {
         // conversation from every later turn behind a summary nothing can
         // produce, so the material is reported as uncompacted instead and the
         // caller sends the real messages again.
-        for (const [sourceKey, id] of [...summarizedSourceKeys]) {
+        for (const [sourceKey, id] of Array.from(summarizedSourceKeys)) {
           if (id === summaryId) summarizedSourceKeys.delete(sourceKey);
         }
         return [];

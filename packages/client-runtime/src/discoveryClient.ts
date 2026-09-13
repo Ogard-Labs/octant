@@ -1,6 +1,5 @@
 import {
   decodeDiscoveryCommandResult,
-  decodeDiscoverySnapshot,
   type DiscoveryCommand,
   type DiscoveryCommandResult,
   type DiscoverySnapshot,

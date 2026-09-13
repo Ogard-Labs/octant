@@ -101,7 +101,7 @@ export function managedCloneEnvironment(
 function isSafeSessionBusAddress(value: string | undefined): value is string {
   return (
     value !== undefined &&
-    /^unix:(?:path|abstract)=[A-Za-z0-9_./:=@+\-]+(?:,guid=[A-Za-z0-9._=\-]+)?$/.test(value)
+    /^unix:(?:path|abstract)=[A-Za-z0-9_./:=@+-]+(?:,guid=[A-Za-z0-9._=-]+)?$/.test(value)
   );
 }
 

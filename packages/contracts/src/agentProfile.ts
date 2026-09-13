@@ -1,7 +1,6 @@
 import { Schema } from "effect";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
-import { ProjectId } from "./projects";
 import {
   PermissionPersistence,
   ProviderExecutionPolicy,

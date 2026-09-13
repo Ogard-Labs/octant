@@ -284,7 +284,7 @@ async function readAliasTargets(
   const targets = new Map<string, string>();
   const conflicting = new Set<string>();
   if (home === undefined || !isAbsolute(home) || fs.readFile === undefined) return targets;
-  if (/[`$(){}|;&<>!#*?[\\]'\"]/.test(home)) return targets;
+  if (/[`$(){}|;&<>!#*?[\\]'"]/.test(home)) return targets;
 
   for (const file of aliasFilesForShell(shell)) {
     let result: DiscoveryTextRead;
@@ -303,7 +303,7 @@ async function readAliasTargets(
       const rawValue = match[2];
       if (name === undefined || rawValue === undefined) continue;
       const target = unwrapAliasValue(rawValue);
-      if (target === undefined || /\s|[`$(){}|;&<>!#*?[\\]'\"]/.test(target)) continue;
+      if (target === undefined || /\s|[`$(){}|;&<>!#*?[\\]'"]/.test(target)) continue;
       if (conflicting.has(name)) continue;
       if (isAbsolute(target)) {
         setAliasTarget(targets, conflicting, name, target);

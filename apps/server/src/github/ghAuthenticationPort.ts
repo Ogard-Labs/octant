@@ -241,7 +241,9 @@ export class GhAuthenticationPort {
     const observation = await this.observe(signal);
     if (observation.kind !== "observed" || observation.accounts.length !== 1)
       throw new Error("github-authentication-unavailable");
-    return observation.accounts[0]!.login;
+    const [account] = observation.accounts;
+    if (account === undefined) throw new Error("github-authentication-unavailable");
+    return account.login;
   }
 
   #releaseLifecycle(): void {
@@ -427,7 +429,7 @@ export function sanitizedEnvironment(inherited: NodeJS.ProcessEnv): NodeJS.Proce
 function isSafeSessionBusAddress(value: string | undefined): value is string {
   return (
     value !== undefined &&
-    /^unix:(?:path|abstract)=[A-Za-z0-9_./:=@+\-]+(?:,guid=[A-Za-z0-9._=\-]+)?$/.test(value)
+    /^unix:(?:path|abstract)=[A-Za-z0-9_./:=@+-]+(?:,guid=[A-Za-z0-9._=-]+)?$/.test(value)
   );
 }
 
@@ -649,7 +651,7 @@ export function extractDeviceFlowCode(output: string): string | undefined {
   if (Buffer.byteLength(output, "utf8") > MAX_OUTPUT_BYTES) return undefined;
   const match =
     /(?:your\s+)?(?:one-time|device)(?:\s+your)?\s+code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})/i.exec(output);
-  return match === null ? undefined : match[1]!.toUpperCase();
+  return match?.[1]?.toUpperCase();
 }
 
 function createGhSecureStoragePort(): GhSecureStoragePort {

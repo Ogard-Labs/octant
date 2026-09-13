@@ -73,7 +73,6 @@ export class AutomationNotificationDeliveryService {
   readonly #tokens: AutomationNotificationDeliveryServiceOptions["tokens"];
   readonly #transport: PushDeliveryTransport;
   readonly #clock: () => UtcTimestamp;
-  readonly #uuid: () => string;
   readonly #recordRunNotificationRef:
     | AutomationNotificationDeliveryServiceOptions["recordRunNotificationRef"]
     | undefined;
@@ -90,7 +89,6 @@ export class AutomationNotificationDeliveryService {
     this.#tokens = options.tokens;
     this.#transport = options.transport;
     this.#clock = options.clock;
-    this.#uuid = options.uuid ?? (() => deterministicAutomationUuid(`notif:${Date.now()}`));
     this.#recordRunNotificationRef = options.recordRunNotificationRef;
     this.#resolveAutomationProjectId = options.resolveAutomationProjectId;
   }

@@ -127,7 +127,6 @@ export class AgentProfileService implements AgentProfileServiceApi {
 
       const profileById = new Map(profiles.map((p) => [String(p.id), p]));
       const providerIds = providers.filter((p) => p.enabled).map((p) => p.id);
-      const catalogByInstance = new Map(catalogs.map((c) => [String(c.instanceId), c]));
 
       const oneOffProfile = request.oneOffOverride
         ? profileById.get(String(request.oneOffOverride.profileId))

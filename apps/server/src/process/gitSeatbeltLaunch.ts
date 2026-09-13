@@ -136,7 +136,9 @@ export function gitConfigIncludePaths(
     if (!inInclude) continue;
     const match = /^path\s*=\s*(.+?)\s*$/i.exec(line);
     if (match === null) continue;
-    const value = match[1]!.replace(/^"(.*)"$/, "$1");
+    const rawValue = match[1];
+    if (rawValue === undefined) continue;
+    const value = rawValue.replace(/^"(.*)"$/, "$1");
     if (value === "") continue;
     const expanded = value.startsWith("~/") ? join(home, value.slice(2)) : value;
     paths.push(isAbsolute(expanded) ? expanded : join(configDirectory, expanded));

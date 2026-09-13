@@ -1,8 +1,5 @@
 import type { AgentRunCenterSummary } from "@octant/contracts";
-import {
-  AgentRunClientFailure,
-  type AgentRunClient,
-} from "@octant/client-runtime/agent-run-client";
+import { type AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import {

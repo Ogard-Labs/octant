@@ -259,6 +259,7 @@ export function buildCatalogs(
   const entries: CapabilityCatalogEntry[] = [];
   const plugins = effectiveSnapshot.packages.flatMap((packageState) => {
     if (packageState.slug === undefined) return [];
+    const [onlyComponent] = packageState.components;
     return [
       {
         extensionId: packageState.extensionId,
@@ -266,8 +267,8 @@ export function buildCatalogs(
         slug: packageState.slug,
         packageVersion: packageState.version,
         packageDigest: packageState.digest,
-        ...(packageState.components.length === 1
-          ? { primaryComponentId: packageState.components[0]!.component.id }
+        ...(packageState.components.length === 1 && onlyComponent !== undefined
+          ? { primaryComponentId: onlyComponent.component.id }
           : {}),
         components: packageState.components.map((componentState) => {
           const componentKind = capabilityKind(componentState.component);

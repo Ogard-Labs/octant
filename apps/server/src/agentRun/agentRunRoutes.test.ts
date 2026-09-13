@@ -1157,9 +1157,9 @@ describe("agentRunRoutes", () => {
 
   it("refuses a child asking for parent context this host cannot resolve", async () => {
     for (const parentContext of [undefined, { resolve: () => undefined }]) {
-      const { handler, token } = createHandler({
-        ...(parentContext === undefined ? {} : { parentContext }),
-      });
+      const { handler, token } = createHandler(
+        parentContext === undefined ? {} : { parentContext },
+      );
       const response = await handler(
         new Request("http://127.0.0.1/api/agent-runs/request", {
           method: "POST",

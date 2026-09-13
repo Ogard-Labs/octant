@@ -21,7 +21,6 @@ import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
 
 // Canvas wire contracts are deliberately versioned independently from event
 // envelopes. A decoder must reject a future version until its renderer and

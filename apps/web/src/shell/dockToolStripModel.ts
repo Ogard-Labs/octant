@@ -20,7 +20,7 @@ export function partitionDockTools<T extends { readonly id: string }>(
   const visible =
     active === undefined
       ? visibleRest
-      : [...tools.filter((tool) => visibleRest.includes(tool) || tool === active)];
+      : tools.filter((tool) => visibleRest.includes(tool) || tool === active);
   const overflow = tools.filter((tool) => !visible.includes(tool));
   return { visible, overflow };
 }

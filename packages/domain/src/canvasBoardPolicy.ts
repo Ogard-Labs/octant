@@ -18,7 +18,6 @@ import {
   CanvasCommentOrigin,
   CanvasCommentReplied,
   CanvasCommentReply,
-  CanvasCommentReplyCommand,
   CanvasCommentResolved,
   CanvasDiagramLayoutReviseCommand,
   CanvasDiagramNodePosition,
@@ -58,10 +57,6 @@ function reject(code: CanvasBoardRejectionCode, message: string): CanvasBoardRej
 
 function isUserOrAgent(actor: { readonly kind: string }): boolean {
   return actor.kind === "local-user" || actor.kind === "agent";
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0;
 }
 
 // ── Comments ───────────────────────────────────────────────────────────────────

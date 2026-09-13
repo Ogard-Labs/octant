@@ -427,7 +427,7 @@ async function handleControlLine(
   if (request.type === "diagnostics") {
     try {
       const payload = await onControlRequest?.({ type: "diagnostics", principal: "local" });
-      respond(socket, { ok: true, ...(payload ?? {}) });
+      respond(socket, { ok: true, ...payload });
     } catch {
       respond(socket, { ok: false, error: "handler-failed" });
     }
@@ -454,7 +454,7 @@ async function handleControlLine(
         ...(request.limit === undefined ? {} : { limit: request.limit }),
         ...(request.follow === undefined ? {} : { follow: request.follow }),
       });
-      respond(socket, { ok: true, ...(payload ?? {}) });
+      respond(socket, { ok: true, ...payload });
     } catch {
       respond(socket, { ok: false, error: "handler-failed" });
     }

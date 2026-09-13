@@ -413,11 +413,11 @@ export class AgentRunEventStore {
       if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
     }
 
+    const lastEvent = events.at(-1);
     return {
       status: "ok",
       events,
-      nextCursor:
-        events.length === 0 ? input.afterVersion : events[events.length - 1]!.aggregateVersion,
+      nextCursor: lastEvent === undefined ? input.afterVersion : lastEvent.aggregateVersion,
     };
   }
 
@@ -445,10 +445,11 @@ export class AgentRunEventStore {
       }
       if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
     }
+    const lastEvent = events.at(-1);
     return {
       status: "ok",
       events,
-      nextCursor: events.length === 0 ? 0 : events[events.length - 1]!.aggregateVersion,
+      nextCursor: lastEvent === undefined ? 0 : lastEvent.aggregateVersion,
     };
   }
 

@@ -11,7 +11,6 @@ import { deriveManagedWorktreeCheckoutId } from "../code/managedCodeThreadCreati
 import type { ManagedWorktreeReceipt } from "../code/managedWorktreeReceiptStore";
 import type { ManagedWorktreeService } from "../code/managedWorktreeService";
 import type {
-  AgentRunChildWorktreeConfirmResult,
   AgentRunChildWorktreePort,
   AgentRunChildWorktreePrepareInput,
   AgentRunChildWorktreePrepareResult,

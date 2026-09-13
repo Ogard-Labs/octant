@@ -22,7 +22,6 @@ import type {
   ProviderModelId,
   ProviderModelOption,
   ProviderModelOptionValues,
-  ProviderResumeCursor,
   ProviderSessionId,
 } from "@octant/contracts/providers";
 

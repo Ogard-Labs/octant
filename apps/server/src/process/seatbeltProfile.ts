@@ -267,7 +267,8 @@ function shebangInterpreter(
     return undefined;
   }
   if (!header.startsWith("#!")) return undefined;
-  const [command, ...rest] = header.slice(2).split(/\r?\n/, 1)[0]!.trim().split(/\s+/);
+  const [firstLine = ""] = header.slice(2).split(/\r?\n/, 1);
+  const [command, ...rest] = firstLine.trim().split(/\s+/);
   if (command === undefined || !isAbsolute(command)) return undefined;
   if (basename(command) !== "env") return { command };
   const program = envInterpreterOperand(rest);

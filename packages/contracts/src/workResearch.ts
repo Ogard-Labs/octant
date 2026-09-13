@@ -156,7 +156,7 @@ export type WorkResearchSourcePolicy = typeof WorkResearchSourcePolicy.Type;
  */
 const WorkResearchQuestion = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(2_000),
-  Schema.filter((value) => !/[\\/]/.test(value) && !/(?:^|\s|[(\[{<])(file|https?):/i.test(value)),
+  Schema.filter((value) => !/[\\/]/.test(value) && !/(?:^|\s|[([{<])(file|https?):/i.test(value)),
 );
 
 /**
@@ -164,7 +164,7 @@ const WorkResearchQuestion = Schema.NonEmptyTrimmedString.pipe(
  */
 const WorkResearchNote = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(4_000),
-  Schema.filter((value) => !/[\\/]/.test(value) && !/(?:^|\s|[(\[{<])(file|https?):/i.test(value)),
+  Schema.filter((value) => !/[\\/]/.test(value) && !/(?:^|\s|[([{<])(file|https?):/i.test(value)),
 );
 
 /**
@@ -237,7 +237,7 @@ export type WorkResearchEvidence = typeof WorkResearchEvidence.Type;
  */
 const WorkResearchClaimText = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(8_000),
-  Schema.filter((value) => !/[\\/]/.test(value) && !/(?:^|\s|[(\[{<])(file|https?):/i.test(value)),
+  Schema.filter((value) => !/[\\/]/.test(value) && !/(?:^|\s|[([{<])(file|https?):/i.test(value)),
 );
 
 export const WorkResearchClaim = Schema.Struct({

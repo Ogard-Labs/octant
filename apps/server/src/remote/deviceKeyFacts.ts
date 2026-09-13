@@ -28,7 +28,7 @@ export function canonicalDeviceKeyFacts(publicKey: string): CanonicalDeviceKeyFa
   }
   const envelope = SPKI_PEM_PATTERN.exec(publicKey.trim());
   if (envelope === null) return undefined;
-  const body = envelope[1]!.replace(/\s+/g, "");
+  const body = (envelope[1] ?? "").replace(/\s+/g, "");
   if (body.length === 0 || !BASE64_BODY_PATTERN.test(body)) return undefined;
   try {
     const key = createPublicKey(`-----BEGIN PUBLIC KEY-----\n${body}\n-----END PUBLIC KEY-----\n`);

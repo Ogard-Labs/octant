@@ -24,7 +24,9 @@ export function createTabActivationRegistry(): TabActivationRegistry {
     noteActivated: (tabId) => {
       if (activated.has(tabId)) return;
       activated.add(tabId);
-      for (const listener of [...listeners]) listener();
+      // Snapshot the listeners: a React subscription can attach or detach
+      // while this dispatch is running, and that must not change this pass.
+      for (const listener of Array.from(listeners)) listener();
     },
     wasActivatedThisSession: (tabId) => activated.has(tabId),
     subscribe: (listener) => {

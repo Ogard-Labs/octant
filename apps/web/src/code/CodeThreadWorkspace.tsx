@@ -538,7 +538,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     );
   }
 
-  const { checkout, thread } = view;
+  const { thread } = view;
   const nextTurnAccess = clampTurnAccessPosture({
     thread: thread.executionPolicy,
     ...(turnAccessOverride === undefined ? {} : { requested: turnAccessOverride }),
@@ -1834,10 +1834,6 @@ function providerLimitLabel(limit: CodeController["threadUsage"]["limits"][numbe
     (part): part is string => part !== undefined,
   );
   return parts.join(" · ");
-}
-
-function formatUsd(cost: number): string {
-  return cost < 0.01 && cost > 0 ? "<$0.01" : `$${cost.toFixed(2)}`;
 }
 
 function waitingTurnLabel(requests: CodeController["providerRequests"]): string {

@@ -279,11 +279,12 @@ async function runPreview(
     if (operation !== generation.current) return;
 
     if (reply.kind === "chunks") {
-      if (reply.chunks.length === 0) {
+      const lastChunk = reply.chunks.at(-1);
+      if (lastChunk === undefined) {
         setModel({ ...openState, status: "ready" });
         return;
       }
-      afterSequence = reply.chunks[reply.chunks.length - 1]!.sequence + 1;
+      afterSequence = lastChunk.sequence + 1;
       const accumulated = [...openState.chunks, ...reply.chunks];
       const nextState: PreviewControllerModel = {
         ...openState,

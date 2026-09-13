@@ -139,6 +139,7 @@ export function normalizeCodexPluginPackage(
     input.source.kind === "catalog" &&
     input.source.catalogId === binding.catalogId &&
     input.source.entryId === binding.entryId;
+  const [onlyComponent] = components;
   const normalizedManifest = {
     manifestVersion: 1,
     extensionId: stableUuid(`extension:${name}`),
@@ -163,7 +164,9 @@ export function normalizeCodexPluginPackage(
       providerFamilies: [],
     },
     declaredCapabilities: [...packageCapabilities].sort(),
-    ...(components.length === 1 ? { primaryComponentId: components[0]!.id } : {}),
+    ...(components.length === 1 && onlyComponent !== undefined
+      ? { primaryComponentId: onlyComponent.id }
+      : {}),
     components: components.sort((left, right) => String(left.id).localeCompare(String(right.id))),
   };
 

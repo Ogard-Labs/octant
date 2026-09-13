@@ -44,7 +44,7 @@ const SECRET_KEY_PATTERN =
 const SECRET_VALUE_PATTERN =
   /(?:ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-proj-[A-Za-z0-9._-]{10,}|sk-[A-Za-z0-9]{10,}|AKIA[0-9A-Z]{16}|Basic\s+[A-Za-z0-9+/=]{12,}|Bearer\s+[A-Za-z0-9._~+/=-]{12,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/i;
 const FILE_PATH_PATTERN =
-  /(?:^|[\s"'`()\[\]{}<>|,;])(?:file:\/\/\/?[^\s"'`<>]+|\/(?:[A-Za-z0-9._-]+\/)+[A-Za-z0-9._-]+|\.\.(?:\/|\\)|[A-Za-z]:\\[^\s"'`<>]*)/i;
+  /(?:^|[\s"'`()[\]{}<>|,;])(?:file:\/\/\/?[^\s"'`<>]+|\/(?:[A-Za-z0-9._-]+\/)+[A-Za-z0-9._-]+|\.\.(?:\/|\\)|[A-Za-z]:\\[^\s"'`<>]*)/i;
 const CREDENTIAL_QUERY_KEY_PATTERN =
   /^(?:token|access_token|id_token|refresh_token|auth|authorization|signature|sig|x-amz-signature|x-amz-credential|x-amz-security-token|api[_-]?key|key|password|passwd|secret|session|code|jwt)$/i;
 

@@ -24,9 +24,9 @@ export function useWorkOverviewController(
   options: UseWorkOverviewControllerOptions,
 ): WorkOverviewController {
   const [model, setModel] = useState<WorkOverviewModel>(() =>
-    buildWorkOverviewModel({
-      ...(options.availability === undefined ? {} : { availability: options.availability }),
-    }),
+    buildWorkOverviewModel(
+      options.availability === undefined ? {} : { availability: options.availability },
+    ),
   );
   const [status, setStatus] = useState<WorkOverviewController["status"]>("idle");
   const [retryToken, setRetryToken] = useState(0);
@@ -37,9 +37,9 @@ export function useWorkOverviewController(
     if (!options.enabled || options.client === undefined || options.projectId === undefined) {
       setStatus("idle");
       setModel(
-        buildWorkOverviewModel({
-          ...(options.availability === undefined ? {} : { availability: options.availability }),
-        }),
+        buildWorkOverviewModel(
+          options.availability === undefined ? {} : { availability: options.availability },
+        ),
       );
       return;
     }

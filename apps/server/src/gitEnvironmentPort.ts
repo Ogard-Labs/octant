@@ -205,7 +205,9 @@ export class GitEnvironmentPort {
       if (worktreeEntries === undefined || worktreeEntries.length === 0)
         return { status: "failed" };
 
-      const repositoryRoot = await this.#dependencies.realpath(worktreeEntries[0]!.path);
+      const [firstWorktree] = worktreeEntries;
+      if (firstWorktree === undefined) return { status: "failed" };
+      const repositoryRoot = await this.#dependencies.realpath(firstWorktree.path);
       let worktreeRoot: string | undefined;
       for (const entry of worktreeEntries) {
         try {

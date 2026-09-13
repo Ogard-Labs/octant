@@ -626,7 +626,9 @@ async function sensitiveDocument(page: PlaywrightPagePort): Promise<boolean> {
       const sensitive = await frame.evaluate(() => {
         const roots: Array<Document | ShadowRoot> = [document];
         for (let index = 0; index < roots.length; index += 1) {
-          for (const element of roots[index]!.querySelectorAll("*")) {
+          const root = roots[index];
+          if (root === undefined) continue;
+          for (const element of root.querySelectorAll("*")) {
             if (element.shadowRoot !== null) roots.push(element.shadowRoot);
           }
         }

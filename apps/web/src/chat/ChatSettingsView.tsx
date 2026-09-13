@@ -93,7 +93,6 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
       : (draft.defaultProviderInstanceId as ProviderInstanceId);
   const selectedModelId =
     draft.defaultModelId === "" ? undefined : (draft.defaultModelId as ProviderModelId);
-  const hasSelection = selectedProviderInstanceId !== undefined && selectedModelId !== undefined;
 
   const busy = props.busy === true || saving;
 
