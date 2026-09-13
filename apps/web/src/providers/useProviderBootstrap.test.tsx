@@ -103,7 +103,7 @@ describe("useProviderBootstrap", () => {
       }),
     );
 
-    await waitFor(() => expect(probe).toHaveBeenCalledWith(instance.id));
+    await waitFor(() => expect(probe).toHaveBeenCalledWith(instance.id, { quiet: true }));
   });
 
   it("tries the next enabled provider when the preferred runtime probe fails", async () => {
@@ -162,8 +162,8 @@ describe("useProviderBootstrap", () => {
     );
 
     await waitFor(() => expect(probe).toHaveBeenCalledTimes(2));
-    expect(probe).toHaveBeenNthCalledWith(1, first.id);
-    expect(probe).toHaveBeenNthCalledWith(2, second.id);
+    expect(probe).toHaveBeenNthCalledWith(1, first.id, { quiet: true });
+    expect(probe).toHaveBeenNthCalledWith(2, second.id, { quiet: true });
     expect(providerController.setEnabled).not.toHaveBeenCalled();
     rerender({ renderKey: 1 });
     await Promise.resolve();
@@ -222,7 +222,7 @@ describe("useProviderBootstrap", () => {
     );
 
     await waitFor(() => expect(probe).toHaveBeenCalledTimes(2));
-    expect(probe).toHaveBeenNthCalledWith(1, first.id);
-    expect(probe).toHaveBeenNthCalledWith(2, second.id);
+    expect(probe).toHaveBeenNthCalledWith(1, first.id, { quiet: true });
+    expect(probe).toHaveBeenNthCalledWith(2, second.id, { quiet: true });
   });
 });

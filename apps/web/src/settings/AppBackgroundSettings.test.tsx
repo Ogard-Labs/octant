@@ -9,9 +9,11 @@ afterEach(cleanup);
 const PHOTO_ID = "00000000-0000-4000-8000-000000000b01";
 const UPLOADED_ID = "00000000-0000-4000-8000-000000000b02";
 const dials = {
+  patternEnabled: DEFAULT_APP_BACKGROUND.patternEnabled,
   patternOpacity: DEFAULT_APP_BACKGROUND.patternOpacity,
   patternSpeed: DEFAULT_APP_BACKGROUND.patternSpeed,
   patternIntensity: DEFAULT_APP_BACKGROUND.patternIntensity,
+  photoDithered: DEFAULT_APP_BACKGROUND.photoDithered,
   photoOpacity: DEFAULT_APP_BACKGROUND.photoOpacity,
   scope: DEFAULT_APP_BACKGROUND.scope,
   coversSidebar: DEFAULT_APP_BACKGROUND.coversSidebar,
@@ -193,6 +195,23 @@ describe("AppBackgroundSettings", () => {
       target: { value: "75" },
     });
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ photoOpacity: 75 }));
+  });
+
+  it("offers direct switches for a clean photo ground", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <AppBackgroundSettings
+        background={{ ...DEFAULT_APP_BACKGROUND, kind: "photo", backgroundId: PHOTO_ID as never }}
+        library={library()}
+        onChange={onChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("switch", { name: "Show pattern" }));
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ patternEnabled: false }));
+    await user.click(screen.getByRole("switch", { name: "Dither photo" }));
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ photoDithered: false }));
   });
 
   it("offers the sidebar only once the ground is behind everything", async () => {

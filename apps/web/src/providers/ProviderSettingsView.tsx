@@ -60,6 +60,8 @@ export interface ProviderSettingsViewProps {
   readonly busy: boolean;
   readonly credentialManagementAvailable: boolean;
   readonly message?: string;
+  /** Open provider-owned sign-in pages through the desktop host bridge. */
+  readonly onOpenExternalUrl?: (url: string) => void;
   readonly onCreate: (
     driverKind:
       | "opencode"
@@ -255,13 +257,17 @@ export interface ProviderSettingsViewProps {
     instanceId: ProviderInstanceId,
     attemptId: ProviderAuthenticationAttempt["attemptId"],
   ) => Promise<boolean>;
+  readonly onUpdateProviderCli?: (instanceId: ProviderInstanceId) => Promise<boolean>;
   readonly onProviderCredentialStatus: (
     instanceId: ProviderInstanceId,
   ) => Promise<ProviderCredentialStatus>;
   readonly onClearProviderCredential: (instanceId: ProviderInstanceId) => Promise<boolean>;
   readonly onSetEnabled: (instanceId: ProviderInstanceId, enabled: boolean) => Promise<boolean>;
   readonly onRemove: (instanceId: ProviderInstanceId) => Promise<boolean>;
-  readonly onProbe: (instanceId: ProviderInstanceId) => Promise<boolean>;
+  readonly onProbe: (
+    instanceId: ProviderInstanceId,
+    options?: { readonly quiet?: boolean },
+  ) => Promise<boolean>;
   readonly onVerifyFoundryTools: (
     instanceId: ProviderInstanceId,
     modelId: ProviderModelId,
@@ -376,6 +382,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onAgentEligibleModelsChange={props.onAgentEligibleModelsChange}
         onHiddenModelsChange={props.onHiddenModelsChange}
         onBeginProviderAuthentication={props.onBeginProviderAuthentication}
+        {...(props.onOpenExternalUrl === undefined
+          ? {}
+          : { onOpenExternalUrl: props.onOpenExternalUrl })}
         onChangeAnthropicCompatibleConfiguration={props.onChangeAnthropicCompatibleConfiguration}
         onChangeAzureFoundryConfiguration={props.onChangeAzureFoundryConfiguration}
         onChangeBinary={props.onChangeBinary}
@@ -400,6 +409,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangePiConfiguration={props.onChangePiConfiguration}
         onClearProviderCredential={props.onClearProviderCredential}
         onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}
+        {...(props.onUpdateProviderCli === undefined
+          ? {}
+          : { onUpdateProviderCli: props.onUpdateProviderCli })}
         onProbe={props.onProbe}
         onProviderCredentialStatus={props.onProviderCredentialStatus}
         onProviderOrderChange={(visibleOrder) =>

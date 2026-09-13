@@ -240,6 +240,7 @@ function writeManagedFiles(
 interface HostAuthenticationPaths {
   readonly readPaths: ReadonlyArray<string>;
   readonly writePaths: ReadonlyArray<string>;
+  readonly environment: Readonly<Record<string, string>>;
 }
 
 function prepareHostAuthentication(
@@ -248,7 +249,8 @@ function prepareHostAuthentication(
   overridePath: string | undefined,
 ): Effect.Effect<HostAuthenticationPaths, ProviderFailure> {
   const hostAuthentication = profile.process.hostAuthentication;
-  if (hostAuthentication === undefined) return Effect.succeed({ readPaths: [], writePaths: [] });
+  if (hostAuthentication === undefined)
+    return Effect.succeed({ readPaths: [], writePaths: [], environment: {} });
   const path = overridePath ?? hostAuthentication.defaultPath;
   const label = `${profile.displayName} provider data directory`;
   if (hostAuthentication.kind === "directory") {
@@ -264,7 +266,11 @@ function prepareHostAuthentication(
           )
         : canonicalManagedDirectory(path, label);
     return directory.pipe(
-      Effect.map((canonical) => ({ readPaths: [canonical], writePaths: [canonical] })),
+      Effect.map((canonical) => ({
+        readPaths: [canonical],
+        writePaths: [canonical],
+        environment: hostAuthentication.environment?.(canonical) ?? {},
+      })),
     );
   }
   const managedCredential = join(managedHome, hostAuthentication.managedRelativePath);
@@ -272,7 +278,7 @@ function prepareHostAuthentication(
     try: () => {
       mkdirSync(dirname(managedCredential), { recursive: true, mode: 0o700 });
       if (existsSync(path) && !existsSync(managedCredential)) symlinkSync(path, managedCredential);
-      return { readPaths: existsSync(path) ? [path] : [], writePaths: [] };
+      return { readPaths: existsSync(path) ? [path] : [], writePaths: [], environment: {} };
     },
     catch: () =>
       failure(
@@ -483,7 +489,12 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
         );
         const args = profile.process.args({ root, managedHome });
         if (input.executionPolicy === "full-access") {
-          return { command: input.binaryPath, args, cwd: root, environment: input.environment };
+          return {
+            command: input.binaryPath,
+            args,
+            cwd: root,
+            environment: { ...input.environment, ...hostAuthentication.environment },
+          };
         }
         const binaryDirectory = dirname(realpathSync(input.binaryPath));
         const binaryRuntimeDirectory = dirname(binaryDirectory);
@@ -551,7 +562,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           command: launch.command,
           args: launch.args,
           cwd: root,
-          environment: input.environment,
+          environment: { ...input.environment, ...hostAuthentication.environment },
         };
       }),
   };

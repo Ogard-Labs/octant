@@ -94,7 +94,7 @@ export interface AcpDriverOptions {
   readonly process: AcpProcessPort;
   readonly runtimeRegistry: ProviderRuntimeRegistry;
   /** Instance authentication mode for profiles with delegated browser sign-in. */
-  readonly authentication?: "subscription" | "api-key";
+  readonly authentication?: "provider-owned" | "subscription" | "api-key";
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly clientFactory?: (connection: AcpConnection) => AcpClientPort;
   readonly managedToolsBridgeFactory?: typeof createAcpManagedToolsBridge;
@@ -327,7 +327,6 @@ function resolveApiKey(
   options: AcpDriverOptions,
 ): Effect.Effect<string | undefined, ProviderFailure> {
   const name = options.profile.displayName;
-  if (options.profile.authentication.kind !== "delegated-browser") return Effect.succeed(undefined);
   if (options.authentication !== "api-key") return Effect.succeed(undefined);
   const resolver = options.credentialResolver;
   if (resolver === undefined) {

@@ -37,7 +37,13 @@ export type ComposerProjectEntry =
       readonly rootPath: string;
     }
   | { readonly kind: "add-folder" }
-  | { readonly kind: "default-folder"; readonly rootPath: string };
+  | {
+      readonly kind: "default-folder";
+      readonly rootPath: string;
+      /** Code keeps this visible while its opt-in setting is disabled. */
+      readonly disabled?: boolean;
+      readonly disabledReason?: string;
+    };
 
 /** The Project the composer will start the thread in, if the person picked one. */
 export interface ComposerProjectSelection {
@@ -71,7 +77,7 @@ type MenuEntry = ComposerProjectEntry | { readonly kind: "add-github" };
 
 export const NEW_PROJECT_FROM_FOLDER_LABEL = "New Project from folder…";
 export const NEW_PROJECT_FROM_GITHUB_LABEL = "New Project from GitHub repository…";
-export const START_IN_DEFAULT_FOLDER_LABEL = "No Project — use the default folder";
+export const START_IN_DEFAULT_FOLDER_LABEL = "No project";
 
 /**
  * The composer's one Project menu: saved Projects to search, then the two
@@ -128,6 +134,7 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
         setActiveIndex(-1);
         return;
       }
+      if (entry.kind === "default-folder" && entry.disabled === true) return;
       if (entry.kind === "add-folder") props.onAddFolder();
       else props.onSelect(entry);
       close();
@@ -329,12 +336,15 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                   return (
                     <OctantButton
                       aria-selected={false}
+                      disabled={entry.kind === "default-folder" && entry.disabled === true}
                       className={optionClass(index)}
                       id={`${listboxId}-option-${index}`}
                       key={entry.kind}
                       onClick={() => activate(entry)}
                       role="option"
-                      {...(entry.kind === "default-folder" ? { title: entry.rootPath } : {})}
+                      {...(entry.kind === "default-folder"
+                        ? { title: entry.disabledReason ?? entry.rootPath }
+                        : {})}
                       type="button"
                       variant="ghost"
                     >
@@ -348,9 +358,16 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                       <span className="composer-folder-selector__option-copy">
                         <span className="composer-folder-selector__option-name">{label}</span>
                         {entry.kind === "default-folder" ? (
-                          <span className="composer-folder-selector__option-path">
-                            {entry.rootPath}
-                          </span>
+                          <>
+                            <span className="composer-folder-selector__option-path">
+                              {entry.rootPath}
+                            </span>
+                            {entry.disabledReason === undefined ? null : (
+                              <span className="composer-folder-selector__option-path">
+                                {entry.disabledReason}
+                              </span>
+                            )}
+                          </>
                         ) : null}
                       </span>
                     </OctantButton>

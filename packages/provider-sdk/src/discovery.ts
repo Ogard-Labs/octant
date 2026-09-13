@@ -86,7 +86,7 @@ export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> =
     approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
     versionProbeArgs: ["--version"],
     onboardingGuidance:
-      "Run kimi login for this provider's Octant-managed profile, then check the connection again.",
+      "Run kimi login in your terminal, then check the connection again. Octant reuses the same provider profile.",
     isDirectEndpoint: false,
   },
   {
@@ -132,7 +132,7 @@ export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> =
     executableNames: ["vibe-acp"],
     approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
     versionProbeArgs: ["--version"],
-    onboardingGuidance: "Authenticate with Mistral Vibe, then check the connection again.",
+    onboardingGuidance: "Run `vibe --setup` in your terminal, then check the connection again.",
     isDirectEndpoint: false,
   },
   {
@@ -141,11 +141,8 @@ export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> =
     executableNames: ["grok"],
     approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
     versionProbeArgs: ["--version"],
-    // Octant runs Grok with `GROK_HOME` pointed at the instance's managed home
-    // and bridges no host credential, so a terminal `grok login` authenticates
-    // `~/.grok` and leaves this instance exactly as unauthenticated as before.
     onboardingGuidance:
-      "Sign in to Grok Build from Provider Settings, then check the connection again.",
+      "Run grok login (or grok login --device-auth on a headless host), then check the connection again.",
     isDirectEndpoint: false,
   },
   {
@@ -164,7 +161,7 @@ export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> =
     approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
     versionProbeArgs: [],
     onboardingGuidance:
-      "Sign in to GLM Agent from Provider Settings with a Z.AI API key, then check the connection again.",
+      "Run the provider-owned GLM Agent CLI login in your terminal, then check the connection again.",
     isDirectEndpoint: false,
   },
   {
@@ -174,7 +171,7 @@ export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> =
     approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
     versionProbeArgs: ["--version"],
     onboardingGuidance:
-      "Sign in to Gemini CLI from Provider Settings with a Gemini API key, then check the connection again.",
+      "Run Gemini CLI in your terminal and complete its provider-owned login, then check the connection again.",
     isDirectEndpoint: false,
   },
   {
@@ -192,8 +189,7 @@ export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> =
     executableNames: ["cline"],
     approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
     versionProbeArgs: ["--version"],
-    onboardingGuidance:
-      "Sign in to Cline from Provider Settings with a Cline API key, then check the connection again.",
+    onboardingGuidance: "Run `cline auth` in your terminal, then check the connection again.",
     isDirectEndpoint: false,
   },
   {
@@ -203,7 +199,7 @@ export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> =
     approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
     versionProbeArgs: ["--version"],
     onboardingGuidance:
-      "Sign in to Qwen Code from Provider Settings with an OpenAI-compatible API key, then check the connection again.",
+      "Run the provider-owned Qwen CLI login in your terminal, then check the connection again.",
     isDirectEndpoint: false,
   },
   {

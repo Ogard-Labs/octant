@@ -1195,6 +1195,32 @@ export function useProviderController(options: ProviderControllerOptions) {
     },
     [client],
   );
+  const updateProviderCli = useCallback(
+    (instanceId: ProviderInstanceId): Promise<boolean> =>
+      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, async () => {
+        if (client === undefined) return false;
+        try {
+          const result = await client.execute({ kind: "update-provider-cli", instanceId });
+          if (result.kind !== "provider-cli-updated") {
+            throw new Error("Provider returned an invalid CLI update result.");
+          }
+          const refreshed = await client.bootstrap();
+          install(refreshed);
+          if (mounted.current) {
+            setMessage(
+              result.status === "already-current"
+                ? "The provider CLI is already up to date."
+                : "Provider CLI updated. The native login profile was preserved.",
+            );
+          }
+          return true;
+        } catch (error) {
+          if (mounted.current) setMessage(failureMessage(error));
+          return false;
+        }
+      }),
+    [client, install],
+  );
   const changeClaudeConfiguration = useCallback(
     (
       instanceId: ProviderInstanceId,
@@ -2589,7 +2615,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     [execute],
   );
   const probe = useCallback(
-    async (instanceId: ProviderInstanceId) => {
+    async (instanceId: ProviderInstanceId, options?: { readonly quiet?: boolean }) => {
       if (client === undefined) return false;
       pendingProbes.current.add(instanceId);
       const current = authoritative.current;
@@ -2626,7 +2652,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         // page-level alert after the next registry snapshot is ready. Other
         // probe failures remain visible through the shared alert and the row's
         // authoritative readiness details.
-        if (mounted.current && !isInterruptedFailure(error)) {
+        if (mounted.current && !options?.quiet && !isInterruptedFailure(error)) {
           setMessage(redactedProbeFailureMessage(error));
         }
         return false;
@@ -2769,6 +2795,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     clearProviderCredential,
     beginProviderAuthentication,
     completeProviderAuthentication,
+    updateProviderCli,
     probe,
     verifyFoundryTools,
     updatePermissionPersistence,

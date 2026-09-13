@@ -42,6 +42,8 @@ import {
   renameProvider,
   setProviderEnabled,
   normalizeOpenAiCompatibleBaseUrl,
+  providerCliUpdateArgs,
+  supportsProviderCliUpdate,
   updateProviderDefaults,
 } from "./providerPolicy";
 import * as providerPolicy from "./providerPolicy";
@@ -390,6 +392,16 @@ function ollamaProvider(): Extract<ProviderInstance, { driverKind: "ollama" }> {
   if (instance.driverKind !== "ollama") throw new Error("expected Ollama provider fixture");
   return instance;
 }
+
+describe("provider CLI update policy", () => {
+  it("keeps update command support shared by server and renderer", () => {
+    expect(providerCliUpdateArgs("devin")).toEqual(["update"]);
+    expect(providerCliUpdateArgs("kimi-code")).toEqual(["upgrade"]);
+    expect(supportsProviderCliUpdate("copilot")).toBe(true);
+    expect(supportsProviderCliUpdate("goose")).toBe(false);
+    expect(providerCliUpdateArgs("openai-compatible")).toBeUndefined();
+  });
+});
 
 describe("provider instance policy", () => {
   it.each([
@@ -1497,7 +1509,7 @@ describe("provider instance policy", () => {
         expectedVersion: version(0),
         createdAt,
       }),
-    ).toThrow("GLM Agent authentication must be api-key.");
+    ).toThrow("GLM Agent authentication must be provider-owned or api-key.");
   });
 
   it("creates and immutably updates Gemini CLI with api-key authentication", () => {

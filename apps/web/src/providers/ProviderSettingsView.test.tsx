@@ -461,7 +461,7 @@ describe("ProviderSettingsView", () => {
     expect(document.body.textContent).not.toContain("private-value");
   });
 
-  it("creates Mistral Vibe and delegates subscription browser sign-in", async () => {
+  it("creates Mistral Vibe with provider-owned CLI authentication", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: vibeProvider() });
     renderExpanded(<ProviderSettingsView {...props} />);
@@ -478,7 +478,7 @@ describe("ProviderSettingsView", () => {
       "/absolute/path/to/vibe-acp",
     );
     expect(within(create).getByLabelText("Mistral Vibe authentication")).toHaveTextContent(
-      "Mistral subscription",
+      "Provider CLI login (recommended)",
     );
     await user.click(within(create).getByRole("button", { name: "Add Mistral Vibe" }));
     expect(props.onCreateMistralVibe).toHaveBeenCalledWith(
@@ -490,20 +490,8 @@ describe("ProviderSettingsView", () => {
       },
       expect.objectContaining({ value: "" }),
     );
-
-    await user.click(
-      screen.getByRole("button", { name: "Start Mistral browser sign-in for Mistral Vibe local" }),
-    );
-    expect(await screen.findByRole("link", { name: "Open Mistral sign-in" })).toHaveAttribute(
-      "href",
-      "https://auth.mistral.example/attempt",
-    );
-    await user.click(
-      screen.getByRole("button", {
-        name: "Complete Mistral browser sign-in for Mistral Vibe local",
-      }),
-    );
-    expect(props.onCompleteProviderAuthentication).toHaveBeenCalledWith(id, "provider-attempt-1");
+    expect(screen.getAllByText(/Run the provider-owned Vibe CLI login/)).not.toHaveLength(0);
+    expect(screen.queryByRole("button", { name: /browser sign-in/i })).not.toBeInTheDocument();
   });
 
   it("disables only Claude API-key creation when host credential operations are unavailable", async () => {
@@ -601,10 +589,7 @@ describe("ProviderSettingsView", () => {
 
     const card = screen.getByRole("article", { name: "Kimi local" });
     expect(within(card).getByText("Kimi Code CLI")).toBeVisible();
-    expect(within(card).getByText(/kimi login/i)).toHaveTextContent(/Octant-managed profile/i);
-    expect(within(card).getByText(/kimi login/i)).toHaveTextContent(
-      /do not use your ordinary Kimi profile/i,
-    );
+    expect(within(card).getByText(/kimi login/i)).toHaveTextContent(/in your terminal/i);
     expect(within(card).getByLabelText("Binary path for Kimi local")).toHaveValue(
       "/opt/homebrew/bin/kimi",
     );
@@ -706,7 +691,7 @@ describe("ProviderSettingsView", () => {
     expect(card.textContent).not.toMatch(/auth\.json|oauth token|plugin|skill|raw acp/i);
   });
 
-  it("explains the fail-closed Kimi runtime and managed-profile boundary", () => {
+  it("explains the fail-closed Kimi runtime and provider-owned profile boundary", () => {
     renderExpanded(
       <ProviderSettingsView
         {...fixture({
@@ -717,7 +702,7 @@ describe("ProviderSettingsView", () => {
     );
 
     const card = screen.getByRole("article", { name: "Kimi local" });
-    expect(within(card).getByText(/managed safety profile/i)).toHaveTextContent(/incompatible/i);
+    expect(within(card).getByText(/provider-owned profile/i)).toHaveTextContent(/incompatible/i);
     expect(within(card).queryByText(/update your Kimi Code installation/i)).not.toBeInTheDocument();
   });
 
@@ -2016,7 +2001,7 @@ describe("ProviderSettingsView", () => {
     await user.click(screen.getByRole("switch", { name: "Enable Detected Codex" }));
 
     expect(props.onSetEnabled).toHaveBeenCalledWith(id, true);
-    expect(props.onProbe).toHaveBeenCalledWith(id);
+    expect(props.onProbe).toHaveBeenCalledWith(id, { quiet: true });
     expect(props.onProbe).toHaveBeenCalledTimes(1);
   });
 
@@ -2165,6 +2150,7 @@ function fixture(
     instance?: ProviderInstance;
     credentialManagementAvailable?: boolean;
     discoverySnapshot?: DiscoverySnapshot;
+    onOpenExternalUrl?: (url: string) => void;
   } = {},
 ): ProviderSettingsViewProps {
   return {
@@ -2178,6 +2164,9 @@ function fixture(
     probingIds: new Set(),
     busy: false,
     ...(options.error ? { message: options.error } : {}),
+    ...(options.onOpenExternalUrl === undefined
+      ? {}
+      : { onOpenExternalUrl: options.onOpenExternalUrl }),
     credentialManagementAvailable: options.credentialManagementAvailable ?? true,
     onCreate: vi.fn(async () => true),
     onCreateClaude: vi.fn(async (_name, _configuration, credential) => {

@@ -22,6 +22,14 @@ const modelId = "agent-k2" as ProviderModelId;
 const projectRoot = "/tmp/octant-acp-conformance";
 const managedHome = "/tmp/octant-acp-conformance-home";
 
+it("keeps browser authentication reserved for non-CLI profiles", () => {
+  expect(
+    Object.values(acpProviderProfiles).every(
+      (profile) => profile.authentication.kind === "provider-owned",
+    ),
+  ).toBe(true);
+});
+
 describe.each(Object.values(acpProviderProfiles))(
   "ACP provider conformance ($displayName)",
   (profile) => {

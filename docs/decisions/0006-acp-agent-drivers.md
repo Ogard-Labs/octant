@@ -1,6 +1,6 @@
 # 0006. ACP agent drivers as one generic stack with per-provider profiles
 
-**Status:** Accepted
+**Status:** Superseded by 0121
 
 ## Context
 

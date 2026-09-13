@@ -747,7 +747,39 @@ describe("Kilo provider-owned data directory", () => {
   });
 });
 
-describe("Kimi Code immutable managed profile", () => {
+describe("Goose provider-owned profile", () => {
+  it("points the CLI at the native config directory instead of the managed home", async () => {
+    const target = fixture(goose);
+    const managedHome = join(target.canonicalRoot, "managed-goose");
+    const hostHome = join(target.canonicalRoot, "host-home");
+    const hostAuthentication = join(hostHome, ".config", "goose");
+    mkdirSync(hostAuthentication, { recursive: true });
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: hostAuthentication,
+      }).prepare({
+        profile: goose,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome,
+        mode: "code",
+        executionPolicy: "approval-gated",
+        environment: { PATH: "/usr/bin" },
+      }),
+    );
+
+    expect(launch.environment).toMatchObject({
+      HOME: hostHome,
+      XDG_CONFIG_HOME: join(hostHome, ".config"),
+    });
+    expect(launch.environment.HOME).not.toBe(managedHome);
+  });
+});
+
+describe("Kimi Code provider-owned profile", () => {
   function confinement(target: ReturnType<typeof fixture>, temporaryDirectory?: string) {
     return makeAcpConfinementLive({
       platform: "darwin",
@@ -756,17 +788,24 @@ describe("Kimi Code immutable managed profile", () => {
     });
   }
 
-  it("creates an isolated managed profile with immutable static tool denials", async () => {
+  it("launches the configured CLI with its native profile and Octant's process boundary", async () => {
     const target = fixture(kimi);
     const managedHome = join(target.canonicalRoot, "managed-kimi");
+    const hostAuthentication = join(target.canonicalRoot, "host-auth");
+    mkdirSync(hostAuthentication, { recursive: true });
     const launch = await Effect.runPromise(
-      confinement(target, target.canonicalRoot).prepare({
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: target.canonicalRoot,
+        hostAuthenticationPath: hostAuthentication,
+      }).prepare({
         profile: kimi,
         binaryPath: target.binaryPath,
         root: target.canonicalRoot,
         managedHome,
         mode: "code",
-        executionPolicy: "full-access",
+        executionPolicy: "approval-gated",
         environment: {
           PATH: "/usr/bin",
           HOME: "/Users/test",
@@ -778,39 +817,20 @@ describe("Kimi Code immutable managed profile", () => {
     expect(launch.cwd).toBe(target.canonicalRoot);
     expect(launch.args.at(-1)).toBe("acp");
     expect(launch.environment).toMatchObject({
-      HOME: join(managedHome, "home"),
-      KIMI_CODE_HOME: managedHome,
-      TMPDIR: target.canonicalRoot,
+      HOME: "/Users/test",
+      KIMI_CODE_HOME: hostAuthentication,
     });
-    expect(launch.args[1]).toContain("(allow default)");
-    expect(launch.args[1]).toContain(
-      `(deny file-write* (subpath "${join(managedHome, "config.toml")}"))`,
-    );
-    expect(launch.args[1]).toContain(
-      `(deny file-read* (subpath "${join(target.canonicalRoot, ".agents")}"))`,
-    );
-    const configuration = readFileSync(join(managedHome, "config.toml"), "utf8");
-    for (const tool of [
-      "Skill",
-      "Agent",
-      "AgentSwarm",
-      "CreateGoal",
-      "GetGoal",
-      "SetGoalBudget",
-      "UpdateGoal",
-      "TaskList",
-      "TaskOutput",
-      "TaskStop",
-    ]) {
-      expect(configuration).toContain(`pattern = "${tool}"`);
-    }
-    expect(configuration).toContain('decision = "deny"');
-    expect(configuration).toContain("telemetry = false");
+    expect(launch.command).toBe(target.sandboxPath);
+    expect(launch.args).toContain(target.binaryPath);
+    expect(launch.args[1]).toContain("(deny default)");
+    expect(launch.args[1]).toContain(`(allow file-read* (subpath "${hostAuthentication}"))`);
   });
 
-  it("rejects managed extension content and a mutated generated policy", async () => {
+  it("does not create a duplicate managed authentication profile", async () => {
     const target = fixture(kimi);
     const managedHome = join(target.canonicalRoot, "managed-kimi");
+    const hostAuthentication = join(target.canonicalRoot, "host-auth");
+    mkdirSync(hostAuthentication, { recursive: true });
     const input = {
       profile: kimi,
       binaryPath: target.binaryPath,
@@ -820,22 +840,15 @@ describe("Kimi Code immutable managed profile", () => {
       executionPolicy: "approval-gated" as const,
       environment: { PATH: "/usr/bin" },
     };
-    const prepared = confinement(target, join(target.canonicalRoot, "sandbox-tmp"));
-    await Effect.runPromise(prepared.prepare(input));
-
-    mkdirSync(join(managedHome, "skills"));
-    expect(await failureOf(prepared.prepare(input))).toEqual({
-      category: "incompatible",
-      message: "Kimi Code managed profile contains forbidden executable configuration.",
+    const prepared = makeAcpConfinementLive({
+      platform: "darwin",
+      sandboxPath: target.sandboxPath,
+      temporaryDirectory: join(target.canonicalRoot, "sandbox-tmp"),
+      hostAuthenticationPath: hostAuthentication,
     });
-    rmSync(join(managedHome, "skills"), { recursive: true });
-
-    chmodSync(join(managedHome, "config.toml"), 0o644);
-    expect((await failureOf(prepared.prepare(input))).category).toBe("incompatible");
-    chmodSync(join(managedHome, "config.toml"), 0o600);
-
-    writeFileSync(join(managedHome, "config.toml"), "telemetry = true\n");
-    expect((await failureOf(prepared.prepare(input))).category).toBe("incompatible");
+    await Effect.runPromise(prepared.prepare(input));
+    expect(existsSync(join(managedHome, "config.toml"))).toBe(false);
+    expect(existsSync(join(managedHome, "home"))).toBe(false);
   });
 
   it("builds exact-root approval, read-only plan, and read-only chat Seatbelt profiles", async () => {
@@ -915,32 +928,29 @@ describe("Kimi Code immutable managed profile", () => {
     });
   });
 
-  it("keeps immutable managed-profile confinement and fails closed on Linux even with Bubblewrap", async () => {
-    expect(kimi.process.confinement.kind).toBe("immutable-managed-profile");
-
+  it("keeps provider-owned profile confinement on Linux with Bubblewrap", async () => {
+    expect(kimi.process.confinement.kind).toBe("deny-default-seatbelt");
     const target = fixture(kimi);
-    for (const executionPolicy of ["approval-gated", "full-access"] as const) {
-      const unsupported = await failureOf(
-        makeAcpConfinementLive({
-          platform: "linux",
-          // Usable bwrap would confine deny-default ACP agents; managed-profile must not fall through.
-          sandboxPath: target.bwrapPath,
-          temporaryDirectory: join(target.canonicalRoot, "tmp"),
-        }).prepare({
-          profile: kimi,
-          binaryPath: target.binaryPath,
-          root: target.canonicalRoot,
-          managedHome: join(target.canonicalRoot, `managed-kimi-${executionPolicy}`),
-          mode: "code",
-          executionPolicy,
-          environment: {},
-        }),
-      );
-      expect(unsupported).toEqual({
-        category: "incompatible",
-        message: "Kimi Code immutable managed profile is only available on macOS.",
-      });
-    }
+    const hostAuthentication = join(target.canonicalRoot, "host-auth");
+    mkdirSync(hostAuthentication, { recursive: true });
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "linux",
+        sandboxPath: target.bwrapPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: hostAuthentication,
+      }).prepare({
+        profile: kimi,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome: join(target.canonicalRoot, "managed-kimi"),
+        mode: "code",
+        executionPolicy: "approval-gated",
+        environment: {},
+      }),
+    );
+    expect(launch.command).toBe(target.bwrapPath);
+    expect(launch.args).toContain(target.binaryPath);
   });
 
   it("fails closed on non-canonical roots", async () => {

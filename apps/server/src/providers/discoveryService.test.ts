@@ -8,6 +8,7 @@ import {
 
 function makeFakeFs(
   existingPaths: Map<string, { file: boolean; symlink?: boolean; target?: string }>,
+  files: Map<string, string> = new Map(),
 ): DiscoveryFsPort {
   return {
     async access(path: string, _mode: number) {
@@ -26,6 +27,11 @@ function makeFakeFs(
       if (entry === undefined) throw new Error("ENOENT");
       if (entry.symlink === true && entry.target !== undefined) return entry.target;
       return path;
+    },
+    async readFile(path: string) {
+      const content = files.get(path);
+      if (content === undefined) throw new Error("ENOENT");
+      return content;
     },
   };
 }
@@ -71,6 +77,51 @@ describe("discoveryService", () => {
     expect(codex!.binaryPath).toBe("/usr/local/bin/codex");
     expect(codex!.version).toBe("codex-cli 0.1.2507100955");
     expect(codex!.readiness).toBe("ready");
+  });
+
+  it("discovers a provider whose executable is declared by a safe bash alias", async () => {
+    const fs = makeFakeFs(
+      new Map([["/Users/test/tools/grok-build", { file: true }]]),
+      new Map([["/Users/test/.bash_aliases", "alias grok='/Users/test/tools/grok-build'\n"]]),
+    );
+    const exec = makeFakeExec(
+      new Map([["/Users/test/tools/grok-build --version", { stdout: "grok 1.0.5\n", stderr: "" }]]),
+    );
+    const service = makeDiscoveryService({
+      exec,
+      fs,
+      environment: { PATH: "/usr/bin", HOME: "/Users/test" },
+      now: () => 1753430400000,
+    });
+
+    const snapshot = await service.scan();
+    expect(snapshot.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          driverKind: "grok",
+          binaryPath: "/Users/test/tools/grok-build",
+          version: "grok 1.0.5",
+        }),
+      ]),
+    );
+  });
+
+  it("ignores aliases that would require shell evaluation", async () => {
+    const fs = makeFakeFs(
+      new Map([["/Users/test/tools/grok-build", { file: true }]]),
+      new Map([
+        ["/Users/test/.bash_aliases", "alias grok='/Users/test/tools/grok-build --unsafe'\n"],
+      ]),
+    );
+    const service = makeDiscoveryService({
+      exec: makeFakeExec(new Map()),
+      fs,
+      environment: { PATH: "/usr/bin", HOME: "/Users/test" },
+      now: () => 1753430400000,
+    });
+
+    const snapshot = await service.scan();
+    expect(snapshot.candidates.some((candidate) => candidate.driverKind === "grok")).toBe(false);
   });
 
   it("discovers the beta OpenCode executable from the approved user bin", async () => {

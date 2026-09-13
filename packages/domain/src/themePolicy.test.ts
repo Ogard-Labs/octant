@@ -272,9 +272,11 @@ describe("resolveEffectiveSidebarBackground", () => {
 
 describe("application background policy", () => {
   const resolvedDefaults = {
+    patternEnabled: true,
     patternOpacity: 0.55,
     patternSpeed: 1,
     patternIntensity: 0.6,
+    photoDithered: true,
     photoOpacity: 0.42,
     scope: "welcome",
     coversSidebar: false,
@@ -316,6 +318,27 @@ describe("application background policy", () => {
       animated: false,
       photoOpacity: 0.7,
       patternSpeed: 2,
+    });
+  });
+
+  it("carries clean-photo and hidden-pattern choices to the renderer", () => {
+    const settings: ThemeSettings = {
+      ...baseSettings,
+      appBackground: {
+        ...baseSettings.appBackground,
+        kind: "photo",
+        backgroundId: "00000000-0000-4000-8000-000000000b01" as never,
+        patternEnabled: false,
+        photoDithered: false,
+      },
+    };
+    expect(resolveAppBackground(settings)).toEqual({
+      ...resolvedDefaults,
+      kind: "photo",
+      backgroundId: "00000000-0000-4000-8000-000000000b01",
+      animated: false,
+      patternEnabled: false,
+      photoDithered: false,
     });
   });
 

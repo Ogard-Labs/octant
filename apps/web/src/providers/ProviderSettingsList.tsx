@@ -7,7 +7,7 @@ import type {
   ProviderModelId,
   ProviderObservedState,
 } from "@octant/contracts";
-import { isImageProfileDriverKind } from "@octant/domain";
+import { isImageProfileDriverKind, supportsProviderCliUpdate } from "@octant/domain";
 import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -85,7 +85,9 @@ export type ProviderSettingsListProps = Pick<
   | "onProviderCredentialStatus"
   | "onClearProviderCredential"
   | "onBeginProviderAuthentication"
+  | "onOpenExternalUrl"
   | "onCompleteProviderAuthentication"
+  | "onUpdateProviderCli"
   | "onSetEnabled"
   | "onRemove"
   | "onProbe"
@@ -228,6 +230,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
                 onChangeIdeogramImageConfiguration={props.onChangeIdeogramImageConfiguration}
                 onClearProviderCredential={props.onClearProviderCredential}
                 onBeginProviderAuthentication={props.onBeginProviderAuthentication}
+                onOpenExternalUrl={props.onOpenExternalUrl}
                 onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}
                 onMove={move}
                 onProbe={props.onProbe}
@@ -450,7 +453,9 @@ interface ProviderRowProps {
   readonly onProviderCredentialStatus: ProviderSettingsViewProps["onProviderCredentialStatus"];
   readonly onClearProviderCredential: ProviderSettingsViewProps["onClearProviderCredential"];
   readonly onBeginProviderAuthentication: ProviderSettingsViewProps["onBeginProviderAuthentication"];
+  readonly onOpenExternalUrl?: ProviderSettingsViewProps["onOpenExternalUrl"];
   readonly onCompleteProviderAuthentication: ProviderSettingsViewProps["onCompleteProviderAuthentication"];
+  readonly onUpdateProviderCli?: ProviderSettingsViewProps["onUpdateProviderCli"];
   readonly onSetEnabled: ProviderSettingsViewProps["onSetEnabled"];
   readonly onRemove: ProviderSettingsViewProps["onRemove"];
   readonly onProbe: ProviderSettingsViewProps["onProbe"];
@@ -550,7 +555,11 @@ function ProviderRow(props: ProviderRowProps) {
     const nextEnabled = !props.instance.enabled;
     const updated = await props.onSetEnabled(props.instance.id, nextEnabled);
     if (updated && nextEnabled && autoRegisteredDisabled) {
-      await props.onProbe(props.instance.id);
+      // Enabling a detected provider is a successful settings mutation even
+      // when its first connection check reports missing setup. Keep that
+      // row-level readiness fact visible without making the page banner say
+      // that activation itself failed.
+      await props.onProbe(props.instance.id, { quiet: true });
     }
   };
   const name = props.instance.displayName;
@@ -688,6 +697,19 @@ function ProviderRow(props: ProviderRowProps) {
                 size={14}
               />
             </OctantButton>
+            {props.onUpdateProviderCli !== undefined &&
+            supportsProviderCliUpdate(props.instance.driverKind) ? (
+              <OctantButton
+                aria-label={`Update ${props.instance.displayName} CLI`}
+                disabled={disabled || !props.instance.enabled}
+                onClick={() => void props.onUpdateProviderCli?.(props.instance.id)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Update CLI
+              </OctantButton>
+            ) : null}
             <OctantButton
               aria-label={`Remove ${props.instance.displayName}`}
               disabled={disabled || (usesCredential && !props.credentialManagementAvailable)}
@@ -787,9 +809,7 @@ function ProviderRow(props: ProviderRowProps) {
                   disabled={disabled}
                   instance={props.instance}
                   key={`vibe:${props.instance.version}`}
-                  onBeginAuthentication={props.onBeginProviderAuthentication}
                   onChange={props.onChangeMistralVibeConfiguration}
-                  onCompleteAuthentication={props.onCompleteProviderAuthentication}
                 />
               ) : isGrok ? (
                 <GrokConfigurationForm
@@ -798,9 +818,7 @@ function ProviderRow(props: ProviderRowProps) {
                   disabled={disabled}
                   instance={props.instance}
                   key={`grok:${props.instance.version}`}
-                  onBeginAuthentication={props.onBeginProviderAuthentication}
                   onChange={props.onChangeGrokConfiguration}
-                  onCompleteAuthentication={props.onCompleteProviderAuthentication}
                 />
               ) : isGoose ? (
                 <GooseConfigurationForm
@@ -816,9 +834,7 @@ function ProviderRow(props: ProviderRowProps) {
                   disabled={disabled}
                   instance={props.instance}
                   key={`glm:${props.instance.version}`}
-                  onBeginAuthentication={props.onBeginProviderAuthentication}
                   onChange={props.onChangeGlmConfiguration}
-                  onCompleteAuthentication={props.onCompleteProviderAuthentication}
                 />
               ) : isGemini ? (
                 <GeminiConfigurationForm
@@ -826,9 +842,7 @@ function ProviderRow(props: ProviderRowProps) {
                   disabled={disabled}
                   instance={props.instance}
                   key={`gemini:${props.instance.version}`}
-                  onBeginAuthentication={props.onBeginProviderAuthentication}
                   onChange={props.onChangeGeminiConfiguration}
-                  onCompleteAuthentication={props.onCompleteProviderAuthentication}
                 />
               ) : isCopilot ? (
                 <CopilotConfigurationForm
@@ -843,9 +857,7 @@ function ProviderRow(props: ProviderRowProps) {
                   disabled={disabled}
                   instance={props.instance}
                   key={`cline:${props.instance.version}`}
-                  onBeginAuthentication={props.onBeginProviderAuthentication}
                   onChange={props.onChangeClineConfiguration}
-                  onCompleteAuthentication={props.onCompleteProviderAuthentication}
                 />
               ) : isQwen ? (
                 <QwenConfigurationForm
@@ -853,9 +865,7 @@ function ProviderRow(props: ProviderRowProps) {
                   disabled={disabled}
                   instance={props.instance}
                   key={`qwen:${props.instance.version}`}
-                  onBeginAuthentication={props.onBeginProviderAuthentication}
                   onChange={props.onChangeQwenConfiguration}
-                  onCompleteAuthentication={props.onCompleteProviderAuthentication}
                 />
               ) : isDevin ? (
                 <DevinConfigurationForm
@@ -1371,6 +1381,63 @@ function providerBinaryPath(instance: ProviderInstance): string | undefined {
   return "binaryPath" in instance.configuration ? instance.configuration.binaryPath : undefined;
 }
 
+function authenticationGuidance(instance: ProviderInstance): string {
+  switch (instance.driverKind) {
+    case "codex":
+      return "Run codex login in your terminal, then check the connection again.";
+    case "opencode":
+      return "Authenticate with OpenCode, then check the connection again.";
+    case "kimi-code":
+      return "Run kimi login in your terminal, then check the connection again.";
+    case "devin":
+      return "Run devin auth login in your terminal, then check the connection again.";
+    case "pi":
+      return "Authenticate with the official Pi CLI, then check the connection again.";
+    case "oh-my-pi":
+      return "Install and authenticate Oh My Pi (`omp`), then check the connection again. Octant treats Oh My Pi as distinct from Pi.";
+    case "kilo":
+      return "Run kilo auth login in your terminal, then check the connection again.";
+    case "claude":
+      return instance.configuration.authentication === "api-key"
+        ? "Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in Keychain, then check the connection again."
+        : "Authenticate with the official Claude Code app or CLI, then check the connection again.";
+    case "mistral-vibe":
+      return instance.configuration.authentication === "api-key"
+        ? "Add or replace the Mistral API key in the Octant host, then check the connection again."
+        : "Run the provider-owned Vibe CLI login in your terminal, then check the connection again.";
+    case "grok":
+      return instance.configuration.authentication === "api-key"
+        ? "Add or replace the xAI API key in the Octant host, then check the connection again."
+        : "Run grok login in your terminal (or grok login --device-auth on a headless host), then check the connection again.";
+    case "goose":
+      return "Run `goose configure` in your terminal, then check the connection again.";
+    case "glm":
+      return instance.configuration.authentication === "api-key"
+        ? "Add or replace the Z.AI API key in the Octant host, then check the connection again."
+        : "Run the provider-owned GLM Agent CLI login in your terminal, then check the connection again.";
+    case "gemini":
+      return instance.configuration.authentication === "api-key"
+        ? "Add or replace the Gemini API key in the Octant host, then check the connection again."
+        : "Run Gemini CLI in your terminal and complete its provider-owned login, then check the connection again.";
+    case "copilot":
+      return "Run `copilot login` in your terminal, then check the connection again.";
+    case "cline":
+      return instance.configuration.authentication === "api-key"
+        ? "Add or replace the Cline API key in the Octant host, then check the connection again."
+        : "Run `cline auth` in your terminal, then check the connection again.";
+    case "qwen":
+      return instance.configuration.authentication === "api-key"
+        ? "Add or replace the OpenAI-compatible API key in the Octant host, then check the connection again."
+        : "Run the provider-owned Qwen CLI login in your terminal, then check the connection again.";
+    case "anthropic-compatible":
+      return "Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in Keychain, then check the connection again.";
+    case "azure-foundry":
+      return "Add or replace the Azure AI Foundry API key in the Octant host. It is stored in Keychain and sent as the api-key header, then check the connection again.";
+    default:
+      return "Add a bearer API key in the Octant host, then check the connection again.";
+  }
+}
+
 function guidance(
   instance: ProviderInstance,
   readiness: ProviderObservedState["readiness"] | undefined,
@@ -1380,53 +1447,7 @@ function guidance(
   const label = driverLabel(driverKind);
   const message = observed?.message;
   if (readiness === "unauthenticated")
-    return (
-      <p className="provider-card__guidance">
-        {driverKind === "codex"
-          ? "Run codex login in your terminal, then check the connection again."
-          : driverKind === "opencode"
-            ? "Authenticate with OpenCode, then check the connection again."
-            : driverKind === "kimi-code"
-              ? "Run kimi login for this provider's Octant-managed profile. Do not use your ordinary Kimi profile; then check the connection again."
-              : driverKind === "devin"
-                ? "Run devin auth login in your terminal, then check the connection again."
-                : driverKind === "pi"
-                  ? "Authenticate with the official Pi CLI, then check the connection again."
-                  : driverKind === "oh-my-pi"
-                    ? "Install and authenticate Oh My Pi (`omp`), then check the connection again. Octant treats Oh My Pi as distinct from Pi."
-                    : driverKind === "kilo"
-                      ? "Run kilo auth login in your terminal, then check the connection again."
-                      : driverKind === "claude"
-                        ? instance.configuration.authentication === "api-key"
-                          ? "Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in Keychain, then check the connection again."
-                          : "Authenticate with the official Claude Code app or CLI, then check the connection again."
-                        : driverKind === "mistral-vibe"
-                          ? instance.configuration.authentication === "api-key"
-                            ? "Add or replace the Mistral API key in the Octant host, then check the connection again."
-                            : "Use the Mistral browser sign-in action below, then check the connection again."
-                          : driverKind === "grok"
-                            ? instance.configuration.authentication === "api-key"
-                              ? "Add or replace the xAI API key in the Octant host, then check the connection again."
-                              : "Use the xAI browser sign-in action below, then check the connection again."
-                            : driverKind === "goose"
-                              ? "Run `goose configure` in your terminal, then check the connection again."
-                              : driverKind === "glm"
-                                ? "Add or replace the Z.AI API key in the Octant host, then check the connection again."
-                                : driverKind === "gemini"
-                                  ? "Add or replace the Gemini API key in the Octant host, then check the connection again."
-                                  : driverKind === "copilot"
-                                    ? "Run `copilot login` in your terminal, then check the connection again."
-                                    : driverKind === "cline"
-                                      ? "Add or replace the Cline API key in the Octant host, then check the connection again."
-                                      : driverKind === "qwen"
-                                        ? "Add or replace the OpenAI-compatible API key in the Octant host, then check the connection again."
-                                        : driverKind === "anthropic-compatible"
-                                          ? "Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in Keychain, then check the connection again."
-                                          : driverKind === "azure-foundry"
-                                            ? "Add or replace the Azure AI Foundry API key in the Octant host. It is stored in Keychain and sent as the api-key header, then check the connection again."
-                                            : "Add a bearer API key in the Octant host, then check the connection again."}
-      </p>
-    );
+    return <p className="provider-card__guidance">{authenticationGuidance(instance)}</p>;
   if (readiness === "incompatible") {
     const nextAction =
       driverKind === "openai-compatible" ||
@@ -1436,7 +1457,7 @@ function guidance(
         : driverKind === "ollama"
           ? "The loopback endpoint returned an incompatible native Ollama response. Update Ollama or verify the native API endpoint."
           : driverKind === "kimi-code"
-            ? "The Kimi Code runtime or its Octant-managed safety profile is incompatible. Review the connection detail and supported version before retrying."
+            ? "The Kimi Code runtime or its provider-owned profile is incompatible. Review the connection detail and supported version before retrying."
             : `Update your ${label} installation to a compatible version, then retry.`;
     return (
       <>

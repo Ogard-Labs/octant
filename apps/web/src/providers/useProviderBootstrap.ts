@@ -57,7 +57,10 @@ export function useProviderBootstrap(options: ProviderBootstrapOptions): void {
           new Set(options.providerController.observedByInstance.keys()),
         );
         for (const instanceId of autoProbeInstanceIds) {
-          await options.providerController.probe(instanceId);
+          // Bootstrap is background discovery, not an explicit connection
+          // check. A missing binary, sign-in, or provider setup should stay on
+          // the row's readiness badge instead of becoming a page-level alert.
+          await options.providerController.probe(instanceId, { quiet: true });
         }
       } finally {
         inFlight.current = false;

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, constants, lstat, realpath } from "node:fs/promises";
+import { access, constants, lstat, readFile, realpath } from "node:fs/promises";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import type { DiscoveryCandidate, DiscoverySnapshot, ProviderDriverKind } from "@octant/contracts";
 import { admittedBundledProviderDriverKinds } from "@octant/plugin-host/provider-drivers";
@@ -19,6 +19,9 @@ const APPROVED_HOME_BIN_DIRECTORIES = [
   ".kimi-code/bin",
   ".grok/bin",
 ] as const;
+const ALIAS_FILES = [".bash_aliases", ".bash_profile", ".bashrc", ".zprofile", ".zshrc"] as const;
+const MAX_ALIAS_FILE_BYTES = 64 * 1024;
+const MAX_ALIAS_LINES = 2_000;
 const PROBE_ENVIRONMENT_KEYS = [
   "HOME",
   "PATH",
@@ -55,6 +58,8 @@ export interface DiscoveryFsPort {
   access(path: string, mode: number): Promise<void>;
   lstat(path: string): Promise<{ isSymbolicLink(): boolean; isFile(): boolean }>;
   realpath(path: string): Promise<string>;
+  /** Read-only shell alias inspection; implementations must not source files. */
+  readonly readFile?: (path: string) => Promise<string>;
 }
 
 export interface DiscoveryServiceOptions {
@@ -102,6 +107,7 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
           ...approvedHomeBinDirs(environment.HOME),
         ]),
       ];
+      const aliasTargets = await readAliasTargets(fs, environment.HOME, pathDirs);
 
       for (const descriptor of descriptors) {
         if (signal?.aborted) {
@@ -119,6 +125,7 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
           const found = await scanDescriptor(
             descriptor,
             pathDirs,
+            aliasTargets,
             exec,
             fs,
             environment,
@@ -165,6 +172,7 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
 async function scanDescriptor(
   descriptor: ProviderDiscoveryDescriptor,
   pathDirs: ReadonlyArray<string>,
+  aliasTargets: ReadonlyMap<string, string>,
   exec: DiscoveryExecPort,
   fs: DiscoveryFsPort,
   environment: NodeJS.ProcessEnv,
@@ -175,68 +183,133 @@ async function scanDescriptor(
   const candidates: DiscoveryCandidate[] = [];
   const seenPaths = new Set<string>();
 
-  // Search PATH directories + approved locations
+  // Search PATH directories + approved locations. Alias targets are appended
+  // after ordinary paths so discovery remains deterministic when a shell
+  // alias points at an already visible executable.
   const searchDirs = [...pathDirs, ...descriptor.approvedLocations];
+  const aliasPaths = descriptor.executableNames.flatMap((execName) => {
+    const target = aliasTargets.get(execName);
+    if (target === undefined) return [];
+    if (isAbsolute(target)) return [{ path: target, execName }];
+    return pathDirs.map((dir) => ({ path: join(dir, target), execName }));
+  });
+  const candidatePaths = [
+    ...searchDirs.flatMap((dir) =>
+      descriptor.executableNames.map((execName) => ({ path: join(dir, execName), execName })),
+    ),
+    ...aliasPaths,
+  ];
 
-  for (const dir of searchDirs) {
+  for (const candidate of candidatePaths) {
+    const candidatePath = candidate.path;
     if (signal?.aborted) break;
     if (now() - startTime > MAX_SCAN_DURATION_MS) break;
     if (candidates.length >= MAX_CANDIDATES_PER_DRIVER) break;
 
-    for (const execName of descriptor.executableNames) {
-      const candidatePath = join(dir, execName);
-      const validated = await validateExecutable(candidatePath, fs);
-      if (validated === undefined) continue;
-      if (seenPaths.has(validated)) continue;
-      seenPaths.add(validated);
+    const execName = candidate.execName;
+    const validated = await validateExecutable(candidatePath, fs);
+    if (validated === undefined) continue;
+    if (seenPaths.has(validated)) continue;
+    seenPaths.add(validated);
 
-      // Version probe
-      let version: string | undefined;
+    // Version probe
+    let version: string | undefined;
+    try {
+      const { stdout } = await exec(validated, [...descriptor.versionProbeArgs], {
+        timeout: MAX_PROBE_TIMEOUT_MS,
+        maxBuffer: MAX_PROBE_OUTPUT_BYTES,
+        env: sanitizeProbeEnvironment(environment),
+      });
+      version = extractVersion(stdout);
+    } catch {
+      // Version probe failed; continue without version
+    }
+
+    // Auth readiness probe
+    let readiness: DiscoveryCandidate["readiness"] = "unknown";
+    if (descriptor.authProbeArgs !== undefined) {
       try {
-        const { stdout } = await exec(validated, [...descriptor.versionProbeArgs], {
+        await exec(validated, [...descriptor.authProbeArgs], {
           timeout: MAX_PROBE_TIMEOUT_MS,
           maxBuffer: MAX_PROBE_OUTPUT_BYTES,
           env: sanitizeProbeEnvironment(environment),
         });
-        version = extractVersion(stdout);
+        readiness = "ready";
       } catch {
-        // Version probe failed; continue without version
+        readiness = "unauthenticated";
       }
-
-      // Auth readiness probe
-      let readiness: DiscoveryCandidate["readiness"] = "unknown";
-      if (descriptor.authProbeArgs !== undefined) {
-        try {
-          await exec(validated, [...descriptor.authProbeArgs], {
-            timeout: MAX_PROBE_TIMEOUT_MS,
-            maxBuffer: MAX_PROBE_OUTPUT_BYTES,
-            env: sanitizeProbeEnvironment(environment),
-          });
-          readiness = "ready";
-        } catch {
-          readiness = "unauthenticated";
-        }
-      }
-
-      candidates.push({
-        driverKind: descriptor.driverKind as DiscoveryCandidate["driverKind"],
-        displayName: (descriptor.displayNameForExecutable?.(execName) ??
-          descriptor.displayName) as DiscoveryCandidate["displayName"],
-        binaryPath: validated as DiscoveryCandidate["binaryPath"],
-        ...(version !== undefined ? { version: version as DiscoveryCandidate["version"] } : {}),
-        readiness,
-        pathSummary: summarizePath(
-          validated,
-          environment.HOME,
-        ) as DiscoveryCandidate["pathSummary"],
-        onboardingGuidance:
-          descriptor.onboardingGuidance as DiscoveryCandidate["onboardingGuidance"],
-        detectedAt: new Date(now()).toISOString() as DiscoveryCandidate["detectedAt"],
-      });
     }
+
+    candidates.push({
+      driverKind: descriptor.driverKind as DiscoveryCandidate["driverKind"],
+      displayName: (descriptor.displayNameForExecutable?.(execName) ??
+        descriptor.displayName) as DiscoveryCandidate["displayName"],
+      binaryPath: validated as DiscoveryCandidate["binaryPath"],
+      ...(version !== undefined ? { version: version as DiscoveryCandidate["version"] } : {}),
+      readiness,
+      pathSummary: summarizePath(validated, environment.HOME) as DiscoveryCandidate["pathSummary"],
+      onboardingGuidance: descriptor.onboardingGuidance as DiscoveryCandidate["onboardingGuidance"],
+      detectedAt: new Date(now()).toISOString() as DiscoveryCandidate["detectedAt"],
+    });
   }
 
   return candidates;
+}
+
+/**
+ * Read shell alias declarations without evaluating startup files. Sourcing a
+ * profile would execute arbitrary user commands during a background scan, so
+ * only a strict, single-token alias grammar is accepted here.
+ */
+async function readAliasTargets(
+  fs: DiscoveryFsPort,
+  home: string | undefined,
+  pathDirs: ReadonlyArray<string>,
+): Promise<ReadonlyMap<string, string>> {
+  const targets = new Map<string, string>();
+  if (home === undefined || !isAbsolute(home) || fs.readFile === undefined) return targets;
+  if (/[`$(){}|;&<>!#*?[\\]'\"]/.test(home)) return targets;
+
+  for (const file of ALIAS_FILES) {
+    let content: string;
+    try {
+      content = await fs.readFile(join(resolve(home), file));
+    } catch {
+      continue;
+    }
+    if (content.length > MAX_ALIAS_FILE_BYTES) continue;
+    for (const line of content.split(/\r?\n/, MAX_ALIAS_LINES + 1).slice(0, MAX_ALIAS_LINES)) {
+      const match = /^\s*alias\s+([A-Za-z0-9][A-Za-z0-9_-]*)\s*=\s*(.*?)\s*$/.exec(line);
+      if (match === null) continue;
+      const name = match[1];
+      const rawValue = match[2];
+      if (name === undefined || rawValue === undefined) continue;
+      const target = unwrapAliasValue(rawValue);
+      if (target === undefined || /\s|[`$(){}|;&<>!#*?[\\]'\"]/.test(target)) continue;
+      if (isAbsolute(target)) {
+        targets.set(name, target);
+        continue;
+      }
+      if (!/^[A-Za-z0-9._-]+$/.test(target)) continue;
+      if (pathDirs.some((dir) => isAbsolute(join(dir, target)))) targets.set(name, target);
+    }
+  }
+  return targets;
+}
+
+function unwrapAliasValue(value: string): string | undefined {
+  if (
+    value.length >= 2 &&
+    ((value.startsWith("'") && value.endsWith("'")) ||
+      (value.startsWith('"') && value.endsWith('"')))
+  ) {
+    const quote = value[0];
+    const unwrapped = value.slice(1, -1);
+    if (quote === undefined || unwrapped.includes(quote)) return undefined;
+    return unwrapped;
+  }
+  if (value.includes("'") || value.includes('"')) return undefined;
+  return value;
 }
 
 /**
@@ -363,4 +436,5 @@ const defaultFs: DiscoveryFsPort = {
   access: (path, mode) => access(path, mode),
   lstat: (path) => lstat(path),
   realpath: (path) => realpath(path),
+  readFile: async (path) => readFile(path, "utf8"),
 };

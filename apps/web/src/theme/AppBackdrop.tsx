@@ -1,6 +1,6 @@
 import type { ResolvedAppBackground } from "@octant/domain";
 import { useEffect, useRef, useState } from "react";
-import { decodePhoto, drawDitheredPhoto, type DecodedPhoto } from "./appBackdropPhoto";
+import { decodePhoto, drawDitheredPhoto, drawPhoto, type DecodedPhoto } from "./appBackdropPhoto";
 import { startAppPattern, type AppPatternHandle, type InkRgb } from "./appBackdropPattern";
 
 export type BackgroundImageFetcher = (backgroundId: string) => Promise<Blob>;
@@ -92,7 +92,7 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
   const [photo, setPhoto] = useState<DecodedPhoto | null>(null);
   const active = resolved.kind !== "none";
   const photoId = resolved.kind === "photo" ? resolved.backgroundId : null;
-  const showPattern = patternSupported && resolved.patternOpacity > 0;
+  const showPattern = resolved.patternEnabled && patternSupported && resolved.patternOpacity > 0;
 
   useEffect(() => {
     const canvas = patternCanvas.current;
@@ -165,17 +165,19 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
     if (photo === null || canvas === null) return;
     const paint = () => {
       const rect = canvas.getBoundingClientRect();
-      drawDitheredPhoto(canvas, photo.source, photo.size, {
-        width: rect.width,
-        height: rect.height,
-      });
+      const viewport = { width: rect.width, height: rect.height };
+      if (resolved.photoDithered) {
+        drawDitheredPhoto(canvas, photo.source, photo.size, viewport);
+      } else {
+        drawPhoto(canvas, photo.source, photo.size, viewport);
+      }
     };
     paint();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(paint);
     observer.observe(canvas);
     return () => observer.disconnect();
-  }, [photo]);
+  }, [photo, resolved.photoDithered]);
 
   if (!active) return null;
 
@@ -190,6 +192,7 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
       {photoId === null ? null : (
         <canvas
           className="app-backdrop__photo"
+          data-dithered={resolved.photoDithered ? "true" : "false"}
           data-photo-ready={photo !== null}
           ref={photoCanvas}
           style={{ opacity: resolved.photoOpacity }}

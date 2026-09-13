@@ -39,13 +39,38 @@ describe("ComposerProjectSelector", () => {
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
-    const row = screen.getByRole("option", { name: /No Project — use the default folder/ });
+    const row = screen.getByRole("option", { name: /^No project/ });
     expect(row).toHaveTextContent("/Users/ada/Documents/Octant/Work");
     await userEvent.click(row);
     expect(onSelect).toHaveBeenCalledWith({
       kind: "default-folder",
       rootPath: "/Users/ada/Documents/Octant/Work",
     });
+  });
+
+  it("shows Code's opt-in default folder without allowing a refused start", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    render(
+      <ComposerProjectSelector
+        entries={[
+          {
+            kind: "default-folder",
+            rootPath: "/Users/example/Documents/Octant/Code",
+            disabled: true,
+            disabledReason: "Enable Threads without a Project in Code settings",
+          },
+          { kind: "add-folder" },
+        ]}
+        onAddFolder={vi.fn()}
+        onSelect={onSelect}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
+    const row = screen.getByRole("option", { name: /^No project/ });
+    expect(row).toBeDisabled();
+    expect(row).toHaveAttribute("title", "Enable Threads without a Project in Code settings");
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it("asks for a Project until one is chosen", () => {

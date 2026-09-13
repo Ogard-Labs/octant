@@ -95,11 +95,13 @@ deleted. **None** keeps the plain page.
 **Show behind** puts the ground behind the start screens only, where it is
 masked away behind the composer and fades out below it, or behind everything,
 where the workspace and its pages turn translucent over it; **Cover the
-sidebar** extends an everything ground under the sidebar. **Pattern opacity**,
-**Pattern speed**, and **Pattern intensity** dial the cloud (speed zero holds it
-still), and **Photo opacity** dims a photo. Reduced motion holds the cloud
-still; Increased contrast turns the ground off; a browser without WebGL2 shows
-a photo but no cloud.
+sidebar** extends an everything ground under the sidebar. **Show pattern** is
+the direct on/off switch for the cloud, while **Pattern opacity**, **Pattern
+speed**, and **Pattern intensity** remain its tuning dials. For a photo,
+**Dither photo** keeps or removes the ordered-dither print treatment and
+**Photo opacity** dims the image. Reduced motion holds the cloud still;
+Increased contrast turns the ground off; a browser without WebGL2 shows a
+photo but no cloud.
 
 ### Zen backgrounds
 

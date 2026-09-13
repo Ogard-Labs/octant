@@ -1453,6 +1453,38 @@ describe("ProviderService", () => {
     expect(fixture.append).not.toHaveBeenCalled();
   });
 
+  it("preserves typed provider authentication failures", async () => {
+    const fixture = serviceFixture({ instances: [mistralVibeProvider()] });
+    const service = new ProviderService({
+      persistence: fixture.persistence,
+      runtimeRegistry: fixture.runtime,
+      driver: () => ({
+        kind: "mistral-vibe",
+        probe: () => Effect.die("unused"),
+        acquire: () => Effect.die("unused"),
+        beginAuthentication: () =>
+          Effect.fail({
+            category: "unauthenticated" as const,
+            message: "Mistral Vibe is not authenticated.",
+          }),
+      }),
+      uuid: () => crypto.randomUUID(),
+      clock: () => now,
+    });
+
+    await expect(
+      service.execute(windowId, {
+        kind: "begin-provider-authentication",
+        instanceId,
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "unauthenticated",
+        message: "Mistral Vibe is not authenticated.",
+      },
+    });
+  });
+
   it("invalidates the persisted catalog after browser authentication completes", async () => {
     const fixture = serviceFixture({
       instances: [mistralVibeProvider()],
@@ -2599,6 +2631,26 @@ describe("ProviderService", () => {
       message: "Provider configuration is incompatible.",
     });
   });
+
+  it("updates a provider-owned CLI directly and probes after releasing the instance lock", async () => {
+    const fixture = serviceFixture({
+      instances: [
+        kimiProvider({ configuration: { kind: "kimi-code-acp", binaryPath: "/usr/bin/true" } }),
+      ],
+      probe: async (instance) =>
+        observation({ instanceId: instance.id, detectedVersion: "0.27.0" }),
+    });
+    fixture.runtime.setObservedState(observation({ detectedVersion: "0.26.0" }));
+
+    await expect(
+      fixture.service.execute(windowId, { kind: "update-provider-cli", instanceId }),
+    ).resolves.toMatchObject({
+      kind: "provider-cli-updated",
+      status: "updated",
+      previousVersion: "0.26.0",
+      currentVersion: "0.27.0",
+    });
+  });
 });
 
 function serviceFixture(
@@ -2703,6 +2755,21 @@ function provider(overrides: Record<string, unknown> = {}) {
     displayName: "OpenCode local",
     driverKind: "opencode",
     configuration: { kind: "opencode-cli", binaryPath: "/opt/homebrew/bin/opencode" },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  });
+}
+
+function kimiProvider(overrides: Record<string, unknown> = {}) {
+  return decodeProviderInstance({
+    id: instanceId,
+    displayName: "Kimi local",
+    driverKind: "kimi-code",
+    configuration: { kind: "kimi-code-acp", binaryPath: "/opt/homebrew/bin/kimi" },
     enabled: true,
     environmentPolicy: "inherit-host",
     version: 1,

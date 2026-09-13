@@ -284,6 +284,27 @@ describe("useProviderController", () => {
     expect(result.current.message).toMatch(/authoritative provider state/i);
   });
 
+  it("updates a provider CLI and refreshes the native provider snapshot", async () => {
+    const api = client();
+    vi.mocked(api.execute).mockResolvedValue({
+      kind: "provider-cli-updated",
+      instanceId: id,
+      status: "updated",
+      previousVersion: "1.0.0",
+      currentVersion: "1.1.0",
+    });
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(result.current.updateProviderCli(id)).resolves.toBe(true);
+    });
+
+    expect(api.execute).toHaveBeenCalledWith({ kind: "update-provider-cli", instanceId: id });
+    expect(api.bootstrap).toHaveBeenCalledTimes(2);
+    expect(result.current.message).toMatch(/provider CLI updated/i);
+  });
+
   it("shows probe progress and keeps normalized results only", async () => {
     const pending = deferred<Awaited<ReturnType<ProviderClient["probe"]>>>();
     const api = client();
@@ -384,6 +405,24 @@ describe("useProviderController", () => {
     );
     expect(result.current.message).not.toContain("secret provider diagnostic");
     expect(api.bootstrap).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps an automatic probe failure out of the page alert when quiet", async () => {
+    const pending = deferred<Awaited<ReturnType<ProviderClient["probe"]>>>();
+    const api = client();
+    vi.mocked(api.probe).mockReturnValueOnce(pending.promise);
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let check!: Promise<boolean>;
+    act(() => {
+      check = result.current.probe(id, { quiet: true });
+    });
+    pending.reject({ category: "provider-failed", message: "provider setup is incomplete" });
+    await expect(check).resolves.toBe(false);
+    await waitFor(() => expect(result.current.probingIds.has(id)).toBe(false));
+
+    expect(result.current.message).toBeUndefined();
   });
 
   it("keeps prior discovery cleared when probe failure refresh is unavailable", async () => {

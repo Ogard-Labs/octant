@@ -166,7 +166,8 @@ Intentionally out of scope; changing this requires an approved design change.
 - **Octant-operated cloud accounts or telemetry** — the product stays
   local-first and privacy-preserving by default.
 - **Auto-installing or auto-updating provider runtimes** — Octant detects
-  binaries, versions, and readiness but never installs them.
+  binaries, versions, and readiness but never installs or silently updates
+  them; explicit provider-owned update actions remain user-triggered.
 - **Core capabilities that require a specific provider or an optional
   extension** — browser/computer use, tests, Apple validation, approvals,
   memory, and subagents stay app-managed and provider-neutral.
