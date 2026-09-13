@@ -1,3 +1,4 @@
+import { useComposerTip } from "../composer/useComposerTip";
 import {
   ApplicationMentionTypeahead,
   BrowserUseMention,
@@ -29,7 +30,6 @@ import { CirclePause, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
-import { composerPlaceholder, FILE_HINT, THREAD_HINT } from "../composer/composerPlaceholder";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
@@ -429,6 +429,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft,
+  });
+  const tip = useComposerTip({
+    scopeKey: String(props.threadId),
+    files: true,
+    threads: threadMentions.composer !== undefined,
+    commands: slash.available,
+    browser: browser.available,
+    computer: computer.available,
+    plan: true,
   });
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
@@ -1554,14 +1563,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             onPaste={(event) => {
               if (attachFromTransfer(event.clipboardData)) event.preventDefault();
             }}
-            placeholder={
-              busy
-                ? "Send the next message…"
-                : composerPlaceholder("Ask for follow-up changes", [
-                    FILE_HINT,
-                    threadMentions.composer === undefined ? undefined : THREAD_HINT,
-                  ])
-            }
+            placeholder={busy ? "Send the next message…" : tip}
             ref={textareaRef}
             rows={2}
             value={draft}

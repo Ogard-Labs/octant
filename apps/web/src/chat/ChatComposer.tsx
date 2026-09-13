@@ -1,3 +1,4 @@
+import { useComposerTip } from "../composer/useComposerTip";
 import {
   ApplicationMentionTypeahead,
   BrowserUseMention,
@@ -28,7 +29,6 @@ import {
   type ThreadMentions,
 } from "./ThreadMentionPicker";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
-import { COMMAND_HINT, composerPlaceholder, THREAD_HINT } from "../composer/composerPlaceholder";
 import type {
   CanvasContextSelection,
   CanvasContextSelectionId,
@@ -265,6 +265,13 @@ export function ChatComposer(props: ChatComposerProps) {
   const offeredCommands = useOctantCommands().filter(
     (command) => command.action.kind === "run" || props.onResolveExtensionReference !== undefined,
   );
+  const tip = useComposerTip({
+    scopeKey: String(props.caretRestoreKey ?? "chat"),
+    threads: props.threadMentions !== undefined,
+    commands: offeredCommands.length > 0,
+    browser: browser.available,
+    computer: computer.available,
+  });
   const [commandToken, setCommandToken] = useState<SlashCommandToken | undefined>(undefined);
   const [activeCommandIndex, setActiveCommandIndex] = useState(0);
   const commandMatches =
@@ -671,14 +678,7 @@ export function ChatComposer(props: ChatComposerProps) {
       onKeyDown={onDraftKeyDown}
       onKeyUp={onDraftKeyUp}
       onPaste={onDraftPaste}
-      placeholder={
-        props.isSending
-          ? "Send the next message…"
-          : composerPlaceholder("Message Octant", [
-              offeredCommands.length > 0 ? COMMAND_HINT : undefined,
-              props.threadMentions === undefined ? undefined : THREAD_HINT,
-            ])
-      }
+      placeholder={props.isSending ? "Send the next message…" : tip}
       ref={messageRef}
       rows={1}
       value={props.draft}

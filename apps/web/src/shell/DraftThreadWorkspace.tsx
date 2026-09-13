@@ -1,3 +1,4 @@
+import { useComposerTip } from "../composer/useComposerTip";
 import { ComputerUseMention, useComputerUseMention } from "../computerUse/ComputerUseMention";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { decodeGithubIssueContextRequest } from "@octant/contracts";
@@ -813,6 +814,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     scopeKey: "chat-draft",
   });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const tip = useComposerTip({ scopeKey: "chat-draft", computer: computer.available });
   const trimmed = prompt.trim();
   const canSubmit = trimmed.length > 0 && !props.creating;
 
@@ -900,7 +902,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                   computer.sync(event.target.value, event.currentTarget.selectionStart);
                 }}
                 onKeyDown={handleKeyDown}
-                placeholder={presentation.composerPlaceholder}
+                placeholder={tip}
                 ref={textareaRef}
                 rows={3}
                 value={prompt}
