@@ -85,25 +85,13 @@ Destinations that this host cannot back — Navigator without a model, a Work
 board that is not wired, GitHub pull requests without a working GitHub
 capability, Agents without child runs — stay absent rather than advertised.
 
-## Local profile and execution settings
+## Provider and access settings
 
-Octant supports persisted execution profiles that capture settings, provider
-defaults, and effective context. Create, edit, and restore profiles through
-Settings to avoid reconfiguring each thread.
-
-Selecting a profile in the Code composer binds it to the thread you start. The
-profile can only narrow that thread: if it defaults to Approval-gated and you
-asked for Full access, the thread starts Approval-gated; if you asked for Plan,
-Plan stands. It shortens the permission duration the same
-way: a profile that keeps permissions to the current session starts the thread
-that way even if you asked for the Project default. A profile written for
-another mode, one that does not list the model you selected, and one that
-belongs to a different Project or thread all refuse the thread rather than
-starting it. A profile can
-never grant authority the Project does not already give, and editing a profile
-afterwards does not change a thread that is already running under it — the
-thread shows which profile it started under beside its model and access
-controls.
+Choose the provider, model, and access posture in the new-thread composer.
+Execution profiles are no longer offered in Settings or the command palette
+and do not supply new-thread defaults. Existing saved profile records remain
+available for historical thread labels and automation configuration; removing
+the Settings page does not change an existing thread's authority.
 
 ## Next steps
 

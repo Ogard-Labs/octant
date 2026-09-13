@@ -15,7 +15,6 @@ describe("ShellSettingsSurface", () => {
         codeController={{} as never}
         diagnosticsExportClient={{} as never}
         discoveryController={{} as never}
-        executionProfiles={null}
         extensionClient={{} as never}
         githubClient={{} as never}
         hostControlClient={{} as never}

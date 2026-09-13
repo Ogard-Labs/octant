@@ -77,7 +77,6 @@ here than additional decoration or page animation.
 | Chat                  | Saved revisions update untouched values while retaining active drafts and focus. Manual textarea resizing remains available.                                              |
 | Code                  | Saved defaults no longer remount the editor form; unfinished editor fields survive revisions.                                                                             |
 | Providers & Models    | Fixed metadata columns, bounded model catalog, reserved feedback, and presentation-only model facts during checks. Authoritative eligibility still clears during probing. |
-| Execution profiles    | Bounded catalog with deliberate expansion; direct pointer interaction preserves the page anchor.                                                                          |
 | Agents                | Sparse and consistent with the shared field recipe.                                                                                                                       |
 | Octant Harness        | Aligned slot rows; long but navigable with the same page structure.                                                                                                       |
 | Skills & Extensions   | Refresh retains installed controls; initial loading remains a distinct state. A failed refresh identifies the retained snapshot as the last loaded settings.              |
@@ -194,12 +193,12 @@ primary-at-90% implementation tier. Neutral light/dark secondary text measures
 8.19:1 and 7.41:1 against the workspace; the retained tinted preset measures
 5.58:1 and 6.12:1. These meet the normal-text contrast floor.
 
-### Execution profiles remain a distinct capability
+### Execution profiles retired from Settings
 
-Settings now calls this destination Execution profiles and describes it as
-saved provider, model, and behavior defaults for agent runs. Personal identity
-remains in General. Saved profile data, editing, and resolution behavior are
-preserved; no retirement or migration is implied.
+The execution-profile page and command-palette selection are removed because
+profile resolution no longer supplies new-thread defaults. Provider, model,
+and access choices belong to the composer. Saved records remain available to
+existing thread labels and the automation catalog.
 
 ### Density and refresh follow-up
 

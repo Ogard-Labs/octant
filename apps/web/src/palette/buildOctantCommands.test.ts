@@ -13,8 +13,6 @@ function sources(overrides: Partial<OctantCommandSources> = {}): OctantCommandSo
     onOpenThread: vi.fn(),
     projects: [],
     onOpenProject: vi.fn(),
-    profiles: [],
-    onSelectProfile: vi.fn(),
     skills: [],
     appleProjects: [],
     onOpenAppleProject: vi.fn(),

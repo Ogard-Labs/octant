@@ -230,7 +230,6 @@ import {
   threadSearchListingForStatus,
 } from "./shell/shellModeRouting";
 import type { ThreadSearchThread } from "./shell/threadSearchViewModel";
-import { EXECUTION_POLICY_LABEL } from "./shell/shellCommandWiring";
 import { useWorkPromotionController } from "./work/useWorkPromotionController";
 import { ShellState } from "./shell/ShellState";
 import type { FirstRunHandoffProject } from "./onboarding/firstRunHandoffModel";
@@ -349,7 +348,7 @@ import { resolveZenTerminalPinTarget } from "./zen/zenThreadActions";
 import { useAppleProjects } from "./apple/useAppleProjects";
 import { useThemeController } from "./theme/useThemeController";
 import { AgentProfileNamesProvider } from "./agentProfile/AgentProfileNames";
-import { useExecutionProfileController } from "./agentProfile/useExecutionProfileController";
+import { useAgentProfiles } from "./agentProfile/useAgentProfiles";
 import { useWorkThreadNavigation } from "./work/useWorkThreadNavigation";
 import type { ThreadRowActions } from "./projects/ThreadRowMenu";
 import { exportThreadBundle, resolveThreadExportClient } from "./thread/threadExport";
@@ -365,7 +364,7 @@ const UsageWorkspace = lazy(() =>
   import("./usage/UsageWorkspace").then((module) => ({ default: module.UsageWorkspace })),
 );
 // Surfaces most sessions never open stay out of the first bundle: pairing a
-// remote device, the execution-profile editor in Settings, and Zen.
+// remote device and Zen.
 const RemotePairingView = lazy(() =>
   import("./remote/RemotePairingView").then((module) => ({ default: module.RemotePairingView })),
 );
@@ -380,11 +379,6 @@ const ZenResearchDock = lazy(() =>
 );
 const ZenTerminalCard = lazy(() =>
   import("./zen/ZenTerminalCard").then((module) => ({ default: module.ZenTerminalCard })),
-);
-const ExecutionProfileWorkflow = lazy(() =>
-  import("./agentProfile/ExecutionProfileWorkflow").then((module) => ({
-    default: module.ExecutionProfileWorkflow,
-  })),
 );
 
 export type { ShellLaunch } from "./shell/shellLaunch";
@@ -2395,43 +2389,10 @@ function LaunchedShell(
       : visibleDraftSelection?.providerInstanceId;
   const effectiveDraftModelId =
     activeMode === "work" ? workProviderChoice?.modelId : visibleDraftSelection?.modelId;
-  const executionProfileScope = useMemo(
-    () =>
-      activeProjectId === undefined
-        ? ({ scopeKind: "mode", scopeRef: activeMode } as const)
-        : ({
-            scopeKind: "project",
-            scopeRef: String(activeProjectId),
-          } as const),
-    [activeMode, activeProjectId],
-  );
   const localHost = hosts.find((host) => String(host.hostId) === String(LOCAL_HOST_ID));
   const codeDefaultExecutionPolicy =
     codeController.bootstrap?.settings.defaultExecutionPolicy ?? "approval-gated";
-  const draftRequestedExecutionPolicy =
-    activeMode === "code"
-      ? (draftComposerExecutionPolicy ?? codeDefaultExecutionPolicy)
-      : "approval-gated";
-  const executionProfileController = useExecutionProfileController({
-    client: agentProfileClient,
-    ...(localHost === undefined ? {} : { hostHealth: localHost.health }),
-    hostId: LOCAL_HOST_ID,
-    hostLabel: localHost?.displayName ?? localHostDisplayName(),
-    mode: activeMode,
-    onSelectProvider: (selection) => {
-      setDraftProviderInstanceId(selection.providerInstanceId);
-      setDraftModelId(selection.modelId);
-    },
-    profileSelectionStorageKey: `octant.execution-profile.${activeMode}.${activeProjectId ?? "unfiled"}`,
-    projectExecutionPolicy: draftRequestedExecutionPolicy,
-    requestedExecutionPolicy: draftRequestedExecutionPolicy,
-    providerGroups: draftProviderGroups,
-    ...(effectiveDraftProviderInstanceId === undefined
-      ? {}
-      : { selectedProviderInstanceId: effectiveDraftProviderInstanceId }),
-    ...(effectiveDraftModelId === undefined ? {} : { selectedModelId: effectiveDraftModelId }),
-    scope: executionProfileScope,
-  });
+  const agentProfiles = useAgentProfiles(agentProfileClient);
   // Editor catalog from Projects already loaded in App, approval-gated agent
   // profiles, and Code bootstrap / prepared checkout receipts when present.
   // Work Projects with a binding revision always qualify; Code Projects
@@ -2442,7 +2403,7 @@ function LaunchedShell(
   // choice arrays allocate new wrappers every render; depending on those
   // references in an effect/setState path would loop forever and hang App tests.
   const automationCatalogProjects = projectController.allProjects;
-  const automationCatalogProfiles = executionProfileController.profiles;
+  const automationCatalogProfiles = agentProfiles;
   const automationCatalogProjectKey = automationCatalogProjects
     .map((project) => {
       const bindingRevision =
@@ -4592,26 +4553,6 @@ function LaunchedShell(
         mode: project.type,
       })),
     onOpenProject: openCommandProject,
-    // Only profiles the host loaded and marked compatible with the active mode
-    // are offered; an unloaded or incompatible profile would be a dead entry.
-    profiles:
-      executionProfileController.status === "loading" ||
-      executionProfileController.status === "error"
-        ? []
-        : executionProfileController.profiles
-            .filter((profile) => profile.compatibleModes.includes(activeMode))
-            .map((profile) => ({
-              profileId: String(profile.id),
-              displayName: profile.displayName,
-              executionPolicyLabel: EXECUTION_POLICY_LABEL[profile.defaultExecutionPolicy],
-            })),
-    onSelectProfile: (profile) => {
-      const target = executionProfileController.profiles.find(
-        (candidate) => String(candidate.id) === profile.profileId,
-      );
-      if (target === undefined) return;
-      executionProfileController.selectProfile(target.id);
-    },
     skills: commandSkills,
     appleProjects,
     onOpenAppleProject: (project) => {
@@ -4681,11 +4622,6 @@ function LaunchedShell(
       chatController={chatController}
       codeController={codeController}
       discoveryController={discoveryController}
-      executionProfiles={
-        <Suspense fallback={null}>
-          <ExecutionProfileWorkflow controller={executionProfileController} variant="settings" />
-        </Suspense>
-      }
       extensionClient={extensionClient}
       {...(props.hostBridge?.selectLocalPluginFolder === undefined
         ? {}
@@ -5415,7 +5351,7 @@ function LaunchedShell(
                   void controller.openWorkThread(decodeWorkThreadId(target.threadId), target.title);
                 }}
               />
-              <AgentProfileNamesProvider profiles={executionProfileController.profiles}>
+              <AgentProfileNamesProvider profiles={agentProfiles}>
                 <ComposerContextMeterProvider
                   busy={contextController.status === "updating"}
                   onRebuild={() => void contextController.rebuild()}

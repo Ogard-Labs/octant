@@ -139,17 +139,13 @@ function defaultProps(): SettingsViewProps {
 }
 
 describe("SettingsView", () => {
-  it("mounts execution-profile management in its own Profiles settings destination", async () => {
-    renderSettings({
-      executionProfiles: <div data-testid="execution-profile-settings">Profile settings</div>,
-      initialDeepLink: { section: "profiles" },
-    });
-    expect(await screen.findByTestId("execution-profile-settings")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Execution profiles" })).toHaveAttribute(
+  it("falls back to General for a retired execution-profile link and offers no profile page", async () => {
+    renderSettings({ initialDeepLink: { section: "profiles" } });
+    expect(await screen.findByRole("button", { name: "General" })).toHaveAttribute(
       "aria-current",
       "page",
     );
-    expect(screen.queryByText("Providers", { selector: "h1" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Execution profiles" })).not.toBeInTheDocument();
   });
 
   it("mounts the Agents settings panel when an AgentRunSettingsClient is supplied", async () => {

@@ -21,8 +21,6 @@ export interface OctantCommandSources {
   readonly onOpenThread: (thread: CommandThread) => void;
   readonly projects: ReadonlyArray<CommandProject>;
   readonly onOpenProject: (project: CommandProject) => void;
-  readonly profiles: ReadonlyArray<CommandAgentProfile>;
-  readonly onSelectProfile: (profile: CommandAgentProfile) => void;
   readonly skills: ReadonlyArray<CommandSkill>;
   /**
    * Apple projects the host listed in the active Code thread's checkout. A
@@ -49,13 +47,6 @@ export interface CommandProject {
   readonly projectId: string;
   readonly name: string;
   readonly mode: OctantMode;
-}
-
-export interface CommandAgentProfile {
-  readonly profileId: string;
-  readonly displayName: string;
-  /** Words for the policy this profile defaults to; never a colour. */
-  readonly executionPolicyLabel: string;
 }
 
 export interface CommandAppleProject {
@@ -139,17 +130,6 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
       detail: `${MODE_LABEL[project.mode]} Project`,
       keywords: [project.name],
       action: { kind: "run", run: () => sources.onOpenProject(project) },
-    });
-  }
-
-  for (const profile of sources.profiles) {
-    commands.push({
-      id: `profile:${profile.profileId}`,
-      title: `Use ${profile.displayName}`,
-      group: "Agent profiles",
-      detail: profile.executionPolicyLabel,
-      keywords: ["agent", "profile", profile.displayName],
-      action: { kind: "run", run: () => sources.onSelectProfile(profile) },
     });
   }
 

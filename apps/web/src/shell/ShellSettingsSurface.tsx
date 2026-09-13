@@ -39,7 +39,6 @@ export interface ShellSettingsSurfaceProps {
   readonly chatController: ChatController;
   readonly codeController: CodeController;
   readonly discoveryController: DiscoveryController;
-  readonly executionProfiles: ReactNode;
   readonly pickLocalPluginFolder?: () => Promise<
     Readonly<{ receiptId: string; displayName: string }> | undefined
   >;
@@ -100,7 +99,6 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             chatController={props.chatController}
             codeController={props.codeController}
             discoveryController={props.discoveryController}
-            executionProfiles={props.executionProfiles}
             extensionClient={props.extensionClient}
             {...(props.pickLocalPluginFolder === undefined
               ? {}

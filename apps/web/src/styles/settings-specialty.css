@@ -7,7 +7,6 @@
 .settings-view #settings-voice,
 .settings-view #settings-navigator-assistant,
 .settings-view #settings-computer-use,
-.settings-view .execution-profile-workflow--settings,
 .settings-view .agent-run-settings-panel,
 .settings-view #settings-harness,
 .settings-view .extensions-settings,
@@ -201,28 +200,8 @@
   line-height: 1.45;
 }
 
-/* Execution profiles and agent policy */
-.settings-view .execution-profile-workflow--settings {
-  gap: 28px;
-}
-
-.settings-view .execution-profile-workflow--settings .settings-card-section {
-  gap: 0;
-}
-
-.settings-view .execution-profile-workflow--settings .execution-profile-workflow__profiles {
-  border-top: 1px solid var(--oct-hairline);
-}
-
-.settings-view .execution-profile-workflow--settings .execution-profile-workflow__profile {
-  min-height: 44px;
-  padding: 10px 0;
-  border-top: 0;
-  border-bottom: 1px solid var(--oct-hairline);
-}
-
-.settings-view .agent-run-settings-panel__error,
-.settings-view .execution-profile-workflow__alert {
+/* Agent policy */
+.settings-view .agent-run-settings-panel__error {
   margin: 0;
   padding: 10px 12px;
   border: 1px solid color-mix(in oklab, var(--oct-danger) 45%, transparent);

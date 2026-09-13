@@ -151,7 +151,6 @@ export interface SettingsViewProps {
   readonly themeController?: ThemeController;
   /** The host's photo library for the welcome background; absent on hosts without one. */
   readonly backgroundImageLibrary?: BackgroundImageLibrary;
-  readonly executionProfiles?: ReactNode;
   readonly agentRunSettingsClient?: AgentRunSettingsClient;
   readonly nativeHarnessClient?: NativeHarnessClient;
   readonly automationNotificationClient?: AutomationNotificationClient;
@@ -179,7 +178,6 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   "image-generation": "Choose connected providers and models for image generation.",
   "computer-use": "Control applications through the bundled Computer use plugin.",
   providers: "Connect providers, manage authentication, and pick default models.",
-  profiles: "Saved provider, model, and behavior defaults for agent runs.",
   agents: "How agent runs behave in this app.",
   harness: "Octant's own agent loop for API-key and local models: which model does which job.",
   skills: "Skills and extensions available to agents.",
@@ -585,8 +583,6 @@ function ActiveSectionContent({
           providerController={props.providerController}
         />
       ) : null;
-    case "profiles":
-      return props.executionProfiles ?? null;
     case "agents":
       return props.agentRunSettingsClient !== undefined ? (
         <div id="settings-agents">

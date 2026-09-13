@@ -23,8 +23,8 @@ palette is inert while Zen is active. Every command still runs through
 its ordinary authority check.
 
 It can switch mode, start a new thread in the current mode, open thread
-Search, open a thread or Project the host has already listed, select an
-agent profile, open Settings, and open the Apple workbench for a
+Search, open a thread or Project the host has already listed,
+open Settings, and open the Apple workbench for a
 `.xcodeproj` or `.xcworkspace` at the checkout root. Skill references
 stay in the composer `/` list, because the palette has no draft to write
 into.
