@@ -101,7 +101,7 @@ export function useComposerSlashCommands(input: {
   return {
     active,
     activeIndex,
-    available: commands.length > 0,
+    commandIds: commands.map((command) => command.id),
     choose,
     handleKeyDown,
     listId,

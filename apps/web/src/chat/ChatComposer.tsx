@@ -268,7 +268,7 @@ export function ChatComposer(props: ChatComposerProps) {
   const tip = useComposerTip({
     scopeKey: String(props.caretRestoreKey ?? "chat"),
     threads: props.threadMentions !== undefined,
-    commands: offeredCommands.length > 0,
+    commands: offeredCommands.map((command) => command.id),
     browser: browser.available,
     computer: computer.available,
   });

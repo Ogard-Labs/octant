@@ -139,7 +139,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   const tip = useComposerTip({
     scopeKey: "work-draft",
     threads: threadMentions.composer !== undefined,
-    commands: slash.available,
+    commands: slash.commandIds,
     browser: browser.available,
     computer: computer.available,
   });

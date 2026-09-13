@@ -613,6 +613,8 @@ flowchart LR
   including returning to a thread and creating another draft. It stays steady
   through typing and routine updates. Callers offer only mounted capabilities:
   file and thread mentions, commands, Browser, Computer, and Code Plan mode.
+  Command-specific tips cover thread search, new threads, Settings, Zen mode,
+  and skills only when their commands are offered by the current composer.
   Removing a capability replaces an ineligible tip. Active responses retain
   their send-next-message placeholder. Tips use no timers, persisted history,
   network calls, or live announcements; accessible input labels remain stable.

@@ -66,7 +66,15 @@ describe("composer tips", () => {
     const discovered = new Set<string | null>();
     for (let index = 0; index < 24; index += 1) {
       rerender(
-        <Composer scopeKey={`enabled-${index}`} files threads commands browser computer plan />,
+        <Composer
+          scopeKey={`enabled-${index}`}
+          files
+          threads
+          commands={["test:command"]}
+          browser
+          computer
+          plan
+        />,
       );
       discovered.add(field.getAttribute("placeholder"));
     }
@@ -80,5 +88,30 @@ describe("composer tips", () => {
     );
     rerender(<Composer scopeKey="enabled-23" />);
     expect(baseTips.has(field.getAttribute("placeholder"))).toBe(true);
+  });
+  it("offers command-specific tips only for commands this composer can run or resolve", () => {
+    const commands = [
+      "thread:search",
+      "thread:new:code",
+      "settings:open",
+      "workspace:zen-mode",
+      "skill:review",
+    ];
+    const { rerender } = render(<Composer scopeKey="commands-0" commands={commands} />);
+    const seen = new Set<string | null>();
+    for (let index = 0; index < 24; index += 1) {
+      rerender(<Composer scopeKey={`commands-${index}`} commands={commands} />);
+      seen.add(screen.getByRole("textbox").getAttribute("placeholder"));
+    }
+    expect(seen).toContain("Tip: Type /search to find another thread.");
+    expect(seen).toContain("Tip: Type /new to start a fresh thread.");
+    expect(seen).toContain("Tip: Type /settings to open Settings.");
+    expect(seen).toContain("Tip: Type /zen to toggle a focused workspace.");
+    expect(seen).toContain("Tip: Type /skill to find skills available in this composer.");
+    for (let index = 0; index < 12; index += 1) {
+      rerender(<Composer scopeKey={`limited-${index}`} commands={["settings:open"]} />);
+      const tip = screen.getByRole("textbox").getAttribute("placeholder");
+      expect(tip).not.toMatch(/\/(search|new|zen|skill)/);
+    }
   });
 });

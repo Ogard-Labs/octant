@@ -434,7 +434,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     scopeKey: String(props.threadId),
     files: true,
     threads: threadMentions.composer !== undefined,
-    commands: slash.available,
+    commands: slash.commandIds,
     browser: browser.available,
     computer: computer.available,
     plan: true,

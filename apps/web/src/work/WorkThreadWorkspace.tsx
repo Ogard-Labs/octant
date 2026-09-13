@@ -437,7 +437,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     scopeKey: String(props.threadId),
     files: props.fileMentionClient !== undefined,
     threads: threadMentions.composer !== undefined,
-    commands: slash.available,
+    commands: slash.commandIds,
     browser: browser.available,
     computer: computer.available,
   });

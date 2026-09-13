@@ -314,7 +314,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const tip = useComposerTip({
     scopeKey: "code-draft",
     threads: threadMentions.composer !== undefined,
-    commands: slash.available,
+    commands: slash.commandIds,
     browser: browser.available,
     computer: computer.available,
     plan: true,
