@@ -24,6 +24,7 @@ import {
   SquarePen,
   Star,
   Terminal,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { groupProjectsForView, sortProjectsForView } from "@octant/domain";
@@ -186,7 +187,7 @@ function CodeProjectViewGlyph(props: {
  * read as data loss.
  */
 const FILTERED_THREADS_EMPTY_MESSAGE =
-  "No threads match the current filters. Nothing was deleted — clear search or change environment filters to see more.";
+  "No threads match the current filters. Nothing was deleted — clear search or filters to see more.";
 
 const PROJECT_SORT_ITEMS: ReadonlyArray<OctantMenuItem> = [
   {
@@ -1718,7 +1719,7 @@ function CodeProjectViewEditorDialog(props: {
           type="button"
           variant="ghost"
         >
-          ×
+          <X aria-hidden="true" size={16} strokeWidth={1.8} />
         </OctantButton>
       </div>
       <p>

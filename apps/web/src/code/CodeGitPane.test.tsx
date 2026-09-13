@@ -25,7 +25,7 @@ describe("CodeGitPane", () => {
 
     expect(screen.getByText("feature/delivery")).toBeVisible();
     fireEvent.click(screen.getByRole("checkbox", { name: "Select src/changed.ts" }));
-    fireEvent.click(screen.getByRole("button", { name: "Stage 1 path" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stage 1 file" }));
     await waitFor(() =>
       expect(client.executeOperation).toHaveBeenCalledWith(
         expect.objectContaining({ kind: "stage-git", paths: ["src/changed.ts"] }),
@@ -50,7 +50,7 @@ describe("CodeGitPane", () => {
     // Nothing exists to push, but the first commit must still be reachable.
     expect(screen.getByRole("button", { name: "Push exact branch" })).toBeDisabled();
     fireEvent.click(screen.getByRole("checkbox", { name: "Select src/changed.ts" }));
-    fireEvent.click(screen.getByRole("button", { name: "Stage 1 path" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stage 1 file" }));
     await waitFor(() =>
       expect(client.executeOperation).toHaveBeenCalledWith(
         expect.objectContaining({ kind: "stage-git", paths: ["src/changed.ts"] }),
@@ -85,7 +85,7 @@ describe("CodeGitPane", () => {
       />,
     );
     fireEvent.click(screen.getByRole("checkbox", { name: "Select src/changed.ts" }));
-    fireEvent.click(screen.getByRole("button", { name: "Stage 1 path" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stage 1 file" }));
     await waitFor(() =>
       expect(requestApproval).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -139,7 +139,7 @@ describe("CodeGitPane", () => {
     fireEvent.change(screen.getByLabelText("Commit message"), {
       target: { value: "feat: deliver panes" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Commit 1 staged path" }));
+    fireEvent.click(screen.getByRole("button", { name: "Commit 1 staged file" }));
     await waitFor(() =>
       expect(client.executeOperation).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -166,10 +166,10 @@ describe("CodeGitPane", () => {
 
     // Selecting a change that is not in the index leaves nothing to unstage.
     fireEvent.click(screen.getByRole("checkbox", { name: "Select src/changed.ts" }));
-    expect(screen.getByRole("button", { name: "Unstage 0 paths" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Unstage 0 files" })).toBeDisabled();
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Select src/staged.ts" }));
-    fireEvent.click(screen.getByRole("button", { name: "Unstage 1 path" }));
+    fireEvent.click(screen.getByRole("button", { name: "Unstage 1 file" }));
     await waitFor(() =>
       expect(client.executeOperation).toHaveBeenCalledWith(
         expect.objectContaining({ kind: "unstage-git", paths: ["src/staged.ts"] }),
@@ -197,7 +197,7 @@ describe("CodeGitPane", () => {
     );
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Select src/new.ts" }));
-    fireEvent.click(screen.getByRole("button", { name: "Unstage 2 paths" }));
+    fireEvent.click(screen.getByRole("button", { name: "Unstage 2 files" }));
     await waitFor(() =>
       expect(client.executeOperation).toHaveBeenCalledWith(
         expect.objectContaining({ kind: "unstage-git", paths: ["src/new.ts", "src/old.ts"] }),
@@ -219,13 +219,13 @@ describe("CodeGitPane", () => {
     );
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Select src/changed.ts" }));
-    fireEvent.click(screen.getByRole("button", { name: "Discard 1 path" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard 1 file" }));
     expect(client.executeOperation).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Keep changes" }));
     expect(client.executeOperation).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Discard 1 path" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard 1 file" }));
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
     await waitFor(() =>
       expect(client.executeOperation).toHaveBeenCalledWith(
@@ -304,7 +304,7 @@ describe("CodeGitPane", () => {
       />,
     );
     fireEvent.click(screen.getByRole("checkbox", { name: "Select src/changed.ts" }));
-    fireEvent.click(screen.getByRole("button", { name: "Stage 1 path" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stage 1 file" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/Git command failed/i);
   });
 
@@ -350,7 +350,7 @@ describe("CodeGitPane", () => {
       />,
     );
     fireEvent.click(screen.getByRole("checkbox", { name: "Select src/changed.ts" }));
-    fireEvent.click(screen.getByRole("button", { name: "Stage 1 path" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stage 1 file" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(/stage requested.*refresh/i);
     expect(screen.queryByText(/stage completed/i)).not.toBeInTheDocument();

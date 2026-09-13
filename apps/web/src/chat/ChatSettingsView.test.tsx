@@ -55,8 +55,11 @@ describe("ChatSettingsView", () => {
       "SearXNG",
     );
     await user.type(screen.getByLabelText("SearXNG base URL"), "https://search.example/");
-    await user.clear(screen.getByLabelText("Calm personality instructions"));
-    await user.type(screen.getByLabelText("Calm personality instructions"), "Be calm and precise.");
+    await user.clear(screen.getByLabelText("Instructions for new Chat threads"));
+    await user.type(
+      screen.getByLabelText("Instructions for new Chat threads"),
+      "Be calm and precise.",
+    );
     await user.tab();
 
     expect(onUpdate).toHaveBeenLastCalledWith({

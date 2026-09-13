@@ -76,7 +76,7 @@ describe("ModeSwitcher", () => {
 
     const items = screen.getAllByRole("menuitemradio");
     expect(items.map((item) => item.textContent)).toEqual([
-      expect.stringMatching(/Chat.*Conversation with shared virtual context/),
+      expect.stringMatching(/Chat.*Talk through questions with your models/),
       expect.stringMatching(/Work.*Work with local files and documents/),
       expect.stringMatching(/Code.*Build, debug, and ship software/),
     ]);

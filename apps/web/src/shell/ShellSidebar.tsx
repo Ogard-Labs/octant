@@ -233,7 +233,14 @@ export function ShellSidebar(props: ShellSidebarProps) {
           rows={destinationLayout.rows}
         />
         {chatStatusMessage === undefined ? null : (
-          <div className="project-nav__status sidebar__chat-status" role="alert">
+          <div
+            className="project-nav__status sidebar__chat-status"
+            role={
+              props.chatErrorMessage !== undefined || props.chatStatus === "disconnected"
+                ? "alert"
+                : "status"
+            }
+          >
             <span>{chatStatusMessage}</span>
             {props.chatStatus === "disconnected" ? (
               <OctantButton onClick={props.onRetryChat} type="button" variant="ghost">

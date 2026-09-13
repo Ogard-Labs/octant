@@ -84,7 +84,7 @@ describe("CodeFileExplorerPanel", () => {
         onOpenFile={vi.fn()}
       />,
     );
-    expect(await screen.findByText("Loading Files")).toBeVisible();
+    expect(await screen.findByText("Loading files")).toBeVisible();
     expect(screen.queryByText("No matching repository files.")).not.toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: "Filter files" })).toBeVisible();
   });

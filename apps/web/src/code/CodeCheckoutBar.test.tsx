@@ -72,7 +72,7 @@ describe("CodeCheckoutBar", () => {
       </CodeCheckoutProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Create PR" }));
+    await user.click(screen.getByRole("button", { name: "Create pull request" }));
     expect(onCreatePullRequest).toHaveBeenCalledOnce();
   });
 
@@ -82,6 +82,6 @@ describe("CodeCheckoutBar", () => {
         <CodeCheckoutBar />
       </CodeCheckoutProvider>,
     );
-    expect(screen.queryByRole("button", { name: "Create PR" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create pull request" })).not.toBeInTheDocument();
   });
 });

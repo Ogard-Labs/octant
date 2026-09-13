@@ -172,7 +172,10 @@ export function ChatWelcome(props: ChatWelcomeProps) {
           />
         </div>
         {statusMessage === undefined ? null : (
-          <p className="draft-thread__error" role="alert">
+          <p
+            className="draft-thread__error"
+            role={props.errorMessage === undefined ? "status" : "alert"}
+          >
             {statusMessage}
           </p>
         )}

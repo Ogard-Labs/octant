@@ -119,7 +119,7 @@ export function ArchiveView(props: ArchiveViewProps) {
         <ShellState
           message="Loading archived threads from this host."
           state="loading"
-          title="Loading Archive"
+          title="Loading archive"
         />
       ) : entries.length === 0 ? (
         <SurfaceEmpty

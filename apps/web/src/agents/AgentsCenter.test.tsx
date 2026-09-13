@@ -127,6 +127,69 @@ describe("AgentsCenter", () => {
     expect(await screen.findByText("No agent runs match these filters")).toBeInTheDocument();
   });
 
+  it("confirms stopping a live run and does nothing when the answer is keep running", async () => {
+    const user = userEvent.setup();
+    const cancel = vi.fn(async () => ({ results: [] }));
+    render(<AgentsCenter client={createClient({ cancel })} />);
+    await user.click(await screen.findByRole("button", { name: "Summarize the design" }));
+
+    await user.click(await screen.findByRole("button", { name: "Stop child agents" }));
+    expect(screen.getByText(/Stop this run and any child agents/)).toBeVisible();
+    expect(cancel).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Keep running" }));
+    expect(screen.queryByText(/Stop this run and any child agents/)).not.toBeInTheDocument();
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it("does not carry a stop confirmation onto the run selected next", async () => {
+    const user = userEvent.setup();
+    const cancel = vi.fn(async () => ({ results: [] }));
+    const finished = decodeAgentRunCenterSummary({
+      ...summary,
+      runId: "55555555-5555-4555-8555-555555555555",
+      task: "Audit the copy",
+      lifecycleStatus: "completed",
+      version: 3,
+    });
+    render(
+      <AgentsCenter
+        client={createClient({
+          center: vi.fn(async () => ({ items: [summary, finished] })),
+          cancel,
+        })}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Summarize the design" }));
+    await user.click(await screen.findByRole("button", { name: "Stop child agents" }));
+    expect(screen.getByText(/Stop this run and any child agents/)).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Audit the copy" }));
+
+    expect(screen.queryByText(/Stop this run and any child agents/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop child agents" })).not.toBeInTheDocument();
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it("offers a finished run only the actions its lifecycle allows", async () => {
+    const user = userEvent.setup();
+    const finished = decodeAgentRunCenterSummary({
+      ...summary,
+      lifecycleStatus: "completed",
+      version: 3,
+    });
+    render(
+      <AgentsCenter
+        client={createClient({ center: vi.fn(async () => ({ items: [finished] })) })}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Summarize the design" }));
+
+    expect(screen.queryByRole("button", { name: "Stop child agents" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
+  });
+
   it("shows unavailable copy when the center query fails", async () => {
     render(
       <AgentsCenter

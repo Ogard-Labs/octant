@@ -1373,7 +1373,7 @@ function renderNonCodeTab(
   if (tab.kind === "preview") {
     return (
       <Suspense
-        fallback={<ShellState message="Loading preview." state="loading" title="Loading Preview" />}
+        fallback={<ShellState message="Loading preview." state="loading" title="Loading preview" />}
       >
         <PreviewWorkspaceTab key={tab.id} tab={tab} client={props.previewClient} />
       </Suspense>
@@ -1382,7 +1382,7 @@ function renderNonCodeTab(
   if (tab.kind === "canvas") {
     return (
       <Suspense
-        fallback={<ShellState message="Loading canvas." state="loading" title="Loading Canvas" />}
+        fallback={<ShellState message="Loading canvas." state="loading" title="Loading canvas" />}
       >
         <CanvasWorkspaceTab
           key={tab.id}

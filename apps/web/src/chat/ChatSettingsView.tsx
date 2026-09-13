@@ -127,7 +127,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
     }
     const instructions = next.defaultPersonalityInstructions.trim();
     if (instructions.length === 0) {
-      setFormError("Enter calm personality instructions.");
+      setFormError("Enter at least one instruction.");
       return;
     }
     setFormError(undefined);
@@ -263,13 +263,13 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
           />
         </SettingRow>
         <SettingRow
-          description="How a new Chat thread carries itself before you say otherwise."
-          label="Calm personality instructions"
+          description="The personality a new Chat thread starts with, until you say otherwise."
+          label="Instructions for new Chat threads"
           scope="host"
           settingId="chat-personality"
         >
           <OctantTextarea
-            aria-label="Calm personality instructions"
+            aria-label="Instructions for new Chat threads"
             className="settings-view__text-input"
             disabled={busy}
             onBlur={() => void commit({})}

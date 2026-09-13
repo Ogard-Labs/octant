@@ -450,7 +450,7 @@ describe("SettingsView", () => {
     const controller = chatControllerFixture();
     const { props, rerender } = renderSettings({ chatController: controller });
     navigateTo("Chat");
-    const field = screen.getByLabelText("Calm personality instructions");
+    const field = screen.getByLabelText("Instructions for new Chat threads");
     field.focus();
     fireEvent.change(field, { target: { value: "An unfinished draft" } });
     const bootstrap = decodeChatBootstrap({
@@ -462,7 +462,7 @@ describe("SettingsView", () => {
       },
     });
     rerender(<SettingsView {...props} chatController={{ ...controller, bootstrap }} />);
-    expect(screen.getByLabelText("Calm personality instructions")).toBe(field);
+    expect(screen.getByLabelText("Instructions for new Chat threads")).toBe(field);
     expect(field).toHaveFocus();
     expect(field).toHaveValue("An unfinished draft");
     expect(screen.getByRole("switch", { name: "Enable research by default" })).toBeChecked();

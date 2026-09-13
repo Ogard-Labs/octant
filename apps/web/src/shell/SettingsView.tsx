@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
-import { ArrowLeft, Menu, Search, X } from "lucide-react";
+import { ArrowLeft, Check, Menu, Search, X } from "lucide-react";
 import type { ShellSettings } from "@octant/contracts/shell";
 import {
   type SettingsDeepLink,
@@ -388,7 +388,7 @@ export function SettingsView(props: SettingsViewProps) {
             )}
             {!hasQuery && availableSections.length === 0 ? (
               <p className="settings-view__empty" role="status">
-                No implemented settings are available.
+                No settings are available on this host.
               </p>
             ) : null}
           </div>
@@ -441,7 +441,6 @@ function SettingsSearchField(props: {
       </label>
       <Search aria-hidden="true" className="settings-view__search-icon" size={14} />
       <OctantInput
-        aria-label="Search settings"
         className="settings-view__text-input"
         id={inputId}
         onChange={(event) => props.onChange(event.currentTarget.value)}
@@ -1555,7 +1554,7 @@ function SidebarBackgroundSettings({
                 >
                   {selected ? (
                     <span aria-hidden="true" className="settings-view__selection-mark">
-                      ✓
+                      <Check size={14} strokeWidth={2} />
                     </span>
                   ) : null}
                 </OctantButton>
