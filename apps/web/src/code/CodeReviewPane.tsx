@@ -62,7 +62,7 @@ export function PullRequestConversation(props: PullRequestConversationProps) {
       <section aria-label="Pull request reviews" className="code-pr-review__section">
         <header className="code-pr-review__section-header">
           <span className="code-pr-review__section-heading">
-            <ClipboardCheck aria-hidden="true" size={15} strokeWidth={1.8} />
+            <ClipboardCheck aria-hidden="true" size={14} strokeWidth={1.8} />
             <h2>
               Reviews <span className="code-pr-review__section-count">{props.reviews.length}</span>
             </h2>
@@ -93,7 +93,7 @@ export function PullRequestConversation(props: PullRequestConversationProps) {
       <section aria-label="Pull request comments" className="code-pr-review__section">
         <header className="code-pr-review__section-header">
           <span className="code-pr-review__section-heading">
-            <MessageCircle aria-hidden="true" size={15} strokeWidth={1.8} />
+            <MessageCircle aria-hidden="true" size={14} strokeWidth={1.8} />
             <h2>
               Comments{" "}
               <span className="code-pr-review__section-count">{props.comments.length}</span>

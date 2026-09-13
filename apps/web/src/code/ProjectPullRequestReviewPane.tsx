@@ -137,7 +137,7 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
               rel="noreferrer"
               target="_blank"
             >
-              <ExternalLink aria-hidden="true" size={13} strokeWidth={1.8} />
+              <ExternalLink aria-hidden="true" size={14} strokeWidth={1.8} />
               <span>Open on GitHub</span>
             </a>
           )}
@@ -148,44 +148,44 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
               type="button"
               variant="ghost"
             >
-              <RefreshCw aria-hidden="true" size={13} strokeWidth={1.8} />
+              <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
               <span>Refresh detail</span>
             </OctantButton>
           )}
         </div>
         <p className="code-pr-review__meta">
           <OctantBadge variant={PR_STATE_VARIANTS[detail.pullRequestState]}>
-            <StateIcon aria-hidden="true" size={13} strokeWidth={1.8} />
+            <StateIcon aria-hidden="true" size={14} strokeWidth={1.8} />
             <span>{PR_STATE_LABELS[detail.pullRequestState]}</span>
           </OctantBadge>
           <span
             className="code-pr-review__route"
             title={`${detail.headRepository}:${detail.headBranch} → ${detail.baseRepository}:${detail.baseBranch}`}
           >
-            <GitBranch aria-hidden="true" size={13} strokeWidth={1.8} />
+            <GitBranch aria-hidden="true" size={14} strokeWidth={1.8} />
             <code>
               {detail.headRepository}:{detail.headBranch}
             </code>
-            <ArrowRight aria-hidden="true" size={13} strokeWidth={1.8} />
+            <ArrowRight aria-hidden="true" size={14} strokeWidth={1.8} />
             <code>
               {detail.baseRepository}:{detail.baseBranch}
             </code>
           </span>
           {detail.author.length === 0 ? null : (
             <span className="code-pr-review__author">
-              <CircleUserRound aria-hidden="true" size={13} strokeWidth={1.8} />
+              <CircleUserRound aria-hidden="true" size={14} strokeWidth={1.8} />
               <span>by {detail.author}</span>
             </span>
           )}
         </p>
         <p className="code-pr-review__freshness" role="status">
-          <Activity aria-hidden="true" size={13} strokeWidth={1.8} />
+          <Activity aria-hidden="true" size={14} strokeWidth={1.8} />
           <span>{freshnessCopy(props.freshness)}</span>
         </p>
       </header>
 
       <p className="code-pr-review__guardrail">
-        <LockKeyhole aria-hidden="true" size={13} strokeWidth={1.8} />
+        <LockKeyhole aria-hidden="true" size={14} strokeWidth={1.8} />
         <span>Read-only review · use GitHub for review actions.</span>
       </p>
 
@@ -309,7 +309,7 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
                 <OctantBadge data-status={check.state} variant={CHECK_STATE_VARIANTS[check.state]}>
                   {(() => {
                     const CheckIcon = CHECK_STATE_ICONS[check.state];
-                    return <CheckIcon aria-hidden="true" size={13} strokeWidth={1.8} />;
+                    return <CheckIcon aria-hidden="true" size={14} strokeWidth={1.8} />;
                   })()}
                   <span>{CHECK_STATE_LABELS[check.state]}</span>
                 </OctantBadge>
@@ -359,7 +359,7 @@ function SectionHeading(props: {
   return (
     <header className="code-pr-review__section-header">
       <span className="code-pr-review__section-heading">
-        <Icon aria-hidden="true" size={15} strokeWidth={1.8} />
+        <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
         <h2>
           {props.title}
           {props.count === undefined ? null : (
