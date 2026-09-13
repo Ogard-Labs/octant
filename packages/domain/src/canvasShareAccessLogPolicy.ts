@@ -159,20 +159,6 @@ export function buildCanvasShareAccessLogEvent(input: {
   return decoded;
 }
 
-function resolveAuthenticatedPrincipalId(input: {
-  readonly event: CanvasShareAccessLogEvent;
-  readonly record: CanvasShareSnapshotRecord;
-}): string | undefined {
-  if (input.event.principalId !== undefined) {
-    return String(input.event.principalId);
-  }
-  if (input.event.audienceLabel === undefined) return undefined;
-  const principal = input.record.audience.principals.find(
-    (entry) => entry.label === input.event.audienceLabel,
-  );
-  return principal ? String(principal.principalId) : undefined;
-}
-
 /**
  * Historical access-log validation uses the snapshot lifecycle at occurredAt.
  * A later revocation must not rewrite prior allowed events.

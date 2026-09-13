@@ -5,7 +5,6 @@ import {
   decodeProviderProbeResult,
   type ProviderFailure,
   type ProviderInstanceId,
-  type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import {

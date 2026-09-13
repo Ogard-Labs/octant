@@ -157,8 +157,8 @@ export function parseMarkdownBlocks(source: string): ReadonlyArray<MarkdownBlock
     if (heading) {
       blocks.push({
         type: "heading",
-        level: heading[1]!.length as 1 | 2 | 3,
-        text: heading[2]!.trim(),
+        level: (heading[1] ?? "").length as 1 | 2 | 3,
+        text: (heading[2] ?? "").trim(),
       });
       i += 1;
       continue;
@@ -173,7 +173,7 @@ export function parseMarkdownBlocks(source: string): ReadonlyArray<MarkdownBlock
           ? /^\s*\d+\.\s+(.+)$/.exec(itemLine)
           : /^\s*[-*]\s+(.+)$/.exec(itemLine);
         if (!bullet) break;
-        items.push(bullet[1]!.trim());
+        items.push((bullet[1] ?? "").trim());
         i += 1;
       }
       blocks.push({ type: "list", ordered, items });

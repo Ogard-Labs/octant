@@ -131,7 +131,7 @@ export async function composeSelectedExtensionCapabilities(
       return blocked(["extension-context-association-invalid"]);
     }
     const contextBindings = contextEntries.map((contextEntry, index) => {
-      const context = materials[index]!.context;
+      const context = materials[index]?.context;
       return {
         contextEntry,
         ...(context === undefined ? {} : { providerContext: decodeProviderContextBlock(context) }),

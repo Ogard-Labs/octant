@@ -1,12 +1,7 @@
 import { Schema } from "effect";
 import { ProjectId } from "./projects";
 import { AggregateVersion, EventActor, UtcTimestamp } from "./events";
-import {
-  PermissionPersistence,
-  ProviderExecutionPolicy,
-  ProviderInstanceId,
-  ProviderModelId,
-} from "./providers";
+import { PermissionPersistence, ProviderInstanceId, ProviderModelId } from "./providers";
 import { WorkArtifactRef } from "./workArtifacts";
 import { CodeDeliveryTarget, CodeThreadId } from "./code";
 
@@ -31,7 +26,7 @@ export type WorkPromotionProposalId = typeof WorkPromotionProposalId.Type;
  */
 const WorkPromotionSummaryText = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(8_000),
-  Schema.filter((value) => !/[\\/]/.test(value) && !/(?:^|\s|[(\[{<])(file|https?):/i.test(value)),
+  Schema.filter((value) => !/[\\/]/.test(value) && !/(?:^|\s|[([{<])(file|https?):/i.test(value)),
 );
 
 /**

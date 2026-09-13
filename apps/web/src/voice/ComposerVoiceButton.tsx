@@ -73,7 +73,6 @@ export function ComposerVoiceButton(props: ComposerVoiceButtonProps) {
     if (overLimit) void finish();
     // `finish` closes over the current recorder and client; re-running on
     // every render would restart the effect without the limit having moved.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overLimit]);
 
   // A transcription that is still in flight when the endpoint disappears must
@@ -84,7 +83,6 @@ export function ComposerVoiceButton(props: ComposerVoiceButtonProps) {
       recorder.cancel();
       setPhase({ kind: "ready" });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
   if (!ready || !recorder.supported) return null;

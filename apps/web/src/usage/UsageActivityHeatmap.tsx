@@ -48,7 +48,8 @@ export function UsageActivityHeatmap(props: UsageActivityHeatmapProps) {
     (highest, cell) => Math.max(highest, cell.inputTokens + cell.outputTokens),
     0,
   );
-  const leadingBlanks = weekdayIndex(props.cells[0]!.date);
+  const [firstCell] = props.cells;
+  const leadingBlanks = firstCell === undefined ? 0 : weekdayIndex(firstCell.date);
 
   return (
     <section aria-label="Activity" className="usage-heatmap">

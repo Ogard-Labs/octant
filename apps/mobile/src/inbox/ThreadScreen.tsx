@@ -42,7 +42,6 @@ import { NativeHarnessSessionPanel } from "../surfaces/NativeHarnessSessionPanel
 import { listMobileThreadSurfaces } from "../surfaces/threadSurfacePresentation";
 import { MOBILE_COPY, mobileThreadComposerCopy } from "../copy";
 import { PullRequestReviewPanel } from "../review/PullRequestReviewPanel";
-import { createExpoBiometricAuthenticator } from "../security/expoBiometricAuthenticator";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { usePlacementHostModels } from "../session/usePlacementHostModels";
@@ -127,7 +126,6 @@ export interface ThreadScreenProps {
 export function ThreadScreen(props: ThreadScreenProps) {
   const { colors } = useTheme();
   const { transportForHost, hosts, health, hub } = useMobileSession();
-  const authenticator = useMemo(() => createExpoBiometricAuthenticator(), []);
   const transport = useMemo(
     () => (props.selected === undefined ? undefined : transportForHost(props.selected.hostId)),
     [props.selected, transportForHost],

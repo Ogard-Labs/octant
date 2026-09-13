@@ -1,11 +1,7 @@
 import type { ExtensionContentDigest } from "@octant/contracts/extensions";
 import type { ExtensionCatalogEntryId, ExtensionCatalogId } from "@octant/contracts/extensions";
 import type { ExtensionSource } from "@octant/contracts/extensions";
-import {
-  codexPluginExtensionId,
-  codexPluginPackageId,
-  type CodexPluginCurationBinding,
-} from "./codexPluginIngestion";
+import { type CodexPluginCurationBinding } from "./codexPluginIngestion";
 import type { PinnedUpstreamPackageReference } from "./pinnedUpstreamPackageFetcher";
 
 export const OCTANT_CURATED_CATALOG_ID = "octant-curated" as unknown as ExtensionCatalogId;

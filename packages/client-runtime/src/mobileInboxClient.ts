@@ -263,7 +263,9 @@ export async function listAllHostsMobileInbox(
   const rows: MobileInboxRow[] = [];
   const failures: MobileInboxHostFailure[] = [];
   for (const [index, result] of settled.entries()) {
-    const hostId = transports[index]!.hostId;
+    const transport = transports[index];
+    if (transport === undefined) continue;
+    const hostId = transport.hostId;
     if (result.status === "fulfilled") {
       rows.push(...result.value.rows);
       if (result.value.failure !== undefined) failures.push(result.value.failure);

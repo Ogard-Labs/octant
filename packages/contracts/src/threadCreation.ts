@@ -1,6 +1,5 @@
 import { Schema } from "effect";
 import { CodeCheckoutId, CodeRepositoryId } from "./code";
-import { OctantMode } from "./modes";
 import { BindingRevisionId, ProjectId } from "./projects";
 import {
   PermissionPersistence,

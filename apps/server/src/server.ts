@@ -52,8 +52,6 @@ import {
   type CanvasRefreshRequest,
   type CanvasRefreshSkill,
   type CapacityReservationId,
-  type CodeOperationId,
-  type CodeThreadForkOrigin,
   type CodeThreadId,
   type OctantMode,
   type WorkThreadId,
@@ -651,7 +649,6 @@ import {
 } from "@octant/contracts";
 import {
   activeChatTurns,
-  assertHostRoutable,
   authorizeCanvasInventoryAccess,
   canonicalizeWorkRelativePath,
   chatAttemptAnswered,

@@ -6,9 +6,12 @@ const RETRYABLE_OUTCOMES = new Set(["failed", "interrupted"]);
 /** Latest in-flight attempt on the thread (newest turn/attempt wins). */
 export function latestActiveChatAttempt(view: ChatThreadView): ChatAttempt | undefined {
   for (let turnIndex = view.turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
-    const attempts = view.turns[turnIndex]!.attempts;
+    const turn = view.turns[turnIndex];
+    if (turn === undefined) continue;
+    const attempts = turn.attempts;
     for (let attemptIndex = attempts.length - 1; attemptIndex >= 0; attemptIndex -= 1) {
-      const attempt = attempts[attemptIndex]!;
+      const attempt = attempts[attemptIndex];
+      if (attempt === undefined) continue;
       if (ACTIVE_OUTCOMES.has(attempt.outcome)) return attempt;
     }
   }
@@ -18,9 +21,12 @@ export function latestActiveChatAttempt(view: ChatThreadView): ChatAttempt | und
 /** Latest failed/interrupted attempt eligible for retry-chat-turn. */
 export function latestRetryableChatAttempt(view: ChatThreadView): ChatAttempt | undefined {
   for (let turnIndex = view.turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
-    const attempts = view.turns[turnIndex]!.attempts;
+    const turn = view.turns[turnIndex];
+    if (turn === undefined) continue;
+    const attempts = turn.attempts;
     for (let attemptIndex = attempts.length - 1; attemptIndex >= 0; attemptIndex -= 1) {
-      const attempt = attempts[attemptIndex]!;
+      const attempt = attempts[attemptIndex];
+      if (attempt === undefined) continue;
       if (RETRYABLE_OUTCOMES.has(attempt.outcome)) return attempt;
     }
   }

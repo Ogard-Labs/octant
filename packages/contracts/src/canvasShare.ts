@@ -106,7 +106,7 @@ const EXPORT_SENSITIVE_QUERY_KEYS =
   /^(?:token|access_token|id_token|refresh_token|auth|authorization|signature|sig|x-amz-signature|x-amz-credential|x-amz-security-token|api[_-]?key|key|password|passwd|secret|session|code|jwt)$/i;
 
 const EXPORT_FILE_PATH_PATTERN =
-  /(?:^|[\s"'`()\[\]{}<>|,;])(?:file:\/\/\/?[^\s"'`<>]+|\/(?:[A-Za-z0-9._-]+\/)+[A-Za-z0-9._-]+|\.\.(?:\/|\\)|[A-Za-z]:\\[^\s"'`<>]*)/i;
+  /(?:^|[\s"'`()[\]{}<>|,;])(?:file:\/\/\/?[^\s"'`<>]+|\/(?:[A-Za-z0-9._-]+\/)+[A-Za-z0-9._-]+|\.\.(?:\/|\\)|[A-Za-z]:\\[^\s"'`<>]*)/i;
 
 /** Shared secret/path filter for every exported string surface (text, labels, notes). */
 function extractCandidateUrls(value: string): string[] {

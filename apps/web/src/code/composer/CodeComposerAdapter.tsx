@@ -444,7 +444,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     baseBranchChosen.current = false;
     setBaseBranch(props.baseBranch ?? props.branchName ?? "");
     // Only a change of Project resets this; the seed is read as it stands then.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
   const loadWorktreeRefs = useCallback(() => {
     if (projectId === undefined || execute === undefined) return;

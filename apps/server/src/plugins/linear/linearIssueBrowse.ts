@@ -384,7 +384,7 @@ function readLinearUrl(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   if (
-    /^https:\/\/linear\.app\/[A-Za-z0-9_.\-\/]*$/.test(trimmed) &&
+    /^https:\/\/linear\.app\/[A-Za-z0-9_.\-/]*$/.test(trimmed) &&
     !trimmed.includes("@") &&
     trimmed.length <= 512
   ) {

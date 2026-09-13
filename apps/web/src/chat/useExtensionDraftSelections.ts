@@ -254,27 +254,27 @@ function addressingCatalog(
   }
   return {
     epoch: effective.catalogEpoch,
-    plugins: effective.packages.flatMap((packageState) =>
-      packageState.slug === undefined
-        ? []
-        : [
-            {
-              extensionId: packageState.extensionId,
-              packageId: packageState.packageId,
-              slug: packageState.slug,
-              packageVersion: packageState.version,
-              packageDigest: packageState.digest,
-              ...(packageState.components.length === 1
-                ? { primaryComponentId: packageState.components[0]!.component.id }
-                : {}),
-              components: packageState.components.map((component) => ({
-                componentId: component.component.id,
-                label: component.component.displayName,
-                effectiveState: component.effectiveState,
-              })),
-            },
-          ],
-    ),
+    plugins: effective.packages.flatMap((packageState) => {
+      if (packageState.slug === undefined) return [];
+      const [onlyComponent] = packageState.components;
+      return [
+        {
+          extensionId: packageState.extensionId,
+          packageId: packageState.packageId,
+          slug: packageState.slug,
+          packageVersion: packageState.version,
+          packageDigest: packageState.digest,
+          ...(packageState.components.length === 1 && onlyComponent !== undefined
+            ? { primaryComponentId: onlyComponent.component.id }
+            : {}),
+          components: packageState.components.map((component) => ({
+            componentId: component.component.id,
+            label: component.component.displayName,
+            effectiveState: component.effectiveState,
+          })),
+        },
+      ];
+    }),
     skills: filterSkillCatalogForScope(buildSkillCatalog(snapshot.skills ?? []), {
       mode: scope.mode,
       projectId: scope.projectId,

@@ -2,7 +2,7 @@ import { Schema } from "effect";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const SECRETISH =
-  /(?:lin_api_[A-Za-z0-9_]+|bearer\s+[A-Za-z0-9._\-]{20,}|(?:refresh_token|access_token)\s*[=:]|token=)/i;
+  /(?:lin_api_[A-Za-z0-9_]+|bearer\s+[A-Za-z0-9._-]{20,}|(?:refresh_token|access_token)\s*[=:]|token=)/i;
 const safeText = (limit: number) =>
   Schema.NonEmptyTrimmedString.pipe(
     Schema.maxLength(limit),
@@ -87,7 +87,7 @@ const linearIssueUrl = Schema.String.pipe(
   Schema.maxLength(512),
   Schema.filter(
     (value) =>
-      /^https:\/\/linear\.app\/[A-Za-z0-9_.\-\/]*$/.test(value) &&
+      /^https:\/\/linear\.app\/[A-Za-z0-9_.\-/]*$/.test(value) &&
       !SECRETISH.test(value) &&
       !value.includes("@"),
   ),

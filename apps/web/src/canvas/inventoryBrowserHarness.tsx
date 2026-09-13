@@ -11,7 +11,6 @@ import {
   canvasInventoryProjectId,
   quarterlyCanvasId,
   quarterlyInventoryEntry,
-  roadmapCanvasId,
   roadmapInventoryEntry,
 } from "../projects/canvasInventoryFixtures";
 import { canvasFixture } from "./test-fixtures";

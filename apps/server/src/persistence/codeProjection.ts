@@ -592,7 +592,7 @@ function upsertCheckout(
 function deleteCheckout(
   connection: SqliteConnection,
   checkoutId: CodeCheckoutId,
-  event: EventEnvelope,
+  _event: EventEnvelope,
 ): void {
   connection.prepare("DELETE FROM code_checkout_projection WHERE checkout_id = ?").run(checkoutId);
 }

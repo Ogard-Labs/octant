@@ -457,7 +457,7 @@ function reconcileProjectTabs(
  */
 function reconcilePreviewTabs(
   workspace: WindowWorkspace,
-  persistence: PersistenceService,
+  _persistence: PersistenceService,
 ): WindowWorkspace {
   const visit = (
     layout: WorkspaceLayoutNode,

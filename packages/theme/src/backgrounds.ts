@@ -150,7 +150,7 @@ export function validatePresetCssBackground(value: unknown): string {
   return trimmed;
 }
 
-import type { SidebarBackground, ThemeSettings } from "@octant/contracts/theme";
+import type { ThemeSettings } from "@octant/contracts/theme";
 
 export type SidebarBackgroundCategory = "gradient" | "shape" | "dev-inspired" | "subtle";
 

@@ -26,6 +26,5 @@ export function useDismissOnOutsidePointer(
     document.addEventListener("pointerdown", handler);
     return () => document.removeEventListener("pointerdown", handler);
     // The region refs are stable for the life of the component that owns them.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, onDismiss]);
 }

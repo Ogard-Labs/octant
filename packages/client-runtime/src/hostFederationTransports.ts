@@ -268,7 +268,7 @@ export function createHostFederationTransports(
         enabled.filter((host) => host.kind === "remote").map((host) => host.hostId as string),
       );
 
-      for (const hostId of [...bridges.keys()]) {
+      for (const hostId of Array.from(bridges.keys())) {
         if (!nextRemoteIds.has(hostId)) {
           dropRemote(hostId);
         }
@@ -322,7 +322,9 @@ export function createHostFederationTransports(
       const settled = await Promise.allSettled(slots.map((slot) => execute(slot)));
       return settled.map(
         (result, index): HostFederationFanOutResult<Awaited<ReturnType<typeof execute>>> => {
-          const hostId = slots[index]!.hostId;
+          const slot = slots[index];
+          if (slot === undefined) throw new Error("Host federation lost a fan-out slot.");
+          const hostId = slot.hostId;
           if (result.status === "fulfilled") {
             return { hostId, status: "fulfilled", value: result.value };
           }
@@ -339,7 +341,7 @@ export function createHostFederationTransports(
     },
 
     disconnectAll() {
-      for (const hostId of [...bridges.keys()]) {
+      for (const hostId of Array.from(bridges.keys())) {
         dropRemote(hostId);
       }
       localRegistration = undefined;

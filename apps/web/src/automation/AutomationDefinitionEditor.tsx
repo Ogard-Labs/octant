@@ -180,10 +180,11 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
   const [taskPrompt, setTaskPrompt] = useState(
     initial?.taskPrompt ?? props.initialRequestDraft?.prompt ?? "",
   );
+  const [firstHost] = catalog.hosts;
   const [hostId, setHostId] = useState(
     initial === undefined
-      ? catalog.hosts.length === 1
-        ? String(catalog.hosts[0]!.hostId)
+      ? catalog.hosts.length === 1 && firstHost !== undefined
+        ? String(firstHost.hostId)
         : ""
       : String(initial.hostId),
   );

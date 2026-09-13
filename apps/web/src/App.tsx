@@ -2152,7 +2152,7 @@ function LaunchedShell(
     (selection: ModelPickerSelection) =>
       controller.updateSettings({
         navigatorAssistant: {
-          ...(controller.settings?.navigatorAssistant ?? {}),
+          ...controller.settings?.navigatorAssistant,
           defaultProvider: selection,
         },
       }),
@@ -2466,7 +2466,6 @@ function LaunchedShell(
       }),
     // Content keys keep the memo referentially stable across renders that only
     // allocate new Project/profile/provider array wrappers with identical facts.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above
     [
       automationCatalogCodeBootstrapKey,
       automationCatalogProfileKey,

@@ -131,7 +131,6 @@ interface DurableReceiptRow {
  * remains the default for tests that do not need durability.
  */
 export class DurableBindingReceiptStore {
-  readonly #connection: SqliteConnection;
   readonly #randomBytes: (size: number) => Uint8Array;
   readonly #insert: SqliteStatement;
   readonly #select: SqliteStatement;
@@ -139,7 +138,6 @@ export class DurableBindingReceiptStore {
   readonly #deleteExpired: SqliteStatement;
 
   constructor(connection: SqliteConnection, random: (size: number) => Uint8Array = randomBytes) {
-    this.#connection = connection;
     this.#randomBytes = random;
     this.#insert = connection.prepare(`
       INSERT INTO binding_receipt_store (

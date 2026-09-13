@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { radii, space, typography, useTheme } from "../../design-system";
+import { radii, space, useTheme } from "../../design-system";
 
 export interface MessageActionItem {
   readonly id: string;

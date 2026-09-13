@@ -523,7 +523,7 @@ async function handleSelfServiceRoute(
   route: RemoteRouteDefinition,
   sessionId: string,
   options: RemoteHttpAuthenticationOptions,
-  abortSignal: AbortSignal,
+  _abortSignal: AbortSignal,
 ): Promise<Response> {
   const service = options.credentialSelfService;
   if (service === undefined) throw new RemoteHttpAuthFailure(503, "unavailable");

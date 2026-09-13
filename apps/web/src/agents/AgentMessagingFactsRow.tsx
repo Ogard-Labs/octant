@@ -51,7 +51,6 @@ export function AgentMessagingFactsRow(props: AgentMessagingFactsRowProps) {
       stop();
     };
     // The client identity is stable for the surface's lifetime.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client]);
 
   const facts = props.facts ?? loaded;

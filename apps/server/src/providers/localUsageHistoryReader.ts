@@ -664,16 +664,6 @@ function clearScanOffsetForFile(sourceInstallationId: string, filePath: string):
   fileIdentities.delete(key);
 }
 
-function clearScanOffsets(sourceInstallationId: string): void {
-  const prefix = `${sourceInstallationId}\0`;
-  for (const key of scanOffsets.keys()) {
-    if (key.startsWith(prefix)) {
-      scanOffsets.delete(key);
-      fileIdentities.delete(key);
-    }
-  }
-}
-
 function trackSource(sourceInstallationId: string): void {
   if (fileSeen.has(sourceInstallationId)) return;
   if (fileSeen.size >= MAX_TRACKED_SOURCES) {

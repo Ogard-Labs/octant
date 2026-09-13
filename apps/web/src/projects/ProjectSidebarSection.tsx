@@ -838,6 +838,8 @@ function ProjectGroup(props: {
         const degradedContext =
           contextHealth === undefined || contextHealth === "healthy" ? undefined : contextHealth;
         const nestedThreads = props.threadsByProjectId?.get(String(project.id)) ?? [];
+        const previousProject = props.projects[index - 1];
+        const nextProject = props.projects[index + 1];
         const showNested =
           props.onSelectThread !== undefined && props.threadsByProjectId !== undefined;
         const expanded = props.revealThreads === true || !props.collapsedProjects.has(project.id);
@@ -891,12 +893,10 @@ function ProjectGroup(props: {
                 onReorder={props.onReorder}
                 onRestore={props.onRestore}
                 project={project}
-                {...(props.projects[index - 1] === undefined
+                {...(previousProject === undefined
                   ? {}
-                  : { previousProjectId: props.projects[index - 1]!.id })}
-                {...(props.projects[index + 1] === undefined
-                  ? {}
-                  : { nextProjectId: props.projects[index + 1]!.id })}
+                  : { previousProjectId: previousProject.id })}
+                {...(nextProject === undefined ? {} : { nextProjectId: nextProject.id })}
               />
               {props.onNewThreadInProject === undefined ? null : (
                 <OctantButton

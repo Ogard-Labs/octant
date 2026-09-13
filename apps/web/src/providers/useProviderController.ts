@@ -180,7 +180,9 @@ export function useProviderController(options: ProviderControllerOptions) {
           }),
         );
         for (const [index, status] of credentialStatuses.entries()) {
-          const instanceId = subscriptionProviders[index]!.id;
+          const instance = subscriptionProviders[index];
+          if (instance === undefined) continue;
+          const instanceId = instance.id;
           if (status === "stored") {
             credentialCleanupRequired.current.add(instanceId);
             credentialStatusUnconfirmed.current.delete(instanceId);

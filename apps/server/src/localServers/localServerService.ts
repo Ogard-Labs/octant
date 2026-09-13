@@ -505,7 +505,9 @@ export class LocalServerService {
           while (next < classified.length) {
             if (deadline.signal.aborted) return;
             const index = next++;
-            probes[index] = await this.#probe(classified[index]!.observation, deadline.signal);
+            const classifiedServer = classified[index];
+            if (classifiedServer === undefined) continue;
+            probes[index] = await this.#probe(classifiedServer.observation, deadline.signal);
           }
         },
       );

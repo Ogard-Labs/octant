@@ -50,7 +50,7 @@ export function createArtifactMirrorClient(
       response = await fetch(url.toString(), {
         ...init,
         headers: {
-          ...(init.headers ?? {}),
+          ...init.headers,
           "x-octant-window-capability": options.windowCapability,
         },
       });

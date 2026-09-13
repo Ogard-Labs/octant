@@ -96,7 +96,7 @@ function request(path: string, init: RequestInit = {}) {
     headers: {
       "x-octant-desktop-secret": secret,
       "x-octant-window-capability": capability,
-      ...(init.headers ?? {}),
+      ...init.headers,
     },
   });
 }

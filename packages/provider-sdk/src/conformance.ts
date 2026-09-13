@@ -178,7 +178,10 @@ function assertRuntimeEvents(
     "runtime event stream included a different provider session",
   );
   assertConformance(
-    events.every((event, index) => index === 0 || event.sequence > events[index - 1]!.sequence),
+    events.every((event, index) => {
+      const previous = events[index - 1];
+      return previous === undefined || event.sequence > previous.sequence;
+    }),
     "runtime event sequences were not strictly increasing",
   );
   if (terminalKind !== undefined) {

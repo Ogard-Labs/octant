@@ -20,5 +20,6 @@ export function describeGithubRemediation(remediation: string): string {
   // A sentence already reads as one; a code does not.
   if (/\s/.test(remediation)) return remediation;
   const words = remediation.replaceAll("-", " ").trim();
-  return words.length === 0 ? remediation : `${words[0]!.toUpperCase()}${words.slice(1)}.`;
+  const firstWord = words[0];
+  return firstWord === undefined ? remediation : `${firstWord.toUpperCase()}${words.slice(1)}.`;
 }

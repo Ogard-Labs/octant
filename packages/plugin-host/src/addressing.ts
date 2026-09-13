@@ -177,10 +177,13 @@ function resolvePlugin(
   catalog: ExtensionAddressingCatalog,
   originReference: string,
 ): ExtensionDraftResolution {
+  const [onlyComponent] = plugin.components;
   const componentId =
     requestedComponentId ??
     plugin.primaryComponentId ??
-    (plugin.components.length === 1 ? plugin.components[0]!.componentId : undefined);
+    (plugin.components.length === 1 && onlyComponent !== undefined
+      ? onlyComponent.componentId
+      : undefined);
   if (componentId === undefined) return { kind: "blocked", reason: "component-required" };
   const component = plugin.components.find((candidate) => candidate.componentId === componentId);
   if (component === undefined) return { kind: "blocked", reason: "not-found" };

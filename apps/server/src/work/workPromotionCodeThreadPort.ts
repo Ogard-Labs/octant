@@ -5,8 +5,6 @@ import {
   type CodeThreadId,
   type WorkArtifactRef,
   type WorkPromotionProposalId,
-  type PermissionPersistence,
-  type ProjectId,
   type ProviderInstanceId,
   type ProviderModelId,
   type WindowId,

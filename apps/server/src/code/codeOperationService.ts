@@ -1759,7 +1759,10 @@ export class CodeOperationService {
           this.#abandonTerminal(terminalId);
           return;
         }
-        for (const reader of [...owner.readers.values()]) {
+        // Snapshot the seated readers: journaling can evict one mid-loop, and
+        // the emission belongs to exactly the readers that were seated when it
+        // arrived.
+        for (const reader of Array.from(owner.readers.values())) {
           this.#journalTerminalEmission(terminalId, owner, reader, emission, content);
         }
         // The process outlives any one surface, so it is only torn down once

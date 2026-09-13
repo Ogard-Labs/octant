@@ -15,7 +15,6 @@ import type {
 
 const CATALOG_KEY = "octant.remote.device-keys.v1";
 const KEY_ALGORITHM: EcKeyImportParams = { name: "ECDSA", namedCurve: "P-256" };
-const KEY_USAGES: KeyUsage[] = ["sign", "verify"];
 
 export interface ExpoSecureStringStorage {
   readonly getItem: (key: string) => Promise<string | null>;

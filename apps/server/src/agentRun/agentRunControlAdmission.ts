@@ -259,12 +259,15 @@ function matchesIdempotentPool(
     decided.fallbackAllowed === requested.fallbackAllowed &&
     decided.higherCostFallbackAllowed === requested.higherCostFallbackAllowed &&
     decided.candidates.length === requested.candidates.length &&
-    decided.candidates.every(
-      (candidate, index) =>
-        String(candidate.hostId) === String(requested.candidates[index]!.hostId) &&
-        candidate.providerInstanceId === requested.candidates[index]!.providerInstanceId &&
-        candidate.modelId === requested.candidates[index]!.modelId,
-    )
+    decided.candidates.every((candidate, index) => {
+      const requestedCandidate = requested.candidates[index];
+      return (
+        requestedCandidate !== undefined &&
+        String(candidate.hostId) === String(requestedCandidate.hostId) &&
+        candidate.providerInstanceId === requestedCandidate.providerInstanceId &&
+        candidate.modelId === requestedCandidate.modelId
+      );
+    })
   );
 }
 

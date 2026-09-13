@@ -202,6 +202,7 @@ export function normalizeAgentPluginPackage(
       ? createHash("sha256").update(`agent-plugins:${name}`).digest("hex").slice(0, 16)
       : undefined;
 
+  const [onlyComponent] = components;
   const normalizedManifest = {
     manifestVersion: 1,
     extensionId: stableUuid(`extension:${sourceRef}:${name}`),
@@ -229,7 +230,9 @@ export function normalizeAgentPluginPackage(
       providerFamilies: [],
     },
     declaredCapabilities: [...packageCapabilities].sort(),
-    ...(components.length === 1 ? { primaryComponentId: components[0]!.id } : {}),
+    ...(components.length === 1 && onlyComponent !== undefined
+      ? { primaryComponentId: onlyComponent.id }
+      : {}),
     components: components.sort((left, right) => String(left.id).localeCompare(String(right.id))),
   };
 

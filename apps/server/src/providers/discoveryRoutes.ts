@@ -1,10 +1,8 @@
 import {
   decodeDiscoveryCommand,
-  decodeDiscoveryCommandResult,
   decodeDiscoverySnapshot,
   type DiscoveryCommand,
   type DiscoveryCandidate,
-  type DiscoverySnapshot,
   type FirstRunOnboardingStatus,
   type ProviderInstance,
   type ProviderInstanceId,
