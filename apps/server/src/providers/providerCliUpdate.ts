@@ -23,6 +23,7 @@ export interface ProviderCliUpdateOutput {
 
 const MAX_OUTPUT_BYTES = 16_384;
 const DEFAULT_TIMEOUT_MS = 120_000;
+const TIMEOUT_TERMINATION_GRACE_MS = 1_000;
 
 export async function runProviderCliUpdate(
   input: ProviderCliUpdateInput,
@@ -36,11 +37,15 @@ export async function runProviderCliUpdate(
     const chunks: string[] = [];
     let bytes = 0;
     let settled = false;
+    let timedOut = false;
+    let timeoutGrace: ReturnType<typeof setTimeout> | undefined;
     const timeout = setTimeout(() => {
       if (settled) return;
-      settled = true;
+      timedOut = true;
       child.kill("SIGTERM");
-      reject(failure("unavailable", "Provider CLI update timed out."));
+      timeoutGrace = setTimeout(() => {
+        if (!settled) child.kill("SIGKILL");
+      }, TIMEOUT_TERMINATION_GRACE_MS);
     }, input.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     const capture = (chunk: Buffer | string) => {
       if (bytes >= MAX_OUTPUT_BYTES) return;
@@ -53,6 +58,7 @@ export async function runProviderCliUpdate(
     child.stderr.on("data", capture);
     child.once("error", (error) => {
       if (settled) return;
+      if (timedOut) return;
       settled = true;
       clearTimeout(timeout);
       reject(
@@ -66,6 +72,11 @@ export async function runProviderCliUpdate(
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      if (timeoutGrace !== undefined) clearTimeout(timeoutGrace);
+      if (timedOut) {
+        reject(failure("unavailable", "Provider CLI update timed out."));
+        return;
+      }
       if (exitCode === null || exitCode !== 0) {
         reject(failure("provider-failed", "Provider CLI update failed."));
         return;

@@ -107,7 +107,12 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
           ...approvedHomeBinDirs(environment.HOME),
         ]),
       ];
-      const aliasTargets = await readAliasTargets(fs, environment.HOME, pathDirs);
+      const aliasTargets = await readAliasTargets(
+        fs,
+        environment.HOME,
+        environment.SHELL,
+        pathDirs,
+      );
 
       for (const descriptor of descriptors) {
         if (signal?.aborted) {
@@ -264,13 +269,15 @@ async function scanDescriptor(
 async function readAliasTargets(
   fs: DiscoveryFsPort,
   home: string | undefined,
+  shell: string | undefined,
   pathDirs: ReadonlyArray<string>,
 ): Promise<ReadonlyMap<string, string>> {
   const targets = new Map<string, string>();
+  const conflicting = new Set<string>();
   if (home === undefined || !isAbsolute(home) || fs.readFile === undefined) return targets;
   if (/[`$(){}|;&<>!#*?[\\]'\"]/.test(home)) return targets;
 
-  for (const file of ALIAS_FILES) {
+  for (const file of aliasFilesForShell(shell)) {
     let content: string;
     try {
       content = await fs.readFile(join(resolve(home), file));
@@ -286,15 +293,44 @@ async function readAliasTargets(
       if (name === undefined || rawValue === undefined) continue;
       const target = unwrapAliasValue(rawValue);
       if (target === undefined || /\s|[`$(){}|;&<>!#*?[\\]'\"]/.test(target)) continue;
+      if (conflicting.has(name)) continue;
       if (isAbsolute(target)) {
-        targets.set(name, target);
+        setAliasTarget(targets, conflicting, name, target);
         continue;
       }
       if (!/^[A-Za-z0-9._-]+$/.test(target)) continue;
-      if (pathDirs.some((dir) => isAbsolute(join(dir, target)))) targets.set(name, target);
+      if (pathDirs.some((dir) => isAbsolute(join(dir, target)))) {
+        setAliasTarget(targets, conflicting, name, target);
+      }
     }
   }
   return targets;
+}
+
+function aliasFilesForShell(shell: string | undefined): ReadonlyArray<string> {
+  const shellName = shell?.split("/").pop();
+  if (shellName === "bash") {
+    return ALIAS_FILES.filter((file) => file.startsWith(".bash"));
+  }
+  if (shellName === "zsh") {
+    return ALIAS_FILES.filter((file) => file.startsWith(".z"));
+  }
+  return ALIAS_FILES;
+}
+
+function setAliasTarget(
+  targets: Map<string, string>,
+  conflicting: Set<string>,
+  name: string,
+  target: string,
+): void {
+  const previous = targets.get(name);
+  if (previous !== undefined && previous !== target) {
+    targets.delete(name);
+    conflicting.add(name);
+    return;
+  }
+  targets.set(name, target);
 }
 
 function unwrapAliasValue(value: string): string | undefined {

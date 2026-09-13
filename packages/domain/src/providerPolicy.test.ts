@@ -1535,6 +1535,72 @@ describe("provider instance policy", () => {
     });
   });
 
+  it("preserves provider-owned authentication for CLI configuration normalizers", () => {
+    const policy = providerPolicy as unknown as {
+      createGlmProvider: (input: Record<string, unknown>) => ProviderInstance;
+      createGeminiProvider: (input: Record<string, unknown>) => ProviderInstance;
+      createClineProvider: (input: Record<string, unknown>) => ProviderInstance;
+      createQwenProvider: (input: Record<string, unknown>) => ProviderInstance;
+    };
+    const configurations = [
+      policy.createGlmProvider({
+        id: ids.local,
+        displayName: "GLM local",
+        configuration: {
+          kind: "glm-acp",
+          binaryPath: "/Users/example/.local/bin/glm-acp-agent",
+          authentication: "provider-owned",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }).configuration,
+      policy.createGeminiProvider({
+        id: ids.local,
+        displayName: "Gemini local",
+        configuration: {
+          kind: "gemini-acp",
+          binaryPath: "/Users/example/.local/bin/gemini",
+          authentication: "provider-owned",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }).configuration,
+      policy.createClineProvider({
+        id: ids.local,
+        displayName: "Cline local",
+        configuration: {
+          kind: "cline-acp",
+          binaryPath: "/Users/example/.local/bin/cline",
+          authentication: "provider-owned",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }).configuration,
+      policy.createQwenProvider({
+        id: ids.local,
+        displayName: "Qwen local",
+        configuration: {
+          kind: "qwen-acp",
+          binaryPath: "/Users/example/.local/bin/qwen",
+          authentication: "provider-owned",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }).configuration,
+    ];
+
+    expect(
+      configurations.every(
+        (configuration) =>
+          "authentication" in configuration && configuration.authentication === "provider-owned",
+      ),
+    ).toBe(true);
+  });
+
   it("creates and immutably updates GitHub Copilot with provider-owned configuration", () => {
     const policy = providerPolicy as unknown as {
       createCopilotProvider: (input: Record<string, unknown>) => ProviderInstance;

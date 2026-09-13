@@ -84,8 +84,12 @@ describe("discoveryService", () => {
       new Map([["/Users/test/tools/grok-build", { file: true }]]),
       new Map([["/Users/test/.bash_aliases", "alias grok='/Users/test/tools/grok-build'\n"]]),
     );
-    const exec = makeFakeExec(
-      new Map([["/Users/test/tools/grok-build --version", { stdout: "grok 1.0.5\n", stderr: "" }]]),
+    const exec = vi.fn<DiscoveryExecPort>(
+      makeFakeExec(
+        new Map([
+          ["/Users/test/tools/grok-build --version", { stdout: "grok 1.0.5\n", stderr: "" }],
+        ]),
+      ),
     );
     const service = makeDiscoveryService({
       exec,
@@ -104,6 +108,65 @@ describe("discoveryService", () => {
         }),
       ]),
     );
+  });
+
+  it("uses aliases from the active shell without allowing another shell to replace them", async () => {
+    const fs = makeFakeFs(
+      new Map([["/Users/test/tools/grok-build", { file: true }]]),
+      new Map([
+        ["/Users/test/.bash_aliases", "alias grok='/Users/test/tools/grok-build'\n"],
+        ["/Users/test/.zshrc", "alias grok='/Users/test/tools/not-grok'\n"],
+      ]),
+    );
+    const exec = vi.fn<DiscoveryExecPort>(
+      makeFakeExec(
+        new Map([
+          ["/Users/test/tools/grok-build --version", { stdout: "grok 1.0.5\n", stderr: "" }],
+        ]),
+      ),
+    );
+
+    const snapshot = await makeDiscoveryService({
+      exec,
+      fs,
+      environment: { PATH: "/usr/bin", HOME: "/Users/test", SHELL: "/bin/bash" },
+      now: () => 1753430400000,
+    }).scan();
+
+    expect(
+      snapshot.candidates.some(
+        (candidate) => candidate.binaryPath === "/Users/test/tools/grok-build",
+      ),
+    ).toBe(true);
+    expect(exec).not.toHaveBeenCalledWith(
+      "/Users/test/tools/not-grok",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("skips conflicting aliases when the active shell cannot be identified", async () => {
+    const fs = makeFakeFs(
+      new Map([
+        ["/Users/test/tools/bash-grok", { file: true }],
+        ["/Users/test/tools/zsh-grok", { file: true }],
+      ]),
+      new Map([
+        ["/Users/test/.bashrc", "alias grok='/Users/test/tools/bash-grok'\n"],
+        ["/Users/test/.zshrc", "alias grok='/Users/test/tools/zsh-grok'\n"],
+      ]),
+    );
+    const exec = vi.fn<DiscoveryExecPort>();
+
+    const snapshot = await makeDiscoveryService({
+      exec,
+      fs,
+      environment: { PATH: "/usr/bin", HOME: "/Users/test" },
+      now: () => 1753430400000,
+    }).scan();
+
+    expect(snapshot.candidates.some((candidate) => candidate.driverKind === "grok")).toBe(false);
+    expect(exec).not.toHaveBeenCalled();
   });
 
   it("ignores aliases that would require shell evaluation", async () => {

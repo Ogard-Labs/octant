@@ -40,6 +40,9 @@ bundling another binary.
   a runtime, but an explicit user action may invoke a verified provider-owned
   updater. It also supersedes 0057's Kimi-specific immutable-profile bullet;
   the remaining Bubblewrap and Seatbelt confinement rules still stand.
+- This supersedes only 0006's allowance for a managed profile to hold
+  provider-native authentication state. The generic ACP driver, protocol,
+  capability, and authority rules in 0006 remain accepted.
 - Headless hosts use the provider's non-interactive/device login when the CLI
   supports one. Desktop browser OAuth is not an architectural prerequisite for
   an ACP provider.

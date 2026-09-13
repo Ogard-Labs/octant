@@ -13,7 +13,7 @@ distilled successor of the earlier long-form design specifications.
 | [0003](0003-product-modes-and-authority.md)                                  | Product modes: Chat, Work, and Code authority                                               | Accepted           |
 | [0004](0004-monorepo-layering.md)                                            | Monorepo layering and dependency direction                                                  | Accepted           |
 | [0005](0005-provider-sdk-contract.md)                                        | Provider SDK contract, registry, and honest capabilities                                    | Accepted           |
-| [0006](0006-acp-agent-drivers.md)                                            | ACP agent drivers as one generic stack with per-provider profiles                           | Superseded by 0121 |
+| [0006](0006-acp-agent-drivers.md)                                            | ACP agent drivers as one generic stack with per-provider profiles                           | Accepted           |
 | [0007](0007-direct-api-providers-and-native-harness.md)                      | Direct API providers and the native agent harness                                           | Accepted           |
 | [0008](0008-context-budget-and-capacity.md)                                  | Context budget, provider limits, and capacity scheduling                                    | Accepted           |
 | [0009](0009-sandbox-confinement-and-approvals.md)                            | Sandbox confinement, approvals, and Plan mode                                               | Accepted           |

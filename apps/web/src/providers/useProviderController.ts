@@ -1199,25 +1199,38 @@ export function useProviderController(options: ProviderControllerOptions) {
     (instanceId: ProviderInstanceId): Promise<boolean> =>
       queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, async () => {
         if (client === undefined) return false;
+        let result: Extract<
+          Awaited<ReturnType<ProviderClient["execute"]>>,
+          { kind: "provider-cli-updated" }
+        >;
         try {
-          const result = await client.execute({ kind: "update-provider-cli", instanceId });
-          if (result.kind !== "provider-cli-updated") {
+          const executed = await client.execute({ kind: "update-provider-cli", instanceId });
+          if (executed.kind !== "provider-cli-updated") {
             throw new Error("Provider returned an invalid CLI update result.");
           }
-          const refreshed = await client.bootstrap();
-          install(refreshed);
-          if (mounted.current) {
-            setMessage(
-              result.status === "already-current"
-                ? "The provider CLI is already up to date."
-                : "Provider CLI updated. The native login profile was preserved.",
-            );
-          }
-          return true;
+          result = executed;
         } catch (error) {
+          try {
+            install(await client.bootstrap());
+          } catch {
+            // Keep the locally cleared snapshot when authority is unavailable.
+          }
           if (mounted.current) setMessage(failureMessage(error));
           return false;
         }
+        try {
+          install(await client.bootstrap());
+        } catch {
+          // The provider update succeeded; only the follow-up refresh failed.
+        }
+        if (mounted.current) {
+          setMessage(
+            result.status === "already-current"
+              ? "The provider CLI is already up to date."
+              : "Provider CLI updated. The native login profile was preserved.",
+          );
+        }
+        return true;
       }),
     [client, install],
   );

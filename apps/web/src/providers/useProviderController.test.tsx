@@ -305,6 +305,49 @@ describe("useProviderController", () => {
     expect(result.current.message).toMatch(/provider CLI updated/i);
   });
 
+  it("keeps a successful CLI update successful when its refresh fails", async () => {
+    const api = client();
+    vi.mocked(api.execute).mockResolvedValue({
+      kind: "provider-cli-updated",
+      instanceId: id,
+      status: "updated",
+      previousVersion: "1.0.0",
+      currentVersion: "1.1.0",
+    });
+    vi.mocked(api.bootstrap).mockResolvedValueOnce(snapshot()).mockRejectedValueOnce({
+      category: "unavailable",
+      message: "refresh unavailable",
+    });
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(result.current.updateProviderCli(id)).resolves.toBe(true);
+    });
+
+    expect(result.current.message).toMatch(/provider CLI updated/i);
+  });
+
+  it("refreshes provider state when a CLI update fails", async () => {
+    const api = client();
+    vi.mocked(api.execute).mockRejectedValueOnce({
+      category: "provider-failed",
+      message: "provider updater failed",
+    });
+    vi.mocked(api.bootstrap)
+      .mockResolvedValueOnce(snapshot())
+      .mockResolvedValueOnce(snapshot([provider({ version: 2 as never })]));
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(result.current.updateProviderCli(id)).resolves.toBe(false);
+    });
+
+    expect(api.bootstrap).toHaveBeenCalledTimes(2);
+    expect(result.current.instances[0]?.version).toBe(2);
+  });
+
   it("shows probe progress and keeps normalized results only", async () => {
     const pending = deferred<Awaited<ReturnType<ProviderClient["probe"]>>>();
     const api = client();

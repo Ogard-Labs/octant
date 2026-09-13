@@ -546,7 +546,7 @@ function normalizeGlmConfiguration(configuration: GlmConfigurationInput): GlmPro
   return {
     kind: "glm-acp",
     binaryPath: normalizeBinaryPath(configuration.binaryPath),
-    authentication: "api-key",
+    authentication: configuration.authentication,
   };
 }
 
@@ -565,7 +565,7 @@ function normalizeGeminiConfiguration(
   return {
     kind: "gemini-acp",
     binaryPath: normalizeBinaryPath(configuration.binaryPath),
-    authentication: "api-key",
+    authentication: configuration.authentication,
   };
 }
 
@@ -590,7 +590,7 @@ function normalizeClineConfiguration(
   return {
     kind: "cline-acp",
     binaryPath: normalizeBinaryPath(configuration.binaryPath),
-    authentication: "api-key",
+    authentication: configuration.authentication,
   };
 }
 
@@ -606,7 +606,7 @@ function normalizeQwenConfiguration(
   return {
     kind: "qwen-acp",
     binaryPath: normalizeBinaryPath(configuration.binaryPath),
-    authentication: "api-key",
+    authentication: configuration.authentication,
   };
 }
 

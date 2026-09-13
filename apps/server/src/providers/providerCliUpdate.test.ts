@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { providerCliUpdateArgs } from "./providerCliUpdate";
+import { providerCliUpdateArgs, runProviderCliUpdate } from "./providerCliUpdate";
 
 describe("provider-owned CLI updates", () => {
   it("only advertises commands verified for the provider binary", () => {
@@ -12,5 +12,19 @@ describe("provider-owned CLI updates", () => {
     expect(providerCliUpdateArgs("copilot")).toEqual(["update"]);
     expect(providerCliUpdateArgs("opencode")).toBeUndefined();
     expect(providerCliUpdateArgs("goose")).toBeUndefined();
+  });
+
+  it("waits for a timed-out provider updater to terminate before rejecting", async () => {
+    const started = Date.now();
+
+    await expect(
+      runProviderCliUpdate({
+        binaryPath: process.execPath,
+        args: ["-e", "process.once('SIGTERM', () => {}); setTimeout(() => {}, 10000)"],
+        timeoutMs: 100,
+      }),
+    ).rejects.toMatchObject({ category: "unavailable" });
+
+    expect(Date.now() - started).toBeGreaterThanOrEqual(800);
   });
 });
