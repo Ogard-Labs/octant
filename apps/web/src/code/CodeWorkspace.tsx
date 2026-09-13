@@ -16,6 +16,7 @@ import {
   type AppleSimulatorLiveFrameAttach,
 } from "@octant/domain";
 import { LoaderCircle } from "lucide-react";
+import { documentIsVisible } from "../polling/documentVisibility";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import {
@@ -916,7 +917,8 @@ function TerminalWorkspaceSurface(
     readonly threadPolicy: ProviderExecutionPolicy;
   },
 ) {
-  const terminalRefreshIntervalMs = 500;
+  const TERMINAL_REATTACH_INITIAL_MS = 500;
+  const TERMINAL_REATTACH_MAX_MS = 4_000;
   const [terminal, setTerminal] = useState(props.terminal);
   const [terminalId, setTerminalId] = useState(props.terminalId);
   const [failure, setFailure] = useState<string>();
@@ -951,7 +953,28 @@ function TerminalWorkspaceSurface(
     }
     let active = true;
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    let resumeListener: (() => void) | undefined;
+    let absentAttempts = 0;
     setReattaching(true);
+    // A terminal that is genuinely gone used to be re-attached every 500 ms
+    // forever, including while the window was hidden. Back off on each miss and
+    // stop scheduling while hidden; becoming visible resumes the wait.
+    const scheduleReattach = () => {
+      const delay = Math.min(
+        TERMINAL_REATTACH_INITIAL_MS * 2 ** Math.min(absentAttempts, 3),
+        TERMINAL_REATTACH_MAX_MS,
+      );
+      absentAttempts += 1;
+      if (documentIsVisible()) {
+        refreshTimer = setTimeout(() => void reattach(false), delay);
+        return;
+      }
+      resumeListener = () => {
+        resumeListener = undefined;
+        refreshTimer = setTimeout(() => void reattach(false), delay);
+      };
+      document.addEventListener("visibilitychange", resumeListener, { once: true });
+    };
     const reattach = async (initial: boolean) => {
       if (startInFlight.current) {
         // The start already under way owns the wait: it shows its own
@@ -960,7 +983,7 @@ function TerminalWorkspaceSurface(
         // later poll lowered it, so the terminal that start delivered stayed
         // hidden behind a connecting screen for the rest of the session.
         if (initial) setReattaching(false);
-        refreshTimer = setTimeout(() => void reattach(false), terminalRefreshIntervalMs);
+        scheduleReattach();
         return;
       }
       let absent = false;
@@ -1012,13 +1035,16 @@ function TerminalWorkspaceSurface(
         void startRef.current();
       }
       if (active) {
-        refreshTimer = setTimeout(() => void reattach(false), terminalRefreshIntervalMs);
+        scheduleReattach();
       }
     };
     void reattach(true);
     return () => {
       active = false;
       if (refreshTimer !== undefined) clearTimeout(refreshTimer);
+      if (resumeListener !== undefined) {
+        document.removeEventListener("visibilitychange", resumeListener);
+      }
     };
   }, [
     props.checkoutAvailability,

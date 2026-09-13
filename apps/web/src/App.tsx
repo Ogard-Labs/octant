@@ -2940,6 +2940,120 @@ function LaunchedShell(
     openReviewForThread(String(thread.threadId));
   }
 
+  // This model is rebuilt only when its inputs change. It used to be recomputed
+  // by every App render — including the once-a-minute clock tick and every
+  // machine-change revision — and handed fresh array identities to the sidebar.
+  const navigationModel = useMemo(() => {
+    const codeProjectThreads: ReadonlyArray<ChatThreadNavigationItem> =
+      codeController.status === "ready"
+        ? codeController.navigation.map((thread) => ({
+            threadId: String(thread.threadId),
+            title: thread.title,
+            projectId: String(thread.projectId),
+            providerInstanceId: String(thread.providerInstanceId),
+            // The lifecycle used to ride along as a badge on every row, which
+            // said "active" beside almost every thread and told the reader
+            // nothing. The status dot carries it instead.
+            activity: codeThreadActivity(thread),
+            ...(thread.checkoutChip === undefined ? {} : { checkoutChip: thread.checkoutChip }),
+            ...(thread.pullRequestSummaries === undefined
+              ? {}
+              : { pullRequests: thread.pullRequestSummaries }),
+            ...(thread.followUp === undefined ? {} : { followUp: thread.followUp }),
+            ...(thread.unread === undefined ? {} : { unread: thread.unread }),
+            ...(thread.pinned === undefined ? {} : { pinned: thread.pinned }),
+            ...(thread.updatedAt === undefined ? {} : { updatedAt: thread.updatedAt }),
+            ...(thread.lineageParentThreadId === undefined
+              ? {}
+              : { lineageParentThreadId: thread.lineageParentThreadId }),
+            ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
+            ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
+            ...threadRest(thread, {
+              now: minuteNow,
+              awaitingInput:
+                (codeProviderRequestsByThreadId[String(thread.threadId)]?.length ?? 0) > 0,
+            }),
+          }))
+        : [];
+    // Work rows rest the same way Code rows do; the host's runtime says when a
+    // thread waits on the person, which the builder already turned into
+    // "attention".
+    const workProjectThreads: ReadonlyArray<ChatThreadNavigationItem> =
+      workNavigation.navigation.map((thread) => ({
+        ...thread,
+        ...threadRest(thread, { now: minuteNow, awaitingInput: thread.activity === "attention" }),
+      }));
+    const sidebarThreadGroups = sidebarThreadGroupsForMode({
+      activeMode,
+      codeThreads: codeProjectThreads,
+      workThreads: workProjectThreads,
+    });
+
+    // A row names its provider by mark, not by model, so the instance id every
+    // thread already carries is resolved once here rather than by each list that
+    // renders a row. A thread whose instance is gone keeps no mark rather than
+    // borrowing another provider's.
+    const providerIdentityById = new Map<string, ThreadProviderIdentity>(
+      providerController.instances.map((instance) => [
+        String(instance.id),
+        { displayName: instance.displayName, driverKind: instance.driverKind },
+      ]),
+    );
+    const withProviderMark = (thread: ChatThreadNavigationItem): ChatThreadNavigationItem => {
+      const provider =
+        thread.providerInstanceId === undefined
+          ? undefined
+          : providerIdentityById.get(thread.providerInstanceId);
+      return provider === undefined ? thread : { ...thread, provider };
+    };
+    const providerByThreadId = new Map<string, ThreadProviderIdentity>();
+    const rememberThreadProvider = (thread: ChatThreadNavigationItem): void => {
+      if (thread.provider === undefined) return;
+      providerByThreadId.set(thread.threadId, thread.provider);
+    };
+    for (const thread of chatController.navigation.map(withProviderMark)) {
+      rememberThreadProvider(thread);
+    }
+    for (const thread of codeProjectThreads.map(withProviderMark)) {
+      rememberThreadProvider(thread);
+    }
+    for (const thread of workProjectThreads.map(withProviderMark)) {
+      rememberThreadProvider(thread);
+    }
+    const markedThreadGroups =
+      sidebarThreadGroups === undefined
+        ? undefined
+        : {
+            recents: sidebarThreadGroups.recents.map(withProviderMark),
+            all: sidebarThreadGroups.all.map(withProviderMark),
+            unfiled: sidebarThreadGroups.unfiled.map(withProviderMark),
+          };
+    // Chat's durable follow-up is the person's own mark as often as the agent's
+    // question, so it never wakes a snoozed row; only a running answer ending
+    // after a mid-turn snooze does.
+    const markedChatNavigation = chatController.navigation.map((thread) => ({
+      ...withProviderMark(thread),
+      ...threadRest(thread, { now: minuteNow, awaitingInput: false }),
+    }));
+    return {
+      codeProjectThreads,
+      markedChatNavigation,
+      markedThreadGroups,
+      providerByThreadId,
+      withProviderMark,
+      workProjectThreads,
+    };
+  }, [
+    activeMode,
+    chatController.navigation,
+    codeController.navigation,
+    codeController.status,
+    codeProviderRequestsByThreadId,
+    minuteNow,
+    providerController.instances,
+    workNavigation.navigation,
+  ]);
+
   if (controller.status === "loading") {
     return (
       <main className="shell-boundary">
@@ -3126,98 +3240,15 @@ function LaunchedShell(
       : representedComputerUseSessions;
   const contextSidebarWidth = previewContextWidth ?? controller.settings.contextSidebarWidth;
   const sidebarWidth = previewSidebarWidth ?? controller.settings.sidebarWidth;
-  const codeProjectThreads: ReadonlyArray<ChatThreadNavigationItem> =
-    codeController.status === "ready"
-      ? codeController.navigation.map((thread) => ({
-          threadId: String(thread.threadId),
-          title: thread.title,
-          projectId: String(thread.projectId),
-          providerInstanceId: String(thread.providerInstanceId),
-          // The lifecycle used to ride along as a badge on every row, which
-          // said "active" beside almost every thread and told the reader
-          // nothing. The status dot carries it instead.
-          activity: codeThreadActivity(thread),
-          ...(thread.checkoutChip === undefined ? {} : { checkoutChip: thread.checkoutChip }),
-          ...(thread.pullRequestSummaries === undefined
-            ? {}
-            : { pullRequests: thread.pullRequestSummaries }),
-          ...(thread.followUp === undefined ? {} : { followUp: thread.followUp }),
-          ...(thread.unread === undefined ? {} : { unread: thread.unread }),
-          ...(thread.pinned === undefined ? {} : { pinned: thread.pinned }),
-          ...(thread.updatedAt === undefined ? {} : { updatedAt: thread.updatedAt }),
-          ...(thread.lineageParentThreadId === undefined
-            ? {}
-            : { lineageParentThreadId: thread.lineageParentThreadId }),
-          ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
-          ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
-          ...threadRest(thread, {
-            now: minuteNow,
-            awaitingInput:
-              (codeProviderRequestsByThreadId[String(thread.threadId)]?.length ?? 0) > 0,
-          }),
-        }))
-      : [];
-  // Work rows rest the same way Code rows do; the host's runtime says when a
-  // thread waits on the person, which the builder already turned into
-  // "attention".
-  const workProjectThreads: ReadonlyArray<ChatThreadNavigationItem> = workNavigation.navigation.map(
-    (thread) => ({
-      ...thread,
-      ...threadRest(thread, { now: minuteNow, awaitingInput: thread.activity === "attention" }),
-    }),
-  );
-  const sidebarThreadGroups = sidebarThreadGroupsForMode({
-    activeMode,
-    codeThreads: codeProjectThreads,
-    workThreads: workProjectThreads,
-  });
 
-  // A row names its provider by mark, not by model, so the instance id every
-  // thread already carries is resolved once here rather than by each list that
-  // renders a row. A thread whose instance is gone keeps no mark rather than
-  // borrowing another provider's.
-  const providerIdentityById = new Map<string, ThreadProviderIdentity>(
-    providerController.instances.map((instance) => [
-      String(instance.id),
-      { displayName: instance.displayName, driverKind: instance.driverKind },
-    ]),
-  );
-  const withProviderMark = (thread: ChatThreadNavigationItem): ChatThreadNavigationItem => {
-    const provider =
-      thread.providerInstanceId === undefined
-        ? undefined
-        : providerIdentityById.get(thread.providerInstanceId);
-    return provider === undefined ? thread : { ...thread, provider };
-  };
-  const providerByThreadId = new Map<string, ThreadProviderIdentity>();
-  const rememberThreadProvider = (thread: ChatThreadNavigationItem): void => {
-    if (thread.provider === undefined) return;
-    providerByThreadId.set(thread.threadId, thread.provider);
-  };
-  for (const thread of chatController.navigation.map(withProviderMark)) {
-    rememberThreadProvider(thread);
-  }
-  for (const thread of codeProjectThreads.map(withProviderMark)) {
-    rememberThreadProvider(thread);
-  }
-  for (const thread of workProjectThreads.map(withProviderMark)) {
-    rememberThreadProvider(thread);
-  }
-  const markedThreadGroups =
-    sidebarThreadGroups === undefined
-      ? undefined
-      : {
-          recents: sidebarThreadGroups.recents.map(withProviderMark),
-          all: sidebarThreadGroups.all.map(withProviderMark),
-          unfiled: sidebarThreadGroups.unfiled.map(withProviderMark),
-        };
-  // Chat's durable follow-up is the person's own mark as often as the agent's
-  // question, so it never wakes a snoozed row; only a running answer ending
-  // after a mid-turn snooze does.
-  const markedChatNavigation = chatController.navigation.map((thread) => ({
-    ...withProviderMark(thread),
-    ...threadRest(thread, { now: minuteNow, awaitingInput: false }),
-  }));
+  const {
+    codeProjectThreads,
+    markedChatNavigation,
+    markedThreadGroups,
+    providerByThreadId,
+    withProviderMark,
+    workProjectThreads,
+  } = navigationModel;
 
   // What a Code thread row offers on right-click. Each one carries the row's
   // navigation id, which for a Project-backed thread is its Code thread id;

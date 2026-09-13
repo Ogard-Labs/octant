@@ -1,5 +1,5 @@
 import type { ProjectSummary } from "@octant/contracts/projects";
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import { orderThreadsByRecency, threadsInProject } from "./projectThreadGrouping";
 import { ProjectThreadList, type ProjectThreadListStatus } from "./ProjectThreadList";
@@ -51,8 +51,18 @@ export function ProjectThreadsProvider(props: {
  */
 export function ProjectThreadsSection(props: { readonly project: ProjectSummary }) {
   const access = useContext(ProjectThreadsContext);
+  const projectName = props.project.name;
+  // The list memoizes its rows, so the array and the name accessor have to keep
+  // their identity between renders or every row re-renders with them.
+  const threads = useMemo(
+    () =>
+      access === undefined
+        ? []
+        : orderThreadsByRecency(threadsInProject(access.threads, props.project.id)),
+    [access, props.project.id],
+  );
+  const projectNameForThread = useCallback(() => projectName, [projectName]);
   if (access === undefined) return null;
-  const threads = orderThreadsByRecency(threadsInProject(access.threads, props.project.id));
   return (
     <section
       aria-label={`Threads and recent activity in ${props.project.name}`}
@@ -67,7 +77,7 @@ export function ProjectThreadsSection(props: { readonly project: ProjectSummary 
         {...(access.errorMessage === undefined ? {} : { errorMessage: access.errorMessage })}
         {...(access.onRetry === undefined ? {} : { onRetry: access.onRetry })}
         onSelectThread={access.onSelectThread}
-        projectNameForThread={() => props.project.name}
+        projectNameForThread={projectNameForThread}
         status={access.status}
         threads={threads}
       />

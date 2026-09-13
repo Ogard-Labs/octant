@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   NativeHarnessFollowUpCreation,
   NativeHarnessFollowUpPreview,
@@ -12,6 +12,7 @@ import {
 } from "@octant/client-runtime/native-harness-client";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import "./native-harness.css";
 
 export interface NativeHarnessSessionCardProps {
@@ -59,16 +60,23 @@ function describeRoute(decision: NativeHarnessRouteDecision): string {
  */
 export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
   const [view, setView] = useState<NativeHarnessSessionView | null>();
+  const requestGeneration = useRef(0);
   const [error, setError] = useState<string>();
   const [preview, setPreview] = useState<NativeHarnessFollowUpPreview>();
   const [busy, setBusy] = useState(false);
   const [draftAnswer, setDraftAnswer] = useState("");
 
   const load = useCallback(async () => {
+    // A response for a thread the card has left must not paint over the one it
+    // is showing now, and neither must a response after unmount.
+    const generation = ++requestGeneration.current;
     try {
-      setView(await props.client.session(props.threadId));
+      const next = await props.client.session(props.threadId);
+      if (requestGeneration.current !== generation) return;
+      setView(next);
       setError(undefined);
     } catch (failure) {
+      if (requestGeneration.current !== generation) return;
       setError(
         failure instanceof NativeHarnessClientFailure
           ? failure.message
@@ -77,17 +85,33 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
     }
   }, [props.client, props.threadId]);
 
+  useEffect(
+    () => () => {
+      requestGeneration.current += 1;
+    },
+    [],
+  );
+
   const pendingQuestion = view?.questions.find((question) => question.status === "pending");
   const pendingApproval = view?.approvals?.find((approval) => approval.status === "pending");
   useEffect(() => {
-    void load();
+    let inFlight = false;
+    const tick = () => {
+      // A host read can outlast the interval; overlapping it only queues work
+      // the newer response will discard.
+      if (inFlight) return;
+      inFlight = true;
+      void load().finally(() => {
+        inFlight = false;
+      });
+    };
+    tick();
     // A pending question deserves a quicker refresh: the lead is blocked on it.
-    const interval = setInterval(
-      () => void load(),
+    return scheduleVisibleInterval(
+      tick,
       props.refreshIntervalMs ??
         (pendingQuestion === undefined && pendingApproval === undefined ? 5_000 : 1_500),
     );
-    return () => clearInterval(interval);
   }, [load, props.refreshIntervalMs, pendingQuestion === undefined, pendingApproval === undefined]);
 
   const decideApproval = useCallback(

@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-virtual";
 import {
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -111,16 +112,23 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     { readonly index: number; readonly edge: "start" | "end" } | undefined
   >(undefined);
   const prevCountRef = useRef(items.length);
-  const revealIndex =
-    revealKey === undefined
-      ? -1
-      : items.findIndex((item, index) => itemKey(item, index) === revealKey);
+  // One index map per item list: the reveal target and every pinned key resolve
+  // from it instead of an O(items) findIndex each. Streaming transcripts change
+  // `items` per delta, so the scans this replaces were the hot path.
+  const keyIndex = useMemo(() => {
+    const index = new Map<string, number>();
+    items.forEach((item, itemIndex) => {
+      index.set(itemKey(item, itemIndex), itemIndex);
+    });
+    return index;
+  }, [items, itemKey]);
+  const revealIndex = revealKey === undefined ? -1 : (keyIndex.get(revealKey) ?? -1);
 
   const pinnedFromKeys = new Set<number>();
   if (props.pinnedKeys !== undefined) {
     for (const key of props.pinnedKeys) {
-      const index = items.findIndex((item, itemIndex) => itemKey(item, itemIndex) === key);
-      if (index >= 0) pinnedFromKeys.add(index);
+      const index = keyIndex.get(key);
+      if (index !== undefined) pinnedFromKeys.add(index);
     }
   }
 

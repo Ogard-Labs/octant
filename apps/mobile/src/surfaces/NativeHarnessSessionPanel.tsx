@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import * as Clipboard from "expo-clipboard";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View, AppState } from "react-native";
 import {
   activateMobileNativeHarnessFollowUp,
   answerMobileNativeHarnessQuestion,
@@ -49,7 +49,10 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
 
   useEffect(() => {
     void load();
-    const interval = setInterval(() => void load(), props.refreshIntervalMs ?? 8_000);
+    const interval = setInterval(() => {
+      // A phone in a pocket does not need a session refresh.
+      if (AppState.currentState === "active") void load();
+    }, props.refreshIntervalMs ?? 8_000);
     return () => clearInterval(interval);
   }, [load, props.refreshIntervalMs]);
 
