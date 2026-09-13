@@ -2944,7 +2944,8 @@ describe("ProviderService", () => {
       runCliUpdate: async () => {
         throw {
           category: "unavailable",
-          message: "Provider CLI update did not confirm that the updater process tree exited.",
+          message:
+            "Provider CLI update did not confirm that the updater process tree exited. Restart Octant before another update or session on this CLI.",
         };
       },
     });

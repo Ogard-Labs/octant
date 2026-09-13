@@ -25,6 +25,7 @@ import {
   seatbeltDenyRule,
   wrapCommandInSandboxExec,
 } from "../process/seatbeltProfile";
+import { buildLinuxAllowDefaultDenyLaunch } from "../process/linuxConfinement";
 import {
   materializeOsNetworkEgress,
   resolveDefaultThreadEgressPolicy,
@@ -361,10 +362,10 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           ),
         ];
         // Full access is unrestricted except for 0006's static MCP/skills/hooks
-        // denials. Those use allow-default plus trailing denies, not the
-        // deny-default project builder. Linux has no allow-default equivalent here.
+        // denials. Darwin uses allow-default plus trailing denies. Linux binds
+        // the host root and overlays the same paths.
         if (input.executionPolicy === "full-access") {
-          if (denyPaths.length === 0 || platform !== "darwin") {
+          if (denyPaths.length === 0) {
             return {
               command: input.binaryPath,
               args,
@@ -374,20 +375,37 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           }
           const launch = yield* Effect.try({
             try: () => {
-              requireSandboxExec({ platform, sandboxPath });
-              return wrapCommandInSandboxExec({
-                sandboxPath,
-                executable: input.binaryPath,
-                args,
-                profile: [
-                  "(version 1)",
-                  "(allow default)",
-                  ...denyPaths.flatMap((path) => [
-                    seatbeltDenyRule("file-read*", path),
-                    seatbeltDenyRule("file-write*", path),
-                  ]),
-                ].join("\n"),
-              });
+              if (platform === "darwin") {
+                requireSandboxExec({ platform, sandboxPath });
+                return wrapCommandInSandboxExec({
+                  sandboxPath,
+                  executable: input.binaryPath,
+                  args,
+                  profile: [
+                    "(version 1)",
+                    "(allow default)",
+                    ...denyPaths.flatMap((path) => [
+                      seatbeltDenyRule("file-read*", path),
+                      seatbeltDenyRule("file-write*", path),
+                    ]),
+                  ].join("\n"),
+                });
+              }
+              if (platform === "linux") {
+                return buildLinuxAllowDefaultDenyLaunch(
+                  {
+                    executable: input.binaryPath,
+                    args,
+                    cwd: root,
+                    denyPaths,
+                  },
+                  { bwrapPath: sandboxPath },
+                );
+              }
+              throw new SeatbeltConfinementError(
+                "incompatible",
+                `${name} Full access extension denials require macOS or Linux.`,
+              );
             },
             catch: (error) =>
               failure(

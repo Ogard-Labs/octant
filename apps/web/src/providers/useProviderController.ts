@@ -2998,6 +2998,14 @@ function redactedProbeFailureMessage(error: unknown): string {
   if (error.category === "stale-resume") return "Provider session state is stale.";
   if (error.category === "protocol") return "Provider returned an invalid response.";
   if (error.category === "provider-failed") return "Provider operation failed.";
+  if (
+    error.category === "unavailable" &&
+    "message" in error &&
+    typeof error.message === "string" &&
+    error.message.startsWith("Provider CLI update")
+  ) {
+    return error.message;
+  }
   return "Octant Provider service is unavailable.";
 }
 

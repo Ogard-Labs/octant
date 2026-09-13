@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -93,7 +93,8 @@ setInterval(() => {}, 1000);`,
       }),
     ).rejects.toMatchObject({
       category: "unavailable",
-      message: "Provider CLI update did not confirm that the updater process tree exited.",
+      message:
+        "Provider CLI update did not confirm that the updater process tree exited. Restart Octant before another update or session on this CLI.",
     });
   });
 
@@ -109,6 +110,33 @@ setInterval(() => {}, 1000);`,
     expect(Buffer.byteLength(result.output, "utf8")).toBeLessThanOrEqual(16_384);
     expect(result.output).not.toContain("secret-token-value");
     expect(result.exitCode).toBe(0);
+  });
+
+  it("applies a disposable updater fixture that writes a new version marker", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "octant-cli-update-fixture-"));
+    const binaryPath = join(directory, "provider-cli");
+    const versionPath = join(directory, "version.txt");
+    try {
+      await writeFile(versionPath, "1.0.0\n");
+      await writeFile(
+        binaryPath,
+        `#!/bin/sh
+if [ "$1" = "--version" ]; then cat "${versionPath}"; exit 0; fi
+if [ "$1" = "update" ]; then printf '1.1.0\\n' > "${versionPath}"; exit 0; fi
+exit 1
+`,
+      );
+      await chmod(binaryPath, 0o755);
+      const updated = await runProviderCliUpdate({
+        binaryPath,
+        args: ["update"],
+        timeoutMs: 5_000,
+      });
+      expect(updated.exitCode).toBe(0);
+      expect((await readFile(versionPath, "utf8")).trim()).toBe("1.1.0");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("runs the updater in the binary directory with the inherited host environment", async () => {

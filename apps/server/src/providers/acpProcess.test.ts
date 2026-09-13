@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
@@ -1088,6 +1089,94 @@ describe("Kimi Code host-profile extension surfaces", () => {
     expect(profileText).toContain(
       `(deny file-read* (subpath "${join(target.canonicalRoot, ".agents")}"))`,
     );
+  });
+
+  it("binds the host root on Linux Full access and overlays the denied extension paths", async () => {
+    const target = fixture(kimi);
+    const managedHome = join(target.canonicalRoot, "managed-kimi");
+    const hostHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-host-")));
+    directories.push(hostHome);
+    const hostAuthenticationPath = join(hostHome, ".kimi-code");
+    mkdirSync(hostAuthenticationPath, { recursive: true });
+    writeFileSync(join(hostAuthenticationPath, "mcp.json"), "{}\n");
+    const canonicalHostPath = realpathSync(hostAuthenticationPath);
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "linux",
+        sandboxPath: target.bwrapPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: canonicalHostPath,
+      }).prepare({
+        profile: kimi,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome,
+        mode: "code",
+        executionPolicy: "full-access",
+        environment: {},
+      }),
+    );
+    expect(launch.command).toBe(target.bwrapPath);
+    expect(launch.args.slice(0, 9)).toEqual([
+      "--die-with-parent",
+      "--dev-bind",
+      "/dev",
+      "/dev",
+      "--proc",
+      "/proc",
+      "--bind",
+      "/",
+      "/",
+    ]);
+    expect(launch.args).toContainEqual("--tmpfs");
+    expect(launch.args).toContain(join(canonicalHostPath, "skills"));
+    expect(launch.args).toContain(join(canonicalHostPath, "mcp.json"));
+  });
+
+  it("uses native sandbox-exec so a Full access child cannot read planted MCP config", async () => {
+    if (process.platform !== "darwin") return;
+    const target = fixture(kimi);
+    const managedHome = join(target.canonicalRoot, "managed-kimi");
+    const hostHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-host-")));
+    directories.push(hostHome);
+    const hostAuthenticationPath = join(hostHome, ".kimi-code");
+    mkdirSync(join(hostAuthenticationPath, "skills"), { recursive: true });
+    writeFileSync(join(hostAuthenticationPath, "mcp.json"), "hostile-mcp\n");
+    writeFileSync(join(hostAuthenticationPath, "config.toml"), "telemetry = false\n");
+    const canonicalHostPath = realpathSync(hostAuthenticationPath);
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: "/usr/bin/sandbox-exec",
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: canonicalHostPath,
+      }).prepare({
+        profile: kimi,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome,
+        mode: "code",
+        executionPolicy: "full-access",
+        environment: {},
+      }),
+    );
+    const profile = launch.args[1];
+    expect(typeof profile).toBe("string");
+    if (typeof profile !== "string") return;
+    const denied = spawnSync(
+      "/usr/bin/sandbox-exec",
+      ["-p", profile, "--", "/bin/cat", join(canonicalHostPath, "mcp.json")],
+      { encoding: "utf8" },
+    );
+    const allowed = spawnSync(
+      "/usr/bin/sandbox-exec",
+      ["-p", profile, "--", "/bin/cat", join(canonicalHostPath, "config.toml")],
+      { encoding: "utf8" },
+    );
+    expect(denied.status).not.toBe(0);
+    expect(denied.stdout).not.toContain("hostile-mcp");
+    expect(allowed.status).toBe(0);
+    expect(allowed.stdout).toContain("telemetry = false");
   });
 });
 

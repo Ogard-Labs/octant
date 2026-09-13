@@ -33,7 +33,7 @@ const MAX_OUTPUT_BYTES = 16_384;
 const DEFAULT_TIMEOUT_MS = 120_000;
 const TIMEOUT_TERMINATION_GRACE_MS = 1_000;
 export const PROVIDER_CLI_UPDATE_UNCONFIRMED_MESSAGE =
-  "Provider CLI update did not confirm that the updater process tree exited.";
+  "Provider CLI update did not confirm that the updater process tree exited. Restart Octant before another update or session on this CLI.";
 
 export function isProviderCliUpdateTerminationUnconfirmed(error: unknown): boolean {
   return (
@@ -173,11 +173,19 @@ function defaultProcessGroupExists(pid: number): boolean {
 }
 
 function defaultKillProcessGroup(child: ChildProcess, pid: number, signal: NodeJS.Signals): void {
+  if (process.platform === "win32") {
+    // Same tree kill the GitHub ports use: SIGTERM cannot target a process group here.
+    void spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    return;
+  }
   try {
-    if (process.platform === "win32") child.kill(signal);
-    else process.kill(-pid, signal);
+    process.kill(-pid, signal);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    child.kill(signal);
   }
 }
 

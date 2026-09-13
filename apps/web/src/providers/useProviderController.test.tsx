@@ -355,6 +355,24 @@ describe("useProviderController", () => {
     expect(result.current.message).not.toMatch(/secret-token-value/i);
   });
 
+  it("tells the person to restart Octant when an updater tree exit cannot be confirmed", async () => {
+    const api = client();
+    vi.mocked(api.execute).mockRejectedValueOnce({
+      category: "unavailable",
+      message:
+        "Provider CLI update did not confirm that the updater process tree exited. Restart Octant before another update or session on this CLI.",
+    });
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(result.current.updateProviderCli(id)).resolves.toBe(false);
+    });
+
+    expect(result.current.message).toMatch(/restart octant/i);
+    expect(result.current.message).toMatch(/updater process tree/i);
+  });
+
   it("shows a scoped updating state and reports unknown, unchanged, and failed follow-up checks", async () => {
     const pending =
       deferred<

@@ -15,7 +15,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildLinuxConfinementLaunch, DEFAULT_BWRAP_PATH } from "./linuxConfinement";
+import {
+  buildLinuxAllowDefaultDenyLaunch,
+  buildLinuxConfinementLaunch,
+  DEFAULT_BWRAP_PATH,
+} from "./linuxConfinement";
 import { SeatbeltConfinementError } from "./seatbeltProfile";
 
 const directories: string[] = [];
@@ -55,6 +59,42 @@ function canRunHostBwrap(): boolean {
     return false;
   }
 }
+
+describe("Linux Full access extension denials", () => {
+  it("keeps the host root and overlays denied files and directories", () => {
+    const { boundRoot, bwrapPath, root } = fixture();
+    const skills = join(root, "skills");
+    const mcp = join(root, "mcp.json");
+    mkdirSync(skills);
+    writeFileSync(mcp, "{}\n");
+    const launch = buildLinuxAllowDefaultDenyLaunch(
+      {
+        executable: "/bin/true",
+        args: ["acp"],
+        cwd: boundRoot,
+        denyPaths: [skills, mcp],
+      },
+      { bwrapPath },
+    );
+    expect(launch.command).toBe(bwrapPath);
+    expect(launch.args.slice(0, 9)).toEqual([
+      "--die-with-parent",
+      "--dev-bind",
+      "/dev",
+      "/dev",
+      "--proc",
+      "/proc",
+      "--bind",
+      "/",
+      "/",
+    ]);
+    expect(launch.args).toContain("--tmpfs");
+    expect(launch.args).toContain(skills);
+    expect(launch.args).toContain("--ro-bind");
+    expect(launch.args.at(-2)).toBe("/bin/true");
+    expect(launch.args.at(-1)).toBe("acp");
+  });
+});
 
 describe("Linux Bubblewrap confinement", () => {
   it("uses a private tmpfs for /tmp instead of binding the host directory", () => {
