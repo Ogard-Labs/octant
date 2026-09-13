@@ -156,7 +156,6 @@ export interface WorkspaceViewProps {
   readonly focusedPaneId?: PaneId;
   readonly hosts?: ReadonlyArray<HostIdentity>;
   readonly selectedCreateHostId?: import("@octant/contracts/host").HostId;
-  readonly fixedCreateHostId?: import("@octant/contracts/host").HostId;
   readonly lastSelectedHealthyHostId?: import("@octant/contracts/host").HostId;
   readonly createHostViewScope?: import("@octant/domain").CreateHostViewScope;
   readonly onSelectCreateHost?: (hostId: import("@octant/contracts/host").HostId) => void;
@@ -195,7 +194,6 @@ export interface WorkspaceViewProps {
   readonly usageDashboardClient?: UsageDashboardClient;
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
   readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
-  readonly workOverviewModel?: WorkOverviewModel;
   readonly workCreateThreadAvailable?: boolean;
   readonly onCommitResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
   readonly onFocus: (paneId: PaneId) => void;
@@ -247,6 +245,16 @@ export interface WorkspaceViewProps {
      */
     browserContextId?: BrowserContextId,
   ) => Promise<boolean>;
+  /**
+   * Offers the thread's existing Browser surface for an agent-owned session.
+   * The shell remembers the session on this window so a pane remount cannot
+   * reopen activity the person already left.
+   */
+  readonly onRevealBrowserActivity?: (input: {
+    readonly paneId: PaneId;
+    readonly sessionIds: ReadonlyArray<string>;
+    readonly threadId: string;
+  }) => void;
   readonly onPreviewResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
   /** A keyboard path to the edge-drop gesture: split a pane onto a welcome. */
   readonly onSplitPane: (
@@ -283,7 +291,6 @@ export interface WorkspaceViewProps {
   readonly onArchiveProject: (projectId: ProjectId) => void;
   readonly onRelinkProject: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
   readonly onRenameProject: (projectId: ProjectId, name: string) => Promise<boolean>;
-  readonly statusBar?: ReactNode;
   /** The theme's ground behind the welcome and draft-thread surfaces, when one is set. */
   readonly welcomeBackdrop?: ReactNode;
   /** The person's name from their profile, for the greeting on every start screen. */
@@ -576,7 +583,6 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           )}
           showSinglePaneHeader={singlePaneSurfaceNeedsHeader(activeSurface)}
         />
-        {props.statusBar}
       </main>
     </TabActivationProvider>
   );
@@ -845,9 +851,7 @@ function renderCodeTab(
           {...(props.onComputerUseSessionChange === undefined
             ? {}
             : { onComputerUseSessionChange: props.onComputerUseSessionChange })}
-          {...(props.onOpenSurface === undefined
-            ? {}
-            : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
+          {...threadBrowserReveal(props.onRevealBrowserActivity, paneId, String(tab.threadId))}
           threadId={tab.threadId as never}
         >
           <CodeThreadEnvironment
@@ -1034,11 +1038,9 @@ function renderNonCodeTab(
         {...(props.selectedCreateHostId === undefined
           ? {}
           : { selectedHostId: props.selectedCreateHostId })}
-        {...(props.fixedCreateHostId === undefined
-          ? tab.projectId !== undefined && props.selectedCreateHostId !== undefined
-            ? { fixedHostId: props.selectedCreateHostId }
-            : {}
-          : { fixedHostId: props.fixedCreateHostId })}
+        {...(tab.projectId !== undefined && props.selectedCreateHostId !== undefined
+          ? { fixedHostId: props.selectedCreateHostId }
+          : {})}
         {...(props.lastSelectedHealthyHostId === undefined
           ? {}
           : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
@@ -1281,9 +1283,7 @@ function renderNonCodeTab(
               {...(props.onComputerUseSessionChange === undefined
                 ? {}
                 : { onComputerUseSessionChange: props.onComputerUseSessionChange })}
-              {...(props.onOpenSurface === undefined
-                ? {}
-                : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
+              {...threadBrowserReveal(props.onRevealBrowserActivity, paneId, String(tab.threadId))}
               threadId={tab.threadId as never}
             >
               <WorkThreadWorkspace
@@ -1630,9 +1630,6 @@ function renderNonCodeTab(
                   {...(props.onDraftSelectProvider === undefined
                     ? {}
                     : { onSelectProvider: props.onDraftSelectProvider })}
-                  {...(props.workOverviewModel === undefined
-                    ? {}
-                    : { overviewModel: props.workOverviewModel })}
                   projectId={project.id}
                   projectName={project.name}
                   providerGroups={props.workProviderGroups ?? props.draftProviderGroups ?? []}
@@ -1696,7 +1693,6 @@ function renderNonCodeTab(
         {...(props.selectedCreateHostId === undefined
           ? {}
           : { selectedHostId: props.selectedCreateHostId })}
-        {...(props.fixedCreateHostId === undefined ? {} : { fixedHostId: props.fixedCreateHostId })}
         {...(props.lastSelectedHealthyHostId === undefined
           ? {}
           : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
@@ -1897,6 +1893,24 @@ function resolveCodeTabCheckoutId(
 
 function paneIsActive(props: WorkspaceViewProps, paneId: PaneId): boolean {
   return paneId === (props.focusedPaneId ?? props.workspace.activePaneIds[props.mode]);
+}
+
+function threadBrowserReveal(
+  onRevealBrowserActivity: WorkspaceViewProps["onRevealBrowserActivity"],
+  paneId: PaneId,
+  threadId: string,
+): {
+  readonly onOpenBrowser?: (activity: { readonly sessionIds: ReadonlyArray<string> }) => void;
+} {
+  if (onRevealBrowserActivity === undefined) return {};
+  return {
+    onOpenBrowser: (activity) =>
+      onRevealBrowserActivity({
+        paneId,
+        threadId,
+        sessionIds: activity.sessionIds,
+      }),
+  };
 }
 
 function ChatThreadWorkspace(props: {

@@ -35,11 +35,31 @@ bundling another binary.
   re-probes the resulting version. The user must stop active sessions first.
   Providers without a verified update command report the action as unsupported.
   Octant never silently updates a CLI.
+- An explicit provider-owned updater is a documented spawn exception to 0009's
+  deny-default confinement. Session work stays sandboxed. The updater runs only
+  the configured absolute binary with the verified argv, inherits the host
+  environment, and uses the binary's directory as cwd so the provider installer
+  can write its own installation tree. Octant does not copy, download, or
+  replace the binary itself, and it does not wrap this spawn in Seatbelt or
+  Bubblewrap, because those profiles deny the writes a legitimate updater
+  needs. Stdin is ignored, captured output is byte-bounded and never shown
+  raw, and the owned process group must exit before another session or updater
+  is admitted against that executable. This is not a general unconstrained
+  spawn exception.
 - This is a scoped exception to the no-update rule in 0005 and its first-run
   restatement in 0112: discovery still never installs or automatically updates
   a runtime, but an explicit user action may invoke a verified provider-owned
   updater. It also supersedes 0057's Kimi-specific immutable-profile bullet;
   the remaining Bubblewrap and Seatbelt confinement rules still stand.
+- Discovery may inspect only these named files under the user's HOME, and only
+  to recover a safe single-token executable alias: `.bash_aliases`,
+  `.bash_profile`, and `.bashrc` when the active shell is bash; `.zprofile` and
+  `.zshrc` when it is zsh; all five when the shell cannot be identified,
+  skipping any alias name those files disagree on. Each read is byte-bounded
+  through the discovery filesystem port so an oversized or growing file is
+  never fully allocated. The files are never sourced or executed. Symlinks and
+  non-regular paths cannot unbounded-allocate or block the scan. This is
+  inspection, not the terminal's rc grant in 0092.
 - This supersedes only 0006's allowance for a managed profile to hold
   provider-native authentication state. The generic ACP driver, protocol,
   capability, and authority rules in 0006 remain accepted.

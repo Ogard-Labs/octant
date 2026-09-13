@@ -271,6 +271,7 @@ describe("WorkspaceView Code tab registration", () => {
 
   it("mounts the exact-thread Browser activity preview over an active Code conversation", async () => {
     const base = propsFor(codeTab("code-overview", "Browser owner"));
+    const onRevealBrowserActivity = vi.fn();
     const onOpenSurface = vi.fn();
     const browserAutomationClient = {
       inspectThread: vi.fn(async () => ({
@@ -291,21 +292,43 @@ describe("WorkspaceView Code tab registration", () => {
       })),
     } as never;
 
-    render(
+    const { unmount } = render(
       <WorkspaceView
         {...base}
         browserAutomationClient={browserAutomationClient}
         onOpenSurface={onOpenSurface}
+        onRevealBrowserActivity={onRevealBrowserActivity}
       />,
     );
 
     const preview = await screen.findByRole("img", { name: "Preview page browser activity" });
     expect(preview).toBeVisible();
     expect(screen.queryByRole("button", { name: "Open Browser tab" })).toBeNull();
-    await waitFor(() => expect(onOpenSurface).toHaveBeenCalledWith("browser", ids.pane));
-    expect(onOpenSurface).toHaveBeenCalledOnce();
+    await waitFor(() =>
+      expect(onRevealBrowserActivity).toHaveBeenCalledWith({
+        paneId: ids.pane,
+        threadId: String(codeIds.thread),
+        sessionIds: ["30000000-0000-4000-8000-000000000001"],
+      }),
+    );
+    expect(onRevealBrowserActivity).toHaveBeenCalledOnce();
+    expect(onOpenSurface).not.toHaveBeenCalled();
     fireEvent.click(preview);
-    expect(onOpenSurface).toHaveBeenCalledOnce();
+    expect(onRevealBrowserActivity).toHaveBeenCalledOnce();
+    expect(onOpenSurface).not.toHaveBeenCalled();
+
+    unmount();
+    render(
+      <WorkspaceView
+        {...base}
+        browserAutomationClient={browserAutomationClient}
+        onOpenSurface={onOpenSurface}
+        onRevealBrowserActivity={onRevealBrowserActivity}
+      />,
+    );
+    expect(await screen.findByRole("img", { name: "Preview page browser activity" })).toBeVisible();
+    await waitFor(() => expect(onRevealBrowserActivity).toHaveBeenCalledTimes(2));
+    expect(onOpenSurface).not.toHaveBeenCalled();
   });
 
   it("keeps Code auxiliary probes off when conversation history is unavailable", async () => {

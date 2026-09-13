@@ -88,8 +88,11 @@ API-key mode remains available for profiles that support it.
 
 The **Update CLI** action is shown only for providers with a verified native
 update command. It runs that command against the same configured executable,
-when no active session is using it, and checks the new version. Stop active
-sessions before updating. Octant never silently replaces a CLI or updates
+when no active session is using it, and then reports whether the observed
+version changed, stayed the same, could not be compared, or the follow-up
+connection check failed. Exit zero is not treated as proof that the binary was
+replaced. Stop active sessions before updating. Unsupported or unverified
+commands stay unavailable. Octant never silently replaces a CLI or updates
 providers without an explicit action. On a headless
 host, use the provider's device/non-interactive login when available; no
 desktop browser window is required by the architecture.

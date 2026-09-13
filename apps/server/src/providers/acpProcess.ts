@@ -4,33 +4,28 @@ import {
   chmodSync,
   constants,
   existsSync,
-  linkSync,
   lstatSync,
   mkdirSync,
   readFileSync,
-  readdirSync,
   realpathSync,
   statSync,
   symlinkSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
-import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { Effect, type Scope } from "effect";
 import type { AcpProviderProfile, AcpSessionMode } from "./acpProfiles";
 import { AcpFailure, makeAcpClient, type AcpClient, type AcpInitializeResult } from "./acpProtocol";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import {
-  escapeSeatbeltPath,
   makeSeatbeltConfinementLive,
-  requireSandboxExec,
   SeatbeltConfinementError,
-  seatbeltAllowRule,
+  requireSandboxExec,
   seatbeltDenyRule,
   wrapCommandInSandboxExec,
 } from "../process/seatbeltProfile";
+import { buildLinuxAllowDefaultDenyLaunch } from "../process/linuxConfinement";
 import {
   materializeOsNetworkEgress,
   resolveDefaultThreadEgressPolicy,
@@ -297,40 +292,17 @@ function prepareHostAuthentication(
   });
 }
 
-function prepareImmutableConfiguration(
+function hostExtensionDenyPaths(
   profile: AcpProviderProfile,
-  configPath: string,
-  configuration: string,
-): Effect.Effect<void, ProviderFailure> {
-  return Effect.try({
-    try: () => {
-      if (existsSync(configPath)) {
-        const metadata = lstatSync(configPath);
-        if (metadata.isSymbolicLink() || !metadata.isFile()) throw new Error();
-        if ((metadata.mode & 0o777) !== 0o600) throw new Error();
-        const userId = process.getuid?.();
-        if (userId !== undefined && metadata.uid !== userId) throw new Error();
-        if (readFileSync(configPath, "utf8") !== configuration) throw new Error();
-        return;
-      }
-      const temporaryPath = join(
-        dirname(configPath),
-        `.${basename(configPath)}.${process.pid}.${crypto.randomUUID()}.tmp`,
-      );
-      try {
-        writeFileSync(temporaryPath, configuration, { encoding: "utf8", flag: "wx", mode: 0o600 });
-        linkSync(temporaryPath, configPath);
-        chmodSync(configPath, 0o600);
-      } finally {
-        if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
-      }
-    },
-    catch: () =>
-      failure(
-        "incompatible",
-        `${profile.displayName} managed configuration is missing, unsafe, or has been modified.`,
-      ),
-  });
+  hostDirectory: string | undefined,
+  root: string,
+): ReadonlyArray<string> {
+  const hostEntries = profile.process.hostDeniedEntries ?? [];
+  const rootEntries = profile.process.forbiddenRootEntries ?? [];
+  return [
+    ...(hostDirectory === undefined ? [] : hostEntries.map((entry) => join(hostDirectory, entry))),
+    ...rootEntries.map((entry) => join(root, entry)),
+  ];
 }
 
 export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): AcpConfinementPort {
@@ -365,122 +337,6 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
             failure("invalid-configuration", `${name} app-managed tool bridge port is invalid.`),
           );
         }
-        const strategy = profile.process.confinement;
-        if (strategy.kind === "immutable-managed-profile") {
-          if (platform !== "darwin") {
-            return yield* Effect.fail(
-              failure(
-                "incompatible",
-                `${name} immutable managed profile is only available on macOS.`,
-              ),
-            );
-          }
-          const syntheticHome = yield* canonicalManagedDirectory(
-            join(managedHome, "home"),
-            `${name} synthetic home`,
-          );
-          const temporaryDirectory = yield* canonicalManagedDirectory(
-            options.temporaryDirectory ?? join(managedHome, "tmp"),
-            `${name} temporary directory`,
-          );
-          const root =
-            input.root === input.managedHome
-              ? managedHome
-              : yield* canonicalExistingDirectory(input.root, `${name} Project root`);
-          const managedEntries = yield* Effect.try({
-            try: () => new Set(readdirSync(managedHome)),
-            catch: () =>
-              failure("incompatible", `${name} managed profile could not be inspected safely.`),
-          });
-          if (strategy.forbiddenEntries.some((entry) => managedEntries.has(entry))) {
-            return yield* Effect.fail(
-              failure(
-                "incompatible",
-                `${name} managed profile contains forbidden executable configuration.`,
-              ),
-            );
-          }
-          const configPath = join(managedHome, strategy.configurationFileName);
-          yield* prepareImmutableConfiguration(profile, configPath, strategy.configuration);
-          try {
-            requireSandboxExec({ platform, sandboxPath });
-          } catch {
-            return yield* Effect.fail(
-              failure("incompatible", `${name} requires the macOS Seatbelt runtime.`),
-            );
-          }
-          const forbiddenPaths = [
-            ...strategy.forbiddenEntries.map((entry) => join(managedHome, entry)),
-            ...strategy.forbiddenRootEntries.map((entry) => join(root, entry)),
-          ];
-          const immutableRules = [
-            seatbeltDenyRule("file-write*", configPath),
-            ...forbiddenPaths.flatMap((path) => [
-              seatbeltDenyRule("file-read*", path),
-              seatbeltDenyRule("file-write*", path),
-            ]),
-          ];
-          const fullAccess = input.executionPolicy === "full-access";
-          const sideEffects =
-            decidesCodeEffectsByApproval(input.executionPolicy) && input.mode !== "chat";
-          const binaryPath = realpathSync(input.binaryPath);
-          const runtimeReadPaths = [
-            "/System",
-            "/Library",
-            "/usr",
-            "/bin",
-            "/sbin",
-            dirname(binaryPath),
-            dirname(dirname(binaryPath)),
-            root,
-            managedHome,
-            temporaryDirectory,
-          ];
-          const networkEgress = materializeOsNetworkEgress(
-            resolveDefaultThreadEgressPolicy({
-              mode: input.mode,
-              executionPolicy: input.executionPolicy,
-            }),
-          );
-          const seatbeltProfile = fullAccess
-            ? ["(version 1)", "(allow default)", ...immutableRules].join("\n")
-            : [
-                "(version 1)",
-                "(deny default)",
-                "(allow signal (target self))",
-                "(allow sysctl-read)",
-                ...(networkEgress === "allow" ? ["(allow network*)"] : []),
-                ...loopbackPorts.map(
-                  (port) => `(allow network-outbound (remote ip "localhost:${port}"))`,
-                ),
-                `(allow process-exec (literal "${escapeSeatbeltPath(binaryPath)}"))`,
-                ...(sideEffects ? ["(allow process-exec)", "(allow process-fork)"] : []),
-                ...runtimeReadPaths.map((path) => seatbeltAllowRule("file-read*", path)),
-                seatbeltAllowRule("file-write*", managedHome),
-                seatbeltAllowRule("file-write*", temporaryDirectory),
-                ...(sideEffects ? [seatbeltAllowRule("file-write*", root)] : []),
-                '(allow file-write-data (literal "/dev/null"))',
-                ...immutableRules,
-              ].join("\n");
-          const launch = wrapCommandInSandboxExec({
-            sandboxPath,
-            profile: seatbeltProfile,
-            executable: input.binaryPath,
-            args: profile.process.args({ root, managedHome }),
-          });
-          return {
-            command: launch.command,
-            args: launch.args,
-            cwd: root,
-            environment: {
-              ...input.environment,
-              HOME: syntheticHome,
-              [strategy.homeVariable]: managedHome,
-              TMPDIR: temporaryDirectory,
-            },
-          };
-        }
-
         const hostAuthentication = yield* prepareHostAuthentication(
           profile,
           managedHome,
@@ -497,10 +353,74 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           name,
         );
         const args = profile.process.args({ root, managedHome });
+        const denyPaths = [
+          ...hostAuthentication.forbiddenPaths,
+          ...hostExtensionDenyPaths(
+            profile,
+            hostAuthentication.writePaths[0] ?? hostAuthentication.readPaths[0],
+            root,
+          ),
+        ];
+        // Full access is unrestricted except for 0006's static MCP/skills/hooks
+        // denials. Darwin uses allow-default plus trailing denies. Linux binds
+        // the host root and overlays the same paths.
         if (input.executionPolicy === "full-access") {
+          if (denyPaths.length === 0) {
+            return {
+              command: input.binaryPath,
+              args,
+              cwd: root,
+              environment: { ...input.environment, ...hostAuthentication.environment },
+            };
+          }
+          const launch = yield* Effect.try({
+            try: () => {
+              if (platform === "darwin") {
+                requireSandboxExec({ platform, sandboxPath });
+                return wrapCommandInSandboxExec({
+                  sandboxPath,
+                  executable: input.binaryPath,
+                  args,
+                  profile: [
+                    "(version 1)",
+                    "(allow default)",
+                    ...denyPaths.flatMap((path) => [
+                      seatbeltDenyRule("file-read*", path),
+                      seatbeltDenyRule("file-write*", path),
+                    ]),
+                  ].join("\n"),
+                });
+              }
+              if (platform === "linux") {
+                return buildLinuxAllowDefaultDenyLaunch(
+                  {
+                    executable: input.binaryPath,
+                    args,
+                    cwd: root,
+                    denyPaths,
+                  },
+                  { bwrapPath: sandboxPath },
+                );
+              }
+              throw new SeatbeltConfinementError(
+                "incompatible",
+                `${name} Full access extension denials require macOS or Linux.`,
+              );
+            },
+            catch: (error) =>
+              failure(
+                error instanceof SeatbeltConfinementError &&
+                  error.reason === "invalid-configuration"
+                  ? "invalid-configuration"
+                  : "incompatible",
+                error instanceof SeatbeltConfinementError
+                  ? error.message
+                  : `${name} Full access extension denials could not be prepared.`,
+              ),
+          });
           return {
-            command: input.binaryPath,
-            args,
+            command: launch.command,
+            args: launch.args,
             cwd: root,
             environment: { ...input.environment, ...hostAuthentication.environment },
           };
@@ -518,12 +438,16 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           platform,
           sandboxPath,
         });
+        const loopbackRules =
+          input.loopbackPorts === undefined || input.loopbackPorts.length === 0
+            ? []
+            : input.loopbackPorts.map(
+                (port) => `(allow network-outbound (remote ip "localhost:${port}"))`,
+              );
         const extraRules = [
-          ...(input.loopbackPorts ?? []).map(
-            (port) => `(allow network-outbound (remote ip "localhost:${port}"))`,
-          ),
+          ...loopbackRules,
           ...(platform === "darwin"
-            ? hostAuthentication.forbiddenPaths.flatMap((path) => [
+            ? denyPaths.flatMap((path) => [
                 seatbeltDenyRule("file-read*", path),
                 seatbeltDenyRule("file-write*", path),
               ])
@@ -541,8 +465,8 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
               allowProcessExec: !(input.executionPolicy === "plan" || input.mode === "chat"),
               allowProcessFork: !(input.executionPolicy === "plan" || input.mode === "chat"),
               additionalWriteRoots: [managedHome, ...hostAuthentication.writePaths],
-              additionalDenyReadPaths: hostAuthentication.forbiddenPaths,
-              additionalDenyWritePaths: hostAuthentication.forbiddenPaths,
+              additionalDenyReadPaths: denyPaths,
+              additionalDenyWritePaths: denyPaths,
               allowFileReadStar: true,
               readRoots: [
                 root,

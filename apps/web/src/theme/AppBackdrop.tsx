@@ -1,6 +1,12 @@
 import type { ResolvedAppBackground } from "@octant/domain";
 import { useEffect, useRef, useState } from "react";
-import { decodePhoto, drawDitheredPhoto, drawPhoto, type DecodedPhoto } from "./appBackdropPhoto";
+import {
+  decodePhoto,
+  drawDitheredPhoto,
+  drawPhoto,
+  watchDisplayPixelRatio,
+  type DecodedPhoto,
+} from "./appBackdropPhoto";
 import { startAppPattern, type AppPatternHandle, type InkRgb } from "./appBackdropPattern";
 
 export type BackgroundImageFetcher = (backgroundId: string) => Promise<Blob>;
@@ -173,10 +179,13 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
       }
     };
     paint();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(paint);
-    observer.observe(canvas);
-    return () => observer.disconnect();
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(paint);
+    observer?.observe(canvas);
+    const stopPixelRatio = watchDisplayPixelRatio(paint);
+    return () => {
+      observer?.disconnect();
+      stopPixelRatio();
+    };
   }, [photo, resolved.photoDithered]);
 
   if (!active) return null;

@@ -53,6 +53,7 @@ import { sideChatTitle } from "@octant/domain";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { markInteraction, markInteractionAfterPaint } from "../polling/interactionTrace";
 import type { ProjectWindowTarget } from "./hostBridge";
+import { createBrowserActivityAnnouncementStore } from "./browserActivityReveal";
 import { createTabActivationRegistry, type TabActivationRegistry } from "./TabActivation";
 import type { WorkspaceSurfaceDropDestination } from "./workspaceTabDragGeometry";
 
@@ -330,6 +331,7 @@ export function useShellController(options: ShellControllerOptions) {
   const activeLoad = useRef<Promise<void> | undefined>(undefined);
   const mounted = useRef(true);
   const tabActivation = useRef(createTabActivationRegistry()).current;
+  const browserActivityAnnouncements = useRef(createBrowserActivityAnnouncementStore()).current;
   const [status, setStatus] = useState<ShellControllerStatus>("loading");
   const [authoritative, setAuthoritative] = useState<AuthoritativeShell>();
   const [errorMessage, setErrorMessage] = useState<string>();
@@ -724,6 +726,30 @@ export function useShellController(options: ShellControllerOptions) {
     );
   }
 
+  /**
+   * Offer this thread's existing Browser surface for an agent-owned session.
+   * The offer is remembered on this window for the thread and session, so a
+   * pane remount, a close, or a return to the conversation cannot reopen the
+   * same activity. A later disjoint session still surfaces. An already-visible
+   * Browser pane for the thread is left in place.
+   */
+  function revealBrowserActivity(input: {
+    readonly paneId?: PaneId;
+    readonly sessionIds: ReadonlyArray<string>;
+    readonly threadId: string;
+  }): void {
+    if (browserActivityAnnouncements.remember(input.threadId, input.sessionIds) === "ignore") {
+      return;
+    }
+    const latest = committedShell.current;
+    if (latest !== undefined && threadHasBrowserSurface(latest.workspace, input.threadId)) {
+      return;
+    }
+    void (input.paneId === undefined
+      ? openSurface("browser")
+      : openSurface("browser", input.paneId));
+  }
+
   async function openSurfaceInSplit(
     surface: WorkspaceSurfaceKind,
     targetPaneId: PaneId,
@@ -1064,6 +1090,7 @@ export function useShellController(options: ShellControllerOptions) {
     openSettings,
     openSurface,
     openSurfaceInSplit,
+    revealBrowserActivity,
     pendingSettingsDeepLink,
     presentedLayout,
     previewSplitResize,
@@ -1803,6 +1830,26 @@ function committedBrowserContextSurface(
   if (shell === undefined) return false;
   return Object.values(shell.workspace.layouts).some((layout) =>
     layoutHasBrowserContext(layout, contextId),
+  );
+}
+
+function threadHasBrowserSurface(workspace: WindowWorkspace, threadId: string): boolean {
+  return (["chat", "work", "code"] as const).some((mode) =>
+    layoutHasThreadBrowser(workspace.layouts[mode], threadId),
+  );
+}
+
+function layoutHasThreadBrowser(layout: WorkspaceLayoutNode, threadId: string): boolean {
+  if (layout.kind === "pane") {
+    return (
+      layout.surface.kind === "browser" &&
+      layout.surface.threadId !== undefined &&
+      String(layout.surface.threadId) === String(threadId)
+    );
+  }
+  return (
+    layoutHasThreadBrowser(layout.first, threadId) ||
+    layoutHasThreadBrowser(layout.second, threadId)
   );
 }
 

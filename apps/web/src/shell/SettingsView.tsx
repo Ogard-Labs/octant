@@ -815,6 +815,7 @@ function ProvidersSection(props: {
         onRetry={props.providerController.retry}
         onSetEnabled={props.providerController.setEnabled}
         probingIds={props.providerController.probingIds}
+        updatingIds={props.providerController.updatingIds}
         status={props.providerController.status}
       />
     </div>

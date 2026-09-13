@@ -26,6 +26,71 @@ export interface BuildLinuxConfinementLaunchInput {
   readonly processArch?: NodeJS.Architecture;
 }
 
+export interface LinuxAllowDefaultDenyLaunchInput {
+  readonly executable: string;
+  readonly args: ReadonlyArray<string>;
+  readonly cwd: string;
+  readonly denyPaths: ReadonlyArray<string>;
+}
+
+/**
+ * Full access on Linux: keep the host filesystem, then overlay the same
+ * static denials Seatbelt applies with (allow default) plus trailing denies.
+ */
+export function buildLinuxAllowDefaultDenyLaunch(
+  input: LinuxAllowDefaultDenyLaunchInput,
+  options: BuildLinuxConfinementLaunchInput = {},
+): ConfinedProcessLaunch {
+  const bwrapPath = options.bwrapPath ?? DEFAULT_BWRAP_PATH;
+  requireLinuxConfinement(bwrapPath);
+  if (!isAbsolute(input.executable)) {
+    throw new SeatbeltConfinementError(
+      "invalid-configuration",
+      "Linux confinement executable path must be absolute.",
+    );
+  }
+  if (!isAbsolute(input.cwd)) {
+    throw new SeatbeltConfinementError(
+      "invalid-configuration",
+      "Linux Full access working directory must be absolute.",
+    );
+  }
+  const args: string[] = [
+    "--die-with-parent",
+    "--dev-bind",
+    "/dev",
+    "/dev",
+    "--proc",
+    "/proc",
+    "--bind",
+    "/",
+    "/",
+  ];
+  for (const path of input.denyPaths) {
+    if (!isAbsolute(path)) {
+      throw new SeatbeltConfinementError(
+        "invalid-configuration",
+        `Linux Full access deny path "${path}" must be absolute.`,
+      );
+    }
+    const normalized = normalize(path);
+    if (isDirectoryForDeny(path)) {
+      args.push("--tmpfs", normalized, "--remount-ro", normalized);
+      continue;
+    }
+    const source = createEmptySourceForPath(path);
+    if (source === undefined) {
+      throw new SeatbeltConfinementError(
+        "invalid-configuration",
+        `Linux Full access deny path "${path}" could not be overlaid.`,
+      );
+    }
+    args.push("--ro-bind", source, normalized);
+  }
+  args.push("--chdir", input.cwd, "--", input.executable, ...input.args);
+  return { command: bwrapPath, args };
+}
+
 export function requireLinuxConfinement(bwrapPath: string): void {
   if (!isAbsolute(bwrapPath)) {
     throw new SeatbeltConfinementError(

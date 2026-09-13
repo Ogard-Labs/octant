@@ -1,7 +1,13 @@
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderDriverKind } from "@octant/contracts";
 import {
+  MAX_ALIAS_FILE_BYTES,
   makeDiscoveryService,
+  readDiscoveryText,
   type DiscoveryExecPort,
   type DiscoveryFsPort,
 } from "./discoveryService";
@@ -28,10 +34,11 @@ function makeFakeFs(
       if (entry.symlink === true && entry.target !== undefined) return entry.target;
       return path;
     },
-    async readFile(path: string) {
+    async readFile(path: string, maxBytes: number) {
       const content = files.get(path);
-      if (content === undefined) throw new Error("ENOENT");
-      return content;
+      if (content === undefined) return { kind: "unavailable" };
+      if (Buffer.byteLength(content, "utf8") > maxBytes) return { kind: "too-large" };
+      return { kind: "ok", content };
     },
   };
 }
@@ -45,6 +52,15 @@ function makeFakeExec(
     if (response === undefined) throw new Error(`exec failed: ${key}`);
     return response;
   };
+}
+
+async function withTempDir(run: (home: string) => Promise<void>): Promise<void> {
+  const home = mkdtempSync(join(tmpdir(), "octant-alias-"));
+  try {
+    await run(home);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 }
 
 const baseEnvironment = {
@@ -167,6 +183,64 @@ describe("discoveryService", () => {
 
     expect(snapshot.candidates.some((candidate) => candidate.driverKind === "grok")).toBe(false);
     expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("does not discover a provider from an alias file that exceeds the byte budget", async () => {
+    const alias = "alias grok='/Users/test/tools/grok-build'\n";
+    const content = `${"é".repeat(MAX_ALIAS_FILE_BYTES / 2 + 1)}${alias}`;
+    expect(content.length).toBeLessThan(MAX_ALIAS_FILE_BYTES);
+    expect(Buffer.byteLength(content, "utf8")).toBeGreaterThan(MAX_ALIAS_FILE_BYTES);
+
+    const fs = makeFakeFs(
+      new Map([["/Users/test/tools/grok-build", { file: true }]]),
+      new Map([["/Users/test/.bash_aliases", content]]),
+    );
+    const readFile = vi.fn(fs.readFile);
+    const exec = vi.fn<DiscoveryExecPort>();
+    const snapshot = await makeDiscoveryService({
+      exec,
+      fs: { ...fs, readFile },
+      environment: { PATH: "/usr/bin", HOME: "/Users/test", SHELL: "/bin/bash" },
+      now: () => 1753430400000,
+    }).scan();
+
+    expect(snapshot.candidates.some((candidate) => candidate.driverKind === "grok")).toBe(false);
+    expect(exec).not.toHaveBeenCalled();
+    expect(readFile).toHaveBeenCalled();
+    for (const [, maxBytes] of readFile.mock.calls) {
+      expect(maxBytes).toBe(MAX_ALIAS_FILE_BYTES);
+    }
+  });
+
+  it("still discovers a safe alias that fills the byte budget exactly", async () => {
+    const alias = "alias grok='/Users/test/tools/grok-build'\n";
+    const padBytes = MAX_ALIAS_FILE_BYTES - Buffer.byteLength(alias, "utf8") - 1;
+    const content = `${"#".repeat(padBytes)}\n${alias}`;
+    expect(Buffer.byteLength(content, "utf8")).toBe(MAX_ALIAS_FILE_BYTES);
+
+    const fs = makeFakeFs(
+      new Map([["/Users/test/tools/grok-build", { file: true }]]),
+      new Map([["/Users/test/.bash_aliases", content]]),
+    );
+    const exec = vi.fn<DiscoveryExecPort>(
+      makeFakeExec(
+        new Map([
+          ["/Users/test/tools/grok-build --version", { stdout: "grok 1.0.5\n", stderr: "" }],
+        ]),
+      ),
+    );
+    const snapshot = await makeDiscoveryService({
+      exec,
+      fs,
+      environment: { PATH: "/usr/bin", HOME: "/Users/test", SHELL: "/bin/bash" },
+      now: () => 1753430400000,
+    }).scan();
+
+    expect(
+      snapshot.candidates.some(
+        (candidate) => candidate.binaryPath === "/Users/test/tools/grok-build",
+      ),
+    ).toBe(true);
   });
 
   it("ignores aliases that would require shell evaluation", async () => {
@@ -598,5 +672,82 @@ describe("discoveryService", () => {
 
     const snapshot = await service.scan();
     expect(snapshot.candidates.map((candidate) => candidate.driverKind)).toEqual(["codex"]);
+  });
+
+  it("reads only up to the alias byte budget from a regular home file", async () => {
+    await withTempDir(async (home) => {
+      const path = join(home, ".zshrc");
+      writeFileSync(path, `${"a".repeat(40)}alias grok='/usr/bin/grok'\n`);
+      await expect(readDiscoveryText(path, 32)).resolves.toEqual({ kind: "too-large" });
+      writeFileSync(path, "alias grok='/usr/bin/grok'\n");
+      await expect(readDiscoveryText(path, 32)).resolves.toEqual({
+        kind: "ok",
+        content: "alias grok='/usr/bin/grok'\n",
+      });
+    });
+  });
+
+  it("rejects a file whose UTF-8 bytes exceed the budget even when string length does not", async () => {
+    await withTempDir(async (home) => {
+      const path = join(home, ".bashrc");
+      const content = `${"é".repeat(20)}alias grok='/usr/bin/grok'\n`;
+      writeFileSync(path, content);
+      expect(content.length).toBeLessThan(48);
+      expect(Buffer.byteLength(content, "utf8")).toBeGreaterThan(48);
+      await expect(readDiscoveryText(path, 48)).resolves.toEqual({ kind: "too-large" });
+    });
+  });
+
+  it("reads a safe alias through a symlink to a regular file and skips an oversized target", async () => {
+    await withTempDir(async (home) => {
+      const target = join(home, "real-zshrc");
+      const link = join(home, ".zshrc");
+      writeFileSync(target, "alias grok='/usr/bin/grok'\n");
+      symlinkSync(target, link);
+      await expect(readDiscoveryText(link, 64)).resolves.toEqual({
+        kind: "ok",
+        content: "alias grok='/usr/bin/grok'\n",
+      });
+      writeFileSync(target, `${"a".repeat(80)}alias grok='/usr/bin/grok'\n`);
+      await expect(readDiscoveryText(link, 64)).resolves.toEqual({ kind: "too-large" });
+    });
+  });
+
+  it("skips directories, missing paths, and FIFOs without blocking the scan", async () => {
+    await withTempDir(async (home) => {
+      const directory = join(home, ".bashrc");
+      mkdirSync(directory);
+      await expect(readDiscoveryText(directory, 64)).resolves.toEqual({ kind: "unavailable" });
+      await expect(readDiscoveryText(join(home, ".missing"), 64)).resolves.toEqual({
+        kind: "unavailable",
+      });
+
+      if (process.platform === "win32") return;
+      const fifo = join(home, ".zshrc");
+      execFileSync("mkfifo", [fifo], { stdio: "ignore" });
+      const startedAt = Date.now();
+      const fifoResult = await Promise.race([
+        readDiscoveryText(fifo, 64),
+        new Promise<{ kind: "blocked" }>((resolve) => {
+          setTimeout(() => resolve({ kind: "blocked" }), 1_000);
+        }),
+      ]);
+      expect(fifoResult).toEqual({ kind: "unavailable" });
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
+
+      const fifoTarget = join(home, "alias-fifo");
+      const fifoLink = join(home, ".bash_aliases");
+      execFileSync("mkfifo", [fifoTarget], { stdio: "ignore" });
+      symlinkSync(fifoTarget, fifoLink);
+      const linkStartedAt = Date.now();
+      const linkResult = await Promise.race([
+        readDiscoveryText(fifoLink, 64),
+        new Promise<{ kind: "blocked" }>((resolve) => {
+          setTimeout(() => resolve({ kind: "blocked" }), 1_000);
+        }),
+      ]);
+      expect(linkResult).toEqual({ kind: "unavailable" });
+      expect(Date.now() - linkStartedAt).toBeLessThan(1_000);
+    });
   });
 });

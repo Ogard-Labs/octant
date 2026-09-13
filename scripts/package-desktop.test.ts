@@ -824,9 +824,11 @@ describe("desktop packaging boundary", () => {
     // This is the policy apps/web actually ships (apps/web/index.html), not a
     // synthetic fixture: it proves the exact-match rule does not start
     // refusing a correct build just because it carries directives, like
-    // frame-ancestors or connect-src, that this function does not require.
+    // connect-src, that this function does not require.
     const source = await readFile(resolve(repositoryRoot, "apps/web/index.html"), "utf8");
 
     expect(() => validatePackagedRendererPolicy(source)).not.toThrow();
+    expect(source).not.toMatch(/frame-ancestors/);
+    expect(source).not.toMatch(/\[::1]/);
   });
 });

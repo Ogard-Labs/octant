@@ -141,6 +141,36 @@ function mintedCodeThreadSurface(threadId: CodeThreadId, title: string): Workspa
   };
 }
 
+async function readyBoundCodeShell(id = windowId) {
+  const initial = codeBootstrap();
+  const server = statefulClient({
+    ...initial,
+    workspace: {
+      ...initial.workspace,
+      windowId: id,
+      contextByMode: {
+        ...initial.workspace.contextByMode,
+        code: {
+          ...initial.workspace.contextByMode.code,
+          projectId: decodeProjectId("00000000-0000-4000-8000-000000000896"),
+          boundRoot: "/repo",
+        },
+      },
+    },
+  });
+  const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000895");
+  const { result } = renderHook(() =>
+    useShellController({
+      client: server.client,
+      serverUrl: "http://127.0.0.1:13773",
+      windowId: id,
+    }),
+  );
+  await waitFor(() => expect(result.current.status).toBe("ready"));
+  await act(async () => result.current.openCodeThread(threadId, "Browser QA"));
+  return { result, server, threadId };
+}
+
 describe("useShellController", () => {
   it("switches to Chat and reuses the pane already showing a repeated thread selection", async () => {
     const server = statefulClient();
@@ -599,6 +629,289 @@ describe("useShellController", () => {
         operation: expect.objectContaining({ kind: "open-surface", mode: "code" }),
       }),
     );
+  });
+
+  it("opens the thread Browser surface the first time a session is announced", async () => {
+    const { result, threadId } = await readyBoundCodeShell();
+    const paneId = firstPane(result.current.workspace!.layouts.code).paneId;
+
+    await act(async () =>
+      result.current.revealBrowserActivity({
+        paneId,
+        threadId: String(threadId),
+        sessionIds: ["30000000-0000-4000-8000-000000000001"],
+      }),
+    );
+
+    const browserPanes = panes(result.current.workspace!.layouts.code).filter(
+      (pane) => pane.surface.kind === "browser",
+    );
+    expect(browserPanes).toHaveLength(1);
+    expect(browserPanes[0]!.surface).toMatchObject({ kind: "browser", threadId });
+  });
+
+  it("does not reopen the same Browser session after another announcement", async () => {
+    const { result, server, threadId } = await readyBoundCodeShell();
+    const paneId = firstPane(result.current.workspace!.layouts.code).paneId;
+    const sessionIds = ["30000000-0000-4000-8000-000000000001"];
+
+    await act(async () =>
+      result.current.revealBrowserActivity({ paneId, threadId: String(threadId), sessionIds }),
+    );
+    const executeCalls = server.execute.mock.calls.length;
+    await act(async () =>
+      result.current.revealBrowserActivity({ paneId, threadId: String(threadId), sessionIds }),
+    );
+
+    expect(server.execute.mock.calls.length).toBe(executeCalls);
+    expect(
+      panes(result.current.workspace!.layouts.code).filter(
+        (pane) => pane.surface.kind === "browser",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("does not reopen the same session after the thread returns to the pane", async () => {
+    const { result, server, threadId } = await readyBoundCodeShell();
+    const paneId = firstPane(result.current.workspace!.layouts.code).paneId;
+    const sessionIds = ["30000000-0000-4000-8000-000000000001"];
+
+    await act(async () =>
+      result.current.revealBrowserActivity({ paneId, threadId: String(threadId), sessionIds }),
+    );
+    await act(async () => result.current.openCodeThread(threadId, "Browser QA"));
+    expect(
+      panes(result.current.workspace!.layouts.code).some(
+        (pane) => pane.surface.kind === "code-overview",
+      ),
+    ).toBe(true);
+
+    const executeCalls = server.execute.mock.calls.length;
+    await act(async () =>
+      result.current.revealBrowserActivity({ paneId, threadId: String(threadId), sessionIds }),
+    );
+
+    expect(server.execute.mock.calls.length).toBe(executeCalls);
+    expect(
+      panes(result.current.workspace!.layouts.code).filter(
+        (pane) => pane.surface.kind === "browser",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("surfaces a later Browser session after the previous pane is gone", async () => {
+    const { result, threadId } = await readyBoundCodeShell();
+    const paneId = firstPane(result.current.workspace!.layouts.code).paneId;
+
+    await act(async () =>
+      result.current.revealBrowserActivity({
+        paneId,
+        threadId: String(threadId),
+        sessionIds: ["30000000-0000-4000-8000-000000000001"],
+      }),
+    );
+    await act(async () => result.current.openCodeThread(threadId, "Browser QA"));
+    await act(async () =>
+      result.current.revealBrowserActivity({
+        paneId,
+        threadId: String(threadId),
+        sessionIds: ["30000000-0000-4000-8000-000000000002"],
+      }),
+    );
+
+    const browserPanes = panes(result.current.workspace!.layouts.code).filter(
+      (pane) => pane.surface.kind === "browser",
+    );
+    expect(browserPanes).toHaveLength(1);
+    expect(browserPanes[0]!.surface).toMatchObject({ kind: "browser", threadId });
+  });
+
+  it("does not duplicate an already-present Browser surface or steal another pane", async () => {
+    const { result, server, threadId } = await readyBoundCodeShell();
+    await act(async () => result.current.openSurface("browser"));
+    const browserPane = panes(result.current.workspace!.layouts.code).find(
+      (pane) => pane.surface.kind === "browser",
+    );
+    expect(browserPane).toBeDefined();
+    const executeCalls = server.execute.mock.calls.length;
+
+    await act(async () =>
+      result.current.revealBrowserActivity({
+        paneId: browserPane!.paneId,
+        threadId: String(threadId),
+        sessionIds: ["30000000-0000-4000-8000-000000000001"],
+      }),
+    );
+
+    expect(server.execute.mock.calls.length).toBe(executeCalls);
+    expect(
+      panes(result.current.workspace!.layouts.code).filter(
+        (pane) => pane.surface.kind === "browser",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("leaves a second thread's pane alone when the first thread's Browser appears", async () => {
+    const { result, threadId } = await readyBoundCodeShell();
+    const secondThreadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000896");
+    await act(async () =>
+      result.current.pinInPane(mintedCodeThreadSurface(secondThreadId, "Second")),
+    );
+    const firstPaneId = panes(result.current.workspace!.layouts.code).find(
+      (pane) => pane.surface.kind === "code-overview" && pane.surface.threadId === threadId,
+    )?.paneId;
+    const secondPaneId = panes(result.current.workspace!.layouts.code).find(
+      (pane) => pane.surface.kind === "code-overview" && pane.surface.threadId === secondThreadId,
+    )?.paneId;
+    if (firstPaneId === undefined || secondPaneId === undefined) {
+      throw new Error("expected both thread panes");
+    }
+
+    await act(async () =>
+      result.current.revealBrowserActivity({
+        paneId: firstPaneId,
+        threadId: String(threadId),
+        sessionIds: ["30000000-0000-4000-8000-000000000001"],
+      }),
+    );
+
+    const layoutPanes = panes(result.current.workspace!.layouts.code);
+    expect(
+      layoutPanes.some(
+        (pane) =>
+          pane.surface.kind === "browser" && String(pane.surface.threadId) === String(threadId),
+      ),
+    ).toBe(true);
+    expect(
+      layoutPanes.some(
+        (pane) => pane.surface.kind === "code-overview" && pane.surface.threadId === secondThreadId,
+      ),
+    ).toBe(true);
+  });
+
+  it("still surfaces the second thread after the first thread's session was announced", async () => {
+    const { result, threadId } = await readyBoundCodeShell();
+    const secondThreadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000896");
+    const firstPaneId = firstPane(result.current.workspace!.layouts.code).paneId;
+
+    await act(async () =>
+      result.current.revealBrowserActivity({
+        paneId: firstPaneId,
+        threadId: String(threadId),
+        sessionIds: ["30000000-0000-4000-8000-000000000001"],
+      }),
+    );
+    await act(async () => result.current.openCodeThread(secondThreadId, "Second"));
+    const secondPaneId = firstPane(result.current.workspace!.layouts.code).paneId;
+    await act(async () =>
+      result.current.revealBrowserActivity({
+        paneId: secondPaneId,
+        threadId: String(secondThreadId),
+        sessionIds: ["30000000-0000-4000-8000-000000000099"],
+      }),
+    );
+
+    expect(
+      panes(result.current.workspace!.layouts.code).some(
+        (pane) =>
+          pane.surface.kind === "browser" &&
+          String(pane.surface.threadId) === String(secondThreadId),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not reopen the same session after a mode change and return", async () => {
+    const { result, server, threadId } = await readyBoundCodeShell();
+    const paneId = firstPane(result.current.workspace!.layouts.code).paneId;
+    const sessionIds = ["30000000-0000-4000-8000-000000000001"];
+
+    await act(async () =>
+      result.current.revealBrowserActivity({ paneId, threadId: String(threadId), sessionIds }),
+    );
+    await act(async () => result.current.setMode("work"));
+    await act(async () => result.current.setMode("code"));
+    const executeCalls = server.execute.mock.calls.length;
+    await act(async () =>
+      result.current.revealBrowserActivity({ paneId, threadId: String(threadId), sessionIds }),
+    );
+
+    expect(server.execute.mock.calls.length).toBe(executeCalls);
+  });
+
+  it("opens the Work thread Browser surface for a first session", async () => {
+    const bootstrap = workBootstrap();
+    const server = statefulClient({
+      ...bootstrap,
+      workspace: {
+        ...bootstrap.workspace,
+        contextByMode: {
+          ...bootstrap.workspace.contextByMode,
+          work: {
+            ...bootstrap.workspace.contextByMode.work,
+            projectId: decodeProjectId("00000000-0000-4000-8000-000000000896"),
+            boundRoot: "/folder",
+          },
+        },
+      },
+    });
+    const threadId = decodeWorkThreadId("00000000-0000-4000-8000-000000000894");
+    const { result } = renderHook(() =>
+      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await act(async () => result.current.openWorkThread(threadId, "Research"));
+    const paneId = firstPane(result.current.workspace!.layouts.work).paneId;
+
+    await act(async () =>
+      result.current.revealBrowserActivity({
+        paneId,
+        threadId: String(threadId),
+        sessionIds: ["30000000-0000-4000-8000-000000000001"],
+      }),
+    );
+
+    expect(
+      panes(result.current.workspace!.layouts.work).some(
+        (pane) =>
+          pane.surface.kind === "browser" && String(pane.surface.threadId) === String(threadId),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not leak a session announcement into another window", async () => {
+    const first = await readyBoundCodeShell();
+    const second = await readyBoundCodeShell(
+      decodeWindowId("00000000-0000-4000-8000-000000000602"),
+    );
+    const sessionIds = ["30000000-0000-4000-8000-000000000001"];
+    const firstPaneId = firstPane(first.result.current.workspace!.layouts.code).paneId;
+    const secondPaneId = firstPane(second.result.current.workspace!.layouts.code).paneId;
+
+    await act(async () =>
+      first.result.current.revealBrowserActivity({
+        paneId: firstPaneId,
+        threadId: String(first.threadId),
+        sessionIds,
+      }),
+    );
+    await act(async () =>
+      second.result.current.revealBrowserActivity({
+        paneId: secondPaneId,
+        threadId: String(second.threadId),
+        sessionIds,
+      }),
+    );
+
+    expect(
+      panes(first.result.current.workspace!.layouts.code).filter(
+        (pane) => pane.surface.kind === "browser",
+      ),
+    ).toHaveLength(1);
+    expect(
+      panes(second.result.current.workspace!.layouts.code).filter(
+        (pane) => pane.surface.kind === "browser",
+      ),
+    ).toHaveLength(1);
   });
 
   it("gives split Terminals unique titles without changing their thread", async () => {

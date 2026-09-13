@@ -22,8 +22,12 @@ export interface ThreadActivityPictureInPictureProps {
     sessionId: string,
     represented: boolean,
   ) => void;
-  /** Opens the thread's Browser surface when agent-owned Browser activity appears. */
-  readonly onOpenBrowser?: () => void;
+  /**
+   * Asks the window shell to reveal this thread's Browser surface. The payload
+   * names the live session so the shell, not this pane instance, can remember
+   * a dismissal across remounts.
+   */
+  readonly onOpenBrowser?: (activity: { readonly sessionIds: ReadonlyArray<string> }) => void;
   readonly pollIntervalMs?: number;
   readonly threadId: BrowserThreadId;
 }
@@ -148,15 +152,22 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
       ? computerSession
       : undefined;
 
-  const browserIsActive = currentBrowserSnapshot !== undefined;
-  const browserWasActive = useRef(false);
+  const browserSessionIds =
+    currentBrowserSnapshot === undefined ? [] : browserActivitySessionIds(currentBrowserSnapshot);
+  const browserSessionKey = browserSessionIds.join("\0");
+  const announcedBrowserSessionKey = useRef("");
   useEffect(() => {
-    // Browser activity is created by the thread's agent. Surface it in the
-    // workspace when it first appears, while keeping polling from reopening
-    // the same Browser tab on every refresh.
-    if (browserIsActive && !browserWasActive.current) props.onOpenBrowser?.();
-    browserWasActive.current = browserIsActive;
-  }, [browserIsActive, props.onOpenBrowser]);
+    // The shell owns whether this session has already been offered. This
+    // effect only reports a change in the live session set; a remount starts
+    // with an empty ref and reports again, which is what lets the window
+    // remember a dismissal the pane itself cannot.
+    if (browserSessionKey === "" || browserSessionKey === announcedBrowserSessionKey.current) {
+      announcedBrowserSessionKey.current = browserSessionKey;
+      return;
+    }
+    announcedBrowserSessionKey.current = browserSessionKey;
+    props.onOpenBrowser?.({ sessionIds: browserSessionIds });
+  }, [browserSessionIds, browserSessionKey, props.onOpenBrowser]);
 
   const representedComputerUseSessionId = currentComputerSession?.sessionId;
   useEffect(() => {
@@ -513,6 +524,21 @@ function ComputerUseActivityPreview(props: {
       )}
     </div>
   );
+}
+
+function browserActivitySessionIds(snapshot: BrowserAutomationSnapshot): ReadonlyArray<string> {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  const add = (id: string) => {
+    if (id === "" || seen.has(id)) return;
+    seen.add(id);
+    ids.push(id);
+  };
+  if (snapshot.context !== undefined) add(String(snapshot.context.contextId));
+  if (snapshot.contexts !== undefined) {
+    for (const entry of snapshot.contexts) add(String(entry.context.contextId));
+  }
+  return ids;
 }
 
 function isBrowserActivity(snapshot: BrowserAutomationSnapshot): boolean {

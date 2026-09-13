@@ -333,10 +333,11 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                       : entry.kind === "default-folder"
                         ? START_IN_DEFAULT_FOLDER_LABEL
                         : NEW_PROJECT_FROM_FOLDER_LABEL;
+                  const refused = entry.kind === "default-folder" && entry.disabled === true;
                   return (
                     <OctantButton
                       aria-selected={false}
-                      disabled={entry.kind === "default-folder" && entry.disabled === true}
+                      {...(refused ? { "aria-disabled": true } : {})}
                       className={optionClass(index)}
                       id={`${listboxId}-option-${index}`}
                       key={entry.kind}

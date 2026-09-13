@@ -516,6 +516,14 @@
   display: block;
   width: 100%;
   height: 100%;
+}
+
+/* The pattern and a dithered photo are a coarse grid scaled up with
+   nearest-neighbour sampling. A clean photo is already at device pixels
+   and must sample ordinarily; sharing pixelated with the pattern was
+   turning that path into a 1× nearest-neighbour upscale on Retina. */
+.app-backdrop__pattern,
+.app-backdrop__photo[data-dithered="true"] {
   image-rendering: pixelated;
 }
 

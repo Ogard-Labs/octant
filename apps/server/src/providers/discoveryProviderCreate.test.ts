@@ -82,4 +82,34 @@ describe("createProviderFromDiscoveryCandidate", () => {
       },
     });
   });
+
+  it.each([
+    ["glm", "create-glm-provider", "glm-acp", "GLM Agent", "/opt/homebrew/bin/glm-acp-agent"],
+    ["gemini", "create-gemini-provider", "gemini-acp", "Gemini CLI", "/opt/homebrew/bin/gemini"],
+    ["cline", "create-cline-provider", "cline-acp", "Cline", "/opt/homebrew/bin/cline"],
+    ["qwen", "create-qwen-provider", "qwen-acp", "Qwen Code", "/opt/homebrew/bin/qwen"],
+  ] as const)(
+    "creates a %s discovery command with provider-owned authentication",
+    (driverKind, commandKind, configurationKind, displayName, binaryPath) => {
+      vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000904");
+
+      const result = createProviderFromDiscoveryCandidate(
+        makeCandidate({ driverKind, displayName, binaryPath }),
+        { enabled: true },
+      );
+
+      expect(result.command).toEqual({
+        kind: commandKind,
+        instanceId: "00000000-0000-4000-8000-000000000904",
+        expectedVersion: 0,
+        displayName,
+        configuration: {
+          kind: configurationKind,
+          binaryPath,
+          authentication: "provider-owned",
+        },
+        enabled: true,
+      });
+    },
+  );
 });

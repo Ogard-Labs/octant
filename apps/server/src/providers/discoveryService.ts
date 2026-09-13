@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { access, constants, lstat, readFile, realpath } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, lstat, open, realpath } from "node:fs/promises";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import type { DiscoveryCandidate, DiscoverySnapshot, ProviderDriverKind } from "@octant/contracts";
 import { admittedBundledProviderDriverKinds } from "@octant/plugin-host/provider-drivers";
@@ -20,7 +21,7 @@ const APPROVED_HOME_BIN_DIRECTORIES = [
   ".grok/bin",
 ] as const;
 const ALIAS_FILES = [".bash_aliases", ".bash_profile", ".bashrc", ".zprofile", ".zshrc"] as const;
-const MAX_ALIAS_FILE_BYTES = 64 * 1024;
+export const MAX_ALIAS_FILE_BYTES = 64 * 1024;
 const MAX_ALIAS_LINES = 2_000;
 const PROBE_ENVIRONMENT_KEYS = [
   "HOME",
@@ -54,12 +55,20 @@ export interface DiscoveryExecPort {
   ): Promise<{ stdout: string; stderr: string }>;
 }
 
+export type DiscoveryTextRead =
+  | { readonly kind: "ok"; readonly content: string }
+  | { readonly kind: "too-large" }
+  | { readonly kind: "unavailable" };
+
 export interface DiscoveryFsPort {
   access(path: string, mode: number): Promise<void>;
   lstat(path: string): Promise<{ isSymbolicLink(): boolean; isFile(): boolean }>;
   realpath(path: string): Promise<string>;
-  /** Read-only shell alias inspection; implementations must not source files. */
-  readonly readFile?: (path: string) => Promise<string>;
+  /**
+   * Read-only shell alias inspection. Implementations must not source files
+   * and must not allocate more than maxBytes of file content.
+   */
+  readonly readFile?: (path: string, maxBytes: number) => Promise<DiscoveryTextRead>;
 }
 
 export interface DiscoveryServiceOptions {
@@ -278,13 +287,15 @@ async function readAliasTargets(
   if (/[`$(){}|;&<>!#*?[\\]'\"]/.test(home)) return targets;
 
   for (const file of aliasFilesForShell(shell)) {
-    let content: string;
+    let result: DiscoveryTextRead;
     try {
-      content = await fs.readFile(join(resolve(home), file));
+      result = await fs.readFile(join(resolve(home), file), MAX_ALIAS_FILE_BYTES);
     } catch {
       continue;
     }
-    if (content.length > MAX_ALIAS_FILE_BYTES) continue;
+    if (result.kind !== "ok") continue;
+    const content = result.content;
+    if (Buffer.byteLength(content, "utf8") > MAX_ALIAS_FILE_BYTES) continue;
     for (const line of content.split(/\r?\n/, MAX_ALIAS_LINES + 1).slice(0, MAX_ALIAS_LINES)) {
       const match = /^\s*alias\s+([A-Za-z0-9][A-Za-z0-9_-]*)\s*=\s*(.*?)\s*$/.exec(line);
       if (match === null) continue;
@@ -468,9 +479,62 @@ function defaultExec(
   });
 }
 
+/**
+ * Byte-bounded UTF-8 read for alias discovery. `readFile(path, "utf8")` then a
+ * string-length check allocated the whole home file (and counted UTF-16 units,
+ * not bytes). `stat` size is not a bound because the file can grow between
+ * stat and read; a FIFO or device at the same path can also block `open`.
+ */
+export async function readDiscoveryText(
+  path: string,
+  maxBytes: number,
+): Promise<DiscoveryTextRead> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) return { kind: "unavailable" };
+  const budget = Math.min(maxBytes, MAX_ALIAS_FILE_BYTES);
+  const nonblock = typeof constants.O_NONBLOCK === "number" ? constants.O_NONBLOCK : 0;
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    // Follow a final symlink so a linked rc remains inspectable. O_NONBLOCK
+    // plus isFile() on the opened descriptor refuse FIFOs and devices without
+    // blocking a background scan.
+    handle = await open(path, constants.O_RDONLY | nonblock);
+  } catch {
+    return { kind: "unavailable" };
+  }
+  try {
+    const opened = await handle.stat();
+    if (!opened.isFile()) return { kind: "unavailable" };
+    if (opened.size > budget) return { kind: "too-large" };
+
+    const buffer = Buffer.alloc(budget + 1);
+    let total = 0;
+    while (total < buffer.byteLength) {
+      let bytesRead: number;
+      try {
+        ({ bytesRead } = await handle.read(buffer, total, buffer.byteLength - total, null));
+      } catch {
+        return { kind: "unavailable" };
+      }
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > budget) return { kind: "too-large" };
+    try {
+      return {
+        kind: "ok",
+        content: new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(0, total)),
+      };
+    } catch {
+      return { kind: "unavailable" };
+    }
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+}
+
 const defaultFs: DiscoveryFsPort = {
   access: (path, mode) => access(path, mode),
   lstat: (path) => lstat(path),
   realpath: (path) => realpath(path),
-  readFile: async (path) => readFile(path, "utf8"),
+  readFile: readDiscoveryText,
 };

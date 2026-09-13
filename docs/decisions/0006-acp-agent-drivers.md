@@ -33,9 +33,11 @@ profile must obtain compatibility GO through the shared ACP stack before shippin
 - Authentication is provider-owned. Profiles support subscription or OAuth
   through a documented ACP authenticate request or the provider's own login
   flow, and explicit write-only API keys where the runtime supports them.
-  Octant may keep a dedicated managed profile directory so provider-native
-  login state exists without exposing the user's general configuration; it
-  stores no token or account identity and never falls back between modes.
+  0121 later chose host-profile reuse for provider-native login instead of a
+  dedicated managed profile directory holding that authentication state. The
+  generic ACP driver, protocol, capability, and authority rules in this
+  record still hold. Octant still stores no token or account identity and
+  never falls back between authentication modes.
 - Connection Check negotiates the protocol, verifies authentication readiness,
   and observes models and capabilities without sending a prompt or mutating a
   Project.
@@ -86,5 +88,7 @@ profile must obtain compatibility GO through the shared ACP stack before shippin
 - 0005 Provider SDK contract
 - 0009 Sandbox confinement, approvals, and Plan mode
 - 0012 Mixed-provider subagents
+- 0121 Provider-owned CLI runtimes (scoped supersession of managed-profile
+  authentication only)
 - [fx ACP compatibility](../fx-acp-compatibility.md): probed; remains unselectable
   until a managed process can exclude the interactive `~/.fx` profile.

@@ -78,6 +78,10 @@ export class ProviderRuntimeInvalidationRejected extends Error {
   override readonly name = "ProviderRuntimeInvalidationRejected";
 }
 
+export class ProviderExecutableUpdateRejected extends Error {
+  override readonly name = "ProviderExecutableUpdateRejected";
+}
+
 export class ProviderRuntimeRegistry {
   readonly #receiptDirectory: string | undefined;
   readonly #processIdentity: ((pid: number) => Promise<string | undefined>) | undefined;
@@ -90,6 +94,8 @@ export class ProviderRuntimeRegistry {
   readonly #compatibleProtocols = new Map<ProviderInstanceId, CompatibleProtocol>();
   readonly #runtimes = new Map<ProviderInstanceId, RuntimeEntry>();
   readonly #invalidationListeners = new Map<ProviderInstanceId, Set<() => void>>();
+  readonly #updatingByExecutable = new Map<string, ReadonlySet<string>>();
+  readonly #executableByInstance = new Map<string, string>();
 
   constructor(options: ProviderRuntimeRegistryOptions = {}) {
     this.#receiptDirectory = options.receiptDirectory;
@@ -154,8 +160,47 @@ export class ProviderRuntimeRegistry {
     if (!Number.isSafeInteger(count) || count < 0) {
       throw new Error("Provider active session count must be a non-negative integer.");
     }
+    if (count > 0 && this.executableUpdateInProgress(instanceId)) {
+      throw new ProviderExecutableUpdateRejected("Stop the CLI update before starting a session.");
+    }
     if (count === 0) this.#activeSessionsByInstance.delete(instanceId);
     else this.#activeSessionsByInstance.set(instanceId, count);
+  }
+
+  claimExecutableUpdate(
+    executableKey: string,
+    instanceIds: ReadonlyArray<ProviderInstanceId>,
+  ): void {
+    if (this.#updatingByExecutable.has(executableKey)) {
+      throw new ProviderExecutableUpdateRejected(
+        "A CLI update is already running for this executable.",
+      );
+    }
+    for (const instanceId of instanceIds) {
+      if (this.activeSessionCount(instanceId) !== 0) {
+        throw new ProviderRuntimeInvalidationRejected(
+          "Stop active sessions before updating this provider CLI.",
+        );
+      }
+    }
+    const claimed = new Set(instanceIds.map((instanceId) => String(instanceId)));
+    this.#updatingByExecutable.set(executableKey, claimed);
+    for (const instanceId of claimed) this.#executableByInstance.set(instanceId, executableKey);
+  }
+
+  releaseExecutableUpdate(executableKey: string): void {
+    const claimed = this.#updatingByExecutable.get(executableKey);
+    this.#updatingByExecutable.delete(executableKey);
+    if (claimed === undefined) return;
+    for (const instanceId of claimed) {
+      if (this.#executableByInstance.get(instanceId) === executableKey) {
+        this.#executableByInstance.delete(instanceId);
+      }
+    }
+  }
+
+  executableUpdateInProgress(instanceId: ProviderInstanceId): boolean {
+    return this.#executableByInstance.has(String(instanceId));
   }
 
   acquireRuntime<T>(
@@ -165,6 +210,12 @@ export class ProviderRuntimeRegistry {
     let acquired: RuntimeEntry<T> | undefined;
     const acquire = Effect.tryPromise({
       try: async () => {
+        if (this.executableUpdateInProgress(instanceId)) {
+          throw {
+            category: "unavailable",
+            message: "Stop the CLI update before starting a session.",
+          } satisfies ProviderFailure;
+        }
         const startedAt = performance.now();
         let createdRuntimeEntry = false;
         let entry = this.#runtimes.get(instanceId) as RuntimeEntry<T> | undefined;
