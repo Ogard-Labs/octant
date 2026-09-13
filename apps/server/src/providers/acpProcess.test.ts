@@ -781,10 +781,13 @@ describe("Goose provider-owned profile", () => {
 
 describe("Kimi Code provider-owned profile", () => {
   function confinement(target: ReturnType<typeof fixture>, temporaryDirectory?: string) {
+    const hostAuthenticationPath = join(target.canonicalRoot, "host-auth");
+    mkdirSync(hostAuthenticationPath, { recursive: true });
     return makeAcpConfinementLive({
       platform: "darwin",
       sandboxPath: target.sandboxPath,
       ...(temporaryDirectory === undefined ? {} : { temporaryDirectory }),
+      hostAuthenticationPath,
     });
   }
 
