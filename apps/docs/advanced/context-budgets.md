@@ -69,6 +69,11 @@ shows used tokens, the context-window maximum, the used percentage, free
 space, and only the categories the host actually measured. Estimated,
 deferred, unavailable, or provider-reported values say so. Provider account
 limits appear in a separate section, and only when the host reported them.
+For Codex CLI turns, the meter uses the latest request's context occupancy and
+window size reported by the app-server, rather than cumulative input tokens
+or account quota. These values are retained with the turn and restored when
+the thread is reopened. Older turns recorded without context values need a
+new provider usage report before a context percentage can appear.
 Opening the popover does not make a further provider or network call.
 Inspect context opens the composition list so you can pin, exclude, or
 rebuild the next-turn plan. Switching the active pane closes a popover or

@@ -94,6 +94,8 @@ export interface CodeTurnEvent {
   readonly inputTokens?: number;
   readonly outputTokens?: number;
   readonly costUsd?: number;
+  readonly contextWindow?: number;
+  readonly contextTokens?: number;
   readonly utilization?: number;
   readonly resetsAt?: string;
   readonly providerClaimIsMutationProof?: false;
