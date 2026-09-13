@@ -158,10 +158,7 @@ describe("DraftThreadWorkspace", () => {
 
   it("seeds the Chat composer when a review hands it a prompt", async () => {
     render(
-      <DraftThreadWorkspace
-        {...baseProps}
-        pendingMessage="Help me understand pull request #12"
-      />,
+      <DraftThreadWorkspace {...baseProps} pendingMessage="Help me understand pull request #12" />,
     );
 
     await waitFor(() =>
