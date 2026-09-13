@@ -4377,7 +4377,7 @@ input.switch:checked::after {
   display: block;
 }
 .thread-composer__surface .composer-input {
-  min-height: 40px;
+  min-height: calc(40px + 1lh);
   padding: 12px 12px 6px;
 }
 .thread-composer__surface > .composer-row {

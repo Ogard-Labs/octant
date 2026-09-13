@@ -18,8 +18,10 @@ the frame height and toolbar position between otherwise similar panes.
   remains scrollable and accessible; interactive recovery controls remain usable.
 - Code checkout identity, branch, diff facts, and the pull-request action sit in
   a separate attached context strip beneath the message surface. They continue
-  to read the same authoritative checkout context.
-- Input grows when the person adds lines. Model selection, attachments, typing,
+  to read the same authoritative checkout context. The tray uses a theme-derived
+  fill distinct from the workspace in both light and dark modes.
+- The message input reserves an extra line of typing room at rest and grows
+  when the person adds lines. Model selection, attachments, typing,
   sending, stopping, and draft persistence keep their existing owners and behavior.
 - Welcome composers retain their current paragraph-height input, context band,
   radius, and elevation.
