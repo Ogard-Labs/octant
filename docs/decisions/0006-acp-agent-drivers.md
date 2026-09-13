@@ -14,9 +14,9 @@ whether tools execute inside the agent process, and how modes map to Octant
 authority. Designing and shipping each as an unrelated driver duplicated
 framing, correlation, cancellation, and cleanup code and invited drift.
 
-Cursor ACP probe contracts remain for a future compatibility GO, but Cursor
-is outside the technical-preview production provider surface until that probe
-returns GO.
+Cursor remains outside the technical-preview production provider surface. The
+retired, unused probe contracts do not establish compatibility; any future Cursor
+profile must obtain compatibility GO through the shared ACP stack before shipping.
 
 ## Decision
 

@@ -111,7 +111,6 @@ export * from "./zenPolicy";
 export * from "./zenWall";
 export * from "./zenFocusZonePolicy";
 export * from "./auditPolicy";
-export * from "./cursorAcpPolicy";
 export * from "./githubCapabilityPolicy";
 export * from "./githubRepositoryReadPolicy";
 export * from "./githubRemoteIdentity";

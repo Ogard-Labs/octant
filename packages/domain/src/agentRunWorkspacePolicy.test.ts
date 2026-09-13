@@ -281,6 +281,18 @@ describe("admitAgentRunWorkspace", () => {
     ).toEqual({ status: "refused", reason: "parent-checkout" });
   });
 
+  it("refuses a Code worktree receipt issued for another parent thread", () => {
+    expect(
+      admitAgentRunWorkspace({
+        requested: codeRequest(),
+        role: "implementation",
+        parent: codeParent,
+        issued: codeGrant({ parentThreadId: ids.otherThread }),
+        now,
+      }),
+    ).toEqual({ status: "refused", reason: "foreign-thread" });
+  });
+
   it("refuses unconfirmed, unavailable, and wider-than-parent Code receipts", () => {
     expect(
       admitAgentRunWorkspace({

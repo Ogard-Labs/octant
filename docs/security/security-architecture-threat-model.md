@@ -154,14 +154,15 @@ workspace pointing at another Project's root.
 | Authority clamp    | Requested authority is intersected with parent, Project, and global ceilings; any widening rejects fail-closed | `packages/domain/src/agentRunPolicy.ts` (`clampAgentRunAuthority`, `authority-widening`) | Exists today |
 | Mode ceiling       | Mode-derived maximum authority (Chat plan-only, Work no shell, Code approval-gated) caps every child           | `packages/domain/src/agentRunAuthorityCeiling.ts`                                        | Exists today |
 | Depth and capacity | Depth ≤ 2, ≤ 4 active global, ≤ 3 active per parent; creation posture Off/Ask/Always enforced server-side      | `agentRunPolicy.ts`, `apps/server/src/agentRun/agentRunSettingsStore.ts`                 | Exists today |
-| Workspace receipt  | A Code child requires a verified isolated worktree receipt; Chat children get virtual scratch only             | `agentRunPolicy.ts` (`validateWorkspaceReceipt`), `agentRunCreationService.ts`           | Exists today |
+| Workspace receipt  | A Code child requires a verified isolated worktree receipt; Chat children get virtual scratch only             | `agentRunWorkspacePolicy.ts` (`admitAgentRunWorkspace`), `agentRunWorkspaceService.ts`   | Exists today |
 | Live parent grant  | Clamping against the parent thread's _live_ effective grant, not only the mode ceiling                         | `agentRunLiveGrant.ts` / `clampAgentRunAuthorityAgainstLiveGrant` feeding admission      | Exists today |
 
-Today `apps/server/src/agentRun/agentRunCreationService.ts` admits Chat virtual research
-children and Code children that resolve a verified managed worktree receipt
-(`createVerifiedAgentRunWorktreeReceiptPort`); Work workspaces remain fail-closed until
-authoritative Project/root resolution lands. Child authority is clamped against both the
-mode ceiling and the parent thread's live effective grant.
+The server prepares, confirms, and admits child workspaces through
+`apps/server/src/agentRun/agentRunWorkspaceService.ts` and the domain
+`admitAgentRunWorkspace` policy. Chat children receive virtual research workspaces;
+Work children must match the current Project root and binding revision; Code children
+require a confirmed, ready isolated worktree bound to the parent thread. Child
+authority is clamped against both the mode ceiling and the parent thread's live grant.
 
 ### AC4 — Remote client exceeding host policy
 
@@ -304,9 +305,9 @@ window, or approves an action class the host policy reserves for the local user.
   Tools and renderers see indirect references only; broker coordinates are stripped from child
   environments.
 - **Worktree and workspace isolation.** Code children require a verified isolated worktree receipt
-  (`validateWorkspaceReceipt`, `createVerifiedAgentRunWorktreeReceiptPort`); Chat tools use
+  (`AgentRunWorkspaceService`, `admitAgentRunWorkspace`); Chat tools use
   isolated scratch areas (`apps/server/src/chat/chatScratchStore.ts`).
-  Work Project/root children remain deferred until authoritative root resolution is wired.
+  Work children must match the current Project root and binding revision.
 - **Browser and computer-use confinement.** Per-thread isolated browser contexts with
   deny-by-default origin allowlists and credential-field protection
   (`packages/domain/src/browserAutomationPolicy.ts`); computer-use requires allowlisted

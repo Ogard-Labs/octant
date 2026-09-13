@@ -115,7 +115,6 @@ export * from "./linkedThreadPrompt";
 export * from "./linkedThreadAggregation";
 export * from "./validationRpc";
 export * from "./zen";
-export * from "./cursorAcp";
 export * from "./githubCatalogue";
 export * from "./githubIssueContext";
 export * from "./linearIssueContext";
