@@ -91,4 +91,21 @@ describe("DockProjectPullRequestReviewTool", () => {
     expect(screen.getByText(/Read-only review/)).toBeVisible();
     expect(screen.queryByRole("button", { name: /merge/i })).toBeNull();
   });
+
+  it("offers to continue the review in a Chat thread", async () => {
+    const onOpenChat = vi.fn();
+    render(
+      <DockProjectPullRequestReviewTool
+        onOpenChat={onOpenChat}
+        load={async () => detailView()}
+        query={query}
+        refresh={async () => detailView()}
+      />,
+    );
+
+    await waitFor(() => expect(onOpenChat).not.toHaveBeenCalled());
+    await screen.findByText("Adds manual refresh.", { selector: "p" });
+    screen.getByRole("button", { name: "Open chat" }).click();
+    expect(onOpenChat).toHaveBeenCalledOnce();
+  });
 });

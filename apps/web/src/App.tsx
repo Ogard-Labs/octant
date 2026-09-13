@@ -79,6 +79,7 @@ import { useMachineChangeFeed } from "./polling/useMachineChangeFeed";
 import type { CodeOperationId, ProviderInstance, VoiceSettings } from "@octant/contracts";
 import type {
   CodeBoardQuery,
+  CodeProjectPullRequestDetailObserved,
   CodeProjectPullRequestDetailQuery,
   CodeProjectPullRequestRow,
   ThreadBoardPullRequestIdentity,
@@ -2643,6 +2644,7 @@ function LaunchedShell(
         <DockProjectPullRequestReviewTool
           key={`${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`}
           load={(query) => codeClient.queryProjectPullRequestDetail(query)}
+          onOpenChat={openProjectPullRequestChat}
           onOpenLinkedThread={(thread) =>
             openLinkedProjectPullRequestThread(thread, selectedProjectPullRequest.projectId)
           }
@@ -2939,6 +2941,19 @@ function LaunchedShell(
     openReviewForThread(String(thread.threadId));
   }
 
+  function openProjectPullRequestChat(detail: CodeProjectPullRequestDetailObserved): void {
+    const title = detail.title.length === 0 ? `Pull request #${detail.number}` : detail.title;
+    const prompt = [
+      `Help me understand pull request #${detail.number}: ${title}`,
+      detail.url,
+    ].join("\n");
+    closeWorkspaceReaders();
+    setDraftError(undefined);
+    setDraftPendingMessage(prompt);
+    setDraftResetRevision((revision) => revision + 1);
+    setDraftProjectSelection(({ chat: _previous, ...rest }) => rest);
+    void controller.openDraftThread("chat");
+  }
   // This model is rebuilt only when its inputs change. It used to be recomputed
   // by every App render — including the once-a-minute clock tick and every
   // machine-change revision — and handed fresh array identities to the sidebar.
@@ -5804,6 +5819,7 @@ function LaunchedShell(
                   <DockProjectPullRequestReviewTool
                     key={`${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`}
                     load={(query) => codeClient.queryProjectPullRequestDetail(query)}
+                    onOpenChat={openProjectPullRequestChat}
                     onOpenLinkedThread={(thread) =>
                       openLinkedProjectPullRequestThread(
                         thread,
@@ -5866,6 +5882,7 @@ function LaunchedShell(
                     <DockProjectPullRequestReviewTool
                       key={`${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`}
                       load={(query) => codeClient.queryProjectPullRequestDetail(query)}
+                      onOpenChat={openProjectPullRequestChat}
                       onOpenLinkedThread={(thread) =>
                         openLinkedProjectPullRequestThread(
                           thread,

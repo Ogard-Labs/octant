@@ -1,4 +1,5 @@
 import type {
+  CodeProjectPullRequestDetailObserved,
   CodeProjectPullRequestDetailQuery,
   CodeProjectPullRequestDetailRefreshCommand,
   CodeProjectPullRequestDetailView,
@@ -17,6 +18,7 @@ export interface DockProjectPullRequestReviewToolProps {
     command: CodeProjectPullRequestDetailRefreshCommand,
   ) => Promise<CodeProjectPullRequestDetailView>;
   readonly onOpenLinkedThread?: (thread: CodeProjectPullRequestLinkedThread) => void;
+  readonly onOpenChat?: (detail: CodeProjectPullRequestDetailObserved) => void;
 }
 
 type DetailState =
@@ -155,6 +157,7 @@ export function DockProjectPullRequestReviewTool(props: DockProjectPullRequestRe
         {...(props.onOpenLinkedThread === undefined
           ? {}
           : { onOpenLinkedThread: props.onOpenLinkedThread })}
+        {...(props.onOpenChat === undefined ? {} : { onOpenChat: props.onOpenChat })}
         onRefresh={() => void runRefresh()}
       />
     </>

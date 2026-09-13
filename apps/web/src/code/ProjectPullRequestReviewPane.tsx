@@ -24,6 +24,7 @@ import {
   GitPullRequestDraft,
   LockKeyhole,
   LoaderCircle,
+  MessageSquare,
   MessagesSquare,
   RefreshCw,
   type LucideIcon,
@@ -98,6 +99,7 @@ export interface ProjectPullRequestReviewPaneProps {
   readonly freshness: CodeProjectPullRequestFreshness;
   readonly linkedThreads: ReadonlyArray<CodeProjectPullRequestLinkedThread>;
   readonly onOpenLinkedThread?: (thread: CodeProjectPullRequestLinkedThread) => void;
+  readonly onOpenChat?: (detail: CodeProjectPullRequestDetailObserved) => void;
   readonly onRefresh?: () => void;
 }
 
@@ -130,6 +132,17 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
           </div>
         </div>
         <div className="code-pr-review__actions">
+          {props.onOpenChat === undefined ? null : (
+            <OctantButton
+              onClick={() => props.onOpenChat?.(detail)}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              <MessageSquare aria-hidden="true" size={14} strokeWidth={1.8} />
+              Open chat
+            </OctantButton>
+          )}
           {githubUrl === undefined ? null : (
             <a
               className="code-pr-review__github-link"
