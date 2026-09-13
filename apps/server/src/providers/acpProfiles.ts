@@ -49,6 +49,8 @@ export type AcpHostAuthentication =
       readonly loginHint: string;
       /** Environment variables that point the real CLI at this host profile. */
       readonly environment?: (path: string) => Readonly<Record<string, string>>;
+      /** Provider-owned entries that must remain outside the ACP process authority. */
+      readonly forbiddenEntries?: ReadonlyArray<string>;
     }
   | {
       readonly kind: "credential-file";
@@ -887,6 +889,7 @@ const kimiProfile: AcpProviderProfile = {
       defaultPath: join(homedir(), ".kimi-code"),
       loginHint: "Run `kimi login` in your terminal, then retry.",
       environment: (path) => ({ KIMI_CODE_HOME: path }),
+      forbiddenEntries: ["AGENTS.md", "mcp.json", "skills", "plugins", "hooks"],
     },
     // Authentication lives in the provider-owned Kimi data root. The process
     // still runs inside Octant's project/managed-home Seatbelt boundary and

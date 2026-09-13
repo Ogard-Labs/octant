@@ -827,6 +827,14 @@ describe("Kimi Code provider-owned profile", () => {
     expect(launch.args).toContain(target.binaryPath);
     expect(launch.args[1]).toContain("(deny default)");
     expect(launch.args[1]).toContain(`(allow file-read* (subpath "${hostAuthentication}"))`);
+    for (const entry of ["AGENTS.md", "mcp.json", "skills", "plugins", "hooks"]) {
+      expect(launch.args[1]).toContain(
+        `(deny file-read* (subpath "${join(hostAuthentication, entry)}"))`,
+      );
+      expect(launch.args[1]).toContain(
+        `(deny file-write* (subpath "${join(hostAuthentication, entry)}"))`,
+      );
+    }
   });
 
   it("does not create a duplicate managed authentication profile", async () => {

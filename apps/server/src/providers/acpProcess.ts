@@ -240,6 +240,7 @@ function writeManagedFiles(
 interface HostAuthenticationPaths {
   readonly readPaths: ReadonlyArray<string>;
   readonly writePaths: ReadonlyArray<string>;
+  readonly forbiddenPaths: ReadonlyArray<string>;
   readonly environment: Readonly<Record<string, string>>;
 }
 
@@ -250,7 +251,7 @@ function prepareHostAuthentication(
 ): Effect.Effect<HostAuthenticationPaths, ProviderFailure> {
   const hostAuthentication = profile.process.hostAuthentication;
   if (hostAuthentication === undefined)
-    return Effect.succeed({ readPaths: [], writePaths: [], environment: {} });
+    return Effect.succeed({ readPaths: [], writePaths: [], forbiddenPaths: [], environment: {} });
   const path = overridePath ?? hostAuthentication.defaultPath;
   const label = `${profile.displayName} provider data directory`;
   if (hostAuthentication.kind === "directory") {
@@ -269,6 +270,9 @@ function prepareHostAuthentication(
       Effect.map((canonical) => ({
         readPaths: [canonical],
         writePaths: [canonical],
+        forbiddenPaths: (hostAuthentication.forbiddenEntries ?? []).map((entry) =>
+          join(canonical, entry),
+        ),
         environment: hostAuthentication.environment?.(canonical) ?? {},
       })),
     );
@@ -278,7 +282,12 @@ function prepareHostAuthentication(
     try: () => {
       mkdirSync(dirname(managedCredential), { recursive: true, mode: 0o700 });
       if (existsSync(path) && !existsSync(managedCredential)) symlinkSync(path, managedCredential);
-      return { readPaths: existsSync(path) ? [path] : [], writePaths: [], environment: {} };
+      return {
+        readPaths: existsSync(path) ? [path] : [],
+        writePaths: [],
+        forbiddenPaths: [],
+        environment: {},
+      };
     },
     catch: () =>
       failure(
@@ -509,6 +518,17 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           platform,
           sandboxPath,
         });
+        const extraRules = [
+          ...(input.loopbackPorts ?? []).map(
+            (port) => `(allow network-outbound (remote ip "localhost:${port}"))`,
+          ),
+          ...(platform === "darwin"
+            ? hostAuthentication.forbiddenPaths.flatMap((path) => [
+                seatbeltDenyRule("file-read*", path),
+                seatbeltDenyRule("file-write*", path),
+              ])
+            : []),
+        ];
         const launch = yield* Effect.try({
           try: () =>
             confinement.prepare({
@@ -521,6 +541,8 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
               allowProcessExec: !(input.executionPolicy === "plan" || input.mode === "chat"),
               allowProcessFork: !(input.executionPolicy === "plan" || input.mode === "chat"),
               additionalWriteRoots: [managedHome, ...hostAuthentication.writePaths],
+              additionalDenyReadPaths: hostAuthentication.forbiddenPaths,
+              additionalDenyWritePaths: hostAuthentication.forbiddenPaths,
               allowFileReadStar: true,
               readRoots: [
                 root,
@@ -540,13 +562,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 binaryRuntimeDirectory,
                 configuredBinaryDirectory,
               ],
-              ...(input.loopbackPorts === undefined || input.loopbackPorts.length === 0
-                ? {}
-                : {
-                    extraRules: input.loopbackPorts.map(
-                      (port) => `(allow network-outbound (remote ip "localhost:${port}"))`,
-                    ),
-                  }),
+              ...(extraRules.length === 0 ? {} : { extraRules }),
             }),
           catch: (error) =>
             failure(
