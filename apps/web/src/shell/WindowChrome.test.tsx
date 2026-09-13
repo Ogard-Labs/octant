@@ -1040,6 +1040,17 @@ describe("WindowChrome", () => {
     expect(chromeLayer).toBeGreaterThan(headerLayer);
   });
 
+  it("hides native pane tabs while a reader rail replaces the workspace", () => {
+    const readerHeader =
+      /html\[data-octant-native-host="true"\]\s+\.primary-workspace-layer:has\([\s\S]*?\)\s+\.workspace-pane__header\s*\{([^}]*)\}/.exec(
+        styles,
+      );
+    expect(readerHeader, "missing native reader header rule").not.toBeNull();
+
+    expect(readerHeader?.[1]).toContain("visibility: hidden;");
+    expect(readerHeader?.[1]).toContain("pointer-events: none;");
+  });
+
   it("keeps the native drag overlay away from split-pane pointer controls", () => {
     const rule = cssRule(
       'html[data-octant-native-host="true"] .shell-frame:has(.workspace-pane__header) .shell-frame__native-drag-strip',
