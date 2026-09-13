@@ -126,6 +126,34 @@ describe("CodeWorkspaceTab repository tests", () => {
     ).toBeVisible();
   });
 
+  it("restores the host's newest result when the Tests tab opens", async () => {
+    const client = codeClient();
+    (client.readTestStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      kind: "code-repository-test-status",
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      result: {
+        kind: "repository-test-state",
+        operationId: ids.operation,
+        testRunId: ids.testRun,
+        state: "interrupted",
+        concerns: [],
+      },
+    });
+    render(<CodeWorkspaceTab controller={controller(client)} tab={testTab()} />);
+
+    expect(await screen.findByText("Interrupted")).toBeVisible();
+    expect(client.readTestStatus).toHaveBeenCalledWith(ids.thread, ids.checkout);
+  });
+
+  it("stays at Not run when the host holds no result for the checkout", async () => {
+    const client = codeClient();
+    render(<CodeWorkspaceTab controller={controller(client)} tab={testTab()} />);
+
+    expect(await screen.findByRole("button", { name: "Run Web tests" })).toBeVisible();
+    expect(screen.getByText("Not run")).toBeVisible();
+  });
+
   it("does not read the checkout for a tab that is not the Tests surface", () => {
     const client = codeClient();
     render(
