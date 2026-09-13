@@ -4,6 +4,30 @@ import type {
   CodeProjectPullRequestFreshness,
   CodeProjectPullRequestLinkedThread,
 } from "@octant/contracts";
+import {
+  Activity,
+  ArrowRight,
+  CircleCheck,
+  CircleMinus,
+  CircleQuestionMark,
+  CircleUserRound,
+  CircleX,
+  ExternalLink,
+  FileDiff,
+  FileText,
+  GitBranch,
+  GitCommitHorizontal,
+  GitCompareArrows,
+  GitMerge,
+  GitPullRequest,
+  GitPullRequestClosed,
+  GitPullRequestDraft,
+  LockKeyhole,
+  LoaderCircle,
+  MessagesSquare,
+  RefreshCw,
+  type LucideIcon,
+} from "lucide-react";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { Markdown } from "../markdown/Markdown";
@@ -22,11 +46,19 @@ const PR_STATE_VARIANTS: Record<
   CodeProjectPullRequestDetailObserved["pullRequestState"],
   NonNullable<OctantBadgeProps["variant"]>
 > = {
-  open: "secondary",
+  open: "success",
   draft: "outline",
-  merged: "success",
+  merged: "default",
   closed: "destructive",
 };
+
+const PR_STATE_ICONS: Record<CodeProjectPullRequestDetailObserved["pullRequestState"], LucideIcon> =
+  {
+    open: GitPullRequest,
+    draft: GitPullRequestDraft,
+    merged: GitMerge,
+    closed: GitPullRequestClosed,
+  };
 
 const CHECK_STATE_LABELS: Record<
   CodeProjectPullRequestDetailObserved["checks"][number]["state"],
@@ -50,6 +82,17 @@ const CHECK_STATE_VARIANTS: Record<
   unknown: "secondary",
 };
 
+const CHECK_STATE_ICONS: Record<
+  CodeProjectPullRequestDetailObserved["checks"][number]["state"],
+  LucideIcon
+> = {
+  success: CircleCheck,
+  failure: CircleX,
+  pending: LoaderCircle,
+  neutral: CircleMinus,
+  unknown: CircleQuestionMark,
+};
+
 export interface ProjectPullRequestReviewPaneProps {
   readonly detail: CodeProjectPullRequestDetailObserved;
   readonly freshness: CodeProjectPullRequestFreshness;
@@ -65,24 +108,26 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
   const waiting = detail.ambiguous || detail.freshness === "stale";
   const githubUrl = safeGithubUrl(detail.url);
 
+  const StateIcon = PR_STATE_ICONS[detail.pullRequestState];
+
   return (
-    <section aria-label="Pull request review" className="code-pr-review">
+    <section
+      aria-label="Pull request review"
+      className="code-pr-review"
+      data-pr-state={detail.pullRequestState}
+    >
       <header className="code-pr-review__header">
-        <div>
-          <span>Pull request #{detail.number}</span>
-          <h1>{detail.title.length === 0 ? `Pull request #${detail.number}` : detail.title}</h1>
-          <p className="code-pr-review__meta">
-            <OctantBadge variant={PR_STATE_VARIANTS[detail.pullRequestState]}>
-              {PR_STATE_LABELS[detail.pullRequestState]}
-            </OctantBadge>
-            <span>
-              {detail.headBranch} → {detail.baseRepository}:{detail.baseBranch}
-            </span>
-            {detail.author.length === 0 ? null : <span>by {detail.author}</span>}
-          </p>
-          <p className="code-project-pull-requests__status" role="status">
-            {freshnessCopy(props.freshness)}
-          </p>
+        <div className="code-pr-review__headline">
+          <span aria-hidden="true" className="code-pr-review__state-mark">
+            <StateIcon size={20} strokeWidth={1.8} />
+          </span>
+          <div className="code-pr-review__title-block">
+            <p className="code-pr-review__eyebrow">
+              <span className="code-pr-review__eyebrow-label">Pull request</span>
+              <span className="code-pr-review__number">#{detail.number}</span>
+            </p>
+            <h1>{detail.title.length === 0 ? `Pull request #${detail.number}` : detail.title}</h1>
+          </div>
         </div>
         <div className="code-pr-review__actions">
           {githubUrl === undefined ? null : (
@@ -92,7 +137,8 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
               rel="noreferrer"
               target="_blank"
             >
-              Open on GitHub
+              <ExternalLink aria-hidden="true" size={13} strokeWidth={1.8} />
+              <span>Open on GitHub</span>
             </a>
           )}
           {props.onRefresh === undefined ? null : (
@@ -102,13 +148,46 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
               type="button"
               variant="ghost"
             >
-              Refresh detail
+              <RefreshCw aria-hidden="true" size={13} strokeWidth={1.8} />
+              <span>Refresh detail</span>
             </OctantButton>
           )}
         </div>
+        <p className="code-pr-review__meta">
+          <OctantBadge variant={PR_STATE_VARIANTS[detail.pullRequestState]}>
+            <StateIcon aria-hidden="true" size={13} strokeWidth={1.8} />
+            <span>{PR_STATE_LABELS[detail.pullRequestState]}</span>
+          </OctantBadge>
+          <span
+            className="code-pr-review__route"
+            title={`${detail.headRepository}:${detail.headBranch} → ${detail.baseRepository}:${detail.baseBranch}`}
+          >
+            <GitBranch aria-hidden="true" size={13} strokeWidth={1.8} />
+            <code>
+              {detail.headRepository}:{detail.headBranch}
+            </code>
+            <ArrowRight aria-hidden="true" size={13} strokeWidth={1.8} />
+            <code>
+              {detail.baseRepository}:{detail.baseBranch}
+            </code>
+          </span>
+          {detail.author.length === 0 ? null : (
+            <span className="code-pr-review__author">
+              <CircleUserRound aria-hidden="true" size={13} strokeWidth={1.8} />
+              <span>by {detail.author}</span>
+            </span>
+          )}
+        </p>
+        <p className="code-pr-review__freshness" role="status">
+          <Activity aria-hidden="true" size={13} strokeWidth={1.8} />
+          <span>{freshnessCopy(props.freshness)}</span>
+        </p>
       </header>
 
-      <p className="code-pr-review__guardrail">Read-only review · use GitHub for review actions.</p>
+      <p className="code-pr-review__guardrail">
+        <LockKeyhole aria-hidden="true" size={13} strokeWidth={1.8} />
+        <span>Read-only review · use GitHub for review actions.</span>
+      </p>
 
       {waiting ? (
         <div className="code-pr-review__waiting" role="alert">
@@ -123,9 +202,7 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
 
       {props.linkedThreads.length === 0 ? null : (
         <section aria-label="Linked threads" className="code-pr-review__section">
-          <header className="code-pr-review__section-header">
-            <h2>Linked threads</h2>
-          </header>
+          <SectionHeading icon={MessagesSquare} title="Linked threads" />
           <ul className="code-pr-review__commits">
             {props.linkedThreads.map((thread) => (
               <li key={String(thread.threadId)}>
@@ -147,10 +224,11 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
       )}
 
       <section aria-label="Pull request description" className="code-pr-review__section">
-        <header className="code-pr-review__section-header">
-          <h2>Description</h2>
-          {stale("description") ? <StaleTag section="description" /> : null}
-        </header>
+        <SectionHeading
+          icon={FileText}
+          stale={stale("description") ? "description" : undefined}
+          title="Description"
+        />
         {detail.description.length === 0 ? (
           <p role="status">No description provided.</p>
         ) : (
@@ -167,10 +245,12 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
       </section>
 
       <section aria-label="Pull request commits" className="code-pr-review__section">
-        <header className="code-pr-review__section-header">
-          <h2>Commits ({detail.commits.length})</h2>
-          {stale("commits") ? <StaleTag section="commits" /> : null}
-        </header>
+        <SectionHeading
+          count={detail.commits.length}
+          icon={GitCommitHorizontal}
+          stale={stale("commits") ? "commits" : undefined}
+          title="Commits"
+        />
         {detail.commits.length === 0 ? (
           <p role="status">No commits observed.</p>
         ) : (
@@ -189,10 +269,12 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
       </section>
 
       <section aria-label="Pull request changed files" className="code-pr-review__section">
-        <header className="code-pr-review__section-header">
-          <h2>Changed files ({detail.files.length})</h2>
-          {stale("files") ? <StaleTag section="files" /> : null}
-        </header>
+        <SectionHeading
+          count={detail.files.length}
+          icon={FileDiff}
+          stale={stale("files") ? "files" : undefined}
+          title="Changed files"
+        />
         {detail.files.length === 0 ? (
           <p role="status">No changed files observed.</p>
         ) : (
@@ -200,8 +282,9 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
             {detail.files.map((file) => (
               <li key={file.path}>
                 <span>{file.path}</span>
-                <span className="code-pr-review__muted">
-                  +{file.additions} −{file.deletions}
+                <span className="code-pr-review__diff-stat">
+                  <span className="code-pr-review__additions">+{file.additions}</span>
+                  <span className="code-pr-review__deletions">−{file.deletions}</span>
                 </span>
               </li>
             ))}
@@ -210,19 +293,25 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
       </section>
 
       <section aria-label="Pull request checks" className="code-pr-review__section">
-        <header className="code-pr-review__section-header">
-          <h2>Checks ({detail.checks.length})</h2>
-          {stale("checks") ? <StaleTag section="checks" /> : null}
-        </header>
+        <SectionHeading
+          count={detail.checks.length}
+          icon={CircleCheck}
+          stale={stale("checks") ? "checks" : undefined}
+          title="Checks"
+        />
         {detail.checks.length === 0 ? (
           <p role="status">No checks observed.</p>
         ) : (
           <ul className="code-pr-review__checks">
             {detail.checks.map((check, index) => (
-              <li key={`${check.name}-${index}`}>
+              <li data-check-state={check.state} key={`${check.name}-${index}`}>
                 <span>{check.name}</span>
-                <OctantBadge variant={CHECK_STATE_VARIANTS[check.state]}>
-                  {CHECK_STATE_LABELS[check.state]}
+                <OctantBadge data-status={check.state} variant={CHECK_STATE_VARIANTS[check.state]}>
+                  {(() => {
+                    const CheckIcon = CHECK_STATE_ICONS[check.state];
+                    return <CheckIcon aria-hidden="true" size={13} strokeWidth={1.8} />;
+                  })()}
+                  <span>{CHECK_STATE_LABELS[check.state]}</span>
                 </OctantBadge>
               </li>
             ))}
@@ -231,10 +320,11 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
       </section>
 
       <section aria-label="Pull request diff" className="code-pr-review__section">
-        <header className="code-pr-review__section-header">
-          <h2>Diff</h2>
-          {stale("diff") ? <StaleTag section="diff" /> : null}
-        </header>
+        <SectionHeading
+          icon={GitCompareArrows}
+          stale={stale("diff") ? "diff" : undefined}
+          title="Diff"
+        />
         {detail.diffTruncated ? (
           <p className="code-pr-review__notice" role="note">
             This diff is truncated and is not complete.
@@ -256,6 +346,29 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
         staleReviews={stale("reviews")}
       />
     </section>
+  );
+}
+
+function SectionHeading(props: {
+  readonly count?: number;
+  readonly icon: LucideIcon;
+  readonly stale?: string | undefined;
+  readonly title: string;
+}) {
+  const Icon = props.icon;
+  return (
+    <header className="code-pr-review__section-header">
+      <span className="code-pr-review__section-heading">
+        <Icon aria-hidden="true" size={15} strokeWidth={1.8} />
+        <h2>
+          {props.title}
+          {props.count === undefined ? null : (
+            <span className="code-pr-review__section-count">{props.count}</span>
+          )}
+        </h2>
+      </span>
+      {props.stale === undefined ? null : <StaleTag section={props.stale} />}
+    </header>
   );
 }
 
