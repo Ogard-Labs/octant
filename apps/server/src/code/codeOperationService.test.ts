@@ -135,6 +135,7 @@ describe("CodeOperationService", () => {
     const events = {
       replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
       append: vi.fn(),
+      historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
     };
     const git = {
       observe: vi.fn(),
@@ -808,6 +809,7 @@ describe("CodeOperationService", () => {
     };
     const events = {
       append: vi.fn(),
+      historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
       replay: vi.fn(() => ({
         status: "ok" as const,
         frames: [
@@ -1673,6 +1675,7 @@ function providerTurnFixture(
   const events = {
     replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
     append: vi.fn(),
+    historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
   };
   const service = new CodeOperationService({
     authority: {
@@ -1734,6 +1737,7 @@ describe("CodeOperationService terminal readers", () => {
     const events = {
       replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
       append: vi.fn(),
+      historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
     };
     const service = new CodeOperationService({
       authority: {

@@ -9,6 +9,7 @@ import {
   decodeCodeOperationApprovalReceipt,
   decodeCodeOperationApprovalRequest,
   decodeCodeOperationResult,
+  decodeCodeRepositoryTestStatus,
   decodeCodeReviewFinding,
   decodeCodeReviewFindingUpdated,
   decodeCodeThreadOperationalMetadata,
@@ -530,6 +531,37 @@ describe("Code operation contracts", () => {
     expect(() => decodeCodeOperationResult({ ...test, state: "completed" })).toThrow();
     expect(() =>
       decodeCodeOperationResult({ ...test, state: "running", verdict: "passed" }),
+    ).toThrow();
+
+    // The Tests surface reads this back when it reopens. A thread with no run
+    // yet carries no result; the decoder must reject a result that is not a
+    // repository-test-state rather than pass it through.
+    expect(
+      decodeCodeRepositoryTestStatus({
+        kind: "code-repository-test-status",
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+      }),
+    ).toEqual({
+      kind: "code-repository-test-status",
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+    });
+    expect(
+      decodeCodeRepositoryTestStatus({
+        kind: "code-repository-test-status",
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        result: { ...test, state: "interrupted" },
+      }),
+    ).toMatchObject({ result: { state: "interrupted" } });
+    expect(() =>
+      decodeCodeRepositoryTestStatus({
+        kind: "code-repository-test-status",
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        result: { ...test, state: "interrupted", verdict: "passed" },
+      }),
     ).toThrow();
 
     const pullRequestIdentity = {
