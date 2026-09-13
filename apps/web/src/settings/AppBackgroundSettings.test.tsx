@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DEFAULT_APP_BACKGROUND, type SidebarBackgroundMetadata } from "@octant/contracts/theme";
+import { ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
 import { AppBackgroundSettings, type BackgroundImageLibrary } from "./AppBackgroundSettings";
 
 afterEach(cleanup);
@@ -81,6 +82,35 @@ describe("AppBackgroundSettings", () => {
     await user.click(await screen.findByRole("radio", { name: "harbour.png" }));
 
     expect(onChange).toHaveBeenLastCalledWith({ ...dials, kind: "photo", backgroundId: PHOTO_ID });
+  });
+
+  it("shows Zen built-in previews and saves the selected one as the workspace ground", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const preset = ZEN_BUILTIN_BACKGROUNDS[0];
+    render(
+      <AppBackgroundSettings
+        background={DEFAULT_APP_BACKGROUND}
+        library={library()}
+        onChange={onChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Application background" }));
+    await user.click(await screen.findByRole("option", { name: "Built-in" }));
+
+    expect(screen.getByRole("radio", { name: preset.title })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: `${preset.title} preview` })).toHaveAttribute(
+      "src",
+      preset.src,
+    );
+    await user.click(screen.getByRole("radio", { name: preset.title }));
+
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...dials,
+      kind: "builtin",
+      presetId: preset.id,
+    });
   });
 
   it("uploads a photo through the host and makes it the ground", async () => {

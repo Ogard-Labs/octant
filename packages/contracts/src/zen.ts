@@ -14,6 +14,9 @@ import {
   ProviderModelId,
   ProviderReadiness,
 } from "./providers";
+import { ZenBuiltinBackgroundId } from "./backgroundCatalog";
+
+export { ZenBuiltinBackgroundId } from "./backgroundCatalog";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -480,7 +483,7 @@ export const ZenHexColor = Schema.String.pipe(Schema.pattern(/^#[0-9a-fA-F]{6}$/
 export type ZenHexColor = typeof ZenHexColor.Type;
 
 export interface ZenBuiltinBackgroundPreset {
-  readonly id: string;
+  readonly id: ZenBuiltinBackgroundId;
   readonly title: string;
   readonly group: "landscape" | "forest" | "wood" | "abstract";
   readonly tone: "dark" | "light";
@@ -658,11 +661,6 @@ export const ZEN_BUILTIN_BACKGROUNDS = [
   },
 ] as const satisfies ReadonlyArray<ZenBuiltinBackgroundPreset>;
 
-export type ZenBuiltinBackgroundId = (typeof ZEN_BUILTIN_BACKGROUNDS)[number]["id"];
-
-export const ZenBuiltinBackgroundId = Schema.Literal(
-  ...ZEN_BUILTIN_BACKGROUNDS.map((preset) => preset.id),
-);
 export type ZenBuiltinBackgroundIdSchema = typeof ZenBuiltinBackgroundId.Type;
 
 export const ZenBackground = Schema.Union(

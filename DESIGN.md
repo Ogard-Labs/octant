@@ -142,7 +142,8 @@ from…") floats over the page. Nothing about delivery is asked up front; it
 is derived from the row and shown on the thread once it exists.
 
 The screen sits on the application ground (0091): an ordered-dither cloud
-drawn in `--octant-accent` at one cell per three pixels, or a person's photo
+drawn in `--octant-accent` at one cell per three pixels, one of the
+first-party Zen backgrounds with its still-frame fallback, a person's photo
 printed through the same dither with the cloud over it, or the plain page.
 Behind a start screen the ground is masked away behind the composer and fades
 out below it, so the prompt and the recent-thread list read on the plain

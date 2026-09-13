@@ -1,4 +1,5 @@
 import type { ThemeSettings, ThemeTypography } from "@octant/contracts/theme";
+import { getZenBuiltinBackground } from "@octant/contracts/zen";
 import { resolveTypographyProjection } from "@octant/theme/typography";
 
 export type EffectiveThemeMode = "light" | "dark";
@@ -77,8 +78,14 @@ export function resolveEffectiveSidebarBackground(
 }
 
 export interface ResolvedAppBackground {
-  readonly kind: "theme" | "photo" | "none";
+  readonly kind: "theme" | "builtin" | "photo" | "none";
   readonly backgroundId: string | null;
+  /** Public asset used by a first-party built-in, or null for other grounds. */
+  readonly backgroundUrl: string | null;
+  /** Still asset for previews and reduced-motion fallback. */
+  readonly backgroundStillUrl: string | null;
+  /** Whether the selected built-in asset is allowed to animate. */
+  readonly backgroundAnimated: boolean;
   /** Whether the pattern layer is enabled independent of its opacity dial. */
   readonly patternEnabled: boolean;
   /** The pattern drifts only while nothing has asked Octant to hold still. */
@@ -117,15 +124,50 @@ export function resolveAppBackground(
     coversSidebar: background.scope === "everywhere" && background.coversSidebar,
   };
   if (settings.increasedContrast || background.kind === "none") {
-    return { ...tuning, kind: "none", backgroundId: null, animated: false };
+    return {
+      ...tuning,
+      kind: "none",
+      backgroundId: null,
+      backgroundUrl: null,
+      backgroundStillUrl: null,
+      backgroundAnimated: false,
+      animated: false,
+    };
   }
-  const animated =
-    background.patternEnabled &&
-    !settings.reducedMotion &&
-    !systemPrefersReducedMotion &&
-    background.patternSpeed > 0;
+  const motionAllowed = !settings.reducedMotion && !systemPrefersReducedMotion;
+  const animated = background.patternEnabled && motionAllowed && background.patternSpeed > 0;
+  if (background.kind === "builtin") {
+    const preset = getZenBuiltinBackground(background.presetId);
+    const stillUrl = "stillSrc" in preset ? preset.stillSrc : preset.src;
+    const backgroundAnimated = motionAllowed && preset.motion === "animated";
+    return {
+      ...tuning,
+      kind: "builtin",
+      backgroundId: background.presetId,
+      backgroundUrl: backgroundAnimated ? preset.src : stillUrl,
+      backgroundStillUrl: stillUrl,
+      backgroundAnimated,
+      animated,
+    };
+  }
   if (background.kind === "photo") {
-    return { ...tuning, kind: "photo", backgroundId: background.backgroundId, animated };
+    return {
+      ...tuning,
+      kind: "photo",
+      backgroundId: background.backgroundId,
+      backgroundUrl: null,
+      backgroundStillUrl: null,
+      backgroundAnimated: false,
+      animated,
+    };
   }
-  return { ...tuning, kind: "theme", backgroundId: null, animated };
+  return {
+    ...tuning,
+    kind: "theme",
+    backgroundId: null,
+    backgroundUrl: null,
+    backgroundStillUrl: null,
+    backgroundAnimated: false,
+    animated,
+  };
 }

@@ -280,6 +280,9 @@ describe("application background policy", () => {
     photoOpacity: 0.42,
     scope: "welcome",
     coversSidebar: false,
+    backgroundUrl: null,
+    backgroundStillUrl: null,
+    backgroundAnimated: false,
   };
 
   it("animates the theme pattern until reduced motion or a zero speed asks it to hold still", () => {
@@ -318,6 +321,31 @@ describe("application background policy", () => {
       animated: false,
       photoOpacity: 0.7,
       patternSpeed: 2,
+    });
+  });
+
+  it("resolves a built-in workspace background to its still or animated asset", () => {
+    const settings: ThemeSettings = {
+      ...baseSettings,
+      appBackground: {
+        ...baseSettings.appBackground,
+        kind: "builtin",
+        presetId: "perspective-dot-plane-animated",
+      },
+    };
+    expect(resolveAppBackground(settings)).toEqual({
+      ...resolvedDefaults,
+      kind: "builtin",
+      backgroundId: "perspective-dot-plane-animated",
+      backgroundUrl: "/zen-backgrounds/perspective-dot-plane-dark.webp",
+      backgroundStillUrl: "/zen-backgrounds/perspective-dot-plane.jpg",
+      backgroundAnimated: true,
+      animated: true,
+    });
+    expect(resolveAppBackground({ ...settings, reducedMotion: true })).toMatchObject({
+      backgroundUrl: "/zen-backgrounds/perspective-dot-plane.jpg",
+      backgroundStillUrl: "/zen-backgrounds/perspective-dot-plane.jpg",
+      backgroundAnimated: false,
     });
   });
 

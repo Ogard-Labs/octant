@@ -190,6 +190,8 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
 
   if (!active) return null;
 
+  const builtinUrl = resolved.kind === "builtin" ? resolved.backgroundUrl : null;
+
   return (
     <div
       aria-hidden="true"
@@ -198,6 +200,14 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
       data-octant-app-backdrop={resolved.kind}
       data-placement={placement}
     >
+      {builtinUrl === null ? null : (
+        <div
+          aria-hidden="true"
+          className="app-backdrop__builtin"
+          data-animated={resolved.backgroundAnimated ? "true" : "false"}
+          style={{ backgroundImage: `url("${builtinUrl}")` }}
+        />
+      )}
       {photoId === null ? null : (
         <canvas
           className="app-backdrop__photo"

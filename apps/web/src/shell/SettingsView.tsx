@@ -1275,7 +1275,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
           ) : null}
           {isAvailable("app-background") && props.themeController !== undefined ? (
             <SettingRow
-              description="The theme's own pattern or a photo of yours behind the start screen, or behind everything."
+              description="A theme pattern, built-in Zen background, or photo behind the start screen, or behind everything."
               focused={focusedSetting === settingId("app-background")}
               label="Background"
               scope="app"

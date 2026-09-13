@@ -135,6 +135,7 @@ distilled successor of the earlier long-form design specifications.
 | [0121](0121-provider-owned-cli-runtime-and-updates.md) | Provider-owned CLI runtimes, profiles, and updates | Accepted |
 | [0122](0122-provider-readiness-probes-reach-provider-endpoints.md) | Provider readiness probes reach provider endpoints | Accepted |
 | [0123](0123-explicit-github-pull-request-merges.md) | Explicit GitHub pull-request merges are fresh and approval-gated | Accepted |
+| [0124](0124-built-in-zen-backgrounds-are-workspace-grounds.md) | Built-in Zen backgrounds are workspace grounds | Accepted |
 
 ## Adding an ADR
 
