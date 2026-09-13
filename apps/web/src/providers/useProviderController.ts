@@ -25,6 +25,7 @@ import {
   type PiProviderConfiguration,
   type PermissionPersistence,
   type ProviderDefaults,
+  type ProviderDataTags,
   type ProviderInstanceId,
   type ProviderModelId,
   type ProviderAuthenticationAttempt,
@@ -124,8 +125,26 @@ export function useProviderController(options: ProviderControllerOptions) {
     const nextPresentation = new Map<ProviderInstanceId, ProviderObservedState>();
     const preserved = pendingProbes.current;
     const instanceIds = new Set(value.instances.map((instance) => instance.id));
+    const catalogModels = new Map(
+      (value.catalogs ?? []).map((catalog) => [
+        String(catalog.instanceId),
+        new Map(catalog.models.map((model) => [String(model.id), model.dataTags] as const)),
+      ]),
+    );
     for (const observed of value.observedStates) {
-      nextPresentation.set(observed.instanceId, observed);
+      const tags = catalogModels.get(String(observed.instanceId));
+      nextPresentation.set(
+        observed.instanceId,
+        tags === undefined
+          ? observed
+          : {
+              ...observed,
+              models: observed.models.map((model) => {
+                const dataTags = tags.get(String(model.id));
+                return dataTags === undefined ? model : { ...model, dataTags };
+              }),
+            },
+      );
     }
     for (const instanceId of preserved) {
       if (!instanceIds.has(instanceId) || nextPresentation.has(instanceId)) continue;
@@ -2588,6 +2607,37 @@ export function useProviderController(options: ProviderControllerOptions) {
       }),
     [execute],
   );
+  const setDataTags = useCallback(
+    (instanceId: ProviderInstanceId, dataTags: ProviderDataTags) =>
+      execute((current) => {
+        const instance = findProvider(current, instanceId);
+        return instance === undefined
+          ? undefined
+          : {
+              kind: "set-provider-data-tags",
+              instanceId,
+              expectedVersion: instance.version,
+              dataTags,
+            };
+      }),
+    [execute],
+  );
+  const setModelDataTags = useCallback(
+    (instanceId: ProviderInstanceId, modelId: ProviderModelId, dataTags: ProviderDataTags) =>
+      execute((current) => {
+        const instance = findProvider(current, instanceId);
+        return instance === undefined
+          ? undefined
+          : {
+              kind: "set-provider-model-data-tags",
+              instanceId,
+              expectedVersion: instance.version,
+              modelId,
+              dataTags,
+            };
+      }),
+    [execute],
+  );
   const remove = useCallback(
     (instanceId: ProviderInstanceId) =>
       queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, async () => {
@@ -2913,6 +2963,8 @@ export function useProviderController(options: ProviderControllerOptions) {
     changeAnthropicCompatibleConfiguration,
     changeAzureFoundryConfiguration,
     setEnabled,
+    setDataTags,
+    setModelDataTags,
     remove,
     providerCredentialStatus,
     clearProviderCredential,

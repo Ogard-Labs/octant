@@ -813,6 +813,8 @@ function ProvidersSection(props: {
         onRename={props.providerController.rename}
         onRetry={props.providerController.retry}
         onSetEnabled={props.providerController.setEnabled}
+        onDataTagsChange={props.providerController.setDataTags}
+        onModelDataTagsChange={props.providerController.setModelDataTags}
         probingIds={props.providerController.probingIds}
         updatingIds={props.providerController.updatingIds}
         status={props.providerController.status}

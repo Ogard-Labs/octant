@@ -427,6 +427,48 @@ describe("ProviderService", () => {
     expect(fixture.append).not.toHaveBeenCalled();
   });
 
+  it("persists provider residency tags without invalidating its model catalog", async () => {
+    const fixture = serviceFixture({
+      instances: [provider()],
+      withCatalogPersistence: true,
+      initialCatalog: persistedCatalog(),
+    });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-provider-data-tags",
+        instanceId,
+        expectedVersion: 1,
+        dataTags: ["eu"],
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: { dataTags: ["eu"], version: 2 },
+    });
+    expect(fixture.catalogs()[0]).toMatchObject({ version: 1, invalidated: false });
+  });
+
+  it("persists residency tags on an individual provider model", async () => {
+    const fixture = serviceFixture({
+      instances: [provider()],
+      withCatalogPersistence: true,
+      initialCatalog: persistedCatalog(),
+    });
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "set-provider-model-data-tags",
+        instanceId,
+        expectedVersion: 1,
+        modelId: "model-1",
+        dataTags: ["zdr"],
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-model-tags-updated",
+      snapshot: { version: 2, models: [{ id: "model-1", dataTags: ["zdr"] }] },
+    });
+  });
+
   it("rejects ambiguous duplicate normalized smoke requests", async () => {
     const sessionId = "80000000-0000-4000-8000-000000000021";
     const answerApproval = vi.fn(() => Effect.void);

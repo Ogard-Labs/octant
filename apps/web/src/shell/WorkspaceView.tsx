@@ -10,7 +10,12 @@ import type {
 } from "@octant/contracts/shell";
 import { decodeWorkMutationRequestId } from "@octant/contracts";
 import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts/browser-automation";
-import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
+import type {
+  ProjectAvailability,
+  ProjectId,
+  ProjectProviderPolicy,
+  ProjectSummary,
+} from "@octant/contracts/projects";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { PreviewClient } from "@octant/client-runtime/preview-client";
@@ -29,6 +34,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { ComposerContextMeterGate } from "../context/composerContextMeterScope";
 import { SplitWorkspace, type PaneFacts } from "./SplitWorkspace";
 import { ProjectOverview } from "../projects/ProjectOverview";
+import { providerGroupsForProject } from "../projects/ProjectProviderPolicySection";
 import type { OctantHostBridge } from "./hostBridge";
 import type { ProviderController } from "../providers/useProviderController";
 import { ShellState } from "./ShellState";
@@ -291,6 +297,10 @@ export interface WorkspaceViewProps {
   readonly onArchiveProject: (projectId: ProjectId) => void;
   readonly onRelinkProject: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
   readonly onRenameProject: (projectId: ProjectId, name: string) => Promise<boolean>;
+  readonly onProviderPolicyChange?: (
+    projectId: ProjectId,
+    policy: ProjectProviderPolicy,
+  ) => Promise<boolean>;
   /** The theme's ground behind the welcome and draft-thread surfaces, when one is set. */
   readonly welcomeBackdrop?: ReactNode;
   /** The person's name from their profile, for the greeting on every start screen. */
@@ -1543,7 +1553,10 @@ function renderNonCodeTab(
                     : {
                         baseRepository: `${project.connectedRepository.owner}/${project.connectedRepository.repository}`,
                       })}
-                  providerGroups={props.codeProviderGroups ?? props.draftProviderGroups ?? []}
+                  providerGroups={providerGroupsForProject(
+                    project,
+                    props.codeProviderGroups ?? props.draftProviderGroups ?? [],
+                  )}
                   {...(props.draftSelectedProviderInstanceId === undefined
                     ? {}
                     : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
@@ -1628,7 +1641,10 @@ function renderNonCodeTab(
                     : { onSelectProvider: props.onDraftSelectProvider })}
                   projectId={project.id}
                   projectName={project.name}
-                  providerGroups={props.workProviderGroups ?? props.draftProviderGroups ?? []}
+                  providerGroups={providerGroupsForProject(
+                    project,
+                    props.workProviderGroups ?? props.draftProviderGroups ?? [],
+                  )}
                   {...(props.draftSelectedModelId === undefined
                     ? {}
                     : { selectedModelId: props.draftSelectedModelId })}
@@ -1664,6 +1680,10 @@ function renderNonCodeTab(
           : { folderBrowseClient: props.folderBrowseClient })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
         onArchive={props.onArchiveProject}
+        {...(props.onProviderPolicyChange === undefined
+          ? {}
+          : { onProviderPolicyChange: props.onProviderPolicyChange })}
+        providerInstances={props.providerController.instances ?? []}
         onRelink={props.onRelinkProject}
         onRename={props.onRenameProject}
         project={project}

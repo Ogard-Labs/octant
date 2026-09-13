@@ -2258,6 +2258,8 @@ function ControllerBackedProviderSettings(props: {
       onRename={controller.rename}
       onRetry={controller.retry}
       onSetEnabled={controller.setEnabled}
+      onDataTagsChange={controller.setDataTags}
+      onModelDataTagsChange={controller.setModelDataTags}
       probingIds={controller.probingIds}
       updatingIds={controller.updatingIds}
       status={controller.status}
@@ -2471,6 +2473,8 @@ function fixture(
     onProviderCredentialStatus: vi.fn(async () => "stored" as const),
     onClearProviderCredential: vi.fn(async () => true),
     onSetEnabled: vi.fn(async () => true),
+    onDataTagsChange: vi.fn(async () => true),
+    onModelDataTagsChange: vi.fn(async () => true),
     onRemove: vi.fn(async () => true),
     onProbe: vi.fn(async () => true),
     onVerifyFoundryTools: vi.fn(async () => true),

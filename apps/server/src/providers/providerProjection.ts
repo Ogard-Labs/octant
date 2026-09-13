@@ -7,6 +7,7 @@ import {
   decodeProviderInstanceBinaryChanged,
   decodeProviderInstanceConfigurationChanged,
   decodeProviderInstanceCreated,
+  decodeProviderInstanceDataTagsChanged,
   decodeProviderInstanceEnabledChanged,
   decodeProviderInstanceRemoved,
   decodeProviderInstanceRenamed,
@@ -38,6 +39,8 @@ const instanceDecoders = {
     decodeProviderInstanceBinaryChanged(payload).instance,
   "provider.instance-configuration-changed@1": (payload: unknown) =>
     decodeProviderInstanceConfigurationChanged(payload).instance,
+  "provider.instance-data-tags-changed@1": (payload: unknown) =>
+    decodeProviderInstanceDataTagsChanged(payload).instance,
   "provider.instance-enabled-changed@1": (payload: unknown) =>
     decodeProviderInstanceEnabledChanged(payload).instance,
 } as const;

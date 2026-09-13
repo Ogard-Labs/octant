@@ -35,6 +35,7 @@ import {
   changeCodeProjectAccess,
   changeCodeProjectNewThreadWorkspace,
   changeCodeProjectPullRequestBackgroundRefresh,
+  changeProjectProviderPolicy,
   createMemoryEntry,
   createProject,
   defaultShellSettings,
@@ -685,6 +686,10 @@ export class ProjectService implements ProjectServiceApi {
           );
           kind = "code-project-pull-request-background-refresh-changed";
           eventName = "project.code-pull-request-background-refresh-changed@1";
+        } else if (command.kind === "change-project-provider-policy") {
+          project = changeProjectProviderPolicy(current, command.policy, timestamp);
+          kind = "project-provider-policy-changed";
+          eventName = "project.provider-policy-changed@1";
         } else {
           if (current.type === "chat")
             throw new ProjectServiceError({

@@ -13,6 +13,7 @@ import {
   type CodeAccessPersistence,
   type CodeNewThreadWorkspace,
   type CodeProjectPullRequestBackgroundRefresh,
+  type ProjectProviderPolicy,
 } from "@octant/contracts/projects";
 import type { AggregateVersion } from "@octant/contracts/events";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
@@ -255,6 +256,34 @@ export function useProjectController(options: ProjectControllerOptions) {
       pullRequestBackgroundRefresh === "enabled"
         ? "Background pull-request refresh enabled."
         : "Background pull-request refresh disabled.",
+    );
+  }
+
+  /** Restrict provider/model choices for Work and Code turns in this Project. */
+  async function setProviderPolicy(
+    projectId: ProjectId,
+    providerPolicy: ProjectProviderPolicy,
+  ): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project === undefined || project.type === "chat") return false;
+    const current = project.providerPolicy ?? { mode: "all" as const, providerInstanceIds: [] };
+    if (
+      current.mode === providerPolicy.mode &&
+      current.providerInstanceIds.length === providerPolicy.providerInstanceIds.length &&
+      current.providerInstanceIds.every((id) =>
+        providerPolicy.providerInstanceIds.some((candidate) => String(candidate) === String(id)),
+      )
+    ) {
+      return true;
+    }
+    return execute(
+      {
+        kind: "change-project-provider-policy",
+        projectId,
+        expectedVersion: project.version,
+        policy: providerPolicy,
+      },
+      "Project provider policy updated.",
     );
   }
 
@@ -578,6 +607,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     setCodeAccessPersistence,
     setCodeNewThreadWorkspace,
     setCodePullRequestBackgroundRefresh,
+    setProviderPolicy,
     setArchived,
     status,
     supersedeMemory,

@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { ActorId, AggregateVersion, EventActor, UtcTimestamp } from "./events";
 import { HostId } from "./host";
+import { ProviderInstanceId } from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -90,6 +91,17 @@ export const ProjectActor = Schema.Union(
 );
 export type ProjectActor = typeof ProjectActor.Type;
 
+export const ProjectProviderPolicyMode = Schema.Literal("all", "eu-zdr", "whitelist");
+export type ProjectProviderPolicyMode = typeof ProjectProviderPolicyMode.Type;
+export const ProjectProviderPolicy = Schema.Struct({
+  mode: ProjectProviderPolicyMode,
+  /** Provider instances allowed when mode is `whitelist`; empty means none. */
+  providerInstanceIds: Schema.Array(ProviderInstanceId).pipe(
+    Schema.filter((ids) => new Set(ids).size === ids.length),
+  ),
+}).annotations(strict);
+export type ProjectProviderPolicy = typeof ProjectProviderPolicy.Type;
+
 export const CanonicalProjectBinding = Schema.Struct({
   canonicalRoot: Schema.NonEmptyTrimmedString,
 }).annotations(strict);
@@ -129,6 +141,8 @@ const BoundProjectFields = {
   binding: CanonicalProjectBinding,
   bindingHistory: Schema.NonEmptyArray(BindingRevision),
   origin: Schema.optional(ProjectOrigin),
+  /** Absent on older Projects and interpreted as allow-all. */
+  providerPolicy: Schema.optional(ProjectProviderPolicy),
 } as const;
 
 export const ChatProject = Schema.Struct({
@@ -181,6 +195,7 @@ const WorkProjectSummary = Schema.Struct({
   /** Exact current binding revision the renderer must send on create/first turn. */
   bindingRevisionId: BindingRevisionId,
   origin: Schema.optional(ProjectOrigin),
+  providerPolicy: Schema.optional(ProjectProviderPolicy),
 }).annotations(strict);
 
 const CodeProjectSummary = Schema.Struct({
@@ -193,6 +208,7 @@ const CodeProjectSummary = Schema.Struct({
   newThreadWorkspace: Schema.optional(CodeNewThreadWorkspace),
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
   connectedRepository: Schema.optional(ConnectedGitHubRepository),
+  providerPolicy: Schema.optional(ProjectProviderPolicy),
 }).annotations(strict);
 
 export const ProjectSummary = Schema.Union(ChatProject, WorkProjectSummary, CodeProjectSummary);
@@ -385,6 +401,11 @@ export const ProjectCommand = Schema.Union(
     ...ProjectCommandFields,
     pullRequestBackgroundRefresh: CodeProjectPullRequestBackgroundRefresh,
   }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-project-provider-policy"),
+    ...ProjectCommandFields,
+    policy: ProjectProviderPolicy,
+  }).annotations(strict),
 );
 export type ProjectCommand = typeof ProjectCommand.Type;
 
@@ -424,6 +445,10 @@ export const ProjectCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("code-project-pull-request-background-refresh-changed"),
     project: CodeProject,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("project-provider-policy-changed"),
+    project: BoundProject,
   }).annotations(strict),
 );
 export type ProjectCommandResult = typeof ProjectCommandResult.Type;
@@ -536,6 +561,10 @@ export const CodeProjectPullRequestBackgroundRefreshChanged = Schema.Struct({
 }).annotations(strict);
 export type CodeProjectPullRequestBackgroundRefreshChanged =
   typeof CodeProjectPullRequestBackgroundRefreshChanged.Type;
+export const ProjectProviderPolicyChanged = Schema.Struct({
+  project: BoundProject,
+}).annotations(strict);
+export type ProjectProviderPolicyChanged = typeof ProjectProviderPolicyChanged.Type;
 
 export const MemoryEntryCreated = Schema.Struct({ entry: ActiveMemoryEntry }).annotations(strict);
 export type MemoryEntryCreated = typeof MemoryEntryCreated.Type;
@@ -562,6 +591,7 @@ export const PROJECT_EVENT_NAMES = [
   "project.code-access-changed@1",
   "project.code-new-thread-workspace-changed@1",
   "project.code-pull-request-background-refresh-changed@1",
+  "project.provider-policy-changed@1",
   "memory.entry-created@1",
   "memory.entry-superseded@1",
   "memory.entry-retracted@1",
@@ -596,6 +626,9 @@ export const decodeCodeProjectNewThreadWorkspaceChanged = Schema.decodeUnknownSy
 );
 export const decodeCodeProjectPullRequestBackgroundRefreshChanged = Schema.decodeUnknownSync(
   CodeProjectPullRequestBackgroundRefreshChanged,
+);
+export const decodeProjectProviderPolicyChanged = Schema.decodeUnknownSync(
+  ProjectProviderPolicyChanged,
 );
 export const decodeMemoryEntryCreated = Schema.decodeUnknownSync(MemoryEntryCreated);
 export const decodeMemoryEntrySuperseded = Schema.decodeUnknownSync(MemoryEntrySuperseded);

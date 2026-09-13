@@ -136,6 +136,7 @@ distilled successor of the earlier long-form design specifications.
 | [0122](0122-provider-readiness-probes-reach-provider-endpoints.md) | Provider readiness probes reach provider endpoints | Accepted |
 | [0123](0123-explicit-github-pull-request-merges.md) | Explicit GitHub pull-request merges are fresh and approval-gated | Accepted |
 | [0124](0124-built-in-zen-backgrounds-are-workspace-grounds.md) | Built-in Zen backgrounds are workspace grounds | Accepted |
+| [0125](0125-project-provider-data-policy.md) | Projects may restrict providers by residency labels | Accepted |
 
 ## Adding an ADR
 

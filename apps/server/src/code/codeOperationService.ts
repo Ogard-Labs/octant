@@ -651,6 +651,8 @@ export interface CodeOperationServiceOptions {
     readonly thread: CodeThread;
     readonly checkout: CodeCheckoutIdentity;
   }) => void;
+  /** Refuses a new provider turn when the Project policy changed since thread creation. */
+  readonly isProviderModelAllowed?: (thread: CodeThread) => boolean;
   readonly approvals?: CodeApprovalValidationPort;
   readonly terminals: CodeOperationTerminalPort;
   readonly repositoryTests: CodeOperationRepositoryTestPort;
@@ -795,6 +797,17 @@ export class CodeOperationService {
         );
       }
       return existing.event.result;
+    }
+
+    if (
+      command.kind === "start-provider-turn" &&
+      this.#options.isProviderModelAllowed?.(scope.thread) === false
+    ) {
+      return this.#failed(
+        command.operationId,
+        "unauthorized",
+        "This provider or model is not allowed by this Code Project's provider policy.",
+      );
     }
 
     this.#options.onScopedOperation?.({

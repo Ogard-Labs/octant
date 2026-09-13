@@ -5631,6 +5631,7 @@ function LaunchedShell(
                     onPreviewResize={controller.previewSplitResize}
                     onRelinkProject={projectController.relink}
                     onRenameProject={projectController.rename}
+                    onProviderPolicyChange={projectController.setProviderPolicy}
                     onSplitPane={(paneId, orientation, placement) =>
                       void controller.splitPane(paneId, orientation, placement)
                     }

@@ -1073,6 +1073,20 @@ describe("CodeOperationService", () => {
     expect(journalled().at(-1)).toMatchObject({ attachments: [reference] });
   });
 
+  it("refuses a Code follow-up when its Project provider policy no longer accepts it", async () => {
+    const fixture = providerTurnFixture({ isProviderModelAllowed: () => false });
+
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: {
+        category: "unauthorized",
+        message: "This provider or model is not allowed by this Code Project's provider policy.",
+      },
+    });
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+    expect(fixture.events.append).not.toHaveBeenCalled();
+  });
+
   it("runs only a definition the server discovered for the checkout", async () => {
     const discovered = {
       id: "abcdabcd-abcd-4bcd-8bcd-abcdabcdabcd",
@@ -1658,6 +1672,7 @@ function providerTurnFixture(
       | "attachments"
       | "supportsAttachments"
       | "git"
+      | "isProviderModelAllowed"
     >
   > & { readonly thread?: CodeThread } = {},
 ) {

@@ -9,6 +9,7 @@ import {
   decodeCodeProjectAccessChanged,
   decodeCodeProjectNewThreadWorkspaceChanged,
   decodeCodeProjectPullRequestBackgroundRefreshChanged,
+  decodeProjectProviderPolicyChanged,
   decodeProjectCreated,
   decodeProjectId,
   decodeProjectLifecycleChanged,
@@ -166,6 +167,8 @@ const projectDecoders = {
     decodeCodeProjectNewThreadWorkspaceChanged(payload).project,
   "project.code-pull-request-background-refresh-changed@1": (payload: unknown) =>
     decodeCodeProjectPullRequestBackgroundRefreshChanged(payload).project,
+  "project.provider-policy-changed@1": (payload: unknown) =>
+    decodeProjectProviderPolicyChanged(payload).project,
 } as const;
 
 const memoryDecoders = {

@@ -27,6 +27,7 @@ import type {
   ProviderCredentialStatus,
   ProviderAuthenticationAttempt,
   ProviderDefaults,
+  ProviderDataTags,
   ProviderInstance,
   ProviderInstanceId,
   ProviderModelId,
@@ -264,6 +265,15 @@ export interface ProviderSettingsViewProps {
   ) => Promise<ProviderCredentialStatus>;
   readonly onClearProviderCredential: (instanceId: ProviderInstanceId) => Promise<boolean>;
   readonly onSetEnabled: (instanceId: ProviderInstanceId, enabled: boolean) => Promise<boolean>;
+  readonly onDataTagsChange: (
+    instanceId: ProviderInstanceId,
+    dataTags: ProviderDataTags,
+  ) => Promise<boolean>;
+  readonly onModelDataTagsChange: (
+    instanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+    dataTags: ProviderDataTags,
+  ) => Promise<boolean>;
   readonly onRemove: (instanceId: ProviderInstanceId) => Promise<boolean>;
   readonly onProbe: (
     instanceId: ProviderInstanceId,
@@ -424,6 +434,8 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onRemove={props.onRemove}
         onRename={props.onRename}
         onSetEnabled={props.onSetEnabled}
+        onDataTagsChange={props.onDataTagsChange}
+        onModelDataTagsChange={props.onModelDataTagsChange}
         onVerifyFoundryTools={props.onVerifyFoundryTools}
       />
       <section aria-label="Defaults" className="settings-card-section settings-card-section--open">

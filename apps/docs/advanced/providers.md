@@ -32,6 +32,27 @@ New-task defaults use visible models. If every model is hidden, show a model
 in Provider Settings before starting a new task. Visibility is a selection
 preference; it does not grant or change provider permissions.
 
+### EU and ZDR labels
+
+Provider instances and individual models can carry user-maintained **EU** and
+**ZDR** labels. These labels are local policy metadata, not a claim that
+Octant independently verified a provider's residency or retention guarantees.
+Use the labels in **Settings → Providers & Models** when a Project needs a
+data-handling boundary.
+
+On a Work or Code Project page, **Provider access** offers three policies:
+
+- **Allow all providers** (the backwards-compatible default)
+- **Allow EU or ZDR tagged providers/models**
+- **Allow only selected providers**
+
+The host enforces the selected policy for new threads, provider/model changes,
+and every turn. If a policy changes while a thread is open, a follow-up is
+refused when its current provider or model is no longer accepted. Picker
+filtering is only a convenience; it cannot bypass the server check. A provider
+must still be installed, enabled, authenticated, and ready regardless of its
+labels or whitelist entry.
+
 ### App-managed browser tools
 
 The Browser view and an agent's browser access are separate capabilities.

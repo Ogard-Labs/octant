@@ -174,6 +174,8 @@ export interface CodeOperationRuntimeOptions {
    * not bring back.
    */
   readonly onProviderTurnRequested?: (threadId: CodeThreadId) => void;
+  /** Refuses every new Code turn whose current Project policy no longer accepts its provider/model. */
+  readonly isProviderModelAllowed?: (thread: CodeThread) => boolean;
   readonly ghExecutable?: string;
   readonly pullRequestPort?: CodeOperationPullRequestPort;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
@@ -549,6 +551,9 @@ export function createCodeOperationRuntime(
   };
   const service = new CodeOperationService({
     authority: authorityForTurn,
+    ...(options.isProviderModelAllowed === undefined
+      ? {}
+      : { isProviderModelAllowed: options.isProviderModelAllowed }),
     onScopedOperation: ({ command }) => {
       // The service invokes this only after its authoritative scope check and
       // replay lookup, but before approval or the operation side effect. That
@@ -807,6 +812,15 @@ export function createCodeOperationRuntime(
             decodeCodeFailure({
               category: "unauthorized",
               message: "Code operation is unauthorized.",
+            }),
+          );
+        }
+        if (thread !== undefined && options.isProviderModelAllowed?.(thread) === false) {
+          throw new CodeServiceError(
+            decodeCodeFailure({
+              category: "unauthorized",
+              message:
+                "This provider or model is not allowed by this Code Project's provider policy.",
             }),
           );
         }

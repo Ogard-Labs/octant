@@ -1,6 +1,8 @@
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
+import type { ProjectProviderPolicy } from "@octant/contracts/projects";
+import type { ProviderInstance } from "@octant/contracts/providers";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -8,6 +10,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { FolderPicker } from "./FolderPicker";
 import { ProjectMemorySection } from "./ProjectMemorySection";
 import { ProjectThreadsSection } from "./ProjectThreadsSection";
+import { ProjectProviderPolicySection } from "./ProjectProviderPolicySection";
 
 export interface ProjectOverviewProps {
   readonly allowRootRelink?: boolean;
@@ -26,6 +29,11 @@ export interface ProjectOverviewProps {
   readonly onMemoryChanged?: () => void;
   readonly onRelink: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
   readonly onRename: (projectId: ProjectId, name: string) => Promise<boolean>;
+  readonly onProviderPolicyChange?: (
+    projectId: ProjectId,
+    policy: ProjectProviderPolicy,
+  ) => Promise<boolean>;
+  readonly providerInstances?: ReadonlyArray<ProviderInstance>;
   readonly project: ProjectSummary;
   readonly projectClient?: ProjectClient;
 }
@@ -211,6 +219,16 @@ export function ProjectOverview(props: ProjectOverviewProps) {
       {props.project.type === "chat" ? null : (
         <p className="project-overview__description">{authorityCopy(props.project.type)}</p>
       )}
+      {props.project.type !== "chat" && props.onProviderPolicyChange !== undefined ? (
+        <ProjectProviderPolicySection
+          disabled={archived || connectionStale}
+          onChange={async (policy) =>
+            (await props.onProviderPolicyChange?.(props.project.id, policy)) ?? false
+          }
+          project={props.project}
+          providerInstances={props.providerInstances ?? []}
+        />
+      ) : null}
       {props.projectClient === undefined ? null : (
         <ProjectMemorySection
           client={props.projectClient}

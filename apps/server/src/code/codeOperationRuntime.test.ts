@@ -358,6 +358,31 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("refuses a provider turn before admission when the Project policy no longer allows it", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const admit = vi.fn();
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+      spendCeiling: { admit, settle: vi.fn() },
+      isProviderModelAllowed: () => false,
+    });
+
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(13),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(admit).not.toHaveBeenCalled();
+    fixture.close();
+  });
+
   it("refuses to start a turn when the thread cannot be brought back, and records no work for it", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -1749,6 +1774,7 @@ function runtimeFixture(options: {
   failRuntimeWorkJournal?: boolean;
   throwRuntimeWorkReporter?: boolean;
   onProviderTurnRequested?: (threadId: CodeThreadId) => void;
+  isProviderModelAllowed?: (thread: CodeThread) => boolean;
   spendCeiling?: Parameters<typeof createCodeOperationRuntime>[0]["spendCeiling"];
   evidencePut?: (
     content: string,
@@ -1862,6 +1888,9 @@ function runtimeFixture(options: {
     ...(options.onProviderTurnRequested === undefined
       ? {}
       : { onProviderTurnRequested: options.onProviderTurnRequested }),
+    ...(options.isProviderModelAllowed === undefined
+      ? {}
+      : { isProviderModelAllowed: options.isProviderModelAllowed }),
     ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
     reportRuntimeWorkFailure: (failure) => {
       runtimeWorkFailures.push(failure.kind);

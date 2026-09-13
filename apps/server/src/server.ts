@@ -47,6 +47,7 @@ import {
   type PermissionPersistence,
   type ProviderDriverKind,
   type ProviderInstance,
+  type ProviderModel,
   type ProviderRuntimeEvent,
   type WindowId,
   type CanvasRefreshRequest,
@@ -659,6 +660,7 @@ import {
   isAgentRunActiveStatus,
   isImageProfileDriverKind,
   isNativeHarnessDriverKind,
+  isProviderAllowedByProjectPolicy,
   nativeHarnessJobForRole,
   THREAD_MENTION_UNREADABLE_CONTEXT,
   listHosts,
@@ -2890,6 +2892,19 @@ export function startOctantServer(
         projectId,
         hasActiveCodeProject: (id) => projectService.hasActiveProject(id, "code"),
       });
+    const isCodeProviderModelAllowed = (input: {
+      readonly projectId: ProjectId;
+      readonly providerInstanceId: ProviderInstance["id"];
+      readonly modelId: ProviderModel["id"];
+    }): boolean => {
+      const project = persistence.readProject(input.projectId);
+      const provider = persistence.readProviderInstance(input.providerInstanceId);
+      if (project?.type !== "code" || provider === undefined) return false;
+      const model = persistence
+        .readProviderCatalog?.(input.providerInstanceId)
+        ?.models.find((candidate) => String(candidate.id) === String(input.modelId));
+      return isProviderAllowedByProjectPolicy(project, provider, model);
+    };
     const codeService =
       options.codeService ??
       new CodeService({
@@ -2940,6 +2955,7 @@ export function startOctantServer(
         onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
         waitForThreadChange: (signal) => machineChangeFeed.waitFor("code-navigation", signal),
         probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
+        isProviderModelAllowed: isCodeProviderModelAllowed,
         issueContext: githubIssueContextService,
         linearIssueContext: linearIssueContextService,
         // Resolved lazily: the pull-request service is constructed after this
@@ -3739,6 +3755,12 @@ export function startOctantServer(
           readReviewFinding: persistence.readCodeReviewFinding,
           readReviewFindings: persistence.readCodeReviewFindings,
         },
+        isProviderModelAllowed: (thread) =>
+          isCodeProviderModelAllowed({
+            projectId: thread.projectId,
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+          }),
         windowAccess: {
           canAccessProject: canAccessCodeProject,
         },
@@ -5039,13 +5061,23 @@ export function startOctantServer(
       probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
       observeRuntime: (threadId) => observeWorkThreadRuntime?.(threadId) ?? { executing: false },
       projectDueReminder,
+      readProviderModel: (providerInstanceId, modelId) =>
+        persistence
+          .readProviderCatalog?.(providerInstanceId)
+          ?.models.find((model) => String(model.id) === String(modelId)),
       issueContext: githubIssueContextService,
       linearIssueContext: linearIssueContextService,
     });
     const workTurnService = new WorkTurnService({
       spendCeiling,
       onTurnRequested: (threadId) => workThreadService.noteTurnRequested(threadId),
-      persistence,
+      persistence: {
+        ...persistence,
+        readProviderModel: (providerInstanceId, modelId) =>
+          persistence
+            .readProviderCatalog?.(providerInstanceId)
+            ?.models.find((model) => String(model.id) === String(modelId)),
+      },
       resolveAppManagedTools: (input) => {
         const observed = providerRuntimeRegistry.observedState(input.thread.providerInstanceId);
         const browserSupported =

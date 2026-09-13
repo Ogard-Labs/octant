@@ -542,6 +542,12 @@ export interface CodeServiceOptions {
   readonly probeProvider?: (
     providerInstanceId: CodeThread["providerInstanceId"],
   ) => Promise<ProviderProbeResult>;
+  /** Server-authoritative Project provider/model policy gate. */
+  readonly isProviderModelAllowed?: (input: {
+    readonly projectId: ProjectId;
+    readonly providerInstanceId: CodeThread["providerInstanceId"];
+    readonly modelId: ProviderModelId;
+  }) => boolean;
   readonly workingDirectories: {
     readonly resolve: (
       authenticatedWindowId: WindowId,
@@ -708,6 +714,7 @@ export class CodeService {
   readonly #worktreeRefs: CodeWorktreeRefsPort | undefined;
   readonly #managedThreadCreation: ManagedCodeThreadCreationPort | undefined;
   readonly #probeProvider: CodeServiceOptions["probeProvider"];
+  readonly #isProviderModelAllowed: CodeServiceOptions["isProviderModelAllowed"];
   readonly #workingDirectories: CodeServiceOptions["workingDirectories"];
   readonly #onWorkingDirectoryChanged: CodeServiceOptions["onWorkingDirectoryChanged"];
   readonly #waitForThreadChange: CodeServiceOptions["waitForThreadChange"];
@@ -751,6 +758,7 @@ export class CodeService {
     this.#worktreeRefs = options.worktreeRefs;
     this.#managedThreadCreation = options.managedThreadCreation;
     this.#probeProvider = options.probeProvider;
+    this.#isProviderModelAllowed = options.isProviderModelAllowed;
     this.#workingDirectories = options.workingDirectories;
     this.#onWorkingDirectoryChanged = options.onWorkingDirectoryChanged;
     this.#waitForThreadChange = options.waitForThreadChange;
@@ -1055,6 +1063,18 @@ export class CodeService {
         });
         // Authorization that is decidable before any mutation runs first.
         const project = this.#persistence.readProject?.(command.projectId);
+        if (
+          this.#isProviderModelAllowed?.({
+            projectId: command.projectId,
+            providerInstanceId: command.providerInstanceId,
+            modelId: command.modelId,
+          }) === false
+        ) {
+          throw this.#failure(
+            "unauthorized",
+            "This provider or model is not allowed by this Code Project's provider policy.",
+          );
+        }
         if (
           managedAuthority.executionPolicy === "full-access" &&
           managedAuthority.permissionPersistence === "project-default" &&
@@ -1441,6 +1461,18 @@ export class CodeService {
         const thread = this.#threadWithProfiledAuthority(command.thread, profiled);
         const project = this.#persistence.readProject?.(thread.projectId);
         if (
+          this.#isProviderModelAllowed?.({
+            projectId: thread.projectId,
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+          }) === false
+        ) {
+          throw this.#failure(
+            "unauthorized",
+            "This provider or model is not allowed by this Code Project's provider policy.",
+          );
+        }
+        if (
           thread.executionPolicy === "full-access" &&
           thread.permissionPersistence === "project-default" &&
           (project?.type !== "code" || project.codeAccessPersistence !== "project-default")
@@ -1630,6 +1662,18 @@ export class CodeService {
       }
       if (command.kind === "change-code-thread-provider") {
         await this.#requireProviderModel(command.providerInstanceId, command.modelId);
+        if (
+          this.#isProviderModelAllowed?.({
+            projectId: current.projectId,
+            providerInstanceId: command.providerInstanceId,
+            modelId: command.modelId,
+          }) === false
+        ) {
+          throw this.#failure(
+            "unauthorized",
+            "This provider or model is not allowed by this Code Project's provider policy.",
+          );
+        }
       }
       if (command.kind === "propose-code-delivery-outcome") {
         // An agent proposal is advisory: it records a pending proposal but must

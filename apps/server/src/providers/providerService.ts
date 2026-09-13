@@ -78,6 +78,8 @@ import {
   removeProvider,
   renameProvider,
   setProviderEnabled,
+  setProviderDataTags,
+  setProviderModelDataTags,
   updateProviderDefaults,
   orderProviderInstances,
   orderProviderModels,
@@ -806,9 +808,45 @@ export class ProviderService implements ProviderServiceApi {
           });
         }
 
+        if (command.kind === "set-provider-model-data-tags") {
+          if (this.#persistence.readProviderCatalog === undefined) {
+            throw this.#unavailable();
+          }
+          const catalog = this.#persistence.readProviderCatalog(current.id);
+          if (catalog === undefined) throw this.#invalid("Provider model catalog was not found.");
+          const model = catalog.models.find(
+            (candidate) => String(candidate.id) === String(command.modelId),
+          );
+          if (model === undefined) throw this.#invalid("Provider model was not found.");
+          const snapshot = decodeProviderCatalogSnapshot({
+            ...catalog,
+            version: (catalog.version + 1) as typeof catalog.version,
+            models: catalog.models.map((candidate) =>
+              String(candidate.id) === String(command.modelId)
+                ? setProviderModelDataTags(candidate, command.dataTags)
+                : candidate,
+            ),
+            updatedAt,
+          });
+          this.#persistence.journal.append({
+            aggregate: { aggregateType: "provider-catalog", aggregateId: current.id },
+            expectedVersion: catalog.version,
+            events: [this.#pendingEvent("provider.catalog-updated@1", { snapshot })],
+          });
+          const authoritative = this.#persistence.readProviderCatalog(current.id);
+          if (authoritative?.version !== snapshot.version) throw this.#unavailable();
+          return decodeProviderRegistryCommandResult({
+            kind: "provider-model-tags-updated",
+            snapshot: authoritative,
+          });
+        }
+
         let instance: ProviderInstance;
         let eventName: string;
-        if (command.kind === "rename-provider") {
+        if (command.kind === "set-provider-data-tags") {
+          instance = setProviderDataTags(current, command.dataTags, updatedAt);
+          eventName = "provider.instance-data-tags-changed@1";
+        } else if (command.kind === "rename-provider") {
           instance = renameProvider(current, {
             displayName: command.displayName,
             existingInstances: instances,
@@ -1071,7 +1109,10 @@ export class ProviderService implements ProviderServiceApi {
         }
         this.#appendInstance(command.expectedVersion, eventName, instance);
         const authoritative = this.#authoritativeInstance(instance);
-        if (eventName !== "provider.instance-renamed@1") {
+        if (
+          eventName !== "provider.instance-renamed@1" &&
+          eventName !== "provider.instance-data-tags-changed@1"
+        ) {
           this.#invalidateCatalog(
             instance.id,
             describeProviderConfigurationChange(current, instance),
@@ -1194,7 +1235,22 @@ export class ProviderService implements ProviderServiceApi {
                 ...mergedResult,
                 models: orderProviderModels(mergedResult.models, manualModelOrder),
               };
-        const observed = this.#runtime.setObservedState(orderedResult);
+        const taggedCatalog = this.#persistence.readProviderCatalog?.(instanceId);
+        const observed = this.#runtime.setObservedState(
+          taggedCatalog === undefined
+            ? orderedResult
+            : {
+                ...orderedResult,
+                models: orderedResult.models.map((model) => {
+                  const tagged = taggedCatalog.models.find(
+                    (candidate) => String(candidate.id) === String(model.id),
+                  );
+                  return tagged?.dataTags === undefined
+                    ? model
+                    : { ...model, dataTags: tagged.dataTags };
+                }),
+              },
+        );
         this.#persistCatalog(observed);
         return observed;
       } catch (error) {
@@ -1327,10 +1383,16 @@ export class ProviderService implements ProviderServiceApi {
     if (observed.readiness !== "ready" && observed.models.length === 0) return;
     const current = this.#persistence.readProviderCatalog(observed.instanceId);
     const instance = this.#persistence.readProviderInstance(observed.instanceId);
+    const taggedModels = new Map(
+      current?.models.map((model) => [String(model.id), model.dataTags] as const) ?? [],
+    );
     const snapshot: ProviderCatalogSnapshot = decodeProviderCatalogSnapshot({
       instanceId: observed.instanceId,
       version: (current?.version ?? 0) + 1,
-      models: observed.models,
+      models: observed.models.map((model) => {
+        const dataTags = taggedModels.get(String(model.id));
+        return dataTags === undefined ? model : { ...model, dataTags };
+      }),
       manualModelOrder:
         instance?.configuration.kind === "openai-compatible-http" ||
         instance?.configuration.kind === "anthropic-compatible-http" ||
