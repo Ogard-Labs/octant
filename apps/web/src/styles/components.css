@@ -924,9 +924,10 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 }
 
 /* ── Turn header ───────────────────────────────────────────────────────────
-   One line above every assistant reply, in every mode: provider, outcome,
-   time. Status colour is the only colour; the interface face, not the code
-   face, because "Failed" is a sentence to the person, not an identifier. */
+   One line above every assistant reply, in every mode: outcome and time.
+   Provider/model provenance is available in the header's hover details.
+   Status colour is the only colour; the interface face, not the code face,
+   because "Failed" is a sentence to the person, not an identifier. */
 .turn-header {
   display: flex;
   min-width: 0;
@@ -938,15 +939,6 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-regular);
   line-height: 1.35;
-}
-
-.turn-header__provider {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--octant-text-secondary);
-  font-weight: var(--oct-weight-display);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .turn-header__status {

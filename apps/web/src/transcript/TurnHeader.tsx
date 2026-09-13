@@ -68,19 +68,23 @@ function outcomeIcon(outcome: TurnHeaderOutcome) {
 }
 
 /**
- * One line above every assistant reply: who answered, how the turn ended, and
- * when. Before this each mode drew its own — Chat a mono status under the
- * reply, Work the raw lifecycle word, Code a header of its own — so the same
- * outcome looked like three different things.
+ * One line above every assistant reply: how the turn ended and when. The
+ * provider/model stays available in the hover details with the timestamp so
+ * the transcript keeps its focus on the reply itself without losing
+ * provenance.
  */
 export function TurnHeader(props: TurnHeaderProps) {
   const Icon = outcomeIcon(props.outcome);
+  const hoverDetails = [props.provider, turnTimeTitle(props.at)]
+    .filter((value): value is string => value !== undefined)
+    .join(" · ");
   return (
     <>
-      <header className="turn-header" data-outcome={props.outcome}>
-        {props.provider === undefined ? null : (
-          <span className="turn-header__provider">{props.provider}</span>
-        )}
+      <header
+        className="turn-header"
+        data-outcome={props.outcome}
+        {...(hoverDetails.length === 0 ? {} : { title: hoverDetails })}
+      >
         <span
           className="turn-header__status"
           // Only a turn still in flight, or paused on the person, is a live
