@@ -3,9 +3,11 @@
 .agent-worktrees/
 .turbo/
 .computer-use-driver/
+.scratch/
 coverage/
 dist/
 node_modules/
+.impeccable
 out/
 *.log
 **/.vitepress/cache/
