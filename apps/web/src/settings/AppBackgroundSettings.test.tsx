@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DEFAULT_APP_BACKGROUND, type SidebarBackgroundMetadata } from "@octant/contracts/theme";
 import { ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
@@ -197,6 +197,42 @@ describe("AppBackgroundSettings", () => {
 
     expect(await screen.findByRole("status")).toHaveTextContent("too large");
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("shows each built-in as a still preview with one visible name and its motion beside it", async () => {
+    const user = userEvent.setup();
+    const selected = ZEN_BUILTIN_BACKGROUNDS[0]!;
+    const animated = ZEN_BUILTIN_BACKGROUNDS.find((preset) => preset.motion === "animated");
+    if (animated === undefined) throw new Error("Expected an animated built-in preset");
+    const onChange = vi.fn();
+    render(
+      <AppBackgroundSettings
+        background={{ ...DEFAULT_APP_BACKGROUND, kind: "builtin", presetId: selected.id }}
+        library={library()}
+        onChange={onChange}
+      />,
+    );
+
+    const tile = screen.getByRole("radio", { name: selected.title });
+    expect(tile).toHaveAttribute("aria-checked", "true");
+    expect(
+      within(tile).getByRole("img", { name: `${selected.title} preview` }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("radio")).toHaveLength(ZEN_BUILTIN_BACKGROUNDS.length);
+
+    // The caption carries the motion, so the visible name does not repeat it.
+    const animatedTile = screen.getByRole("radio", { name: animated.title });
+    expect(
+      within(animatedTile).getByText(animated.title.replace(/\s+animated$/i, "")),
+    ).toBeInTheDocument();
+    expect(within(animatedTile).getByText("Animated")).toBeInTheDocument();
+
+    await user.click(animatedTile);
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...dials,
+      kind: "builtin",
+      presetId: animated.id,
+    });
   });
 
   it("dials the pattern's opacity, speed, and intensity, and a photo's opacity", () => {

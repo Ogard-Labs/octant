@@ -4,11 +4,12 @@ import type {
   SidebarBackgroundMetadata,
 } from "@octant/contracts/theme";
 import { ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
-import { Image as ImageIcon, Images, Upload } from "lucide-react";
+import { Check, Image as ImageIcon, Images, Upload } from "lucide-react";
 import { useEffect, useId, useRef, useState, type ChangeEvent } from "react";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { SettingRow } from "./primitives";
 import { SliderField } from "./SliderField";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 
@@ -23,6 +24,8 @@ export interface AppBackgroundSettingsProps {
   readonly background: AppBackground;
   /** Increased contrast hides the ground; the row says so instead of pretending. */
   readonly increasedContrast?: boolean;
+  /** A deep link landed on this setting; the first control takes focus. */
+  readonly focused?: boolean;
   readonly library?: BackgroundImageLibrary | undefined;
   readonly onChange: (next: AppBackground) => void;
 }
@@ -32,6 +35,24 @@ type Dial = "patternOpacity" | "patternSpeed" | "patternIntensity" | "photoOpaci
 
 const ACCEPTED_TYPES = "image/png,image/jpeg,image/webp";
 const LIMITS = "PNG, JPEG, or WebP up to 8 MiB and 4096×4096";
+
+const CATALOG_GROUPS = ["landscape", "forest", "wood", "abstract"] as const;
+
+const GROUP_TITLES: Readonly<Record<(typeof CATALOG_GROUPS)[number], string>> = {
+  landscape: "Landscape",
+  forest: "Forest",
+  wood: "Wood",
+  abstract: "Abstract",
+};
+
+/**
+ * The badge under a tile is the one place a background says it moves, so a
+ * title that already ends in "animated" drops it rather than saying it twice
+ * ("Waving dots animated" beside a badge reading Animated).
+ */
+function presetName(title: string): string {
+  return title.replace(/\s+animated$/i, "");
+}
 
 /** The dials and where the ground shows travel with every kind, so a
  * switch between pattern, photo, and none never loses them. */
@@ -48,6 +69,13 @@ function carry(background: AppBackground) {
   };
 }
 
+/**
+ * Settings › Appearance › Background as an open section of shared setting
+ * rows: the source, scope, pattern, and photo controls each place a label and
+ * one-line description on the left and their control on the right, and the
+ * built-in catalog is the one compound block, spanning the column under its
+ * own quiet grouped headings.
+ */
 export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   // Choosing "Photo" shows the photo controls; the setting itself only
   // changes once a photo exists, because a photo ground without a photo is
@@ -146,32 +174,40 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   const current = photos.find((photo) => String(photo.id) === selectedId);
 
   return (
-    <div className="settings-view__setting settings-app-background">
-      <label className="settings-view__field">
-        <span>Background</span>
-        <OctantSelectField
-          aria-label="Application background"
-          className="settings-view__select"
-          onValueChange={choose}
-          options={[
-            { id: "theme", label: "Theme pattern" },
-            { id: "builtin", label: "Built-in" },
-            { id: "photo", label: "Photo" },
-            { id: "none", label: "None" },
-          ]}
-          value={choice}
-        />
-      </label>
+    <>
+      <div className="setgroup">
+        <SettingRow
+          description="A theme pattern, a built-in Zen background, or a photo behind the start screen, or behind everything."
+          focused={props.focused === true}
+          label="Background"
+          labelledBySection
+          scope="app"
+          settingId="app-background"
+        >
+          <OctantSelectField
+            aria-label="Application background"
+            className="settings-view__select"
+            onValueChange={choose}
+            options={[
+              { id: "theme", label: "Theme pattern" },
+              { id: "builtin", label: "Built-in" },
+              { id: "photo", label: "Photo" },
+              { id: "none", label: "None" },
+            ]}
+            value={choice}
+          />
+        </SettingRow>
+      </div>
       {showBuiltin ? (
-        <fieldset className="settings-app-background__presets">
-          <legend>Built-in backgrounds</legend>
-          {(["landscape", "forest", "wood", "abstract"] as const).map((group) => {
+        <fieldset className="settings-app-background__catalog">
+          <legend className="settings-app-background__catalog-title">Built-in backgrounds</legend>
+          {CATALOG_GROUPS.map((group) => {
             const presets = ZEN_BUILTIN_BACKGROUNDS.filter((preset) => preset.group === group);
             return (
               <div className="settings-app-background__group" key={group}>
-                <h3>{group}</h3>
+                <h3 className="settings-app-background__group-title">{GROUP_TITLES[group]}</h3>
                 <div
-                  aria-label={`${group} built-in backgrounds`}
+                  aria-label={`${GROUP_TITLES[group]} built-in backgrounds`}
                   className="settings-app-background__preset-grid"
                   role="radiogroup"
                 >
@@ -192,13 +228,17 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                         loading="lazy"
                         src={"stillSrc" in preset ? preset.stillSrc : preset.src}
                       />
-                      <span className="settings-app-background__preset-name">{preset.title}</span>
-                      {preset.motion === "animated" ? (
-                        <span className="settings-app-background__preset-motion">Animated</span>
-                      ) : null}
+                      <span className="settings-app-background__preset-name">
+                        {presetName(preset.title)}
+                      </span>
+                      {/* The caption keeps its line even when the preset does
+                          not move, so every tile in the grid is one height. */}
+                      <span aria-hidden="true" className="settings-app-background__preset-motion">
+                        {preset.motion === "animated" ? "Animated" : ""}
+                      </span>
                       {selectedPresetId === preset.id ? (
-                        <span aria-hidden="true" className="settings-view__selection-mark">
-                          ✓
+                        <span aria-hidden="true" className="settings-app-background__preset-mark">
+                          <Check size={12} strokeWidth={2.4} />
                         </span>
                       ) : null}
                     </OctantButton>
@@ -210,64 +250,109 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
         </fieldset>
       ) : null}
       {showPhoto ? (
-        <div className="settings-view__field">
-          <span>Photo</span>
-          <div className="settings-app-background__photo">
-            <PhotoThumbnail library={library} photo={selectedId === null ? undefined : current} />
-            <input
-              accept={ACCEPTED_TYPES}
-              aria-label="Choose a photo to upload"
-              className="settings-app-background__file"
-              disabled={busy || library === undefined}
-              onChange={(event) => void upload(event)}
-              ref={fileInput}
-              type="file"
-            />
-            <OctantIconButton
-              disabled={busy || library === undefined}
-              label={selectedId === null ? "Upload photo" : "Replace photo"}
-              onClick={() => fileInput.current?.click()}
-              title={`${selectedId === null ? "Upload" : "Replace"}: ${LIMITS}`}
-              type="button"
-              variant="ghost"
-            >
-              <Upload aria-hidden="true" size={14} strokeWidth={1.7} />
-            </OctantIconButton>
-            {photos.length === 0 ? null : (
-              <OctantPopover
-                align="end"
-                onOpenChange={setLibraryOpen}
-                open={libraryOpen}
-                title="Photos on this host"
-                trigger={<Images aria-hidden="true" size={14} strokeWidth={1.7} />}
-                triggerClassName="shell-icon-button"
-                triggerLabel="Choose an uploaded photo"
-                triggerVariant="ghost-icon"
+        <div className="setgroup">
+          <SettingRow
+            description="A picture from this host's library."
+            label="Photo"
+            scope="app"
+            settingId="app-background-photo"
+          >
+            <div className="settings-app-background__photo">
+              <PhotoThumbnail library={library} photo={selectedId === null ? undefined : current} />
+              <input
+                accept={ACCEPTED_TYPES}
+                aria-label="Choose a photo to upload"
+                className="settings-app-background__file"
+                disabled={busy || library === undefined}
+                onChange={(event) => void upload(event)}
+                ref={fileInput}
+                type="file"
+              />
+              <OctantIconButton
+                disabled={busy || library === undefined}
+                label={selectedId === null ? "Upload photo" : "Replace photo"}
+                onClick={() => fileInput.current?.click()}
+                title={`${selectedId === null ? "Upload" : "Replace"}: ${LIMITS}`}
+                type="button"
+                variant="ghost"
               >
-                <div
-                  aria-label="Photos on this host"
-                  className="settings-app-background__grid"
-                  role="radiogroup"
+                <Upload aria-hidden="true" size={14} strokeWidth={1.7} />
+              </OctantIconButton>
+              {photos.length === 0 ? null : (
+                <OctantPopover
+                  align="end"
+                  onOpenChange={setLibraryOpen}
+                  open={libraryOpen}
+                  title="Photos on this host"
+                  trigger={<Images aria-hidden="true" size={14} strokeWidth={1.7} />}
+                  triggerClassName="shell-icon-button"
+                  triggerLabel="Choose an uploaded photo"
+                  triggerVariant="ghost-icon"
                 >
-                  {photos.map((photo) => (
-                    <PhotoChoice
-                      checked={selectedId === String(photo.id)}
-                      key={String(photo.id)}
-                      library={library}
-                      onPick={() => pick(photo)}
-                      photo={photo}
-                    />
-                  ))}
-                </div>
-              </OctantPopover>
-            )}
-          </div>
+                  <div
+                    aria-label="Photos on this host"
+                    className="settings-app-background__grid"
+                    role="radiogroup"
+                  >
+                    {photos.map((photo) => (
+                      <PhotoChoice
+                        checked={selectedId === String(photo.id)}
+                        key={String(photo.id)}
+                        library={library}
+                        onPick={() => pick(photo)}
+                        photo={photo}
+                      />
+                    ))}
+                  </div>
+                </OctantPopover>
+              )}
+            </div>
+          </SettingRow>
+          {background.kind === "photo" ? (
+            <>
+              <SettingRow
+                description="Print the picture through the same ordered dither as the pattern."
+                label="Dither photo"
+                scope="app"
+                settingId="app-background-photo-dither"
+              >
+                <OctantSwitch
+                  checked={background.photoDithered}
+                  label="Dither photo"
+                  onCheckedChange={(photoDithered) =>
+                    props.onChange({ ...background, photoDithered })
+                  }
+                />
+              </SettingRow>
+              <SettingRow
+                description="How strongly the picture shows against the page."
+                label="Photo opacity"
+                scope="app"
+                settingId="app-background-photo-opacity"
+              >
+                <SliderField
+                  aria-label="Photo opacity"
+                  className="settings-view__range"
+                  max={100}
+                  min={0}
+                  onChange={(event) => dial("photoOpacity", Number(event.currentTarget.value))}
+                  step={1}
+                  format={(value) => `${String(value)}%`}
+                  value={background.photoOpacity}
+                />
+              </SettingRow>
+            </>
+          ) : null}
         </div>
       ) : null}
       {showDials ? (
-        <>
-          <label className="settings-view__field">
-            <span>Show behind</span>
+        <div className="setgroup">
+          <SettingRow
+            description="Where the ground shows: the start screens, or everything."
+            label="Show behind"
+            scope="app"
+            settingId="app-background-scope"
+          >
             <OctantSelectField
               aria-label="Where the background shows"
               className="settings-view__select"
@@ -282,10 +367,14 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               ]}
               value={background.scope}
             />
-          </label>
+          </SettingRow>
           {background.scope === "everywhere" ? (
-            <div className="settings-view__field">
-              <span>Cover the sidebar</span>
+            <SettingRow
+              description="Run the ground under the sidebar as well."
+              label="Cover the sidebar"
+              scope="app"
+              settingId="app-background-sidebar"
+            >
               <OctantSwitch
                 checked={background.coversSidebar}
                 label="Cover the sidebar"
@@ -293,10 +382,14 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                   props.onChange({ ...background, coversSidebar })
                 }
               />
-            </div>
+            </SettingRow>
           ) : null}
-          <div className="settings-view__field">
-            <span>Show pattern</span>
+          <SettingRow
+            description="Draw the theme's dither cloud over the ground."
+            label="Show pattern"
+            scope="app"
+            settingId="app-background-pattern"
+          >
             <OctantSwitch
               checked={background.patternEnabled}
               label="Show pattern"
@@ -304,14 +397,18 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                 props.onChange({ ...background, patternEnabled })
               }
             />
-          </div>
+          </SettingRow>
           {patternDialsActive ? null : (
             <p className="settings-app-background__note" id={patternDialsHintId}>
               Pattern opacity, speed, and intensity apply when Show pattern is on.
             </p>
           )}
-          <label className="settings-view__field">
-            <span>Pattern opacity</span>
+          <SettingRow
+            description="How strongly the cloud draws over the ground."
+            label="Pattern opacity"
+            scope="app"
+            settingId="app-background-pattern-opacity"
+          >
             <SliderField
               {...(patternDialsActive ? {} : { "aria-describedby": patternDialsHintId })}
               aria-label="Pattern opacity"
@@ -324,9 +421,13 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               format={(value) => `${String(value)}%`}
               value={background.patternOpacity}
             />
-          </label>
-          <label className="settings-view__field">
-            <span>Pattern speed</span>
+          </SettingRow>
+          <SettingRow
+            description="How fast the cloud drifts."
+            label="Pattern speed"
+            scope="app"
+            settingId="app-background-pattern-speed"
+          >
             <SliderField
               {...(patternDialsActive ? {} : { "aria-describedby": patternDialsHintId })}
               aria-label="Pattern speed"
@@ -339,9 +440,13 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               format={(value) => `${String(value)}%`}
               value={background.patternSpeed}
             />
-          </label>
-          <label className="settings-view__field">
-            <span>Pattern intensity</span>
+          </SettingRow>
+          <SettingRow
+            description="How dense the cloud is."
+            label="Pattern intensity"
+            scope="app"
+            settingId="app-background-pattern-intensity"
+          >
             <SliderField
               {...(patternDialsActive ? {} : { "aria-describedby": patternDialsHintId })}
               aria-label="Pattern intensity"
@@ -354,35 +459,8 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               format={(value) => `${String(value)}%`}
               value={background.patternIntensity}
             />
-          </label>
-          {background.kind === "photo" ? (
-            <>
-              <div className="settings-view__field">
-                <span>Dither photo</span>
-                <OctantSwitch
-                  checked={background.photoDithered}
-                  label="Dither photo"
-                  onCheckedChange={(photoDithered) =>
-                    props.onChange({ ...background, photoDithered })
-                  }
-                />
-              </div>
-              <label className="settings-view__field">
-                <span>Photo opacity</span>
-                <SliderField
-                  aria-label="Photo opacity"
-                  className="settings-view__range"
-                  max={100}
-                  min={0}
-                  onChange={(event) => dial("photoOpacity", Number(event.currentTarget.value))}
-                  step={1}
-                  format={(value) => `${String(value)}%`}
-                  value={background.photoOpacity}
-                />
-              </label>
-            </>
-          ) : null}
-        </>
+          </SettingRow>
+        </div>
       ) : null}
       {props.increasedContrast === true ? (
         <p className="settings-app-background__note">Hidden while Increased contrast is on.</p>
@@ -392,7 +470,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
           {status}
         </p>
       )}
-    </div>
+    </>
   );
 }
 

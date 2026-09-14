@@ -1275,46 +1275,39 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               />
             </SettingRow>
           ) : null}
-          {isAvailable("app-background") && props.themeController !== undefined ? (
-            <SettingRow
-              description="A theme pattern, built-in Zen background, or photo behind the start screen, or behind everything."
-              focused={focusedSetting === settingId("app-background")}
-              label="Background"
-              scope="app"
-              settingId="app-background"
-            >
-              <AppBackgroundSettings
-                background={
-                  (props.themeController.draft ?? props.themeController.settings)?.appBackground ??
-                  DEFAULT_APP_BACKGROUND
-                }
-                increasedContrast={
-                  (props.themeController.draft ?? props.themeController.settings)
-                    ?.increasedContrast === true
-                }
-                library={props.backgroundImageLibrary}
-                onChange={(appBackground) => {
-                  void props.themeController?.applyPatch({ appBackground });
-                }}
-              />
-            </SettingRow>
-          ) : null}
         </div>
       </div>
+      {isAvailable("app-background") && props.themeController !== undefined ? (
+        <SettingsSection className="settings-app-background" title="Background">
+          <AppBackgroundSettings
+            background={
+              (props.themeController.draft ?? props.themeController.settings)?.appBackground ??
+              DEFAULT_APP_BACKGROUND
+            }
+            focused={focusedSetting === settingId("app-background")}
+            increasedContrast={
+              (props.themeController.draft ?? props.themeController.settings)?.increasedContrast ===
+              true
+            }
+            library={props.backgroundImageLibrary}
+            onChange={(appBackground) => {
+              void props.themeController?.applyPatch({ appBackground });
+            }}
+          />
+        </SettingsSection>
+      ) : null}
       {props.themeController === undefined ? null : (
-        <div className="settings-card-section settings-card-section--open">
-          <h2>Reset</h2>
+        <SettingsSection
+          description="Return every appearance setting to its default."
+          title="Reset"
+        >
           <div className="setgroup">
-            {/* The section says Reset and the description says what returns
-                to its default, so the row and its button each said "Reset
-                appearance" a second and third time. */}
-            <SettingRow
-              description="Return every appearance setting to its default."
-              label="Appearance"
-              scope="app"
-              settingId="reset-appearance"
-            >
+            {/* The section says Reset and its note says what returns to its
+                default, so the row and its button each said "Reset appearance"
+                a second and third time. */}
+            <SettingRow label="Appearance" scope="app" settingId="reset-appearance">
               <OctantButton
+                className="settings-view__action"
                 onClick={() => void props.themeController?.reset()}
                 size="sm"
                 type="button"
@@ -1324,7 +1317,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               </OctantButton>
             </SettingRow>
           </div>
-        </div>
+        </SettingsSection>
       )}
     </section>
   );
