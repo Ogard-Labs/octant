@@ -1,12 +1,16 @@
 import type { CodeFileMetadata } from "@octant/contracts/code";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   CodeFileExplorer,
   MAX_CODE_FILE_EXPLORER_ENTRIES,
   type CodeFileExplorerEntry,
 } from "./CodeFileExplorer";
+
+const codeStylesheet = readFileSync(resolve(import.meta.dirname, "../styles/code.css"), "utf8");
 
 describe("CodeFileExplorer", () => {
   it("renders authoritative relative paths and opens an available file from the keyboard", async () => {
@@ -78,16 +82,97 @@ describe("CodeFileExplorer", () => {
     expect(screen.getByRole("treeitem", { name: /src\/only-after-cap\.ts/ })).toBeVisible();
   });
 
-  it("keeps relative path context when basenames are duplicated", () => {
+  it("names the folder for each file when two visible basenames match", () => {
     render(
       <CodeFileExplorer
-        entries={[file("src/index.ts"), file("test/index.ts")]}
+        entries={[file("src/index.ts"), file("test/index.ts"), file("src/only.ts")]}
         onOpenFile={vi.fn()}
       />,
     );
 
-    expect(screen.getByRole("treeitem", { name: /src\/index\.ts/ })).toBeVisible();
-    expect(screen.getByRole("treeitem", { name: /test\/index\.ts/ })).toBeVisible();
+    const source = screen.getByRole("treeitem", { name: "src/index.ts" });
+    expect(within(source).getByText("src")).toBeVisible();
+    const test = screen.getByRole("treeitem", { name: "test/index.ts" });
+    expect(within(test).getByText("test")).toBeVisible();
+    // The unique basename keeps the tree's own folder above it; only the
+    // rows that cannot be told apart spend the width on the hint.
+    expect(
+      within(screen.getByRole("treeitem", { name: "src/only.ts" })).queryByText("src"),
+    ).toBeNull();
+  });
+
+  it("counts duplicate basenames from the rows on screen", async () => {
+    const user = userEvent.setup();
+    render(
+      <CodeFileExplorer
+        entries={[
+          { kind: "directory", path: "src" as never },
+          file("src/index.ts"),
+          { kind: "directory", path: "test" as never },
+          file("test/index.ts"),
+        ]}
+        onOpenFile={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("treeitem", { name: "src" }));
+    const source = screen.getByRole("treeitem", { name: "src/index.ts" });
+    expect(within(source).queryByText("src")).toBeNull();
+
+    await user.click(screen.getByRole("treeitem", { name: "test" }));
+    expect(within(source).getByText("src")).toBeVisible();
+    expect(
+      within(screen.getByRole("treeitem", { name: "test/index.ts" })).getByText("test"),
+    ).toBeVisible();
+  });
+
+  it("keeps a reachable tab stop when the first visible row cannot open", () => {
+    render(
+      <CodeFileExplorer
+        entries={[unavailable("gone.txt"), file("src/index.ts")]}
+        onOpenFile={vi.fn()}
+      />,
+    );
+
+    const gone = screen.getByRole("treeitem", { name: /gone\.txt/ });
+    expect(gone).toBeDisabled();
+    // A disabled button cannot take focus, so the stop passes to the next
+    // row instead of leaving the tree with none.
+    expect(screen.getByRole("treeitem", { name: "src/index.ts" })).toHaveAttribute("tabindex", "0");
+  });
+
+  it("steps over an unavailable file from the arrow keys, Home, and End", async () => {
+    const user = userEvent.setup();
+    render(
+      <CodeFileExplorer
+        entries={[
+          file("src/a.ts"),
+          unavailable("src/b.ts"),
+          file("src/c.ts"),
+          unavailable("src/d.ts"),
+          file("src/e.ts"),
+        ]}
+        onOpenFile={vi.fn()}
+      />,
+    );
+
+    const first = screen.getByRole("treeitem", { name: "src/a.ts" });
+    const third = screen.getByRole("treeitem", { name: "src/c.ts" });
+    const last = screen.getByRole("treeitem", { name: "src/e.ts" });
+
+    first.focus();
+    await user.keyboard("{ArrowDown}");
+    expect(third).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(last).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(third).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(first).toHaveFocus();
+    await user.keyboard("{End}");
+    expect(last).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(first).toHaveFocus();
   });
 
   it("collapses nested folders and expands them as a real repository tree", async () => {
@@ -191,6 +276,16 @@ describe("CodeFileExplorer", () => {
     expect(library).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("treeitem", { name: /format\.ts/ })).not.toBeInTheDocument();
   });
+
+  it("keeps a padded head bar where no right-dock rail applies", () => {
+    // The bottom panel renders the same tool without the right dock's rail
+    // (dock.css), so the head must carry its own bar rather than collapse to
+    // the bare 30px search field: that is what lost its padding and hairline.
+    const head = ruleBody(codeStylesheet, ".code-file-explorer__head");
+    expect(head).toMatch(/min-height:\s*44px/);
+    expect(head).toMatch(/padding:\s*7px 12px/);
+    expect(head).toMatch(/border-bottom:\s*1px solid var\(--oct-border\)/);
+  });
 });
 
 function entries(): ReadonlyArray<CodeFileExplorerEntry> {
@@ -199,12 +294,7 @@ function entries(): ReadonlyArray<CodeFileExplorerEntry> {
     file("src/index.ts"),
     file("assets/asset.bin", "binary"),
     file("logs/large.log", "oversized"),
-    {
-      kind: "file",
-      fileId: "10000000-0000-4000-8000-000000000004" as never,
-      path: "missing.txt" as never,
-      availability: { status: "unavailable", reason: "The file no longer exists." },
-    },
+    unavailable("missing.txt"),
   ];
 }
 
@@ -227,4 +317,19 @@ function file(
         ? { status: "available", metadata }
         : { status: "read-only", metadata, reason: readOnlyReason },
   };
+}
+
+function unavailable(path: string): Extract<CodeFileExplorerEntry, { readonly kind: "file" }> {
+  return {
+    kind: "file",
+    fileId: "10000000-0000-4000-8000-000000000004" as never,
+    path: path as never,
+    availability: { status: "unavailable", reason: "The file no longer exists." },
+  };
+}
+
+function ruleBody(css: string, selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`, "s"));
+  return match?.[1] ?? "";
 }

@@ -83,18 +83,42 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
         : entry.path.toLocaleLowerCase().includes(needle),
     );
   }, [directoryPaths, expanded, normalized, props.entries]);
-  const visible = matches.slice(0, MAX_CODE_FILE_EXPLORER_ENTRIES);
+  const visible = useMemo(() => matches.slice(0, MAX_CODE_FILE_EXPLORER_ENTRIES), [matches]);
   const incomplete = matches.length > MAX_CODE_FILE_EXPLORER_ENTRIES;
+  /**
+   * A basename that appears more than once among the rows on screen: two
+   * files sharing one name are otherwise the same row at 320px, and a
+   * filtered list has no folder above either of them to tell them apart.
+   * Counted from the visible rows so a hidden duplicate does not name a
+   * folder the tree already shows.
+   */
+  const duplicateBasenames = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const entry of visible) {
+      if (entry.kind !== "file") continue;
+      const name = pathBasename(entry.path);
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return new Set(
+      Array.from(counts)
+        .filter(([, count]) => count > 1)
+        .map(([name]) => name),
+    );
+  }, [visible]);
   /**
    * One tab stop for the whole tree, moved by the row that last held focus.
    * Every row otherwise stays reachable with Tab first and then the arrow
-   * keys, which is what a tree is expected to do at this size.
+   * keys, which is what a tree is expected to do at this size. A disabled
+   * row cannot hold focus, so it is never the stop.
    */
   const tabbable = useMemo(() => {
-    if (focusedPath !== undefined && visible.some((entry) => String(entry.path) === focusedPath)) {
-      return focusedPath;
+    if (focusedPath !== undefined) {
+      const focused = visible.find(
+        (entry) => String(entry.path) === focusedPath && canReceiveFocus(entry),
+      );
+      if (focused !== undefined) return focusedPath;
     }
-    const first = visible[0];
+    const first = visible.find(canReceiveFocus);
     return first === undefined ? undefined : String(first.path);
   }, [focusedPath, visible]);
 
@@ -107,7 +131,11 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
     if (!(target instanceof HTMLElement) || target.getAttribute("role") !== "treeitem") return;
     const container = tree.current;
     if (container === null) return;
-    const rows = Array.from(container.querySelectorAll<HTMLElement>('[role="treeitem"]'));
+    // A disabled row refuses focus, so Arrow Up/Down and Home/End step over
+    // it to the next row that can actually take focus.
+    const rows = Array.from(container.querySelectorAll<HTMLElement>('[role="treeitem"]')).filter(
+      (row) => !row.hasAttribute("disabled"),
+    );
     const index = rows.indexOf(target);
     if (index === -1) return;
     const level = Number(target.getAttribute("aria-level") ?? "1");
@@ -289,7 +317,19 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
             }
             const unavailable = entry.availability.status === "unavailable";
             const availability = availabilityLabel(entry.availability);
+            const name = pathBasename(entry.path);
             const parent = pathParent(entry.path);
+            // A filtered list is flat, and two files can share one name, so
+            // the folder is named when the row cannot show it itself. A row
+            // that already explains why it cannot open keeps that explanation
+            // instead; the whole path stays in the row's accessible name and
+            // hover title either way.
+            const parentHint =
+              availability === undefined &&
+              parent !== "" &&
+              (normalized !== "" || duplicateBasenames.has(name))
+                ? pathBasename(parent)
+                : undefined;
             const title = `${label}${availability === undefined ? "" : ` ${availability}`}`;
             return (
               <OctantButton
@@ -305,15 +345,9 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
                 variant="ghost"
               >
                 <File aria-hidden="true" size={14} strokeWidth={1.7} />
-                <FileName name={pathBasename(entry.path)} />
-                {/* A filtered list is flat, so the file's folder is no longer
-                    visible above it; the hint says which folder held the
-                    match. Unfiltered, the tree itself carries that context,
-                    and the whole path stays in the row's accessible name and
-                    hover title either way. A row that already explains why it
-                    cannot open keeps that explanation instead. */}
-                {normalized === "" || parent === "" || availability !== undefined ? null : (
-                  <span className="code-file-explorer__hint">{pathBasename(parent)}</span>
+                <FileName name={name} />
+                {parentHint === undefined ? null : (
+                  <span className="code-file-explorer__hint">{parentHint}</span>
                 )}
                 {availability === undefined ? null : (
                   <small className="code-file-explorer__detail">{availability}</small>
@@ -329,6 +363,15 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
 
 function depthStyle(depth: number): CSSProperties {
   return { "--oct-file-depth": String(depth) } as CSSProperties;
+}
+
+/**
+ * Native disabled buttons cannot receive focus, so a file the host reports
+ * as unavailable is never the tree's tab stop or an arrow-key destination.
+ * Directories always can: the explorer never renders them disabled.
+ */
+function canReceiveFocus(entry: CodeFileExplorerEntry): boolean {
+  return entry.kind === "directory" || entry.availability.status !== "unavailable";
 }
 
 function availabilityLabel(
