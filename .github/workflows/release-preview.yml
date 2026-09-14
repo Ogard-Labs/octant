@@ -14,9 +14,10 @@ name: Release (preview)
 
 on:
   schedule:
-    # 03:00 UTC. Nothing depends on the hour; it is outside the working day so a
+    # 00:00 UTC is 01:00 CET and 02:00 CEST — inside the 01:00–03:00
+    # Europe/Berlin window year-round, and outside the working day so a
     # failure is waiting rather than interrupting.
-    - cron: "0 3 * * *"
+    - cron: "0 0 * * *"
   workflow_dispatch:
     inputs:
       force:
