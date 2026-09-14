@@ -287,4 +287,143 @@ describe("GitHubRepositoryPicker", () => {
       consoleError.mockRestore();
     }
   });
+
+  it("resolves a pasted repository link through a fresh read and selects it", async () => {
+    const user = userEvent.setup();
+    const resolved = repositoryRow(7, {
+      name: "public-repo",
+      owner: "atlas-org",
+      visibility: "public",
+      viewerPermission: "read",
+    });
+    const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
+      if (request.kind === "recent-repositories") {
+        return { kind: "recent-repositories", rows: [] } as GithubCatalogueReadResponse;
+      }
+      if (request.kind === "repository") {
+        return {
+          kind: "repository",
+          row: resolved,
+          freshness: { status: "fresh" },
+        } as GithubCatalogueReadResponse;
+      }
+      return pageOne;
+    });
+    const onSelect = vi.fn();
+    render(<GitHubRepositoryPicker client={makeClient({ readCatalogue })} onSelect={onSelect} />);
+    await screen.findByText("octant/repo-1");
+
+    await user.type(
+      screen.getByLabelText("Repository link or owner/repository"),
+      "https://github.com/atlas-org/public-repo",
+    );
+    await user.click(screen.getByRole("button", { name: "Use repository" }));
+
+    expect(readCatalogue).toHaveBeenCalledWith({
+      kind: "repository",
+      owner: "atlas-org",
+      name: "public-repo",
+    });
+    await waitFor(() =>
+      expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ nodeId: "R_node7" })),
+    );
+  });
+
+  it("refuses a stale repository resolve before selecting it", async () => {
+    const user = userEvent.setup();
+    const resolved = repositoryRow(8, { name: "stale-repo" });
+    const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
+      if (request.kind === "recent-repositories") {
+        return { kind: "recent-repositories", rows: [] } as GithubCatalogueReadResponse;
+      }
+      if (request.kind === "repository") {
+        return {
+          kind: "repository",
+          row: resolved,
+          freshness: { status: "stale", staleReason: "refresh-failed" },
+        } as GithubCatalogueReadResponse;
+      }
+      return pageOne;
+    });
+    const onSelect = vi.fn();
+    render(<GitHubRepositoryPicker client={makeClient({ readCatalogue })} onSelect={onSelect} />);
+    await screen.findByText("octant/repo-1");
+
+    await user.type(
+      screen.getByLabelText("Repository link or owner/repository"),
+      "octant/stale-repo",
+    );
+    await user.click(screen.getByRole("button", { name: "Use repository" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/refresh failed/i);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("ignores a late link resolve after the person selects a catalogue row", async () => {
+    const user = userEvent.setup();
+    let resolveRepository: ((value: GithubCatalogueReadResponse) => void) | undefined;
+    const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
+      if (request.kind === "recent-repositories") {
+        return { kind: "recent-repositories", rows: [] } as GithubCatalogueReadResponse;
+      }
+      if (request.kind === "repository") {
+        return await new Promise<GithubCatalogueReadResponse>((resolve) => {
+          resolveRepository = resolve;
+        });
+      }
+      return pageOne;
+    });
+    const onSelect = vi.fn();
+    render(<GitHubRepositoryPicker client={makeClient({ readCatalogue })} onSelect={onSelect} />);
+    await screen.findByText("octant/repo-1");
+
+    await user.type(
+      screen.getByLabelText("Repository link or owner/repository"),
+      "octant/late-repo",
+    );
+    await user.click(screen.getByRole("button", { name: "Use repository" }));
+    fireEvent.click(screen.getByText("octant/repo-1"));
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ nodeId: "R_node1" }));
+
+    resolveRepository?.({
+      kind: "repository",
+      row: repositoryRow(99, { name: "late-repo" }),
+      freshness: { status: "fresh" },
+    } as GithubCatalogueReadResponse);
+    await waitFor(() => expect(onSelect).toHaveBeenCalledTimes(1));
+  });
+
+  it("reports an invalid reference and an unavailable resolve honestly", async () => {
+    const user = userEvent.setup();
+    const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
+      if (request.kind === "recent-repositories") {
+        return { kind: "recent-repositories", rows: [] } as GithubCatalogueReadResponse;
+      }
+      if (request.kind === "repository") {
+        return {
+          kind: "unavailable",
+          capability: "repository-catalogue",
+          reason: "scope-limited",
+          remediation: "The repository is not visible to this GitHub account.",
+        } as GithubCatalogueReadResponse;
+      }
+      return pageOne;
+    });
+    render(<GitHubRepositoryPicker client={makeClient({ readCatalogue })} onSelect={vi.fn()} />);
+    await screen.findByText("octant/repo-1");
+
+    const input = screen.getByLabelText("Repository link or owner/repository");
+    await user.type(input, "not a repository");
+    await user.click(screen.getByRole("button", { name: "Use repository" }));
+    expect(
+      await screen.findByText(/Enter owner\/repository or a github\.com repository URL\./),
+    ).toBeVisible();
+
+    await user.clear(input);
+    await user.type(input, "atlas-org/missing");
+    await user.click(screen.getByRole("button", { name: "Use repository" }));
+    expect(
+      await screen.findByText("The repository is not visible to this GitHub account."),
+    ).toBeVisible();
+  });
 });

@@ -440,6 +440,20 @@ Disabled GitHub, missing capability, and unauthorized or rate-limited states
 fail closed. See
 [security/github-repository-onboarding-threat-model.md](security/github-repository-onboarding-threat-model.md).
 
+**GitHub repository onboarding.** The managed clone flow turns one confirmed GitHub repository
+into one ordinary Code Project: the composer's Project menu offers "New Project from GitHub
+repository" against the host's managed repository inventory, and the Create Project dialog offers
+a Folder | GitHub source switch whose GitHub side clones into a parent folder the person chooses
+through a host-issued binding receipt (native picker or host folder browser, so a headless host is
+served the same way) plus one folder-name segment. Repositories come from the searchable catalogue
+of what the signed-in `gh` account can reach, or from a pasted link or `owner/name` the renderer
+reduces to owner/name for a fresh server-side `gh api repos/<owner>/<name>` resolution — no clone
+URL is ever a client input. The clone stages on the same filesystem as its destination, verifies
+the staged object's GitHub node identity and origin before any working tree is materialized,
+promotes atomically without overwriting, and only then issues the one-time binding receipt the
+Project is created from; everything is journaled, cancels cleanly, quarantines instead of
+deleting, and reconciles after restart without re-running work.
+
 Code also has a host-scoped Linear issues workspace contributed by the
 bundled-off Linear plugin as `sidebar.destination` `linear-issues`, Code mode
 only. The sidebar row is shown only when that contribution is effective, its

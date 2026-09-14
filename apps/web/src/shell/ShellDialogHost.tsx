@@ -13,7 +13,10 @@ const FirstRunOnboarding = lazy(() =>
   })),
 );
 import { CommandPalette } from "../palette/CommandPalette";
-import { ProjectCreateDialog } from "../projects/ProjectCreateDialog";
+import {
+  ProjectCreateDialog,
+  type ProjectCreateGithubSource,
+} from "../projects/ProjectCreateDialog";
 import { WhatsNewAfterUpdate } from "../settings/WhatsNewAfterUpdate";
 import type { OctantHostBridge } from "./hostBridge";
 import { visuallyHiddenStyle } from "./shellCommandWiring";
@@ -33,6 +36,7 @@ export interface ShellDialogHostCodeThreadView {
 export interface ShellDialogHostProps {
   readonly createOpen: boolean;
   readonly folderBrowseClient: FolderBrowseClient;
+  readonly github?: ProjectCreateGithubSource;
   readonly hostId: string;
   readonly hostBridge?: OctantHostBridge;
   readonly mode: OctantMode;
@@ -76,6 +80,7 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
       {props.createOpen ? (
         <ProjectCreateDialog
           folderBrowseClient={props.folderBrowseClient}
+          {...(props.github === undefined ? {} : { github: props.github })}
           hostId={props.hostId}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
           mode={props.mode}

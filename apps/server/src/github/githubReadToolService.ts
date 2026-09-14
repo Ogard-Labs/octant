@@ -146,6 +146,7 @@ export class GithubReadToolService {
         if (
           response.kind === "recent-repositories" ||
           response.kind === "repositories" ||
+          response.kind === "repository" ||
           response.kind === "issue"
         ) {
           return failure("tool-unavailable");

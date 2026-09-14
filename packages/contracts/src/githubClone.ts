@@ -5,6 +5,7 @@ import {
   GithubRepositoryOwner,
   GithubRepositoryVisibility,
 } from "./githubCatalogue";
+import { BindingReceiptId } from "./projects";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const SECRETISH =
@@ -165,6 +166,18 @@ export const GithubCloneTransitioned = Schema.Struct({
 }).annotations(strict);
 export type GithubCloneTransitioned = typeof GithubCloneTransitioned.Type;
 
+/**
+ * A user-chosen clone destination. The parent folder is named by a one-time
+ * host-issued binding receipt (native picker or host folder browser), so the
+ * client never sends a path; `folderName` is one strict segment the server
+ * validates again before it derives the final destination.
+ */
+export const GithubCloneDestinationSelection = Schema.Struct({
+  parentReceiptId: BindingReceiptId,
+  folderName: GithubRepositoryName,
+}).annotations(strict);
+export type GithubCloneDestinationSelection = typeof GithubCloneDestinationSelection.Type;
+
 export const GithubCloneCommand = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("request-clone"),
@@ -172,6 +185,11 @@ export const GithubCloneCommand = Schema.Union(
     nodeId: GithubRepositoryNodeId,
     expectedOwner: GithubRepositoryOwner,
     expectedName: GithubRepositoryName,
+    /**
+     * Absent means the host's managed repository inventory derives the
+     * destination; present means the person chose the parent folder and name.
+     */
+    destination: Schema.optional(GithubCloneDestinationSelection),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("confirm-clone"),

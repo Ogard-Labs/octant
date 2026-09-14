@@ -134,6 +134,42 @@ describe("GitHub managed clone contracts", () => {
     ).toThrow();
   });
 
+  it("accepts one host receipt plus one strict folder segment as a chosen destination", () => {
+    const receiptId = `${"R".repeat(42)}A`;
+    expect(
+      decodeGithubCloneCommand({
+        kind: "request-clone",
+        requestId,
+        nodeId: "R_kgDOG8x1Aa",
+        expectedOwner: "octant",
+        expectedName: "octant",
+        destination: { parentReceiptId: receiptId, folderName: "my-project" },
+      }),
+    ).toMatchObject({ destination: { folderName: "my-project" } });
+    for (const folderName of ["..", ".", "a/b", "a".repeat(101), ""]) {
+      expect(() =>
+        decodeGithubCloneCommand({
+          kind: "request-clone",
+          requestId,
+          nodeId: "R_kgDOG8x1Aa",
+          expectedOwner: "octant",
+          expectedName: "octant",
+          destination: { parentReceiptId: receiptId, folderName },
+        }),
+      ).toThrow();
+    }
+    expect(() =>
+      decodeGithubCloneCommand({
+        kind: "request-clone",
+        requestId,
+        nodeId: "R_kgDOG8x1Aa",
+        expectedOwner: "octant",
+        expectedName: "octant",
+        destination: { parentReceiptId: "short", folderName: "my-project" },
+      }),
+    ).toThrow();
+  });
+
   it("requires the exact confirmation literal and destination digest to confirm", () => {
     expect(
       decodeGithubCloneCommand({
