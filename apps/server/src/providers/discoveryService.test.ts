@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type { ProviderDriverKind } from "@octant/contracts";
+import type { DiscoverySnapshot, ProviderDriverKind } from "@octant/contracts";
 import {
   MAX_ALIAS_FILE_BYTES,
   makeDiscoveryService,
@@ -94,7 +94,7 @@ describe("discoveryService", () => {
     expect(codex!.discoveredPath).toBeUndefined();
     expect(codex!.version).toBe("codex-cli 0.1.2507100955");
     expect(codex!.readiness).toBe("ready");
-    expect(snapshot.searchedDirectories).toContain("/usr/local/bin");
+    expect(codexCoverage(snapshot)?.directories).toContain("/usr/local/bin");
   });
 
   it("discovers a provider whose executable is declared by a safe bash alias", async () => {
@@ -483,7 +483,72 @@ describe("discoveryService", () => {
     expect(codex).toBeDefined();
     expect(codex!.binaryPath).toBe("/opt/codex/bin/codex");
     expect(codex!.discoveredPath).toBe("/usr/local/bin/codex");
-    expect(snapshot.searchedDirectories).toContain("/usr/local/bin");
+    expect(codexCoverage(snapshot)?.directories).toContain("/usr/local/bin");
+  });
+
+  it("keeps one candidate per discovered launcher path when two link to the same executable", async () => {
+    const fs = makeFakeFs(
+      new Map([
+        ["/usr/local/bin/codex", { file: false, symlink: true, target: "/opt/codex/bin/codex" }],
+        ["/opt/homebrew/bin/codex", { file: false, symlink: true, target: "/opt/codex/bin/codex" }],
+        ["/opt/codex/bin/codex", { file: true }],
+      ]),
+    );
+    const exec = makeFakeExec(
+      new Map([
+        ["/opt/codex/bin/codex --version", { stdout: "codex-cli 0.1.0\n", stderr: "" }],
+        ["/opt/codex/bin/codex login status", { stdout: "Logged in", stderr: "" }],
+      ]),
+    );
+    const service = makeDiscoveryService({
+      exec,
+      fs,
+      environment: { PATH: "/usr/local/bin:/opt/homebrew/bin", HOME: "/Users/test" },
+      now: () => 1753430400000,
+    });
+
+    const snapshot = await service.scan();
+    const codexCandidates = snapshot.candidates.filter(
+      (candidate) => candidate.driverKind === "codex",
+    );
+    expect(codexCandidates).toHaveLength(2);
+    expect(codexCandidates.map((candidate) => candidate.discoveredPath).sort()).toEqual([
+      "/opt/homebrew/bin/codex",
+      "/usr/local/bin/codex",
+    ]);
+    expect(
+      codexCandidates.every((candidate) => candidate.binaryPath === "/opt/codex/bin/codex"),
+    ).toBe(true);
+  });
+
+  it("records only directories a driver scan actually visited before timing out", async () => {
+    let probes = 0;
+    const fs = makeFakeFs(
+      new Map([
+        ["/usr/local/bin/codex", { file: true }],
+        ["/usr/bin/codex", { file: true }],
+      ]),
+    );
+    const exec = vi.fn<DiscoveryExecPort>(async (file, args) => {
+      probes += 1;
+      const key = `${file} ${args.join(" ")}`;
+      if (key === "/usr/local/bin/codex --version") {
+        return { stdout: "codex-cli 0.1.0\n", stderr: "" };
+      }
+      if (key === "/usr/local/bin/codex login status") {
+        return { stdout: "Logged in", stderr: "" };
+      }
+      throw new Error("unexpected probe");
+    });
+    const service = makeDiscoveryService({
+      exec,
+      fs,
+      environment: { PATH: "/usr/local/bin:/usr/bin", HOME: "/Users/test" },
+      now: () => (probes >= 2 ? 1753430400000 + 11_000 : 1753430400000),
+    });
+
+    const snapshot = await service.scan();
+    expect(codexCoverage(snapshot)?.directories).toEqual(["/usr/local/bin"]);
   });
 
   it("rejects non-executable files", async () => {
@@ -787,3 +852,7 @@ describe("discoveryService", () => {
     });
   });
 });
+
+function codexCoverage(snapshot: DiscoverySnapshot) {
+  return snapshot.searchedDirectories?.find((entry) => entry.driverKind === "codex");
+}

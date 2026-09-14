@@ -2101,7 +2101,7 @@ describe("ProviderSettingsView", () => {
           discoverySnapshot: discoverySnapshot({
             autoRegisteredInstanceIds: [id],
             candidates: [],
-            searchedDirectories: ["/opt/homebrew/bin"],
+            searchedDirectories: searchedDirectoriesFor("opencode", "/opt/homebrew/bin"),
           }),
         })}
       />,
@@ -2122,7 +2122,7 @@ describe("ProviderSettingsView", () => {
           discoverySnapshot: discoverySnapshot({
             status: "failed",
             candidates: [opencodeCandidate()],
-            searchedDirectories: ["/opt/homebrew/bin"],
+            searchedDirectories: searchedDirectoriesFor("opencode", "/opt/homebrew/bin"),
           }),
         })}
       />,
@@ -2209,7 +2209,10 @@ describe("ProviderSettingsView", () => {
         {...fixture({
           discoverySnapshot: discoverySnapshot({
             candidates: [codexCandidate()],
-            searchedDirectories: ["/opt/homebrew/bin"],
+            searchedDirectories: [
+              ...searchedDirectoriesFor("codex", "/opt/homebrew/bin"),
+              ...searchedDirectoriesFor("kilo", "/opt/homebrew/bin"),
+            ],
           }),
         })}
         instances={[absent, codexProvider()]}
@@ -2246,7 +2249,7 @@ describe("ProviderSettingsView", () => {
           instance: { ...devinProvider(), enabled: false },
           discoverySnapshot: discoverySnapshot({
             candidates: [devinCandidate()],
-            searchedDirectories: ["/Users/example/.local/bin"],
+            searchedDirectories: searchedDirectoriesFor("devin", "/Users/example/.local/bin"),
           }),
         })}
       />,
@@ -2266,7 +2269,7 @@ describe("ProviderSettingsView", () => {
           instance: { ...devinProvider(), enabled: false },
           discoverySnapshot: discoverySnapshot({
             candidates: [],
-            searchedDirectories: ["/opt/homebrew/bin"],
+            searchedDirectories: searchedDirectoriesFor("codex", "/opt/homebrew/bin"),
           }),
         })}
       />,
@@ -2334,7 +2337,7 @@ describe("ProviderSettingsView", () => {
           instance: provider({ enabled: false }),
           discoverySnapshot: discoverySnapshot({
             candidates: [],
-            searchedDirectories: ["/opt/homebrew/bin"],
+            searchedDirectories: searchedDirectoriesFor("opencode", "/opt/homebrew/bin"),
           }),
         })}
       />,
@@ -2948,6 +2951,13 @@ function observation(patch: Partial<ProviderObservedState> = {}): ProviderObserv
     observedAt: "2026-07-14T10:00:00.000Z" as never,
     ...patch,
   };
+}
+
+function searchedDirectoriesFor(
+  driverKind: DiscoverySnapshot["candidates"][number]["driverKind"],
+  ...directories: string[]
+) {
+  return [{ driverKind, directories }];
 }
 
 function discoverySnapshot(patch: Partial<DiscoverySnapshot> = {}): DiscoverySnapshot {

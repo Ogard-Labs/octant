@@ -51,6 +51,12 @@ export type DiscoveryScanStatus = typeof DiscoveryScanStatus.Type;
 
 // ── Discovery snapshot ──────────────────────────────────────────────────────
 
+export const DiscoveryDriverDirectoryCoverage = Schema.Struct({
+  driverKind: ProviderDriverKind,
+  directories: Schema.Array(AbsolutePath),
+}).annotations(strict);
+export type DiscoveryDriverDirectoryCoverage = typeof DiscoveryDriverDirectoryCoverage.Type;
+
 export const DiscoverySnapshot = Schema.Struct({
   hostId: HostId,
   candidates: Schema.Array(DiscoveryCandidate).pipe(
@@ -61,11 +67,11 @@ export const DiscoverySnapshot = Schema.Struct({
   status: DiscoveryScanStatus,
   message: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
   /**
-   * Absolute, deduplicated directories the scan searched. A configured binary
-   * outside every entry was never a scan candidate, so the scan's silence
-   * about it is not evidence of absence. Old snapshots omit the field.
+   * Directories each driver scan actually examined. A configured binary is
+   * absent only when its driverKind was scanned and its parent directory
+   * appears in that driver's coverage. Old snapshots omit the field.
    */
-  searchedDirectories: Schema.optional(Schema.Array(AbsolutePath)),
+  searchedDirectories: Schema.optional(Schema.Array(DiscoveryDriverDirectoryCoverage)),
   /**
    * Instances auto-registered by this scan. This records what the scan created,
    * not current presence — `candidates` is the evidence a runtime is installed.

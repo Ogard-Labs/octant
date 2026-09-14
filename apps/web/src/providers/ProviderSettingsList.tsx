@@ -174,7 +174,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         detected.push(row);
       } else if (
         binaryPath === undefined ||
-        !isAbsenceProven(binaryPath, props.discoverySnapshot)
+        !isAbsenceProven(binaryPath, instance.driverKind, props.discoverySnapshot)
       ) {
         // The scan never visited this binary's directory, or never finished:
         // its silence is not evidence of absence.
@@ -1561,22 +1561,29 @@ function canEnableProvider(
   if (snapshot === undefined || snapshot.status === "failed" || snapshot.status === "cancelled") {
     return false;
   }
-  return !isAbsenceProven(binaryPath, snapshot);
+  return !isAbsenceProven(binaryPath, instance.driverKind, snapshot);
 }
 
 /**
  * Whether the current scan searched the directory holding this path and found
- * nothing. Silence about a directory the scan never visited proves nothing, so
- * a missing or pre-`searchedDirectories` snapshot never proves absence.
+ * nothing for this provider. Silence about a directory the scan never visited,
+ * or a driverKind the scan never finished, proves nothing, so a missing or
+ * pre-`searchedDirectories` snapshot never proves absence.
  */
-function isAbsenceProven(binaryPath: string, snapshot: DiscoverySnapshot | undefined): boolean {
+function isAbsenceProven(
+  binaryPath: string,
+  driverKind: ProviderInstance["driverKind"],
+  snapshot: DiscoverySnapshot | undefined,
+): boolean {
   if (snapshot === undefined || snapshot.status === "failed" || snapshot.status === "cancelled") {
     return false;
   }
-  const searched = snapshot.searchedDirectories;
-  if (searched === undefined || searched.length === 0) return false;
+  const coverage = snapshot.searchedDirectories;
+  if (coverage === undefined || coverage.length === 0) return false;
   const directory = directoryOf(binaryPath);
-  return searched.some((candidate) => candidate === directory);
+  const driverCoverage = coverage.find((entry) => entry.driverKind === driverKind);
+  if (driverCoverage === undefined) return false;
+  return driverCoverage.directories.some((candidate) => candidate === directory);
 }
 
 /** The parent directory of an absolute path, without node's path module. */

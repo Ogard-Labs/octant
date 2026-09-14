@@ -106,6 +106,7 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
       const startTime = now();
       const descriptors = discoverableDescriptorsForAdmittedDrivers(admittedDriverKinds);
       const candidates: DiscoveryCandidate[] = [];
+      const searchedDirectories: NonNullable<DiscoverySnapshot["searchedDirectories"]> = [];
       let status: DiscoverySnapshot["status"] = "completed";
       let message: string | undefined;
 
@@ -147,7 +148,13 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
             startTime,
             signal,
           );
-          candidates.push(...found.slice(0, MAX_CANDIDATES_PER_DRIVER));
+          candidates.push(...found.candidates.slice(0, MAX_CANDIDATES_PER_DRIVER));
+          searchedDirectories.push({
+            driverKind: descriptor.driverKind as DiscoveryCandidate["driverKind"],
+            directories: [...found.searchedDirectories] as NonNullable<
+              DiscoverySnapshot["searchedDirectories"]
+            >[number]["directories"],
+          });
         } catch {
           if (status === "completed") status = "partial";
         }
@@ -155,11 +162,12 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
         if (candidates.length >= MAX_TOTAL_CANDIDATES) break;
       }
 
-      // Deduplicate by canonical path
+      // Deduplicate by the launcher path the scan examined, not the canonical target.
       const seen = new Set<string>();
       const deduplicated = candidates.filter((candidate) => {
-        if (seen.has(candidate.binaryPath)) return false;
-        seen.add(candidate.binaryPath);
+        const key = candidate.discoveredPath ?? candidate.binaryPath;
+        if (seen.has(key)) return false;
+        seen.add(key);
         return true;
       });
 
@@ -174,7 +182,7 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
         scannedAt: new Date(now()).toISOString() as DiscoverySnapshot["scannedAt"],
         scanDurationMs: now() - startTime,
         status,
-        searchedDirectories: pathDirs as DiscoverySnapshot["searchedDirectories"],
+        ...(searchedDirectories.length > 0 ? { searchedDirectories } : {}),
         ...(message !== undefined ? { message: message as DiscoverySnapshot["message"] } : {}),
       };
       return snapshot;
@@ -194,9 +202,13 @@ async function scanDescriptor(
   now: () => number,
   startTime: number,
   signal?: AbortSignal,
-): Promise<DiscoveryCandidate[]> {
+): Promise<{
+  readonly candidates: DiscoveryCandidate[];
+  readonly searchedDirectories: ReadonlyArray<string>;
+}> {
   const candidates: DiscoveryCandidate[] = [];
   const seenPaths = new Set<string>();
+  const searchedDirectories = new Set<string>();
 
   // Search PATH directories + approved locations. Alias targets are appended
   // after ordinary paths so discovery remains deterministic when a shell
@@ -221,11 +233,12 @@ async function scanDescriptor(
     if (now() - startTime > MAX_SCAN_DURATION_MS) break;
     if (candidates.length >= MAX_CANDIDATES_PER_DRIVER) break;
 
+    searchedDirectories.add(directoryOf(candidatePath));
     const execName = candidate.execName;
     const validated = await validateExecutable(candidatePath, fs);
     if (validated === undefined) continue;
-    if (seenPaths.has(validated.canonicalPath)) continue;
-    seenPaths.add(validated.canonicalPath);
+    if (seenPaths.has(validated.discoveredPath)) continue;
+    seenPaths.add(validated.discoveredPath);
 
     // Version probe
     let version: string | undefined;
@@ -274,7 +287,12 @@ async function scanDescriptor(
     });
   }
 
-  return candidates;
+  return { candidates, searchedDirectories: [...searchedDirectories] };
+}
+
+function directoryOf(path: string): string {
+  const separator = path.lastIndexOf("/");
+  return separator <= 0 ? "/" : path.slice(0, separator);
 }
 
 /**

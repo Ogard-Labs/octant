@@ -137,13 +137,16 @@ describe("provider discovery contracts", () => {
       );
     });
 
-    it("decodes the searched directories and leaves them absent on an old snapshot", () => {
+    it("decodes per-driver searched directories and leaves them absent on an old snapshot", () => {
       const withDirectories = {
         ...validSnapshot,
-        searchedDirectories: ["/usr/local/bin", "/Users/example/.local/bin"],
+        searchedDirectories: [
+          { driverKind: "codex", directories: ["/usr/local/bin"] },
+          { driverKind: "devin", directories: ["/Users/example/.local/bin"] },
+        ],
       };
       const decoded = decodeDiscoverySnapshot(withDirectories);
-      expect(decoded.searchedDirectories).toEqual(["/usr/local/bin", "/Users/example/.local/bin"]);
+      expect(decoded.searchedDirectories).toEqual(withDirectories.searchedDirectories);
 
       const old = decodeDiscoverySnapshot(validSnapshot);
       expect(old.searchedDirectories).toBeUndefined();
@@ -151,7 +154,10 @@ describe("provider discovery contracts", () => {
 
     it("rejects a relative searched directory", () => {
       expect(() =>
-        decodeDiscoverySnapshot({ ...validSnapshot, searchedDirectories: ["relative/bin"] }),
+        decodeDiscoverySnapshot({
+          ...validSnapshot,
+          searchedDirectories: [{ driverKind: "codex", directories: ["relative/bin"] }],
+        }),
       ).toThrow();
     });
   });
