@@ -211,7 +211,8 @@
    the sidebar and dock tabs draw, so pointing and being there never share
    one tint. The class stays off the .tree-item recipe because a row
    carries a filter hint and an availability note the plain tree item has
-   no slot for. The head sits on the dock's own rail (dock.css). */
+   no slot for. The head carries its own compact bar, which dock.css
+   refines onto the dock head's rail when the tool lives there. */
 
 /* A name that keeps its start and its extension: the head yields to an
    ellipsis, the tail never does. Shared by the tree and the Work list so
@@ -255,11 +256,19 @@
   flex-direction: column;
 }
 
+/* The head stands on its own so the bottom panel, which has no right-dock
+   rail, keeps a padded bar and its hairline; dock.css refines it to the
+   dock head's rail when Files is the right dock's tool. The baseline matches
+   the other complete work surfaces that own a head (the delivery toolbar). */
 .code-file-explorer__head {
   display: flex;
   min-width: 0;
+  min-height: 44px;
   align-items: center;
   gap: var(--oct-space-2);
+  padding: 7px 12px;
+  background: var(--oct-surface);
+  border-bottom: 1px solid var(--oct-border);
 }
 
 .code-file-explorer__search {
@@ -383,9 +392,10 @@
   color: var(--oct-fg);
 }
 
-/* The folder a filtered match lives in. It is already in the row's
-   accessible name and hover title, so it only appears while a filter makes
-   the tree flat, and truncates from the start, keeping the deepest folder. */
+/* The folder that tells a row apart: a filtered match is flat, and two
+   files sharing one basename are otherwise the same row at this width. It
+   is already in the row's accessible name and hover title, so it appears
+   only where the tree cannot show the folder itself. */
 .code-file-explorer__hint {
   /* The hint is one short folder name; below this it would read as an
      ellipsis, so the name above it yields instead. */
