@@ -106,7 +106,9 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
       const startTime = now();
       const descriptors = discoverableDescriptorsForAdmittedDrivers(admittedDriverKinds);
       const candidates: DiscoveryCandidate[] = [];
-      const searchedDirectories: NonNullable<DiscoverySnapshot["searchedDirectories"]> = [];
+      const searchedDirectories: Array<
+        NonNullable<DiscoverySnapshot["searchedDirectories"]>[number]
+      > = [];
       let status: DiscoverySnapshot["status"] = "completed";
       let message: string | undefined;
 
@@ -151,9 +153,7 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
           candidates.push(...found.candidates.slice(0, MAX_CANDIDATES_PER_DRIVER));
           searchedDirectories.push({
             driverKind: descriptor.driverKind as DiscoveryCandidate["driverKind"],
-            directories: [...found.searchedDirectories] as NonNullable<
-              DiscoverySnapshot["searchedDirectories"]
-            >[number]["directories"],
+            directories: [...found.searchedDirectories],
           });
         } catch {
           if (status === "completed") status = "partial";
