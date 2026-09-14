@@ -1,5 +1,7 @@
 import {
   decodeWorkThread,
+  decodeThreadBoardPullRequestSummary,
+  decodeCodeProjectPullRequestDetailView,
   decodeCodeProjectPullRequestView,
   type CodeBoardView,
   type NavigatorAssistantSnapshot,
@@ -3356,7 +3358,7 @@ describe("App", () => {
     await user.click(within(sidebar).getByRole("button", { name: "Account menu, Set your name" }));
     expect(await screen.findByRole("menuitem", { name: "Plugins" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Board" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Pull requests" })).toBeVisible();
+    expect(within(sidebar).getByRole("button", { name: "Pull requests" })).toBeVisible();
     const addFolder = screen.getByRole("button", { name: "Add folder" });
     expect(addFolder).toHaveClass("project-section__add");
     expect(addFolder).not.toHaveTextContent("Add folder");
@@ -3931,7 +3933,11 @@ describe("App", () => {
       />,
     );
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
-    await user.click(screen.getByRole("button", { name: "Pull requests" }));
+    await user.click(
+      within(screen.getByRole("complementary", { name: "Octant sidebar" })).getByRole("button", {
+        name: "Pull requests",
+      }),
+    );
     await user.click(await screen.findByRole("button", { name: /Inspect selected pull request/ }));
     expect(await screen.findByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
     expect(screen.getByRole("region", { name: "Pull requests" })).toBeVisible();
@@ -3955,6 +3961,191 @@ describe("App", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Archive" }));
     expect(await screen.findByRole("region", { name: "Archive" })).toBeVisible();
     expect(screen.queryByRole("region", { name: "Image generator" })).not.toBeInTheDocument();
+  });
+
+  it("lists the active Project's pull requests in the dock and opens a row in the same dock", async () => {
+    const user = userEvent.setup();
+    const codeApi = codes();
+    vi.mocked(codeApi.queryProjectPullRequests).mockResolvedValue(
+      decodeCodeProjectPullRequestView({
+        version: 1,
+        query: { version: 1 },
+        projects: [
+          {
+            kind: "connected",
+            projectId,
+            projectName: "Octant",
+            repositoryOwner: "octant",
+            repositoryName: "octant",
+          },
+        ],
+        rows: [
+          {
+            projectId,
+            projectName: "Octant",
+            repositoryOwner: "octant",
+            repositoryName: "octant",
+            number: 12,
+            title: "Inspect dock pull request",
+            draft: false,
+            state: "open",
+            mergeability: "mergeable",
+            author: "octocat",
+            baseBranch: "development",
+            headBranch: "feature/dock-list",
+            updatedAt: "2026-09-08T00:00:00.000Z",
+            checks: "passing",
+            review: "approved",
+            linkedThreads: [],
+          },
+        ],
+        repositoriesTruncated: false,
+        pullRequestsTruncated: false,
+        freshness: { status: "fresh", lastSuccessfulRefreshAt: "2026-09-08T00:00:00.000Z" },
+        generatedAt: "2026-09-08T00:00:00.000Z",
+      }),
+    );
+    vi.mocked(codeApi.refreshProjectPullRequestDetail).mockResolvedValue(
+      decodeCodeProjectPullRequestDetailView({
+        version: 1,
+        query: {
+          projectId,
+          repositoryOwner: "octant",
+          repositoryName: "octant",
+          number: 12,
+        },
+        detail: {
+          state: "observed",
+          freshness: "fresh",
+          ambiguous: false,
+          staleSections: [],
+          number: 12,
+          url: "https://github.com/octant/octant/pull/12",
+          title: "Inspect dock pull request",
+          pullRequestState: "open",
+          baseRepository: "octant/octant",
+          baseBranch: "development",
+          headRepository: "octant/octant",
+          headBranch: "feature/dock-list",
+          headSha: "9".repeat(40),
+          author: "octocat",
+          mergeability: "mergeable",
+          matchesDeliveryBranch: false,
+          description: "Lists the Project's pull requests in the dock.",
+          diff: "",
+          diffTruncated: false,
+          commits: [],
+          files: [],
+          checks: [],
+          reviews: [],
+          comments: [],
+        },
+        freshness: { status: "fresh", lastSuccessfulRefreshAt: "2026-09-08T00:00:00.000Z" },
+        linkedThreads: [],
+        generatedAt: "2026-09-08T00:00:00.000Z",
+      }),
+    );
+    render(
+      <App
+        codeClient={codeApi}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+
+    await showRightUtilityDock(user);
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    await user.click(within(dock).getByRole("button", { name: "Pull requests" }));
+    expect(await within(dock).findByText("Inspect dock pull request")).toBeVisible();
+
+    await user.click(within(dock).getByRole("button", { name: /Inspect dock pull request/ }));
+    await waitFor(() =>
+      expect(codeApi.refreshProjectPullRequestDetail).toHaveBeenCalledWith({
+        projectId,
+        repositoryOwner: "octant",
+        repositoryName: "octant",
+        number: 12,
+      }),
+    );
+    // The row opens the existing Review tool in this dock, and the list keeps
+    // its tab so the reader can pick another request.
+    expect(within(dock).getByRole("tab", { name: "Review" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(within(dock).getByRole("tab", { name: "Pull requests" })).toBeVisible();
+    expect(await within(dock).findByRole("region", { name: "Pull request review" })).toBeVisible();
+  });
+
+  it("opens a pull request named on a Code pane tab in the dock", async () => {
+    const user = userEvent.setup();
+    const codeApi = codes();
+    const runtime = {
+      threadId: codeThreadId,
+      executing: false,
+      pullRequestSummaries: {
+        items: [
+          decodeThreadBoardPullRequestSummary({
+            identity: {
+              projectId,
+              repositoryOwner: "octant",
+              repositoryName: "octant",
+              number: 12,
+            },
+            title: "Named on the pane tab",
+            state: "open",
+            checks: "failing",
+            review: "pending",
+            mergeability: "mergeable",
+            freshness: "fresh",
+            readyToMerge: false,
+          }),
+        ],
+        hiddenCount: 0,
+      },
+    };
+    const bootstrap = await codeApi.bootstrap();
+    vi.mocked(codeApi.bootstrap).mockResolvedValue({ ...bootstrap, runtime: [runtime] });
+    // The read effect asks the host for navigation as soon as a thread is in
+    // front; that response owns the runtime sidecar, so the summary has to
+    // arrive there too rather than only in the bootstrap.
+    const navigation = await codeApi.navigation();
+    vi.mocked(codeApi.navigation).mockResolvedValue({ ...navigation, runtime: [runtime] });
+    render(
+      <App
+        codeClient={codeApi}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+
+    await user.click(await screen.findByRole("button", { name: "Pull request #12 · Open" }));
+
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    expect(within(dock).getByRole("tab", { name: "Review" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await waitFor(() =>
+      expect(codeApi.refreshProjectPullRequestDetail).toHaveBeenCalledWith({
+        projectId,
+        repositoryOwner: "octant",
+        repositoryName: "octant",
+        number: 12,
+      }),
+    );
   });
 
   it("hands the pane to the Board and gives the dock back afterwards, toggle included", async () => {

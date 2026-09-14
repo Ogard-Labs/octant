@@ -28,6 +28,18 @@ export interface CodeProjectPullRequestsProps {
   readonly selectedRowKey?: string;
   readonly onSelectRow?: (row: CodeProjectPullRequestRow) => void;
   /**
+   * The dock lists one thread's Project under the dock's own head; the page
+   * keeps its Surface shell, cross-Project grouping, and the Project's
+   * auto-refresh setting.
+   */
+  readonly presentation?: "page" | "dock";
+  /**
+   * Show only this Project's connection and rows. The dock scopes the list to
+   * the Project the active thread belongs to, so it never reports another
+   * Project's refresh as this one's.
+   */
+  readonly projectId?: ProjectId;
+  /**
    * Present when the shell can toggle the opt-in background refresh for a
    * Project. The server owns the setting; this only issues the command.
    */
@@ -105,10 +117,177 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       : workspace.status === "error"
         ? workspace.view
         : undefined;
+  const dock = props.presentation === "dock";
+  const projectId = props.projectId;
+  const scopedProjects =
+    view === undefined
+      ? []
+      : projectId === undefined
+        ? view.projects
+        : view.projects.filter((project) => String(project.projectId) === String(projectId));
+  // The dock speaks about one Project, so its freshness is that Project's, not
+  // the newest refresh anywhere in the snapshot.
+  const scopedFreshness =
+    view === undefined || projectId === undefined
+      ? view?.freshness
+      : projectFreshnessFor(view, projectId);
   const normalizedSearch = search.trim().toLocaleLowerCase();
-  const visibleRows = view?.rows.filter((row) => pullRequestMatches(row, normalizedSearch)) ?? [];
-  const freshnessStatus = view?.freshness.status ?? "loading";
-  const hasProjects = view !== undefined && view.projects.length > 0;
+  const visibleRows =
+    view?.rows.filter(
+      (row) =>
+        (projectId === undefined || String(row.projectId) === String(projectId)) &&
+        pullRequestMatches(row, normalizedSearch),
+    ) ?? [];
+  const freshnessStatus = scopedFreshness?.status ?? "loading";
+  const hasProjects = scopedProjects.length > 0;
+
+  const body = (
+    <div
+      className="code-project-pull-requests"
+      data-freshness={freshnessStatus}
+      data-narrow={props.isNarrow === true ? "true" : "false"}
+      data-presentation={dock ? "dock" : "page"}
+    >
+      {view === undefined || !hasProjects ? null : (
+        <div className="surface-toolbar">
+          <label className="surface-toolbar__search code-project-pull-requests__search">
+            <Search aria-hidden="true" size={14} strokeWidth={1.7} />
+            <span className="sr-only">Search pull requests</span>
+            <OctantInput
+              aria-label="Search pull requests"
+              onChange={(event) => setSearch(event.currentTarget.value)}
+              placeholder="Search pull requests"
+              ref={searchInput}
+              type="search"
+              value={search}
+            />
+            {search === "" ? null : (
+              <OctantButton
+                aria-label="Clear pull-request search"
+                className="code-project-pull-requests__search-clear"
+                onClick={() => {
+                  setSearch("");
+                  searchInput.current?.focus();
+                }}
+                type="button"
+                variant="ghost"
+              >
+                <X aria-hidden="true" size={14} strokeWidth={1.7} />
+              </OctantButton>
+            )}
+          </label>
+          <span
+            className="oct-meta code-project-pull-requests__count"
+            data-freshness={scopedFreshness?.status}
+          >
+            {pullRequestCountCopy(scopedFreshness ?? view.freshness, visibleRows.length)}
+          </span>
+          {dock ? null : (
+            <OctantButton
+              aria-label="Refresh all"
+              disabled={workspace.status === "loading" || workspace.status === "refreshing"}
+              onClick={() => void runRefresh({ kind: "refresh-all" })}
+              title="Refresh all pull requests"
+              type="button"
+              variant="ghost"
+            >
+              <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
+              Refresh all
+            </OctantButton>
+          )}
+        </div>
+      )}
+
+      {workspace.status === "loading" ? (
+        <ShellState
+          eyebrow="Pull requests"
+          message="Reading the last authorized snapshot."
+          state="loading"
+          title="Loading pull requests"
+        />
+      ) : null}
+
+      {view === undefined ? (
+        workspace.status === "error" ? (
+          <p className="code-project-pull-requests__status" role="alert">
+            {workspace.message}
+          </p>
+        ) : null
+      ) : !hasProjects ? (
+        dock ? (
+          <SurfaceEmpty
+            detail="Only a Code Project with a github.com origin lists pull requests."
+            title="No pull-request source for this Project"
+          />
+        ) : (
+          <SurfaceEmpty
+            detail="Add a Code Project to see pull requests here."
+            title="No Code Projects yet"
+          />
+        )
+      ) : (
+        <>
+          <p
+            className="code-project-pull-requests__status"
+            data-state={scopedFreshness?.status}
+            role="status"
+          >
+            {freshnessCopy(scopedFreshness ?? view.freshness)}
+            {view.repositoriesTruncated
+              ? " Some connected repositories were omitted after the preview bound of 25."
+              : ""}
+            {view.pullRequestsTruncated
+              ? " Some pull requests were omitted after the preview bound of 100."
+              : ""}
+          </p>
+          {workspace.status === "error" ? (
+            <p className="code-project-pull-requests__status" role="alert">
+              {workspace.message}
+            </p>
+          ) : null}
+          {visibleRows.length === 0 && normalizedSearch !== "" ? (
+            <SurfaceEmpty
+              action={
+                <OctantButton onClick={() => setSearch("")} size="sm" type="button" variant="ghost">
+                  Clear search
+                </OctantButton>
+              }
+              title={`No pull requests match “${search.trim()}”.`}
+            />
+          ) : null}
+          <div className="code-project-pull-requests__groups">
+            {scopedProjects.map((project) => {
+              const backgroundRefreshState = backgroundRefreshStateFor(view, project.projectId);
+              return (
+                <ProjectGroup
+                  key={String(project.projectId)}
+                  busy={workspace.status === "refreshing"}
+                  onRefresh={() =>
+                    void runRefresh({ kind: "refresh-project", projectId: project.projectId })
+                  }
+                  project={project}
+                  rows={visibleRows.filter(
+                    (row) => String(row.projectId) === String(project.projectId),
+                  )}
+                  freshness={projectFreshnessFor(view, project.projectId)}
+                  {...(props.backgroundRefresh === undefined || dock
+                    ? {}
+                    : { backgroundRefresh: props.backgroundRefresh })}
+                  {...(backgroundRefreshState === undefined ? {} : { backgroundRefreshState })}
+                  {...(props.onSelectRow === undefined ? {} : { onSelectRow: props.onSelectRow })}
+                  {...(props.selectedRowKey === undefined
+                    ? {}
+                    : { selectedRowKey: props.selectedRowKey })}
+                />
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+
+  if (dock) return body;
 
   return (
     <Surface
@@ -121,144 +300,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
         title="Pull requests"
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
       />
-      <div
-        className="code-project-pull-requests"
-        data-freshness={freshnessStatus}
-        data-narrow={props.isNarrow === true ? "true" : "false"}
-      >
-        {view === undefined || !hasProjects ? null : (
-          <div className="surface-toolbar">
-            <label className="surface-toolbar__search code-project-pull-requests__search">
-              <Search aria-hidden="true" size={14} strokeWidth={1.7} />
-              <span className="sr-only">Search pull requests</span>
-              <OctantInput
-                aria-label="Search pull requests"
-                onChange={(event) => setSearch(event.currentTarget.value)}
-                placeholder="Search pull requests"
-                ref={searchInput}
-                type="search"
-                value={search}
-              />
-              {search === "" ? null : (
-                <OctantButton
-                  aria-label="Clear pull-request search"
-                  className="code-project-pull-requests__search-clear"
-                  onClick={() => {
-                    setSearch("");
-                    searchInput.current?.focus();
-                  }}
-                  type="button"
-                  variant="ghost"
-                >
-                  <X aria-hidden="true" size={14} strokeWidth={1.7} />
-                </OctantButton>
-              )}
-            </label>
-            <span
-              className="oct-meta code-project-pull-requests__count"
-              data-freshness={view.freshness.status}
-            >
-              {pullRequestCountCopy(view.freshness, visibleRows.length)}
-            </span>
-            <OctantButton
-              aria-label="Refresh all"
-              disabled={workspace.status === "loading" || workspace.status === "refreshing"}
-              onClick={() => void runRefresh({ kind: "refresh-all" })}
-              title="Refresh all pull requests"
-              type="button"
-              variant="ghost"
-            >
-              <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
-              Refresh all
-            </OctantButton>
-          </div>
-        )}
-
-        {workspace.status === "loading" ? (
-          <ShellState
-            eyebrow="Pull requests"
-            message="Reading the last authorized snapshot."
-            state="loading"
-            title="Loading pull requests"
-          />
-        ) : null}
-
-        {view === undefined ? (
-          workspace.status === "error" ? (
-            <p className="code-project-pull-requests__status" role="alert">
-              {workspace.message}
-            </p>
-          ) : null
-        ) : !hasProjects ? (
-          <SurfaceEmpty
-            detail="Add a Code Project to see pull requests here."
-            title="No Code Projects yet"
-          />
-        ) : (
-          <>
-            <p
-              className="code-project-pull-requests__status"
-              data-state={view.freshness.status}
-              role="status"
-            >
-              {freshnessCopy(view.freshness)}
-              {view.repositoriesTruncated
-                ? " Some connected repositories were omitted after the preview bound of 25."
-                : ""}
-              {view.pullRequestsTruncated
-                ? " Some pull requests were omitted after the preview bound of 100."
-                : ""}
-            </p>
-            {workspace.status === "error" ? (
-              <p className="code-project-pull-requests__status" role="alert">
-                {workspace.message}
-              </p>
-            ) : null}
-            {visibleRows.length === 0 && normalizedSearch !== "" ? (
-              <SurfaceEmpty
-                action={
-                  <OctantButton
-                    onClick={() => setSearch("")}
-                    size="sm"
-                    type="button"
-                    variant="ghost"
-                  >
-                    Clear search
-                  </OctantButton>
-                }
-                title={`No pull requests match “${search.trim()}”.`}
-              />
-            ) : null}
-            <div className="code-project-pull-requests__groups">
-              {view.projects.map((project) => {
-                const backgroundRefreshState = backgroundRefreshStateFor(view, project.projectId);
-                return (
-                  <ProjectGroup
-                    key={String(project.projectId)}
-                    busy={workspace.status === "refreshing"}
-                    onRefresh={() =>
-                      void runRefresh({ kind: "refresh-project", projectId: project.projectId })
-                    }
-                    project={project}
-                    rows={visibleRows.filter(
-                      (row) => String(row.projectId) === String(project.projectId),
-                    )}
-                    freshness={projectFreshnessFor(view, project.projectId)}
-                    {...(props.backgroundRefresh === undefined
-                      ? {}
-                      : { backgroundRefresh: props.backgroundRefresh })}
-                    {...(backgroundRefreshState === undefined ? {} : { backgroundRefreshState })}
-                    {...(props.onSelectRow === undefined ? {} : { onSelectRow: props.onSelectRow })}
-                    {...(props.selectedRowKey === undefined
-                      ? {}
-                      : { selectedRowKey: props.selectedRowKey })}
-                  />
-                );
-              })}
-            </div>
-          </>
-        )}
-      </div>
+      {body}
     </Surface>
   );
 }
@@ -342,7 +384,7 @@ function ProjectGroup(props: {
           >
             <ul className="code-project-pull-requests__list">
               {group.rows.map((row) => {
-                const rowKey = pullRequestRowKey(row);
+                const rowKey = projectPullRequestKey(row);
                 const selected = props.selectedRowKey === rowKey;
                 return (
                   <li key={rowKey}>
@@ -619,6 +661,15 @@ function formatUpdatedAt(value: string): string {
   return Number.isFinite(parsed) ? new Date(parsed).toLocaleString() : value;
 }
 
-function pullRequestRowKey(row: CodeProjectPullRequestRow): string {
-  return `${String(row.projectId)}:${row.repositoryOwner}/${row.repositoryName}#${row.number}`;
+/**
+ * The one key a Project pull-request row and the shell's selected pull request
+ * share, so a row can mark itself selected wherever the selection was made.
+ */
+export function projectPullRequestKey(identity: {
+  readonly projectId: ProjectId;
+  readonly repositoryOwner: string;
+  readonly repositoryName: string;
+  readonly number: number;
+}): string {
+  return `${String(identity.projectId)}:${identity.repositoryOwner}/${identity.repositoryName}#${identity.number}`;
 }

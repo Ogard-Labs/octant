@@ -12,6 +12,7 @@ export type RightUtilityDockSurfaceId =
   | "delivery"
   | "agents"
   | "review"
+  | "pull-requests"
   | "terminal"
   | "tests"
   | "ios-simulator";
@@ -187,6 +188,12 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
     scope: "thread",
   },
   {
+    id: "pull-requests",
+    label: "Pull requests",
+    modes: ["work", "code"],
+    scope: "thread",
+  },
+  {
     id: "terminal",
     label: "Terminal",
     modes: ["code"],
@@ -218,9 +225,10 @@ const descriptors: Readonly<Record<RightUtilityDockSurfaceId, RightUtilityDockSu
     delivery: RIGHT_UTILITY_DOCK_SURFACES[7],
     agents: RIGHT_UTILITY_DOCK_SURFACES[8],
     review: RIGHT_UTILITY_DOCK_SURFACES[9],
-    terminal: RIGHT_UTILITY_DOCK_SURFACES[10],
-    tests: RIGHT_UTILITY_DOCK_SURFACES[11],
-    "ios-simulator": RIGHT_UTILITY_DOCK_SURFACES[12],
+    "pull-requests": RIGHT_UTILITY_DOCK_SURFACES[10],
+    terminal: RIGHT_UTILITY_DOCK_SURFACES[11],
+    tests: RIGHT_UTILITY_DOCK_SURFACES[12],
+    "ios-simulator": RIGHT_UTILITY_DOCK_SURFACES[13],
   };
 
 export function resolveRightUtilityDockSurface(

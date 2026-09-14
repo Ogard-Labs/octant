@@ -67,7 +67,11 @@ describe("WorkspaceRailLayers", () => {
       await screen.findByRole("region", { name: "Workspace pane: Controller foundation" }),
     ).toBeVisible();
     expect(screen.queryByRole("button", { name: "Automations" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Pull requests" })).toBeVisible();
+    expect(
+      within(screen.getByRole("complementary", { name: "Octant sidebar" })).getByRole("button", {
+        name: "Pull requests",
+      }),
+    ).toBeVisible();
     expect(screen.queryByRole("button", { name: "Issues" })).not.toBeInTheDocument();
   });
 
@@ -86,8 +90,9 @@ describe("WorkspaceRailLayers", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Pull requests" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Pull requests" }));
+    const sidebar = within(await screen.findByRole("complementary", { name: "Octant sidebar" }));
+    expect(await sidebar.findByRole("button", { name: "Pull requests" })).toBeVisible();
+    await user.click(sidebar.getByRole("button", { name: "Pull requests" }));
     expect(await screen.findByRole("region", { name: "Pull requests" })).toBeVisible();
     expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
     // LazyRailSurface exposes the region before CodeProjectPullRequests's effect runs load.
@@ -111,7 +116,12 @@ describe("WorkspaceRailLayers", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "Pull requests" }));
+    await user.click(
+      within(await screen.findByRole("complementary", { name: "Octant sidebar" })).getByRole(
+        "button",
+        { name: "Pull requests" },
+      ),
+    );
     expect(await screen.findByRole("region", { name: "Pull requests" })).toBeVisible();
     expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
 

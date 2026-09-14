@@ -629,13 +629,14 @@ region that was only stepped aside.
 On wide windows it may use at most 38 percent of the viewport, preserving a
 560px primary workspace; the bottom panel may use at most 38 percent of the
 viewport height while preserving 320px for the primary workspace. It can host
-Review, Files, Document (only once a turn has written one), Browser, Terminal,
-Canvas, Plan (only for a real plan artifact), Delivery (only for a configured
-target), Agents (when children exist or explicitly invoked), Simulator, and
-Side chat. A Markdown or text file a Code turn creates or rewrites, and a
-Canvas a Chat turn authors, open in the dock beside the transcript once, the
-first time they appear: the offer never moves focus from the composer, a
-rewrite never reopens a tab, and a tab the person closed stays closed. Document
+Review, Pull requests (the active Project's open rows), Files, Document (only
+once a turn has written one), Browser, Terminal, Canvas, Plan (only for a real
+plan artifact), Delivery (only for a configured target), Agents (when children
+exist or explicitly invoked), Simulator, and Side chat. A Markdown or text file
+a Code turn creates or rewrites, and a Canvas a Chat turn authors, open in the
+dock beside the transcript once, the first time they appear: the offer never
+moves focus from the composer, a rewrite never reopens a tab, and a tab the
+person closed stays closed. Document
 reads the file through the same host-authorized open the editor uses and
 renders Markdown with the preview's own viewer. The dock launcher is
 not a second thread switcher. With no open tab, it shows only capability-valid

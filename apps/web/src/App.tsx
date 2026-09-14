@@ -247,6 +247,7 @@ import {
   type FirstRunOnboardingOutcome,
 } from "./onboarding/useFirstRunOnboardingController";
 import { projectViewEnvironmentOptionsFromHosts } from "./code/codeProjectViewModel";
+import { projectPullRequestKey } from "./code/CodeProjectPullRequests";
 import { ProjectSidebarSection } from "./projects/ProjectSidebarSection";
 import { OctantButton } from "./ui/base/OctantButton";
 import { useProjectController } from "./projects/useProjectController";
@@ -819,6 +820,10 @@ function LaunchedShell(
   const [selectedProjectPullRequest, setSelectedProjectPullRequest] = useState<
     CodeProjectPullRequestDetailQuery | undefined
   >();
+  const selectedProjectPullRequestKey =
+    selectedProjectPullRequest === undefined
+      ? undefined
+      : projectPullRequestKey(selectedProjectPullRequest);
   const [workBoardOpen, setWorkBoardOpen] = useState(false);
   const [automationCenterOpen, setAutomationCenterOpen] = useState(false);
   const [agentsCenterOpen, setAgentsCenterOpen] = useState(false);
@@ -2569,6 +2574,8 @@ function LaunchedShell(
         canvasClient={canvasClient}
         chatClient={chatClient}
         chatReadCursorStore={chatReadCursorStore}
+        codeClient={codeClient}
+        onSelectProjectPullRequest={selectProjectPullRequest}
         onOpenWorkFile={(request) => {
           void controller.openPreview({
             mode: "work",
@@ -2626,6 +2633,7 @@ function LaunchedShell(
         }}
         providerController={providerController}
         serverUrl={props.launch.serverUrl}
+        {...(selectedProjectPullRequestKey === undefined ? {} : { selectedProjectPullRequestKey })}
         {...(sidecarThreadId === undefined ? {} : { sidecarThreadId })}
         subject={{
           mode: dockThread.mode,
@@ -5290,11 +5298,9 @@ function LaunchedShell(
                       enabled ? "enabled" : "disabled",
                     ),
                 }}
-                {...(selectedProjectPullRequest === undefined
+                {...(selectedProjectPullRequestKey === undefined
                   ? {}
-                  : {
-                      selectedProjectPullRequestKey: `${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`,
-                    })}
+                  : { selectedProjectPullRequestKey })}
                 onCloseWorkBoard={() => setWorkBoardOpen(false)}
                 unreadThreadIds={
                   new Set(
@@ -5616,6 +5622,7 @@ function LaunchedShell(
                       void controller.openCodeThread(threadId, title, undefined, projectId)
                     }
                     onOpenReview={(threadId) => openReviewForThread(String(threadId))}
+                    onSelectPullRequest={selectProjectPullRequestIdentity}
                     onOpenCodeSurface={(kind, threadId, title, terminalId) =>
                       void controller.openCodeSurface(
                         kind === "code-terminal"

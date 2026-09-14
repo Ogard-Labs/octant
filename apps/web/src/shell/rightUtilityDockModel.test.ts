@@ -107,6 +107,12 @@ describe("resolving what the right utility dock shows", () => {
         scope: "thread",
       },
       {
+        id: "pull-requests",
+        label: "Pull requests",
+        modes: ["work", "code"],
+        scope: "thread",
+      },
+      {
         id: "terminal",
         label: "Terminal",
         modes: ["code"],

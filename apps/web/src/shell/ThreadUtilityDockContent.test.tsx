@@ -1,4 +1,7 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { decodeCodeProjectPullRequestView } from "@octant/contracts";
+import { decodeProjectId } from "@octant/contracts/projects";
 import { describe, expect, it, vi } from "vitest";
 import { ThreadUtilityDockContent } from "./ThreadUtilityDockContent";
 
@@ -124,6 +127,99 @@ describe("thread utility dock content", () => {
       await screen.findByRole("heading", { name: "Files is unavailable" }, { timeout: 5_000 }),
     ).toBeVisible();
     expect(screen.getByText("Files opens from a Code thread.")).toBeVisible();
+  });
+
+  it("lists the active Project's pull requests and hands a row to the shell", async () => {
+    const user = userEvent.setup();
+    const onSelectProjectPullRequest = vi.fn();
+    const projectId = decodeProjectId("10000000-0000-4000-8000-000000000001");
+    const view = decodeCodeProjectPullRequestView({
+      version: 1,
+      query: { version: 1 },
+      projects: [
+        {
+          kind: "connected",
+          projectId,
+          projectName: "Octant",
+          repositoryOwner: "octant",
+          repositoryName: "octant",
+        },
+        {
+          kind: "connected",
+          projectId: "10000000-0000-4000-8000-000000000002",
+          projectName: "Elsewhere",
+          repositoryOwner: "octant",
+          repositoryName: "elsewhere",
+        },
+      ],
+      rows: [
+        {
+          projectId,
+          projectName: "Octant",
+          repositoryOwner: "octant",
+          repositoryName: "octant",
+          number: 12,
+          title: "List active pull requests",
+          draft: false,
+          state: "open",
+          mergeability: "mergeable",
+          author: "octocat",
+          baseBranch: "main",
+          headBranch: "feature/list",
+          updatedAt: "2026-09-08T00:00:00.000Z",
+          checks: "passing",
+          review: "approved",
+          linkedThreads: [],
+        },
+      ],
+      repositoriesTruncated: false,
+      pullRequestsTruncated: false,
+      freshness: { status: "fresh", lastSuccessfulRefreshAt: "2026-09-08T00:00:00.000Z" },
+      generatedAt: "2026-09-08T00:00:00.000Z",
+    });
+    render(
+      <ThreadUtilityDockContent
+        {...props()}
+        codeClient={
+          {
+            queryProjectPullRequests: vi.fn(async () => view),
+            refreshProjectPullRequests: vi.fn(async () => view),
+          } as never
+        }
+        onSelectProjectPullRequest={onSelectProjectPullRequest}
+        subject={{ mode: "code", threadId, projectId }}
+        surface="pull-requests"
+      />,
+    );
+
+    // The module is lazy-loaded; a cold module transform can exceed the query
+    // library's one-second default in the full renderer suite.
+    const row = await screen.findByRole(
+      "button",
+      { name: /List active pull requests/i },
+      { timeout: 5_000 },
+    );
+    expect(screen.queryByRole("region", { name: "Project Elsewhere" })).toBeNull();
+
+    await user.click(row);
+    expect(onSelectProjectPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ number: 12, title: "List active pull requests" }),
+    );
+  });
+
+  it("explains that Pull requests needs a Project on the active thread", async () => {
+    render(<ThreadUtilityDockContent {...props()} surface="pull-requests" />);
+
+    expect(
+      await screen.findByRole(
+        "heading",
+        { name: "Pull requests is unavailable" },
+        { timeout: 5_000 },
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText("This thread has no Project whose pull requests could be listed."),
+    ).toBeVisible();
   });
 
   it("uses a loading state while Code utility data is still arriving", async () => {
