@@ -88,26 +88,53 @@ export type ChatToolPartStatus = typeof ChatToolPartStatus.Type;
 
 const ChatQuestionText = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000));
 
+/** One answer a provider offered: what it is called and what choosing means. */
+export const ChatQuestionOption = Schema.Struct({
+  label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  description: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000))),
+}).annotations(strict);
+export type ChatQuestionOption = typeof ChatQuestionOption.Type;
+
 /**
  * A question a provider asked mid-turn. Journaled on the attempt so the
  * transcript can show it again after a reload, and so the answer rides the
- * same provider session the turn is parked on.
+ * same provider session the turn is parked on. A set the provider asked at
+ * once arrives as one record per question under the same request identity,
+ * each carrying its place in the set.
  */
 export const ChatAttemptQuestion = Schema.Struct({
   requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
   prompt: ChatQuestionText,
-  options: Schema.Array(ChatQuestionText).pipe(Schema.maxItems(8)),
-}).annotations(strict);
+  options: Schema.Array(ChatQuestionOption).pipe(Schema.maxItems(8)),
+  questionIndex: Schema.optional(PositiveInt),
+  questionCount: Schema.optional(PositiveInt),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (question) =>
+        (question.questionIndex === undefined) === (question.questionCount === undefined),
+    ),
+  );
 export type ChatAttemptQuestion = typeof ChatAttemptQuestion.Type;
 
 /** A question the person answered, kept on the attempt that asked it. */
 export const ChatAttemptAnsweredQuestion = Schema.Struct({
   requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
   prompt: ChatQuestionText,
-  options: Schema.Array(ChatQuestionText).pipe(Schema.maxItems(8)),
+  options: Schema.Array(ChatQuestionOption).pipe(Schema.maxItems(8)),
+  questionIndex: Schema.optional(PositiveInt),
+  questionCount: Schema.optional(PositiveInt),
   answer: ChatQuestionText,
   answeredAt: UtcTimestamp,
-}).annotations(strict);
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (question) =>
+        (question.questionIndex === undefined) === (question.questionCount === undefined),
+    ),
+  );
 export type ChatAttemptAnsweredQuestion = typeof ChatAttemptAnsweredQuestion.Type;
 
 /** Octant structured message parts (optional on content). */

@@ -1247,15 +1247,17 @@ describe("CodeThreadWorkspace", () => {
       decision: "approved",
     });
 
-    await user.click(screen.getByRole("button", { name: "npm" }));
+    await user.click(screen.getByRole("radio", { name: /npm/ }));
+    await user.click(screen.getByRole("button", { name: "Submit" }));
     expect(answerProviderRequest).toHaveBeenCalledWith({
       kind: "input",
       requestId: "req-1",
       response: "npm",
     });
 
-    await user.type(screen.getByRole("textbox", { name: "Answer" }), "pnpm");
-    await user.click(screen.getByRole("button", { name: "Send answer" }));
+    await user.click(screen.getByRole("radio", { name: "Type your own answer" }));
+    await user.type(screen.getByRole("textbox", { name: "Your answer" }), "pnpm");
+    await user.click(screen.getByRole("button", { name: "Submit" }));
     expect(answerProviderRequest).toHaveBeenLastCalledWith({
       kind: "input",
       requestId: "req-1",

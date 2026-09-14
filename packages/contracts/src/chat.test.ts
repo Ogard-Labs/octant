@@ -523,12 +523,16 @@ describe("chat contracts", () => {
   it("decodes ChatAttempt with a pending provider question and rejects an oversized one", () => {
     const withQuestion = decodeChatAttempt({
       ...attemptFixture,
-      pendingQuestion: { requestId: "q-1", prompt: "Which file?", options: ["A", "B"] },
+      pendingQuestion: {
+        requestId: "q-1",
+        prompt: "Which file?",
+        options: [{ label: "A" }, { label: "B", description: "The second" }],
+      },
     });
     expect(withQuestion.pendingQuestion).toEqual({
       requestId: "q-1",
       prompt: "Which file?",
-      options: ["A", "B"],
+      options: [{ label: "A" }, { label: "B", description: "The second" }],
     });
     expect(decodeChatAttempt(attemptFixture).pendingQuestion).toBeUndefined();
     expect(() =>
@@ -543,10 +547,34 @@ describe("chat contracts", () => {
         pendingQuestion: {
           requestId: "q-1",
           prompt: "Which file?",
-          options: ["1", "2", "3", "4", "5", "6", "7", "8", "9"],
+          options: Array.from({ length: 9 }, (_, i) => ({ label: `o${String(i)}` })),
         },
       }),
     ).toThrow();
+    // A place in a set only travels with the set's size.
+    expect(() =>
+      decodeChatAttempt({
+        ...attemptFixture,
+        pendingQuestion: {
+          requestId: "q-1",
+          prompt: "Which file?",
+          options: [],
+          questionIndex: 1,
+        },
+      }),
+    ).toThrow();
+    const inSet = decodeChatAttempt({
+      ...attemptFixture,
+      pendingQuestion: {
+        requestId: "q-1",
+        prompt: "Which file?",
+        options: [],
+        questionIndex: 1,
+        questionCount: 2,
+      },
+    });
+    expect(inSet.pendingQuestion?.questionIndex).toBe(1);
+    expect(inSet.pendingQuestion?.questionCount).toBe(2);
   });
 
   it("decodes create-chat-thread with title and optional project only", () => {

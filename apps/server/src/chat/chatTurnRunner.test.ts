@@ -953,7 +953,7 @@ describe("ChatTurnRunner", () => {
             sessionId,
             requestId: "q1",
             prompt: "Proceed?",
-            options: ["Yes", "No"],
+            options: [{ label: "Yes" }, { label: "No" }],
           } as never);
         }),
       answerUserInput: (input: { readonly requestId: string; readonly answer: string }) =>
@@ -1077,7 +1077,7 @@ describe("ChatTurnRunner", () => {
             sessionId,
             requestId: "q1",
             prompt: "Proceed?",
-            options: [],
+            options: [{ label: "Yes" }],
           } as never);
         }),
       answerUserInput: (_input: { readonly requestId: string; readonly answer: string }) =>

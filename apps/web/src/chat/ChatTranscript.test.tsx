@@ -636,7 +636,16 @@ describe("ChatTranscript", () => {
             {
               ...viewFixture().turns[0]!.attempts[1]!,
               outcome: "waiting",
-              pendingQuestion: { requestId: "q1", prompt: "Proceed?", options: ["Yes", "No"] },
+              pendingQuestion: {
+                requestId: "q1",
+                prompt: "Proceed?",
+                options: [
+                  { label: "Yes", description: "Go ahead now" },
+                  { label: "No", description: "Stop here" },
+                ],
+                questionIndex: 1,
+                questionCount: 2,
+              },
             },
           ],
         },
@@ -645,9 +654,12 @@ describe("ChatTranscript", () => {
     render(<ChatTranscript onAnswerQuestion={onAnswerQuestion} view={view} />);
 
     expect(screen.getByText("Waiting for your answer")).toBeVisible();
-    const question = screen.getByLabelText("Provider question");
-    expect(question).toHaveTextContent("Proceed?");
-    await user.click(within(question).getByRole("button", { name: "Yes" }));
+    expect(screen.getByText("Question 1 of 2")).toBeVisible();
+    const card = screen.getByLabelText("Provider question");
+    expect(card).toHaveTextContent("Proceed?");
+    expect(card).toHaveTextContent("Go ahead");
+    await user.click(within(card).getByRole("radio", { name: /Yes/ }));
+    await user.click(within(card).getByRole("button", { name: "Next" }));
 
     expect(onAnswerQuestion).toHaveBeenCalledWith({
       turnId: ids.turn,
@@ -657,7 +669,7 @@ describe("ChatTranscript", () => {
     });
   });
 
-  it("answers a provider question with typed text when no option fits", async () => {
+  it("submits the final question of a set and offers typed text when no option fits", async () => {
     const onAnswerQuestion = vi.fn();
     const user = userEvent.setup();
     const view = viewFixture({
@@ -668,7 +680,13 @@ describe("ChatTranscript", () => {
             {
               ...viewFixture().turns[0]!.attempts[1]!,
               outcome: "waiting",
-              pendingQuestion: { requestId: "q1", prompt: "Proceed?", options: [] },
+              pendingQuestion: {
+                requestId: "q1",
+                prompt: "Proceed?",
+                options: [{ label: "Yes" }],
+                questionIndex: 2,
+                questionCount: 2,
+              },
             },
           ],
         },
@@ -676,9 +694,10 @@ describe("ChatTranscript", () => {
     });
     render(<ChatTranscript onAnswerQuestion={onAnswerQuestion} view={view} />);
 
-    const question = screen.getByLabelText("Provider question");
-    await user.type(within(question).getByLabelText("Answer"), "Go ahead");
-    await user.click(within(question).getByRole("button", { name: "Send answer" }));
+    const card = screen.getByLabelText("Provider question");
+    await user.click(within(card).getByRole("radio", { name: "Type your own answer" }));
+    await user.type(within(card).getByLabelText("Your answer"), "Go ahead");
+    await user.click(within(card).getByRole("button", { name: "Submit" }));
 
     expect(onAnswerQuestion).toHaveBeenCalledWith({
       turnId: ids.turn,
@@ -686,6 +705,43 @@ describe("ChatTranscript", () => {
       requestId: "q1",
       answer: "Go ahead",
     });
+  });
+
+  it("dismisses a question by cancelling the turn that asked it", async () => {
+    const onAnswerQuestion = vi.fn();
+    const onDismissQuestion = vi.fn();
+    const user = userEvent.setup();
+    const view = viewFixture({
+      turns: [
+        {
+          ...viewFixture().turns[0]!,
+          attempts: [
+            {
+              ...viewFixture().turns[0]!.attempts[1]!,
+              outcome: "waiting",
+              pendingQuestion: {
+                requestId: "q1",
+                prompt: "Proceed?",
+                options: [{ label: "Yes" }],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    render(
+      <ChatTranscript
+        onAnswerQuestion={onAnswerQuestion}
+        onDismissQuestion={onDismissQuestion}
+        view={view}
+      />,
+    );
+
+    const card = screen.getByLabelText("Provider question");
+    await user.click(within(card).getByRole("button", { name: "Dismiss" }));
+
+    expect(onDismissQuestion).toHaveBeenCalledWith(ids.turn, ids.secondAttempt);
+    expect(onAnswerQuestion).not.toHaveBeenCalled();
   });
 
   it("keeps an unanswered question read-only when the host serves no answer route", () => {
@@ -697,7 +753,7 @@ describe("ChatTranscript", () => {
             {
               ...viewFixture().turns[0]!.attempts[1]!,
               outcome: "waiting",
-              pendingQuestion: { requestId: "q1", prompt: "Proceed?", options: ["Yes"] },
+              pendingQuestion: { requestId: "q1", prompt: "Proceed?", options: [{ label: "Yes" }] },
             },
           ],
         },
@@ -721,7 +777,7 @@ describe("ChatTranscript", () => {
                 {
                   requestId: "q1",
                   prompt: "Proceed?",
-                  options: ["Yes", "No"],
+                  options: [{ label: "Yes" }, { label: "No" }],
                   answer: "Yes",
                   answeredAt: now,
                 },
@@ -736,7 +792,7 @@ describe("ChatTranscript", () => {
     const row = screen.getByLabelText("Answered question");
     expect(row).toHaveTextContent("Proceed?");
     expect(row).toHaveTextContent("Answered: Yes");
-    expect(screen.queryByRole("button", { name: "Yes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: /Yes/ })).not.toBeInTheDocument();
   });
 
   it("shows the durable pool route receipt for a fallback-selected turn", () => {

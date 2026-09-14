@@ -76,7 +76,7 @@ import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import { providerLimitWindowLabel } from "../providers/providerLimitWindow";
 import { TurnHeader, TurnTime, type TurnHeaderOutcome } from "../transcript/TurnHeader";
-import { ProviderQuestionRow } from "../transcript/ProviderQuestionRow";
+import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
@@ -1377,7 +1377,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 summary={request.summary}
               />
             ) : (
-              <ProviderQuestionRow
+              <ProviderQuestionCard
                 key={request.requestId}
                 className="code-thread-workspace__provider-request"
                 onAnswer={(response) =>
@@ -1387,7 +1387,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     response,
                   })
                 }
-                options={request.options}
+                options={request.options.map((label) => ({ label }))}
                 prompt={request.prompt}
               />
             ),

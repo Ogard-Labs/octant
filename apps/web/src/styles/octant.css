@@ -2559,6 +2559,73 @@ input.switch:checked::after {
   color: var(--oct-muted);
 }
 
+/* ─── provider question card ──────────────────────────────────────────
+   A question the turn is blocked on, laid out so it can be answered
+   without guessing: the question first, then each offered answer with
+   what it means, a text field for answers no option covers, and the two
+   ways out — dismiss the turn, or send this answer. Radio-card semantics
+   match the rest of the system: one choice, marked, keyboard reachable. */
+.provider-question-card {
+  display: grid;
+  gap: var(--oct-space-2);
+  max-width: 72ch;
+  padding: var(--oct-space-3) var(--oct-space-4);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  line-height: 1.45;
+}
+.provider-question-card__prompt {
+  margin: 0;
+  font-weight: 500;
+}
+.provider-question-card__progress {
+  margin: 0;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+}
+.provider-question-card__choices {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+.provider-question-card__choice {
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+}
+.provider-question-card__choice[data-checked] {
+  background: var(--oct-accent-soft);
+  border-color: color-mix(in oklab, var(--oct-fg) 45%, transparent);
+}
+.provider-question-card__option {
+  display: grid;
+  gap: 2px;
+  justify-items: start;
+  align-items: start;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  text-align: start;
+  white-space: normal;
+}
+.provider-question-card__custom {
+  padding: 0 var(--oct-space-2) var(--oct-space-2) var(--oct-space-3);
+}
+.provider-question-card__option-label {
+  font-weight: 500;
+}
+.provider-question-card__option-description {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+.provider-question-card__actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-1);
+}
+
 @media (max-width: 680px) {
   .turn-user .bubble {
     max-width: 94%;

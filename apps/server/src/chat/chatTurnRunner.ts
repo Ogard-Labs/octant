@@ -798,9 +798,9 @@ export class ChatTurnRunner {
                   if (parkedQuestionRequestId !== undefined) {
                     // The turn parks on one question at a time; a second
                     // concurrent one cannot both be answered from one
-                    // surface. Interrupting the provider ends the wait rather
-                    // than leaving it blocked on a question nobody saw — the
-                    // same way Work interrupts a request it cannot record.
+                    // surface. A multi-question set queues behind the park and
+                    // is asked right after its predecessor is answered, so
+                    // this interrupt is only for genuinely concurrent asks.
                     yield* connection
                       .interrupt(input.attempt.providerSessionId)
                       .pipe(Effect.catchAll(() => Effect.void));
@@ -816,7 +816,18 @@ export class ChatTurnRunner {
                       prompt: boundedQuestionText(event.prompt),
                       options: event.options
                         .slice(0, MAX_ATTEMPT_QUESTION_OPTIONS)
-                        .map(boundedQuestionText),
+                        .map((option) => ({
+                          label: boundedQuestionText(option.label),
+                          ...(option.description === undefined
+                            ? {}
+                            : { description: boundedQuestionText(option.description) }),
+                        })),
+                      ...(event.questionIndex === undefined || event.questionCount === undefined
+                        ? {}
+                        : {
+                            questionIndex: event.questionIndex,
+                            questionCount: event.questionCount,
+                          }),
                     }),
                   };
                   yield* input.persistAttempt(currentAttempt);

@@ -1321,8 +1321,8 @@ describe("Claude execution policy", () => {
         {
           question: "  Choose a safe option  ",
           options: [
-            { label: "One", description: "private-description-one" },
-            { label: "Two", description: "private-description-two" },
+            { label: "One", description: "Use the first option" },
+            { label: "Two", description: "Use the second option" },
           ],
           multiSelect: false,
         },
@@ -1363,9 +1363,11 @@ describe("Claude execution policy", () => {
       kind: "user-input-request",
       requestId: "request-1",
       prompt: "Choose a safe option",
-      options: ["One", "Two"],
+      options: [
+        { label: "One", description: "Use the first option" },
+        { label: "Two", description: "Use the second option" },
+      ],
     });
-    expect(JSON.stringify(event)).not.toContain("private-description");
 
     const crossSession = await Effect.runPromise(
       Effect.exit(

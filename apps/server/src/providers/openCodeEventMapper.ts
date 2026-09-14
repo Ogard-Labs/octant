@@ -96,12 +96,14 @@ function mapQuestion(
   requestId: string,
   questions: ReadonlyArray<{
     readonly question: string;
-    readonly options: ReadonlyArray<{ readonly label: string }>;
+    readonly header?: string;
+    readonly options: ReadonlyArray<{ readonly label: string; readonly description?: string }>;
     readonly multiple?: boolean;
+    readonly custom?: boolean;
   }>,
 ): ReadonlyArray<ProviderRuntimeEvent> {
-  const question = questions[0];
-  if (questions.length !== 1 || question?.multiple === true) {
+  if (questions.length === 0) return [];
+  if (questions.some((question) => question.multiple === true)) {
     return [
       mappedEvent(context, {
         kind: "failed",
@@ -114,21 +116,37 @@ function mapQuestion(
     ];
   }
   const normalizedRequestId = normalizeText(requestId);
-  const prompt = question === undefined ? undefined : normalizeText(question.question);
-  if (question === undefined || normalizedRequestId === undefined || prompt === undefined)
-    return [];
-
-  return [
-    mappedEvent(context, {
-      kind: "user-input-request",
-      requestId: normalizedRequestId,
-      prompt,
-      options: question.options.flatMap(({ label }) => {
-        const normalized = normalizeText(label);
-        return normalized === undefined ? [] : [normalized];
+  if (normalizedRequestId === undefined) return [];
+  const count = questions.length;
+  return questions.flatMap((question, index) => {
+    const prompt = normalizeText(question.question);
+    if (prompt === undefined) return [];
+    const options = question.options.flatMap((option) => {
+      const label = normalizeText(option.label);
+      if (label === undefined) return [];
+      const rawDescription = option.description;
+      const description =
+        typeof rawDescription === "string" ? normalizeText(rawDescription) : undefined;
+      return [
+        {
+          label,
+          ...(description === undefined ? {} : { description }),
+        },
+      ];
+    });
+    return [
+      mappedEvent(context, {
+        kind: "user-input-request",
+        requestId: normalizedRequestId,
+        prompt,
+        options,
+        // A set arrives as one event per question under the same request
+        // identity, so the host answers them in order and the driver replies
+        // to the provider once, with every answer.
+        ...(count > 1 ? { questionIndex: index + 1, questionCount: count } : {}),
       }),
-    }),
-  ];
+    ];
+  });
 }
 
 function assertNever(value: never): never {

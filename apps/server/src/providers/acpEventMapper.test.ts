@@ -235,7 +235,11 @@ describe("ACP event normalization", () => {
     expect(question).toMatchObject({
       kind: "question",
       requestId: "request-1",
-      event: { kind: "user-input-request", prompt: "Choose a target", options: ["A", "B"] },
+      event: {
+        kind: "user-input-request",
+        prompt: "Choose a target",
+        options: [{ label: "A" }, { label: "B" }],
+      },
     });
   });
 });

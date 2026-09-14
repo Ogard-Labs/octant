@@ -1000,7 +1000,18 @@ function mapQuestion(
           typeof option?.label === "string"
             ? normalized(option.label, LABEL_MAX_CHARACTERS)
             : undefined;
-        return label === undefined ? [] : [label];
+        if (label === undefined) return [];
+        const rawDescription = option?.description;
+        const description =
+          typeof rawDescription === "string"
+            ? normalized(rawDescription, SUMMARY_MAX_CHARACTERS)
+            : undefined;
+        return [
+          {
+            label,
+            ...(description === undefined ? {} : { description }),
+          },
+        ];
       })
     : [];
   if (

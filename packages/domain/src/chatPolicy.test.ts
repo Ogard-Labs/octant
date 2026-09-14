@@ -417,7 +417,13 @@ describe("chat turn and attempt policy", () => {
 
   it("answers an open question and puts the attempt back to work", () => {
     const attempt = makeAttempt("waiting", {
-      pendingQuestion: { requestId: ids.question, prompt: "Proceed?", options: ["Yes", "No"] },
+      pendingQuestion: {
+        requestId: ids.question,
+        prompt: "Proceed?",
+        options: [{ label: "Yes" }, { label: "No" }],
+        questionIndex: 2,
+        questionCount: 2,
+      },
     });
     const answered = answerChatTurnQuestion(attempt, {
       turnId: ids.turn,
@@ -432,7 +438,9 @@ describe("chat turn and attempt policy", () => {
       {
         requestId: ids.question,
         prompt: "Proceed?",
-        options: ["Yes", "No"],
+        options: [{ label: "Yes" }, { label: "No" }],
+        questionIndex: 2,
+        questionCount: 2,
         answer: "Yes",
         answeredAt: later,
       },
@@ -441,11 +449,19 @@ describe("chat turn and attempt policy", () => {
 
   it("refuses an answer that names no open question", () => {
     const waiting = makeAttempt("waiting", {
-      pendingQuestion: { requestId: ids.question, prompt: "Proceed?", options: [] },
+      pendingQuestion: {
+        requestId: ids.question,
+        prompt: "Proceed?",
+        options: [{ label: "Yes" }],
+      },
     });
     const silent = makeAttempt("waiting");
     const completed = makeAttempt("completed", {
-      pendingQuestion: { requestId: ids.question, prompt: "Proceed?", options: [] },
+      pendingQuestion: {
+        requestId: ids.question,
+        prompt: "Proceed?",
+        options: [{ label: "Yes" }],
+      },
     });
     for (const attempt of [waiting, completed, silent]) {
       expect(() =>

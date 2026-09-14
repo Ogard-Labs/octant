@@ -303,7 +303,7 @@ describe("ProviderService", () => {
         kind: "user-input-request",
         requestId: "question-1",
         prompt: "Choose a smoke answer",
-        options: ["bounded"],
+        options: [{ label: "bounded" }],
       },
       input: { answer: "bounded" },
       expected: {

@@ -268,7 +268,7 @@ export function mapAcpPermissionRequest(
     /^q0_opt_\d+$/.test(option.optionId),
   );
   if (questionOptions.length > 0) {
-    const options = questionOptions.map((option) => option.name);
+    const options = questionOptions.map((option) => ({ label: option.name }));
     const optionIds = new Map(questionOptions.map((option) => [option.name, option.optionId]));
     const skipOptionId = request.params.options.find(
       (option) => option.optionId === "q0_skip",

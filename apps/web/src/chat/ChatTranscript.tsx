@@ -29,7 +29,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
-import { ProviderQuestionRow } from "../transcript/ProviderQuestionRow";
+import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
@@ -57,6 +57,8 @@ export interface ChatTranscriptProps {
     readonly requestId: string;
     readonly answer: string;
   }) => void;
+  /** Cancels the turn a question belongs to, without answering it. */
+  readonly onDismissQuestion?: (turnId: ChatTurnId, attemptId: ChatAttemptId) => void;
   /** Sends the revised message to the server, which decides whether to accept it. */
   readonly onEditTurn?: (turnId: ChatTurnId, prompt: string) => void;
   /** Starts a second thread carrying the conversation through this turn. */
@@ -365,6 +367,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   contentById={contentById}
                   key={attempt.id}
                   onAnswerQuestion={props.onAnswerQuestion}
+                  onDismissQuestion={props.onDismissQuestion}
                   onQuoteSelection={props.onQuoteSelection}
                   onRetryAttempt={props.onRetryAttempt}
                   previousAttempt={turn.attempts[index - 1]}
@@ -497,6 +500,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
   readonly citations: ChatThreadView["citations"];
   readonly contentById: ReadonlyMap<string, ChatContentBody>;
   readonly onAnswerQuestion: ChatTranscriptProps["onAnswerQuestion"];
+  readonly onDismissQuestion: ChatTranscriptProps["onDismissQuestion"];
   readonly onQuoteSelection: ChatTranscriptProps["onQuoteSelection"];
   readonly onRetryAttempt: ChatTranscriptProps["onRetryAttempt"];
   readonly previousAttempt: ChatAttempt | undefined;
@@ -581,7 +585,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
         {props.citations.length > 0 ? <CitationList citations={props.citations} /> : null}
         {props.attempt.pendingQuestion === undefined ||
         props.onAnswerQuestion === undefined ? null : (
-          <ProviderQuestionRow
+          <ProviderQuestionCard
             onAnswer={(answer) =>
               props.onAnswerQuestion?.({
                 turnId: props.attempt.turnId,
@@ -590,7 +594,18 @@ const AttemptBlock = memo(function AttemptBlock(props: {
                 answer,
               })
             }
+            onDismiss={
+              props.onDismissQuestion === undefined
+                ? undefined
+                : () => props.onDismissQuestion?.(props.attempt.turnId, props.attempt.id)
+            }
             options={props.attempt.pendingQuestion.options}
+            {...(props.attempt.pendingQuestion.questionIndex === undefined
+              ? {}
+              : {
+                  questionIndex: props.attempt.pendingQuestion.questionIndex,
+                  questionCount: props.attempt.pendingQuestion.questionCount,
+                })}
             prompt={props.attempt.pendingQuestion.prompt}
           />
         )}

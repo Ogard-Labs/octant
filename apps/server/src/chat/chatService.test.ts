@@ -793,12 +793,17 @@ function abandonedReplyDriver(
 }
 
 /**
- * A driver whose reply stops mid-turn to ask the person a question, and which
- * continues only once the host answers it on the same session. Reproduces the
- * exchange the transcript must keep: the text before the question, the
- * question itself, and the reply that grows from the answer.
+ * A driver whose reply stops mid-turn to ask the person a two-question set,
+ * and which continues only once both are answered on the same session — the
+ * way a provider that asks a set receives it: one reply carrying every
+ * answer. Reproduces the exchange the transcript must keep: the text before
+ * the questions, each question with its place in the set, and the reply that
+ * grows from the answers.
  */
-function questionDriver(sent: Array<SentTurn>): ProviderDriver {
+function questionDriver(
+  sent: Array<SentTurn>,
+  answered: Array<{ requestId: string; answer: string }> = [],
+): ProviderDriver {
   return {
     acquire: () =>
       Effect.sync(() => {
@@ -819,14 +824,26 @@ function questionDriver(sent: Array<SentTurn>): ProviderDriver {
               yield* emit({ kind: "text-delta", text: "Let me check." });
               yield* emit({
                 kind: "user-input-request",
-                requestId: "q1",
-                prompt: "Proceed?",
-                options: ["Yes", "No"],
+                requestId: "q-set",
+                prompt: "How should I proceed?",
+                options: [{ label: "Yes" }, { label: "No" }],
+                questionIndex: 1,
+                questionCount: 2,
+              });
+              yield* emit({
+                kind: "user-input-request",
+                requestId: "q-set",
+                prompt: "Mark it resolved?",
+                options: [{ label: "Resolve" }, { label: "Leave open" }],
+                questionIndex: 2,
+                questionCount: 2,
               });
             }),
           answerUserInput: (input: { readonly requestId: string; readonly answer: string }) =>
             Effect.gen(function* () {
-              yield* emit({ kind: "text-delta", text: ` Continuing: ${input.answer}.` });
+              answered.push(input);
+              if (answered.length < 2) return;
+              yield* emit({ kind: "text-delta", text: " Continuing." });
               yield* emit({ kind: "completed" });
             }),
           interrupt: () => Effect.void,
@@ -4311,9 +4328,10 @@ describe("ChatService", () => {
     ]);
   });
 
-  it("shows and answers a question the provider asks mid-turn", async () => {
+  it("shows and answers a provider's question set, one question at a time", async () => {
     const sent: Array<SentTurn> = [];
-    const { service } = openFixture({ driver: questionDriver(sent) });
+    const answered: Array<{ requestId: string; answer: string }> = [];
+    const { service } = openFixture({ driver: questionDriver(sent, answered) });
     const created = await service.execute({
       kind: "create-chat-thread",
       hostId: "local",
@@ -4321,7 +4339,7 @@ describe("ChatService", () => {
     });
     if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
     // The send resolves only when the turn settles, and the turn parks on the
-    // question, so the send runs alongside this test instead of before it.
+    // questions, so the send runs alongside this test instead of before it.
     const sendPromise = service
       .execute({
         kind: "send-chat-turn",
@@ -4333,17 +4351,20 @@ describe("ChatService", () => {
         if (result.kind !== "turn-created") throw new Error("Expected turn-created result.");
         return result;
       });
-    await until(() => {
-      const attempt = service.read(created.thread.id).turns[0]?.attempts[0];
-      return attempt?.outcome === "waiting" && attempt.pendingQuestion !== undefined;
-    });
+    const pendingQuestion = () =>
+      service.read(created.thread.id).turns[0]?.attempts[0]?.pendingQuestion;
+    await until(
+      () => pendingQuestion()?.questionIndex === 1 && pendingQuestion()?.questionCount === 2,
+    );
     const waiting = service.read(created.thread.id);
     const turnId = waiting.turns[0]!.id;
     const attempt = waiting.turns[0]!.attempts[0]!;
     expect(attempt.pendingQuestion).toEqual({
-      requestId: "q1",
-      prompt: "Proceed?",
-      options: ["Yes", "No"],
+      requestId: "q-set",
+      prompt: "How should I proceed?",
+      options: [{ label: "Yes" }, { label: "No" }],
+      questionIndex: 1,
+      questionCount: 2,
     });
 
     // A stale version is refused before anything reaches the provider.
@@ -4354,7 +4375,7 @@ describe("ChatService", () => {
         expectedVersion: (waiting.thread.version + 1) as never,
         turnId,
         attemptId: attempt.id,
-        requestId: "q1",
+        requestId: "q-set",
         answer: "Yes",
       }),
     ).rejects.toMatchObject({ failure: { category: "stale" } });
@@ -4366,29 +4387,44 @@ describe("ChatService", () => {
         expectedVersion: waiting.thread.version,
         turnId,
         attemptId: attempt.id,
-        requestId: "q2",
+        requestId: "other",
         answer: "Yes",
       }),
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
 
-    const answered = await service.execute({
+    const first = await service.execute({
       kind: "answer-chat-turn-question",
       threadId: created.thread.id,
       expectedVersion: waiting.thread.version,
       turnId,
       attemptId: attempt.id,
-      requestId: "q1",
+      requestId: "q-set",
       answer: "Yes",
     });
-    expect(answered).toMatchObject({ kind: "attempt-updated" });
-    if (answered.kind !== "attempt-updated") throw new Error("Expected attempt-updated result.");
-    expect(answered.attempt.outcome).toBe("streaming");
-    expect(answered.attempt.pendingQuestion).toBeUndefined();
-    expect(answered.attempt.answeredQuestions?.[0]).toMatchObject({
-      requestId: "q1",
-      prompt: "Proceed?",
+    expect(first).toMatchObject({ kind: "attempt-updated" });
+    if (first.kind !== "attempt-updated") throw new Error("Expected attempt-updated result.");
+    expect(first.attempt.outcome).toBe("streaming");
+    expect(first.attempt.pendingQuestion).toBeUndefined();
+    expect(first.attempt.answeredQuestions?.[0]).toMatchObject({
+      requestId: "q-set",
+      prompt: "How should I proceed?",
+      questionIndex: 1,
+      questionCount: 2,
       answer: "Yes",
     });
+
+    // The set continues: the next question of the same request parks the turn.
+    await until(() => pendingQuestion()?.questionIndex === 2);
+    const second = await service.execute({
+      kind: "answer-chat-turn-question",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      turnId,
+      attemptId: attempt.id,
+      requestId: "q-set",
+      answer: "Resolve",
+    });
+    expect(second).toMatchObject({ kind: "attempt-updated" });
     await sendPromise;
     await until(
       () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "completed",
@@ -4397,7 +4433,15 @@ describe("ChatService", () => {
     const settledAttempt = settled.turns[0]!.attempts.at(-1)!;
     expect(settledAttempt.outcome).toBe("completed");
     expect(settledAttempt.pendingQuestion).toBeUndefined();
-    expect(settledAttempt.answeredQuestions?.[0]?.answer).toBe("Yes");
+    expect(settledAttempt.answeredQuestions?.map((question) => question.answer)).toEqual([
+      "Yes",
+      "Resolve",
+    ]);
+    // The provider received both answers under the set's one request identity.
+    expect(answered.map((answer) => ({ ...answer, sessionId: undefined }))).toEqual([
+      { requestId: "q-set", answer: "Yes" },
+      { requestId: "q-set", answer: "Resolve" },
+    ]);
 
     // Answering again names no open question any more.
     await expect(
@@ -4407,8 +4451,8 @@ describe("ChatService", () => {
         expectedVersion: settled.thread.version,
         turnId,
         attemptId: attempt.id,
-        requestId: "q1",
-        answer: "Yes",
+        requestId: "q-set",
+        answer: "Resolve",
       }),
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
   });

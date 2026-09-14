@@ -527,6 +527,9 @@ export function answerChatTurnQuestion(
       requestId: question.requestId,
       prompt: question.prompt,
       options: [...question.options],
+      ...(question.questionIndex === undefined || question.questionCount === undefined
+        ? {}
+        : { questionIndex: question.questionIndex, questionCount: question.questionCount }),
       answer: input.answer,
       answeredAt: input.answeredAt,
     },

@@ -1545,8 +1545,8 @@ describe("mapClaudeToolRequest", () => {
               header: "Choice",
               question: "Which safe option?",
               options: [
-                { label: "One", description: "private option description must-not-cross" },
-                { label: "Two", description: "private second description must-not-cross" },
+                { label: "One", description: "Use the first safe option" },
+                { label: "Two", description: "Use the second safe option" },
               ],
               multiSelect: false,
               rawPrivate: "raw question input must-not-cross",
@@ -1567,11 +1567,14 @@ describe("mapClaudeToolRequest", () => {
           kind: "user-input-request",
           requestId: "request-1",
           prompt: "Which safe option?",
-          options: ["One", "Two"],
+          options: [
+            { label: "One", description: "Use the first safe option" },
+            { label: "Two", description: "Use the second safe option" },
+          ],
         },
       },
     });
-    expect(JSON.stringify(result)).not.toMatch(/private option|raw question input/);
+    expect(JSON.stringify(result)).not.toMatch(/raw question input|must-not-cross/);
   });
 
   it("reuses one public request ID for an identical callback correlation tuple", () => {
