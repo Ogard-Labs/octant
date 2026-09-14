@@ -8,7 +8,7 @@ import type { ShellSettings } from "@octant/contracts/shell";
 import { getInjectedHostBridge, type OctantHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
-import { SettingRow } from "./primitives";
+import { SettingRow, SettingsSection } from "./primitives";
 
 type ComputerBridge = Pick<
   OctantHostBridge,
@@ -94,12 +94,15 @@ export function ComputerUseSettingsView(props: {
   };
   return (
     <section aria-label="Computer use" id="settings-computer-use">
-      <div className="settings-card-section settings-card-section--open">
-        <h2>Plugin</h2>
-        <p className="settings-section-note">
-          Add <strong>@Computer</strong> to a task to use this bundled plugin with a supported
-          provider.
-        </p>
+      <SettingsSection
+        title="Plugin"
+        description={
+          <>
+            Add <strong>@Computer</strong> to a task to use this bundled plugin with a supported
+            provider.
+          </>
+        }
+      >
         <div className="setgroup">
           <SettingRow
             settingId="computer-use-enabled"
@@ -118,13 +121,11 @@ export function ComputerUseSettingsView(props: {
             />
           </SettingRow>
         </div>
-      </div>
-      <div className="settings-card-section settings-card-section--open">
-        <h2>macOS permissions</h2>
-        <p className="settings-section-note">
-          Octant asks macOS the first time a task needs one; a refusal can only be changed in System
-          Settings.
-        </p>
+      </SettingsSection>
+      <SettingsSection
+        title="macOS permissions"
+        description="Octant asks macOS the first time a task needs one; a refusal can only be changed in System Settings."
+      >
         <div className="setgroup">
           <SettingRow
             settingId="computer-use-accessibility"
@@ -193,12 +194,11 @@ export function ComputerUseSettingsView(props: {
             </div>
           </SettingRow>
         </div>
-      </div>
-      <div className="settings-card-section settings-card-section--open">
-        <h2>Driver and updates</h2>
-        <p className="settings-section-note">
-          Which driver build Octant runs, and when it looks for a newer one.
-        </p>
+      </SettingsSection>
+      <SettingsSection
+        title="Driver and updates"
+        description="Which driver build Octant runs, and when it looks for a newer one."
+      >
         <div className="setgroup">
           <SettingRow
             settingId="computer-use-version"
@@ -254,7 +254,7 @@ export function ComputerUseSettingsView(props: {
             active.
           </p>
         ) : null}
-      </div>
+      </SettingsSection>
       <p
         className="provider-settings__field-guidance"
         role={error === undefined ? "status" : "alert"}

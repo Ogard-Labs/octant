@@ -594,7 +594,9 @@ function ActiveSectionContent({
       return props.nativeHarnessClient !== undefined ? (
         <div id="settings-harness">
           <p className="native-harness-panel__lead">
-            Assign models to roles below. Child-agent permissions are managed in Agents.
+            Models connected through API keys or local endpoints appear under{" "}
+            <strong>Octant</strong> in the model picker. Assign models to roles below. Child-agent
+            permissions are managed in Agents.
           </p>
           <NativeHarnessRoutingPanel
             client={props.nativeHarnessClient}
