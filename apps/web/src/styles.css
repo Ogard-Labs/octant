@@ -9293,8 +9293,13 @@ ul.board-col-body {
 }
 
 /* The dock lists one thread's Project under the dock's own head: the same rows
-   with the page's outer rhythm tightened to the dock's measure. */
+   with the page's outer rhythm tightened to the dock's measure. The dock clips
+   its content, so this root owns the scroll a long Project needs; without it
+   the rows past the dock's height were cut off and unreachable. */
 .code-project-pull-requests[data-presentation="dock"] {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
   gap: var(--oct-space-2);
 }
 

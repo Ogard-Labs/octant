@@ -37,7 +37,6 @@ export interface RightUtilityDockSurfaceProps {
   readonly onOpenTab: (surface: RightUtilityDockSurfaceId) => void;
   readonly onSelectSurface: (tabId: string) => void;
   readonly plan?: ReactNode;
-  readonly pullRequests?: ReactNode;
   readonly resolution: RightUtilityDockResolution;
   readonly sideChat?: ReactNode;
   readonly renderTab?: (tab: RightUtilityDockTabDescriptor) => ReactNode;
@@ -55,12 +54,11 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
       MULTI_INSTANCE_DOCK_SURFACES.has(surface.id) ||
       !props.tabs.some((tab) => dockTabSurface(tab).id === surface.id),
   );
-  const contents: Readonly<Record<RightUtilityDockSurfaceId, ReactNode | undefined>> = {
+  const contents: Readonly<Partial<Record<RightUtilityDockSurfaceId, ReactNode>>> = {
     agents: props.agents,
     browser: props.browser,
     canvas: props.canvas,
     review: props.review,
-    "pull-requests": props.pullRequests,
     delivery: props.delivery,
     document: props.document,
     environment: props.environment,

@@ -400,6 +400,32 @@ describe("CodeProjectPullRequests", () => {
     expect(onSelectRow).toHaveBeenCalledWith(expect.objectContaining({ number: 12 }));
   });
 
+  it("names the snapshot as the scope of a truncated dock list, not the Project", async () => {
+    const truncated = view({ repositoriesTruncated: true, pullRequestsTruncated: true });
+    render(
+      <CodeProjectPullRequests
+        load={async () => truncated}
+        presentation="dock"
+        projectId={projectAId}
+        refresh={async () => truncated}
+      />,
+    );
+
+    expect(
+      await screen.findByText(
+        /Some of the snapshot's pull requests were omitted after the preview bound of 100\./,
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        /Some connected repositories in the snapshot were omitted after the preview bound of 25\./,
+      ),
+    ).toBeVisible();
+    // Beside one Project's still-visible rows, "some pull requests were
+    // omitted" would read as this Project having lost rows.
+    expect(screen.queryByText(/Some pull requests were omitted/)).toBeNull();
+  });
+
   it("says why a Project the snapshot does not cover lists no pull requests", async () => {
     render(
       <CodeProjectPullRequests
@@ -491,5 +517,16 @@ describe("CodeProjectPullRequests", () => {
     );
     expect(narrowMeta).toMatch(/grid-column:\s*1/);
     expect(narrowMeta).toMatch(/grid-row:\s*auto/);
+  });
+
+  it("scrolls a long dock list inside the dock instead of letting the dock clip it", () => {
+    // The dock's body clips (overflow: hidden) and the tool is the dock's full
+    // height, so the list root has to be the bounded scroller: without a
+    // height and its own overflow, rows past the dock's height had no way to
+    // be reached.
+    const dock = ruleBody(stylesheet, '.code-project-pull-requests[data-presentation="dock"]');
+    expect(dock).toMatch(/height:\s*100%/);
+    expect(dock).toMatch(/min-height:\s*0/);
+    expect(dock).toMatch(/overflow:\s*auto/);
   });
 });

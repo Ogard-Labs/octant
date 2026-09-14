@@ -190,7 +190,10 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
   {
     id: "pull-requests",
     label: "Pull requests",
-    modes: ["work", "code"],
+    // The resolved list is a Code Project read: a Work Project has no
+    // pull-request source, so offering the tool there promises a list the
+    // host can never fill.
+    modes: ["code"],
     scope: "thread",
   },
   {

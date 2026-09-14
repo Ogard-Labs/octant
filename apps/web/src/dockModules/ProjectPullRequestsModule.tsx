@@ -8,13 +8,13 @@ type Props = Pick<
 >;
 
 /**
- * The active thread's Project as a list of its open pull requests. The list is
- * the same component the Pull requests page renders; the dock passes the
- * Project scope and lets a row open the existing Review tool in this dock.
+ * The active Code thread's Project as a list of its open pull requests. The
+ * list is the same component the Pull requests page renders; the dock passes
+ * the Project scope and lets a row open the existing Review tool in this dock.
  */
 export default function ProjectPullRequestsModule(props: Props) {
-  if (props.subject.mode !== "work" && props.subject.mode !== "code") {
-    return unavailable("Pull requests", "Pull requests open from a Work or Code thread.");
+  if (props.subject.mode !== "code") {
+    return unavailable("Pull requests", "Pull requests open from a Code thread.");
   }
   if (props.subject.projectId === undefined) {
     return unavailable(

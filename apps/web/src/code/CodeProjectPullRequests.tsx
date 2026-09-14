@@ -233,12 +233,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
             role="status"
           >
             {freshnessCopy(scopedFreshness ?? view.freshness)}
-            {view.repositoriesTruncated
-              ? " Some connected repositories were omitted after the preview bound of 25."
-              : ""}
-            {view.pullRequestsTruncated
-              ? " Some pull requests were omitted after the preview bound of 100."
-              : ""}
+            {truncationCopy(view, dock)}
           </p>
           {workspace.status === "error" ? (
             <p className="code-project-pull-requests__status" role="alert">
@@ -592,6 +587,24 @@ function groupByRepository(rows: ReadonlyArray<CodeProjectPullRequestRow>): Read
     }
   }
   return groups;
+}
+
+function truncationCopy(view: CodeProjectPullRequestView, dock: boolean): string {
+  // The truncation bounds apply to the whole cached snapshot, but the dock
+  // shows one Project. An unqualified "some pull requests were omitted" beside
+  // that Project's rows reads as its own rows having been dropped from a list
+  // that is still showing them, so the dock names the snapshot as the scope.
+  const repositories = view.repositoriesTruncated
+    ? dock
+      ? " Some connected repositories in the snapshot were omitted after the preview bound of 25."
+      : " Some connected repositories were omitted after the preview bound of 25."
+    : "";
+  const pullRequests = view.pullRequestsTruncated
+    ? dock
+      ? " Some of the snapshot's pull requests were omitted after the preview bound of 100."
+      : " Some pull requests were omitted after the preview bound of 100."
+    : "";
+  return `${repositories}${pullRequests}`;
 }
 
 function freshnessCopy(freshness: CodeProjectPullRequestFreshness): string {
