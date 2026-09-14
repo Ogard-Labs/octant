@@ -9,7 +9,6 @@ import { FolderTree, RefreshCw } from "lucide-react";
 import { CodeFileExplorer, type CodeFileExplorerEntry } from "./CodeFileExplorer";
 import { useCodeFileListingController } from "./useCodeFileListingController";
 import { OctantButton } from "../ui/base/OctantButton";
-import { ShellState } from "../shell/ShellState";
 
 export interface CodeFileExplorerPanelProps {
   readonly threadId?: CodeThreadId | undefined;
@@ -56,49 +55,41 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
     );
   }
 
-  return (
-    <div className="code-file-explorer-panel">
-      <div className="code-file-explorer-panel__toolbar">
-        <OctantButton
-          aria-label="Refresh files"
-          disabled={controller.status === "loading"}
-          onClick={() => void controller.refresh()}
-          size="icon"
-          title="Refresh files"
-          type="button"
-          variant="ghost"
-        >
-          <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
-        </OctantButton>
-      </div>
-
-      {controller.status === "loading" ? (
-        <ShellState state="loading" title="Loading files" />
-      ) : null}
-
-      {controller.status === "error" ? (
-        // The one sentence, and nothing under it. Rendering the tree as well
-        // put a live filter field and "No matching repository files" beneath
-        // an explanation that there are no files to match.
+  if (controller.status === "error") {
+    // The one sentence, and one way back. Rendering the tree as well put a
+    // live filter field and "No files match" beneath an explanation that
+    // there are no files to match.
+    return (
+      <div className="code-file-explorer-panel">
         <p className="code-file-explorer__error" role="alert">
           {controller.errorMessage ?? "Repository files are unavailable."}
         </p>
-      ) : (
-        <>
-          {controller.truncated ? (
-            <p className="code-file-explorer__status" role="status">
-              Octant listed part of this repository. The file tree is incomplete.
-            </p>
-          ) : null}
+        <div className="code-file-explorer-panel__recovery">
+          <OctantButton
+            onClick={() => void controller.refresh()}
+            size="sm"
+            type="button"
+            variant="secondary"
+          >
+            <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
+            <span>Try again</span>
+          </OctantButton>
+        </div>
+      </div>
+    );
+  }
 
-          <CodeFileExplorer
-            loading={controller.status === "loading"}
-            entries={controller.entries}
-            onOpenFile={props.onOpenFile}
-            {...(props.selectedPath === undefined ? {} : { selectedPath: props.selectedPath })}
-          />
-        </>
-      )}
+  return (
+    <div className="code-file-explorer-panel">
+      <CodeFileExplorer
+        entries={controller.entries}
+        loading={controller.status === "loading"}
+        onOpenFile={props.onOpenFile}
+        onRefresh={() => void controller.refresh()}
+        refreshing={controller.status === "loading"}
+        truncated={controller.truncated}
+        {...(props.selectedPath === undefined ? {} : { selectedPath: props.selectedPath })}
+      />
     </div>
   );
 }

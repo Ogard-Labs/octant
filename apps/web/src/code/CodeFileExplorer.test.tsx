@@ -114,6 +114,83 @@ describe("CodeFileExplorer", () => {
     expect(screen.getByRole("treeitem", { name: /src\/lib\/format\.ts/ })).toBeVisible();
     expect(screen.queryByText("Available")).not.toBeInTheDocument();
   });
+
+  it("names an empty checkout instead of reporting a filter that is not set", () => {
+    render(<CodeFileExplorer entries={[]} onOpenFile={vi.fn()} />);
+
+    expect(screen.getByText("This checkout has no files to list.")).toBeVisible();
+    expect(screen.queryByText(/No files match/)).not.toBeInTheDocument();
+  });
+
+  it("names the query when a filter matches nothing", async () => {
+    render(<CodeFileExplorer entries={entries()} onOpenFile={vi.fn()} />);
+
+    await userEvent
+      .setup()
+      .type(screen.getByRole("searchbox", { name: "Filter files" }), "zzz-nothing");
+
+    expect(screen.getByText("No files match “zzz-nothing”.")).toBeVisible();
+  });
+
+  it("shows which folder held a filtered match and keeps the whole path on the row", async () => {
+    const path = "packages/provider-sdk/src/drivers/normalized-runtime-event-adapter.ts";
+    render(<CodeFileExplorer entries={[file(path)]} onOpenFile={vi.fn()} />);
+
+    await userEvent
+      .setup()
+      .type(screen.getByRole("searchbox", { name: "Filter files" }), "drivers");
+
+    const row = screen.getByRole("treeitem", { name: path });
+    expect(within(row).getByText("drivers")).toBeVisible();
+    expect(row).toHaveAttribute("title", path);
+  });
+
+  it("labels a long file with its whole path so the truncated name can be resolved", () => {
+    const path = "packages/provider-sdk/src/drivers/normalized-runtime-event-adapter.ts";
+    render(<CodeFileExplorer entries={[file(path)]} onOpenFile={vi.fn()} />);
+
+    const row = screen.getByRole("treeitem", { name: path });
+    expect(row).toHaveAttribute("title", path);
+    expect(row).toHaveTextContent("normalized-runtime-event-adapter.ts");
+  });
+
+  it("expands, collapses, and walks the tree from the arrow keys", async () => {
+    const user = userEvent.setup();
+    render(
+      <CodeFileExplorer
+        entries={[
+          { kind: "directory", path: "src" as never },
+          { kind: "directory", path: "src/lib" as never },
+          file("src/lib/format.ts"),
+        ]}
+        onOpenFile={vi.fn()}
+      />,
+    );
+
+    const source = screen.getByRole("treeitem", { name: "src" });
+    // The tree is one tab stop: the row that holds focus is the only one Tab
+    // returns to, and the arrow keys move between rows from there.
+    expect(source).toHaveAttribute("tabindex", "0");
+
+    source.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(source).toHaveAttribute("aria-expanded", "true");
+    await user.keyboard("{ArrowRight}");
+    const library = screen.getByRole("treeitem", { name: "src/lib" });
+    expect(library).toHaveFocus();
+    await user.keyboard("{ArrowRight}");
+    expect(library).toHaveAttribute("aria-expanded", "true");
+    await user.keyboard("{ArrowDown}");
+    const format = screen.getByRole("treeitem", { name: /src\/lib\/format\.ts/ });
+    expect(format).toHaveFocus();
+    expect(format).toHaveAttribute("tabindex", "0");
+    expect(source).toHaveAttribute("tabindex", "-1");
+    await user.keyboard("{ArrowLeft}");
+    expect(library).toHaveFocus();
+    await user.keyboard("{ArrowLeft}");
+    expect(library).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("treeitem", { name: /format\.ts/ })).not.toBeInTheDocument();
+  });
 });
 
 function entries(): ReadonlyArray<CodeFileExplorerEntry> {

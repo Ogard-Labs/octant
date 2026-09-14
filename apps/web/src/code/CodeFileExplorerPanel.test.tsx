@@ -85,7 +85,7 @@ describe("CodeFileExplorerPanel", () => {
       />,
     );
     expect(await screen.findByText("Loading files")).toBeVisible();
-    expect(screen.queryByText("No matching repository files.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/No files match/)).not.toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: "Filter files" })).toBeVisible();
   });
 
@@ -102,11 +102,43 @@ describe("CodeFileExplorerPanel", () => {
     );
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Code checkout is unavailable.");
-    // A live filter field and "No matching repository files" under an
-    // explanation that there are no files to match is the same absence said
-    // three times.
+    // A live filter field and "No files match" under an explanation that
+    // there are no files to match is the same absence said three times.
     expect(screen.queryByRole("searchbox", { name: "Filter files" })).not.toBeInTheDocument();
-    expect(screen.queryByText("No matching repository files.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/No files match/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
+  });
+
+  it("lists again when the person asks after a failure", async () => {
+    const user = userEvent.setup();
+    const list = vi.fn(async () => {
+      throw new Error("Code checkout is unavailable.");
+    });
+    render(
+      <CodeFileExplorerPanel
+        checkoutId={checkoutId}
+        client={{ list, watch: vi.fn(async function* () {}) } as never}
+        onOpenFile={vi.fn()}
+        threadId={threadId}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Try again" }));
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it("names an empty checkout instead of an empty filter result", async () => {
+    render(
+      <CodeFileExplorerPanel
+        checkoutId={checkoutId}
+        client={client(listing([]))}
+        onOpenFile={vi.fn()}
+        threadId={threadId}
+      />,
+    );
+
+    expect(await screen.findByText("This checkout has no files to list.")).toBeVisible();
+    expect(screen.queryByText(/No files match/)).not.toBeInTheDocument();
   });
 
   it("relists the repository when the host reports that files changed", async () => {
