@@ -266,7 +266,11 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
 
   return (
     <div className="github-picker">
-      <form className="github-picker__link" noValidate onSubmit={(event) => void resolveLink(event)}>
+      <form
+        className="github-picker__link"
+        noValidate
+        onSubmit={(event) => void resolveLink(event)}
+      >
         <OctantInput
           aria-label="Repository link or owner/repository"
           onChange={(event) => {
