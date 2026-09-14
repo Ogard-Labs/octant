@@ -113,11 +113,13 @@ second press right after quits.
 
 When the lead needs a decision it cannot make alone, it asks. The question
 appears inline on the thread — on the harness card in the app, on the phone
-panel, and as a numbered prompt in the CLI — with any options it offered as
-buttons. Pick one or type an answer; the turn continues the moment it lands,
-and the same question can be answered from any surface. A question nobody
-answers within ten minutes expires and the lead is told to continue with its
-best judgment; interrupting the turn cancels it. Every question and answer is
+panel, as a numbered prompt in the CLI, and in a Chat thread's own transcript
+as a card on the turn that asked — with any options it offered, each with the
+meaning the lead wrote for it, and a field for an answer no option covers.
+Pick one or type an answer; the turn continues the moment it lands, and the
+same question can be answered from any surface. A question nobody answers
+within ten minutes expires and the lead is told to continue with its best
+judgment; interrupting the turn cancels it. Every question and answer is
 journaled with the session.
 
 ## From the terminal
