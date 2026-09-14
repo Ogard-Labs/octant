@@ -5095,6 +5095,10 @@ function LaunchedShell(
                         }
                       : {})}
                     activityMode={activeMode}
+                    rowProperties={controller.settings.sidebarRowProperties}
+                    onRowPropertiesChange={(sidebarRowProperties) => {
+                      void controller.updateSettings({ sidebarRowProperties });
+                    }}
                     {...(activeProjectId === undefined ? {} : { activeProjectId })}
                     {...(activeMode === "chat" && chatProjectThreadListRequest !== undefined
                       ? { expandProjectThreadsRequest: chatProjectThreadListRequest }

@@ -59,6 +59,16 @@ const settings = {
   transcriptTextSize: "medium",
   transcriptWidth: "narrow",
   showThreadProviderIcons: true,
+  sidebarRowProperties: {
+    projects: { project: false, branch: true, pullRequest: true, lastUpdated: true, status: true },
+    activity: {
+      project: true,
+      branch: false,
+      pullRequest: false,
+      lastUpdated: false,
+      status: true,
+    },
+  },
   openInApplications: ["vscode", "cursor", "zed", "finder", "terminal", "ghostty", "xcode"],
   sidebarBackground: {
     kind: "none",
@@ -971,6 +981,90 @@ describe("environment presentation contracts", () => {
     // The re-encoded struct includes the default, so the shapes differ; verify
     // only the presentation default rather than full equality.
     expect(decoded.sidebarWidth).toBe(280);
+  });
+
+  it("keeps each view's sidebar row defaults for a store that never chose any", () => {
+    const { sidebarRowProperties: _omit, ...withoutRowProperties } = settings;
+
+    // A store persisted before the choice shipped decodes to exactly the rows
+    // those views already carried: the Project tree never showed a Project
+    // name, and the Activity feed never showed a branch, pull request, or age.
+    expect(decodeShellSettings(withoutRowProperties).sidebarRowProperties).toEqual({
+      projects: {
+        project: false,
+        branch: true,
+        pullRequest: true,
+        lastUpdated: true,
+        status: true,
+      },
+      activity: {
+        project: true,
+        branch: false,
+        pullRequest: false,
+        lastUpdated: false,
+        status: true,
+      },
+    });
+  });
+
+  it("round-trips a sidebar row choice that differs between the two views", () => {
+    const chosen = {
+      ...settings,
+      sidebarRowProperties: {
+        projects: {
+          project: false,
+          branch: false,
+          pullRequest: true,
+          lastUpdated: true,
+          status: false,
+        },
+        activity: {
+          project: true,
+          branch: true,
+          pullRequest: false,
+          lastUpdated: false,
+          status: true,
+        },
+      },
+    };
+
+    expect(decodeShellSettings(chosen).sidebarRowProperties).toEqual(chosen.sidebarRowProperties);
+    expect(decodeShellSettings(chosen).sidebarRowProperties.projects.branch).toBe(false);
+    expect(decodeShellSettings(chosen).sidebarRowProperties.activity.branch).toBe(true);
+  });
+
+  it("rejects a sidebar row record that is incomplete, unknown, or not boolean", () => {
+    const withoutUnreadProperty = {
+      ...settings,
+      sidebarRowProperties: {
+        projects: settings.sidebarRowProperties.projects,
+        activity: {
+          project: true,
+          branch: false,
+          pullRequest: false,
+          lastUpdated: false,
+        },
+      },
+    };
+    expect(() => decodeShellSettings(withoutUnreadProperty)).toThrow();
+
+    const withRetiredProperty = {
+      ...settings,
+      sidebarRowProperties: {
+        projects: { ...settings.sidebarRowProperties.projects, repository: true },
+        activity: settings.sidebarRowProperties.activity,
+      },
+    };
+    expect(() => decodeShellSettings(withRetiredProperty)).toThrow();
+
+    const withNonBoolean = {
+      ...settings,
+      sidebarRowProperties: {
+        projects: { ...settings.sidebarRowProperties.projects, status: "on" },
+        activity: settings.sidebarRowProperties.activity,
+      },
+    };
+    expect(() => decodeShellSettings(withNonBoolean)).toThrow();
   });
 
   it("decodes a set-environment-presentation command", () => {

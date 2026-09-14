@@ -42,9 +42,11 @@ The sidebar displays a mode-aware Project hierarchy. Each mode group lists its P
 
 ## What a thread row shows
 
-Sidebar thread rows can carry a branch, a linked pull request, when the thread was last updated, and its status mark. **Property visibility** in the Project view filter menu turns each of those on or off, and **Hide all** clears them in one action.
+Sidebar thread rows can carry the Project a thread belongs to, its branch, its linked pull request, when it was last updated, and its status mark. **Settings › Appearance › Sidebar thread rows** turns each of those on or off for the view you choose, and the Project view filter menu's **Property visibility** submenu edits the view you are looking at, with **Hide all** clearing it in one action. A row that does not carry a property omits it rather than leaving a gap.
 
-The choice belongs to the view you are looking at. Hiding pull requests in the Project tree leaves the activity feed as it was, and the reverse; the activity feed also offers its Project name. Each view remembers its own choice on this device.
+The choice belongs to the view you are looking at. The Projects tree and the Activity feed each keep their own switches: by default the tree shows the branch, pull request, age, and status mark, while the feed shows the Project name and status mark alone. Hiding pull requests in the tree leaves the feed as it was, and the reverse.
+
+The choice is saved with your other appearance settings on the host, so it survives restarts and reaches every window that reads that host.
 
 ## Bound root lifecycle
 

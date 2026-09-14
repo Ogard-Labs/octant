@@ -707,6 +707,22 @@ describe("createPhase1RuntimeRegistries", () => {
           transcriptTextSize: "medium",
           transcriptWidth: "narrow",
           showThreadProviderIcons: true,
+          sidebarRowProperties: {
+            projects: {
+              project: false,
+              branch: true,
+              pullRequest: true,
+              lastUpdated: true,
+              status: true,
+            },
+            activity: {
+              project: true,
+              branch: false,
+              pullRequest: false,
+              lastUpdated: false,
+              status: true,
+            },
+          },
           openInApplications: ["vscode", "cursor", "zed", "finder", "terminal", "ghostty", "xcode"],
           userProfile: { accent: "indigo", avatar: { kind: "initials" } },
           sidebarBackground: {
@@ -920,6 +936,22 @@ function validSettingsPayload() {
       transcriptTextSize: "medium",
       transcriptWidth: "narrow",
       showThreadProviderIcons: true,
+      sidebarRowProperties: {
+        projects: {
+          project: false,
+          branch: true,
+          pullRequest: true,
+          lastUpdated: true,
+          status: true,
+        },
+        activity: {
+          project: true,
+          branch: false,
+          pullRequest: false,
+          lastUpdated: false,
+          status: true,
+        },
+      },
       openInApplications: ["vscode", "cursor", "zed", "finder", "terminal", "ghostty", "xcode"],
       userProfile: { accent: "indigo", avatar: { kind: "initials" } },
       sidebarBackground: {

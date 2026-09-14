@@ -1817,6 +1817,84 @@ describe("App", () => {
     expect(document.querySelector(".shell")).toHaveStyle({ "--octant-sidebar-width": "300px" });
   });
 
+  it("hides and restores a sidebar thread-row property through Appearance settings", async () => {
+    const user = userEvent.setup();
+    const shellApi = client();
+    const codeApi = codes();
+    const codeValue = await codeApi.bootstrap();
+    const codeThread = codeValue.threads[0];
+    if (codeThread === undefined) throw new Error("Expected the Code bootstrap to hold a thread.");
+    const runtime = [
+      {
+        executing: false,
+        threadId: codeThread.id,
+        checkoutChip: { checkoutKind: "managed-worktree", label: "feature/sidebar" },
+      },
+    ] as const;
+    codeApi.bootstrap = vi.fn(async () => ({ ...codeValue, runtime }) as never);
+    codeApi.navigation = vi.fn(
+      async () => ({ activity: [], runtime, threads: codeValue.threads }) as never,
+    );
+
+    render(
+      <App
+        codeClient={codeApi}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={shellApi}
+      />,
+    );
+
+    const row = await screen.findByRole("button", { name: /Controller foundation/ });
+    expect(within(row).getByText("feature/sidebar")).toBeVisible();
+
+    await openSettingsFromSidebar(user);
+    fireEvent.click(await screen.findByRole("button", { name: "Appearance" }));
+    const branchSwitch = await screen.findByRole("switch", {
+      name: "Branch on Projects rows",
+    });
+    expect(branchSwitch).toHaveAttribute("aria-checked", "true");
+    await user.click(branchSwitch);
+    const defaults = settingsPastFirstRun().sidebarRowProperties;
+    expect(shellApi.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "replace-settings",
+        settings: expect.objectContaining({
+          sidebarRowProperties: {
+            ...defaults,
+            projects: { ...defaults.projects, branch: false },
+          },
+        }),
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("button", { name: /Controller foundation/ })).queryByText(
+          "feature/sidebar",
+        ),
+      ).toBeNull(),
+    );
+
+    // The saved choice comes back with the page, so the switch is a persisted
+    // setting rather than renderer state that dies with the surface.
+    await openSettingsFromSidebar(user);
+    fireEvent.click(await screen.findByRole("button", { name: "Appearance" }));
+    const saved = await screen.findByRole("switch", { name: "Branch on Projects rows" });
+    expect(saved).toHaveAttribute("aria-checked", "false");
+    await user.click(saved);
+    await user.click(screen.getByRole("button", { name: "Back to app" }));
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("button", { name: /Controller foundation/ })).getByText(
+          "feature/sidebar",
+        ),
+      ).toBeVisible(),
+    );
+  }, 15_000);
+
   it("keeps the committed desktop width and omits horizontal resizing when responsive", async () => {
     render(
       <App

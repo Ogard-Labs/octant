@@ -192,6 +192,40 @@ export const SidebarDestinationCustomization = Schema.Struct({
   );
 export type SidebarDestinationCustomization = typeof SidebarDestinationCustomization.Type;
 
+/**
+ * Which of the facts a sidebar thread row can carry beside its title are
+ * shown, for one sidebar view.
+ *
+ * The choice is appearance, not authority: it changes what the same rows show
+ * on every window and every client that reads this host, so it travels with
+ * the shell defaults rather than living in one renderer's storage.
+ */
+export const SidebarRowPropertyVisibility = Schema.Struct({
+  project: Schema.Boolean,
+  branch: Schema.Boolean,
+  pullRequest: Schema.Boolean,
+  lastUpdated: Schema.Boolean,
+  status: Schema.Boolean,
+}).annotations(strict);
+export type SidebarRowPropertyVisibility = typeof SidebarRowPropertyVisibility.Type;
+
+/**
+ * The two sidebar views answer different questions — where a thread lives
+ * versus what happened lately — so each keeps its own record and quieting one
+ * never strips the other.
+ */
+export const SidebarRowProperties = Schema.Struct({
+  projects: SidebarRowPropertyVisibility,
+  activity: SidebarRowPropertyVisibility,
+}).annotations(strict);
+export type SidebarRowProperties = typeof SidebarRowProperties.Type;
+
+/** Each view starts showing exactly what it showed before it could be told otherwise. */
+export const DEFAULT_SIDEBAR_ROW_PROPERTIES: SidebarRowProperties = {
+  projects: { project: false, branch: true, pullRequest: true, lastUpdated: true, status: true },
+  activity: { project: true, branch: false, pullRequest: false, lastUpdated: false, status: true },
+};
+
 /** How the Code sidebar offers its saved project views: a dropdown or inline icon buttons. */
 export const ProjectViewSwitcherPresentation = Schema.Literal("dropdown", "inline");
 export type ProjectViewSwitcherPresentation = typeof ProjectViewSwitcherPresentation.Type;
@@ -459,6 +493,18 @@ export const ShellSettings = Schema.Struct({
     default: () => "narrow" as const,
   }),
   showThreadProviderIcons: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /**
+   * Which facts each sidebar view's thread rows show. A store persisted before
+   * this shipped decodes to each view's own defaults — exactly what those rows
+   * carried already — so nothing disappears or appears for an existing
+   * install.
+   */
+  sidebarRowProperties: Schema.optionalWith(SidebarRowProperties, {
+    default: () => ({
+      projects: { ...DEFAULT_SIDEBAR_ROW_PROPERTIES.projects },
+      activity: { ...DEFAULT_SIDEBAR_ROW_PROPERTIES.activity },
+    }),
+  }),
   // Navigator settings section. A store persisted before Navigator shipped
   // decodes to the empty section — both roles absent — which the snapshot
   // reports as `unconfigured` rather than inventing a default model.
