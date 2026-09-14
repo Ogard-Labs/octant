@@ -57,6 +57,46 @@ function request(path: string, body?: unknown, headers: Record<string, string> =
 }
 
 describe("bounded authenticated extension routes", () => {
+  it("accepts source-qualified skill lifecycle commands only from an authorized window", async () => {
+    const observed: Array<ExtensionCommand> = [];
+    const handler = setup({
+      snapshot: setupSnapshot,
+      execute: async (command) => {
+        observed.push(command);
+        return { kind: "extension-state-updated", snapshot: setupSnapshot() };
+      },
+    });
+    const qualifiedId = `agents-skills-directory:project:fixture:qa-marker:${digest}`;
+    const commands = [
+      { kind: "review-skill", qualifiedId, digest },
+      { kind: "trust-skill-source", qualifiedId, digest, trusted: true },
+      { kind: "set-skill-desired", qualifiedId, digest, desired: true },
+      { kind: "select-skill-collision", qualifiedId, name: "qa-marker" },
+    ] as const;
+    for (const command of commands) {
+      const denied = await handler(
+        request("/api/extensions/lifecycle", command, {
+          "x-octant-window-capability": "invalid",
+        }),
+      );
+      expect(denied?.status).toBe(401);
+      expect(observed).not.toContainEqual(command);
+      const accepted = await handler(request("/api/extensions/lifecycle", command));
+      expect(accepted?.status).toBe(200);
+      expect(await accepted?.json()).toMatchObject({ kind: "extension-state-updated" });
+    }
+    expect(observed).toEqual(commands);
+    const malformed = await handler(
+      request("/api/extensions/lifecycle", {
+        kind: "review-skill",
+        qualifiedId,
+        digest: "invalid",
+      }),
+    );
+    expect(malformed?.status).toBe(400);
+    expect(observed).toEqual(commands);
+  });
+
   it("lists and decides only window-bound extension tool approvals", async () => {
     const windowAuthorityStore = new WindowAuthorityStore();
     windowAuthorityStore.register({ windowId: windowId as never, capability, now });

@@ -271,6 +271,10 @@ function isLifecycleCommand(command: ExtensionCommand): boolean {
     command.kind === "set-source-trust" ||
     command.kind === "set-plugin-desired" ||
     command.kind === "set-component-desired" ||
+    command.kind === "review-skill" ||
+    command.kind === "trust-skill-source" ||
+    command.kind === "set-skill-desired" ||
+    command.kind === "select-skill-collision" ||
     command.kind === "install-skill" ||
     command.kind === "update-skill" ||
     command.kind === "remove-skill" ||
