@@ -9,7 +9,7 @@ search, and detail), managed clone, Code Project binding, and create-from-issue 
 
 **Design:** Implemented onboarding lives behind `/api/github/*` and is summarized in
 [`../architecture.md`](../architecture.md). The approved issue-browser and create-from-issue shape
-is recorded in this document.
+and the approved user-chosen destination and pasted-reference delta are recorded in this document.
 
 ## Overview
 
@@ -111,10 +111,15 @@ or host mismatch.
 case-insensitive collision targets another directory; a partial clone is adopted as valid; a
 malicious pre-existing directory is overwritten; a restart loses ownership and deletes user data.
 
-**Controls:** server-derived path segments; canonical component walks; no arbitrary destination;
-exclusive repository/destination reservation; same-filesystem staging; no overwrite or automatic
+**Controls:** server-derived path segments; canonical component walks; exclusive
+repository/destination reservation; same-filesystem staging; no overwrite or automatic
 cleanup of unknown content; ownership receipts before mutation; identity revalidation before and
-after atomic rename; explicit recovery states; quarantine instead of destructive repair.
+after atomic rename; explicit recovery states; quarantine instead of destructive repair. When the
+person chooses where a clone lands, the parent folder arrives as a one-time host-issued binding
+receipt (native picker or the home-confined host folder browser), the folder name is one strict
+segment the server validates again, the parent is re-canonicalized and must still exist, staging
+and quarantine live inside that parent so promotion is same-filesystem, and every destination
+observation and promotion rule applies unchanged; the client never sends a path.
 
 ### Clone transport and repository identity confusion
 
@@ -123,8 +128,10 @@ origin; a fork with the same name is bound; Git configuration changes credential
 submodule checkout is accepted; default branch changes during clone.
 
 **Controls:** `owner/name` selected from a fresh normalized GitHub node identity; fixed GitHub host;
-non-HTTPS `gh` protocol rejected before clone; shell disabled; no URL supplied by the client;
-`--no-checkout` plus an Octant-owned empty template directory and suppressed ambient Git config;
+non-HTTPS `gh` protocol rejected before clone; shell disabled; no clone URL supplied by the client —
+a person may paste a repository link, but only its `owner/name` is extracted, and the server resolves
+it through a fresh live observation before any effect; `--no-checkout` plus an Octant-owned empty
+template directory and suppressed ambient Git config;
 origin URL normalization rejects userinfo, query, and unexpected hosts; post-clone fresh
 node-identity observation; canonical Git common/object identity; bare and submodule-root refusal;
 explicit empty-repository/default-branch outcomes. Repository content is not materialized until
@@ -254,6 +261,45 @@ Injected fields, exactly: repository `owner`/`name`, issue `number`, `state`, `t
 body (≤8 KiB UTF-8, explicit truncated marker), ≤10 most recent comments (author ≤128, body ≤2 KiB
 each, per-comment truncated). The whole framed block is hard-capped at 32 KiB
 (`MAX_NEW_THREAD_DRAFT_INTENT_BYTES`); truncation is disclosed, never silent.
+
+## User-chosen destination and pasted repository reference design
+
+This shape is approved by Henrik (2026-09-14) and implemented; it extends the managed clone and the
+repository catalogue without changing any approval, verification, or revocation control above.
+
+### Where onboarding starts
+
+Two entry points exist and both end in the same managed-clone pipeline. The composer's Project menu
+keeps "New Project from GitHub repository" with the host's managed repository inventory as the
+destination. The Create Project dialog gains a Folder | GitHub source switch for Code Projects;
+its GitHub side asks for a parent folder through the same host-issued binding receipt a bound
+Project uses — the native picker where one exists, the home-confined host folder browser on a
+paired browser or a headless host — plus one folder-name segment, so the same flow works when no
+native sheet can open.
+
+### Pasted references resolve on the server
+
+The catalogue read union gains `kind: "repository"` (`owner`, `name`) served by
+`/api/github/catalogue/reads` and gated on the existing `repository-catalogue` capability like the
+repository page. The renderer extracts only `owner/name` from a pasted github.com URL or typed
+`owner/name`; the URL itself never leaves the client, and no clone URL is ever an input. The server
+answers with the same normalized `GithubRepositoryRow` the catalogue serves, from a fresh
+`gh api repos/<owner>/<name>` observation that is never cached as authorization. A repository that
+is not visible to the signed-in account fails closed with the ordinary unavailable reasons.
+
+### Chosen destination
+
+`request-clone` carries an optional `destination` of `{ parentReceiptId, folderName }`. The server
+consumes the one-time binding receipt (window- and code-bound), re-canonicalizes the parent and
+requires it to still exist, derives `parent/folderName` with the same segment rules, observes the
+destination shape, and journals the operation before anything runs. Absent `destination` keeps the
+inventory-derived destination. Staging (`.octant-incoming`), quarantine (`.octant-quarantine`), and
+promotion operate beneath the chosen parent, so the rename stays same-filesystem, and the
+operation's recovery, cancellation, and confinement behave exactly as they do inside the
+inventory. Confirmation still binds to the exact previewed destination digest, and an existing
+matching checkout is still attachable only through the explicit attach command. An expired or
+spent receipt is an honest refusal that returns the person to the folder chooser; nothing is
+re-created behind them.
 
 ## Severity Calibration
 

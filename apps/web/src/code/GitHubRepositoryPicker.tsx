@@ -8,6 +8,7 @@ import type {
 } from "@octant/contracts";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { parseGithubRepositoryReference } from "./githubRepositoryReference";
 
 /**
  * The searchable, paginated, keyboard-operable GitHub
@@ -76,7 +77,11 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [activeIndex, setActiveIndex] = useState<number>();
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [linkInput, setLinkInput] = useState("");
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkError, setLinkError] = useState<string>();
   const generation = useRef(0);
+  const linkGeneration = useRef(0);
 
   const trimmedQuery = query.trim();
 
@@ -197,6 +202,43 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
       .catch(() => undefined);
   };
 
+  /**
+   * Resolve a repository the person typed or pasted. A public repository the
+   * viewer does not own is still a legitimate Project; the server reads it
+   * live and answers with the same normalized row the catalogue serves, which
+   * then rides the ordinary confirm-and-clone flow.
+   */
+  const resolveLink = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const reference = parseGithubRepositoryReference(linkInput);
+    if (reference === undefined) {
+      setLinkError("Enter owner/repository or a github.com repository URL.");
+      return;
+    }
+    const operation = ++linkGeneration.current;
+    setLinkBusy(true);
+    setLinkError(undefined);
+    try {
+      const response = await client.readCatalogue({ kind: "repository", ...reference });
+      if (operation !== linkGeneration.current) return;
+      if (response.kind === "unavailable") {
+        setLinkError(response.remediation ?? UNAVAILABLE_FALLBACKS[response.reason]);
+        return;
+      }
+      if (response.kind !== "repository") {
+        setLinkError("GitHub returned an unexpected response.");
+        return;
+      }
+      setLinkInput("");
+      select(response.row);
+    } catch (error) {
+      if (operation !== linkGeneration.current) return;
+      setLinkError(error instanceof Error ? error.message : "GitHub repositories are unavailable.");
+    } finally {
+      if (operation === linkGeneration.current) setLinkBusy(false);
+    }
+  };
+
   const handleListboxKeyDown = (event: React.KeyboardEvent<HTMLUListElement>) => {
     if (options.length === 0) return;
     const lastIndex = options.length - 1;
@@ -224,6 +266,31 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
 
   return (
     <div className="github-picker">
+      <form className="github-picker__link" noValidate onSubmit={(event) => void resolveLink(event)}>
+        <OctantInput
+          aria-label="Repository link or owner/repository"
+          onChange={(event) => {
+            setLinkInput(event.target.value);
+            setLinkError(undefined);
+          }}
+          placeholder="owner/repository or GitHub URL"
+          type="text"
+          value={linkInput}
+        />
+        <OctantButton
+          disabled={linkBusy || linkInput.trim() === ""}
+          size="sm"
+          type="submit"
+          variant="secondary"
+        >
+          {linkBusy ? "Resolving…" : "Use repository"}
+        </OctantButton>
+      </form>
+      {linkError === undefined ? null : (
+        <p className="github-picker__note" role="alert">
+          {linkError}
+        </p>
+      )}
       <div className="github-picker__toolbar">
         <OctantInput
           aria-label="Search GitHub repositories"

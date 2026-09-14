@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { FolderOpen } from "lucide-react";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { GithubCloneClient } from "@octant/client-runtime/github-clone-client";
 import type {
@@ -7,7 +8,9 @@ import type {
   GithubCloneRefusalReason,
   GithubRepositoryRow,
 } from "@octant/contracts";
+import { decodeBindingReceiptId } from "@octant/contracts/projects";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 import { GITHUB_VISIBILITY_LABELS, GitHubRepositoryPicker } from "./GitHubRepositoryPicker";
 
 /**
@@ -20,6 +23,12 @@ import { GITHUB_VISIBILITY_LABELS, GitHubRepositoryPicker } from "./GitHubReposi
  * repository selection survives all of them so a retry needs no re-pick.
  */
 
+export interface GithubCloneDestinationChoice {
+  /** One host-issued parent-folder receipt from the native picker or folder browser. */
+  readonly receiptId: string;
+  readonly displayName: string;
+}
+
 export interface GitHubRepositoryOnboardingFlowProps {
   readonly client: GithubClient;
   readonly cloneClient: GithubCloneClient;
@@ -28,6 +37,12 @@ export interface GitHubRepositoryOnboardingFlowProps {
   /** Creates the ordinary Code Project from the one-time binding receipt. */
   readonly createProject: (name: string, receiptId: string) => Promise<string | undefined>;
   readonly onProjectCreated?: (projectId: string, name: string) => void;
+  /**
+   * When present, the person chooses the parent folder and folder name the
+   * checkout lands in before anything is requested. Absent keeps the host's
+   * managed repository inventory as the destination.
+   */
+  readonly chooseDestination?: () => Promise<GithubCloneDestinationChoice | undefined>;
   /** Done on the completed step; the owner closes whatever holds the flow. */
   readonly onDone: () => void;
   readonly pollIntervalMs?: number;
@@ -35,6 +50,7 @@ export interface GitHubRepositoryOnboardingFlowProps {
 
 type FlowPhase =
   | { readonly kind: "pick" }
+  | { readonly kind: "destination"; readonly repository: GithubRepositoryRow }
   | { readonly kind: "requesting" }
   | { readonly kind: "confirm"; readonly operation: GithubCloneOperation }
   | {
@@ -82,8 +98,11 @@ const PROGRESS_PHASE_LABELS: Readonly<Record<string, string>> = {
 
 export function GitHubRepositoryOnboardingFlow(props: GitHubRepositoryOnboardingFlowProps) {
   const { cloneClient, createProject, onProjectCreated } = props;
+  const chooseDestination = props.chooseDestination;
   const pollIntervalMs = props.pollIntervalMs ?? 700;
   const [selection, setSelection] = useState<GithubRepositoryRow>();
+  const [destination, setDestination] = useState<GithubCloneDestinationChoice>();
+  const [folderName, setFolderName] = useState("");
   const [phase, setPhase] = useState<FlowPhase>({ kind: "pick" });
 
   // Poll bounded, redacted progress while the confirmed pipeline runs. The
@@ -119,7 +138,7 @@ export function GitHubRepositoryOnboardingFlow(props: GitHubRepositoryOnboarding
     return () => clearInterval(interval);
   }, [cloneClient, pollIntervalMs, runningRequestId]);
 
-  const requestClone = async (row: GithubRepositoryRow) => {
+  const requestClone = async (row: GithubRepositoryRow, chosen?: GithubCloneDestinationChoice) => {
     setPhase({ kind: "requesting" });
     const requestId = crypto.randomUUID();
     try {
@@ -129,6 +148,14 @@ export function GitHubRepositoryOnboardingFlow(props: GitHubRepositoryOnboarding
         nodeId: row.nodeId,
         expectedOwner: row.owner,
         expectedName: row.name,
+        ...(chosen === undefined
+          ? {}
+          : {
+              destination: {
+                parentReceiptId: decodeBindingReceiptId(chosen.receiptId),
+                folderName: folderName.trim(),
+              },
+            }),
       });
       if (response.kind === "refused") {
         setPhase({
@@ -221,19 +248,59 @@ export function GitHubRepositoryOnboardingFlow(props: GitHubRepositoryOnboarding
     }
   };
 
+  /**
+   * A chosen parent folder arrives as a one-time receipt that the request
+   * consumes, so returning to the destination step always asks for a fresh
+   * folder selection rather than replaying a spent receipt.
+   */
+  const returnToDestination = () => {
+    if (selection === undefined || chooseDestination === undefined) return;
+    setDestination(undefined);
+    setPhase({ kind: "destination", repository: selection });
+  };
+
+  const backFromConfirm = (operation: GithubCloneOperation) => {
+    if (chooseDestination === undefined) {
+      setPhase({ kind: "pick" });
+      return;
+    }
+    void cloneClient
+      .execute({ kind: "cancel-clone", requestId: operation.requestId })
+      .catch(() => undefined);
+    returnToDestination();
+  };
+
   return (
     <FlowBody
       hostName={props.hostName}
       client={props.client}
       phase={phase}
       selection={selection}
+      destination={destination}
+      folderName={folderName}
+      {...(chooseDestination === undefined ? {} : { chooseDestination })}
       onPick={(row) => {
         setSelection(row);
-        void requestClone(row);
+        if (chooseDestination === undefined) {
+          void requestClone(row);
+          return;
+        }
+        setFolderName(row.name);
+        setPhase({ kind: "destination", repository: row });
+      }}
+      onChooseDestination={(choice) => setDestination(choice)}
+      onFolderNameChange={setFolderName}
+      onContinueToRequest={() => {
+        if (selection === undefined || destination === undefined) return;
+        void requestClone(selection, destination);
       }}
       onConfirm={(operation) => void confirm(operation)}
       onCancelClone={(operation) => void cancel(operation)}
       onBackToPicker={() => setPhase({ kind: "pick" })}
+      {...(chooseDestination !== undefined && selection !== undefined
+        ? { onBackToDestination: returnToDestination }
+        : {})}
+      onBackFromConfirm={backFromConfirm}
       onRetryRequest={() => {
         if (selection !== undefined) void requestClone(selection);
       }}
@@ -248,10 +315,18 @@ interface FlowBodyProps {
   readonly hostName: string;
   readonly phase: FlowPhase;
   readonly selection: GithubRepositoryRow | undefined;
+  readonly destination: GithubCloneDestinationChoice | undefined;
+  readonly folderName: string;
+  readonly chooseDestination?: () => Promise<GithubCloneDestinationChoice | undefined>;
   readonly onPick: (row: GithubRepositoryRow) => void;
+  readonly onChooseDestination: (choice: GithubCloneDestinationChoice) => void;
+  readonly onFolderNameChange: (name: string) => void;
+  readonly onContinueToRequest: () => void;
   readonly onConfirm: (operation: GithubCloneOperation) => void;
   readonly onCancelClone: (operation: GithubCloneOperation) => void;
   readonly onBackToPicker: () => void;
+  readonly onBackToDestination?: () => void;
+  readonly onBackFromConfirm: (operation: GithubCloneOperation) => void;
   readonly onRetryRequest: () => void;
   readonly onRetryProjectCreation: (
     receipt: GithubCloneBindingReceipt,
@@ -274,6 +349,20 @@ function FlowBody(props: FlowBodyProps) {
           />
         </div>
       );
+    case "destination":
+      return props.chooseDestination === undefined ? null : (
+        <DestinationStep
+          chooseDestination={props.chooseDestination}
+          destination={props.destination}
+          folderName={props.folderName}
+          hostName={props.hostName}
+          onBack={props.onBackToPicker}
+          onChoose={props.onChooseDestination}
+          onContinue={props.onContinueToRequest}
+          onFolderNameChange={props.onFolderNameChange}
+          repository={phase.repository}
+        />
+      );
     case "requesting":
       return (
         <div className="github-onboarding__body">
@@ -284,7 +373,7 @@ function FlowBody(props: FlowBodyProps) {
       return (
         <ConfirmationCard
           hostName={props.hostName}
-          onBack={props.onBackToPicker}
+          onBack={() => props.onBackFromConfirm(phase.operation)}
           onConfirm={() => props.onConfirm(phase.operation)}
           operation={phase.operation}
         />
@@ -313,11 +402,21 @@ function FlowBody(props: FlowBodyProps) {
         <div className="github-onboarding__body">
           <p role="alert">{phase.remediation ?? REFUSAL_FALLBACKS[phase.reason]}</p>
           <div className="github-onboarding__actions">
+            {props.onBackToDestination === undefined ? null : (
+              <OctantButton
+                onClick={props.onBackToDestination}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Change destination
+              </OctantButton>
+            )}
             <OctantButton
               onClick={props.onBackToPicker}
               size="sm"
               type="button"
-              variant="secondary"
+              variant={props.onBackToDestination === undefined ? "secondary" : "ghost"}
             >
               Choose another repository
             </OctantButton>
@@ -335,14 +434,25 @@ function FlowBody(props: FlowBodyProps) {
             attached; any staging remains quarantined on the host.
           </p>
           <div className="github-onboarding__actions">
-            <OctantButton
-              onClick={props.onRetryRequest}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Try again
-            </OctantButton>
+            {props.onBackToDestination === undefined ? (
+              <OctantButton
+                onClick={props.onRetryRequest}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Try again
+              </OctantButton>
+            ) : (
+              <OctantButton
+                onClick={props.onBackToDestination}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Change destination
+              </OctantButton>
+            )}
             <OctantButton onClick={props.onBackToPicker} size="sm" type="button" variant="ghost">
               Choose another repository
             </OctantButton>
@@ -354,14 +464,25 @@ function FlowBody(props: FlowBodyProps) {
         <div className="github-onboarding__body">
           <p role="status">The clone was cancelled. Nothing was attached.</p>
           <div className="github-onboarding__actions">
-            <OctantButton
-              onClick={props.onRetryRequest}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Try again
-            </OctantButton>
+            {props.onBackToDestination === undefined ? (
+              <OctantButton
+                onClick={props.onRetryRequest}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Try again
+              </OctantButton>
+            ) : (
+              <OctantButton
+                onClick={props.onBackToDestination}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Change destination
+              </OctantButton>
+            )}
             <OctantButton onClick={props.onBackToPicker} size="sm" type="button" variant="ghost">
               Choose another repository
             </OctantButton>
@@ -407,6 +528,86 @@ function FlowBody(props: FlowBodyProps) {
         </div>
       );
   }
+}
+
+/**
+ * The destination step for the Create Project dialog: the person picks the
+ * parent folder through a host-issued binding receipt and names the folder
+ * the checkout will occupy. The server derives and previews the exact final
+ * path on the next step; nothing here sends a path.
+ */
+function DestinationStep(props: {
+  readonly hostName: string;
+  readonly repository: GithubRepositoryRow;
+  readonly destination: GithubCloneDestinationChoice | undefined;
+  readonly folderName: string;
+  readonly chooseDestination: () => Promise<GithubCloneDestinationChoice | undefined>;
+  readonly onChoose: (choice: GithubCloneDestinationChoice) => void;
+  readonly onFolderNameChange: (name: string) => void;
+  readonly onContinue: () => void;
+  readonly onBack: () => void;
+}) {
+  const [choosing, setChoosing] = useState(false);
+
+  const choose = async () => {
+    if (choosing) return;
+    setChoosing(true);
+    try {
+      const choice = await props.chooseDestination();
+      if (choice !== undefined) props.onChoose(choice);
+    } finally {
+      setChoosing(false);
+    }
+  };
+
+  const valid = props.destination !== undefined && props.folderName.trim() !== "";
+  return (
+    <div className="github-onboarding__body">
+      <h2 className="github-onboarding__heading">Where should it be cloned?</h2>
+      <p className="github-onboarding__note">
+        {props.repository.owner}/{props.repository.name} will be cloned into a folder you choose on{" "}
+        {props.hostName}.
+      </p>
+      <p className="project-dialog__field-label" id="github-clone-parent-label">
+        Clone into
+      </p>
+      <OctantButton
+        aria-describedby="github-clone-parent-label"
+        className="project-dialog__folder"
+        data-chosen={props.destination === undefined ? "false" : "true"}
+        disabled={choosing}
+        onClick={() => void choose()}
+        type="button"
+        variant="ghost"
+      >
+        <FolderOpen aria-hidden="true" size={16} strokeWidth={1.6} />
+        <span className="project-dialog__folder-name">
+          {props.destination?.displayName ??
+            (choosing ? "Waiting for the folder chooser…" : "Choose a folder")}
+        </span>
+        {props.destination === undefined ? null : (
+          <span className="project-dialog__folder-change">Change</span>
+        )}
+      </OctantButton>
+      <label className="project-dialog__field-label" htmlFor="github-clone-folder-name">
+        Folder name
+      </label>
+      <OctantInput
+        id="github-clone-folder-name"
+        onChange={(event) => props.onFolderNameChange(event.target.value)}
+        placeholder={props.repository.name}
+        value={props.folderName}
+      />
+      <div className="github-onboarding__actions">
+        <OctantButton disabled={!valid} onClick={props.onContinue} size="sm" type="button">
+          Continue
+        </OctantButton>
+        <OctantButton onClick={props.onBack} size="sm" type="button" variant="ghost">
+          Back
+        </OctantButton>
+      </div>
+    </div>
+  );
 }
 
 function ConfirmationCard(props: {

@@ -79,17 +79,36 @@ export type ManagedQuarantineResult =
 export class ManagedRepositoryInventory {
   readonly #inventoryPath: string;
   readonly #dependencies: ManagedInventoryDependencies;
+  readonly #requireExistingRoot: boolean;
 
   constructor(options: {
     readonly inventoryPath: string;
     readonly dependencies?: ManagedInventoryDependencies;
+    /** True for a user-chosen root that must already exist as a real directory. */
+    readonly requireExistingRoot?: boolean;
   }) {
     this.#inventoryPath = options.inventoryPath;
     this.#dependencies = options.dependencies ?? liveDependencies;
+    this.#requireExistingRoot = options.requireExistingRoot ?? false;
   }
 
   get inventoryPath(): string {
     return this.#inventoryPath;
+  }
+
+  /**
+   * A view of the same rules rooted at one directory the person chose through
+   * a host-issued binding receipt. Staging, quarantine, promotion, and
+   * confinement all operate beneath that root; because it is somebody's real
+   * folder rather than Octant's inventory, it must already exist and is never
+   * created on its behalf.
+   */
+  forRoot(rootPath: string): ManagedRepositoryInventory {
+    return new ManagedRepositoryInventory({
+      inventoryPath: rootPath,
+      dependencies: this.#dependencies,
+      requireExistingRoot: rootPath !== this.#inventoryPath,
+    });
   }
 
   async deriveDestination(segments: readonly string[]): Promise<ManagedInventoryDerivation> {
@@ -250,7 +269,10 @@ export class ManagedRepositoryInventory {
     try {
       details = await this.#dependencies.lstat(this.#inventoryPath);
     } catch (error) {
-      if (this.#dependencies.isMissingError(error)) return this.#inventoryPath;
+      if (this.#dependencies.isMissingError(error)) {
+        if (this.#requireExistingRoot) return { status: "unavailable" };
+        return this.#inventoryPath;
+      }
       return { status: "unavailable" };
     }
     if (details.isSymbolicLink() || !details.isDirectory()) {

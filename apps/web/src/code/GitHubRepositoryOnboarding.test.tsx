@@ -14,7 +14,10 @@ import type { GithubCloneClient } from "@octant/client-runtime/github-clone-clie
 import { GitHubRepositoryOnboardingFlow } from "./GitHubRepositoryOnboarding";
 
 const DIGEST = "a".repeat(64);
-const RECEIPT_ID = "R".repeat(43);
+// 43 base64url characters whose final character satisfies the branded
+// BindingReceiptId wire pattern, so the same value works as a parent-folder
+// receipt and as a binding receipt.
+const RECEIPT_ID = `${"R".repeat(42)}A`;
 
 const repositoriesPage: GithubCatalogueReadResponse = {
   kind: "repositories",
@@ -411,5 +414,110 @@ describe("GitHubRepositoryOnboardingFlow", () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+});
+
+describe("GitHubRepositoryOnboardingFlow with a chosen destination", () => {
+  function destinationChoice() {
+    return { receiptId: RECEIPT_ID, displayName: "Code" };
+  }
+
+  function destinationOverrides(
+    execute: (command: GithubCloneCommand) => Promise<GithubCloneCommandResponse>,
+    chooseDestination: () => Promise<{ receiptId: string; displayName: string } | undefined>,
+  ) {
+    return {
+      cloneClient: makeCloneClient({ execute }),
+      chooseDestination,
+    };
+  }
+
+  it("asks for the parent folder and folder name before any clone request", async () => {
+    const commands: GithubCloneCommand[] = [];
+    const execute = vi.fn(async (command: GithubCloneCommand) => {
+      commands.push(command);
+      return {
+        kind: "operation",
+        operation: operation({ requestId: command.requestId }),
+      } as GithubCloneCommandResponse;
+    });
+    const chooseDestination = vi.fn(async () => destinationChoice());
+    renderOnboarding(destinationOverrides(execute, chooseDestination));
+
+    await selectFirstRepository();
+
+    expect(await screen.findByText("Where should it be cloned?")).toBeInTheDocument();
+    expect(screen.getByText("Clone into")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Choose a folder" })).toBeEnabled();
+    expect(screen.getByLabelText("Folder name")).toHaveValue("repo-1");
+    expect(commands.filter((command) => command.kind === "request-clone")).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Choose a folder" }));
+    expect(await screen.findByText("Code")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Folder name"), {
+      target: { value: "repo-1-local" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+    expect(await screen.findByText("Confirm managed clone")).toBeInTheDocument();
+
+    const request = commands.find((command) => command.kind === "request-clone");
+    expect(request).toMatchObject({
+      kind: "request-clone",
+      nodeId: "R_node1",
+      destination: { parentReceiptId: RECEIPT_ID, folderName: "repo-1-local" },
+    });
+  });
+
+  it("backs out of the confirmation and asks for a fresh folder choice", async () => {
+    let choices = 0;
+    const chooseDestination = vi.fn(async () => {
+      choices += 1;
+      return destinationChoice();
+    });
+    renderOnboarding(
+      destinationOverrides(
+        async (command) => ({
+          kind: "operation",
+          operation: operation({ requestId: command.requestId }),
+        }),
+        chooseDestination,
+      ),
+    );
+
+    await selectFirstRepository();
+    fireEvent.click(await screen.findByRole("button", { name: "Choose a folder" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+    expect(await screen.findByText("Confirm managed clone")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    expect(await screen.findByText("Where should it be cloned?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Choose a folder" }));
+    expect(chooseDestination).toHaveBeenCalledTimes(2);
+  });
+
+  it("offers Change destination after a refusal instead of replaying a spent receipt", async () => {
+    const execute = vi.fn(async (command: GithubCloneCommand) => {
+      if (command.kind === "request-clone") {
+        return {
+          kind: "refused",
+          reason: "collision",
+          remediation: "The destination already contains a different checkout.",
+        } as GithubCloneCommandResponse;
+      }
+      throw new Error("unexpected");
+    });
+    renderOnboarding(destinationOverrides(execute, async () => destinationChoice()));
+
+    await selectFirstRepository();
+    fireEvent.click(await screen.findByRole("button", { name: "Choose a folder" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The destination already contains a different checkout.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Change destination" }));
+    expect(await screen.findByText("Where should it be cloned?")).toBeInTheDocument();
+    expect(screen.getByLabelText("Folder name")).toHaveValue("repo-1");
   });
 });

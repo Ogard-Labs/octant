@@ -1371,6 +1371,16 @@ function LaunchedShell(
     () => readLastSelectedHealthyHostId(),
   );
   const [createHostId, setCreateHostId] = useState<HostId>(() => defaultCreateHostId());
+  // The Create Project dialog's GitHub tab rides the same host-scoped GitHub
+  // clients the composer's "New Project from GitHub repository" uses. Disabled
+  // GitHub contributes no tab, exactly as it contributes no composer row.
+  const projectCreateGithub = useMemo(() => {
+    if (FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") !== true) return undefined;
+    const hostName =
+      hosts.find((host) => String(host.hostId) === String(createHostId))?.displayName ??
+      localHostDisplayName();
+    return { client: githubClient, cloneClient: githubCloneClient, hostName };
+  }, [createHostId, githubCloneClient, githubClient, hosts]);
   // Drop removed hosts from the environments filter before create preselect runs,
   // otherwise a lone removed remote leaves createHostId pointing at nothing.
   useEffect(() => {
@@ -5970,6 +5980,7 @@ function LaunchedShell(
         <ShellDialogHost
           createOpen={createOpen}
           folderBrowseClient={folderBrowseClient}
+          {...(projectCreateGithub === undefined ? {} : { github: projectCreateGithub })}
           hostId={createHostId}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
           mode={projectCreateMode ?? controller.workspace.activeMode}

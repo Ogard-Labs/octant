@@ -23,6 +23,66 @@ function portReturning(pages: ReadonlyArray<readonly unknown[]>) {
   return { port: new GhRepositoryCataloguePort({ command: { run } }), run };
 }
 
+function repositoryItem(overrides: Record<string, unknown> = {}) {
+  return {
+    node_id: "R_kgDOG8x1Aa",
+    owner: { login: "octant" },
+    name: "octant",
+    visibility: "public",
+    default_branch: "main",
+    permissions: { pull: true },
+    ...overrides,
+  };
+}
+
+describe("readRepository", () => {
+  it("reads one repository by owner and name and normalizes its identity", async () => {
+    const run = vi.fn(async (_arguments_: readonly string[]) => ({
+      exitCode: 0,
+      stdout: JSON.stringify(repositoryItem()),
+    }));
+    const port = new GhRepositoryCataloguePort({ command: { run } });
+    expect(
+      await port.readRepository({ owner: "octant", name: "octant" }, new AbortController().signal),
+    ).toEqual({
+      kind: "ok",
+      value: {
+        nodeId: "R_kgDOG8x1Aa",
+        owner: "octant",
+        name: "octant",
+        visibility: "public",
+        defaultBranch: "main",
+        viewerPermission: "read",
+      },
+    });
+    expect(run.mock.calls[0]?.[0]).toEqual(["api", "repos/octant/octant"]);
+  });
+
+  it("refuses an invalid owner or name before spawning gh", async () => {
+    const run = vi.fn();
+    const port = new GhRepositoryCataloguePort({ command: { run } });
+    expect(
+      await port.readRepository({ owner: "../evil", name: "octant" }, new AbortController().signal),
+    ).toEqual({ kind: "unavailable" });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("classifies a missing repository as an actionable bounded failure", async () => {
+    const run = vi.fn(async () => ({
+      exitCode: 1,
+      stdout: "",
+      stderr: "HTTP 404: Not Found",
+    }));
+    const port = new GhRepositoryCataloguePort({ command: { run } });
+    expect(
+      await port.readRepository({ owner: "octant", name: "gone" }, new AbortController().signal),
+    ).toEqual({
+      kind: "scope-limited",
+      remediation: "repository-access-or-scope-required",
+    });
+  });
+});
+
 describe("listAssignedWork", () => {
   it("merges the four viewer searches, own pull requests included, and keeps one row per item", async () => {
     const { port, run } = portReturning([

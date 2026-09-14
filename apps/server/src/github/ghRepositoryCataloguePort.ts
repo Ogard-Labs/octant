@@ -192,6 +192,24 @@ export class GhRepositoryCataloguePort implements GhOperationProbePort {
     });
   }
 
+  /**
+   * One fresh single-repository read by owner/name. This is how a repository
+   * the person named or pasted — including a public repository outside their
+   * own catalogue — is resolved to normalized identity before any clone.
+   */
+  async readRepository(
+    request: { readonly owner: string; readonly name: string },
+    signal: AbortSignal,
+  ): Promise<GhCatalogueResult<GhRepositoryObservationRow>> {
+    const repository = validatedRepositoryPath(request.owner, request.name);
+    if (repository === undefined) return { kind: "unavailable" };
+    const result = await this.#run(["api", `repos/${repository}`], signal);
+    if (result.kind !== "ok") return result;
+    const row = decodeRepositoryItem(tryParseJson(result.stdout));
+    if (row === undefined || row === "skip") return { kind: "unavailable" };
+    return { kind: "ok", value: row };
+  }
+
   async listIssues(
     request: {
       readonly owner: string;

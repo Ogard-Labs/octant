@@ -231,3 +231,43 @@ describe("promotion and quarantine", () => {
     expect(await inventory.quarantine(requestId)).toEqual({ status: "clean" });
   });
 });
+
+describe("user-chosen root", () => {
+  it("derives a single-segment destination beneath an existing chosen folder", async () => {
+    const { inventory } = createInventory();
+    const parent = mkdtempSync(join(tmpdir(), "octant-chosen-"));
+    directories.push(parent);
+    const derived = await inventory.forRoot(parent).deriveDestination(["my-project"]);
+    if (derived.status !== "derived") throw new Error("expected derivation");
+    expect(derived.inventoryPath).toBe(parent);
+    expect(derived.destinationPath).toBe(join(parent, "my-project"));
+  });
+
+  it("refuses a chosen root that no longer exists instead of creating it", async () => {
+    const { inventory } = createInventory();
+    const base = mkdtempSync(join(tmpdir(), "octant-chosen-"));
+    directories.push(base);
+    const missing = join(base, "gone");
+    expect(await inventory.forRoot(missing).deriveDestination(["my-project"])).toEqual({
+      status: "unavailable",
+    });
+  });
+
+  it("keeps staging, promotion, and confinement beneath the chosen root", async () => {
+    const { inventory } = createInventory();
+    const parent = mkdtempSync(join(tmpdir(), "octant-chosen-"));
+    directories.push(parent);
+    const root = inventory.forRoot(parent);
+    const staged = await root.ensureStaging(requestId);
+    if (staged.status !== "staged") throw new Error("expected staging");
+    expect(staged.stagingPath).toBe(join(parent, ".octant-incoming", requestId));
+    expect(await root.isConfined(staged.stagingPath)).toBe(true);
+
+    const promoted = await root.promote(staged.stagingPath, join(parent, "my-project"));
+    expect(promoted).toMatchObject({ status: "promoted" });
+
+    const outside = mkdtempSync(join(tmpdir(), "octant-outside-"));
+    directories.push(outside);
+    expect(await root.isConfined(join(outside, "elsewhere"))).toBe(false);
+  });
+});
