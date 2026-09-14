@@ -620,8 +620,9 @@ describe("OpenCodeProcessPort", () => {
       allowProcessExec: false,
       allowProcessFork: false,
     });
-    expect(captured?.readRoots).toContain(realpathSync(shimDirectory));
+    expect(captured?.readRoots).not.toContain(realpathSync(shimDirectory));
     expect(captured?.privateHomeAllowPaths).toContain(realpathSync(shimDirectory));
+    expect(captured?.privateHomeAllowPaths).toContain(realpathSync(linkedBinary));
   });
 
   it("starts with a private config profile while withholding isolation without an OS receipt", async () => {

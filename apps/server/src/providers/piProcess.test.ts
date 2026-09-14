@@ -21,7 +21,7 @@ import {
   piProcessEnvironment,
   sanitizePiEnvironment,
 } from "./piProcess";
-import { seatbeltAllowRule } from "../process/seatbeltProfile";
+import { seatbeltAllowRule, seatbeltDenyRule } from "../process/seatbeltProfile";
 
 const roots: string[] = [];
 
@@ -382,6 +382,8 @@ describe("Pi process boundary", () => {
         environment: sanitizePiEnvironment({ PATH: "/usr/bin" }, f.home),
       }),
     );
-    expect(launch.args[1]).toContain(seatbeltAllowRule("file-read*", shimDirectory));
+    const profile = launch.args[1]!;
+    expect(profile).not.toContain(seatbeltAllowRule("file-read*", shimDirectory));
+    expect(profile).not.toContain(seatbeltDenyRule("file-read*", linkedBinary));
   });
 });

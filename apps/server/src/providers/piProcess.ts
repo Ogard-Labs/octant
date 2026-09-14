@@ -514,12 +514,11 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
         const temporaryDirectoryPath = yield* temporaryDirectory(
           options.temporaryDirectory ?? input.environment.TMPDIR ?? "/tmp",
         );
-        const binaryDirectory = dirname(realpathSync(input.binaryPath));
+        const resolvedBinaryPath = realpathSync(input.binaryPath);
         // The configured path can be a launcher link; the kernel needs
         // read-metadata on that link before it can resolve to the realpath.
         const configuredBinaryDirectory = dirname(input.binaryPath);
-        const runtimeDirectory = dirname(binaryDirectory);
-        const packageRoot = packageRootAbove(binaryDirectory);
+        const packageRoot = packageRootAbove(dirname(resolvedBinaryPath));
         const networkEgress = materializeOsNetworkEgress(
           resolveDefaultThreadEgressPolicy({
             mode: input.mode,
@@ -561,9 +560,6 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
               readRoots: [
                 root,
                 piHome,
-                binaryDirectory,
-                configuredBinaryDirectory,
-                runtimeDirectory,
                 ...(packageRoot === undefined ? [] : [packageRoot]),
                 temporaryDirectoryPath,
                 ...credentialPaths,
@@ -571,9 +567,8 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
               privateHomeAllowPaths: [
                 root,
                 piHome,
-                binaryDirectory,
+                resolvedBinaryPath,
                 configuredBinaryDirectory,
-                runtimeDirectory,
                 ...(packageRoot === undefined ? [] : [packageRoot]),
                 ...credentialPaths,
               ],

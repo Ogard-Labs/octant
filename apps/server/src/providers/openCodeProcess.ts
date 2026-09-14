@@ -797,12 +797,10 @@ function prepareOpenCodeLaunch(
       const root = realpathSync(input.cwd);
       if (!statSync(root).isDirectory()) throw new Error("project root is not a directory");
       const binaryPath = realpathSync(input.binaryPath);
-      const binaryDirectory = dirname(binaryPath);
       // The configured path can be a launcher link (a Homebrew shim or
       // `~/.local/bin/...`); the kernel needs read-metadata on that link
       // before it can resolve to the realpath the rules allow.
       const configuredBinaryDirectory = dirname(input.binaryPath);
-      const runtimeDirectory = dirname(binaryDirectory);
       const temporaryDirectory = profile.environment.TMPDIR ?? "/tmp";
       const configDirectory = profile.environment.OPENCODE_CONFIG_DIR;
       const configHome = profile.environment.XDG_CONFIG_HOME;
@@ -818,9 +816,17 @@ function prepareOpenCodeLaunch(
       }
       const readRoots = existingAbsolutePaths([
         root,
-        binaryDirectory,
+        temporaryDirectory,
+        configDirectory,
+        configHome,
+        cacheHome,
+        stateHome,
+        providerDataDirectory,
+      ]);
+      const privateHomeAllowPaths = existingAbsolutePaths([
+        root,
+        binaryPath,
         configuredBinaryDirectory,
-        runtimeDirectory,
         temporaryDirectory,
         configDirectory,
         configHome,
@@ -853,7 +859,7 @@ function prepareOpenCodeLaunch(
         temporaryDirectory,
         additionalWriteRoots: writeRoots,
         readRoots,
-        privateHomeAllowPaths: readRoots,
+        privateHomeAllowPaths,
         networkEgress,
         writeBoundRoot: !(executionPolicy === "plan" || mode === "chat"),
         allowProcessExec: !(executionPolicy === "plan" || mode === "chat"),

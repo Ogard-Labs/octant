@@ -567,8 +567,7 @@ function prepareDarwinSeatbelt(
   const interpreterSearchPath =
     input.interpreterSearchPath ?? options.interpreterSearchPath ?? process.env.PATH;
   const executablePaths = confinedExecutableExecPaths(input.executable, interpreterSearchPath);
-  const executableDirectories = uniqueAbsolutePaths(executablePaths.map(dirname));
-  const readRoots = [...(input.readRoots ?? []), ...executableDirectories];
+  const readRoots = input.readRoots ?? [];
   const privateHomeAllowPaths = uniqueAbsolutePaths([
     ...(input.privateHomeAllowPaths ?? [
       input.boundRoot,
@@ -576,6 +575,7 @@ function prepareDarwinSeatbelt(
       ...(input.additionalWriteRoots ?? []),
     ]),
     ...readRoots,
+    ...executablePaths,
   ]);
   const profile = buildDenyDefaultSeatbeltProfile({
     boundRoot: input.boundRoot,
