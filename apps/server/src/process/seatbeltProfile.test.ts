@@ -249,10 +249,12 @@ describe("shared Seatbelt profile builder", () => {
     expect(reachable).toContain('(allow mach-lookup (global-name "com.apple.trustd"))');
     expect(reachable).toContain('(allow mach-lookup (global-name "com.apple.trustd.agent"))');
     expect(reachable).toContain(seatbeltAllowRule("file-read*", "/System/Library/Keychains"));
+    expect(reachable).toContain(seatbeltAllowRule("file-read*", "/System/Library/Security"));
 
     const offline = buildDenyDefaultSeatbeltProfile({ ...input, networkEgress: "none" });
     expect(offline).not.toContain("mach-lookup");
     expect(offline).not.toContain("/System/Library/Keychains");
+    expect(offline).not.toContain("/System/Library/Security");
   });
 
   it("wraps a command with sandbox-exec -p profile --", () => {
