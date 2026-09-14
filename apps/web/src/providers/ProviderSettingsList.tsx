@@ -161,18 +161,29 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
   }
 
   // Only the current scan is evidence that a runtime is installed; the group a
-  // row lands in follows that, while a row's switch can still be enable-able
-  // when the provider is a manual endpoint addition.
+  // row lands in follows that. A binary the scan never searched for is not
+  // claimed absent, and a manual endpoint has no local binary to detect at all.
   const groups = useMemo(() => {
     const detected: Array<{ readonly instance: ProviderInstance; readonly index: number }> = [];
-    const notDetected: Array<{ readonly instance: ProviderInstance; readonly index: number }> = [];
+    const notFound: Array<{ readonly instance: ProviderInstance; readonly index: number }> = [];
+    const other: Array<{ readonly instance: ProviderInstance; readonly index: number }> = [];
     ordered.forEach((instance, index) => {
-      (isDetectedLocally(instance, props.discoverySnapshot) ? detected : notDetected).push({
-        instance,
-        index,
-      });
+      const row = { instance, index };
+      const binaryPath = providerBinaryPath(instance);
+      if (isDetectedLocally(instance, props.discoverySnapshot)) {
+        detected.push(row);
+      } else if (
+        binaryPath === undefined ||
+        !isAbsenceProven(binaryPath, instance.driverKind, props.discoverySnapshot)
+      ) {
+        // The scan never visited this binary's directory, or never finished:
+        // its silence is not evidence of absence.
+        other.push(row);
+      } else {
+        notFound.push(row);
+      }
     });
-    return { detected, notDetected };
+    return { detected, notFound, other };
   }, [ordered, props.discoverySnapshot]);
 
   const busy = props.busy || props.status !== "ready";
@@ -296,13 +307,19 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
                 </div>
               </>
             )}
-            {groups.notDetected.length === 0 ? null : (
+            {groups.notFound.length === 0 ? null : (
               <>
                 <h3 className="oct-section-label">Supported, not detected</h3>
                 <div className="provlist">
-                  {groups.notDetected.map(({ instance, index }) =>
-                    renderProviderRow(instance, index),
-                  )}
+                  {groups.notFound.map(({ instance, index }) => renderProviderRow(instance, index))}
+                </div>
+              </>
+            )}
+            {groups.other.length === 0 ? null : (
+              <>
+                <h3 className="oct-section-label">Other providers</h3>
+                <div className="provlist">
+                  {groups.other.map(({ instance, index }) => renderProviderRow(instance, index))}
                 </div>
               </>
             )}
@@ -557,9 +574,16 @@ function ProviderRow(props: ProviderRowProps) {
     if (readiness === "unauthenticated") setDetailsOpen(true);
   }, [readiness]);
   const detectedLocally = isDetectedLocally(props.instance, props.discoverySnapshot);
-  const canEnable = canEnableProvider(props.instance, detectedLocally);
+  const canEnable = canEnableProvider(props.instance, props.discoverySnapshot, detectedLocally);
   const detectedButDisabled = !props.instance.enabled && detectedLocally;
   const enableBlocked = !props.instance.enabled && !canEnable;
+  // A disabled binary-backed provider the finished scan never searched for:
+  // the switch stays usable and the row says why the scan is silent.
+  const absenceUnproven =
+    !props.instance.enabled &&
+    canEnable &&
+    !detectedLocally &&
+    providerBinaryPath(props.instance) !== undefined;
   const isCli =
     props.instance.driverKind === "codex" ||
     props.instance.driverKind === "opencode" ||
@@ -685,6 +709,12 @@ function ProviderRow(props: ProviderRowProps) {
         <span className="prov-meta oct-meta">
           {label} {runtimeLabel}
         </span>
+        {absenceUnproven ? (
+          <span className="prov-meta provider-settings__scan-note">
+            Not found by the latest scan in the locations it searched — you can still enable it; the
+            host checks the binary first.
+          </span>
+        ) : null}
       </span>
       <span className="prov-observation">
         <span className="prov-models oct-meta">
@@ -1487,6 +1517,11 @@ function readinessTone(
  * Presence evidence comes only from the current scan. `autoRegisteredInstanceIds`
  * records what an earlier scan created, so it is history, not current presence.
  * A scan that has not run, failed, or was cancelled proves nothing either way.
+ *
+ * The scan probes the executable's canonical path, while an instance stores the
+ * path the user configured (Homebrew's `/opt/homebrew/bin/codex` symlink is the
+ * usual spelling). Either the canonical `binaryPath` or the `discoveredPath`
+ * the scan actually examined identifies the instance.
  */
 function isDetectedLocally(
   instance: ProviderInstance,
@@ -1503,19 +1538,58 @@ function isDetectedLocally(
     binaryPath !== undefined &&
     snapshot.candidates.some(
       (candidate) =>
-        candidate.driverKind === instance.driverKind && candidate.binaryPath === binaryPath,
+        candidate.driverKind === instance.driverKind &&
+        (candidate.binaryPath === binaryPath || candidate.discoveredPath === binaryPath),
     )
   );
 }
 
 /**
- * A binary-backed provider stays fail-closed until the current scan finds it:
- * a missing, cancelled, or failed scan is not proof that the binary exists.
- * Manual endpoint additions have no binaryPath to detect, so their switch
- * reflects the user's own configuration instead.
+ * A binary-backed provider stays fail-closed while presence is unknown: an
+ * unrun, failed, or cancelled scan is not proof that the binary exists. A
+ * finished scan proves absence only for a directory it actually searched, so a
+ * binary outside those locations stays enable-able even when the scan did not
+ * find it; the server refuses to enable a missing binary.
  */
-function canEnableProvider(instance: ProviderInstance, detectedLocally: boolean): boolean {
-  return providerBinaryPath(instance) === undefined || detectedLocally;
+function canEnableProvider(
+  instance: ProviderInstance,
+  snapshot: DiscoverySnapshot | undefined,
+  detectedLocally: boolean,
+): boolean {
+  const binaryPath = providerBinaryPath(instance);
+  if (binaryPath === undefined || detectedLocally) return true;
+  if (snapshot === undefined || snapshot.status === "failed" || snapshot.status === "cancelled") {
+    return false;
+  }
+  return !isAbsenceProven(binaryPath, instance.driverKind, snapshot);
+}
+
+/**
+ * Whether the current scan searched the directory holding this path and found
+ * nothing for this provider. Silence about a directory the scan never visited,
+ * or a driverKind the scan never finished, proves nothing, so a missing or
+ * pre-`searchedDirectories` snapshot never proves absence.
+ */
+function isAbsenceProven(
+  binaryPath: string,
+  driverKind: ProviderInstance["driverKind"],
+  snapshot: DiscoverySnapshot | undefined,
+): boolean {
+  if (snapshot === undefined || snapshot.status === "failed" || snapshot.status === "cancelled") {
+    return false;
+  }
+  const coverage = snapshot.searchedDirectories;
+  if (coverage === undefined || coverage.length === 0) return false;
+  const directory = directoryOf(binaryPath);
+  const driverCoverage = coverage.find((entry) => entry.driverKind === driverKind);
+  if (driverCoverage === undefined) return false;
+  return driverCoverage.directories.some((candidate) => candidate === directory);
+}
+
+/** The parent directory of an absolute path, without node's path module. */
+function directoryOf(path: string): string {
+  const separator = path.lastIndexOf("/");
+  return separator <= 0 ? "/" : path.slice(0, separator);
 }
 
 function providerBinaryPath(instance: ProviderInstance): string | undefined {

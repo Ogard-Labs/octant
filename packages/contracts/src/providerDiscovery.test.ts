@@ -61,6 +61,24 @@ describe("provider discovery contracts", () => {
       const decoded = decodeDiscoveryCandidate(minimal);
       expect(decoded.version).toBeUndefined();
       expect(decoded.onboardingGuidance).toBeUndefined();
+      expect(decoded.discoveredPath).toBeUndefined();
+    });
+
+    it("carries the discovered symlink spelling beside the canonical binary path", () => {
+      const linked = {
+        ...validCandidate,
+        binaryPath: "/opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js",
+        discoveredPath: "/opt/homebrew/bin/codex",
+      };
+      const decoded = decodeDiscoveryCandidate(linked);
+      expect(decoded.binaryPath).toBe("/opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js");
+      expect(decoded.discoveredPath).toBe("/opt/homebrew/bin/codex");
+    });
+
+    it("rejects a relative discovered path", () => {
+      expect(() =>
+        decodeDiscoveryCandidate({ ...validCandidate, discoveredPath: "bin/codex" }),
+      ).toThrow();
     });
 
     it("rejects a non-absolute binary path", () => {
@@ -117,6 +135,30 @@ describe("provider discovery contracts", () => {
       expect(decoded.autoRegisteredInstanceIds).toEqual(
         withAutoRegistered.autoRegisteredInstanceIds,
       );
+    });
+
+    it("decodes per-driver searched directories and leaves them absent on an old snapshot", () => {
+      const withDirectories = {
+        ...validSnapshot,
+        searchedDirectories: [
+          { driverKind: "codex", directories: ["/usr/local/bin"] },
+          { driverKind: "devin", directories: ["/Users/example/.local/bin"] },
+        ],
+      };
+      const decoded = decodeDiscoverySnapshot(withDirectories);
+      expect(decoded.searchedDirectories).toEqual(withDirectories.searchedDirectories);
+
+      const old = decodeDiscoverySnapshot(validSnapshot);
+      expect(old.searchedDirectories).toBeUndefined();
+    });
+
+    it("rejects a relative searched directory", () => {
+      expect(() =>
+        decodeDiscoverySnapshot({
+          ...validSnapshot,
+          searchedDirectories: [{ driverKind: "codex", directories: ["relative/bin"] }],
+        }),
+      ).toThrow();
     });
   });
 

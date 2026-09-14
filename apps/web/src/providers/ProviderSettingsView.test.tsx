@@ -2101,6 +2101,7 @@ describe("ProviderSettingsView", () => {
           discoverySnapshot: discoverySnapshot({
             autoRegisteredInstanceIds: [id],
             candidates: [],
+            searchedDirectories: searchedDirectoriesFor("opencode", "/opt/homebrew/bin"),
           }),
         })}
       />,
@@ -2121,6 +2122,7 @@ describe("ProviderSettingsView", () => {
           discoverySnapshot: discoverySnapshot({
             status: "failed",
             candidates: [opencodeCandidate()],
+            searchedDirectories: searchedDirectoriesFor("opencode", "/opt/homebrew/bin"),
           }),
         })}
       />,
@@ -2132,6 +2134,40 @@ describe("ProviderSettingsView", () => {
     expect(control).toHaveAttribute("aria-disabled", "true");
     expect(control).toHaveAccessibleDescription(/failed/i);
   });
+
+  it.each([
+    { label: "not run", snapshot: undefined },
+    {
+      label: "failed",
+      snapshot: discoverySnapshot({ status: "failed", candidates: [opencodeCandidate()] }),
+    },
+    {
+      label: "cancelled",
+      snapshot: discoverySnapshot({ status: "cancelled", candidates: [opencodeCandidate()] }),
+    },
+  ])(
+    "groups a binary-backed provider under a neutral heading while the scan is $label",
+    ({ snapshot }) => {
+      renderProviderSettings(
+        <ProviderSettingsView
+          {...fixture({
+            instance: provider({ enabled: false }),
+            ...(snapshot === undefined ? {} : { discoverySnapshot: snapshot }),
+          })}
+        />,
+      );
+
+      expect(screen.queryByRole("heading", { name: "Detected on this host" })).toBeNull();
+      expect(screen.queryByRole("heading", { name: "Supported, not detected" })).toBeNull();
+      const neutral = screen.getByRole("heading", { name: "Other providers" });
+      const card = screen.getByRole("article", { name: "Existing CLI" });
+      expect(neutral.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(within(card).getByRole("switch", { name: "Enable Existing CLI" })).toHaveAttribute(
+        "aria-disabled",
+        "true",
+      );
+    },
+  );
 
   it("keeps a binary-backed provider fail-closed until a scan has run", () => {
     renderProviderSettings(
@@ -2145,7 +2181,7 @@ describe("ProviderSettingsView", () => {
     expect(control).toHaveAccessibleDescription(/has not been scanned/i);
   });
 
-  it("keeps a manual endpoint provider enable-able without a local detection", () => {
+  it("keeps a manual endpoint provider enable-able and out of the not-detected group", () => {
     renderProviderSettings(
       <ProviderSettingsView
         {...fixture({
@@ -2159,6 +2195,8 @@ describe("ProviderSettingsView", () => {
     expect(within(card).queryByLabelText("Detected locally")).toBeNull();
     const control = within(card).getByRole("switch", { name: "Enable Private gateway" });
     expect(control).not.toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByRole("heading", { name: "Supported, not detected" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Other providers" })).toBeVisible();
   });
 
   it("separates providers the scan found from supported providers it did not find", () => {
@@ -2168,7 +2206,15 @@ describe("ProviderSettingsView", () => {
     };
     renderProviderSettings(
       <ProviderSettingsView
-        {...fixture({ discoverySnapshot: discoverySnapshot({ candidates: [codexCandidate()] }) })}
+        {...fixture({
+          discoverySnapshot: discoverySnapshot({
+            candidates: [codexCandidate()],
+            searchedDirectories: [
+              ...searchedDirectoriesFor("codex", "/opt/homebrew/bin"),
+              ...searchedDirectoriesFor("kilo", "/opt/homebrew/bin"),
+            ],
+          }),
+        })}
         instances={[absent, codexProvider()]}
       />,
     );
@@ -2194,6 +2240,46 @@ describe("ProviderSettingsView", () => {
     expect(screen.queryByRole("heading", { name: "Supported, not detected" })).toBeNull();
     expect(screen.getByRole("article", { name: "Codex local" })).toBeVisible();
     expect(screen.getByRole("article", { name: "Kilo local" })).toBeVisible();
+  });
+
+  it("matches a symlink-spelled instance path through the scan's discovered path", () => {
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture({
+          instance: { ...devinProvider(), enabled: false },
+          discoverySnapshot: discoverySnapshot({
+            candidates: [devinCandidate()],
+            searchedDirectories: searchedDirectoriesFor("devin", "/Users/example/.local/bin"),
+          }),
+        })}
+      />,
+    );
+
+    const card = screen.getByRole("article", { name: "Devin local" });
+    expect(within(card).getByLabelText("Detected locally")).toBeVisible();
+    const control = within(card).getByRole("switch", { name: "Enable Devin local" });
+    expect(control).not.toHaveAttribute("aria-disabled", "true");
+    expect(within(card).queryByText(/not found by the latest scan/i)).toBeNull();
+  });
+
+  it("keeps a binary outside every searched directory enable-able with an honest scan note", () => {
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture({
+          instance: { ...devinProvider(), enabled: false },
+          discoverySnapshot: discoverySnapshot({
+            candidates: [],
+            searchedDirectories: searchedDirectoriesFor("codex", "/opt/homebrew/bin"),
+          }),
+        })}
+      />,
+    );
+
+    const card = screen.getByRole("article", { name: "Devin local" });
+    expect(within(card).queryByLabelText("Detected locally")).toBeNull();
+    const control = within(card).getByRole("switch", { name: "Enable Devin local" });
+    expect(control).not.toHaveAttribute("aria-disabled", "true");
+    expect(within(card).getByText(/not found by the latest scan/i)).toBeVisible();
   });
 
   it("keeps detected Ollama enablement visible after a repeated scan", () => {
@@ -2244,12 +2330,15 @@ describe("ProviderSettingsView", () => {
     expect(props.onProbe).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps a local CLI disabled when the completed scan cannot find its binary", () => {
+  it("keeps a local CLI disabled when the completed scan searched its directory and found nothing", () => {
     renderProviderSettings(
       <ProviderSettingsView
         {...fixture({
           instance: provider({ enabled: false }),
-          discoverySnapshot: discoverySnapshot({ candidates: [] }),
+          discoverySnapshot: discoverySnapshot({
+            candidates: [],
+            searchedDirectories: searchedDirectoriesFor("opencode", "/opt/homebrew/bin"),
+          }),
         })}
       />,
     );
@@ -2258,6 +2347,7 @@ describe("ProviderSettingsView", () => {
     expect(control).toHaveAttribute("aria-disabled", "true");
     expect(control).toHaveAccessibleDescription(/did not find/i);
     expect(screen.queryByLabelText("Detected locally")).toBeNull();
+    expect(screen.queryByText(/not found by the latest scan/i)).toBeNull();
   });
 
   it("renders the Bedrock Mantle setup guide only for an OpenAI-compatible endpoint", async () => {
@@ -2863,6 +2953,13 @@ function observation(patch: Partial<ProviderObservedState> = {}): ProviderObserv
   };
 }
 
+function searchedDirectoriesFor(
+  driverKind: DiscoverySnapshot["candidates"][number]["driverKind"],
+  ...directories: string[]
+) {
+  return [{ driverKind, directories }];
+}
+
 function discoverySnapshot(patch: Partial<DiscoverySnapshot> = {}): DiscoverySnapshot {
   return decodeDiscoverySnapshot({
     hostId: "local",
@@ -2878,9 +2975,24 @@ function codexCandidate(): DiscoverySnapshot["candidates"][number] {
   return {
     driverKind: "codex",
     displayName: "Codex CLI",
-    binaryPath: "/opt/homebrew/bin/codex",
+    // Homebrew installs the CLI through a `bin/codex` symlink; the scan probes
+    // the realpath, so the canonical path and the discovered spelling differ.
+    binaryPath: "/opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js",
+    discoveredPath: "/opt/homebrew/bin/codex",
     readiness: "ready",
-    pathSummary: "/opt/homebrew/bin/codex",
+    pathSummary: "/opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js",
+    detectedAt: "2026-07-26T20:00:00.000Z" as never,
+  } as DiscoverySnapshot["candidates"][number];
+}
+
+function devinCandidate(): DiscoverySnapshot["candidates"][number] {
+  return {
+    driverKind: "devin",
+    displayName: "Devin ACP",
+    binaryPath: "/Users/example/.local/share/devin/cli/_versions/3000.10.21/bin/devin",
+    discoveredPath: "/Users/example/.local/bin/devin",
+    readiness: "ready",
+    pathSummary: "/Users/example/.local/bin/devin",
     detectedAt: "2026-07-26T20:00:00.000Z" as never,
   } as DiscoverySnapshot["candidates"][number];
 }
@@ -2889,9 +3001,10 @@ function opencodeCandidate(): DiscoverySnapshot["candidates"][number] {
   return {
     driverKind: "opencode",
     displayName: "OpenCode",
-    binaryPath: "/opt/homebrew/bin/opencode",
+    binaryPath: "/opt/homebrew/lib/node_modules/@opencode-ai/cli/bin/opencode.exe",
+    discoveredPath: "/opt/homebrew/bin/opencode",
     readiness: "ready",
-    pathSummary: "/opt/homebrew/bin/opencode",
+    pathSummary: "/opt/homebrew/lib/node_modules/@opencode-ai/cli/bin/opencode.exe",
     detectedAt: "2026-07-26T20:00:00.000Z" as never,
   } as DiscoverySnapshot["candidates"][number];
 }

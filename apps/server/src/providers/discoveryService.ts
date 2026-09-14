@@ -106,6 +106,9 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
       const startTime = now();
       const descriptors = discoverableDescriptorsForAdmittedDrivers(admittedDriverKinds);
       const candidates: DiscoveryCandidate[] = [];
+      const searchedDirectories: Array<
+        NonNullable<DiscoverySnapshot["searchedDirectories"]>[number]
+      > = [];
       let status: DiscoverySnapshot["status"] = "completed";
       let message: string | undefined;
 
@@ -147,7 +150,11 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
             startTime,
             signal,
           );
-          candidates.push(...found.slice(0, MAX_CANDIDATES_PER_DRIVER));
+          candidates.push(...found.candidates.slice(0, MAX_CANDIDATES_PER_DRIVER));
+          searchedDirectories.push({
+            driverKind: descriptor.driverKind as DiscoveryCandidate["driverKind"],
+            directories: [...found.searchedDirectories],
+          });
         } catch {
           if (status === "completed") status = "partial";
         }
@@ -155,11 +162,12 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
         if (candidates.length >= MAX_TOTAL_CANDIDATES) break;
       }
 
-      // Deduplicate by canonical path
+      // Deduplicate by the launcher path the scan examined, not the canonical target.
       const seen = new Set<string>();
       const deduplicated = candidates.filter((candidate) => {
-        if (seen.has(candidate.binaryPath)) return false;
-        seen.add(candidate.binaryPath);
+        const key = candidate.discoveredPath ?? candidate.binaryPath;
+        if (seen.has(key)) return false;
+        seen.add(key);
         return true;
       });
 
@@ -174,6 +182,7 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
         scannedAt: new Date(now()).toISOString() as DiscoverySnapshot["scannedAt"],
         scanDurationMs: now() - startTime,
         status,
+        ...(searchedDirectories.length > 0 ? { searchedDirectories } : {}),
         ...(message !== undefined ? { message: message as DiscoverySnapshot["message"] } : {}),
       };
       return snapshot;
@@ -193,9 +202,13 @@ async function scanDescriptor(
   now: () => number,
   startTime: number,
   signal?: AbortSignal,
-): Promise<DiscoveryCandidate[]> {
+): Promise<{
+  readonly candidates: DiscoveryCandidate[];
+  readonly searchedDirectories: ReadonlyArray<string>;
+}> {
   const candidates: DiscoveryCandidate[] = [];
   const seenPaths = new Set<string>();
+  const searchedDirectories = new Set<string>();
 
   // Search PATH directories + approved locations. Alias targets are appended
   // after ordinary paths so discovery remains deterministic when a shell
@@ -220,16 +233,17 @@ async function scanDescriptor(
     if (now() - startTime > MAX_SCAN_DURATION_MS) break;
     if (candidates.length >= MAX_CANDIDATES_PER_DRIVER) break;
 
+    searchedDirectories.add(directoryOf(candidatePath));
     const execName = candidate.execName;
     const validated = await validateExecutable(candidatePath, fs);
     if (validated === undefined) continue;
-    if (seenPaths.has(validated)) continue;
-    seenPaths.add(validated);
+    if (seenPaths.has(validated.discoveredPath)) continue;
+    seenPaths.add(validated.discoveredPath);
 
     // Version probe
     let version: string | undefined;
     try {
-      const { stdout } = await exec(validated, [...descriptor.versionProbeArgs], {
+      const { stdout } = await exec(validated.canonicalPath, [...descriptor.versionProbeArgs], {
         timeout: MAX_PROBE_TIMEOUT_MS,
         maxBuffer: MAX_PROBE_OUTPUT_BYTES,
         env: sanitizeProbeEnvironment(environment),
@@ -243,7 +257,7 @@ async function scanDescriptor(
     let readiness: DiscoveryCandidate["readiness"] = "unknown";
     if (descriptor.authProbeArgs !== undefined) {
       try {
-        await exec(validated, [...descriptor.authProbeArgs], {
+        await exec(validated.canonicalPath, [...descriptor.authProbeArgs], {
           timeout: MAX_PROBE_TIMEOUT_MS,
           maxBuffer: MAX_PROBE_OUTPUT_BYTES,
           env: sanitizeProbeEnvironment(environment),
@@ -258,16 +272,27 @@ async function scanDescriptor(
       driverKind: descriptor.driverKind as DiscoveryCandidate["driverKind"],
       displayName: (descriptor.displayNameForExecutable?.(execName) ??
         descriptor.displayName) as DiscoveryCandidate["displayName"],
-      binaryPath: validated as DiscoveryCandidate["binaryPath"],
+      binaryPath: validated.canonicalPath as DiscoveryCandidate["binaryPath"],
+      ...(validated.discoveredPath === validated.canonicalPath
+        ? {}
+        : { discoveredPath: validated.discoveredPath as DiscoveryCandidate["discoveredPath"] }),
       ...(version !== undefined ? { version: version as DiscoveryCandidate["version"] } : {}),
       readiness,
-      pathSummary: summarizePath(validated, environment.HOME) as DiscoveryCandidate["pathSummary"],
+      pathSummary: summarizePath(
+        validated.canonicalPath,
+        environment.HOME,
+      ) as DiscoveryCandidate["pathSummary"],
       onboardingGuidance: descriptor.onboardingGuidance as DiscoveryCandidate["onboardingGuidance"],
       detectedAt: new Date(now()).toISOString() as DiscoveryCandidate["detectedAt"],
     });
   }
 
-  return candidates;
+  return { candidates, searchedDirectories: [...searchedDirectories] };
+}
+
+function directoryOf(path: string): string {
+  const separator = path.lastIndexOf("/");
+  return separator <= 0 ? "/" : path.slice(0, separator);
 }
 
 /**
@@ -360,20 +385,19 @@ function unwrapAliasValue(value: string): string | undefined {
 }
 
 /**
- * Validates that a path is a real executable file (not a broken symlink,
- * not a directory, not a symlink pointing outside approved locations).
- * Returns the canonical (realpath) path or undefined if invalid.
- */
-/**
  * Validates an executable discovered only through sanitized PATH or approved
  * search directories. Symlink targets may resolve outside those directories
  * (Homebrew Cellar, nix store); we still require an absolute real file with
  * execute permission and never follow relative or broken links.
+ *
+ * Both spellings matter: the probe runs the canonical path, while instances
+ * store the user-facing one (`/opt/homebrew/bin/codex`), so callers need the
+ * discovered path to match a configured instance.
  */
 async function validateExecutable(
   candidatePath: string,
   fs: DiscoveryFsPort,
-): Promise<string | undefined> {
+): Promise<{ readonly discoveredPath: string; readonly canonicalPath: string } | undefined> {
   if (!isAbsolute(candidatePath)) return undefined;
 
   try {
@@ -391,10 +415,10 @@ async function validateExecutable(
       await fs.access(resolved, constants.X_OK);
       const targetStat = await fs.lstat(resolved);
       if (!targetStat.isFile()) return undefined;
-      return resolved;
+      return { discoveredPath: candidatePath, canonicalPath: resolved };
     }
     if (!stat.isFile()) return undefined;
-    return candidatePath;
+    return { discoveredPath: candidatePath, canonicalPath: candidatePath };
   } catch {
     return undefined;
   }
