@@ -2252,7 +2252,7 @@ textarea.settings-view__text-input {
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-medium);
-  letter-spacing: -0.01em;
+  letter-spacing: var(--oct-tracking-snug);
   line-height: 1.35;
   text-transform: none;
 }

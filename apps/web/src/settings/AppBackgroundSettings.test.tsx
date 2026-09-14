@@ -202,8 +202,11 @@ describe("AppBackgroundSettings", () => {
   it("shows each built-in as a still preview with one visible name and its motion beside it", async () => {
     const user = userEvent.setup();
     const selected = ZEN_BUILTIN_BACKGROUNDS[0]!;
-    const animated = ZEN_BUILTIN_BACKGROUNDS.find((preset) => preset.motion === "animated");
-    if (animated === undefined) throw new Error("Expected an animated built-in preset");
+    const animated = ZEN_BUILTIN_BACKGROUNDS.find(
+      (preset) => preset.id === "waving-dot-field-animated",
+    );
+    if (animated === undefined)
+      throw new Error("Expected the Waving dots animated built-in preset");
     const onChange = vi.fn();
     render(
       <AppBackgroundSettings
@@ -220,11 +223,10 @@ describe("AppBackgroundSettings", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByRole("radio")).toHaveLength(ZEN_BUILTIN_BACKGROUNDS.length);
 
-    // The caption carries the motion, so the visible name does not repeat it.
-    const animatedTile = screen.getByRole("radio", { name: animated.title });
-    expect(
-      within(animatedTile).getByText(animated.title.replace(/\s+animated$/i, "")),
-    ).toBeInTheDocument();
+    // The caption carries the motion, so the visible name drops the "animated"
+    // the title ends with; the literal keeps this able to fail if it does not.
+    const animatedTile = screen.getByRole("radio", { name: "Waving dots animated" });
+    expect(within(animatedTile).getByText("Waving dots")).toBeInTheDocument();
     expect(within(animatedTile).getByText("Animated")).toBeInTheDocument();
 
     await user.click(animatedTile);
