@@ -6131,13 +6131,15 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   box-sizing: border-box;
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr);
-  width: min(440px, calc(100vw - 24px));
+  /* The inline level control sits under the list, spanning both columns. */
+  grid-template-rows: minmax(0, 1fr) auto;
+  width: min(400px, calc(100vw - 24px));
   /* A fixed box, not a cap. The rail switches provider inside one open menu,
      and provider lists differ wildly in length — a twelve-model list next to
      an empty one resized the panel between clicks, so the menu appeared to
      jump under the pointer. A stable height costs some empty space on short
      lists and buys a menu that holds still. The list pane scrolls. */
-  height: min(46vh, 360px);
+  height: min(42vh, 330px);
   max-height: calc(100dvh - 24px);
   padding: 0;
   overflow: hidden;
@@ -6145,6 +6147,28 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border: 0;
   border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-overlay);
+}
+
+/* The chosen model's effort/reasoning level, one tap from the list. The
+   segmented recipe paints the buttons; this rule only places the row. */
+.composer-model-picker__level {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+  padding: 5px 8px;
+  border-top: 1px solid var(--octant-border);
+}
+
+.composer-model-picker__level-label {
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+.composer-model-picker__level-group {
+  flex: 0 0 auto;
 }
 
 .code-branch-selector__search {
@@ -6286,8 +6310,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
-  min-height: 32px;
-  margin: 8px 10px 6px;
+  min-height: 28px;
+  margin: 6px 8px 4px;
   padding: 0 12px;
   color: var(--octant-text-muted);
   background: var(--octant-control);
@@ -6320,8 +6344,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   flex: 0 0 auto;
   flex-wrap: wrap;
   gap: 4px;
-  max-height: 62px;
-  margin: 0 10px 4px;
+  max-height: 52px;
+  margin: 0 8px 4px;
   overflow-y: auto;
   scrollbar-color: var(--octant-border-strong) transparent;
   scrollbar-width: thin;
@@ -6377,7 +6401,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   flex-direction: column;
   gap: 2px;
   min-height: 0;
-  padding: 4px 8px 8px;
+  padding: 3px 6px 6px;
   overflow: auto;
 }
 
@@ -6403,9 +6427,9 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  min-height: 38px;
+  min-height: 32px;
   min-width: 0;
-  padding: 5px 4px 5px 10px;
+  padding: 4px 4px 4px 9px;
   color: var(--octant-text-primary);
   background: transparent;
   border: 0;

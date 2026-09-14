@@ -323,7 +323,7 @@ describe("ChatComposer", () => {
   it("keeps model options hidden until the model-options control is opened", async () => {
     const user = userEvent.setup();
     renderComposer({
-      modelOptions: [{ id: "effort", displayName: "Effort", values: ["low", "high"] }],
+      modelOptions: [{ id: "service-tier", displayName: "Service tier", values: ["fast", "flex"] }],
       onModelOptionChange: vi.fn(),
     });
 
@@ -331,14 +331,14 @@ describe("ChatComposer", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     // Every value is the provider default, so the trigger shows no active mark.
     expect(trigger).not.toHaveAttribute("data-customized");
-    expect(screen.queryByRole("combobox", { name: "Effort" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Service tier" })).toBeNull();
 
     await user.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("combobox", { name: "Effort" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "Service tier" })).toBeVisible();
 
     await user.click(trigger);
-    expect(screen.queryByRole("combobox", { name: "Effort" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Service tier" })).toBeNull();
   });
 
   it("offers no model-options control when the model declares none and no pool exists", () => {
@@ -349,7 +349,7 @@ describe("ChatComposer", () => {
   it("marks the model-options trigger when any option is off the provider default", () => {
     renderComposer({
       modelOptions: [
-        { id: "effort", displayName: "Effort", values: ["low", "high"], value: "high" },
+        { id: "service-tier", displayName: "Service tier", values: ["fast"], value: "fast" },
       ],
       onModelOptionChange: vi.fn(),
     });
@@ -363,35 +363,46 @@ describe("ChatComposer", () => {
     const onModelOptionChange = vi.fn();
     const { rerender, props } = renderComposer({
       modelOptions: [
-        { id: "effort", displayName: "Effort", values: ["low", "high"], value: "high" },
-        { id: "service-tier", displayName: "Service tier", values: ["fast"] },
+        { id: "service-tier", displayName: "Service tier", values: ["fast"], value: "fast" },
+        { id: "verbosity", displayName: "Verbosity", values: ["brief", "full"] },
       ],
       onModelOptionChange,
     });
 
     await user.click(screen.getByRole("button", { name: "Model options" }));
-    expect(screen.getByRole("combobox", { name: "Effort" })).toHaveTextContent("Effort: high");
     expect(screen.getByRole("combobox", { name: "Service tier" })).toHaveTextContent(
-      "Service tier: Default",
+      "Service tier: fast",
+    );
+    expect(screen.getByRole("combobox", { name: "Verbosity" })).toHaveTextContent(
+      "Verbosity: Default",
     );
 
-    await user.click(screen.getByRole("combobox", { name: "Effort" }));
-    expect((await screen.findAllByRole("option")).map((option) => option.textContent)).toEqual([
-      "Effort: Default",
-      "Effort: low",
-      "Effort: high",
-    ]);
-    await user.click(screen.getByRole("option", { name: "Effort: Default" }));
-    expect(onModelOptionChange).toHaveBeenCalledWith("effort", undefined);
-
     await user.click(screen.getByRole("combobox", { name: "Service tier" }));
-    await user.click(await screen.findByRole("option", { name: "Service tier: fast" }));
-    expect(onModelOptionChange).toHaveBeenCalledWith("service-tier", "fast");
+    expect((await screen.findAllByRole("option")).map((option) => option.textContent)).toEqual([
+      "Service tier: Default",
+      "Service tier: fast",
+    ]);
+    await user.click(screen.getByRole("option", { name: "Service tier: Default" }));
+    expect(onModelOptionChange).toHaveBeenCalledWith("service-tier", undefined);
+
+    await user.click(screen.getByRole("combobox", { name: "Verbosity" }));
+    await user.click(await screen.findByRole("option", { name: "Verbosity: brief" }));
+    expect(onModelOptionChange).toHaveBeenCalledWith("verbosity", "brief");
 
     rerender(<ChatComposer {...props} modelOptions={[]} />);
-    expect(screen.queryByRole("combobox", { name: "Effort" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Service tier" })).toBeNull();
     rerender(<ChatComposer {...props} isSending />);
     expect(screen.getByRole("button", { name: "Model options" })).toBeDisabled();
+  });
+
+  it("leaves the reasoning level to the model picker instead of the options surface", () => {
+    renderComposer({
+      modelOptions: [{ id: "effort", displayName: "Effort", values: ["low", "high"] }],
+      onModelOptionChange: vi.fn(),
+    });
+    // The picker draws the level control; nothing is left for the separate
+    // options surface, so its trigger is not rendered at all.
+    expect(screen.queryByRole("button", { name: "Model options" })).toBeNull();
   });
 
   it("makes disabled reasons available without relying on color", async () => {

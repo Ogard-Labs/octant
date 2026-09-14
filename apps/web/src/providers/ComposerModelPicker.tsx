@@ -14,7 +14,34 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSeparator } from "../ui/base/OctantSeparator";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { ProviderGlyph } from "./ProviderGlyph";
+
+/**
+ * One selectable option the selected model declares (effort, reasoning, speed
+ * tier). `value` is the thread's current choice; absent means provider default.
+ */
+export interface ComposerModelPickerModelOption {
+  readonly id: string;
+  readonly displayName: string;
+  readonly values: ReadonlyArray<string>;
+  readonly value?: string;
+}
+
+/**
+ * Whether an option names how hard the model should think. The picker keeps
+ * that one next to the model name; every other declared option stays in the
+ * composer's options surface.
+ */
+export function isComposerReasoningOption(option: {
+  readonly id: string;
+  readonly displayName: string;
+}): boolean {
+  return /(reasoning|effort|thinking|thought)/i.test(`${option.id} ${option.displayName}`);
+}
+
+/** Sentinel meaning “use the provider default” rather than a declared value. */
+const DEFAULT_LEVEL_ID = "__default__";
 
 export interface ComposerModelPickerProps {
   readonly groups: ReadonlyArray<PickerGroup>;
@@ -27,6 +54,14 @@ export interface ComposerModelPickerProps {
   readonly onOpenHarnessSettings?: () => void;
   readonly disabled?: boolean;
   readonly ariaLabel?: string;
+  /**
+   * The selected model's declared options. A reasoning/effort option among
+   * them is drawn inline in the picker so choosing a model and choosing how
+   * hard it thinks are one decision.
+   */
+  readonly modelOptions?: ReadonlyArray<ComposerModelPickerModelOption>;
+  /** Absent leaves the inline level control out; undefined restores the default. */
+  readonly onModelOptionChange?: (optionId: string, value: string | undefined) => void;
   /**
    * Which side of the trigger the menu opens on. Most composers sit at the
    * bottom of their view, so the menu opens upward by default; a composer
@@ -132,6 +167,15 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     props.unselectedLabel ??
     activeGroup.sections[0]?.models[0]?.model.displayName ??
     activeGroup.instance.displayName;
+  // The inline level control shows only when the caller owns the option value
+  // and the selected model actually declares a reasoning/effort option.
+  const levelOption = props.modelOptions?.find(isComposerReasoningOption);
+  const levelValue =
+    levelOption !== undefined &&
+    levelOption.value !== undefined &&
+    levelOption.values.includes(levelOption.value)
+      ? levelOption.value
+      : DEFAULT_LEVEL_ID;
   const favoritesActive = !searching && activeRailId === FAVORITES_RAIL_ID;
   // With a search query, matches span every provider; the Favorites rail entry
   // lists starred models across providers; otherwise the list shows the active
@@ -482,9 +526,48 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             )}
           </div>
         </div>
+        {levelOption === undefined || props.onModelOptionChange === undefined ? null : (
+          <div className="composer-model-picker__level">
+            <span className="composer-model-picker__level-label">{levelOption.displayName}</span>
+            <OctantToggleGroup<string>
+              aria-label={`${levelOption.displayName} level`}
+              className="composer-model-picker__level-group segmented"
+              onValueChange={(value) => {
+                const next = value[0];
+                if (next === undefined) return;
+                props.onModelOptionChange?.(
+                  levelOption.id,
+                  next === DEFAULT_LEVEL_ID ? undefined : next,
+                );
+              }}
+              value={[levelValue]}
+            >
+              <OctantToggleGroupItem<string>
+                className="composer-model-picker__level-option segment"
+                value={DEFAULT_LEVEL_ID}
+              >
+                Default
+              </OctantToggleGroupItem>
+              {levelOption.values.map((value) => (
+                <OctantToggleGroupItem<string>
+                  className="composer-model-picker__level-option segment"
+                  key={value}
+                  value={value}
+                >
+                  {levelLabel(value)}
+                </OctantToggleGroupItem>
+              ))}
+            </OctantToggleGroup>
+          </div>
+        )}
       </OctantPopover>
     </div>
   );
+}
+
+/** “medium” reads as “Medium” beside the model the control belongs to. */
+function levelLabel(value: string): string {
+  return value.length === 0 ? value : `${value[0]?.toUpperCase() ?? ""}${value.slice(1)}`;
 }
 
 function matchesQuery(row: ModelRow, trimmedQuery: string): boolean {
