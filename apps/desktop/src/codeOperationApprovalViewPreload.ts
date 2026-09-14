@@ -1,25 +1,6 @@
+import { decodeChallenge, type ApprovalChallengeView } from "./codeOperationApprovalChallengeView";
 import { ipcRenderer } from "electron";
 import { CODE_OPERATION_APPROVAL_VIEW_CHANNELS } from "./codeOperationApprovalViewProtocol";
-
-interface ApprovalChallengeView {
-  readonly challengeId: string;
-  readonly effectDigest: string;
-  readonly contextDigest: string;
-  readonly projectId: string;
-  readonly threadId: string;
-  readonly checkoutId: string;
-  readonly repositoryId: string;
-  readonly checkoutHead:
-    | { readonly kind: "branch"; readonly name: string; readonly oid: string }
-    | { readonly kind: "detached"; readonly oid: string };
-  readonly pullRequestTarget?: {
-    readonly baseRepository: string;
-    readonly baseBranch: string;
-    readonly head: string;
-  };
-  readonly message: string;
-  readonly detail: string;
-}
 
 const token = process.argv
   .find((argument) => argument.startsWith("--octant-code-approval-token="))
@@ -45,84 +26,6 @@ function send(decision: "approve" | "cancel"): void {
   });
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function stringField(record: Record<string, unknown>, key: string): string | undefined {
-  const value = record[key];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function decodeChallenge(value: unknown): ApprovalChallengeView | undefined {
-  if (!isRecord(value)) return undefined;
-  const challengeId = stringField(value, "challengeId");
-  const effectDigest = stringField(value, "effectDigest");
-  const contextDigest = stringField(value, "contextDigest");
-  const projectId = stringField(value, "projectId");
-  const threadId = stringField(value, "threadId");
-  const checkoutId = stringField(value, "checkoutId");
-  const repositoryId = stringField(value, "repositoryId");
-  const message = stringField(value, "message");
-  const detail = stringField(value, "detail");
-  const checkoutHeadValue = value.checkoutHead;
-  if (
-    challengeId === undefined ||
-    effectDigest === undefined ||
-    contextDigest === undefined ||
-    projectId === undefined ||
-    threadId === undefined ||
-    checkoutId === undefined ||
-    repositoryId === undefined ||
-    message === undefined ||
-    detail === undefined ||
-    !isRecord(checkoutHeadValue)
-  ) {
-    return undefined;
-  }
-  const oid = stringField(checkoutHeadValue, "oid");
-  if (oid === undefined) return undefined;
-  const checkoutHead =
-    checkoutHeadValue.kind === "branch"
-      ? (() => {
-          const name = stringField(checkoutHeadValue, "name");
-          return name === undefined ? undefined : { kind: "branch" as const, name, oid };
-        })()
-      : checkoutHeadValue.kind === "detached"
-        ? { kind: "detached" as const, oid }
-        : undefined;
-  if (checkoutHead === undefined) return undefined;
-
-  const pullRequestValue = value.pullRequestTarget;
-  let pullRequestTarget: ApprovalChallengeView["pullRequestTarget"];
-  if (pullRequestValue === undefined) {
-    pullRequestTarget = undefined;
-  } else {
-    if (!isRecord(pullRequestValue)) return undefined;
-    const baseRepository = stringField(pullRequestValue, "baseRepository");
-    const baseBranch = stringField(pullRequestValue, "baseBranch");
-    const head = stringField(pullRequestValue, "head");
-    if (baseRepository === undefined || baseBranch === undefined || head === undefined) {
-      return undefined;
-    }
-    pullRequestTarget = { baseRepository, baseBranch, head };
-  }
-
-  return {
-    challengeId,
-    effectDigest,
-    contextDigest,
-    projectId,
-    threadId,
-    checkoutId,
-    repositoryId,
-    checkoutHead,
-    ...(pullRequestTarget === undefined ? {} : { pullRequestTarget }),
-    message,
-    detail,
-  };
-}
-
 function render(next: ApprovalChallengeView): void {
   challenge = next;
   const message = element("message");
@@ -138,7 +41,7 @@ function render(next: ApprovalChallengeView): void {
       `Thread: ${next.threadId}`,
       `Checkout: ${next.checkoutId}`,
       `Repository: ${next.repositoryId}`,
-      `Checkout head: ${next.checkoutHead.kind === "branch" ? `${next.checkoutHead.name} @ ${next.checkoutHead.oid}` : next.checkoutHead.oid}`,
+      `Checkout head: ${next.checkoutHead.kind === "branch" ? `${next.checkoutHead.name} @ ${next.checkoutHead.oid}` : next.checkoutHead.kind === "detached" ? next.checkoutHead.oid : "No revision"}`,
       ...(next.pullRequestTarget === undefined
         ? []
         : [
