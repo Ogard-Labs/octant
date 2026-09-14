@@ -1,5 +1,6 @@
 import {
   decodeCodeProjectPullRequestDetailView,
+  decodeUtcTimestamp,
   type CodeProjectPullRequestDetailQuery,
   type CodeProjectPullRequestDetailRefreshCommand,
 } from "@octant/contracts";
@@ -16,7 +17,10 @@ const query: CodeProjectPullRequestDetailQuery = {
   number: 12,
 };
 
-function detailView(description = "Adds manual refresh.") {
+function detailView(
+  description = "Adds manual refresh.",
+  mergeability?: "mergeable" | "conflicting" | "unknown",
+) {
   return decodeCodeProjectPullRequestDetailView({
     version: 1,
     query,
@@ -33,7 +37,9 @@ function detailView(description = "Adds manual refresh.") {
       baseBranch: "development",
       headRepository: "octant/octant",
       headBranch: "feature/manual-refresh",
+      headSha: "9".repeat(40),
       author: "octocat",
+      ...(mergeability === undefined ? {} : { mergeability }),
       matchesDeliveryBranch: false,
       description,
       diff: "diff --git a/README.md b/README.md",
@@ -76,19 +82,57 @@ describe("DockProjectPullRequestReviewTool", () => {
       detailView(),
     );
     const load = vi.fn(async () => detailView());
-    const { container } = render(
-      <DockProjectPullRequestReviewTool load={load} query={query} refresh={refresh} />,
-    );
+    render(<DockProjectPullRequestReviewTool load={load} query={query} refresh={refresh} />);
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
     expect(load).not.toHaveBeenCalled();
-    expect(await screen.findByText("#12")).toBeVisible();
-    expect(container.querySelector('[data-pr-state="open"]')).not.toBeNull();
-    expect(container.querySelector(".code-pr-review__state-mark svg")).not.toBeNull();
-    expect(
-      container.querySelectorAll(".code-pr-review__section-heading svg").length,
-    ).toBeGreaterThanOrEqual(5);
     expect(await screen.findByText("Adds manual refresh.", { selector: "p" })).toBeVisible();
-    expect(screen.getByText(/Read-only review/)).toBeVisible();
+    expect(screen.getByText(/Review data is read-only/)).toBeVisible();
     expect(screen.queryByRole("button", { name: /merge/i })).toBeNull();
+  });
+
+  it("offers to continue the review in a Chat thread", async () => {
+    const onOpenChat = vi.fn();
+    render(
+      <DockProjectPullRequestReviewTool
+        onOpenChat={onOpenChat}
+        load={async () => detailView()}
+        query={query}
+        refresh={async () => detailView()}
+      />,
+    );
+
+    await waitFor(() => expect(onOpenChat).not.toHaveBeenCalled());
+    await screen.findByText("Adds manual refresh.", { selector: "p" });
+    screen.getByRole("button", { name: "Open chat" }).click();
+    expect(onOpenChat).toHaveBeenCalledOnce();
+  });
+
+  it("requires confirmation before merging a fresh mergeable pull request", async () => {
+    const onMerge = vi.fn(async (method: "merge" | "squash" | "rebase") => ({
+      status: "merged" as const,
+      number: 12,
+      method,
+      mergedAt: decodeUtcTimestamp("2026-08-22T08:00:00.000Z"),
+    }));
+    render(
+      <DockProjectPullRequestReviewTool
+        load={async () => detailView("Ready to merge.", "mergeable")}
+        onMerge={onMerge}
+        query={query}
+        refresh={async () => detailView("Ready to merge.", "mergeable")}
+      />,
+    );
+
+    await screen.findByText("Ready to merge.", { selector: "p" });
+    screen.getByRole("button", { name: "Merge" }).click();
+    expect(
+      await screen.findByRole("alertdialog", { name: "Confirm pull-request merge" }),
+    ).toBeVisible();
+    screen.getByRole("button", { name: "Confirm merge" }).click();
+
+    expect(onMerge).toHaveBeenCalledWith("squash", "9".repeat(40));
+    expect(
+      await screen.findByText("Merged pull request #12. Refreshing its review state."),
+    ).toBeVisible();
   });
 });

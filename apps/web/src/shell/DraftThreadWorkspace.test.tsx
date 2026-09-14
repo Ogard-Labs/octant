@@ -156,6 +156,18 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.queryByText(/Start a calm, focused conversation/)).not.toBeInTheDocument();
   });
 
+  it("seeds the Chat composer when a review hands it a prompt", async () => {
+    render(
+      <DraftThreadWorkspace {...baseProps} pendingMessage="Help me understand pull request #12" />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
+        "Help me understand pull request #12",
+      ),
+    );
+  });
+
   it("renders mode-specific welcome copy for code", () => {
     render(<DraftThreadWorkspace {...baseProps} mode="code" />);
     expect(screen.getByRole("heading", { name: "What should we build?" })).toBeVisible();

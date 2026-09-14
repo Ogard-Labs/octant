@@ -10,6 +10,7 @@ import { CodeProjectPullRequestSnapshotStore } from "./codeProjectPullRequestSna
 import {
   CodeProjectPullRequestService,
   type CodeProjectPullRequestAuthorizedProject,
+  type CodeProjectPullRequestMergePort,
 } from "./codeProjectPullRequestService";
 import type {
   GhActivePullRequestListResult,
@@ -90,6 +91,7 @@ function serviceFixture(options: {
     readonly number: number;
     readonly observedAt: string;
   }>;
+  readonly merge?: CodeProjectPullRequestMergePort;
   readonly clock?: () => string;
   readonly cacheStats?: CacheStatsRecorder;
   readonly snapshotStore?: CodeProjectPullRequestSnapshotStore;
@@ -148,6 +150,7 @@ function serviceFixture(options: {
     },
     list: { listActive },
     detail: { observeReviewByIdentity },
+    ...(options.merge === undefined ? {} : { merge: options.merge }),
     threads: {
       list: listThreads,
     },
@@ -181,6 +184,37 @@ describe("CodeProjectPullRequestService", () => {
     expect(view.freshness).toEqual({ status: "empty" });
     expect(listActive).not.toHaveBeenCalled();
     expect(journal.append).not.toHaveBeenCalled();
+  });
+
+  it("drops the cached list after a merge so the merged row cannot stay open", async () => {
+    const mergeByIdentity = vi.fn(async () => ({ status: "merged" }) as const);
+    const fixture = serviceFixture({ merge: { mergeByIdentity } });
+
+    await fixture.service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    const before = await fixture.service.query(windowId, { version: 1 });
+    expect(before.rows.some((row) => row.number === 12 && row.state === "open")).toBe(true);
+
+    const outcome = await fixture.service.merge(
+      windowId,
+      {
+        projectId: projectA,
+        repositoryOwner: "octant",
+        repositoryName: "octant",
+        number: 12,
+        method: "squash",
+        headSha: "9".repeat(40),
+      },
+      new AbortController().signal,
+    );
+
+    expect(outcome.status).toBe("merged");
+    expect(mergeByIdentity).toHaveBeenCalledWith(
+      expect.objectContaining({ number: 12, headSha: "9".repeat(40) }),
+      expect.any(AbortSignal),
+    );
+    // The stale snapshot is gone: a query can no longer return the row as open.
+    const after = await fixture.service.query(windowId, { version: 1 });
+    expect(after.rows.filter((row) => row.number === 12 && row.state === "open")).toEqual([]);
   });
 
   it("restores a successful snapshot after restart without contacting GitHub", async () => {
@@ -1319,6 +1353,7 @@ describe("CodeProjectPullRequestService", () => {
       baseBranch: "development",
       headRepository: "octant",
       headBranch: "feature/manual-refresh",
+      headSha: "9".repeat(40),
       author: "octocat",
       matchesDeliveryBranch: false,
     },

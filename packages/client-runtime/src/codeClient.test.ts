@@ -369,6 +369,38 @@ describe("code client", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
+  it("merges a pull request through the explicit user command and rejects forged identity", async () => {
+    const command = {
+      projectId: decodeProjectId("10000000-0000-4000-8000-000000000001"),
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+      method: "squash",
+      headSha: "a".repeat(40),
+    } as const;
+    const outcome = {
+      status: "merged",
+      number: 12,
+      method: "squash",
+      mergedAt: now,
+    } as const;
+    const fetch = vi.fn().mockResolvedValue(Response.json(outcome));
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+
+    await expect(client.mergeProjectPullRequest?.(command)).resolves.toEqual(outcome);
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/code/project-pull-requests/merge`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify(command),
+      }),
+    );
+    await expect(
+      client.mergeProjectPullRequest?.({ ...command, owner: "octant" } as never),
+    ).rejects.toMatchObject({ category: "invalid" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("reads a Code thread follow-up view over the authenticated endpoint", async () => {
     const view = {
       threadId: ids.thread,

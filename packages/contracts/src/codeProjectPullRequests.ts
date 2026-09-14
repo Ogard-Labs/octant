@@ -171,6 +171,60 @@ export const CodeProjectPullRequestMergeability = Schema.Literal(
 );
 export type CodeProjectPullRequestMergeability = typeof CodeProjectPullRequestMergeability.Type;
 
+export const CodeProjectPullRequestMergeMethod = Schema.Literal("merge", "squash", "rebase");
+export type CodeProjectPullRequestMergeMethod = typeof CodeProjectPullRequestMergeMethod.Type;
+
+export const CodeProjectPullRequestMergeCommand = Schema.Struct({
+  projectId: ProjectId,
+  repositoryOwner: GithubRepositoryOwner,
+  repositoryName: GithubRepositoryName,
+  number: Schema.Int.pipe(Schema.positive()),
+  method: CodeProjectPullRequestMergeMethod,
+  /**
+   * The head commit the person reviewed. The server refuses with `stale`
+   * when the pull request's head no longer matches, so an approval cannot
+   * merge a revision that was never on screen.
+   */
+  headSha: boundedNonEmptyText(64),
+}).annotations(strict);
+export type CodeProjectPullRequestMergeCommand = typeof CodeProjectPullRequestMergeCommand.Type;
+
+const CodeProjectPullRequestMergeRefusal = Schema.Literal(
+  "not-authorized",
+  "not-open",
+  "not-mergeable",
+  "stale",
+  "conflict",
+  "failed",
+);
+export type CodeProjectPullRequestMergeRefusal = typeof CodeProjectPullRequestMergeRefusal.Type;
+
+const CodeProjectPullRequestMergeUnavailable = Schema.Literal(
+  "disconnected",
+  "unauthenticated",
+  "unavailable",
+);
+export type CodeProjectPullRequestMergeUnavailable =
+  typeof CodeProjectPullRequestMergeUnavailable.Type;
+
+export const CodeProjectPullRequestMergeOutcome = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("merged"),
+    number: Schema.Int.pipe(Schema.positive()),
+    method: CodeProjectPullRequestMergeMethod,
+    mergedAt: UtcTimestamp,
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: CodeProjectPullRequestMergeRefusal,
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("unavailable"),
+    reason: CodeProjectPullRequestMergeUnavailable,
+  }).annotations(strict),
+);
+export type CodeProjectPullRequestMergeOutcome = typeof CodeProjectPullRequestMergeOutcome.Type;
+
 export const CodeProjectPullRequestLinkedThread = Schema.Struct({
   threadId: CodeThreadId,
   title: boundedNonEmptyText(512),
@@ -247,6 +301,12 @@ export const decodeCodeProjectPullRequestQuery = Schema.decodeUnknownSync(
 export const decodeCodeProjectPullRequestRefreshCommand = Schema.decodeUnknownSync(
   CodeProjectPullRequestRefreshCommand,
 );
+export const decodeCodeProjectPullRequestMergeCommand = Schema.decodeUnknownSync(
+  CodeProjectPullRequestMergeCommand,
+);
+export const decodeCodeProjectPullRequestMergeOutcome = Schema.decodeUnknownSync(
+  CodeProjectPullRequestMergeOutcome,
+);
 export const decodeCodeProjectPullRequestView = Schema.decodeUnknownSync(
   CodeProjectPullRequestView,
 );
@@ -290,7 +350,10 @@ export const CodeProjectPullRequestDetailObserved = Schema.Struct({
   baseBranch: branchName,
   headRepository: boundedText(512),
   headBranch: branchName,
+  /** Empty when the read carried no head commit; a merge then refuses as stale. */
+  headSha: Schema.String.pipe(Schema.maxLength(64)),
   author: boundedText(255),
+  mergeability: Schema.optional(CodeProjectPullRequestMergeability),
   matchesDeliveryBranch: Schema.Literal(false),
   description: boundedText(MAX_CODE_PROJECT_PULL_REQUEST_DETAIL_DESCRIPTION_BYTES),
   diff: boundedText(MAX_CODE_PROJECT_PULL_REQUEST_DETAIL_DIFF_BYTES),

@@ -134,6 +134,7 @@ distilled successor of the earlier long-form design specifications.
 | [0120](0120-clean-application-background-controls.md) | Clean application background controls | Accepted |
 | [0121](0121-provider-owned-cli-runtime-and-updates.md) | Provider-owned CLI runtimes, profiles, and updates | Accepted |
 | [0122](0122-provider-readiness-probes-reach-provider-endpoints.md) | Provider readiness probes reach provider endpoints | Accepted |
+| [0123](0123-explicit-github-pull-request-merges.md) | Explicit GitHub pull-request merges are fresh and approval-gated | Accepted |
 
 ## Adding an ADR
 

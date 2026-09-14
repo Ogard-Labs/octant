@@ -786,6 +786,10 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const tip = useComposerTip({ scopeKey: "chat-draft", computer: computer.available });
+  useEffect(() => {
+    if (props.pendingMessage === undefined) return;
+    setPrompt(props.pendingMessage);
+  }, [props.pendingMessage]);
   const trimmed = prompt.trim();
   const canSubmit = trimmed.length > 0 && !props.creating;
 

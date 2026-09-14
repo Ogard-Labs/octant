@@ -3,33 +3,14 @@ import type {
   CodeProjectPullRequestDetailSection,
   CodeProjectPullRequestFreshness,
   CodeProjectPullRequestLinkedThread,
+  CodeProjectPullRequestMergeMethod,
+  CodeProjectPullRequestMergeOutcome,
 } from "@octant/contracts";
-import {
-  Activity,
-  ArrowRight,
-  CircleCheck,
-  CircleMinus,
-  CircleQuestionMark,
-  CircleUserRound,
-  CircleX,
-  ExternalLink,
-  FileDiff,
-  FileText,
-  GitBranch,
-  GitCommitHorizontal,
-  GitCompareArrows,
-  GitMerge,
-  GitPullRequest,
-  GitPullRequestClosed,
-  GitPullRequestDraft,
-  LockKeyhole,
-  LoaderCircle,
-  MessagesSquare,
-  RefreshCw,
-  type LucideIcon,
-} from "lucide-react";
+import { Activity, GitBranch, GitPullRequest, MessageSquare, RefreshCw } from "lucide-react";
+import { useState } from "react";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { Markdown } from "../markdown/Markdown";
 import { CodeBlock } from "../transcript/CodeBlock";
 import "./project-pull-request-review.css";
@@ -46,19 +27,11 @@ const PR_STATE_VARIANTS: Record<
   CodeProjectPullRequestDetailObserved["pullRequestState"],
   NonNullable<OctantBadgeProps["variant"]>
 > = {
-  open: "success",
+  open: "secondary",
   draft: "outline",
-  merged: "default",
+  merged: "success",
   closed: "destructive",
 };
-
-const PR_STATE_ICONS: Record<CodeProjectPullRequestDetailObserved["pullRequestState"], LucideIcon> =
-  {
-    open: GitPullRequest,
-    draft: GitPullRequestDraft,
-    merged: GitMerge,
-    closed: GitPullRequestClosed,
-  };
 
 const CHECK_STATE_LABELS: Record<
   CodeProjectPullRequestDetailObserved["checks"][number]["state"],
@@ -82,54 +55,125 @@ const CHECK_STATE_VARIANTS: Record<
   unknown: "secondary",
 };
 
-const CHECK_STATE_ICONS: Record<
-  CodeProjectPullRequestDetailObserved["checks"][number]["state"],
-  LucideIcon
-> = {
-  success: CircleCheck,
-  failure: CircleX,
-  pending: LoaderCircle,
-  neutral: CircleMinus,
-  unknown: CircleQuestionMark,
-};
-
 export interface ProjectPullRequestReviewPaneProps {
   readonly detail: CodeProjectPullRequestDetailObserved;
   readonly freshness: CodeProjectPullRequestFreshness;
   readonly linkedThreads: ReadonlyArray<CodeProjectPullRequestLinkedThread>;
   readonly onOpenLinkedThread?: (thread: CodeProjectPullRequestLinkedThread) => void;
+  readonly onOpenChat?: (detail: CodeProjectPullRequestDetailObserved) => void;
+  readonly onMerge?: (
+    method: CodeProjectPullRequestMergeMethod,
+    headSha: string,
+  ) => Promise<CodeProjectPullRequestMergeOutcome>;
   readonly onRefresh?: () => void;
 }
 
 export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPaneProps) {
   const { detail } = props;
+  const [mergeMethod, setMergeMethod] = useState<CodeProjectPullRequestMergeMethod>("squash");
+  const [mergeConfirmationOpen, setMergeConfirmationOpen] = useState(false);
+  const [mergePending, setMergePending] = useState(false);
+  const [mergeOutcome, setMergeOutcome] = useState<CodeProjectPullRequestMergeOutcome>();
   const stale = (section: CodeProjectPullRequestDetailSection) =>
     detail.staleSections.includes(section);
   const waiting = detail.ambiguous || detail.freshness === "stale";
+  const mergeAvailable =
+    props.onMerge !== undefined &&
+    detail.headSha !== "" &&
+    detail.pullRequestState === "open" &&
+    detail.mergeability === "mergeable" &&
+    props.freshness.status === "fresh" &&
+    !waiting;
   const githubUrl = safeGithubUrl(detail.url);
 
-  const StateIcon = PR_STATE_ICONS[detail.pullRequestState];
+  async function confirmMerge(): Promise<void> {
+    if (props.onMerge === undefined || !mergeAvailable) return;
+    setMergePending(true);
+    setMergeOutcome(undefined);
+    try {
+      const outcome = await props.onMerge(mergeMethod, detail.headSha);
+      setMergeOutcome(outcome);
+      setMergeConfirmationOpen(false);
+      if (outcome.status === "merged") props.onRefresh?.();
+    } catch {
+      setMergeOutcome({ status: "unavailable", reason: "unavailable" });
+    } finally {
+      setMergePending(false);
+    }
+  }
 
   return (
-    <section
-      aria-label="Pull request review"
-      className="code-pr-review"
-      data-pr-state={detail.pullRequestState}
-    >
+    <section aria-label="Pull request review" className="code-pr-review">
       <header className="code-pr-review__header">
-        <div className="code-pr-review__headline">
-          <span aria-hidden="true" className="code-pr-review__state-mark">
-            <StateIcon size={20} strokeWidth={1.8} />
-          </span>
-          <div className="code-pr-review__title-block">
-            <p className="code-pr-review__eyebrow">
-              <span className="code-pr-review__eyebrow-label">Pull request</span>
-              <span className="code-pr-review__number">#{detail.number}</span>
-            </p>
-            <h1>{detail.title.length === 0 ? `Pull request #${detail.number}` : detail.title}</h1>
+        <div>
+          <div className="code-pr-review__eyebrow">
+            <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.8} />
+            <span>Pull request #{detail.number}</span>
           </div>
+          <h1>{detail.title.length === 0 ? `Pull request #${detail.number}` : detail.title}</h1>
+          <p className="code-pr-review__meta">
+            <OctantBadge variant={PR_STATE_VARIANTS[detail.pullRequestState]}>
+              {PR_STATE_LABELS[detail.pullRequestState]}
+            </OctantBadge>
+            <span className="code-pr-review__meta-item">
+              <GitBranch aria-hidden="true" size={14} strokeWidth={1.8} />
+              {detail.headBranch} → {detail.baseRepository}:{detail.baseBranch}
+            </span>
+            {detail.author.length === 0 ? null : (
+              <span className="code-pr-review__meta-item">by {detail.author}</span>
+            )}
+          </p>
+          <p className="code-project-pull-requests__status code-pr-review__freshness" role="status">
+            <Activity aria-hidden="true" size={14} strokeWidth={1.8} />
+            {freshnessCopy(props.freshness)}
+          </p>
         </div>
         <div className="code-pr-review__actions">
+          {props.onOpenChat === undefined ? null : (
+            <OctantButton
+              onClick={() => props.onOpenChat?.(detail)}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              <MessageSquare aria-hidden="true" size={14} strokeWidth={1.8} />
+              Open chat
+            </OctantButton>
+          )}
+          {props.onMerge === undefined ? null : (
+            <div className="code-pr-review__merge-actions">
+              <OctantSelectField
+                aria-label="Merge method"
+                className="code-pr-review__merge-method"
+                disabled={!mergeAvailable || mergePending}
+                onValueChange={(value) => {
+                  if (isMergeMethod(value)) {
+                    setMergeMethod(value);
+                  }
+                }}
+                options={[
+                  { id: "merge", label: "Merge commit" },
+                  { id: "squash", label: "Squash and merge" },
+                  { id: "rebase", label: "Rebase and merge" },
+                ]}
+                value={mergeMethod}
+              />
+              <OctantButton
+                disabled={!mergeAvailable || mergePending}
+                onClick={() => setMergeConfirmationOpen(true)}
+                size="sm"
+                title={
+                  mergeAvailable
+                    ? "Merge this pull request after confirming the selected method."
+                    : "Merge is available after a fresh, mergeable pull-request observation."
+                }
+                type="button"
+                variant="secondary"
+              >
+                {mergePending ? "Merging…" : "Merge"}
+              </OctantButton>
+            </div>
+          )}
           {githubUrl === undefined ? null : (
             <a
               className="code-pr-review__github-link"
@@ -137,8 +181,7 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
               rel="noreferrer"
               target="_blank"
             >
-              <ExternalLink aria-hidden="true" size={14} strokeWidth={1.8} />
-              <span>Open on GitHub</span>
+              Open on GitHub
             </a>
           )}
           {props.onRefresh === undefined ? null : (
@@ -149,44 +192,63 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
               variant="ghost"
             >
               <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
-              <span>Refresh detail</span>
+              Refresh detail
             </OctantButton>
           )}
         </div>
-        <p className="code-pr-review__meta">
-          <OctantBadge variant={PR_STATE_VARIANTS[detail.pullRequestState]}>
-            <StateIcon aria-hidden="true" size={14} strokeWidth={1.8} />
-            <span>{PR_STATE_LABELS[detail.pullRequestState]}</span>
-          </OctantBadge>
-          <span
-            className="code-pr-review__route"
-            title={`${detail.headRepository}:${detail.headBranch} → ${detail.baseRepository}:${detail.baseBranch}`}
-          >
-            <GitBranch aria-hidden="true" size={14} strokeWidth={1.8} />
-            <code>
-              {detail.headRepository}:{detail.headBranch}
-            </code>
-            <ArrowRight aria-hidden="true" size={14} strokeWidth={1.8} />
-            <code>
-              {detail.baseRepository}:{detail.baseBranch}
-            </code>
-          </span>
-          {detail.author.length === 0 ? null : (
-            <span className="code-pr-review__author">
-              <CircleUserRound aria-hidden="true" size={14} strokeWidth={1.8} />
-              <span>by {detail.author}</span>
-            </span>
-          )}
-        </p>
-        <p className="code-pr-review__freshness" role="status">
-          <Activity aria-hidden="true" size={14} strokeWidth={1.8} />
-          <span>{freshnessCopy(props.freshness)}</span>
-        </p>
       </header>
 
+      {mergeConfirmationOpen ? (
+        <div
+          aria-label="Confirm pull-request merge"
+          className="code-pr-review__merge-confirmation"
+          role="alertdialog"
+        >
+          <strong>Merge pull request #{detail.number}?</strong>
+          {mergeAvailable ? (
+            <p>
+              This merges the head you reviewed ({detail.headSha.slice(0, 7)}). Octant refuses if
+              the pull request changed since then.
+            </p>
+          ) : (
+            <p>
+              This pull request changed or is no longer mergeable. Refresh the detail before
+              merging.
+            </p>
+          )}
+          <div className="code-pr-review__actions">
+            <OctantButton
+              disabled={mergePending}
+              onClick={() => setMergeConfirmationOpen(false)}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              Cancel
+            </OctantButton>
+            <OctantButton
+              disabled={mergePending || !mergeAvailable}
+              onClick={() => void confirmMerge()}
+              size="sm"
+              type="button"
+              variant="destructive"
+            >
+              Confirm merge
+            </OctantButton>
+          </div>
+        </div>
+      ) : null}
+      {mergeOutcome === undefined ? null : (
+        <p
+          className={`code-pr-review__merge-result code-pr-review__merge-result--${mergeOutcome.status}`}
+          role={mergeOutcome.status === "merged" ? "status" : "alert"}
+        >
+          {mergeOutcomeCopy(mergeOutcome)}
+        </p>
+      )}
+
       <p className="code-pr-review__guardrail">
-        <LockKeyhole aria-hidden="true" size={14} strokeWidth={1.8} />
-        <span>Read-only review · use GitHub for review actions.</span>
+        Review data is read-only; merging is explicit and approval-gated.
       </p>
 
       {waiting ? (
@@ -202,7 +264,9 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
 
       {props.linkedThreads.length === 0 ? null : (
         <section aria-label="Linked threads" className="code-pr-review__section">
-          <SectionHeading icon={MessagesSquare} title="Linked threads" />
+          <header className="code-pr-review__section-header">
+            <h2>Linked threads</h2>
+          </header>
           <ul className="code-pr-review__commits">
             {props.linkedThreads.map((thread) => (
               <li key={String(thread.threadId)}>
@@ -224,11 +288,10 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
       )}
 
       <section aria-label="Pull request description" className="code-pr-review__section">
-        <SectionHeading
-          icon={FileText}
-          stale={stale("description") ? "description" : undefined}
-          title="Description"
-        />
+        <header className="code-pr-review__section-header">
+          <h2>Description</h2>
+          {stale("description") ? <StaleTag section="description" /> : null}
+        </header>
         {detail.description.length === 0 ? (
           <p role="status">No description provided.</p>
         ) : (
@@ -245,12 +308,10 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
       </section>
 
       <section aria-label="Pull request commits" className="code-pr-review__section">
-        <SectionHeading
-          count={detail.commits.length}
-          icon={GitCommitHorizontal}
-          stale={stale("commits") ? "commits" : undefined}
-          title="Commits"
-        />
+        <header className="code-pr-review__section-header">
+          <h2>Commits ({detail.commits.length})</h2>
+          {stale("commits") ? <StaleTag section="commits" /> : null}
+        </header>
         {detail.commits.length === 0 ? (
           <p role="status">No commits observed.</p>
         ) : (
@@ -269,12 +330,10 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
       </section>
 
       <section aria-label="Pull request changed files" className="code-pr-review__section">
-        <SectionHeading
-          count={detail.files.length}
-          icon={FileDiff}
-          stale={stale("files") ? "files" : undefined}
-          title="Changed files"
-        />
+        <header className="code-pr-review__section-header">
+          <h2>Changed files ({detail.files.length})</h2>
+          {stale("files") ? <StaleTag section="files" /> : null}
+        </header>
         {detail.files.length === 0 ? (
           <p role="status">No changed files observed.</p>
         ) : (
@@ -282,9 +341,8 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
             {detail.files.map((file) => (
               <li key={file.path}>
                 <span>{file.path}</span>
-                <span className="code-pr-review__diff-stat">
-                  <span className="code-pr-review__additions">+{file.additions}</span>
-                  <span className="code-pr-review__deletions">−{file.deletions}</span>
+                <span className="code-pr-review__muted">
+                  +{file.additions} −{file.deletions}
                 </span>
               </li>
             ))}
@@ -293,25 +351,19 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
       </section>
 
       <section aria-label="Pull request checks" className="code-pr-review__section">
-        <SectionHeading
-          count={detail.checks.length}
-          icon={CircleCheck}
-          stale={stale("checks") ? "checks" : undefined}
-          title="Checks"
-        />
+        <header className="code-pr-review__section-header">
+          <h2>Checks ({detail.checks.length})</h2>
+          {stale("checks") ? <StaleTag section="checks" /> : null}
+        </header>
         {detail.checks.length === 0 ? (
           <p role="status">No checks observed.</p>
         ) : (
           <ul className="code-pr-review__checks">
             {detail.checks.map((check, index) => (
-              <li data-check-state={check.state} key={`${check.name}-${index}`}>
+              <li key={`${check.name}-${index}`}>
                 <span>{check.name}</span>
-                <OctantBadge data-status={check.state} variant={CHECK_STATE_VARIANTS[check.state]}>
-                  {(() => {
-                    const CheckIcon = CHECK_STATE_ICONS[check.state];
-                    return <CheckIcon aria-hidden="true" size={14} strokeWidth={1.8} />;
-                  })()}
-                  <span>{CHECK_STATE_LABELS[check.state]}</span>
+                <OctantBadge variant={CHECK_STATE_VARIANTS[check.state]}>
+                  {CHECK_STATE_LABELS[check.state]}
                 </OctantBadge>
               </li>
             ))}
@@ -320,11 +372,10 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
       </section>
 
       <section aria-label="Pull request diff" className="code-pr-review__section">
-        <SectionHeading
-          icon={GitCompareArrows}
-          stale={stale("diff") ? "diff" : undefined}
-          title="Diff"
-        />
+        <header className="code-pr-review__section-header">
+          <h2>Diff</h2>
+          {stale("diff") ? <StaleTag section="diff" /> : null}
+        </header>
         {detail.diffTruncated ? (
           <p className="code-pr-review__notice" role="note">
             This diff is truncated and is not complete.
@@ -346,29 +397,6 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
         staleReviews={stale("reviews")}
       />
     </section>
-  );
-}
-
-function SectionHeading(props: {
-  readonly count?: number;
-  readonly icon: LucideIcon;
-  readonly stale?: string | undefined;
-  readonly title: string;
-}) {
-  const Icon = props.icon;
-  return (
-    <header className="code-pr-review__section-header">
-      <span className="code-pr-review__section-heading">
-        <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
-        <h2>
-          {props.title}
-          {props.count === undefined ? null : (
-            <span className="code-pr-review__section-count">{props.count}</span>
-          )}
-        </h2>
-      </span>
-      {props.stale === undefined ? null : <StaleTag section={props.stale} />}
-    </header>
   );
 }
 
@@ -423,4 +451,36 @@ function safeGithubUrl(value: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function mergeOutcomeCopy(outcome: CodeProjectPullRequestMergeOutcome): string {
+  if (outcome.status === "merged") {
+    return `Merged pull request #${outcome.number}. Refreshing its review state.`;
+  }
+  if (outcome.status === "unavailable") {
+    const reason =
+      outcome.reason === "unauthenticated"
+        ? "GitHub authentication is unavailable"
+        : outcome.reason === "disconnected"
+          ? "GitHub could not be reached"
+          : "the GitHub merge command is unavailable";
+    return `Merge unavailable: ${reason}.`;
+  }
+  const reason =
+    outcome.reason === "not-authorized"
+      ? "this Project is not authorized for that repository"
+      : outcome.reason === "not-open"
+        ? "the pull request is no longer open"
+        : outcome.reason === "not-mergeable"
+          ? "GitHub reports that it is not mergeable"
+          : outcome.reason === "stale"
+            ? "the pull request changed since this review"
+            : outcome.reason === "conflict"
+              ? "GitHub reported a merge conflict"
+              : "GitHub rejected the merge";
+  return `Merge refused: ${reason}.`;
+}
+
+function isMergeMethod(value: string): value is CodeProjectPullRequestMergeMethod {
+  return value === "merge" || value === "squash" || value === "rebase";
 }

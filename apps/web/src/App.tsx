@@ -79,7 +79,10 @@ import { useMachineChangeFeed } from "./polling/useMachineChangeFeed";
 import type { CodeOperationId, ProviderInstance, VoiceSettings } from "@octant/contracts";
 import type {
   CodeBoardQuery,
+  CodeProjectPullRequestDetailObserved,
   CodeProjectPullRequestDetailQuery,
+  CodeProjectPullRequestMergeMethod,
+  CodeProjectPullRequestMergeOutcome,
   CodeProjectPullRequestRow,
   ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
@@ -2643,6 +2646,8 @@ function LaunchedShell(
         <DockProjectPullRequestReviewTool
           key={`${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`}
           load={(query) => codeClient.queryProjectPullRequestDetail(query)}
+          onMerge={mergeProjectPullRequest}
+          onOpenChat={openProjectPullRequestChat}
           onOpenLinkedThread={(thread) =>
             openLinkedProjectPullRequestThread(thread, selectedProjectPullRequest.projectId)
           }
@@ -2939,6 +2944,18 @@ function LaunchedShell(
     openReviewForThread(String(thread.threadId));
   }
 
+  function openProjectPullRequestChat(detail: CodeProjectPullRequestDetailObserved): void {
+    const title = detail.title.length === 0 ? `Pull request #${detail.number}` : detail.title;
+    const prompt = [`Help me understand pull request #${detail.number}: ${title}`, detail.url].join(
+      "\n",
+    );
+    closeWorkspaceReaders();
+    setDraftError(undefined);
+    setDraftPendingMessage(prompt);
+    setDraftResetRevision((revision) => revision + 1);
+    setDraftProjectSelection(({ chat: _previous, ...rest }) => rest);
+    void controller.openDraftThread("chat");
+  }
   // This model is rebuilt only when its inputs change. It used to be recomputed
   // by every App render — including the once-a-minute clock tick and every
   // machine-change revision — and handed fresh array identities to the sidebar.
@@ -3052,6 +3069,18 @@ function LaunchedShell(
     providerController.instances,
     workNavigation.navigation,
   ]);
+
+  function mergeProjectPullRequest(
+    method: CodeProjectPullRequestMergeMethod,
+    headSha: string,
+  ): Promise<CodeProjectPullRequestMergeOutcome> {
+    const selected = selectedProjectPullRequest;
+    const merge = codeClient.mergeProjectPullRequest;
+    if (selected === undefined || merge === undefined || headSha === "") {
+      return Promise.resolve({ status: "unavailable", reason: "unavailable" });
+    }
+    return merge({ ...selected, method, headSha });
+  }
 
   if (controller.status === "loading") {
     return (
@@ -3674,6 +3703,10 @@ function LaunchedShell(
     // overview on screen for a frame before the draft replaced it, which read
     // as an old page flashing past every time a task was started from a row.
     closeWorkspaceReaders();
+    // A new draft starts clean: a prompt seeded by an earlier PR-review
+    // handoff must not reappear as this draft's text.
+    setDraftError(undefined);
+    setDraftPendingMessage(undefined);
     setDraftResetRevision((revision) => revision + 1);
     await controller.openDraftThread(mode, projectId);
   }
@@ -3693,6 +3726,8 @@ function LaunchedShell(
   function createChat(prompt?: string) {
     if (prompt === undefined || prompt.trim() === "") {
       closeWorkspaceReaders();
+      setDraftError(undefined);
+      setDraftPendingMessage(undefined);
       setDraftResetRevision((revision) => revision + 1);
       setDraftProjectSelection(({ chat: _previous, ...rest }) => rest);
       void controller.openDraftThread("chat");
@@ -5804,6 +5839,8 @@ function LaunchedShell(
                   <DockProjectPullRequestReviewTool
                     key={`${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`}
                     load={(query) => codeClient.queryProjectPullRequestDetail(query)}
+                    onMerge={mergeProjectPullRequest}
+                    onOpenChat={openProjectPullRequestChat}
                     onOpenLinkedThread={(thread) =>
                       openLinkedProjectPullRequestThread(
                         thread,
@@ -5866,6 +5903,8 @@ function LaunchedShell(
                     <DockProjectPullRequestReviewTool
                       key={`${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`}
                       load={(query) => codeClient.queryProjectPullRequestDetail(query)}
+                      onMerge={mergeProjectPullRequest}
+                      onOpenChat={openProjectPullRequestChat}
                       onOpenLinkedThread={(thread) =>
                         openLinkedProjectPullRequestThread(
                           thread,

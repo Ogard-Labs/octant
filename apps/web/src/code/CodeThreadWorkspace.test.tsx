@@ -2571,7 +2571,10 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getAllByText("Local OpenCode — Model One")).toHaveLength(1);
+    // Provenance moved into the header's hover details; the row itself keeps
+    // only the outcome.
+    expect(screen.getByTitle(/Local OpenCode — Model One/)).toBeInTheDocument();
+    expect(screen.queryByText("Local OpenCode — Model One")).not.toBeInTheDocument();
     expect(screen.getByText("Failed")).toBeVisible();
   });
 

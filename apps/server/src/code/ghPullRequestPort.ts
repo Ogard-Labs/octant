@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import type { CodeThreadId } from "@octant/contracts";
+import type { CodeProjectPullRequestMergeMethod, CodeThreadId } from "@octant/contracts";
 
 const MAX_GH_OUTPUT_BYTES = 1_048_576;
 const MAX_TITLE_BYTES = 512;
@@ -87,6 +87,8 @@ export type GhPullRequestReviewResult =
         baseBranch: string;
         headRepository: string;
         headBranch: string;
+        /** Empty when the read carried no head commit. */
+        headSha: string;
         author: string;
         mergeability?: "mergeable" | "conflicting" | "unknown";
         updatedAt?: string;
@@ -110,6 +112,17 @@ export type GhPullRequestReviewResult =
     }>
   | Readonly<{ status: "none" }>
   | Readonly<{ status: "unavailable" }>;
+
+export type GhPullRequestMergeResult =
+  | Readonly<{ status: "merged" }>
+  | Readonly<{
+      status: "refused";
+      reason: "not-open" | "not-mergeable" | "stale" | "conflict" | "failed";
+    }>
+  | Readonly<{
+      status: "unavailable";
+      reason: "disconnected" | "unauthenticated" | "unavailable";
+    }>;
 
 export interface GhActivePullRequestRow {
   readonly number: number;
@@ -165,6 +178,7 @@ const PR_VIEW_FIELDS = [
   "author",
   "baseRefName",
   "headRefName",
+  "headRefOid",
   "url",
   "commits",
   "files",
@@ -301,6 +315,7 @@ export class GhPullRequestPort {
         baseBranch: identity.baseBranch,
         headRepository: identity.headOwner,
         headBranch: identity.headBranch,
+        headSha: detail?.headSha ?? "",
         author: detail?.author ?? "",
         mergeability: detail?.mergeability ?? "unknown",
         ...(detail?.updatedAt === undefined ? {} : { updatedAt: detail.updatedAt }),
@@ -369,6 +384,7 @@ export class GhPullRequestPort {
         baseBranch: detail?.baseBranch ?? "",
         headRepository: detail?.headRepository ?? "",
         headBranch: detail?.headBranch ?? "",
+        headSha: detail?.headSha ?? "",
         author: detail?.author ?? "",
         mergeability: detail?.mergeability ?? "unknown",
         ...(detail?.updatedAt === undefined ? {} : { updatedAt: detail.updatedAt }),
@@ -383,6 +399,67 @@ export class GhPullRequestPort {
       reviews: detail?.reviews ?? [],
       comments: detail?.comments ?? [],
     };
+  }
+
+  /**
+   * Merge one exact pull request after re-reading its current head and
+   * mergeability, bound to the head the person reviewed. When the re-read's
+   * head differs from the reviewed one the merge is refused as `stale`
+   * instead of merging a revision that was never on screen, and the merge
+   * itself pins `--match-head-commit` so a force-push between the re-read and
+   * the effect is refused by GitHub too.
+   */
+  async mergeByIdentity(
+    request: {
+      readonly owner: string;
+      readonly name: string;
+      readonly number: number;
+      readonly method: CodeProjectPullRequestMergeMethod;
+      /** The head commit the reviewer approved. */
+      readonly headSha: string;
+    },
+    signal: AbortSignal,
+  ): Promise<GhPullRequestMergeResult> {
+    const repository = `${request.owner}/${request.name}`;
+    if (
+      !validRepository(repository) ||
+      !Number.isSafeInteger(request.number) ||
+      request.number <= 0
+    ) {
+      return { status: "refused", reason: "failed" };
+    }
+    const detail = await this.#viewReviewDetail(repository, request.number, signal);
+    if (detail === undefined) return { status: "unavailable", reason: "unavailable" };
+    if (detail.state !== "open") return { status: "refused", reason: "not-open" };
+    if (detail.mergeability !== "mergeable") {
+      return { status: "refused", reason: "not-mergeable" };
+    }
+    if (request.headSha === "" || detail.headSha === "" || detail.headSha !== request.headSha) {
+      return { status: "refused", reason: "stale" };
+    }
+
+    let result: GhCommandResult;
+    try {
+      result = await this.#command.run(
+        [
+          "pr",
+          "merge",
+          String(request.number),
+          "--repo",
+          repository,
+          `--${request.method}`,
+          "--match-head-commit",
+          request.headSha,
+        ],
+        { environment: this.#environment, stdin: undefined },
+        signal,
+      );
+    } catch {
+      return { status: "unavailable", reason: "disconnected" };
+    }
+    if (result.timedOut === true) return { status: "unavailable", reason: "disconnected" };
+    if (result.exitCode === 0) return { status: "merged" };
+    return classifyMergeFailure(result);
   }
 
   /**
@@ -663,6 +740,7 @@ interface GhPullRequestReviewDetail {
   readonly baseBranch: string;
   readonly headBranch: string;
   readonly headRepository: string;
+  readonly headSha: string;
   readonly description: string;
   readonly commits: readonly Readonly<{ oid: string; messageHeadline: string; author: string }>[];
   readonly files: readonly Readonly<{ path: string; additions: number; deletions: number }>[];
@@ -694,6 +772,10 @@ function decodeReviewDetail(output: string): GhPullRequestReviewDetail | undefin
   const baseBranch = typeof value.baseRefName === "string" ? value.baseRefName : "";
   const headBranch = typeof value.headRefName === "string" ? value.headRefName : "";
   const headRepository = loginOf(value.headRepositoryOwner);
+  const headSha =
+    typeof value.headRefOid === "string" && /^[0-9a-f]{40}$/i.test(value.headRefOid)
+      ? value.headRefOid
+      : "";
   const updatedAt =
     typeof value.updatedAt === "string" &&
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value.updatedAt)
@@ -712,6 +794,7 @@ function decodeReviewDetail(output: string): GhPullRequestReviewDetail | undefin
     baseBranch,
     headBranch,
     headRepository,
+    headSha,
     description: clampBytes(value.body, MAX_PR_DESCRIPTION_BYTES),
     commits: decodeCommits(value.commits),
     files: decodeFiles(value.files),
@@ -719,6 +802,29 @@ function decodeReviewDetail(output: string): GhPullRequestReviewDetail | undefin
     reviews: decodeReviews(value.reviews),
     comments: decodeComments(value.comments),
   };
+}
+
+function classifyMergeFailure(result: GhCommandResult): GhPullRequestMergeResult {
+  const diagnostic = `${result.stderr ?? ""}\n${result.stdout}`;
+  if (/HTTP 401|bad credentials|authentication required|not logged in/i.test(diagnostic)) {
+    return { status: "unavailable", reason: "unauthenticated" };
+  }
+  if (
+    /Could not resolve host|no such host|connection refused|network is unreachable|TLS handshake|connection reset/i.test(
+      diagnostic,
+    )
+  ) {
+    return { status: "unavailable", reason: "disconnected" };
+  }
+  if (
+    /expected head|head commit|outdated|update the branch|not at the expected/i.test(diagnostic)
+  ) {
+    return { status: "refused", reason: "stale" };
+  }
+  if (/conflict|not mergeable|merge queue/i.test(diagnostic)) {
+    return { status: "refused", reason: "conflict" };
+  }
+  return { status: "refused", reason: "failed" };
 }
 
 function classifyActiveListFailure(result: GhCommandResult): GhActivePullRequestListResult {
