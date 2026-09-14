@@ -120,21 +120,15 @@ export class NpmAgentPluginMarketplace {
           this.#searchKeyword(trimmed, "agent-plugins", boundedSignal),
         ]);
         const candidates = new Map<string, { readonly name: string; readonly version: string }>();
-        let failed = 0;
+        const failures: Array<unknown> = [];
         for (const result of keywordSearches) {
           if (result.status === "rejected") {
-            failed += 1;
+            failures.push(result.reason);
             continue;
           }
           for (const candidate of result.value) {
             if (!candidates.has(candidate.name)) candidates.set(candidate.name, candidate);
           }
-        }
-        if (failed === keywordSearches.length) {
-          const [first] = keywordSearches;
-          throw first.status === "rejected"
-            ? first.reason
-            : new Error("Agent Plugin search failed.");
         }
         const inspected = [...candidates.values()].slice(0, MAX_CANDIDATES);
         // Inspecting serially would make the Extensions page wait on every
@@ -167,7 +161,7 @@ export class NpmAgentPluginMarketplace {
               if (signal?.aborted === true) throw error;
               if (boundedSignal.aborted) return;
               // One package that is not a conformant, reviewable Agent Plugin is
-              // skipped. The registry search itself failing already threw above.
+              // skipped; a rejected keyword query is still surfaced below.
               continue;
             }
           }
@@ -175,9 +169,15 @@ export class NpmAgentPluginMarketplace {
         await Promise.all(
           Array.from({ length: SEARCH_INSPECTION_CONCURRENCY }, () => inspectNext()),
         );
-        return {
-          entries: results.filter((entry) => entry !== undefined).slice(0, MAX_RESULTS),
-        };
+        const entries = results.filter((entry) => entry !== undefined).slice(0, MAX_RESULTS);
+        if (failures.length > 0 && entries.length === 0) {
+          // A keyword query that rejected and no listing to show means an
+          // empty result would read as "no matches". Surface the first
+          // failure the way a fully failed search does, and keep successful
+          // results when there are any.
+          throw failures[0] ?? new Error("Agent Plugin search failed.");
+        }
+        return { entries };
       },
       this.#searchBudgetMs,
     );

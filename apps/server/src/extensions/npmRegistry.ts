@@ -15,6 +15,15 @@ export const MAX_NPM_REGISTRY_JSON_BYTES = 8 * 1024 * 1024;
 export const MAX_NPM_TARBALL_BYTES = 8 * 1024 * 1024;
 export const NPM_VERSION_PATTERN =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+/**
+ * A package name this module can request verbatim: npm's optional `@scope/`
+ * and exactly one name segment, with no character `encodeURIComponent` would
+ * rewrite. A name such as `@a/b/c` would otherwise be truncated to `@a/b` by
+ * `encodeNpmName`, so a catalog identity would name one package and resolve
+ * another. Uppercase and legacy punctuation stay because the registry still
+ * serves legacy names and encoding leaves those characters alone.
+ */
+const NPM_PACKAGE_NAME_PATTERN = /^(?:@[A-Za-z0-9._~!()*'-]+\/)?[A-Za-z0-9._~!()*'-]+$/;
 
 export interface NpmPackageMetadata {
   readonly version: string;
@@ -133,9 +142,12 @@ export function verifyNpmTarballIntegrity(
 ): void {
   if (typeof integrity === "string" && integrity.trim() !== "") {
     const match = /^(sha512|sha256|sha1)-([A-Za-z0-9+/=]+)$/.exec(integrity.trim());
-    if (match === null) throw new Error("npm package integrity metadata is invalid.");
-    const algorithm = match[1]!;
-    const expected = Buffer.from(match[2]!, "base64");
+    const algorithm = match?.[1];
+    const digest = match?.[2];
+    if (algorithm === undefined || digest === undefined) {
+      throw new Error("npm package integrity metadata is invalid.");
+    }
+    const expected = Buffer.from(digest, "base64");
     const actual = createHash(algorithm).update(tarballBytes).digest();
     if (expected.byteLength !== actual.byteLength || !expected.equals(actual)) {
       throw new Error("npm package integrity check failed.");
@@ -214,11 +226,10 @@ export function encodeNpmName(packageName: string): string {
 export function encodeNpmEntryId(packageName: string, version?: string): string {
   if (
     typeof packageName !== "string" ||
-    packageName.trim() === "" ||
-    packageName.includes("\n") ||
+    !NPM_PACKAGE_NAME_PATTERN.test(packageName) ||
     (version !== undefined && !NPM_VERSION_PATTERN.test(version))
   ) {
-    throw new Error("npm package name is required.");
+    throw new Error("npm package name is invalid.");
   }
   const identity = version === undefined ? packageName : `${packageName}\n${version}`;
   const id = `n${encodeCompactCatalogIdentity(identity)}`;
@@ -237,16 +248,14 @@ export function decodeNpmEntryIdentity(
 ): { readonly packageName: string; readonly version?: string } | undefined {
   if (!/^n[a-z2-7]+$/.test(entryId)) return undefined;
   const decoded = decodeCompactCatalogIdentity(entryId.slice(1));
-  if (decoded === undefined || decoded.trim() === "") return undefined;
+  if (decoded === undefined) return undefined;
   const separator = decoded.lastIndexOf("\n");
-  if (separator < 0) return { packageName: decoded };
+  if (separator < 0) {
+    return NPM_PACKAGE_NAME_PATTERN.test(decoded) ? { packageName: decoded } : undefined;
+  }
   const packageName = decoded.slice(0, separator);
   const version = decoded.slice(separator + 1);
-  if (
-    packageName.trim() === "" ||
-    !NPM_VERSION_PATTERN.test(version) ||
-    packageName.includes("\n")
-  ) {
+  if (!NPM_PACKAGE_NAME_PATTERN.test(packageName) || !NPM_VERSION_PATTERN.test(version)) {
     return undefined;
   }
   return { packageName, version };

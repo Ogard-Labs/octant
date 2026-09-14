@@ -17,6 +17,21 @@ import {
   pluginTarball,
   registryFetch,
 } from "./agentPluginCatalogTestFixtures";
+import { encodeCompactCatalogIdentity } from "./skillPackageBuilder";
+
+/** Serves the `agent-plugins` keyword query and fails the `agent-plugin` one. */
+function failingAgentPluginKeywordFetch(fetch: MarketplaceFetch): MarketplaceFetch {
+  return (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    const isAgentPluginsQuery = (url.searchParams.get("text") ?? "").endsWith(
+      "keywords:agent-plugins",
+    );
+    if (url.pathname === "/-/v1/search" && !isAgentPluginsQuery) {
+      return new Response("unavailable", { status: 503 });
+    }
+    return fetch(input);
+  }) as MarketplaceFetch;
+}
 
 describe("npm Agent Plugin marketplace", () => {
   it("merges and deduplicates the agent-plugin keyword queries", async () => {
@@ -104,6 +119,30 @@ describe("npm Agent Plugin marketplace", () => {
         entryId: encodeNpmEntryId("demo-plugin") as never,
       }),
     ).rejects.toThrow(/cannot resolve/i);
+  });
+
+  it("refuses an entry id whose decoded name would resolve a different package", async () => {
+    // `@a/b/c` has no npm identity; without the grammar check the resolver
+    // would drop the third segment and fetch `@a/b` under a `@a/b/c` source.
+    const craftedEntryId = `n${encodeCompactCatalogIdentity("@a/b/c\n1.0.0")}` as never;
+    const { fetch, calls } = registryFetch([
+      {
+        name: "@a/b",
+        version: "1.0.0",
+        keywords: ["agent-plugin", "agent-plugins"],
+        tarball: pluginTarball({ name: "@a/b" }),
+      },
+    ]);
+    const marketplace = new NpmAgentPluginMarketplace({ fetch, platform: "darwin" });
+
+    await expect(
+      marketplace.resolve({
+        kind: "catalog",
+        catalogId: NPM_AGENT_PLUGINS_CATALOG_ID as never,
+        entryId: craftedEntryId,
+      }),
+    ).rejects.toThrow(/cannot resolve/i);
+    expect(calls).toHaveLength(0);
   });
 
   it("skips candidates whose root plugin.json is not a canonical Agent Plugin", async () => {
@@ -361,21 +400,24 @@ describe("npm Agent Plugin marketplace", () => {
         tarball: pluginTarball({ name: "single-keyword-plugin" }),
       },
     ]);
-    const flaky = (async (input: RequestInfo | URL) => {
-      const url = new URL(String(input));
-      const isAgentPluginsQuery = (url.searchParams.get("text") ?? "").endsWith(
-        "keywords:agent-plugins",
-      );
-      if (url.pathname === "/-/v1/search" && !isAgentPluginsQuery) {
-        return new Response("unavailable", { status: 503 });
-      }
-      return fetch(input);
-    }) as MarketplaceFetch;
-    const marketplace = new NpmAgentPluginMarketplace({ fetch: flaky, platform: "darwin" });
+    const marketplace = new NpmAgentPluginMarketplace({
+      fetch: failingAgentPluginKeywordFetch(fetch),
+      platform: "darwin",
+    });
 
     const search = await marketplace.search("plugin");
 
     expect(search.entries.map((entry) => entry.displayName)).toEqual(["single-keyword-plugin"]);
+  });
+
+  it("surfaces a failed keyword query when no listing can be shown", async () => {
+    const { fetch } = registryFetch([]);
+    const marketplace = new NpmAgentPluginMarketplace({
+      fetch: failingAgentPluginKeywordFetch(fetch),
+      platform: "darwin",
+    });
+
+    await expect(marketplace.search("plugin")).rejects.toThrow(/npm Agent Plugin search/i);
   });
 
   it("fails closed with no listings when the registry is unreachable", async () => {

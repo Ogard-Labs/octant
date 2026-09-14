@@ -31,8 +31,10 @@ export function MarketplaceFetchDisclosure() {
         Network details
       </summary>
       <p className="marketplace-fetch-settings__disclosure">
-        Search contacts skills.sh and the npm registry with the text you typed. Inspecting or
-        installing catalog packages fetches from GitHub. Opening Marketplace never fetches.
+        A catalog search sends your query plus the agent-plugin keywords to npm, then downloads
+        candidate metadata and tarballs; skill search contacts skills.sh and the npm registry with
+        the text you typed. Inspecting or installing a curated package fetches its pinned GitHub
+        tree. Opening Marketplace never fetches.
       </p>
       <ul className="marketplace-fetch-settings__list">
         <li>User-Agent is a fixed string with no app or runtime version.</li>
