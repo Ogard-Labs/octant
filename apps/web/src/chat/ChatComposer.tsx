@@ -50,7 +50,7 @@ import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
-import { ComposerModelPicker } from "../providers/ComposerModelPicker";
+import { ComposerModelPicker, isComposerReasoningOption } from "../providers/ComposerModelPicker";
 import { useOctantCommands } from "../palette/CommandRegistry";
 import {
   applySlashCommandToken,
@@ -301,11 +301,18 @@ export function ChatComposer(props: ChatComposerProps) {
   const settingsLocked = props.isSending;
   const [modelOptionsOpen, setModelOptionsOpen] = useState(false);
   const declaredModelOptions = props.modelOptions ?? [];
-  const hasModelOptionControls = declaredModelOptions.length > 0 || props.poolControl !== undefined;
+  // The picker draws the model's effort/reasoning level inline, so the
+  // options surface keeps every other declared option and stays hidden when
+  // there is nothing left for it to own.
+  const optionsSurfaceModelOptions = declaredModelOptions.filter(
+    (option) => !isComposerReasoningOption(option),
+  );
+  const hasModelOptionControls =
+    optionsSurfaceModelOptions.length > 0 || props.poolControl !== undefined;
   // "Set" mirrors the select's own fallback: a stored value the model no
   // longer declares renders as the provider default, so it must not light the
   // trigger either.
-  const anyModelOptionSet = declaredModelOptions.some(
+  const anyModelOptionSet = optionsSurfaceModelOptions.some(
     (option) => option.value !== undefined && option.values.includes(option.value),
   );
   const status = composeStatus({
@@ -765,6 +772,10 @@ export function ChatComposer(props: ChatComposerProps) {
             disabled={settingsLocked}
             groups={props.providerGroups}
             onSelect={props.onSelectModel}
+            {...(props.modelOptions === undefined ? {} : { modelOptions: props.modelOptions })}
+            {...(props.onModelOptionChange === undefined
+              ? {}
+              : { onModelOptionChange: props.onModelOptionChange })}
             {...(props.onOpenSettings === undefined
               ? {}
               : { onOpenSettings: props.onOpenSettings })}
@@ -823,7 +834,7 @@ export function ChatComposer(props: ChatComposerProps) {
               triggerLabel="Model options"
               triggerVariant="ghost-icon"
             >
-              {declaredModelOptions.map((option) => (
+              {optionsSurfaceModelOptions.map((option) => (
                 <label key={option.id}>
                   <span className="chat-composer__visually-hidden">{option.displayName}</span>
                   <OctantSelectField

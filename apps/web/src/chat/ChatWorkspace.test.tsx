@@ -373,7 +373,12 @@ function providerSnapshotWithModelOptions(): ProviderRegistrySnapshot {
           {
             ...baseModel,
             options: [
-              { id: "effort", displayName: "Effort", kind: "selection", values: ["low", "high"] },
+              {
+                id: "verbosity",
+                displayName: "Verbosity",
+                kind: "selection",
+                values: ["low", "high"],
+              },
               { id: "service-tier", displayName: "Speed", kind: "selection", values: ["fast"] },
             ],
           },
@@ -2153,18 +2158,18 @@ describe("ChatWorkspace", () => {
       "data-customized",
     );
     await user.click(screen.getByRole("button", { name: "Model options" }));
-    expect(screen.getByRole("combobox", { name: "Speed" })).toHaveTextContent("Speed: fast");
-    await user.click(screen.getByRole("combobox", { name: "Effort" }));
-    await user.click(await screen.findByRole("option", { name: "Effort: high" }));
+    await user.click(screen.getByRole("combobox", { name: "Verbosity" }));
+    await user.click(await screen.findByRole("option", { name: "Verbosity: high" }));
     expect(controller.execute).toHaveBeenCalledWith({
       kind: "change-chat-provider",
       threadId,
       expectedVersion: 3,
       providerInstanceId: providerId,
       modelId: "model-a",
-      modelOptionValues: { "service-tier": "fast", effort: "high" },
+      modelOptionValues: { "service-tier": "fast", verbosity: "high" },
     });
 
+    expect(screen.getByRole("combobox", { name: "Speed" })).toHaveTextContent("Speed: fast");
     await user.click(screen.getByRole("combobox", { name: "Speed" }));
     await user.click(await screen.findByRole("option", { name: "Speed: Default" }));
     expect(controller.execute).toHaveBeenLastCalledWith(
@@ -2174,7 +2179,7 @@ describe("ChatWorkspace", () => {
     // A model that declares no options gets no option controls.
     const onModelB = controllerFixture({}, { modelId: "model-b" });
     rerender(<ChatWorkspace controller={onModelB} providerSnapshot={withOptions} />);
-    expect(screen.queryByRole("combobox", { name: "Effort" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Verbosity" })).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Speed" })).toBeNull();
   });
 
@@ -2209,8 +2214,8 @@ describe("ChatWorkspace", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Model options" }));
-    await user.click(screen.getByRole("combobox", { name: "Effort" }));
-    await user.click(await screen.findByRole("option", { name: "Effort: high" }));
+    await user.click(screen.getByRole("combobox", { name: "Verbosity" }));
+    await user.click(await screen.findByRole("option", { name: "Verbosity: high" }));
     await user.click(screen.getByRole("combobox", { name: "Speed" }));
     await user.click(await screen.findByRole("option", { name: "Speed: fast" }));
     // The rendered thread is still at version 3: the second change waits for
@@ -2221,11 +2226,11 @@ describe("ChatWorkspace", () => {
     await waitFor(() => expect(commands).toHaveLength(2));
     expect(commands[0]).toMatchObject({
       expectedVersion: 3,
-      modelOptionValues: { effort: "high" },
+      modelOptionValues: { verbosity: "high" },
     });
     expect(commands[1]).toMatchObject({
       expectedVersion: 4,
-      modelOptionValues: { effort: "high", "service-tier": "fast" },
+      modelOptionValues: { verbosity: "high", "service-tier": "fast" },
     });
   });
 
@@ -2244,7 +2249,7 @@ describe("ChatWorkspace", () => {
           version: 4,
           providerInstanceId: providerId,
           modelId: "model-a",
-          modelOptionValues: { effort: "high" },
+          modelOptionValues: { verbosity: "high" },
         },
       } as never;
     });
@@ -2256,8 +2261,8 @@ describe("ChatWorkspace", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Model options" }));
-    await user.click(screen.getByRole("combobox", { name: "Effort" }));
-    await user.click(await screen.findByRole("option", { name: "Effort: high" }));
+    await user.click(screen.getByRole("combobox", { name: "Verbosity" }));
+    await user.click(await screen.findByRole("option", { name: "Verbosity: high" }));
     await user.click(screen.getByRole("button", { name: "Enable web research" }));
 
     // Both settings were requested, so both have to survive. Sending the
@@ -2306,8 +2311,8 @@ describe("ChatWorkspace", () => {
     // The option controls still belong to model A: the switch has not settled,
     // so nothing has re-rendered them for model B yet.
     await user.click(screen.getByRole("button", { name: "Model options" }));
-    await user.click(screen.getByRole("combobox", { name: "Effort" }));
-    await user.click(await screen.findByRole("option", { name: "Effort: high" }));
+    await user.click(screen.getByRole("combobox", { name: "Verbosity" }));
+    await user.click(await screen.findByRole("option", { name: "Verbosity: high" }));
     // A third command, queued behind both, marks where the queue has got to:
     // the dropped change cannot slip in after it.
     await user.click(screen.getByRole("button", { name: "Enable web research" }));
@@ -2343,7 +2348,7 @@ describe("ChatWorkspace", () => {
           version: 4,
           providerInstanceId: providerId,
           modelId: "model-a",
-          modelOptionValues: { effort: "high" },
+          modelOptionValues: { verbosity: "high" },
         },
       } as never;
     });
@@ -2365,8 +2370,8 @@ describe("ChatWorkspace", () => {
     render(<Harness />);
 
     await user.click(screen.getByRole("button", { name: "Model options" }));
-    await user.click(screen.getByRole("combobox", { name: "Effort" }));
-    await user.click(await screen.findByRole("option", { name: "Effort: high" }));
+    await user.click(screen.getByRole("combobox", { name: "Verbosity" }));
+    await user.click(await screen.findByRole("option", { name: "Verbosity: high" }));
     await user.type(screen.getByRole("textbox", { name: "Message" }), "Think hard{Enter}");
 
     // The turn must run the setting the person just chose, so it waits for the
@@ -3180,7 +3185,7 @@ describe("ChatWorkspace", () => {
           version: 4,
           providerInstanceId: providerId,
           modelId: "model-a",
-          modelOptionValues: { effort: "high" },
+          modelOptionValues: { verbosity: "high" },
         },
       } as never;
     });
@@ -3192,8 +3197,8 @@ describe("ChatWorkspace", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Model options" }));
-    await user.click(screen.getByRole("combobox", { name: "Effort" }));
-    await user.click(await screen.findByRole("option", { name: "Effort: high" }));
+    await user.click(screen.getByRole("combobox", { name: "Verbosity" }));
+    await user.click(await screen.findByRole("option", { name: "Verbosity: high" }));
     await scenario.act(user);
 
     // Sent on the rendered version, this would reach the host behind the option

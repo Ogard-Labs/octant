@@ -279,6 +279,59 @@ describe("ComposerModelPicker", () => {
     );
     expect(within(menu).queryByRole("button", { name: "All" })).not.toBeInTheDocument();
   });
+
+  it("draws the selected model's reasoning level and reports the chosen level", async () => {
+    const user = userEvent.setup();
+    const onModelOptionChange = vi.fn();
+    render(
+      <ComposerModelPicker
+        groups={groups()}
+        modelOptions={[
+          {
+            id: "effort",
+            displayName: "Effort",
+            values: ["low", "medium", "high"],
+            value: "medium",
+          },
+        ]}
+        onModelOptionChange={onModelOptionChange}
+        onSelect={vi.fn()}
+        selectedModelId={modelOne}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const levels = await screen.findByRole("group", { name: "Effort level" });
+    expect(within(levels).getByRole("button", { name: "Medium" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    await user.click(within(levels).getByRole("button", { name: "High" }));
+    expect(onModelOptionChange).toHaveBeenCalledWith("effort", "high");
+
+    await user.click(within(levels).getByRole("button", { name: "Default" }));
+    expect(onModelOptionChange).toHaveBeenCalledWith("effort", undefined);
+  });
+
+  it("keeps the level control out when no reasoning option is declared", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerModelPicker
+        groups={groups()}
+        modelOptions={[{ id: "service-tier", displayName: "Service tier", values: ["fast"] }]}
+        onModelOptionChange={vi.fn()}
+        onSelect={vi.fn()}
+        selectedModelId={modelOne}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await screen.findByRole("dialog", { name: "Choose provider and model" });
+    expect(screen.queryByRole("group", { name: /level$/ })).not.toBeInTheDocument();
+  });
 });
 
 function groups(options?: { readonly degraded?: boolean }) {
