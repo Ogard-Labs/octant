@@ -174,6 +174,7 @@ export function makeDiscoveryService(options: DiscoveryServiceOptions = {}): Dis
         scannedAt: new Date(now()).toISOString() as DiscoverySnapshot["scannedAt"],
         scanDurationMs: now() - startTime,
         status,
+        searchedDirectories: pathDirs as DiscoverySnapshot["searchedDirectories"],
         ...(message !== undefined ? { message: message as DiscoverySnapshot["message"] } : {}),
       };
       return snapshot;
@@ -223,13 +224,13 @@ async function scanDescriptor(
     const execName = candidate.execName;
     const validated = await validateExecutable(candidatePath, fs);
     if (validated === undefined) continue;
-    if (seenPaths.has(validated)) continue;
-    seenPaths.add(validated);
+    if (seenPaths.has(validated.canonicalPath)) continue;
+    seenPaths.add(validated.canonicalPath);
 
     // Version probe
     let version: string | undefined;
     try {
-      const { stdout } = await exec(validated, [...descriptor.versionProbeArgs], {
+      const { stdout } = await exec(validated.canonicalPath, [...descriptor.versionProbeArgs], {
         timeout: MAX_PROBE_TIMEOUT_MS,
         maxBuffer: MAX_PROBE_OUTPUT_BYTES,
         env: sanitizeProbeEnvironment(environment),
@@ -243,7 +244,7 @@ async function scanDescriptor(
     let readiness: DiscoveryCandidate["readiness"] = "unknown";
     if (descriptor.authProbeArgs !== undefined) {
       try {
-        await exec(validated, [...descriptor.authProbeArgs], {
+        await exec(validated.canonicalPath, [...descriptor.authProbeArgs], {
           timeout: MAX_PROBE_TIMEOUT_MS,
           maxBuffer: MAX_PROBE_OUTPUT_BYTES,
           env: sanitizeProbeEnvironment(environment),
@@ -258,10 +259,16 @@ async function scanDescriptor(
       driverKind: descriptor.driverKind as DiscoveryCandidate["driverKind"],
       displayName: (descriptor.displayNameForExecutable?.(execName) ??
         descriptor.displayName) as DiscoveryCandidate["displayName"],
-      binaryPath: validated as DiscoveryCandidate["binaryPath"],
+      binaryPath: validated.canonicalPath as DiscoveryCandidate["binaryPath"],
+      ...(validated.discoveredPath === validated.canonicalPath
+        ? {}
+        : { discoveredPath: validated.discoveredPath as DiscoveryCandidate["discoveredPath"] }),
       ...(version !== undefined ? { version: version as DiscoveryCandidate["version"] } : {}),
       readiness,
-      pathSummary: summarizePath(validated, environment.HOME) as DiscoveryCandidate["pathSummary"],
+      pathSummary: summarizePath(
+        validated.canonicalPath,
+        environment.HOME,
+      ) as DiscoveryCandidate["pathSummary"],
       onboardingGuidance: descriptor.onboardingGuidance as DiscoveryCandidate["onboardingGuidance"],
       detectedAt: new Date(now()).toISOString() as DiscoveryCandidate["detectedAt"],
     });
@@ -360,20 +367,19 @@ function unwrapAliasValue(value: string): string | undefined {
 }
 
 /**
- * Validates that a path is a real executable file (not a broken symlink,
- * not a directory, not a symlink pointing outside approved locations).
- * Returns the canonical (realpath) path or undefined if invalid.
- */
-/**
  * Validates an executable discovered only through sanitized PATH or approved
  * search directories. Symlink targets may resolve outside those directories
  * (Homebrew Cellar, nix store); we still require an absolute real file with
  * execute permission and never follow relative or broken links.
+ *
+ * Both spellings matter: the probe runs the canonical path, while instances
+ * store the user-facing one (`/opt/homebrew/bin/codex`), so callers need the
+ * discovered path to match a configured instance.
  */
 async function validateExecutable(
   candidatePath: string,
   fs: DiscoveryFsPort,
-): Promise<string | undefined> {
+): Promise<{ readonly discoveredPath: string; readonly canonicalPath: string } | undefined> {
   if (!isAbsolute(candidatePath)) return undefined;
 
   try {
@@ -391,10 +397,10 @@ async function validateExecutable(
       await fs.access(resolved, constants.X_OK);
       const targetStat = await fs.lstat(resolved);
       if (!targetStat.isFile()) return undefined;
-      return resolved;
+      return { discoveredPath: candidatePath, canonicalPath: resolved };
     }
     if (!stat.isFile()) return undefined;
-    return candidatePath;
+    return { discoveredPath: candidatePath, canonicalPath: candidatePath };
   } catch {
     return undefined;
   }

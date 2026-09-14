@@ -91,8 +91,10 @@ describe("discoveryService", () => {
     const codex = snapshot.candidates.find((c) => c.driverKind === "codex");
     expect(codex).toBeDefined();
     expect(codex!.binaryPath).toBe("/usr/local/bin/codex");
+    expect(codex!.discoveredPath).toBeUndefined();
     expect(codex!.version).toBe("codex-cli 0.1.2507100955");
     expect(codex!.readiness).toBe("ready");
+    expect(snapshot.searchedDirectories).toContain("/usr/local/bin");
   });
 
   it("discovers a provider whose executable is declared by a safe bash alias", async () => {
@@ -456,7 +458,7 @@ describe("discoveryService", () => {
     expect(claude!.readiness).toBe("unknown");
   });
 
-  it("resolves symlinks to canonical paths", async () => {
+  it("keeps the symlink spelling a user configures while binaryPath stays canonical", async () => {
     const fs = makeFakeFs(
       new Map([
         ["/usr/local/bin/codex", { file: false, symlink: true, target: "/opt/codex/bin/codex" }],
@@ -480,6 +482,8 @@ describe("discoveryService", () => {
     const codex = snapshot.candidates.find((c) => c.driverKind === "codex");
     expect(codex).toBeDefined();
     expect(codex!.binaryPath).toBe("/opt/codex/bin/codex");
+    expect(codex!.discoveredPath).toBe("/usr/local/bin/codex");
+    expect(snapshot.searchedDirectories).toContain("/usr/local/bin");
   });
 
   it("rejects non-executable files", async () => {

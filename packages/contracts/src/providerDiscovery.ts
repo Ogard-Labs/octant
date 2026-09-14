@@ -19,15 +19,23 @@ export type DiscoveryReadiness = typeof DiscoveryReadiness.Type;
 // ── Discovery candidate ─────────────────────────────────────────────────────
 
 const SafePathSummary = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512));
-const CanonicalBinaryPath = Schema.NonEmptyTrimmedString.pipe(
+const AbsolutePath = Schema.NonEmptyTrimmedString.pipe(
   Schema.filter((path) => path.startsWith("/")),
 );
+const CanonicalBinaryPath = AbsolutePath;
 const DetectedVersion = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
 
 export const DiscoveryCandidate = Schema.Struct({
   driverKind: ProviderDriverKind,
   displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
   binaryPath: CanonicalBinaryPath,
+  /**
+   * The path the scan actually examined when it differs from the canonical
+   * `binaryPath`. A Homebrew `bin/codex` symlink is the path a user configures
+   * on an instance, while `binaryPath` is the realpath the symlink resolves to;
+   * detection compares both so an installed provider is not reported missing.
+   */
+  discoveredPath: Schema.optional(CanonicalBinaryPath),
   version: Schema.optional(DetectedVersion),
   readiness: DiscoveryReadiness,
   pathSummary: SafePathSummary,
@@ -52,6 +60,12 @@ export const DiscoverySnapshot = Schema.Struct({
   scanDurationMs: Schema.Int.pipe(Schema.nonNegative()),
   status: DiscoveryScanStatus,
   message: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  /**
+   * Absolute, deduplicated directories the scan searched. A configured binary
+   * outside every entry was never a scan candidate, so the scan's silence
+   * about it is not evidence of absence. Old snapshots omit the field.
+   */
+  searchedDirectories: Schema.optional(Schema.Array(AbsolutePath)),
   /**
    * Instances auto-registered by this scan. This records what the scan created,
    * not current presence — `candidates` is the evidence a runtime is installed.
