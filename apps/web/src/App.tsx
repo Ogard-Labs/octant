@@ -3072,13 +3072,14 @@ function LaunchedShell(
 
   function mergeProjectPullRequest(
     method: CodeProjectPullRequestMergeMethod,
+    headSha: string,
   ): Promise<CodeProjectPullRequestMergeOutcome> {
     const selected = selectedProjectPullRequest;
     const merge = codeClient.mergeProjectPullRequest;
-    if (selected === undefined || merge === undefined) {
+    if (selected === undefined || merge === undefined || headSha === "") {
       return Promise.resolve({ status: "unavailable", reason: "unavailable" });
     }
-    return merge({ ...selected, method });
+    return merge({ ...selected, method, headSha });
   }
 
   if (controller.status === "loading") {
@@ -3702,6 +3703,10 @@ function LaunchedShell(
     // overview on screen for a frame before the draft replaced it, which read
     // as an old page flashing past every time a task was started from a row.
     closeWorkspaceReaders();
+    // A new draft starts clean: a prompt seeded by an earlier PR-review
+    // handoff must not reappear as this draft's text.
+    setDraftError(undefined);
+    setDraftPendingMessage(undefined);
     setDraftResetRevision((revision) => revision + 1);
     await controller.openDraftThread(mode, projectId);
   }
@@ -3721,6 +3726,8 @@ function LaunchedShell(
   function createChat(prompt?: string) {
     if (prompt === undefined || prompt.trim() === "") {
       closeWorkspaceReaders();
+      setDraftError(undefined);
+      setDraftPendingMessage(undefined);
       setDraftResetRevision((revision) => revision + 1);
       setDraftProjectSelection(({ chat: _previous, ...rest }) => rest);
       void controller.openDraftThread("chat");

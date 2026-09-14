@@ -1285,6 +1285,7 @@ describe("Code project pull-request detail routes", () => {
     repositoryName: "octant",
     number: 12,
   };
+  const mergeHeadSha = "a".repeat(40);
   const detailView = {
     version: 1 as const,
     query: detailQuery,
@@ -1373,7 +1374,7 @@ describe("Code project pull-request detail routes", () => {
       request("/api/code/project-pull-requests/merge", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...detailQuery, method: "squash" }),
+        body: JSON.stringify({ ...detailQuery, method: "squash", headSha: mergeHeadSha }),
       }),
     );
 
@@ -1381,7 +1382,7 @@ describe("Code project pull-request detail routes", () => {
     expect(await response!.json()).toEqual(outcome);
     expect(mergeProjectPullRequest).toHaveBeenCalledWith(
       windowId,
-      { ...detailQuery, method: "squash" },
+      { ...detailQuery, method: "squash", headSha: mergeHeadSha },
       expect.any(AbortSignal),
       "user",
     );

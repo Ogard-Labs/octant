@@ -63,6 +63,7 @@ export interface ProjectPullRequestReviewPaneProps {
   readonly onOpenChat?: (detail: CodeProjectPullRequestDetailObserved) => void;
   readonly onMerge?: (
     method: CodeProjectPullRequestMergeMethod,
+    headSha: string,
   ) => Promise<CodeProjectPullRequestMergeOutcome>;
   readonly onRefresh?: () => void;
 }
@@ -78,6 +79,7 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
   const waiting = detail.ambiguous || detail.freshness === "stale";
   const mergeAvailable =
     props.onMerge !== undefined &&
+    detail.headSha !== "" &&
     detail.pullRequestState === "open" &&
     detail.mergeability === "mergeable" &&
     props.freshness.status === "fresh" &&
@@ -89,7 +91,7 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
     setMergePending(true);
     setMergeOutcome(undefined);
     try {
-      const outcome = await props.onMerge(mergeMethod);
+      const outcome = await props.onMerge(mergeMethod, detail.headSha);
       setMergeOutcome(outcome);
       setMergeConfirmationOpen(false);
       if (outcome.status === "merged") props.onRefresh?.();
@@ -203,10 +205,17 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
           role="alertdialog"
         >
           <strong>Merge pull request #{detail.number}?</strong>
-          <p>
-            This will use {mergeMethod === "merge" ? "a merge commit" : `${mergeMethod} and merge`}{" "}
-            on the currently observed head. GitHub will refuse if that head has changed.
-          </p>
+          {mergeAvailable ? (
+            <p>
+              This merges the head you reviewed ({detail.headSha.slice(0, 7)}). Octant refuses if
+              the pull request changed since then.
+            </p>
+          ) : (
+            <p>
+              This pull request changed or is no longer mergeable. Refresh the detail before
+              merging.
+            </p>
+          )}
           <div className="code-pr-review__actions">
             <OctantButton
               disabled={mergePending}
@@ -218,7 +227,7 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
               Cancel
             </OctantButton>
             <OctantButton
-              disabled={mergePending}
+              disabled={mergePending || !mergeAvailable}
               onClick={() => void confirmMerge()}
               size="sm"
               type="button"

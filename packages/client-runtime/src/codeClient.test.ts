@@ -376,6 +376,7 @@ describe("code client", () => {
       repositoryName: "octant",
       number: 12,
       method: "squash",
+      headSha: "a".repeat(40),
     } as const;
     const outcome = {
       status: "merged",

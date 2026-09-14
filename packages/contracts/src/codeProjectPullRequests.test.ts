@@ -214,6 +214,7 @@ describe("Code Project pull-request detail contracts", () => {
     baseBranch: "development",
     headRepository: "octant",
     headBranch: "feature/manual-refresh",
+    headSha: "a".repeat(40),
     author: "octocat",
     matchesDeliveryBranch: false,
     description: "Verified implementation.",
@@ -248,7 +249,7 @@ describe("Code Project pull-request detail contracts", () => {
   });
 
   it("models explicit merge methods and approval outcomes without accepting forged identity", () => {
-    const command = { ...detailQuery, method: "squash" as const };
+    const command = { ...detailQuery, method: "squash" as const, headSha: "a".repeat(40) };
     expect(decodeCodeProjectPullRequestMergeCommand(command)).toEqual(command);
     expect(() =>
       decodeCodeProjectPullRequestMergeCommand({ ...command, credentials: "secret" }),

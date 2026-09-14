@@ -23,6 +23,7 @@ export interface DockProjectPullRequestReviewToolProps {
   readonly onOpenChat?: (detail: CodeProjectPullRequestDetailObserved) => void;
   readonly onMerge?: (
     method: CodeProjectPullRequestMergeMethod,
+    headSha: string,
   ) => Promise<CodeProjectPullRequestMergeOutcome>;
 }
 

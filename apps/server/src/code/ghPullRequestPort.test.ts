@@ -299,6 +299,7 @@ describe("GhPullRequestPort.observeReview", () => {
         baseBranch: target.baseBranch,
         headRepository: "octocat",
         headBranch: "feature/phase-7",
+        headSha,
         author: "octocat",
         mergeability: "mergeable",
         matchesDeliveryBranch: true,
@@ -423,6 +424,7 @@ describe("GhPullRequestPort.observeReviewByIdentity", () => {
         baseBranch: target.baseBranch,
         headRepository: "",
         headBranch: "feature/phase-7",
+        headSha,
         author: "octocat",
         mergeability: "mergeable",
         matchesDeliveryBranch: false,
@@ -464,6 +466,7 @@ describe("GhPullRequestPort.mergeByIdentity", () => {
     name: "octant",
     number: 175,
     method: "squash" as const,
+    headSha,
   };
 
   it("re-reads the PR and pins the merge to the observed head SHA", async () => {
@@ -493,6 +496,20 @@ describe("GhPullRequestPort.mergeByIdentity", () => {
     await expect(port.mergeByIdentity(mergeRequest, new AbortController().signal)).resolves.toEqual(
       { status: "refused", reason: "not-mergeable" },
     );
+    expect(command.run).toHaveBeenCalledOnce();
+  });
+
+  it("refuses a merge when the reviewed head is no longer the observed head", async () => {
+    const moved = JSON.stringify({
+      ...JSON.parse(detailJson),
+      headRefOid: "b".repeat(40),
+    });
+    const { command, port } = fixture([{ exitCode: 0, stdout: moved }]);
+
+    await expect(port.mergeByIdentity(mergeRequest, new AbortController().signal)).resolves.toEqual(
+      { status: "refused", reason: "stale" },
+    );
+    // The re-read refused before any merge command was issued.
     expect(command.run).toHaveBeenCalledOnce();
   });
 

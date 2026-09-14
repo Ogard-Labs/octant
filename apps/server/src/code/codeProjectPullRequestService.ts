@@ -114,6 +114,8 @@ export interface CodeProjectPullRequestMergePort {
       readonly name: string;
       readonly number: number;
       readonly method: CodeProjectPullRequestMergeCommand["method"];
+      /** The head commit the reviewer approved. */
+      readonly headSha: string;
     },
     signal: AbortSignal,
   ): Promise<GhPullRequestMergeResult>;
@@ -440,6 +442,7 @@ export class CodeProjectPullRequestService {
         name: command.repositoryName,
         number: command.number,
         method: command.method,
+        headSha: command.headSha,
       },
       signal,
     );
@@ -448,6 +451,9 @@ export class CodeProjectPullRequestService {
       this.#detailCache.delete(key);
       this.#detailFreshness.delete(key);
       this.#navigationSnapshots.clear();
+      // The list snapshot still holds the merged row as open until the next
+      // refresh; drop it so a query cannot return a pull request that is gone.
+      this.#cache = undefined;
       return {
         status: "merged",
         number: command.number,
@@ -1215,6 +1221,7 @@ export class CodeProjectPullRequestService {
       baseBranch: observed.pullRequest.baseBranch,
       headRepository: observed.pullRequest.headRepository,
       headBranch: observed.pullRequest.headBranch,
+      headSha: observed.pullRequest.headSha,
       author: observed.pullRequest.author,
       ...(observed.pullRequest.mergeability === undefined
         ? {}

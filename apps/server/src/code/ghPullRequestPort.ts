@@ -87,6 +87,8 @@ export type GhPullRequestReviewResult =
         baseBranch: string;
         headRepository: string;
         headBranch: string;
+        /** Empty when the read carried no head commit. */
+        headSha: string;
         author: string;
         mergeability?: "mergeable" | "conflicting" | "unknown";
         updatedAt?: string;
@@ -313,6 +315,7 @@ export class GhPullRequestPort {
         baseBranch: identity.baseBranch,
         headRepository: identity.headOwner,
         headBranch: identity.headBranch,
+        headSha: detail?.headSha ?? "",
         author: detail?.author ?? "",
         mergeability: detail?.mergeability ?? "unknown",
         ...(detail?.updatedAt === undefined ? {} : { updatedAt: detail.updatedAt }),
@@ -381,6 +384,7 @@ export class GhPullRequestPort {
         baseBranch: detail?.baseBranch ?? "",
         headRepository: detail?.headRepository ?? "",
         headBranch: detail?.headBranch ?? "",
+        headSha: detail?.headSha ?? "",
         author: detail?.author ?? "",
         mergeability: detail?.mergeability ?? "unknown",
         ...(detail?.updatedAt === undefined ? {} : { updatedAt: detail.updatedAt }),
@@ -399,9 +403,11 @@ export class GhPullRequestPort {
 
   /**
    * Merge one exact pull request after re-reading its current head and
-   * mergeability. The head SHA is pinned with `--match-head-commit`, so a
-   * force-push or other update between the read and the effect is refused by
-   * GitHub instead of silently merging a different revision.
+   * mergeability, bound to the head the person reviewed. When the re-read's
+   * head differs from the reviewed one the merge is refused as `stale`
+   * instead of merging a revision that was never on screen, and the merge
+   * itself pins `--match-head-commit` so a force-push between the re-read and
+   * the effect is refused by GitHub too.
    */
   async mergeByIdentity(
     request: {
@@ -409,6 +415,8 @@ export class GhPullRequestPort {
       readonly name: string;
       readonly number: number;
       readonly method: CodeProjectPullRequestMergeMethod;
+      /** The head commit the reviewer approved. */
+      readonly headSha: string;
     },
     signal: AbortSignal,
   ): Promise<GhPullRequestMergeResult> {
@@ -426,7 +434,9 @@ export class GhPullRequestPort {
     if (detail.mergeability !== "mergeable") {
       return { status: "refused", reason: "not-mergeable" };
     }
-    if (detail.headSha === "") return { status: "refused", reason: "stale" };
+    if (request.headSha === "" || detail.headSha === "" || detail.headSha !== request.headSha) {
+      return { status: "refused", reason: "stale" };
+    }
 
     let result: GhCommandResult;
     try {
@@ -439,7 +449,7 @@ export class GhPullRequestPort {
           repository,
           `--${request.method}`,
           "--match-head-commit",
-          detail.headSha,
+          request.headSha,
         ],
         { environment: this.#environment, stdin: undefined },
         signal,

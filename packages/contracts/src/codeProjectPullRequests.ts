@@ -180,6 +180,12 @@ export const CodeProjectPullRequestMergeCommand = Schema.Struct({
   repositoryName: GithubRepositoryName,
   number: Schema.Int.pipe(Schema.positive()),
   method: CodeProjectPullRequestMergeMethod,
+  /**
+   * The head commit the person reviewed. The server refuses with `stale`
+   * when the pull request's head no longer matches, so an approval cannot
+   * merge a revision that was never on screen.
+   */
+  headSha: boundedNonEmptyText(64),
 }).annotations(strict);
 export type CodeProjectPullRequestMergeCommand = typeof CodeProjectPullRequestMergeCommand.Type;
 
@@ -344,6 +350,8 @@ export const CodeProjectPullRequestDetailObserved = Schema.Struct({
   baseBranch: branchName,
   headRepository: boundedText(512),
   headBranch: branchName,
+  /** Empty when the read carried no head commit; a merge then refuses as stale. */
+  headSha: Schema.String.pipe(Schema.maxLength(64)),
   author: boundedText(255),
   mergeability: Schema.optional(CodeProjectPullRequestMergeability),
   matchesDeliveryBranch: Schema.Literal(false),

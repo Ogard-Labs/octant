@@ -37,6 +37,7 @@ function detailView(
       baseBranch: "development",
       headRepository: "octant/octant",
       headBranch: "feature/manual-refresh",
+      headSha: "9".repeat(40),
       author: "octocat",
       ...(mergeability === undefined ? {} : { mergeability }),
       matchesDeliveryBranch: false,
@@ -129,7 +130,7 @@ describe("DockProjectPullRequestReviewTool", () => {
     ).toBeVisible();
     screen.getByRole("button", { name: "Confirm merge" }).click();
 
-    expect(onMerge).toHaveBeenCalledWith("squash");
+    expect(onMerge).toHaveBeenCalledWith("squash", "9".repeat(40));
     expect(
       await screen.findByText("Merged pull request #12. Refreshing its review state."),
     ).toBeVisible();

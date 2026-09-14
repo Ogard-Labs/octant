@@ -22,15 +22,19 @@ must not turn a read surface into an unattended write.
   GitHub repository, and rejects renderer-supplied identity, credentials, roots,
   or agent/remote initiators before invoking GitHub. The Project and repository
   in the command must match the server-authorized connection.
-- The GitHub port re-reads the pull request immediately before the mutation and
-  passes its current head SHA to `gh pr merge --match-head-commit`. A changed
-  head, non-mergeable state, closed pull request, authentication failure, or
+- The GitHub port re-reads the pull request immediately before the mutation, and
+  the command carries the head SHA the reviewer approved. The re-read's head
+  must equal the reviewed one or the merge is refused as `stale`; the matching
+  SHA is then passed to `gh pr merge --match-head-commit`. A changed head,
+  non-mergeable state, closed pull request, authentication failure, or
   disconnected host is returned as a typed refusal/unavailable outcome rather
-  than guessed or retried blindly.
+  than guessed or retried blindly. An approval therefore binds to the revision
+  the person saw, not merely to whatever is on the head at merge time.
 - The merge method and result are typed contracts. A successful merge clears
-  the process-local detail cache and lets the next explicit detail refresh
-  observe GitHub's terminal state. The external GitHub mutation is not written
-  to the Octant journal; only durable local facts belong there.
+  the process-local list and detail caches, so a query cannot keep returning the
+  merged row as open and the next explicit detail refresh observes GitHub's
+  terminal state. The external GitHub mutation is not written to the Octant
+  journal; only durable local facts belong there.
 
 ## Consequences
 
