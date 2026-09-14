@@ -47,6 +47,7 @@ import {
   formatProbeTimestamp,
   incompatibleReadinessFacts,
   protocolLabel,
+  providerDetectionBlockedReason,
   providerRowReadinessLabel,
   titleCase,
 } from "./providerSettingsPresentation";
@@ -107,6 +108,8 @@ export type ProviderSettingsListProps = Pick<
   readonly heading?: string;
   readonly note?: string;
   readonly showAgentEligibleModels?: boolean;
+  /** The Providers page separates detected rows from supported rows. */
+  readonly showDetectionGroups?: boolean;
   readonly showReorder?: boolean;
 };
 
@@ -117,8 +120,9 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
   // while the probe is pending; eligibility controls below still use the
   // authoritative map and therefore fail closed.
   const presentationObserved = props.presentationObservedByInstance ?? props.observedByInstance;
-  // Row order is the order the model picker offers providers in, so the list
-  // renders in that order and the row grips edit it directly.
+  // Row order is the order the model picker offers providers in. Detection
+  // groups present that order within each group; reorder mode shows the single
+  // list so the grips still edit the real order directly.
   const ordered = useMemo(() => {
     const explicit = props.defaults.providerOrder ?? [];
     const explicitSet = new Set(explicit);
@@ -156,7 +160,86 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
     void props.onProviderOrderChange(reordered.map((instance) => instance.id));
   }
 
+  // Only the current scan is evidence that a runtime is installed; the group a
+  // row lands in follows that, while a row's switch can still be enable-able
+  // when the provider is a manual endpoint addition.
+  const groups = useMemo(() => {
+    const detected: Array<{ readonly instance: ProviderInstance; readonly index: number }> = [];
+    const notDetected: Array<{ readonly instance: ProviderInstance; readonly index: number }> = [];
+    ordered.forEach((instance, index) => {
+      (isDetectedLocally(instance, props.discoverySnapshot) ? detected : notDetected).push({
+        instance,
+        index,
+      });
+    });
+    return { detected, notDetected };
+  }, [ordered, props.discoverySnapshot]);
+
   const busy = props.busy || props.status !== "ready";
+  const showDetectionGroups = props.showDetectionGroups === true && !reordering;
+
+  function renderProviderRow(instance: ProviderInstance, index: number) {
+    return (
+      <ProviderRow
+        busy={busy}
+        count={ordered.length}
+        credentialManagementAvailable={props.credentialManagementAvailable}
+        index={index}
+        instance={instance}
+        key={instance.id}
+        {...(props.discoverySnapshot === undefined
+          ? {}
+          : { discoverySnapshot: props.discoverySnapshot })}
+        {...(presentationObserved.get(instance.id) === undefined
+          ? {}
+          : { observed: presentationObserved.get(instance.id)! })}
+        onChangeBinary={props.onChangeBinary}
+        onChangeClaudeConfiguration={props.onChangeClaudeConfiguration}
+        onChangeMistralVibeConfiguration={props.onChangeMistralVibeConfiguration}
+        onChangeGrokConfiguration={props.onChangeGrokConfiguration}
+        onChangeGooseConfiguration={props.onChangeGooseConfiguration}
+        onChangeGlmConfiguration={props.onChangeGlmConfiguration}
+        onChangeGeminiConfiguration={props.onChangeGeminiConfiguration}
+        onChangeCopilotConfiguration={props.onChangeCopilotConfiguration}
+        onChangeClineConfiguration={props.onChangeClineConfiguration}
+        onChangeQwenConfiguration={props.onChangeQwenConfiguration}
+        onChangeDevinConfiguration={props.onChangeDevinConfiguration}
+        onChangeKiloConfiguration={props.onChangeKiloConfiguration}
+        onChangePiConfiguration={props.onChangePiConfiguration}
+        onChangeOhMyPiConfiguration={props.onChangeOhMyPiConfiguration}
+        onChangeOllamaConfiguration={props.onChangeOllamaConfiguration}
+        onChangeOpenAiCompatibleConfiguration={props.onChangeOpenAiCompatibleConfiguration}
+        onChangeAnthropicCompatibleConfiguration={props.onChangeAnthropicCompatibleConfiguration}
+        onChangeAzureFoundryConfiguration={props.onChangeAzureFoundryConfiguration}
+        onChangeOpenAiImageConfiguration={props.onChangeOpenAiImageConfiguration}
+        onChangeGeminiImageConfiguration={props.onChangeGeminiImageConfiguration}
+        onChangeBflImageConfiguration={props.onChangeBflImageConfiguration}
+        onChangeIdeogramImageConfiguration={props.onChangeIdeogramImageConfiguration}
+        onClearProviderCredential={props.onClearProviderCredential}
+        onBeginProviderAuthentication={props.onBeginProviderAuthentication}
+        onOpenExternalUrl={props.onOpenExternalUrl}
+        onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}
+        {...(props.onUpdateProviderCli === undefined
+          ? {}
+          : { onUpdateProviderCli: props.onUpdateProviderCli })}
+        onMove={move}
+        onProbe={props.onProbe}
+        onVerifyFoundryTools={props.onVerifyFoundryTools}
+        hiddenModels={props.defaults.hiddenModels ?? []}
+        onHiddenModelsChange={props.onHiddenModelsChange}
+        onProviderCredentialStatus={props.onProviderCredentialStatus}
+        onRemove={props.onRemove}
+        onRename={props.onRename}
+        onSetEnabled={props.onSetEnabled}
+        onDataTagsChange={props.onDataTagsChange}
+        onModelDataTagsChange={props.onModelDataTagsChange}
+        probing={props.probingIds.has(instance.id)}
+        updating={props.updatingIds?.has(instance.id) === true}
+        reordering={reordering}
+      />
+    );
+  }
+
   return props.status !== "ready" && ordered.length === 0 ? null : (
     <>
       <section
@@ -196,70 +279,34 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         )}
         {ordered.length === 0 ? (
           <p className="settings-section-line">No providers configured.</p>
-        ) : (
+        ) : !showDetectionGroups ? (
+          // Surfaces with no detection story keep one list; reorder mode must
+          // show the real stored order the grips edit. Rows still keep
+          // binary-backed providers fail-closed.
           <div className="provlist">
-            {ordered.map((instance, index) => (
-              <ProviderRow
-                busy={busy}
-                count={ordered.length}
-                credentialManagementAvailable={props.credentialManagementAvailable}
-                index={index}
-                instance={instance}
-                key={instance.id}
-                {...(props.discoverySnapshot === undefined
-                  ? {}
-                  : { discoverySnapshot: props.discoverySnapshot })}
-                {...(presentationObserved.get(instance.id) === undefined
-                  ? {}
-                  : { observed: presentationObserved.get(instance.id)! })}
-                onChangeBinary={props.onChangeBinary}
-                onChangeClaudeConfiguration={props.onChangeClaudeConfiguration}
-                onChangeMistralVibeConfiguration={props.onChangeMistralVibeConfiguration}
-                onChangeGrokConfiguration={props.onChangeGrokConfiguration}
-                onChangeGooseConfiguration={props.onChangeGooseConfiguration}
-                onChangeGlmConfiguration={props.onChangeGlmConfiguration}
-                onChangeGeminiConfiguration={props.onChangeGeminiConfiguration}
-                onChangeCopilotConfiguration={props.onChangeCopilotConfiguration}
-                onChangeClineConfiguration={props.onChangeClineConfiguration}
-                onChangeQwenConfiguration={props.onChangeQwenConfiguration}
-                onChangeDevinConfiguration={props.onChangeDevinConfiguration}
-                onChangeKiloConfiguration={props.onChangeKiloConfiguration}
-                onChangePiConfiguration={props.onChangePiConfiguration}
-                onChangeOhMyPiConfiguration={props.onChangeOhMyPiConfiguration}
-                onChangeOllamaConfiguration={props.onChangeOllamaConfiguration}
-                onChangeOpenAiCompatibleConfiguration={props.onChangeOpenAiCompatibleConfiguration}
-                onChangeAnthropicCompatibleConfiguration={
-                  props.onChangeAnthropicCompatibleConfiguration
-                }
-                onChangeAzureFoundryConfiguration={props.onChangeAzureFoundryConfiguration}
-                onChangeOpenAiImageConfiguration={props.onChangeOpenAiImageConfiguration}
-                onChangeGeminiImageConfiguration={props.onChangeGeminiImageConfiguration}
-                onChangeBflImageConfiguration={props.onChangeBflImageConfiguration}
-                onChangeIdeogramImageConfiguration={props.onChangeIdeogramImageConfiguration}
-                onClearProviderCredential={props.onClearProviderCredential}
-                onBeginProviderAuthentication={props.onBeginProviderAuthentication}
-                onOpenExternalUrl={props.onOpenExternalUrl}
-                onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}
-                {...(props.onUpdateProviderCli === undefined
-                  ? {}
-                  : { onUpdateProviderCli: props.onUpdateProviderCli })}
-                onMove={move}
-                onProbe={props.onProbe}
-                onVerifyFoundryTools={props.onVerifyFoundryTools}
-                hiddenModels={props.defaults.hiddenModels ?? []}
-                onHiddenModelsChange={props.onHiddenModelsChange}
-                onProviderCredentialStatus={props.onProviderCredentialStatus}
-                onRemove={props.onRemove}
-                onRename={props.onRename}
-                onSetEnabled={props.onSetEnabled}
-                onDataTagsChange={props.onDataTagsChange}
-                onModelDataTagsChange={props.onModelDataTagsChange}
-                probing={props.probingIds.has(instance.id)}
-                updating={props.updatingIds?.has(instance.id) === true}
-                reordering={reordering}
-              />
-            ))}
+            {ordered.map((instance, index) => renderProviderRow(instance, index))}
           </div>
+        ) : (
+          <>
+            {groups.detected.length === 0 ? null : (
+              <>
+                <h3 className="oct-section-label">Detected on this host</h3>
+                <div className="provlist">
+                  {groups.detected.map(({ instance, index }) => renderProviderRow(instance, index))}
+                </div>
+              </>
+            )}
+            {groups.notDetected.length === 0 ? null : (
+              <>
+                <h3 className="oct-section-label">Supported, not detected</h3>
+                <div className="provlist">
+                  {groups.notDetected.map(({ instance, index }) =>
+                    renderProviderRow(instance, index),
+                  )}
+                </div>
+              </>
+            )}
+          </>
         )}
         {props.createForm === undefined ? null : (
           <div className="provider-settings__foot">{props.createForm}</div>
@@ -509,12 +556,10 @@ function ProviderRow(props: ProviderRowProps) {
   useEffect(() => {
     if (readiness === "unauthenticated") setDetailsOpen(true);
   }, [readiness]);
-  const autoRegisteredDisabled = isDisabledDiscoveryInstance(
-    props.instance,
-    props.discoverySnapshot,
-  );
   const detectedLocally = isDetectedLocally(props.instance, props.discoverySnapshot);
-  const canEnable = canEnableProvider(props.instance, props.discoverySnapshot, detectedLocally);
+  const canEnable = canEnableProvider(props.instance, detectedLocally);
+  const detectedButDisabled = !props.instance.enabled && detectedLocally;
+  const enableBlocked = !props.instance.enabled && !canEnable;
   const isCli =
     props.instance.driverKind === "codex" ||
     props.instance.driverKind === "opencode" ||
@@ -551,7 +596,7 @@ function ProviderRow(props: ProviderRowProps) {
   const credential = useCredentialStatus(props, !usesCredential);
   const setupGuidance = guidance(props.instance, readiness, props.observed);
   const hasSetupGuidance =
-    autoRegisteredDisabled ||
+    detectedButDisabled ||
     usesCredential ||
     (setupGuidance !== null && setupGuidance !== undefined);
   const label = driverLabel(props.instance.driverKind);
@@ -579,7 +624,7 @@ function ProviderRow(props: ProviderRowProps) {
   const toggleEnabled = async () => {
     const nextEnabled = !props.instance.enabled;
     const updated = await props.onSetEnabled(props.instance.id, nextEnabled);
-    if (updated && nextEnabled && autoRegisteredDisabled) {
+    if (updated && nextEnabled && detectedButDisabled) {
       // Enabling a detected provider is a successful settings mutation even
       // when its first connection check reports missing setup. Keep that
       // row-level readiness fact visible without making the page banner say
@@ -678,7 +723,10 @@ function ProviderRow(props: ProviderRowProps) {
         </OctantButton>
         <OctantSwitch
           checked={props.instance.enabled}
-          disabled={disabled || (!props.instance.enabled && !canEnable)}
+          disabled={disabled || enableBlocked}
+          {...(enableBlocked
+            ? { disabledReason: providerDetectionBlockedReason(props.discoverySnapshot) }
+            : {})}
           label={`Enable ${name}`}
           onCheckedChange={() => void toggleEnabled()}
         />
@@ -690,7 +738,7 @@ function ProviderRow(props: ProviderRowProps) {
               aria-label={`Setup for ${name}`}
               className="provider-details__section provider-details__section--connection"
             >
-              {autoRegisteredDisabled ? (
+              {detectedButDisabled ? (
                 <p className="provider-card__guidance">Detected on this host — enable to use</p>
               ) : null}
               {setupGuidance}
@@ -1435,39 +1483,20 @@ function readinessTone(
   return "neutral";
 }
 
-function isDisabledDiscoveryInstance(
-  instance: ProviderInstance,
-  snapshot: DiscoverySnapshot | undefined,
-): boolean {
-  if (instance.enabled || snapshot === undefined) return false;
-  if (snapshot.autoRegisteredInstanceIds?.includes(instance.id) === true) return true;
-  if (
-    instance.driverKind === "ollama" &&
-    snapshot.candidates.some((candidate) => candidate.driverKind === "ollama")
-  ) {
-    return true;
-  }
-  const binaryPath = providerBinaryPath(instance);
-  return (
-    binaryPath !== undefined &&
-    snapshot.candidates.some(
-      (candidate) =>
-        candidate.driverKind === instance.driverKind && candidate.binaryPath === binaryPath,
-    )
-  );
-}
-
+/**
+ * Presence evidence comes only from the current scan. `autoRegisteredInstanceIds`
+ * records what an earlier scan created, so it is history, not current presence.
+ * A scan that has not run, failed, or was cancelled proves nothing either way.
+ */
 function isDetectedLocally(
   instance: ProviderInstance,
   snapshot: DiscoverySnapshot | undefined,
 ): boolean {
-  if (snapshot === undefined) return false;
-  if (snapshot.autoRegisteredInstanceIds?.includes(instance.id) === true) return true;
-  if (
-    instance.driverKind === "ollama" &&
-    snapshot.candidates.some((candidate) => candidate.driverKind === "ollama")
-  ) {
-    return true;
+  if (snapshot === undefined || snapshot.status === "failed" || snapshot.status === "cancelled") {
+    return false;
+  }
+  if (instance.driverKind === "ollama") {
+    return snapshot.candidates.some((candidate) => candidate.driverKind === "ollama");
   }
   const binaryPath = providerBinaryPath(instance);
   return (
@@ -1479,16 +1508,14 @@ function isDetectedLocally(
   );
 }
 
-function canEnableProvider(
-  instance: ProviderInstance,
-  snapshot: DiscoverySnapshot | undefined,
-  detectedLocally: boolean,
-): boolean {
-  if (!("binaryPath" in instance.configuration)) return true;
-  if (detectedLocally || snapshot === undefined) return true;
-  // A failed or cancelled scan does not prove absence. A completed or partial
-  // scan does, so keep the switch fail-closed until the binary is detected.
-  return snapshot.status === "failed" || snapshot.status === "cancelled";
+/**
+ * A binary-backed provider stays fail-closed until the current scan finds it:
+ * a missing, cancelled, or failed scan is not proof that the binary exists.
+ * Manual endpoint additions have no binaryPath to detect, so their switch
+ * reflects the user's own configuration instead.
+ */
+function canEnableProvider(instance: ProviderInstance, detectedLocally: boolean): boolean {
+  return providerBinaryPath(instance) === undefined || detectedLocally;
 }
 
 function providerBinaryPath(instance: ProviderInstance): string | undefined {

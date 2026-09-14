@@ -381,6 +381,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         credentialManagementAvailable={props.credentialManagementAvailable}
         defaults={props.defaults}
         discoverySnapshot={props.discoverySnapshot}
+        showDetectionGroups
         instances={props.instances.filter(
           (instance) => !isImageProfileDriverKind(instance.driverKind),
         )}

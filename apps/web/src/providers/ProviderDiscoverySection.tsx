@@ -22,7 +22,8 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
       .filter((i) => "binaryPath" in i.configuration)
       .map((i) => (i.configuration as { binaryPath: string }).binaryPath),
   );
-  const detected = (snapshot?.candidates ?? []).filter(
+  const candidates = snapshot?.candidates ?? [];
+  const newCandidates = candidates.filter(
     (candidate) =>
       !configuredDriverKinds.has(candidate.driverKind) &&
       !configuredPaths.has(candidate.binaryPath),
@@ -50,9 +51,11 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
       <p className="settings-section-note">Find installed providers and check their connections.</p>
 
       <div className="provider-discovery__status-slot" aria-live="polite">
-        {!scanning && detected.length === 0 && snapshot?.status === "completed" ? (
+        {!scanning && newCandidates.length === 0 && snapshot?.status === "completed" ? (
           <p className="settings-section-line" role="status">
-            No new providers found. Use “Add provider manually” for a custom endpoint or binary.
+            {candidates.length === 0
+              ? "No providers found on this host. Use “Add provider manually” for a custom endpoint or binary."
+              : "Every provider detected on this host is already configured."}
           </p>
         ) : null}
         {scanning && snapshot === undefined ? (
@@ -111,9 +114,9 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
         ) : null}
       </div>
 
-      {detected.length === 0 ? null : (
+      {newCandidates.length === 0 ? null : (
         <div className="setgroup">
-          {detected.map((candidate) => (
+          {newCandidates.map((candidate) => (
             <DiscoveryRow
               key={`${candidate.driverKind}-${candidate.binaryPath}`}
               candidate={candidate}

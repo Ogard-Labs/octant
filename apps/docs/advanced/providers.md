@@ -79,9 +79,14 @@ detected runtime is created disabled. After first run, auto-registration
 always creates a disabled instance. Auto-registration never toggles an
 existing instance, never stores credentials, never logs in, and never installs
 or automatically updates CLIs. Explicit **Update CLI** actions are separate
-and only invoke a verified provider-owned updater. Disabled auto-registered
-rows show **"Detected on this host — enable to use"**; enabling runs the
-Connection Check first.
+and only invoke a verified provider-owned updater. Disabled rows whose binary
+the current scan found show **"Detected on this host — enable to use"**;
+enabling runs the Connection Check first. A row whose binary is missing from
+the current scan stays switched off and explains why: a scan that has not run,
+failed, or was cancelled is not treated as proof that the runtime is gone. The
+provider list separates rows detected on this host from supported providers it
+did not find; a manual endpoint addition has no local binary and can be
+enabled without detection.
 Enabled is not ready: detection does not assert authentication.
 
 Discovery also recognizes a narrowly parsed alias declaration for a supported

@@ -53,4 +53,21 @@ describe("OctantSwitch", () => {
 
     expect(onCheckedChange).not.toHaveBeenCalled();
   });
+
+  it("explains a disabled switch through its accessible description", () => {
+    const reason = "The latest scan did not find its binary on this Mac.";
+    render(
+      <OctantSwitch
+        checked={false}
+        disabled
+        disabledReason={reason}
+        label="Enable Existing CLI"
+        onCheckedChange={vi.fn()}
+      />,
+    );
+
+    const control = screen.getByRole("switch", { name: "Enable Existing CLI" });
+    expect(control).toHaveAccessibleDescription(reason);
+    expect(control).toHaveAttribute("title", reason);
+  });
 });

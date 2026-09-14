@@ -76,10 +76,10 @@ describe("ProviderDiscoverySection", () => {
     expect(screen.getByText("Scanning…")).toBeDefined();
   });
 
-  it("shows empty state when no new candidates", () => {
+  it("says the host search found nothing when the scan has no candidates", () => {
     const emptySnapshot = { ...baseSnapshot, candidates: [] };
     render(<ProviderDiscoverySection {...defaultProps} snapshot={emptySnapshot} />);
-    expect(screen.getByText(/No new providers found/)).toBeDefined();
+    expect(screen.getByText(/No providers found on this host/)).toBeDefined();
     expect(screen.getByText(/Add provider manually/)).toBeDefined();
     expect(screen.queryByText(/under Advanced/)).toBeNull();
   });
@@ -109,7 +109,7 @@ describe("ProviderDiscoverySection", () => {
     expect(screen.getByText("Claude Code")).toBeDefined();
   });
 
-  it("hides detected candidates when the driver family is already configured", () => {
+  it("does not claim nothing is detected when every candidate is already configured", () => {
     const snapshot = { ...baseSnapshot, candidates: [ollamaCandidate] };
     const configuredOllama = {
       id: "00000000-0000-4000-8000-000000000903",
@@ -127,7 +127,8 @@ describe("ProviderDiscoverySection", () => {
     );
 
     expect(screen.queryByText("Ollama")).toBeNull();
-    expect(screen.getByText(/No new providers found/)).toBeDefined();
+    expect(screen.getByText(/already configured/i)).toBeDefined();
+    expect(screen.queryByText(/No providers found on this host/)).toBeNull();
   });
 
   it("calls onScan when Check again is clicked", () => {
