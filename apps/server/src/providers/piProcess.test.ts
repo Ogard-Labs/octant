@@ -21,6 +21,7 @@ import {
   piProcessEnvironment,
   sanitizePiEnvironment,
 } from "./piProcess";
+import { seatbeltAllowRule } from "../process/seatbeltProfile";
 
 const roots: string[] = [];
 
@@ -353,5 +354,34 @@ describe("Pi process boundary", () => {
     expect(linux.args).toContain("--unshare-all");
     expect(linux.args).toContain("--");
     expect(linux.args).toContain(other.binary);
+  });
+
+  it("keeps the configured launcher directory readable when the binary is a symlink", async () => {
+    // `~/.local/bin/pi` -> `.../_versions/1.2.3/bin/pi` is a normal install
+    // shape. The profile allows the resolved directory; the link's own
+    // directory needs read-metadata too, or the kernel cannot resolve the
+    // configured path to the allowed realpath.
+    const f = fixture();
+    const shimDirectory = join(f.base, "shims");
+    mkdirSync(shimDirectory);
+    const linkedBinary = join(shimDirectory, "pi");
+    symlinkSync(f.binary, linkedBinary);
+    const launch = await Effect.runPromise(
+      makePiConfinementLive({
+        platform: "darwin",
+        sandboxPath: f.sandbox,
+        temporaryDirectory: f.base,
+      }).prepare({
+        binaryPath: linkedBinary,
+        root: f.root,
+        piHome: f.home,
+        sessionDirectory: join(f.home, "sessions"),
+        sessionId: "linked-1",
+        mode: "code",
+        executionPolicy: "approval-gated",
+        environment: sanitizePiEnvironment({ PATH: "/usr/bin" }, f.home),
+      }),
+    );
+    expect(launch.args[1]).toContain(seatbeltAllowRule("file-read*", shimDirectory));
   });
 });

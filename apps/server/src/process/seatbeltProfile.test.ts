@@ -609,6 +609,29 @@ describe("host home deny helper defaults", () => {
     expect(rules).toContain(seatbeltDenyRule("file-read*", join(root, "elsewhere")));
   });
 
+  it("keeps a broken link readable only while its target text is on an allowed path", () => {
+    // The allowance reads the link's own target text and never follows it, so
+    // a broken link onto an allowed path grants link metadata and nothing
+    // else — there is no file to open. A broken link whose target is unrelated
+    // to the allowed set stays denied.
+    const root = temporaryRoot();
+    const allowed = join(root, "allowed");
+    mkdirSync(allowed);
+    const ontoAllowed = join(root, "onto-allowed");
+    const ontoElsewhere = join(root, "onto-elsewhere");
+    symlinkSync(join(allowed, "missing"), ontoAllowed);
+    symlinkSync(join(root, "elsewhere", "missing"), ontoElsewhere);
+
+    const rules = privateHomeDenyReadRules({
+      allowedPaths: [allowed],
+      homeDirectory: root,
+      usersDirectory: root,
+    });
+
+    expect(rules).not.toContain(seatbeltDenyRule("file-read*", ontoAllowed));
+    expect(rules).toContain(seatbeltDenyRule("file-read*", ontoElsewhere));
+  });
+
   it("keeps a link to a path outside the allowed set denied", () => {
     const root = temporaryRoot();
     const allowed = join(root, "allowed");

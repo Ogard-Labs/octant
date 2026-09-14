@@ -323,9 +323,9 @@ function resolveOnSearchPath(program: string, searchPath: string | undefined): s
  * (a versioned launcher like `~/.local/bin/devin` resolves through
  * `.../_versions/current`), and resolving a link needs read-metadata on the
  * link itself. A deny rule on the link therefore made an allowed binary
- * unlaunchable. Only the link's own target is read, never followed: a link
- * that points outside the allowed set stays denied, and a broken link
- * resolves to nothing.
+ * unlaunchable. Only the link's own target text is read, never followed: a
+ * link whose target is unrelated to the allowed set stays denied, and a
+ * broken link that points onto an allowed path grants link metadata only.
  */
 function symlinkReachesAllowed(link: string, allowed: ReadonlyArray<string>): boolean {
   let target: string;
@@ -370,9 +370,10 @@ export function privateHomeDenyReadRules(
         // configured binary path is often a launcher link — Devin's
         // `~/.local/bin/devin` resolves through `_versions/current` — and
         // resolving a link needs read-metadata on the link. Denying the link
-        // made an allowed binary unlaunchable. Only the link's own target is
-        // read (never followed), so a link to anything outside the allowed
-        // set stays denied and a broken link resolves to nothing.
+        // made an allowed binary unlaunchable. Only the link's own target text
+        // is read (never followed), so a link whose target is unrelated to the
+        // allowed set stays denied; a broken link that points onto an allowed
+        // path grants link metadata only.
         if (!symlinkReachesAllowed(child, allowed)) {
           rules.push(seatbeltDenyRule("file-read*", child));
         }

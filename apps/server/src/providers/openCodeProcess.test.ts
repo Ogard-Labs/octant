@@ -7,6 +7,7 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -584,6 +585,13 @@ describe("OpenCodeProcessPort", () => {
 
   it("passes the explicit mode and policy to the OS confinement port before spawning", async () => {
     const fixture = profileRecordingWrapper("isolation-supported");
+    // The configured path is a launcher link; the kernel needs read-metadata on
+    // the link's directory before it can resolve to the realpath the profile
+    // allows. The fixture's own directory is not the link's.
+    const shimDirectory = join(fixture.root, "shims");
+    mkdirSync(shimDirectory);
+    const linkedBinary = join(shimDirectory, "opencode");
+    symlinkSync(fixture.binaryPath, linkedBinary);
     let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
     const confinement: SeatbeltConfinementPort = {
       prepare: (input) => {
@@ -598,7 +606,7 @@ describe("OpenCodeProcessPort", () => {
           runtimeConfigResolver: async () => undefined,
           startupTimeoutMs: 2_000,
         }).start({
-          binaryPath: fixture.binaryPath,
+          binaryPath: linkedBinary,
           cwd: fixture.root,
           mode: "work",
           executionPolicy: "plan",
@@ -612,6 +620,8 @@ describe("OpenCodeProcessPort", () => {
       allowProcessExec: false,
       allowProcessFork: false,
     });
+    expect(captured?.readRoots).toContain(realpathSync(shimDirectory));
+    expect(captured?.privateHomeAllowPaths).toContain(realpathSync(shimDirectory));
   });
 
   it("starts with a private config profile while withholding isolation without an OS receipt", async () => {
