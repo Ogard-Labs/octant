@@ -1,3 +1,4 @@
+import { createNativeCodeApprovalViewHost } from "./nativeCodeApprovalView";
 import { startComputerUseBroker, type ComputerUseBroker } from "./computerUseBroker";
 import {
   createComputerUseDesktopService,
@@ -88,7 +89,6 @@ import {
   createCodeOperationApprovalViewController,
   type CodeOperationApprovalAnchor,
   type CodeOperationApprovalBounds,
-  type CodeOperationApprovalViewPort,
 } from "./codeOperationApprovalView";
 import { parseCodeDeepLink, type CodeDeepLink } from "./codeDeepLinks";
 import {
@@ -1062,45 +1062,13 @@ function codeApprovalFallbackBounds(
   };
 }
 
-function createCodeApprovalView(token: string): CodeOperationApprovalViewPort {
-  const view = new WebContentsView({
-    webPreferences: {
-      additionalArguments: [`--octant-code-approval-token=${token}`],
-      contextIsolation: true,
-      nodeIntegration: false,
-      preload: resolve(dirname(fileURLToPath(import.meta.url)), CODE_APPROVAL_PRELOAD_FILENAME),
-      sandbox: true,
-      webSecurity: true,
-    },
-  });
-  view.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  view.webContents.on("will-navigate", (event, url) => {
-    if (!url.startsWith("data:text/html")) event.preventDefault();
-  });
-  view.webContents.on("will-redirect", (event) => event.preventDefault());
-  view.webContents.on("destroyed", () => {
-    codeOperationApprovalViews?.viewDestroyed(view.webContents.id);
-  });
-  return {
-    webContents: {
-      id: view.webContents.id,
-      loadURL: (url) => view.webContents.loadURL(url),
-      send: (channel, value) => view.webContents.send(channel, value),
-      close: () => view.webContents.close(),
-      isDestroyed: () => view.webContents.isDestroyed(),
-    },
-    setBounds: (bounds) => view.setBounds(bounds),
-    setVisible: (visible) => view.setVisible(visible),
-  };
-}
-
 function installCodeOperationApprovalViews(): void {
   codeOperationApprovalViews ??= createCodeOperationApprovalViewController({
     host: {
-      createView: createCodeApprovalView,
-      attach: (window, view) => window.contentView.addChildView(view as unknown as WebContentsView),
-      detach: (window, view) =>
-        window.contentView.removeChildView(view as unknown as WebContentsView),
+      ...createNativeCodeApprovalViewHost(
+        resolve(dirname(fileURLToPath(import.meta.url)), CODE_APPROVAL_PRELOAD_FILENAME),
+        (id) => codeOperationApprovalViews?.viewDestroyed(id),
+      ),
       boundsForAnchor: codeApprovalBoundsForAnchor,
       fallbackBounds: codeApprovalFallbackBounds,
       isWindowDestroyed: (window) => window.isDestroyed(),
