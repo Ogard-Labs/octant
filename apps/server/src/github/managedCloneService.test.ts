@@ -542,6 +542,38 @@ describe("managed clone with a chosen destination", () => {
     });
     expect(existsSync(parentPath)).toBe(false);
   });
+
+  it("quarantines chosen-destination staging beneath the chosen root on failure", async () => {
+    const harness = createHarness({
+      clone: async () => ({ kind: "failed", classification: "unauthorized" }),
+    });
+    const parentPath = join(harness.directory, "projects");
+    mkdirSync(parentPath, { recursive: true });
+    const receipt = harness.receipts.issue({
+      windowId,
+      projectType: "code",
+      canonicalBinding: { canonicalRoot: parentPath },
+      now: NOW_MS,
+    });
+    const requested = await harness.service.execute(
+      chosenCommand(receipt.receiptId),
+      context,
+      signal,
+    );
+    if (requested.kind !== "operation") throw new Error("expected operation");
+    const response = await harness.service.execute(
+      chosenConfirmCommand(requested.operation.destination.digest),
+      context,
+      signal,
+    );
+    expect(response.kind).toBe("operation");
+    if (response.kind !== "operation") return;
+    expect(response.operation.state).toBe("failed");
+    const chosenQuarantine = join(parentPath, ".octant-quarantine", chosenRequestId);
+    const defaultQuarantine = join(harness.inventoryPath, ".octant-quarantine", chosenRequestId);
+    expect(existsSync(chosenQuarantine)).toBe(true);
+    expect(existsSync(defaultQuarantine)).toBe(false);
+  });
 });
 
 describe("managed clone confirmation and pipeline", () => {

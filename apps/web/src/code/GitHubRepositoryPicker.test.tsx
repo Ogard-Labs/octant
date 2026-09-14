@@ -329,6 +329,70 @@ describe("GitHubRepositoryPicker", () => {
     );
   });
 
+  it("refuses a stale repository resolve before selecting it", async () => {
+    const user = userEvent.setup();
+    const resolved = repositoryRow(8, { name: "stale-repo" });
+    const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
+      if (request.kind === "recent-repositories") {
+        return { kind: "recent-repositories", rows: [] } as GithubCatalogueReadResponse;
+      }
+      if (request.kind === "repository") {
+        return {
+          kind: "repository",
+          row: resolved,
+          freshness: { status: "stale", staleReason: "refresh-failed" },
+        } as GithubCatalogueReadResponse;
+      }
+      return pageOne;
+    });
+    const onSelect = vi.fn();
+    render(<GitHubRepositoryPicker client={makeClient({ readCatalogue })} onSelect={onSelect} />);
+    await screen.findByText("octant/repo-1");
+
+    await user.type(
+      screen.getByLabelText("Repository link or owner/repository"),
+      "octant/stale-repo",
+    );
+    await user.click(screen.getByRole("button", { name: "Use repository" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/refresh failed/i);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("ignores a late link resolve after the person selects a catalogue row", async () => {
+    const user = userEvent.setup();
+    let resolveRepository: ((value: GithubCatalogueReadResponse) => void) | undefined;
+    const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
+      if (request.kind === "recent-repositories") {
+        return { kind: "recent-repositories", rows: [] } as GithubCatalogueReadResponse;
+      }
+      if (request.kind === "repository") {
+        return await new Promise<GithubCatalogueReadResponse>((resolve) => {
+          resolveRepository = resolve;
+        });
+      }
+      return pageOne;
+    });
+    const onSelect = vi.fn();
+    render(<GitHubRepositoryPicker client={makeClient({ readCatalogue })} onSelect={onSelect} />);
+    await screen.findByText("octant/repo-1");
+
+    await user.type(
+      screen.getByLabelText("Repository link or owner/repository"),
+      "octant/late-repo",
+    );
+    await user.click(screen.getByRole("button", { name: "Use repository" }));
+    fireEvent.click(screen.getByText("octant/repo-1"));
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ nodeId: "R_node1" }));
+
+    resolveRepository?.({
+      kind: "repository",
+      row: repositoryRow(99, { name: "late-repo" }),
+      freshness: { status: "fresh" },
+    } as GithubCatalogueReadResponse);
+    await waitFor(() => expect(onSelect).toHaveBeenCalledTimes(1));
+  });
+
   it("reports an invalid reference and an unavailable resolve honestly", async () => {
     const user = userEvent.setup();
     const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {

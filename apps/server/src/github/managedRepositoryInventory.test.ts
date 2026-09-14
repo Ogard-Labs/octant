@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -251,6 +251,19 @@ describe("user-chosen root", () => {
     expect(await inventory.forRoot(missing).deriveDestination(["my-project"])).toEqual({
       status: "unavailable",
     });
+  });
+
+  it("refuses staging and quarantine when the chosen root vanished", async () => {
+    const { inventory } = createInventory();
+    const parent = mkdtempSync(join(tmpdir(), "octant-chosen-"));
+    directories.push(parent);
+    const root = inventory.forRoot(parent);
+    const staged = await root.ensureStaging(requestId);
+    if (staged.status !== "staged") throw new Error("expected staging");
+    rmSync(parent, { recursive: true, force: true });
+    expect(await root.ensureStaging(requestId)).toEqual({ status: "unavailable" });
+    expect(await root.quarantine(requestId)).toEqual({ status: "unavailable" });
+    expect(existsSync(parent)).toBe(false);
   });
 
   it("keeps staging, promotion, and confinement beneath the chosen root", async () => {

@@ -496,6 +496,30 @@ describe("GitHubRepositoryOnboardingFlow with a chosen destination", () => {
     expect(chooseDestination).toHaveBeenCalledTimes(2);
   });
 
+  it("clears a previous folder choice when another repository is picked", async () => {
+    const chooseDestination = vi.fn(async () => destinationChoice());
+    renderOnboarding(
+      destinationOverrides(
+        async (command) => ({
+          kind: "operation",
+          operation: operation({ requestId: command.requestId }),
+        }),
+        chooseDestination,
+      ),
+    );
+
+    await selectFirstRepository();
+    fireEvent.click(await screen.findByRole("button", { name: "Choose a folder" }));
+    expect(await screen.findByText("Code")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await screen.findByText("Choose a GitHub repository");
+    await selectFirstRepository();
+
+    expect(screen.getByRole("button", { name: "Choose a folder" })).toBeInTheDocument();
+    expect(screen.queryByText("Code")).not.toBeInTheDocument();
+  });
+
   it("offers Change destination after a refusal instead of replaying a spent receipt", async () => {
     const execute = vi.fn(async (command: GithubCloneCommand) => {
       if (command.kind === "request-clone") {

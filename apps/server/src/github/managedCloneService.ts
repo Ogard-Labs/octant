@@ -887,12 +887,19 @@ export class ManagedCloneService {
     return result.stdout;
   }
 
+  #inventoryForRequest(requestId: string): ManagedRepositoryInventory {
+    const operation = this.#projection.getByRequestId(requestId);
+    if (operation === undefined) return this.#inventory;
+    return this.#inventory.forRoot(operation.destination.inventoryPath);
+  }
+
   async #fail(
     requestId: string,
     code: GithubCloneFailureCode,
     options: { readonly quarantine?: boolean; readonly remediation?: string } = {},
   ): Promise<GithubCloneCommandResponse> {
-    if (options.quarantine === true) await this.#inventory.quarantine(requestId);
+    if (options.quarantine === true)
+      await this.#inventoryForRequest(requestId).quarantine(requestId);
     const failure: GithubCloneFailure = {
       code,
       ...(options.remediation === undefined ? {} : { remediation: options.remediation }),
@@ -905,7 +912,7 @@ export class ManagedCloneService {
     requestId: string,
     options: { readonly quarantine: boolean },
   ): Promise<GithubCloneCommandResponse> {
-    if (options.quarantine) await this.#inventory.quarantine(requestId);
+    if (options.quarantine) await this.#inventoryForRequest(requestId).quarantine(requestId);
     const cancelled = this.#transition(requestId, "cancelled", {});
     return this.#respondOperation(cancelled);
   }

@@ -165,11 +165,14 @@ export class ManagedRepositoryInventory {
       return { status: "refused", code: "path-confinement" };
     }
     try {
-      const created = await this.#ensureOwnedDirectory(
-        join(this.#inventoryPath, INCOMING_DIRECTORY),
-      );
+      const base = await this.#canonicalInventory();
+      if (typeof base !== "string") {
+        if (base.status === "refused") return { status: "refused", code: base.code };
+        return { status: "unavailable" };
+      }
+      const created = await this.#ensureOwnedDirectory(join(base, INCOMING_DIRECTORY));
       if (created !== undefined) return created;
-      const stagingPath = join(this.#inventoryPath, INCOMING_DIRECTORY, requestId);
+      const stagingPath = join(base, INCOMING_DIRECTORY, requestId);
       if (await this.#exists(stagingPath)) {
         return { status: "refused", code: "destination-collision" };
       }
@@ -230,11 +233,13 @@ export class ManagedRepositoryInventory {
 
   /** Move a leftover staging directory aside without deleting any content. */
   async quarantine(requestId: string): Promise<ManagedQuarantineResult> {
-    const stagingPath = this.stagingPath(requestId);
-    if (stagingPath === undefined) return { status: "clean" };
+    if (!REQUEST_ID_PATTERN.test(requestId)) return { status: "clean" };
     try {
+      const base = await this.#canonicalInventory();
+      if (typeof base !== "string") return { status: "unavailable" };
+      const stagingPath = join(base, INCOMING_DIRECTORY, requestId);
       if (!(await this.#exists(stagingPath))) return { status: "clean" };
-      const quarantineRoot = join(this.#inventoryPath, QUARANTINE_DIRECTORY);
+      const quarantineRoot = join(base, QUARANTINE_DIRECTORY);
       const created = await this.#ensureOwnedDirectory(quarantineRoot);
       if (created !== undefined) return { status: "unavailable" };
       for (let ordinal = 0; ordinal < 100; ordinal += 1) {

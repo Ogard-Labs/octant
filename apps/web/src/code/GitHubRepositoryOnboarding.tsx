@@ -281,6 +281,7 @@ export function GitHubRepositoryOnboardingFlow(props: GitHubRepositoryOnboarding
       {...(chooseDestination === undefined ? {} : { chooseDestination })}
       onPick={(row) => {
         setSelection(row);
+        setDestination(undefined);
         if (chooseDestination === undefined) {
           void requestClone(row);
           return;
@@ -555,6 +556,8 @@ function DestinationStep(props: {
     try {
       const choice = await props.chooseDestination();
       if (choice !== undefined) props.onChoose(choice);
+    } catch {
+      // The native picker was dismissed or failed; keep the step idle.
     } finally {
       setChoosing(false);
     }
@@ -648,8 +651,8 @@ function ConfirmationCard(props: {
         </p>
       ) : (
         <p className="github-onboarding__note">
-          Octant will create a managed folder at the destination inside the host's repository
-          inventory. Nothing outside that folder is touched.
+          Octant will create a managed folder at the destination. Nothing outside that folder is
+          touched.
         </p>
       )}
       <div className="github-onboarding__actions">

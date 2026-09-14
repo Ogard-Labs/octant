@@ -132,6 +132,12 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
   }, [loadPage, trimmedQuery]);
 
   useEffect(() => {
+    return () => {
+      linkGeneration.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
     const readCatalogue = client.readCatalogue;
     if (typeof readCatalogue !== "function") return;
     const pending = readCatalogue({ kind: "recent-repositories" });
@@ -194,6 +200,9 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
   const optionId = (row: GithubRepositoryRow) => `${listboxId}-option-${row.nodeId}`;
 
   const select = (row: GithubRepositoryRow) => {
+    linkGeneration.current += 1;
+    setLinkBusy(false);
+    setLinkError(undefined);
     onSelect(row);
     // Recording the recent selection is a convenience write; its failure
     // never blocks the selection itself.
@@ -227,6 +236,13 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
       }
       if (response.kind !== "repository") {
         setLinkError("GitHub returned an unexpected response.");
+        return;
+      }
+      if (response.freshness.status === "stale") {
+        setLinkError(
+          STALE_REASON_LABELS[response.freshness.staleReason ?? ""] ??
+            "The repository facts may be stale. Refresh and try again.",
+        );
         return;
       }
       setLinkInput("");
