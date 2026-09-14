@@ -302,7 +302,15 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
   async function chooseCloneDestination(): Promise<GithubCloneDestinationChoice | undefined> {
     const bridge = props.hostBridge;
     if (bridge !== undefined) {
-      const selection = await bridge.selectProjectRoot("code");
+      let selection: Awaited<ReturnType<OctantHostBridge["selectProjectRoot"]>>;
+      try {
+        selection = await bridge.selectProjectRoot("code");
+      } catch (error) {
+        // A failed native pick is host state the person can act on, not a
+        // reason for the destination step to sit idle without a word.
+        setStatus(safeNativePickerMessage(error));
+        return undefined;
+      }
       if (selection.kind === "cancelled") return undefined;
       const displayName =
         "displayName" in selection && typeof selection.displayName === "string"

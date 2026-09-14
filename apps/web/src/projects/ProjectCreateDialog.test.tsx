@@ -449,6 +449,56 @@ describe("ProjectCreateDialog GitHub source", () => {
     await user.click(await screen.findByRole("button", { name: "Done" }));
     expect(onClose).toHaveBeenCalledOnce();
   });
+
+  it("reports a failed native folder pick in the destination step without firing a clone request", async () => {
+    const user = userEvent.setup();
+    const commands: GithubCloneCommand[] = [];
+    const execute = vi.fn(async (command: GithubCloneCommand) => {
+      commands.push(command);
+      if (command.kind === "request-clone") {
+        return {
+          kind: "operation",
+          operation: cloneOperation(command.requestId),
+        } as GithubCloneCommandResponse;
+      }
+      return {
+        kind: "operation",
+        operation: {
+          ...cloneOperation(command.requestId),
+          state: "completed",
+          bindingIssued: true,
+        },
+        binding: { receiptId: CLONE_RECEIPT, projectType: "code", expiresAt: 9_999_999_999 },
+      } as GithubCloneCommandResponse;
+    });
+    const selectProjectRoot = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("/private/secret/path desktop-token"));
+    render(
+      <ProjectCreateDialog
+        github={{
+          client: catalogueClient(),
+          cloneClient: { execute, listOperations: async () => ({ operations: [] }) },
+          hostName: "This Mac",
+        }}
+        hostBridge={hostBridge(selectProjectRoot)}
+        mode="code"
+        onClose={vi.fn()}
+        onCreate={vi.fn(async () => projectId)}
+        onCreated={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "GitHub" }));
+    fireEvent.click(await screen.findByText("octant/repo-1"));
+
+    await user.click(await screen.findByRole("button", { name: "Choose a folder" }));
+    expect(await screen.findByText("Project creation could not be completed.")).toBeVisible();
+    expect(document.body).not.toHaveTextContent("/private/secret/path");
+    expect(commands.filter((command) => command.kind === "request-clone")).toHaveLength(0);
+    // The destination step stays idle and offers the chooser again.
+    expect(screen.getByRole("button", { name: "Choose a folder" })).toBeEnabled();
+  });
 });
 
 describe("ProjectCreateDialog GitHub source on a headless host", () => {
