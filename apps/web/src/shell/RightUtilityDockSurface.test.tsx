@@ -22,7 +22,7 @@ describe("the right sidebar surface", () => {
     const rail = dockStylesheet.match(/\.right-utility-dock__tool\s+:is\(([^)]*)\)\s*\{([^}]*)\}/);
     expect(rail).not.toBeNull();
     for (const toolbar of [
-      ".code-file-explorer-panel__toolbar",
+      ".code-file-explorer__head",
       ".code-delivery-pane__toolbar",
       ".code-diff-pane__toolbar",
       ".browser-workspace__chrome",

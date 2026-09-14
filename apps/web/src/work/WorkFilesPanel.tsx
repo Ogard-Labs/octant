@@ -12,6 +12,7 @@ import { createWorkFileListingClient } from "@octant/client-runtime/work-file-li
 import { FolderOpen, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { FileName, pathBasename, pathParent } from "../lib/fileName";
 
 type FileEntry = Extract<WorkFileListingEntry, { readonly kind: "file" }>;
 
@@ -213,9 +214,9 @@ export function WorkFilesPanel(props: WorkFilesPanelProps) {
           <ul className="work-files-panel__list">
             {rest.map((entry) =>
               entry.kind === "directory" ? (
-                <li className="work-files-panel__row" key={entry.path}>
-                  <span className="oct-row-label">{entry.path}</span>
-                  <span className="oct-row-detail">Folder</span>
+                <li className="work-files-panel__row" key={entry.path} title={String(entry.path)}>
+                  <FileName className="oct-row-label" name={pathBasename(entry.path)} />
+                  <span className="oct-row-detail">{folderDetail(entry.path)}</span>
                 </li>
               ) : (
                 <FileRow
@@ -261,10 +262,24 @@ function formatBytes(byteLength: number): string {
   return `${(byteLength / (1_024 * 1_024)).toFixed(1)} MB`;
 }
 
+/** A folder inside this one: its own name, and where it sits. */
+function folderDetail(path: string): string {
+  const parent = pathParent(path);
+  return parent === "" ? "Folder" : `${parent} · Folder`;
+}
+
+/** A file's own name with any format line's parent folder kept separate. */
+function fileDetail(entry: FileEntry, detail: string): string {
+  const parent = pathParent(entry.path);
+  return parent === "" ? detail : `${parent} · ${detail}`;
+}
+
 /**
  * One listed file. It is a button only when the host gave it a target to open;
  * otherwise it stays a row, because a control that looks interactive and does
- * nothing is worse than one that never claimed to be.
+ * nothing is worse than one that never claimed to be. The name shows the file
+ * itself; the folder it lives in rides beside the size, and the whole path is
+ * the row's hover title and accessible label.
  */
 function FileRow(props: {
   readonly entry: FileEntry;
@@ -274,9 +289,9 @@ function FileRow(props: {
   const openable = props.onOpen !== undefined && props.entry.preview !== undefined;
   if (!openable) {
     return (
-      <li className="work-files-panel__row">
-        <span className="oct-row-label">{props.entry.path}</span>
-        <span className="oct-row-detail">{props.detail}</span>
+      <li className="work-files-panel__row" title={String(props.entry.path)}>
+        <FileName className="oct-row-label" name={pathBasename(props.entry.path)} />
+        <span className="oct-row-detail">{fileDetail(props.entry, props.detail)}</span>
       </li>
     );
   }
@@ -289,8 +304,8 @@ function FileRow(props: {
         type="button"
         variant="ghost"
       >
-        <span className="oct-row-label">{props.entry.path}</span>
-        <span className="oct-row-detail">{props.detail}</span>
+        <FileName className="oct-row-label" name={pathBasename(props.entry.path)} />
+        <span className="oct-row-detail">{fileDetail(props.entry, props.detail)}</span>
       </OctantButton>
     </li>
   );
