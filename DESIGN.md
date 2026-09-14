@@ -554,9 +554,13 @@ its context menu. Project View and Project Overview are real features, not
 decorative shortcuts.
 
 Primary sidebar destinations are New thread, Board, and Pull requests
-when valid for the active mode. The bottom-left identity menu owns Settings,
-Navigator, Agents, Providers, Usage, Plugins, Automations, Artifacts, and Zen
-entry points. The account menu opens above its identity row, aligned to the
+when valid for the active mode. The destinations a person placed under Menu
+only wait in a More row that closes the destination list — an ellipsis opening
+a popup beside the rail with those destinations and Customize sidebar; the
+setting that turns the More row off returns them to the bottom-left identity
+menu. The identity menu owns Settings, Navigator, Agents, Providers, Usage,
+Plugins, Automations, Artifacts, and Zen entry points. The account menu opens
+above its identity row, aligned to the
 row’s leading edge. Search is a compact in-place filter for the current mode's visible
 threads, with a command-style overlay available for broader actions.
 

@@ -77,6 +77,7 @@ const settings = {
     vibrancyMode: "off",
   },
   sidebarDestinations: { order: [], visibility: [] },
+  sidebarMoreEnabled: true,
   environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
   firstRunOnboarding: "pending",
   automaticUpdateChecks: true,
@@ -1120,5 +1121,18 @@ describe("sidebar destination customization", () => {
         ],
       }),
     ).toThrow();
+  });
+});
+
+describe("sidebar More row preference", () => {
+  it("decodes a store that predates the More row with the row on", () => {
+    const { sidebarMoreEnabled: _predatesTheRow, ...predatesTheRow } = settings;
+    expect(decodeShellSettings(predatesTheRow).sidebarMoreEnabled).toBe(true);
+  });
+
+  it("keeps the More row the person turned off", () => {
+    expect(decodeShellSettings({ ...settings, sidebarMoreEnabled: false }).sidebarMoreEnabled).toBe(
+      false,
+    );
   });
 });

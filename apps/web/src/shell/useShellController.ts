@@ -71,6 +71,7 @@ export type ImplementedSettingId =
   | "enable-work"
   | "sidebar-width"
   | "sidebar-destinations"
+  | "sidebar-more"
   | "sidebar-material"
   | "workspace-material"
   | "sidebar-background"
@@ -293,6 +294,8 @@ const settingSearchText: Readonly<Record<ImplementedSettingId, string>> = {
   "enable-work": "enable work mode",
   "sidebar-width": "sidebar width",
   "sidebar-destinations": "sidebar destinations customize show hide rows menu reorder order",
+  "sidebar-more":
+    "sidebar more row reveal hidden menu destinations account menu customize ellipsis overflow",
   "sidebar-material": "appearance translucent sidebar translucency material system opaque",
   "workspace-material":
     "appearance translucent workspace window translucency material vibrancy glass system opaque",

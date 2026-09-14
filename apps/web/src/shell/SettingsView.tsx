@@ -1054,6 +1054,24 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               />
             </SettingRow>
           ) : null}
+          {isAvailable("sidebar-more") ? (
+            <SettingRow
+              description="Reveal the menu-only destinations and Customize sidebar under a More row at the end of the sidebar navigation. Off keeps them in the account menu."
+              focused={focusedSetting === settingId("sidebar-more")}
+              label="More row in the sidebar"
+              scope="app"
+              settingId="sidebar-more"
+            >
+              <OctantSwitch
+                checked={props.settings.sidebarMoreEnabled}
+                describedBy="sidebar-more-description"
+                label="More row in the sidebar"
+                onCheckedChange={(checked) =>
+                  props.onSettingsChange({ sidebarMoreEnabled: checked })
+                }
+              />
+            </SettingRow>
+          ) : null}
           {isAvailable("sidebar-material") ? (
             <SettingRow
               description="Use the system sidebar material when available."

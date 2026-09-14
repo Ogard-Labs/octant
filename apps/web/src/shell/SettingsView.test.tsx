@@ -540,6 +540,22 @@ describe("SettingsView", () => {
     expect(onSettingsChange).toHaveBeenLastCalledWith({ sidebarMaterial: "system" });
   });
 
+  it("toggles the sidebar's More row and says what it holds", async () => {
+    const user = userEvent.setup();
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+    navigateTo("Appearance");
+
+    const control = screen.getByRole("switch", { name: "More row in the sidebar" });
+    expect(control).toHaveAttribute("aria-checked", "true");
+    expect(control).toHaveAttribute("aria-describedby", "sidebar-more-description");
+    expect(document.getElementById("sidebar-more-description")).toHaveTextContent(
+      "Reveal the menu-only destinations and Customize sidebar",
+    );
+    await user.click(control);
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ sidebarMoreEnabled: false });
+  });
+
   it("selects subtle native vibrancy when translucency is enabled", async () => {
     const user = userEvent.setup();
     const applyPatch = vi.fn(async () => true);

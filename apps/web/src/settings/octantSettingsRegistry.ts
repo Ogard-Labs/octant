@@ -91,6 +91,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "sidebar destinations customize show hide rows menu reorder order",
         },
         {
+          id: settingId("sidebar-more"),
+          label: "More row in the sidebar",
+          scope: "app",
+          keywords: "sidebar more row hidden menu destinations account customize reveal expand",
+        },
+        {
           id: settingId("sidebar-material"),
           label: "Translucent sidebar",
           scope: "app",
