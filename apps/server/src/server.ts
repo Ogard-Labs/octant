@@ -546,6 +546,7 @@ import {
   CodexPluginPackageResolver,
   type CodexPluginPackageResolverOptions,
 } from "./extensions/codexPluginResolver";
+import { NpmAgentPluginMarketplace } from "./extensions/npmAgentPluginMarketplace";
 import { ArtifactMirrorEventStore } from "./canvas/artifactMirrorEventStore";
 import {
   createArtifactMirrorFilePort,
@@ -3212,6 +3213,11 @@ export function startOctantServer(
         ...(options.codexPluginPackageSources ?? createDefaultCodexPluginPackageSources()),
         localFolderRegistry: localPluginFolderRegistry,
         isMarketplaceFetchAllowed,
+        agentPluginCatalog: new NpmAgentPluginMarketplace({
+          appVersion: version,
+          platform: process.platform,
+          isMarketplaceFetchAllowed,
+        }),
       });
     const agentPluginMcpSessionManager =
       options.agentPluginMcpSessionManager ??

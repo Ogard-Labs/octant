@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { CodexPluginPackageResolver } from "./codexPluginResolver";
+import type { ExtensionCatalogEntry } from "@octant/contracts/extension-rpc";
+import { CodexPluginPackageResolver, type AgentPluginCatalogPort } from "./codexPluginResolver";
 import {
   agentPluginExtensionId,
   agentPluginPackageId,
   type AgentPluginPackageInput,
 } from "./agentPluginIngestion";
+import { MarketplaceFetchesDisabledError } from "./marketplaceHttps";
 import { createMockCatalogSource, createMockLocalFolderInput } from "./curatedCatalogTestFixtures";
 
 const catalogSource = {
@@ -12,6 +14,40 @@ const catalogSource = {
   catalogId: "octant-curated",
   entryId: "build-ios-apps",
 } as never;
+
+const npmAgentPluginCatalogId = "npm-agent-plugins" as never;
+
+function liveCatalog(options: {
+  readonly entries?: ReadonlyArray<ExtensionCatalogEntry>;
+  readonly error?: Error;
+}): AgentPluginCatalogPort {
+  return {
+    catalogId: npmAgentPluginCatalogId,
+    search: async () => {
+      if (options.error !== undefined) throw options.error;
+      return { entries: options.entries ?? [] };
+    },
+    resolve: async () => {
+      throw new Error("unused");
+    },
+  };
+}
+
+function npmCatalogEntry(): ExtensionCatalogEntry {
+  return {
+    extensionId: "15000000-0000-4000-8000-000000000011" as never,
+    packageId: "15000000-0000-4000-8000-000000000012" as never,
+    slug: "demo-plugin" as never,
+    displayName: "Demo Plugin",
+    version: "1.2.3" as never,
+    digest: `sha256:${"c".repeat(64)}` as never,
+    source: {
+      kind: "catalog",
+      catalogId: npmAgentPluginCatalogId,
+      entryId: "npkg" as never,
+    },
+  };
+}
 
 describe("Codex plugin package resolver", () => {
   it("resolves catalog entries and local-folder sources through the same normalizer", async () => {
@@ -59,7 +95,7 @@ describe("Codex plugin package resolver", () => {
       fetch: mockFetch,
       platform: "darwin",
     });
-    const result = resolver.searchCatalog({ kind: "search-catalog", query: "build" });
+    const result = await resolver.searchCatalog({ kind: "search-catalog", query: "build" });
     expect(result.entries).toHaveLength(1);
     expect(result.entries[0]).toMatchObject({ slug: "build-ios-apps" });
     expect(JSON.stringify(result)).not.toContain("SKILL.md");
@@ -71,7 +107,7 @@ describe("Codex plugin package resolver", () => {
     const agentRecord = { ...record, packageFormat: "agent-plugin" as const };
     const resolver = new CodexPluginPackageResolver({ catalog: [agentRecord] });
 
-    const result = resolver.searchCatalog({ kind: "search-catalog", query: "build" });
+    const result = await resolver.searchCatalog({ kind: "search-catalog", query: "build" });
     expect(result.entries[0]).toMatchObject({
       extensionId: agentPluginExtensionId(record.source, record.displayMetadata.name),
       packageId: agentPluginPackageId(record.source, record.displayMetadata.name),
@@ -189,5 +225,52 @@ Hello
         }),
       ],
     });
+  });
+
+  it("merges the live Agent Plugin catalog with the curated catalog and filters by catalog id", async () => {
+    const { catalogSource: record } = await createMockCatalogSource();
+    const resolver = new CodexPluginPackageResolver({
+      catalog: [record],
+      agentPluginCatalog: liveCatalog({ entries: [npmCatalogEntry()] }),
+    });
+
+    const all = await resolver.searchCatalog({ kind: "search-catalog", query: "build" });
+    expect(all.entries.map((entry) => entry.slug)).toEqual(["build-ios-apps", "demo-plugin"]);
+
+    const npmOnly = await resolver.searchCatalog({
+      kind: "search-catalog",
+      query: "build",
+      catalogId: npmAgentPluginCatalogId,
+    });
+    expect(npmOnly.entries.map((entry) => entry.slug)).toEqual(["demo-plugin"]);
+
+    const curatedOnly = await resolver.searchCatalog({
+      kind: "search-catalog",
+      query: "build",
+      catalogId: "octant-curated" as never,
+    });
+    expect(curatedOnly.entries.map((entry) => entry.slug)).toEqual(["build-ios-apps"]);
+  });
+
+  it("keeps curated results when the live catalog is unavailable", async () => {
+    const { catalogSource: record } = await createMockCatalogSource();
+    const resolver = new CodexPluginPackageResolver({
+      catalog: [record],
+      agentPluginCatalog: liveCatalog({ error: new MarketplaceFetchesDisabledError() }),
+    });
+
+    const result = await resolver.searchCatalog({ kind: "search-catalog", query: "build" });
+    expect(result.entries.map((entry) => entry.slug)).toEqual(["build-ios-apps"]);
+  });
+
+  it("surfaces a live catalog failure when no curated entry matches", async () => {
+    const resolver = new CodexPluginPackageResolver({
+      catalog: [],
+      agentPluginCatalog: liveCatalog({ error: new Error("npm Agent Plugin search failed.") }),
+    });
+
+    await expect(
+      resolver.searchCatalog({ kind: "search-catalog", query: "build" }),
+    ).rejects.toThrow(/npm Agent Plugin search failed/);
   });
 });

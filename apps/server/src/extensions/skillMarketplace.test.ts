@@ -11,13 +11,8 @@ import {
   parseSkillMarkdown,
 } from "./skillPackageBuilder";
 import { SkillsShMarketplace } from "./skillsShMarketplace";
-import {
-  NpmSkillMarketplace,
-  decodeNpmEntryId,
-  encodeNpmEntryId,
-  extractSkillMarkdownFromTarball,
-  verifyNpmTarballIntegrity,
-} from "./npmSkillMarketplace";
+import { NpmSkillMarketplace, extractSkillMarkdownFromTarball } from "./npmSkillMarketplace";
+import { decodeNpmEntryId, encodeNpmEntryId, verifyNpmTarballIntegrity } from "./npmRegistry";
 import { createCompositeSkillMarketplace } from "./compositeSkillMarketplace";
 import { inspectExtensionPackage } from "./packageInspector";
 import {

@@ -779,8 +779,8 @@ contribution points are rejected. The renderer contribution registry resolves
 `preview.viewer`, `appearance.preset`, and `board.view` from the effective
 first-party catalog; it never decides availability. `apps/server/src/extensions`
 owns the runtime: package store, inspector, marketplaces (skills.sh, npm,
-curated catalog), Agent Plugins ingestion, supervisor, MCP session manager,
-and skill discovery.
+curated catalog, npm Agent Plugins), Agent Plugins ingestion, supervisor, MCP
+session manager, and skill discovery.
 
 **Activation ladder.** `resolveExtensionActivation` resolves each component to
 an effective state with a structured reason. A component is active only when
@@ -800,8 +800,13 @@ prompt, schema, tool, route, model, or capability.
   `~/.agents/skills/`.
 - Marketplace network is on user action: curated catalog search is in-memory;
   inspect/install fetches the pinned GitHub tree; standalone skill search
-  queries skills.sh and npm with the typed text. Opening Settings does not
-  fetch a catalog.
+  queries skills.sh and npm with the typed text; Agent Plugins search queries
+  npm with the publisher-adopted `agent-plugin` / `agent-plugins` keywords,
+  validates every candidate at listing time (bounded tarball bytes, canonical
+  root `plugin.json` `$schema`, unsafe-path and link rejection), lists the real
+  identity and digest, and resolves exactly the listed `name@version` from
+  cache. A candidate that fails validation is not listed. Opening Settings does
+  not fetch a catalog.
 - A structured mention cannot install, trust, enable, or elevate anything.
 - Core capabilities (browser/computer use, tests, Apple validation, approvals,
   memory, subagents) are app-managed and provider-neutral; no core capability

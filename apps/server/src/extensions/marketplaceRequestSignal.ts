@@ -33,8 +33,9 @@ export function createMarketplaceRequestSignal(
 export async function withMarketplaceRequest<T>(
   callerSignal: AbortSignal | undefined,
   run: (signal: AbortSignal) => Promise<T>,
+  timeoutMs?: number,
 ): Promise<T> {
-  const request = createMarketplaceRequestSignal(callerSignal);
+  const request = createMarketplaceRequestSignal(callerSignal, timeoutMs);
   try {
     return await run(request.signal);
   } finally {
