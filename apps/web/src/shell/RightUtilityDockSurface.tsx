@@ -54,7 +54,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
       MULTI_INSTANCE_DOCK_SURFACES.has(surface.id) ||
       !props.tabs.some((tab) => dockTabSurface(tab).id === surface.id),
   );
-  const contents: Readonly<Record<RightUtilityDockSurfaceId, ReactNode | undefined>> = {
+  const contents: Readonly<Partial<Record<RightUtilityDockSurfaceId, ReactNode>>> = {
     agents: props.agents,
     browser: props.browser,
     canvas: props.canvas,
@@ -192,6 +192,7 @@ function workMapDetail(surface: RightUtilityDockSurfaceId): string {
   if (surface === "browser") return "Inspect live web activity";
   if (surface === "canvas") return "Open the thread Canvas";
   if (surface === "review") return "Review checkout changes";
+  if (surface === "pull-requests") return "List the active Project's pull requests";
   if (surface === "delivery") return "Inspect the delivery target";
   if (surface === "files") return "Browse the active checkout";
   if (surface === "document") return "Read the document this thread wrote";

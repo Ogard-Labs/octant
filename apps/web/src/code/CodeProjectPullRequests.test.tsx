@@ -4,6 +4,7 @@ import {
   type CodeProjectPullRequestRefreshCommand,
   type CodeProjectPullRequestView,
 } from "@octant/contracts";
+import { decodeProjectId } from "@octant/contracts/projects";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
@@ -13,6 +14,9 @@ import { CodeProjectPullRequests } from "./CodeProjectPullRequests";
 
 const projectA = "10000000-0000-4000-8000-000000000001";
 const projectB = "10000000-0000-4000-8000-000000000002";
+const projectAId = decodeProjectId(projectA);
+const projectBId = decodeProjectId(projectB);
+const workProjectId = decodeProjectId("10000000-0000-4000-8000-000000000003");
 const threadId = "20000000-0000-4000-8000-000000000001";
 const generatedAt = "2026-08-22T08:00:00.000Z";
 
@@ -363,6 +367,112 @@ describe("CodeProjectPullRequests", () => {
     );
   });
 
+  it("scopes the dock presentation to one Project and drops the page shell", async () => {
+    const user = userEvent.setup();
+    const onSelectRow = vi.fn();
+    render(
+      <CodeProjectPullRequests
+        load={async () => view()}
+        onSelectRow={onSelectRow}
+        presentation="dock"
+        projectId={projectAId}
+        refresh={async () => view()}
+      />,
+    );
+
+    expect(await screen.findByText("List active pull requests")).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Project Octant" })).toBeVisible();
+    // The dock names the surface in its own tab, so the list repeats neither a
+    // page title nor a Back to workspace control.
+    expect(screen.queryByRole("heading", { name: "Pull requests" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Back to workspace" })).toBeNull();
+    // Another Project's group is not this thread's business, and its absent
+    // rows must not be reported as this Project's count.
+    expect(screen.queryByRole("region", { name: "Project Local notes" })).toBeNull();
+    expect(screen.getByText("1 pull request")).toBeVisible();
+    // A single-Project list refreshes that Project; there is nothing for a
+    // cross-Project "Refresh all" to add, and the Project setting stays on the
+    // page that owns it.
+    expect(screen.queryByRole("button", { name: "Refresh all" })).toBeNull();
+    expect(screen.queryByRole("switch", { name: /Auto-refresh/ })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /List active pull requests/i }));
+    expect(onSelectRow).toHaveBeenCalledWith(expect.objectContaining({ number: 12 }));
+  });
+
+  it("names the snapshot as the scope of a truncated dock list, not the Project", async () => {
+    const truncated = view({ repositoriesTruncated: true, pullRequestsTruncated: true });
+    render(
+      <CodeProjectPullRequests
+        load={async () => truncated}
+        presentation="dock"
+        projectId={projectAId}
+        refresh={async () => truncated}
+      />,
+    );
+
+    expect(
+      await screen.findByText(
+        /Some of the snapshot's pull requests were omitted after the preview bound of 100\./,
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        /Some connected repositories in the snapshot were omitted after the preview bound of 25\./,
+      ),
+    ).toBeVisible();
+    // Beside one Project's still-visible rows, "some pull requests were
+    // omitted" would read as this Project having lost rows.
+    expect(screen.queryByText(/Some pull requests were omitted/)).toBeNull();
+  });
+
+  it("says why a Project the snapshot does not cover lists no pull requests", async () => {
+    render(
+      <CodeProjectPullRequests
+        load={async () =>
+          view({
+            projects: [
+              {
+                kind: "connected",
+                projectId: projectA,
+                projectName: "Octant",
+                repositoryOwner: "octant",
+                repositoryName: "octant",
+              },
+            ],
+            rows: [],
+          })
+        }
+        presentation="dock"
+        projectId={workProjectId}
+        refresh={async () => view()}
+      />,
+    );
+
+    expect(await screen.findByText("No pull-request source for this Project")).toBeVisible();
+    expect(
+      screen.getByText("Only a Code Project with a github.com origin lists pull requests."),
+    ).toBeVisible();
+    expect(screen.queryByText("No Code Projects yet")).toBeNull();
+  });
+
+  it("keeps an unconnected Project's dock list honest instead of empty", async () => {
+    render(
+      <CodeProjectPullRequests
+        load={async () => view()}
+        presentation="dock"
+        projectId={projectBId}
+        refresh={async () => view()}
+      />,
+    );
+
+    expect(await screen.findByRole("region", { name: "Project Local notes" })).toBeVisible();
+    expect(
+      screen.getByText("No github.com origin. Add one to list this Project's pull requests."),
+    ).toBeVisible();
+    expect(screen.queryByText("List active pull requests")).toBeNull();
+  });
+
   it("filters the cached snapshot locally and clears the query without contacting GitHub", async () => {
     const user = userEvent.setup();
     const { load, refresh } = renderWorkspace();
@@ -407,5 +517,16 @@ describe("CodeProjectPullRequests", () => {
     );
     expect(narrowMeta).toMatch(/grid-column:\s*1/);
     expect(narrowMeta).toMatch(/grid-row:\s*auto/);
+  });
+
+  it("scrolls a long dock list inside the dock instead of letting the dock clip it", () => {
+    // The dock's body clips (overflow: hidden) and the tool is the dock's full
+    // height, so the list root has to be the bounded scroller: without a
+    // height and its own overflow, rows past the dock's height had no way to
+    // be reached.
+    const dock = ruleBody(stylesheet, '.code-project-pull-requests[data-presentation="dock"]');
+    expect(dock).toMatch(/height:\s*100%/);
+    expect(dock).toMatch(/min-height:\s*0/);
+    expect(dock).toMatch(/overflow:\s*auto/);
   });
 });

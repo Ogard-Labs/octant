@@ -3,6 +3,7 @@ import {
   decodeWorkspaceLayoutNode,
   type WorkspaceLayoutNode,
 } from "@octant/contracts/shell";
+import { decodeThreadBoardPullRequestSummary } from "@octant/contracts";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -75,6 +76,51 @@ describe("SplitWorkspace", () => {
 
     expect(screen.getByTitle("Claude")).toBeVisible();
     expect(screen.getByRole("region", { name: "Workspace pane: A thread" })).toBeVisible();
+  });
+
+  it("opens the pull request a pane tab names in the dock", async () => {
+    const user = userEvent.setup();
+    const onSelectPullRequest = vi.fn();
+    const threadId = "00000000-0000-4000-8000-000000000614";
+    const summary = decodeThreadBoardPullRequestSummary({
+      identity: {
+        projectId: "10000000-0000-4000-8000-000000000001",
+        repositoryOwner: "octant",
+        repositoryName: "octant",
+        number: 917,
+      },
+      title: "Faster issue validation",
+      state: "open",
+      checks: "failing",
+      review: "pending",
+      mergeability: "mergeable",
+      freshness: "fresh",
+      readyToMerge: false,
+    });
+    const layout = decodeWorkspaceLayoutNode({
+      kind: "pane",
+      nodeId: "00000000-0000-4000-8000-000000000611",
+      paneId: String(firstPaneId),
+      surface: {
+        kind: "code-overview",
+        id: "00000000-0000-4000-8000-000000000613",
+        mode: "code",
+        threadId,
+        title: "Faster issue validation",
+      },
+    });
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        layout={layout}
+        onSelectPullRequest={onSelectPullRequest}
+        paneFactsByThreadId={new Map([[threadId, { pullRequest: summary }]])}
+        renderSurface={(surface) => surface.title}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Pull request #917 · Open" }));
+    expect(onSelectPullRequest).toHaveBeenCalledWith(summary.identity);
   });
 
   it("does not offer Terminal or Browser as Code pane add-tab surfaces", () => {

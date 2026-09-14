@@ -21,6 +21,7 @@ const PlanModule = lazy(() => import("../dockModules/PlanModule"));
 const DeliveryModule = lazy(() => import("../dockModules/DeliveryModule"));
 const CanvasModule = lazy(() => import("../dockModules/CanvasModule"));
 const ReviewModule = lazy(() => import("../dockModules/ReviewModule"));
+const ProjectPullRequestsModule = lazy(() => import("../dockModules/ProjectPullRequestsModule"));
 const TerminalModule = lazy(() => import("../dockModules/TerminalModule"));
 const TestsModule = lazy(() => import("../dockModules/TestsModule"));
 const SimulatorModule = lazy(() => import("../dockModules/SimulatorModule"));
@@ -105,6 +106,16 @@ export const dockModules: Readonly<
         "serverUrl",
         "subject",
         "windowCapability",
+      ]),
+    ),
+  "pull-requests": (props) =>
+    createElement(
+      ProjectPullRequestsModule,
+      inputs(props, [
+        "codeClient",
+        "onSelectProjectPullRequest",
+        "selectedProjectPullRequestKey",
+        "subject",
       ]),
     ),
   terminal: (props) =>

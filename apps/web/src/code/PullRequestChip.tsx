@@ -3,6 +3,7 @@ import type {
   ThreadBoardPullRequestState,
 } from "@octant/contracts";
 import { GitPullRequest } from "lucide-react";
+import { OctantButton } from "../ui/base/OctantButton";
 
 const STATE_LABELS: Readonly<Record<ThreadBoardPullRequestState, string>> = {
   unknown: "Pull request",
@@ -19,6 +20,11 @@ export interface PullRequestChipProps {
   /** Spell the state after the number; a tight rail shows the number alone. */
   readonly showState?: boolean;
   readonly className?: string;
+  /**
+   * Present when this mention has somewhere to open. Without it the chip is a
+   * mark inside whatever row already owns the click.
+   */
+  readonly onOpen?: () => void;
 }
 
 /**
@@ -40,7 +46,7 @@ function checksNote(
 export function PullRequestChip(props: PullRequestChipProps) {
   const label = STATE_LABELS[props.state];
   const note = props.showState === true ? checksNote(props.state, props.checks) : undefined;
-  return (
+  const chip = (
     <span
       className={`pull-request-chip${props.className === undefined ? "" : ` ${props.className}`}`}
       data-checks={props.state === "open" ? props.checks : undefined}
@@ -51,5 +57,22 @@ export function PullRequestChip(props: PullRequestChipProps) {
       {props.showState === true ? ` ${label}` : null}
       {note === undefined ? null : <span className="pull-request-chip__checks">{note}</span>}
     </span>
+  );
+  if (props.onOpen === undefined) return chip;
+  return (
+    <OctantButton
+      aria-label={`Pull request #${props.number} · ${label}`}
+      className="pull-request-chip-button"
+      onClick={props.onOpen}
+      // The pane header's grip starts a surface drag on pointerdown. A press
+      // that begins on this control must not become that drag, or the capture
+      // retargets the release and the click never reaches the chip.
+      onPointerDown={(event) => event.stopPropagation()}
+      size="sm"
+      type="button"
+      variant="ghost"
+    >
+      {chip}
+    </OctantButton>
   );
 }

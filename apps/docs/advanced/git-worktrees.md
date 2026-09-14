@@ -131,6 +131,12 @@ card can show an identity as **Unknown** and stale until a user refreshes.
 Thread-scoped create and observe remain on the thread. This workspace does
 not merge, approve, comment, close, or force-push.
 
+A Code thread's right sidebar can also host **Pull requests**: it lists the
+active Project's active rows from the same cached snapshot and opens a selected
+row in Review in the same dock. The pull request named on a pane tab opens
+there too, so a mention in the thread reaches the request without leaving the
+transcript.
+
 ## Issues browser
 
 The GitHub plugin's **Issues** destination is a host-scoped, read-only browser
