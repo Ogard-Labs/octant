@@ -1,5 +1,5 @@
 import type { ExtensionCatalogEntry, ExtensionCommand } from "@octant/contracts/extension-rpc";
-import type { ExtensionSource } from "@octant/contracts/extensions";
+import type { ExtensionCatalogId, ExtensionSource } from "@octant/contracts/extensions";
 import { isAgentPluginsManifest } from "@octant/plugin-host/agent-plugins";
 import {
   agentPluginExtensionId,
@@ -14,7 +14,11 @@ import {
   type CodexPluginPackageInput,
 } from "./codexPluginIngestion";
 import type { ExtensionPackageResolverPort } from "./extensionApiService";
-import type { ExtensionArchiveEntry, ResolvedExtensionPackage } from "./packageInspector";
+import {
+  inspectExtensionPackage,
+  type ExtensionArchiveEntry,
+  type ResolvedExtensionPackage,
+} from "./packageInspector";
 import {
   fetchPinnedUpstreamPackage,
   type PinnedUpstreamFetchInput,
@@ -23,6 +27,21 @@ import { createMarketplaceFetch } from "./marketplaceHttps";
 import type { CuratedBuildIosAppsCatalogSource } from "./curatedBuildIosAppsCatalog";
 
 export type PluginPackageInput = CodexPluginPackageInput | AgentPluginPackageInput;
+
+/**
+ * A live Agent Plugins catalog source (today npm) that the resolver can search
+ * and resolve alongside the static curated catalog. Listings carry the real
+ * normalized identity and digest because the adapter validates before listing;
+ * resolution still runs through inspection, trust, and enablement unchanged.
+ */
+export interface AgentPluginCatalogPort {
+  readonly catalogId: ExtensionCatalogId;
+  search(
+    query: string,
+    signal?: AbortSignal,
+  ): Promise<{ readonly entries: ReadonlyArray<ExtensionCatalogEntry> }>;
+  resolve(source: ExtensionSource, signal?: AbortSignal): Promise<ResolvedExtensionPackage>;
+}
 
 export interface CodexPluginLocalFolderSource {
   readonly source: Extract<ExtensionSource, { readonly kind: "local-folder" }>;
@@ -41,6 +60,8 @@ export interface CodexPluginPackageResolverOptions {
   readonly platform?: NodeJS.Platform;
   /** When false, GitHub catalog inspect/install fetches are not made. */
   readonly isMarketplaceFetchAllowed?: () => boolean;
+  /** Live Agent Plugins catalog (for example npm) searched with the static catalog. */
+  readonly agentPluginCatalog?: AgentPluginCatalogPort;
 }
 
 export class CodexPluginPackageResolver implements ExtensionPackageResolverPort {
@@ -52,6 +73,7 @@ export class CodexPluginPackageResolver implements ExtensionPackageResolverPort 
   readonly #fetch: PinnedUpstreamFetchInput["fetch"];
   readonly #appVersion: string;
   readonly #platform: NodeJS.Platform;
+  readonly #agentPluginCatalog: AgentPluginCatalogPort | undefined;
 
   constructor(options: CodexPluginPackageResolverOptions = {}) {
     this.#catalog = options.catalog ?? [];
@@ -68,12 +90,29 @@ export class CodexPluginPackageResolver implements ExtensionPackageResolverPort 
           });
     this.#appVersion = options.appVersion ?? "1.0.0";
     this.#platform = options.platform ?? process.platform;
+    this.#agentPluginCatalog = options.agentPluginCatalog;
   }
 
   async resolve(
     command: Extract<ExtensionCommand, { readonly kind: "inspect-package" }>,
     signal?: AbortSignal,
   ): Promise<ResolvedExtensionPackage> {
+    const liveCatalog = this.#agentPluginCatalog;
+    if (
+      command.source.kind === "catalog" &&
+      liveCatalog !== undefined &&
+      command.source.catalogId === liveCatalog.catalogId
+    ) {
+      const resolved = await liveCatalog.resolve(command.source, signal);
+      if (command.expectedDigest !== undefined) {
+        // The live catalog computed the digest from the exact bytes it
+        // inspected; the caller's catalog digest must bind the same package.
+        if (command.expectedDigest !== inspectExtensionPackage(resolved).manifest.digest) {
+          throw new Error("Caller-supplied digest does not match the catalog-bound digest.");
+        }
+      }
+      return resolved;
+    }
     const input = await this.#resolveInput(command.source, signal);
     if (command.source.kind === "catalog") {
       if (command.expectedDigest !== undefined && command.expectedDigest !== input.expectedDigest) {
@@ -87,10 +126,13 @@ export class CodexPluginPackageResolver implements ExtensionPackageResolverPort 
     });
   }
 
-  searchCatalog(command: Extract<ExtensionCommand, { readonly kind: "search-catalog" }>): {
+  async searchCatalog(
+    command: Extract<ExtensionCommand, { readonly kind: "search-catalog" }>,
+    signal?: AbortSignal,
+  ): Promise<{
     readonly entries: ReadonlyArray<ExtensionCatalogEntry>;
     readonly nextCursor?: string;
-  } {
+  }> {
     const query = command.query.toLocaleLowerCase("en-US");
     const entries = this.#catalog.flatMap((record) => {
       if (command.catalogId !== undefined && command.catalogId !== record.source.catalogId) {
@@ -120,6 +162,22 @@ export class CodexPluginPackageResolver implements ExtensionPackageResolverPort 
         } as ExtensionCatalogEntry,
       ];
     });
+    const liveCatalog = this.#agentPluginCatalog;
+    if (
+      liveCatalog !== undefined &&
+      (command.catalogId === undefined || command.catalogId === liveCatalog.catalogId)
+    ) {
+      try {
+        const live = await liveCatalog.search(command.query, signal);
+        entries.push(...live.entries);
+      } catch (error) {
+        // The in-memory curated results are independent of any live source: a
+        // network failure (or the marketplace-fetches preference being off)
+        // must not erase them. Surface the failure only when the live source
+        // was the only possible answer, or when the caller canceled.
+        if (entries.length === 0 || signal?.aborted === true) throw error;
+      }
+    }
     const start = command.cursor === undefined ? 0 : Number(command.cursor);
     if (!Number.isSafeInteger(start) || start < 0) throw new Error("Invalid catalog cursor.");
     const page = entries.slice(start, start + 50);

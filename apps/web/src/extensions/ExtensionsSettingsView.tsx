@@ -73,6 +73,7 @@ function sourceLabel(source: ExtensionSnapshot["packages"][number]["source"]): s
     case "catalog":
       if (source.catalogId === "skills-sh") return "skills.sh";
       if (source.catalogId === "npm") return "npm";
+      if (source.catalogId === "npm-agent-plugins") return "npm · Agent Plugins";
       return "Catalog";
     case "local-folder":
       return "Local folder";
@@ -942,9 +943,8 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
             </div>
             {!marketplaceFetchesEnabled ? (
               <p className="extensions-settings__state" role="status">
-                Marketplace fetches are off in Settings → General → Marketplace. Catalog search
-                stays local; Inspect, Search skills, preview, and install will not contact
-                registries.
+                Marketplace fetches are off in Settings → General → Marketplace. Catalog search,
+                Inspect, Search skills, preview, and install will not contact registries.
               </p>
             ) : null}
             <div className="extensions-settings__body">
@@ -1006,7 +1006,8 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
               ) : null}
               {marketplaceStatus === "empty" ? (
                 <p className="extensions-settings__state" role="status">
-                  No catalog entries matched the search.
+                  No catalog entries matched the search. Search covers the curated catalog and npm
+                  packages published with the agent-plugin keywords.
                 </p>
               ) : null}
               {marketplaceStatus === "failed" ? (
