@@ -81,10 +81,15 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
       ) : null}
       {imageProviderSettings}
       <div className="settings-card-section settings-card-section--open">
+        <h2>Custom image sources</h2>
+        <p className="settings-section-note">
+          Connect an OpenAI-compatible image API's provider and model, such as Recraft, to use as a
+          custom image source.
+        </p>
         <div className="setgroup">
           <SettingRow
-            description="Connect an OpenAI-compatible image API's provider and model, such as Recraft, to use as a custom image source."
             label="Custom image sources"
+            labelledBySection
             scope="app"
             settingId="custom-image-sources"
           >

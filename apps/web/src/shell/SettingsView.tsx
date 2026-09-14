@@ -593,13 +593,9 @@ function ActiveSectionContent({
     case "harness":
       return props.nativeHarnessClient !== undefined ? (
         <div id="settings-harness">
-          <section className="settings-card-section settings-card-section--open">
-            <p className="native-harness-panel__lead">
-              Models connected through API keys or local endpoints appear under{" "}
-              <strong>Octant</strong> in the model picker. Assign models to roles below. Child-agent
-              permissions are managed in Agents.
-            </p>
-          </section>
+          <p className="native-harness-panel__lead">
+            Assign models to roles below. Child-agent permissions are managed in Agents.
+          </p>
           <NativeHarnessRoutingPanel
             client={props.nativeHarnessClient}
             hostId={LOCAL_HOST_ID}
@@ -1020,6 +1016,9 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
       ) : null}
       <div className="settings-card-section settings-card-section--open">
         <h2>Workspace and reading</h2>
+        <p className="settings-section-note">
+          How much room the sidebar and the conversation take, and what the sidebar shows.
+        </p>
         <div className="setgroup">
           {isAvailable("sidebar-width") ? (
             <SettingRow

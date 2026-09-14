@@ -77,7 +77,7 @@ export function SidebarDestinationSettings(props: SidebarDestinationSettingsProp
           </li>
         ))}
       </ul>
-      <div>
+      <div className="flex justify-end">
         <OctantButton
           onClick={() => props.onChange({ order: [], visibility: [] })}
           size="sm"
