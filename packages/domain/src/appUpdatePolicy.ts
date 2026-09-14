@@ -4,6 +4,7 @@ import {
   type AppUpdateRefusal,
   type AppUpdateRelease,
   type AppVersion,
+  CANDIDATE_PRERELEASE_TAG,
   PREVIEW_PRERELEASE_TAG,
 } from "@octant/contracts/app-updates";
 import { Schema } from "effect";
@@ -22,20 +23,24 @@ export interface RunningApp {
 /**
  * The ring a build belongs to, read from its own version.
  *
- * A preview build is one whose version carries the preview prerelease tag.
- * Deriving it rather than storing it beside the version means a build cannot
- * be a preview that thinks it is stable, which is the failure that would put
- * unreviewed `main` in front of everyone on the stable ring.
+ * A preview build is one whose version carries the preview prerelease tag;
+ * a candidate build carries the candidate tag. Deriving the ring rather than
+ * storing it beside the version means a build cannot be a preview that thinks
+ * it is stable, which is the failure that would put unreviewed `main` in front
+ * of everyone on the stable ring.
  *
- * This is the *default* ring, not a lock: a person may follow either ring, and
- * the version ordering already makes both directions safe — a stable release
- * outranks the previews leading to it, and no ring can offer a version that is
- * not strictly newer.
+ * This is the *default* ring, not a lock: a person may follow any ring, and
+ * the version ordering already makes every direction safe — a stable release
+ * outranks the previews and candidates leading to it, and no ring can offer a
+ * version that is not strictly newer.
  */
 export function ringForVersion(version: AppVersion): AppReleaseRing {
   const [, prerelease] = splitOnce(String(version), "-");
   if (prerelease === undefined) return "stable";
-  return prerelease.split(".")[0] === PREVIEW_PRERELEASE_TAG ? "preview" : "stable";
+  const tag = prerelease.split(".")[0];
+  if (tag === PREVIEW_PRERELEASE_TAG) return "preview";
+  if (tag === CANDIDATE_PRERELEASE_TAG) return "candidate";
+  return "stable";
 }
 
 export type UpdateOffer =
