@@ -536,7 +536,11 @@ row with its threads nested beneath it, pinned Projects leading in their own
 labelled band that is absent when nothing is pinned), then Chats (threads filed
 in no Project; Work and Code call the group Recents). Rows are hairline rails, never
 cards; provider marks are fixed-size inline and can be hidden without changing
-row height or indentation. A hovered row takes the soft ink wash and the row
+row height or indentation. What a thread row carries — its Project
+attribution, branch, linked pull request, last updated, or status mark — is the
+view's own choice, edited in Settings › Appearance › Sidebar thread rows or the
+view filter menu's Property visibility submenu; a hidden property is omitted
+rather than left as a gap. A hovered row takes the soft ink wash and the row
 the workspace is showing takes the selection fill with a hairline edge, the
 same two states the thread tab strip draws, so pointing never looks like
 being there. Provider identity remains at the leading edge. One fixed trailing
@@ -550,9 +554,13 @@ its context menu. Project View and Project Overview are real features, not
 decorative shortcuts.
 
 Primary sidebar destinations are New thread, Board, and Pull requests
-when valid for the active mode. The bottom-left identity menu owns Settings,
-Navigator, Agents, Providers, Usage, Plugins, Automations, Artifacts, and Zen
-entry points. The account menu opens above its identity row, aligned to the
+when valid for the active mode. The destinations a person placed under Menu
+only wait in a More row that closes the destination list — an ellipsis opening
+a popup beside the rail with those destinations and Customize sidebar; the
+setting that turns the More row off returns them to the bottom-left identity
+menu. The identity menu owns Settings, Navigator, Agents, Providers, Usage,
+Plugins, Automations, Artifacts, and Zen entry points. The account menu opens
+above its identity row, aligned to the
 row’s leading edge. Search is a compact in-place filter for the current mode's visible
 threads, with a command-style overlay available for broader actions.
 

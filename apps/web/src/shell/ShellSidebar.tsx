@@ -20,6 +20,7 @@ import {
 import { IconButton } from "./IconButton";
 import { ModeSwitcher } from "./ModeSwitcher";
 import { SidebarBackgroundLayer, type BackgroundFetcher } from "./SidebarBackgroundLayer";
+import { SidebarMore } from "./SidebarMore";
 import { SidebarProfile } from "./SidebarProfile";
 import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigation";
 import { layoutSidebarDestinations, type SidebarNavigationInput } from "./navigationModel";
@@ -154,8 +155,13 @@ export function ShellSidebar(props: ShellSidebarProps) {
     activeMode,
     customization: props.settings.sidebarDestinations,
     input: navigationInput,
+    moreEnabled: props.settings.sidebarMoreEnabled,
   });
   const secondaryActions = destinationLayout.menu.flatMap((descriptor) => {
+    const action = navigationActions[descriptor.id];
+    return action === undefined ? [] : [{ ...descriptor, onSelect: action }];
+  });
+  const moreActions = destinationLayout.more.flatMap((descriptor) => {
     const action = navigationActions[descriptor.id];
     return action === undefined ? [] : [{ ...descriptor, onSelect: action }];
   });
@@ -229,6 +235,21 @@ export function ShellSidebar(props: ShellSidebarProps) {
             ? {}
             : { counts: { inbox: props.inboxCount } })}
           input={navigationInput}
+          {...(moreActions.length === 0
+            ? {}
+            : {
+                more: (
+                  <SidebarMore
+                    items={moreActions}
+                    onCustomizeSidebar={() =>
+                      props.onOpenSettings({
+                        section: "appearance",
+                        setting: "sidebar-destinations",
+                      })
+                    }
+                  />
+                ),
+              })}
           projectSection={props.projectSection}
           rows={destinationLayout.rows}
         />

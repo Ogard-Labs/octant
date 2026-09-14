@@ -181,6 +181,7 @@ function createHarness(options: HarnessOptions = {}) {
     service,
     journal,
     projection,
+    directory,
     inventoryPath,
     destinationPath,
     stagingPath,
@@ -379,6 +380,199 @@ describe("managed clone request", () => {
       signal,
     );
     expect(concurrent).toEqual({ kind: "refused", reason: "conflict" });
+  });
+});
+
+describe("managed clone with a chosen destination", () => {
+  const chosenRequestId = "22222222-2222-4222-8222-222222222222";
+
+  function chosenCommand(receiptId: string, folderName = "my-project"): GithubCloneCommand {
+    return {
+      kind: "request-clone",
+      requestId: chosenRequestId,
+      nodeId: NODE_ID,
+      expectedOwner: "octant",
+      expectedName: "octant",
+      destination: { parentReceiptId: receiptId, folderName },
+    } as GithubCloneCommand;
+  }
+
+  function chosenConfirmCommand(digest: string): GithubCloneCommand {
+    return {
+      kind: "confirm-clone",
+      requestId: chosenRequestId,
+      nodeId: NODE_ID,
+      confirmation: "confirm-github-managed-clone",
+      destinationDigest: digest,
+    } as GithubCloneCommand;
+  }
+
+  function chosenHarness() {
+    const harness = createHarness();
+    const parentPath = join(harness.directory, "projects");
+    mkdirSync(parentPath, { recursive: true });
+    const receipt = harness.receipts.issue({
+      windowId,
+      projectType: "code",
+      canonicalBinding: { canonicalRoot: parentPath },
+      now: NOW_MS,
+    });
+    return { harness, parentPath, receiptId: receipt.receiptId };
+  }
+
+  it("consumes the host receipt once and derives parent and folder name as the destination", async () => {
+    const { harness, parentPath, receiptId } = chosenHarness();
+    const response = await harness.service.execute(chosenCommand(receiptId), context, signal);
+    if (response.kind !== "operation") {
+      throw new Error(`request refused: ${JSON.stringify(response)}`);
+    }
+    expect(response.operation.state).toBe("awaiting-confirmation");
+    expect(response.operation.mode).toBe("clone");
+    expect(response.operation.destination.inventoryPath).toBe(parentPath);
+    expect(response.operation.destination.destinationPath).toBe(join(parentPath, "my-project"));
+
+    const replayed = await harness.service.execute(
+      {
+        ...chosenCommand(receiptId),
+        requestId: "33333333-3333-4333-8333-333333333333",
+      } as GithubCloneCommand,
+      context,
+      signal,
+    );
+    expect(replayed).toEqual({
+      kind: "refused",
+      reason: "invalid",
+      remediation: "The destination folder selection is no longer valid. Choose the folder again.",
+    });
+  });
+
+  it("stages, clones, promotes, and binds the checkout in the chosen folder", async () => {
+    const { harness, parentPath, receiptId } = chosenHarness();
+    const requested = await harness.service.execute(chosenCommand(receiptId), context, signal);
+    if (requested.kind !== "operation") throw new Error("expected operation");
+    const confirmed = await harness.service.execute(
+      chosenConfirmCommand(requested.operation.destination.digest),
+      context,
+      signal,
+    );
+    if (confirmed.kind !== "operation") throw new Error("expected operation");
+    expect(confirmed.operation.state).toBe("completed");
+    expect(harness.cloneCalls[0]?.stagingPath).toBe(
+      join(parentPath, ".octant-incoming", chosenRequestId),
+    );
+    expect(existsSync(join(parentPath, "my-project"))).toBe(true);
+    expect(existsSync(join(parentPath, ".octant-incoming", chosenRequestId))).toBe(false);
+    expect(confirmed.binding?.projectType).toBe("code");
+  });
+
+  it("refuses a receipt that belongs to another window", async () => {
+    const { harness, receiptId } = chosenHarness();
+    const response = await harness.service.execute(
+      chosenCommand(receiptId),
+      {
+        windowId: decodeWindowId("99999999-8888-4777-8666-000000000000"),
+      },
+      signal,
+    );
+    expect(response).toMatchObject({ kind: "refused", reason: "invalid" });
+    expect(harness.projection.list()).toEqual([]);
+  });
+
+  it("refuses an expired receipt", async () => {
+    const harness = createHarness();
+    const parentPath = join(harness.directory, "projects");
+    mkdirSync(parentPath, { recursive: true });
+    const receipt = harness.receipts.issue({
+      windowId,
+      projectType: "code",
+      canonicalBinding: { canonicalRoot: parentPath },
+      now: NOW_MS - 120_000,
+    });
+    expect(
+      await harness.service.execute(chosenCommand(receipt.receiptId), context, signal),
+    ).toEqual({
+      kind: "refused",
+      reason: "invalid",
+      remediation: "The destination folder selection expired. Choose the folder again.",
+    });
+  });
+
+  it("refuses an occupied destination instead of adopting or overwriting it", async () => {
+    const { harness, parentPath, receiptId } = chosenHarness();
+    mkdirSync(join(parentPath, "my-project"));
+    expect(await harness.service.execute(chosenCommand(receiptId), context, signal)).toMatchObject({
+      kind: "refused",
+      reason: "collision",
+    });
+    expect(harness.projection.list()).toEqual([]);
+  });
+
+  it("refuses a case-folded sibling and a traversal folder name", async () => {
+    const folded = chosenHarness();
+    mkdirSync(join(folded.parentPath, "My-Project"));
+    expect(
+      await folded.harness.service.execute(chosenCommand(folded.receiptId), context, signal),
+    ).toEqual({
+      kind: "refused",
+      reason: "collision",
+      remediation: "case-fold-collision",
+    });
+
+    const traversal = chosenHarness();
+    expect(
+      await traversal.harness.service.execute(
+        chosenCommand(traversal.receiptId, "../escape"),
+        context,
+        signal,
+      ),
+    ).toEqual({
+      kind: "refused",
+      reason: "invalid",
+      remediation: "destination-path-refused",
+    });
+  });
+
+  it("refuses a parent that vanished instead of recreating it", async () => {
+    const { harness, parentPath, receiptId } = chosenHarness();
+    rmSync(parentPath, { recursive: true, force: true });
+    expect(await harness.service.execute(chosenCommand(receiptId), context, signal)).toEqual({
+      kind: "refused",
+      reason: "unavailable",
+      remediation: "The destination folder is not available on the host.",
+    });
+    expect(existsSync(parentPath)).toBe(false);
+  });
+
+  it("quarantines chosen-destination staging beneath the chosen root on failure", async () => {
+    const harness = createHarness({
+      clone: async () => ({ kind: "failed", classification: "unauthorized" }),
+    });
+    const parentPath = join(harness.directory, "projects");
+    mkdirSync(parentPath, { recursive: true });
+    const receipt = harness.receipts.issue({
+      windowId,
+      projectType: "code",
+      canonicalBinding: { canonicalRoot: parentPath },
+      now: NOW_MS,
+    });
+    const requested = await harness.service.execute(
+      chosenCommand(receipt.receiptId),
+      context,
+      signal,
+    );
+    if (requested.kind !== "operation") throw new Error("expected operation");
+    const response = await harness.service.execute(
+      chosenConfirmCommand(requested.operation.destination.digest),
+      context,
+      signal,
+    );
+    expect(response.kind).toBe("operation");
+    if (response.kind !== "operation") return;
+    expect(response.operation.state).toBe("failed");
+    const chosenQuarantine = join(parentPath, ".octant-quarantine", chosenRequestId);
+    const defaultQuarantine = join(harness.inventoryPath, ".octant-quarantine", chosenRequestId);
+    expect(existsSync(chosenQuarantine)).toBe(true);
+    expect(existsSync(defaultQuarantine)).toBe(false);
   });
 });
 

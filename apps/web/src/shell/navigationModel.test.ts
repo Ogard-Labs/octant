@@ -57,6 +57,7 @@ describe("layoutSidebarDestinations", () => {
     const layout = layoutSidebarDestinations({
       activeMode: "code",
       input: codeCapabilities,
+      moreEnabled: false,
       customization: untouched,
     });
     expect(layout.rows).toEqual([
@@ -81,6 +82,7 @@ describe("layoutSidebarDestinations", () => {
     const layout = layoutSidebarDestinations({
       activeMode: "code",
       input: codeCapabilities,
+      moreEnabled: false,
       customization: { order: [], visibility: [{ id: "inbox", visibility: "hidden" }] },
     });
     expect(layout.rows).toEqual([
@@ -97,6 +99,7 @@ describe("layoutSidebarDestinations", () => {
     const layout = layoutSidebarDestinations({
       activeMode: "code",
       input: codeCapabilities,
+      moreEnabled: false,
       customization: { order: [], visibility: [{ id: "automations", visibility: "shown" }] },
     });
     expect(layout.rows).toContain("automations");
@@ -107,6 +110,7 @@ describe("layoutSidebarDestinations", () => {
     const layout = layoutSidebarDestinations({
       activeMode: "code",
       input: codeCapabilities,
+      moreEnabled: false,
       customization: { order: ["board", "inbox"], visibility: [] },
     });
     expect(layout.rows.slice(0, 2)).toEqual(["thread-board", "inbox"]);
@@ -123,6 +127,7 @@ describe("layoutSidebarDestinations", () => {
     const layout = layoutSidebarDestinations({
       activeMode: "code",
       input: { ...codeCapabilities, plugins: "unavailable", imageLibrary: "unavailable" },
+      moreEnabled: false,
       customization: {
         order: [],
         visibility: [
@@ -140,6 +145,7 @@ describe("layoutSidebarDestinations", () => {
     const layout = layoutSidebarDestinations({
       activeMode: "code",
       input: codeCapabilities,
+      moreEnabled: false,
       customization: { order: [], visibility: [{ id: "plugins", visibility: "hidden" }] },
     });
     expect(layout.menu.map((descriptor) => descriptor.id)).not.toContain("plugins");
@@ -149,6 +155,7 @@ describe("layoutSidebarDestinations", () => {
     const layout = layoutSidebarDestinations({
       activeMode: "chat",
       input: { ...codeCapabilities, activeMode: "chat", threadBoard: "unavailable" },
+      moreEnabled: false,
       customization: { order: [], visibility: [{ id: "automations", visibility: "shown" }] },
     });
     expect(layout.rows).not.toContain("automations");
@@ -163,10 +170,62 @@ describe("layoutSidebarDestinations", () => {
       const layout = layoutSidebarDestinations({
         activeMode,
         input: { ...codeCapabilities, activeMode },
+        moreEnabled: false,
         customization: untouched,
       });
       expect(layout.rows[0]).toBe(descriptor);
     }
+  });
+
+  it("waits with the menu-only destinations under More instead of the account menu", () => {
+    const layout = layoutSidebarDestinations({
+      activeMode: "code",
+      input: codeCapabilities,
+      moreEnabled: true,
+      customization: untouched,
+    });
+    expect(layout.more.map((descriptor) => descriptor.id)).toEqual([
+      "agents",
+      "automations",
+      "artifact-library",
+      "image-library",
+      "plugins",
+    ]);
+    expect(layout.menu).toEqual([]);
+  });
+
+  it("keeps an unavailable destination out of More, however it is placed", () => {
+    const layout = layoutSidebarDestinations({
+      activeMode: "code",
+      input: { ...codeCapabilities, plugins: "unavailable", imageLibrary: "unavailable" },
+      moreEnabled: true,
+      customization: untouched,
+    });
+    expect(layout.more.map((descriptor) => descriptor.id)).toEqual([
+      "agents",
+      "automations",
+      "artifact-library",
+    ]);
+  });
+
+  it("keeps a Don't show destination out of More too", () => {
+    const layout = layoutSidebarDestinations({
+      activeMode: "code",
+      input: codeCapabilities,
+      moreEnabled: true,
+      customization: { order: [], visibility: [{ id: "plugins", visibility: "hidden" }] },
+    });
+    expect(layout.more.map((descriptor) => descriptor.id)).not.toContain("plugins");
+  });
+
+  it("never offers Automations under More in Chat, where the center has no authority", () => {
+    const layout = layoutSidebarDestinations({
+      activeMode: "chat",
+      input: { ...codeCapabilities, activeMode: "chat", threadBoard: "unavailable" },
+      moreEnabled: true,
+      customization: untouched,
+    });
+    expect(layout.more.map((descriptor) => descriptor.id)).not.toContain("automations");
   });
 });
 

@@ -243,6 +243,16 @@ export const GithubCatalogueReadRequest = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("recent-repositories"),
   }).annotations(strict),
+  /**
+   * Resolves one repository the person named or pasted. The server reads a
+   * fresh live observation; this is how a public repository that is not in
+   * the viewer's own catalogue can still become a Project.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("repository"),
+    owner: GithubRepositoryOwner,
+    name: GithubRepositoryName,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("issues"),
     owner: GithubRepositoryOwner,
@@ -311,6 +321,11 @@ export const GithubCatalogueReadResponse = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("recent-repositories"),
     rows: Schema.Array(GithubRepositoryRow).pipe(Schema.maxItems(20)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("repository"),
+    row: GithubRepositoryRow,
+    freshness: GithubCatalogueFreshness,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("issues"),

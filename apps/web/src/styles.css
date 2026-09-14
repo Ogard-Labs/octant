@@ -3053,6 +3053,16 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   font-size: var(--oct-text-sm);
 }
 
+/* The Folder | GitHub source switch sits between the header and the body the
+   chosen side draws, at the enclosed-track segment grammar (0071). */
+.project-dialog__source {
+  margin: var(--oct-space-3) 0 var(--oct-space-4);
+}
+
+.project-dialog__source .segment {
+  flex: 1 1 0;
+}
+
 /* The chooser reads as a field, not as a second submit button: same height,
    border, and radius as the name input directly above it, so the two facts the
    dialog is about sit at the same weight. */
@@ -3126,6 +3136,11 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   justify-content: flex-end;
   gap: var(--oct-space-2);
   margin-top: var(--oct-space-3);
+}
+
+/* The remote folder body leads with its chooser instead of trailing with it. */
+.project-dialog__actions--leading {
+  justify-content: flex-start;
 }
 
 .project-button {

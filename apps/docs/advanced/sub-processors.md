@@ -75,10 +75,10 @@ makes on its own, or because you asked, are different relationships:
   platform, architecture, and which release ring you follow. Release archives
   are hosted on GitHub, so downloading an update also discloses your IP address
   to GitHub. See [Installation](/guide/installation#updates).
-- **Marketplace inspect and skill search** contact skills.sh, the npm
-  registry, and GitHub when you search skills, inspect, or install. Catalog
-  search itself is local. Those parties see the query and the fetch, not
-  your journal. See
+- **Marketplace search, inspect, and install** contact skills.sh, the npm
+  registry, and GitHub when you search, inspect, or install. Catalog search
+  reaches the network when marketplace fetches are on; off means no request
+  is made. Those parties see the query and the fetch, not your journal. See
   [Plugins and skills](/advanced/plugins-and-skills#what-a-marketplace-fetch-discloses).
 - **Gravatar** is contacted only if you press the profile button after
   typing an address.

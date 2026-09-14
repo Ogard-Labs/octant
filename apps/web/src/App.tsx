@@ -158,6 +158,7 @@ import {
   rememberHealthyCreateHost,
 } from "./shell/createHostPreference";
 import { useLaunchSession } from "./shell/useLaunchSession";
+import { adoptLegacySidebarRowProperties } from "./shell/sidebarRowProperties";
 import { WorkspaceView } from "./shell/WorkspaceView";
 import {
   SidebarThreadDragContext,
@@ -777,6 +778,20 @@ function LaunchedShell(
     if (!zen.active) return;
     void zen.refreshThreads();
   }, [zen.active, zen.refreshThreads]);
+  // A renderer older than the host-backed setting stored each sidebar view's
+  // row choice in localStorage. Adopt it once, as soon as the host's settings
+  // are in hand: after that a person may have changed the host record, and a
+  // stale local copy must never overwrite it.
+  const adoptedLegacySidebarRowProperties = useRef(false);
+  useEffect(() => {
+    const settings = controller.settings;
+    if (adoptedLegacySidebarRowProperties.current || settings === undefined) return;
+    adoptedLegacySidebarRowProperties.current = true;
+    adoptLegacySidebarRowProperties({
+      current: settings.sidebarRowProperties,
+      updateSettings: (sidebarRowProperties) => controller.updateSettings({ sidebarRowProperties }),
+    });
+  }, [controller.settings, controller.updateSettings]);
   const [createOpen, setCreateOpen] = useState(false);
   const [projectCreateMode, setProjectCreateMode] = useState<OctantMode | undefined>(undefined);
   function openProjectCreate(mode?: OctantMode) {
@@ -1371,6 +1386,16 @@ function LaunchedShell(
     () => readLastSelectedHealthyHostId(),
   );
   const [createHostId, setCreateHostId] = useState<HostId>(() => defaultCreateHostId());
+  // The Create Project dialog's GitHub tab rides the same host-scoped GitHub
+  // clients the composer's "New Project from GitHub repository" uses. Disabled
+  // GitHub contributes no tab, exactly as it contributes no composer row.
+  const projectCreateGithub = useMemo(() => {
+    if (FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") !== true) return undefined;
+    const hostName =
+      hosts.find((host) => String(host.hostId) === String(createHostId))?.displayName ??
+      localHostDisplayName();
+    return { client: githubClient, cloneClient: githubCloneClient, hostName };
+  }, [createHostId, githubCloneClient, githubClient, hosts]);
   // Drop removed hosts from the environments filter before create preselect runs,
   // otherwise a lone removed remote leaves createHostId pointing at nothing.
   useEffect(() => {
@@ -5095,6 +5120,10 @@ function LaunchedShell(
                         }
                       : {})}
                     activityMode={activeMode}
+                    rowProperties={controller.settings.sidebarRowProperties}
+                    onRowPropertiesChange={(sidebarRowProperties) => {
+                      void controller.updateSettings({ sidebarRowProperties });
+                    }}
                     {...(activeProjectId === undefined ? {} : { activeProjectId })}
                     {...(activeMode === "chat" && chatProjectThreadListRequest !== undefined
                       ? { expandProjectThreadsRequest: chatProjectThreadListRequest }
@@ -5970,6 +5999,7 @@ function LaunchedShell(
         <ShellDialogHost
           createOpen={createOpen}
           folderBrowseClient={folderBrowseClient}
+          {...(projectCreateGithub === undefined ? {} : { github: projectCreateGithub })}
           hostId={createHostId}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
           mode={projectCreateMode ?? controller.workspace.activeMode}

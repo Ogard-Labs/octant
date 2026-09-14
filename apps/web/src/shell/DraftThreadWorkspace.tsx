@@ -521,6 +521,18 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           : { folderBrowseClient: props.folderBrowseClient })}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
+        {...(props.mode === "code" &&
+        props.githubClient !== undefined &&
+        props.githubCloneClient !== undefined &&
+        props.githubPluginEnabled !== false
+          ? {
+              github: {
+                client: props.githubClient,
+                cloneClient: props.githubCloneClient,
+                hostName: githubHostName,
+              },
+            }
+          : {})}
         mode={props.mode}
         onClose={() => setAddFolderOpen(false)}
         onCreate={props.onCreateProject}

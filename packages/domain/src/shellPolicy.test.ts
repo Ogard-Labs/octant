@@ -164,6 +164,24 @@ describe("shell settings policy", () => {
       transcriptTextSize: "medium",
       transcriptWidth: "narrow",
       showThreadProviderIcons: true,
+      // Each view starts showing exactly what its rows already carried; the
+      // Appearance switches only take facts away when someone asks.
+      sidebarRowProperties: {
+        projects: {
+          project: false,
+          branch: true,
+          pullRequest: true,
+          lastUpdated: true,
+          status: true,
+        },
+        activity: {
+          project: true,
+          branch: false,
+          pullRequest: false,
+          lastUpdated: false,
+          status: true,
+        },
+      },
       openInApplications: ["vscode", "cursor", "zed", "finder", "terminal", "ghostty", "xcode"],
       sidebarBackground: {
         kind: "none",
@@ -174,6 +192,8 @@ describe("shell settings policy", () => {
       // Sidebar destinations start untouched: default rows, workspace
       // destinations in the account menu.
       sidebarDestinations: { order: [], visibility: [] },
+      // The More row is part of the sidebar until the person turns it off.
+      sidebarMoreEnabled: true,
       environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
       firstRunOnboarding: "pending",
       automaticUpdateChecks: true,

@@ -589,6 +589,25 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   gap: var(--oct-space-3);
 }
 
+/* The sweep moved more compound rows onto the same treatment: a full-width
+   editor stacked under its label instead of a one-line value beside it. The
+   declarations mirror the block above; new rows keep landing here while that
+   one stays as the Background change left it. */
+.setrow[data-setting-id="sidebar-destinations"],
+.setrow[data-setting-id="remote-listener"],
+.setrow[data-setting-id="remote-pairing"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.setrow[data-setting-id="sidebar-destinations"] > .setrow-control,
+.setrow[data-setting-id="remote-listener"] > .setrow-control,
+.setrow[data-setting-id="remote-pairing"] > .setrow-control {
+  grid-column: 1;
+  grid-row: auto;
+  justify-self: stretch;
+  margin-top: var(--oct-space-3);
+}
+
 .image-generation-settings__sources {
   display: grid;
   margin: 0;
@@ -2428,9 +2447,13 @@ textarea.settings-view__text-input {
   width: var(--oct-settings-control);
 }
 
-/* The same compact chooser is used in Settings and conversation composers. */
+/* The same compact chooser is used in Settings and conversation composers. A
+   row whose picker is followed by an effective-state line gets a line wider
+   than the picker; the picker keeps the column's right edge instead of
+   sitting at the line's left edge. */
 .settings-view .composer-model-picker {
   max-width: var(--oct-settings-control);
+  margin-inline-start: auto;
 }
 
 .settings-view .composer-model-picker__trigger {

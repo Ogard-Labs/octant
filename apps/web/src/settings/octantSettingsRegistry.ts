@@ -91,6 +91,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "sidebar destinations customize show hide rows menu reorder order",
         },
         {
+          id: settingId("sidebar-more"),
+          label: "More row in the sidebar",
+          scope: "app",
+          keywords: "sidebar more row hidden menu destinations account customize reveal expand",
+        },
+        {
           id: settingId("sidebar-material"),
           label: "Translucent sidebar",
           scope: "app",
@@ -131,6 +137,66 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Provider icons in thread list",
           scope: "app",
           keywords: "thread provider icon avatar logo sidebar compact visibility",
+        },
+        {
+          id: settingId("sidebar-projects-branch"),
+          label: "Branch on Projects rows",
+          scope: "app",
+          keywords: "sidebar projects rows branch worktree checkout show hide metadata appearance",
+        },
+        {
+          id: settingId("sidebar-projects-pull-request"),
+          label: "Pull request on Projects rows",
+          scope: "app",
+          keywords:
+            "sidebar projects rows pull request pr number state chip show hide metadata appearance",
+        },
+        {
+          id: settingId("sidebar-projects-last-updated"),
+          label: "Last updated on Projects rows",
+          scope: "app",
+          keywords:
+            "sidebar projects rows last updated age timestamp show hide metadata appearance",
+        },
+        {
+          id: settingId("sidebar-projects-status"),
+          label: "Status on Projects rows",
+          scope: "app",
+          keywords:
+            "sidebar projects rows status mark working waiting unread show hide metadata appearance",
+        },
+        {
+          id: settingId("sidebar-activity-project"),
+          label: "Project on Activity rows",
+          scope: "app",
+          keywords: "sidebar activity rows project name show hide metadata appearance",
+        },
+        {
+          id: settingId("sidebar-activity-branch"),
+          label: "Branch on Activity rows",
+          scope: "app",
+          keywords: "sidebar activity rows branch worktree checkout show hide metadata appearance",
+        },
+        {
+          id: settingId("sidebar-activity-pull-request"),
+          label: "Pull request on Activity rows",
+          scope: "app",
+          keywords:
+            "sidebar activity rows pull request pr number state chip show hide metadata appearance",
+        },
+        {
+          id: settingId("sidebar-activity-last-updated"),
+          label: "Last updated on Activity rows",
+          scope: "app",
+          keywords:
+            "sidebar activity rows last updated age timestamp show hide metadata appearance",
+        },
+        {
+          id: settingId("sidebar-activity-status"),
+          label: "Status on Activity rows",
+          scope: "app",
+          keywords:
+            "sidebar activity rows status mark working waiting unread show hide metadata appearance",
         },
         {
           id: settingId("sidebar-background"),

@@ -1,17 +1,41 @@
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
+import type { GithubClient } from "@octant/client-runtime/github-client";
+import type { GithubCloneClient } from "@octant/client-runtime/github-clone-client";
 import type { OctantMode } from "@octant/contracts/modes";
-import type { ProjectId } from "@octant/contracts/projects";
-import { FolderOpen } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { decodeProjectId, type ProjectId } from "@octant/contracts/projects";
+import { FolderOpen, FolderGit2 } from "lucide-react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import type { GithubCloneDestinationChoice } from "../code/GitHubRepositoryOnboarding";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { FolderPicker } from "./FolderPicker";
+
+const GitHubRepositoryOnboardingFlow = lazy(() =>
+  import("../code/GitHubRepositoryOnboarding").then((module) => ({
+    default: module.GitHubRepositoryOnboardingFlow,
+  })),
+);
+
+/**
+ * What the Create Project dialog needs to offer a GitHub repository as the
+ * Project's source. The parent-folder chooser is deliberately absent: the
+ * dialog itself owns the native picker or host folder browser it already
+ * uses for the Folder tab, so a clone destination is requested through the
+ * same host-issued receipt path a bound Project uses.
+ */
+export interface ProjectCreateGithubSource {
+  readonly client: GithubClient;
+  readonly cloneClient: GithubCloneClient;
+  readonly hostName: string;
+}
 
 export interface ProjectCreateDialogProps {
   readonly folderBrowseClient?: FolderBrowseClient;
+  readonly github?: ProjectCreateGithubSource;
   readonly hostBridge?: OctantHostBridge;
   readonly hostId?: string;
   readonly mode: OctantMode;
@@ -143,6 +167,12 @@ function ChatProjectCreateDialog(props: ProjectCreateDialogProps) {
  *
  * One folder, not a list: a bound Project has exactly one canonical root, so a
  * second folder is a second Project rather than another row here.
+ *
+ * A Code Project can also start from a GitHub repository. When the host offers
+ * the managed-clone clients, the dialog grows a Folder | GitHub source switch;
+ * the GitHub side requests a parent folder through the same receipt path the
+ * Folder side uses, so a headless host where no native sheet can open is
+ * served by the same host folder browser that serves a paired browser.
  */
 function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
   const mode = props.mode === "code" ? "code" : "work";
@@ -153,6 +183,16 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
   const [submitting, setSubmitting] = useState(false);
   const [choosing, setChoosing] = useState(false);
   const [name, setName] = useState("");
+  const [source, setSource] = useState<"folder" | "github">("folder");
+  /**
+   * The host folder browser doubles as the clone's parent-folder chooser: a
+   * pending resolver marks that the next selection answers the GitHub flow's
+   * destination request instead of binding a Project root.
+   */
+  const pendingDestination = useRef<
+    ((choice: GithubCloneDestinationChoice | undefined) => void) | undefined
+  >(undefined);
+  const [browsing, setBrowsing] = useState<undefined | "create" | "destination">(undefined);
   /**
    * The chosen folder as the receipt the host minted for it, plus the label to
    * show. The renderer never learns the path: the receipt is the authority the
@@ -165,6 +205,8 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
   }>();
   /** Code-only: initialize the chosen folder as a Git repository on create. */
   const [initializeGit, setInitializeGit] = useState(true);
+
+  const github = mode === "code" ? props.github : undefined;
 
   useEffect(() => {
     alive.current = true;
@@ -249,11 +291,233 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
     void createProject(chosen.receiptId, normalized, mode === "code" && initializeGit);
   }
 
-  if (props.hostBridge !== undefined) {
+  /**
+   * The parent folder for a GitHub clone, through the same receipt path a
+   * bound Project uses: the native picker where one exists, otherwise the
+   * host folder browser, which keeps the flow available on a headless host
+   * where nobody can click a native sheet.
+   */
+  async function chooseCloneDestination(): Promise<GithubCloneDestinationChoice | undefined> {
+    const bridge = props.hostBridge;
+    if (bridge !== undefined) {
+      const selection = await bridge.selectProjectRoot("code");
+      if (selection.kind === "cancelled") return undefined;
+      const displayName =
+        "displayName" in selection && typeof selection.displayName === "string"
+          ? selection.displayName
+          : "Folder";
+      return { receiptId: selection.receiptId, displayName };
+    }
+    if (props.folderBrowseClient === undefined || props.hostId === undefined) return undefined;
+    return new Promise((resolve) => {
+      pendingDestination.current = resolve;
+      setBrowsing("destination");
+    });
+  }
+
+  function settleDestinationChoice(choice: GithubCloneDestinationChoice | undefined) {
+    const pending = pendingDestination.current;
+    pendingDestination.current = undefined;
+    setBrowsing(undefined);
+    pending?.(choice);
+  }
+
+  function onFolderBrowserSelection(
+    receiptId: string,
+    displayName: string,
+    selection?: { readonly initializeGit?: boolean },
+  ) {
+    if (browsing === "destination") {
+      settleDestinationChoice({ receiptId, displayName });
+      return;
+    }
+    setBrowsing(undefined);
+    void createProject(
+      receiptId,
+      displayName,
+      mode === "code" && (selection?.initializeGit ?? true),
+    );
+  }
+
+  const folderBody =
+    props.hostBridge !== undefined ? (
+      <form noValidate onSubmit={submit}>
+        <label htmlFor="project-name">Project name</label>
+        <OctantInput
+          id="project-name"
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Untitled Project"
+          ref={nameInputRef}
+          required
+          value={name}
+        />
+        <p className="project-dialog__field-label" id="project-folder-label">
+          Folder
+        </p>
+        <OctantButton
+          aria-describedby="project-folder-label"
+          className="project-dialog__folder"
+          data-chosen={folder === undefined ? "false" : "true"}
+          disabled={choosing || submitting}
+          onClick={() => void chooseFolder()}
+          type="button"
+          variant="ghost"
+        >
+          <FolderOpen aria-hidden="true" size={16} strokeWidth={1.6} />
+          <span className="project-dialog__folder-name">
+            {folder?.displayName ??
+              (choosing ? "Waiting for the folder chooser…" : "Choose a folder")}
+          </span>
+          {folder === undefined ? null : (
+            <span className="project-dialog__folder-change">Change</span>
+          )}
+        </OctantButton>
+        {mode === "code" ? (
+          <label className="project-dialog__git-init" htmlFor="project-initialize-git">
+            <OctantCheckbox
+              checked={initializeGit}
+              disabled={submitting || choosing}
+              id="project-initialize-git"
+              onChange={(event) => setInitializeGit(event.target.checked)}
+            />
+            <span>Initialize as a Git repository</span>
+          </label>
+        ) : null}
+        <div className="project-dialog__actions">
+          <OctantButton onClick={requestClose} type="button" variant="ghost">
+            Cancel
+          </OctantButton>
+          <OctantButton
+            disabled={submitting || choosing || folder === undefined || name.trim() === ""}
+            type="submit"
+          >
+            Create Project
+          </OctantButton>
+        </div>
+      </form>
+    ) : (
+      <>
+        <p>
+          {mode === "code"
+            ? "One folder, bound as this Code Project. Octant records the binding."
+            : "One folder, bound as this Project's root. Octant records the binding."}
+        </p>
+        <div className="project-dialog__actions project-dialog__actions--leading">
+          <OctantButton
+            className="project-dialog__folder"
+            data-chosen="false"
+            disabled={browsing === "create"}
+            onClick={() => setBrowsing("create")}
+            type="button"
+            variant="ghost"
+          >
+            <FolderOpen aria-hidden="true" size={16} strokeWidth={1.6} />
+            <span className="project-dialog__folder-name">
+              {browsing === "create" ? "Waiting for the folder browser…" : "Choose a folder"}
+            </span>
+          </OctantButton>
+        </div>
+        <div className="project-dialog__actions">
+          <OctantButton onClick={requestClose} type="button" variant="ghost">
+            Cancel
+          </OctantButton>
+        </div>
+      </>
+    );
+
+  // Without the GitHub clients the dialog is exactly what it has always been:
+  // the native picker form on desktop, the host folder browser for a paired
+  // browser, and an honest closed state when neither is available.
+  if (github === undefined) {
+    if (props.hostBridge !== undefined) {
+      return (
+        <OctantDialog
+          className="project-dialog"
+          initialFocus={nameInputRef}
+          label="Create Project"
+          onClose={requestClose}
+          open
+          popupId="create-project-dialog"
+        >
+          <div className="project-dialog__header">
+            <div>
+              <h1 id="create-project-title">Create Project</h1>
+            </div>
+            <OctantButton
+              aria-label="Close new Project"
+              onClick={requestClose}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              ×
+            </OctantButton>
+          </div>
+          <p>
+            {mode === "code"
+              ? "One folder, bound as this Code Project. Initialize Git here so a Code thread can start immediately."
+              : "One folder, bound as this Project's root. Octant records the binding."}
+          </p>
+          {folderBody}
+          <p aria-live="polite" className="project-dialog__status">
+            {status}
+          </p>
+        </OctantDialog>
+      );
+    }
+
+    if (props.folderBrowseClient !== undefined && props.hostId !== undefined) {
+      return (
+        <FolderPicker
+          client={props.folderBrowseClient}
+          hostId={props.hostId}
+          mode={mode}
+          onCancel={props.onClose}
+          onSelect={onFolderBrowserSelection}
+        />
+      );
+    }
+
     return (
       <OctantDialog
         className="project-dialog"
-        initialFocus={nameInputRef}
+        label="Create Project"
+        onClose={props.onClose}
+        open
+        popupId="create-project-dialog"
+      >
+        <div className="project-dialog__header">
+          <div>
+            <h1 id="create-project-title">Create Project</h1>
+          </div>
+          <OctantButton
+            aria-label="Close new Project"
+            onClick={props.onClose}
+            size="icon"
+            type="button"
+            variant="ghost"
+          >
+            ×
+          </OctantButton>
+        </div>
+        <p role="alert">
+          Folder selection is unavailable. Authenticated web needs the host folder browser; Electron
+          needs the native picker bridge.
+        </p>
+        <div className="project-dialog__actions">
+          <OctantButton onClick={props.onClose} type="button" variant="ghost">
+            Close
+          </OctantButton>
+        </div>
+      </OctantDialog>
+    );
+  }
+
+  return (
+    <>
+      <OctantDialog
+        className="project-dialog"
+        {...(source === "folder" ? { initialFocus: nameInputRef } : {})}
         label="Create Project"
         onClose={requestClose}
         open
@@ -273,122 +537,77 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
             ×
           </OctantButton>
         </div>
-        <p>
-          {mode === "code"
-            ? "One folder, bound as this Code Project. Initialize Git here so a Code thread can start immediately."
-            : "One folder, bound as this Project's root. Octant records the binding."}
-        </p>
-        <form noValidate onSubmit={submit}>
-          <label htmlFor="project-name">Project name</label>
-          <OctantInput
-            id="project-name"
-            onChange={(event) => setName(event.target.value)}
-            placeholder="Untitled Project"
-            ref={nameInputRef}
-            required
-            value={name}
-          />
-          <p className="project-dialog__field-label" id="project-folder-label">
-            Folder
-          </p>
-          <OctantButton
-            aria-describedby="project-folder-label"
-            className="project-dialog__folder"
-            data-chosen={folder === undefined ? "false" : "true"}
-            disabled={choosing || submitting}
-            onClick={() => void chooseFolder()}
-            type="button"
-            variant="ghost"
+        <div className="project-dialog__source">
+          <OctantToggleGroup<"folder" | "github">
+            aria-label="Project source"
+            className="project-dialog__source-track segmented"
+            onValueChange={(value) => {
+              const selected = value[0];
+              if (selected !== undefined) setSource(selected);
+            }}
+            value={[source]}
           >
-            <FolderOpen aria-hidden="true" size={16} strokeWidth={1.6} />
-            <span className="project-dialog__folder-name">
-              {folder?.displayName ??
-                (choosing ? "Waiting for the folder chooser…" : "Choose a folder")}
-            </span>
-            {folder === undefined ? null : (
-              <span className="project-dialog__folder-change">Change</span>
-            )}
-          </OctantButton>
-          {mode === "code" ? (
-            <label className="project-dialog__git-init" htmlFor="project-initialize-git">
-              <OctantCheckbox
-                checked={initializeGit}
-                disabled={submitting || choosing}
-                id="project-initialize-git"
-                onChange={(event) => setInitializeGit(event.target.checked)}
-              />
-              <span>Initialize as a Git repository</span>
-            </label>
-          ) : null}
-          <div className="project-dialog__actions">
-            <OctantButton onClick={requestClose} type="button" variant="ghost">
-              Cancel
-            </OctantButton>
-            <OctantButton
-              disabled={submitting || choosing || folder === undefined || name.trim() === ""}
-              type="submit"
-            >
-              Create Project
-            </OctantButton>
-          </div>
-        </form>
+            <OctantToggleGroupItem className="segment" value="folder">
+              <FolderOpen aria-hidden="true" size={14} strokeWidth={1.8} />
+              Folder
+            </OctantToggleGroupItem>
+            <OctantToggleGroupItem className="segment" value="github">
+              <FolderGit2 aria-hidden="true" size={14} strokeWidth={1.8} />
+              GitHub
+            </OctantToggleGroupItem>
+          </OctantToggleGroup>
+        </div>
+        {source === "folder" ? (
+          folderBody
+        ) : (
+          <Suspense
+            fallback={
+              <p className="project-dialog__status" role="status">
+                Loading GitHub…
+              </p>
+            }
+          >
+            <GitHubRepositoryOnboardingFlow
+              chooseDestination={chooseCloneDestination}
+              cloneClient={github.cloneClient}
+              client={github.client}
+              createProject={(projectName, receiptId) =>
+                props.onCreate("code", projectName, receiptId)
+              }
+              hostName={github.hostName}
+              onDone={props.onClose}
+              onProjectCreated={(projectId, projectName) => {
+                props.onCreated(decodeProjectId(projectId), "code", projectName);
+              }}
+            />
+          </Suspense>
+        )}
         <p aria-live="polite" className="project-dialog__status">
           {status}
         </p>
       </OctantDialog>
-    );
-  }
-
-  if (props.folderBrowseClient !== undefined && props.hostId !== undefined) {
-    return (
-      <FolderPicker
-        client={props.folderBrowseClient}
-        hostId={props.hostId}
-        mode={mode}
-        onCancel={props.onClose}
-        onSelect={(receiptId, displayName, selection) => {
-          void createProject(
-            receiptId,
-            displayName,
-            mode === "code" && (selection?.initializeGit ?? true),
-          );
-        }}
-      />
-    );
-  }
-
-  return (
-    <OctantDialog
-      className="project-dialog"
-      label="Create Project"
-      onClose={props.onClose}
-      open
-      popupId="create-project-dialog"
-    >
-      <div className="project-dialog__header">
-        <div>
-          <h1 id="create-project-title">Create Project</h1>
-        </div>
-        <OctantButton
-          aria-label="Close new Project"
-          onClick={props.onClose}
-          size="icon"
-          type="button"
-          variant="ghost"
-        >
-          ×
-        </OctantButton>
-      </div>
-      <p role="alert">
-        Folder selection is unavailable. Authenticated web needs the host folder browser; Electron
-        needs the native picker bridge.
-      </p>
-      <div className="project-dialog__actions">
-        <OctantButton onClick={props.onClose} type="button" variant="ghost">
-          Close
-        </OctantButton>
-      </div>
-    </OctantDialog>
+      {browsing !== undefined &&
+      props.folderBrowseClient !== undefined &&
+      props.hostId !== undefined ? (
+        <FolderPicker
+          client={props.folderBrowseClient}
+          {...(browsing === "destination"
+            ? {
+                hint: "Pick the folder Octant clones the repository into; it creates a new folder inside it.",
+                title: "Choose clone destination",
+              }
+            : {})}
+          hostId={props.hostId}
+          mode="code"
+          onCancel={() => {
+            if (browsing === "destination") settleDestinationChoice(undefined);
+            else setBrowsing(undefined);
+          }}
+          onSelect={onFolderBrowserSelection}
+          showGitInit={browsing === "create"}
+        />
+      ) : null}
+    </>
   );
 }
 

@@ -80,7 +80,7 @@ These are the second kind of HTTPS call Octant makes on its own behalf. They
 are not telemetry: they carry no account, install identifier, Project,
 thread, configuration, or cookie, and they do not use your GitHub or npm
 credentials. They do disclose an IP address, as any network request does, and
-a skill search also discloses the query you typed. See
+a catalog or skill search discloses the query you typed. See
 [Privacy and security](/advanced/privacy-and-security#host-initiated-network)
 for the companion update-check posture.
 

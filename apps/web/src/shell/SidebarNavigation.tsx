@@ -12,6 +12,7 @@ import {
   Workflow,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { Fragment } from "react";
 import {
   buildSidebarNavigation,
   sidebarNavigationDescriptor,
@@ -25,6 +26,12 @@ export interface SidebarNavigationProps {
   /** Row counts (e.g. threads waiting in the Inbox); zero and absent render nothing. */
   readonly counts?: Partial<Readonly<Record<SidebarNavigationDescriptorId, number>>>;
   readonly input: SidebarNavigationInput;
+  /**
+   * The More row that reveals the menu-only destinations, placed as the last
+   * destination row — before the Project tree whenever Projects closes the
+   * list.
+   */
+  readonly more?: ReactNode;
   readonly projectAction?: ReactNode;
   readonly projectSection?: ReactNode;
   /**
@@ -40,54 +47,67 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
       ? buildSidebarNavigation(props.input)
       : props.rows.map((id) => sidebarNavigationDescriptor(id));
 
-  return (
-    <div className="sidebar-navigation">
-      {descriptors.map((descriptor) => {
-        if (descriptor.id === "projects") {
-          if (props.projectSection === undefined || props.projectSection === null) return null;
-          return (
-            <div className="sidebar-navigation__projects" key={descriptor.id}>
-              {props.projectAction}
-              {props.projectSection}
-            </div>
-          );
+  // The More row is the last destination row: it sits between the destination
+  // rows and the Project tree when Projects closes the list, and after the
+  // rows otherwise, so the reveal never drifts away from the rows it belongs
+  // with — however the person reordered or hid Projects.
+  const projectsLast = descriptors[descriptors.length - 1]?.id === "projects";
+  const rows: ReactNode[] = [];
+  let morePending = props.more !== undefined;
+  for (const descriptor of descriptors) {
+    if (descriptor.id === "projects") {
+      if (props.projectSection !== undefined && props.projectSection !== null) {
+        if (projectsLast && morePending) {
+          rows.push(<Fragment key="sidebar-more">{props.more}</Fragment>);
+          morePending = false;
         }
-        const action = props.actions[descriptor.id];
-        if (action === undefined) return null;
-        const Icon = navigationIcon(descriptor.id);
-        if (Icon === undefined) return null;
-        const count = props.counts?.[descriptor.id] ?? 0;
-        return (
-          <OctantButton
-            // The name is stated outright rather than computed from the label
-            // span: the compact sidebar clips that span to one pixel, and the
-            // shell's accessibility tree has reported these rows as unnamed
-            // buttons. The name always starts with the visible label.
-            aria-label={count > 0 ? `${descriptor.label}, ${count} waiting` : descriptor.label}
-            className="sidebar-item window-no-drag justify-start"
-            data-navigation-id={descriptor.id}
-            key={descriptor.id}
-            // Invoked without arguments: some handlers take an optional payload
-            // (New chat's prompt) and must not receive the click event as one.
-            onClick={() => action()}
-            type="button"
-            variant="ghost"
-          >
-            <Icon aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
-            <span className="sidebar-label">{descriptor.label}</span>
-            {count > 0 ? (
-              <span aria-hidden="true" className="count">
-                {count}
-              </span>
-            ) : null}
-          </OctantButton>
+        rows.push(
+          <div className="sidebar-navigation__projects" key={descriptor.id}>
+            {props.projectAction}
+            {props.projectSection}
+          </div>,
         );
-      })}
-    </div>
-  );
+      }
+      continue;
+    }
+    const action = props.actions[descriptor.id];
+    if (action === undefined) continue;
+    const Icon = navigationIcon(descriptor.id);
+    if (Icon === undefined) continue;
+    const count = props.counts?.[descriptor.id] ?? 0;
+    rows.push(
+      <OctantButton
+        // The name is stated outright rather than computed from the label
+        // span: the compact sidebar clips that span to one pixel, and the
+        // shell's accessibility tree has reported these rows as unnamed
+        // buttons. The name always starts with the visible label.
+        aria-label={count > 0 ? `${descriptor.label}, ${count} waiting` : descriptor.label}
+        className="sidebar-item window-no-drag justify-start"
+        data-navigation-id={descriptor.id}
+        key={descriptor.id}
+        // Invoked without arguments: some handlers take an optional payload
+        // (New chat's prompt) and must not receive the click event as one.
+        onClick={() => action()}
+        type="button"
+        variant="ghost"
+      >
+        <Icon aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+        <span className="sidebar-label">{descriptor.label}</span>
+        {count > 0 ? (
+          <span aria-hidden="true" className="count">
+            {count}
+          </span>
+        ) : null}
+      </OctantButton>,
+    );
+  }
+  if (morePending) {
+    rows.push(<Fragment key="sidebar-more">{props.more}</Fragment>);
+  }
+  return <div className="sidebar-navigation">{rows}</div>;
 }
 
-function navigationIcon(id: SidebarNavigationDescriptorId) {
+export function navigationIcon(id: SidebarNavigationDescriptorId) {
   switch (id) {
     case "new-chat":
     case "new-code-thread":
