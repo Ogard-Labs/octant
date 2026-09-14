@@ -48,7 +48,7 @@ export interface SidebarProfileProps {
   readonly secondaryActions?: ReadonlyArray<SidebarSecondaryAction>;
 }
 
-const secondaryIcons: Record<SidebarAppMenuDescriptorId, LucideIcon> = {
+export const secondaryIcons: Record<SidebarAppMenuDescriptorId, LucideIcon> = {
   agents: GitFork,
   automations: Workflow,
   "artifact-library": FileStack,

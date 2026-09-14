@@ -141,11 +141,14 @@ and are **provisional** until signed self-updating releases are final.
 
 Searching or inspecting the plugin and skill catalog can contact third-party
 registries. Opening **Settings → Skills & Extensions** or the Marketplace tab
-does not. Extension catalog **search** is local; **Inspect** and install fetch
-a pinned GitHub tree. Standalone skill **Search skills** queries skills.sh
+does not. Extension catalog **search** sends your query plus the
+`agent-plugin` keywords to npm, then downloads candidate metadata and
+tarballs; **Inspect** and install of a curated entry fetch its pinned GitHub
+tree. Standalone skill **Search skills** queries skills.sh
 and the npm registry with the text you typed; preview and install then fetch
 the package. Turn marketplace fetches off in
-**Settings → General → Marketplace**; off means no request is made. Details live under
+**Settings → General → Marketplace**; off means no request is made and
+catalog search stays with the in-memory curated entries. Details live under
 [Plugins and skills](/advanced/plugins-and-skills#what-a-marketplace-fetch-discloses).
 
 ## Boundaries

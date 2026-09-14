@@ -52,11 +52,18 @@ collision is never silently merged or shadowed.
 
 ### Marketplace
 
-The **Marketplace** tab searches the extension catalog. Each entry can be
-**Inspected** before install with a **"Review before installing"** panel
-covering publisher, source, upstream commit, source review, license, digest,
-platforms, modes, providers, capabilities, component list, and diagnostics.
-Install requires **Confirm install** and always starts disabled.
+The **Marketplace** tab searches the extension catalog: the curated package
+the host ships metadata for and published Agent Plugins packages on npm. Each
+entry can be **Inspected** before install with a **"Review before installing"**
+panel covering publisher, source, upstream commit, source review, license,
+digest, platforms, modes, providers, capabilities, component list, and
+diagnostics. Install requires **Confirm install** and always starts disabled.
+
+Agent Plugins discovery on npm uses the publisher-adopted `agent-plugin` /
+`agent-plugins` keywords. The keyword is a discovery convention, not trust: the
+host fetches each candidate with bounded bytes, requires a root `plugin.json`
+whose `$schema` is the canonical 1.0.0 URL, and lists the package's real
+identity and digest. A package that does not validate is not listed.
 
 The same tab also searches **standalone skills** from
 [skills.sh](https://skills.sh/) and npm packages that ship `SKILL.md`. Preview
@@ -73,16 +80,23 @@ These are the second kind of HTTPS call Octant makes on its own behalf. They
 are not telemetry: they carry no account, install identifier, Project,
 thread, configuration, or cookie, and they do not use your GitHub or npm
 credentials. They do disclose an IP address, as any network request does, and
-a skill search also discloses the query you typed. See
+a catalog or skill search discloses the query you typed. See
 [Privacy and security](/advanced/privacy-and-security#host-initiated-network)
 for the companion update-check posture.
 
-**Extension catalog.** **Run search** filters a curated catalog the host
-already holds in memory. That step does not go to the network. **Inspect**
-and **Confirm install** fetch the pinned package from GitHub
-(`api.github.com` for the tree, then `raw.githubusercontent.com` for the
-blobs at the exact commit the catalog named). GitHub sees your IP address,
-the repository path, and the time. Search is local; inspect is the network.
+**Extension catalog.** **Run search** filters the curated catalog the host
+holds in memory. When marketplace fetches are on, it also searches npm for
+published Agent Plugins: your query plus `keywords:agent-plugin` and
+`keywords:agent-plugins` as two requests to
+`https://registry.npmjs.org/-/v1/search` with a page size of 25. **Inspect**
+then validates and reviews the listed package; the exact `name@version` bytes
+are cached at listing time, so **Confirm install** uses the inspected package
+rather than re-fetching. If the host no longer holds the cached bytes, inspect
+re-fetches that exact version's metadata and tarball from
+`registry.npmjs.org`. Curated entries instead fetch the pinned package from
+GitHub (`api.github.com` for the tree, then `raw.githubusercontent.com` for
+the blobs at the exact commit the catalog named). Whoever operates those
+endpoints sees your IP address, the query text or package path, and the time.
 
 **Standalone skills.** **Search skills** contacts both registries in
 parallel, even if only one will match:
@@ -99,11 +113,12 @@ entries as package metadata and a tarball from `registry.npmjs.org` (the
 same User-Agent on every marketplace request).
 
 **Off switch.** Turn marketplace fetches off in
-**Settings → General → Marketplace**. Off means no request is made: Search
-skills, Inspect, preview, and catalog install refuse rather than calling out.
-Opening the Marketplace tab still does not fetch on its own. Skills already on
-disk under `.agents/skills/` and plugins imported from a local folder never
-contact a registry.
+**Settings → General → Marketplace**. Off means no request is made: catalog
+search falls back to the in-memory curated entries, and Search skills,
+Inspect, preview, and install refuse rather than calling out. Opening the
+Marketplace tab still does not fetch on its own. Skills already on disk under
+`.agents/skills/` and plugins imported from a local folder never contact a
+registry.
 
 Every marketplace and catalog HTTPS request uses User-Agent
 `octant-skill-marketplace` with no app or runtime version — the same

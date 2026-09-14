@@ -2804,6 +2804,14 @@ form > .work-composer-adapter__attachments {
   content: "· ";
 }
 
+/* A chip that opens somewhere keeps the chip's own paint; the button owns the
+   hit area alone, so the pane title's compact rail is unchanged. */
+.pull-request-chip-button {
+  height: auto;
+  min-height: 0;
+  padding: 0;
+}
+
 /* The row's second line of truth: a pull request number beside the title, the
    request's state as a small glyph at the edge, and how long ago the thread
    last moved. Colour is spent on the state only. */

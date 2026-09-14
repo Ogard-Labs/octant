@@ -1,3 +1,5 @@
+import type { SidebarRowProperties, SidebarRowPropertyVisibility } from "@octant/contracts/shell";
+import { DEFAULT_SIDEBAR_ROW_PROPERTIES } from "@octant/contracts/shell";
 import { createContext, useContext } from "react";
 
 /**
@@ -10,11 +12,11 @@ import { createContext, useContext } from "react";
  * the Activity feed also strip the Project tree, which is why the stored
  * choice is keyed by view rather than by mode or by saved Project view.
  *
- * Only properties the row already has data for appear here. Environment is not
- * one: the host attributes an environment to a Project, not to a thread, so a
- * row could only guess at one.
+ * The host-backed shell settings own the choice; this module only names the
+ * views, their supported properties, the context that carries the resolved
+ * record to the rows several groups, shelves and folds below the sidebar, and
+ * the one-time adoption of a choice a renderer persisted before the move.
  */
-export const SIDEBAR_ROW_PROPERTIES_STORAGE_KEY = "octant.sidebar.row-properties.v1";
 
 export const ALL_SIDEBAR_ROW_PROPERTY_VIEWS = ["projects", "activity"] as const;
 export type SidebarRowPropertyView = (typeof ALL_SIDEBAR_ROW_PROPERTY_VIEWS)[number];
@@ -27,8 +29,6 @@ export const ALL_SIDEBAR_ROW_PROPERTIES = [
   "status",
 ] as const;
 export type SidebarRowProperty = (typeof ALL_SIDEBAR_ROW_PROPERTIES)[number];
-
-export type SidebarRowPropertyVisibility = Readonly<Record<SidebarRowProperty, boolean>>;
 
 export const SIDEBAR_ROW_PROPERTY_LABELS: Readonly<Record<SidebarRowProperty, string>> = {
   project: "Project",
@@ -50,104 +50,146 @@ export const SIDEBAR_ROW_PROPERTIES_FOR_VIEW: Readonly<
   activity: ["project", "branch", "pullRequest", "lastUpdated", "status"],
 };
 
-/** Each view's defaults are exactly what it showed before it could be told otherwise. */
-const DEFAULTS: Readonly<Record<SidebarRowPropertyView, SidebarRowPropertyVisibility>> = {
-  projects: { project: false, branch: true, pullRequest: true, lastUpdated: true, status: true },
-  activity: { project: true, branch: false, pullRequest: false, lastUpdated: false, status: true },
-};
-
-export function defaultSidebarRowProperties(
-  view: SidebarRowPropertyView,
-): SidebarRowPropertyVisibility {
-  return DEFAULTS[view];
-}
-
 /** Every property this view can render, shown or hidden together. */
 export function sidebarRowPropertiesAll(
   view: SidebarRowPropertyView,
   visible: boolean,
 ): SidebarRowPropertyVisibility {
   const supported = SIDEBAR_ROW_PROPERTIES_FOR_VIEW[view];
-  const next: Record<SidebarRowProperty, boolean> = { ...DEFAULTS[view] };
+  const next: Record<SidebarRowProperty, boolean> = { ...DEFAULT_SIDEBAR_ROW_PROPERTIES[view] };
   for (const property of supported) next[property] = visible;
   return next;
 }
 
-function storageKey(view: SidebarRowPropertyView): string {
-  return `${SIDEBAR_ROW_PROPERTIES_STORAGE_KEY}.${view}`;
-}
-
-function resolveStorage(
-  storage: Pick<Storage, "getItem" | "setItem"> | undefined,
-  storageHolder: { readonly localStorage?: Storage },
-): Pick<Storage, "getItem" | "setItem"> | undefined {
-  return storage ?? storageHolder.localStorage;
-}
-
-/**
- * Reads a saved choice back onto the view's defaults. A property the saved
- * record does not mention — because it did not exist when the record was
- * written — keeps the default rather than disappearing from the row.
- */
-export function normalizeSidebarRowProperties(
-  view: SidebarRowPropertyView,
-  value: unknown,
-): SidebarRowPropertyVisibility {
-  if (value === null || typeof value !== "object") return DEFAULTS[view];
-  const record = value as Record<string, unknown>;
-  const next: Record<SidebarRowProperty, boolean> = { ...DEFAULTS[view] };
-  for (const property of SIDEBAR_ROW_PROPERTIES_FOR_VIEW[view]) {
-    const saved = record[property];
-    if (typeof saved === "boolean") next[property] = saved;
-  }
-  return next;
-}
-
-export function readSidebarRowProperties(
-  view: SidebarRowPropertyView,
-  storage?: Pick<Storage, "getItem" | "setItem">,
-  storageHolder: { readonly localStorage?: Storage } = globalThis,
-): SidebarRowPropertyVisibility {
-  try {
-    const resolved = resolveStorage(storage, storageHolder);
-    if (resolved === undefined) return DEFAULTS[view];
-    const raw = resolved.getItem(storageKey(view));
-    if (raw === null || raw.trim() === "") return DEFAULTS[view];
-    return normalizeSidebarRowProperties(view, JSON.parse(raw));
-  } catch {
-    return DEFAULTS[view];
-  }
-}
-
-export function writeSidebarRowProperties(
-  view: SidebarRowPropertyView,
-  visibility: SidebarRowPropertyVisibility,
-  storage?: Pick<Storage, "getItem" | "setItem">,
-  storageHolder: { readonly localStorage?: Storage } = globalThis,
-): void {
-  try {
-    const resolved = resolveStorage(storage, storageHolder);
-    if (resolved === undefined) return;
-    const record: Record<string, boolean> = {};
-    for (const property of SIDEBAR_ROW_PROPERTIES_FOR_VIEW[view]) {
-      record[property] = visibility[property];
-    }
-    resolved.setItem(storageKey(view), JSON.stringify(record));
-  } catch {
-    // Presentation persistence is best-effort; the current session still applies.
-  }
-}
-
-/**
- * Rows read their properties from context rather than a prop threaded through
- * every group, shelf, and fold, so the two views can sit in one tree with
- * different answers and a memoized row still re-renders when its view's
- * choice changes.
- */
 export const SidebarRowPropertiesContext = createContext<SidebarRowPropertyVisibility>(
-  DEFAULTS.projects,
+  DEFAULT_SIDEBAR_ROW_PROPERTIES.projects,
 );
 
 export function useSidebarRowProperties(): SidebarRowPropertyVisibility {
   return useContext(SidebarRowPropertiesContext);
+}
+
+/**
+ * Where a renderer older than the host-backed setting stored each view's
+ * choice. The host record is authoritative; this prefix exists only so a
+ * choice made before the move can survive it, and is read once per renderer.
+ */
+export const LEGACY_SIDEBAR_ROW_PROPERTIES_STORAGE_KEY = "octant.sidebar.row-properties.v1";
+
+type LegacySidebarRowPropertiesStorage = Pick<Storage, "getItem" | "removeItem">;
+
+function legacyStorageKey(view: SidebarRowPropertyView): string {
+  return `${LEGACY_SIDEBAR_ROW_PROPERTIES_STORAGE_KEY}.${view}`;
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function resolveLegacyStorage(
+  storage: LegacySidebarRowPropertiesStorage | undefined,
+  storageHolder: { readonly localStorage?: Storage },
+): LegacySidebarRowPropertiesStorage | undefined {
+  return storage ?? storageHolder.localStorage;
+}
+
+/**
+ * Normalizes one view's pre-host record onto that view's defaults, or answers
+ * `undefined` when the stored value is not a record. A malformed record is
+ * absent, not a choice.
+ */
+function normalizeLegacySidebarRowProperties(
+  view: SidebarRowPropertyView,
+  raw: string,
+): SidebarRowPropertyVisibility | undefined {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed)) return undefined;
+    const next: Record<SidebarRowProperty, boolean> = { ...DEFAULT_SIDEBAR_ROW_PROPERTIES[view] };
+    for (const property of SIDEBAR_ROW_PROPERTIES_FOR_VIEW[view]) {
+      const saved = parsed[property];
+      if (typeof saved === "boolean") next[property] = saved;
+    }
+    return next;
+  } catch {
+    return undefined;
+  }
+}
+
+function sameSidebarRowPropertyVisibility(
+  left: SidebarRowPropertyVisibility,
+  right: SidebarRowPropertyVisibility,
+): boolean {
+  return ALL_SIDEBAR_ROW_PROPERTIES.every((property) => left[property] === right[property]);
+}
+
+function forgetLegacySidebarRowProperties(storage: LegacySidebarRowPropertiesStorage): void {
+  try {
+    for (const view of ALL_SIDEBAR_ROW_PROPERTY_VIEWS) storage.removeItem(legacyStorageKey(view));
+  } catch {
+    // Best-effort; a key left behind is inert once the host owns the choice.
+  }
+}
+
+/**
+ * Moves the choices a renderer persisted before the host owned this setting
+ * onto the host record.
+ *
+ * The first settings read after boot is the only moment the host record can be
+ * trusted untouched: afterwards a person may have changed it. For every legacy
+ * key that exists:
+ *
+ * - when the host record for a view still equals its defaults and the legacy
+ *   record differs, the legacy choice is written through `updateSettings`, and
+ *   the keys are cleared once the host accepts it, so a write that never lands
+ *   can be retried;
+ * - when the host record was already changed, it stays authoritative and the
+ *   keys are cleared without seeding anything.
+ *
+ * A renderer that never wrote a legacy key does nothing.
+ */
+export function adoptLegacySidebarRowProperties(input: {
+  readonly current: SidebarRowProperties;
+  readonly updateSettings: (next: SidebarRowProperties) => Promise<boolean>;
+  readonly storage?: LegacySidebarRowPropertiesStorage;
+  readonly storageHolder?: { readonly localStorage?: Storage };
+}): void {
+  const storage = resolveLegacyStorage(input.storage, input.storageHolder ?? globalThis);
+  if (storage === undefined) return;
+  let hasLegacyRecord = false;
+  let seeded = false;
+  const next: Record<SidebarRowPropertyView, SidebarRowPropertyVisibility> = {
+    projects: input.current.projects,
+    activity: input.current.activity,
+  };
+  for (const view of ALL_SIDEBAR_ROW_PROPERTY_VIEWS) {
+    let raw: string | null;
+    try {
+      raw = storage.getItem(legacyStorageKey(view));
+    } catch {
+      continue;
+    }
+    if (raw === null || raw.trim() === "") continue;
+    hasLegacyRecord = true;
+    const legacy = normalizeLegacySidebarRowProperties(view, raw);
+    if (
+      legacy !== undefined &&
+      sameSidebarRowPropertyVisibility(input.current[view], DEFAULT_SIDEBAR_ROW_PROPERTIES[view]) &&
+      !sameSidebarRowPropertyVisibility(legacy, DEFAULT_SIDEBAR_ROW_PROPERTIES[view])
+    ) {
+      next[view] = legacy;
+      seeded = true;
+    }
+  }
+  if (!hasLegacyRecord) return;
+  if (!seeded) {
+    forgetLegacySidebarRowProperties(storage);
+    return;
+  }
+  void input
+    .updateSettings({ projects: next.projects, activity: next.activity })
+    .then((committed) => {
+      if (committed) forgetLegacySidebarRowProperties(storage);
+    })
+    .catch(() => undefined);
 }

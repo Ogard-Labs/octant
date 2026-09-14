@@ -35,6 +35,10 @@ interface CataloguePort {
     request: { readonly pageSize: number; readonly cursor?: string; readonly search?: string },
     signal: AbortSignal,
   ): Promise<GhCatalogueResult<GhCataloguePageObservation<GhRepositoryObservationRow>>>;
+  readRepository(
+    request: { readonly owner: string; readonly name: string },
+    signal: AbortSignal,
+  ): Promise<GhCatalogueResult<GhRepositoryObservationRow>>;
   listIssues(
     request: {
       readonly owner: string;
@@ -294,6 +298,24 @@ export class GithubCatalogueService {
         },
       };
     }
+    if (request.kind === "repository") {
+      const snapshot = await this.#snapshot(signal);
+      const result = await this.#port.readRepository(
+        { owner: request.owner, name: request.name },
+        signal,
+      );
+      if (result.kind !== "ok") return result;
+      const row = this.#annotateRow(result.value, snapshot);
+      this.#rememberRow(row);
+      return {
+        kind: "ok",
+        value: {
+          kind: "repository",
+          row,
+          freshness: { status: "fresh" },
+        },
+      };
+    }
     if (request.kind === "issues") {
       const result = await this.#port.listIssues(
         {
@@ -445,6 +467,7 @@ function capabilityFor(
 ): GithubCapabilityKind {
   switch (kind) {
     case "repositories":
+    case "repository":
       return "repository-catalogue";
     case "issues":
     case "issue":
@@ -469,6 +492,8 @@ function markStale(
   switch (response.kind) {
     case "issue":
       return { kind: "issue", issue: response.issue, freshness };
+    case "repository":
+      return { kind: "repository", row: response.row, freshness };
     case "repositories":
       return { kind: "repositories", page: { ...response.page, freshness } };
     case "issues":

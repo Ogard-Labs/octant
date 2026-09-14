@@ -202,7 +202,47 @@
   gap: var(--oct-space-2);
 }
 
+/* ─── repository file tree ─────────────────────────────────────────────
+   The Files dock is 320px wide, so every row spends its width the same
+   way: one fixed indent step for files and folders alike, one row height,
+   a name that keeps its start and its extension, and one trailing note.
+   Rows mirror the system's .tree-item states (soft hover wash, primary
+   ink) and the selected file takes the selection fill and hairline edge
+   the sidebar and dock tabs draw, so pointing and being there never share
+   one tint. The class stays off the .tree-item recipe because a row
+   carries a filter hint and an availability note the plain tree item has
+   no slot for. The head carries its own compact bar, which dock.css
+   refines onto the dock head's rail when the tool lives there. */
+
+/* A name that keeps its start and its extension: the head yields to an
+   ellipsis, the tail never does. Shared by the tree and the Work list so
+   both Files tools truncate the same way. */
+.file-name {
+  display: inline-flex;
+  min-width: 0;
+  align-items: baseline;
+  /* The name owns the leftover width: the trailing notes that follow it are
+     the secondary reading, and the head yields before they disappear. */
+  flex: 1 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.file-name__head {
+  min-width: 4ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-name__tail {
+  flex: none;
+}
+
 .code-file-explorer {
+  --oct-file-row-h: 28px;
+  --oct-file-inset: 8px;
+  --oct-file-depth-max: 10;
+  --oct-file-depth: 0;
   display: flex;
   height: 100%;
   flex-direction: column;
@@ -216,28 +256,27 @@
   flex-direction: column;
 }
 
-.code-file-explorer-panel__toolbar {
+/* The head stands on its own so the bottom panel, which has no right-dock
+   rail, keeps a padded bar and its hairline; dock.css refines it to the
+   dock head's rail when Files is the right dock's tool. The baseline matches
+   the other complete work surfaces that own a head (the delivery toolbar). */
+.code-file-explorer__head {
   display: flex;
-  min-height: 34px;
+  min-width: 0;
+  min-height: 44px;
   align-items: center;
-  justify-content: flex-end;
-  padding: 2px var(--oct-space-2);
+  gap: var(--oct-space-2);
+  padding: 7px 12px;
+  background: var(--oct-surface);
   border-bottom: 1px solid var(--oct-border);
-}
-
-.code-file-explorer-panel__toolbar button {
-  width: 28px;
-  min-width: 28px;
-  height: 28px;
-  min-height: 28px;
-  padding: 0;
 }
 
 .code-file-explorer__search {
   position: relative;
   display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
   align-items: center;
-  padding: var(--oct-space-2);
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
 }
@@ -245,7 +284,7 @@
 .code-file-explorer__search > svg {
   position: absolute;
   z-index: 1;
-  left: 17px;
+  left: 9px;
   pointer-events: none;
 }
 
@@ -258,12 +297,7 @@
 
 .code-file-explorer__search-clear {
   position: absolute;
-  right: 11px;
-  width: 26px;
-  min-width: 26px;
-  height: 26px;
-  min-height: 26px;
-  padding: 0;
+  right: 1px;
 }
 
 .code-file-explorer__status,
@@ -275,51 +309,117 @@
   line-height: var(--oct-leading-snug);
 }
 
+.code-file-explorer__error {
+  margin: 0;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  color: var(--oct-danger-fg);
+  font-size: var(--oct-text-detail);
+  line-height: var(--oct-leading-snug);
+}
+
+.code-file-explorer-panel__recovery {
+  display: flex;
+  padding: 0 var(--oct-space-3) var(--oct-space-3);
+}
+
 .code-file-explorer__tree {
   min-height: 0;
   overflow: auto;
   padding: 2px var(--oct-space-2) var(--oct-space-3);
 }
 
-/* Rows mirror the system's .tree-item metrics (26px, xs type, 5px radius,
-   fg-soft states); the class itself stays off because a row is a two-column
-   grid carrying an availability note the plain tree item has no slot for. */
 .code-file-explorer__entry {
+  position: relative;
   display: flex;
   width: 100%;
   min-width: 0;
-  min-height: 28px;
+  min-height: var(--oct-file-row-h);
   align-items: center;
   gap: 6px;
   padding-block: 2px;
   padding-inline-end: var(--oct-space-2);
-  border-radius: var(--oct-radius-sm);
+  /* One step per level, capped where a name would otherwise have nothing
+     left; files and folders hang from the same anchor. */
+  padding-inline-start: calc(
+    var(--oct-file-inset) + min(var(--oct-file-depth), var(--oct-file-depth-max)) *
+      var(--oct-tree-indent)
+  );
+  overflow: hidden;
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
   text-align: left;
 }
 
-.code-file-explorer__entry span {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.code-file-explorer__entry small {
-  flex: 0 1 auto;
-  max-width: 42%;
-  overflow: hidden;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* A guide down each ancestor level, under the row's own fill. */
+.code-file-explorer__entry::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--oct-file-inset);
+  width: calc(min(var(--oct-file-depth), var(--oct-file-depth-max)) * var(--oct-tree-indent));
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--oct-hairline) 0 1px,
+    transparent 1px var(--oct-tree-indent)
+  );
+  content: "";
+  pointer-events: none;
 }
 
 .code-file-explorer__entry > svg {
   flex: 0 0 auto;
   color: var(--oct-meta);
+}
+
+/* An open folder is a state the chevron and its children already say; the
+   ghost recipe's aria-expanded fill would make every expanded folder look
+   selected. */
+.code-file-explorer__entry--directory[aria-expanded="true"] {
+  background: transparent;
+}
+
+.code-file-explorer__entry:hover,
+.code-file-explorer__entry:focus-visible {
+  background: var(--oct-fg-soft);
+  color: var(--oct-fg);
+}
+
+/* The file the editor is showing takes the selection fill and the hairline
+   edge the sidebar and dock tabs draw. */
+.code-file-explorer__entry--file[aria-selected="true"] {
+  background: var(--oct-selection);
+  box-shadow: inset 0 0 0 1px var(--oct-border);
+  color: var(--oct-fg);
+}
+
+/* The folder that tells a row apart: a filtered match is flat, and two
+   files sharing one basename are otherwise the same row at this width. It
+   is already in the row's accessible name and hover title, so it appears
+   only where the tree cannot show the folder itself. */
+.code-file-explorer__hint {
+  /* The hint is one short folder name; below this it would read as an
+     ellipsis, so the name above it yields instead. */
+  min-width: 6ch;
+  max-width: 40%;
+  flex: 0 2 auto;
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-file-explorer__detail {
+  min-width: 0;
+  max-width: 55%;
+  flex: 0 3 auto;
+  overflow: hidden;
+  margin-inline-start: auto;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .code-file-explorer__chevron {
@@ -333,13 +433,6 @@
 .code-file-explorer__entry--file,
 .code-file-explorer__entry--directory {
   cursor: pointer;
-}
-
-.code-file-explorer__entry--directory:hover,
-.code-file-explorer__entry--file:hover,
-.code-file-explorer__entry--file[aria-selected="true"] {
-  background: var(--oct-fg-soft);
-  color: var(--oct-fg);
 }
 
 .code-file-explorer__entry--file:disabled {
@@ -755,7 +848,6 @@
 }
 
 @media (prefers-contrast: more) {
-  .code-file-explorer__entry--file[aria-selected="true"],
   .code-editor-pane__warning,
   .code-diff-pane__warning {
     box-shadow: inset 0 0 0 1px currentColor;
@@ -1022,38 +1114,46 @@
   list-style: none;
 }
 
-.work-files-panel__row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--oct-space-4);
-  padding-block: var(--oct-space-2);
+/* The hairline belongs to the list item, not the row inside it: an openable
+   row is a button and an inert row is the item itself, and both must draw
+   the same line at the same place. */
+.work-files-panel__list > li + li {
   border-top: 1px solid var(--oct-hairline);
 }
 
-.work-files-panel__row .oct-row-label {
-  min-width: 0;
-  overflow-wrap: anywhere;
+/* One row height for folders and files. A long name stays on one line and
+   yields to an ellipsis, so the size column never steps down the list. */
+.work-files-panel__row {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-4);
+  padding-block: var(--oct-space-2);
+  text-align: left;
 }
 
 .work-files-panel__row .oct-row-detail {
   flex: none;
+  max-width: 55%;
+  overflow: hidden;
   font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* A row is a control only when the host gave it a target to open. The button
    recipe is card-shaped, so it needs the height release the fixed control
-   height would otherwise clip. */
+   height would otherwise clip; hover keeps the app list's soft ink wash. */
 .work-files-panel__row--openable {
   width: 100%;
   height: auto;
-  min-height: 0;
+  min-height: 40px;
   padding-inline: 0;
-  border-radius: 0;
-  text-align: left;
 }
 
-.work-files-panel__row--openable:hover {
-  color: var(--oct-fg);
+.work-files-panel__row--openable:hover,
+.work-files-panel__row--openable:focus-visible {
   background: var(--oct-fg-soft);
 }

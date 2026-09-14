@@ -1,7 +1,8 @@
 import type { WorkFileOpenRequest } from "../work/WorkFilesPanel";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
-import type { NativeHarnessFollowUpCreation } from "@octant/contracts";
+import type { CodeClient } from "@octant/client-runtime/code-client";
+import type { CodeProjectPullRequestRow, NativeHarnessFollowUpCreation } from "@octant/contracts";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
@@ -45,14 +46,19 @@ export interface ThreadUtilityDockContentProps {
   readonly canvasClient?: CanvasClient;
   readonly chatClient: ChatClient;
   readonly chatReadCursorStore: ChatReadCursorStore;
+  readonly codeClient?: CodeClient;
   readonly codeController?: CodeController;
   readonly codeProviderGroups?: ReadonlyArray<PickerGroup>;
   readonly hostBridge?: OctantHostBridge;
   readonly onOpenFile: (relativePath: CodeRelativePath) => void;
   readonly onBrowserContextCreated?: (contextId: string) => void;
+  /** Selects one of the active Project's pull requests for the dock's Review pane. */
+  readonly onSelectProjectPullRequest?: (row: CodeProjectPullRequestRow) => void;
   readonly onSidecarOpened: (sidecar: SideChatSidecar) => void;
   readonly planClient?: PlanClient;
   readonly providerController?: ProviderController;
+  /** Marks the row the shell currently shows in Review, wherever it was chosen. */
+  readonly selectedProjectPullRequestKey?: string;
   readonly serverUrl?: string;
   readonly shipClient?: ShipClient;
   readonly workFileListingClient?: WorkFileListingClient;

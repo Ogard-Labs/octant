@@ -540,6 +540,22 @@ describe("SettingsView", () => {
     expect(onSettingsChange).toHaveBeenLastCalledWith({ sidebarMaterial: "system" });
   });
 
+  it("toggles the sidebar's More row and says what it holds", async () => {
+    const user = userEvent.setup();
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+    navigateTo("Appearance");
+
+    const control = screen.getByRole("switch", { name: "More row in the sidebar" });
+    expect(control).toHaveAttribute("aria-checked", "true");
+    expect(control).toHaveAttribute("aria-describedby", "sidebar-more-description");
+    expect(document.getElementById("sidebar-more-description")).toHaveTextContent(
+      "Reveal the menu-only destinations and Customize sidebar",
+    );
+    await user.click(control);
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ sidebarMoreEnabled: false });
+  });
+
   it("selects subtle native vibrancy when translucency is enabled", async () => {
     const user = userEvent.setup();
     const applyPatch = vi.fn(async () => true);
@@ -564,6 +580,100 @@ describe("SettingsView", () => {
       sidebarBackground: {
         ...DEFAULT_THEME_SETTINGS.sidebarBackground,
         vibrancyMode: "subtle",
+      },
+    });
+  });
+
+  it("writes each view's sidebar thread-row properties through the shell settings patch", async () => {
+    const user = userEvent.setup();
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+    navigateTo("Appearance");
+
+    expect(screen.getByRole("heading", { name: "Sidebar thread rows" })).toBeVisible();
+    expect(screen.getByRole("group", { name: "Projects rows" })).toBeVisible();
+    expect(screen.getByRole("group", { name: "Activity rows" })).toBeVisible();
+
+    // Each view starts with what its rows already carried: the tree shows
+    // branch, pull request, age, and status; the feed shows the Project name
+    // and status alone.
+    expect(screen.getByRole("switch", { name: "Branch on Projects rows" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByRole("switch", { name: "Pull request on Projects rows" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByRole("switch", { name: "Last updated on Projects rows" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByRole("switch", { name: "Status on Projects rows" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByRole("switch", { name: "Project on Activity rows" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByRole("switch", { name: "Branch on Activity rows" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    expect(screen.getByRole("switch", { name: "Pull request on Activity rows" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    expect(screen.getByRole("switch", { name: "Last updated on Activity rows" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    expect(screen.getByRole("switch", { name: "Status on Activity rows" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getAllByText("Show the branch or worktree a thread works in.")).toHaveLength(2);
+
+    // Turning the Projects branch off leaves every Activity value as it was.
+    await user.click(screen.getByRole("switch", { name: "Branch on Projects rows" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({
+      sidebarRowProperties: {
+        projects: {
+          project: false,
+          branch: false,
+          pullRequest: true,
+          lastUpdated: true,
+          status: true,
+        },
+        activity: {
+          project: true,
+          branch: false,
+          pullRequest: false,
+          lastUpdated: false,
+          status: true,
+        },
+      },
+    });
+
+    // Turning the Activity age on says nothing about the Projects rows.
+    await user.click(screen.getByRole("switch", { name: "Last updated on Activity rows" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({
+      sidebarRowProperties: {
+        projects: {
+          project: false,
+          branch: true,
+          pullRequest: true,
+          lastUpdated: true,
+          status: true,
+        },
+        activity: {
+          project: true,
+          branch: false,
+          pullRequest: false,
+          lastUpdated: true,
+          status: true,
+        },
       },
     });
   });
@@ -813,6 +923,19 @@ describe("SettingsView", () => {
         name: "Buttons",
       }),
     ).toHaveFocus();
+  });
+
+  it("deep-links to the Background setting and focuses its source control", () => {
+    renderSettings({
+      initialDeepLink: { section: "appearance", setting: "app-background" },
+      themeController: {
+        draft: DEFAULT_THEME_SETTINGS,
+        applyPatch: vi.fn(async () => true),
+      } as never,
+    });
+
+    expect(screen.getByRole("heading", { name: "Background" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Application background" })).toHaveFocus();
   });
 
   it("applies a pending deep link from another app surface and reports it consumed", () => {

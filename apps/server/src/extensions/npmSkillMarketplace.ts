@@ -4,31 +4,33 @@ import type { ExtensionSource } from "@octant/contracts/extensions";
 import type { SkillMarketplaceEntry } from "@octant/contracts/extension-rpc";
 import type { ResolvedExtensionPackage } from "./packageInspector";
 import type { SkillMarketplacePort } from "./standaloneSkillService";
-import { readBoundedResponseBody } from "./boundedResponseBody";
 import {
   MARKETPLACE_FETCH_USER_AGENT,
   withMarketplaceRequest,
   type MarketplaceFetch,
 } from "./marketplaceRequestSignal";
 import {
+  DEFAULT_NPM_REGISTRY_URL,
+  decodeNpmEntryIdentity,
+  downloadNpmTarball,
+  encodeNpmEntryId,
+  fetchNpmPackageMetadata,
+  parseNpmSearchObject,
+  parseRegistryJson,
+  verifyNpmTarballIntegrity,
+} from "./npmRegistry";
+import {
   NPM_SKILLS_CATALOG_ID,
   buildStandaloneSkillPackage,
-  decodeCompactCatalogIdentity,
-  encodeCompactCatalogIdentity,
   isUnsafeSkillRelativePath,
   skillSearchEntry,
 } from "./skillPackageBuilder";
 
-const DEFAULT_REGISTRY = "https://registry.npmjs.org";
 const DEFAULT_LIMIT = 25;
-const MAX_TARBALL_BYTES = 8 * 1024 * 1024;
 const MAX_EXTRACTED_BYTES = 4 * 1024 * 1024;
 const MAX_SKILL_FILE_BYTES = 512 * 1024;
 const MAX_TAR_ENTRIES = 4_096;
 const MAX_EXTRA_FILES_PER_SKILL = 64;
-const MAX_REGISTRY_JSON_BYTES = 8 * 1024 * 1024;
-const NPM_VERSION_PATTERN =
-  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 export interface NpmSkillMarketplaceOptions {
   readonly fetch?: MarketplaceFetch;
@@ -56,7 +58,7 @@ export class NpmSkillMarketplace implements SkillMarketplacePort {
 
   constructor(options: NpmSkillMarketplaceOptions = {}) {
     this.#fetch = options.fetch ?? globalThis.fetch;
-    this.#registryUrl = options.registryUrl ?? DEFAULT_REGISTRY;
+    this.#registryUrl = options.registryUrl ?? DEFAULT_NPM_REGISTRY_URL;
     this.#appVersion = options.appVersion ?? "1.0.0";
     this.#platform = options.platform ?? process.platform;
   }
@@ -138,8 +140,19 @@ export class NpmSkillMarketplace implements SkillMarketplacePort {
       throw new Error("npm skill package identity is unavailable.");
     }
     const packageName = identity.packageName;
-    const metadata = await this.#fetchPackageMetadata(packageName, identity.version, signal);
-    const tarball = await this.#downloadTarball(metadata.tarballUrl, signal);
+    const metadata = await fetchNpmPackageMetadata({
+      fetch: this.#fetch,
+      registryUrl: this.#registryUrl,
+      packageName,
+      ...(identity.version === undefined ? {} : { requestedVersion: identity.version }),
+      signal,
+    });
+    const tarball = await downloadNpmTarball({
+      fetch: this.#fetch,
+      registryUrl: this.#registryUrl,
+      url: metadata.tarballUrl,
+      signal,
+    });
     verifyNpmTarballIntegrity(tarball, metadata.integrity, metadata.shasum);
     const skillFiles = extractSkillMarkdownFromTarball(tarball);
     if (skillFiles.length === 0) {
@@ -163,171 +176,6 @@ export class NpmSkillMarketplace implements SkillMarketplacePort {
       platform: this.#platform,
     });
   }
-
-  async #fetchPackageMetadata(
-    packageName: string,
-    requestedVersion?: string,
-    signal?: AbortSignal,
-  ): Promise<{
-    readonly version: string;
-    readonly tarballUrl: string;
-    readonly integrity?: string;
-    readonly shasum?: string;
-    readonly publisher?: string;
-    readonly license?: string;
-  }> {
-    const response = await this.#fetch(
-      new URL(`/${encodeNpmName(packageName)}`, this.#registryUrl).toString(),
-      {
-        headers: { accept: "application/json", "user-agent": MARKETPLACE_FETCH_USER_AGENT },
-        redirect: "error",
-        ...(signal === undefined ? {} : { signal }),
-      },
-    );
-    if (!response.ok) throw new Error("npm package metadata is unavailable.");
-    const body = await parseRegistryJson<{
-      "dist-tags"?: { latest?: string };
-      versions?: Record<
-        string,
-        {
-          dist?: { tarball?: string; integrity?: string; shasum?: string };
-          version?: string;
-          license?: unknown;
-          _npmUser?: { name?: unknown };
-        }
-      >;
-      author?: { name?: string } | string;
-      maintainers?: ReadonlyArray<{ name?: unknown }>;
-      license?: unknown;
-    }>(response);
-    const version = requestedVersion ?? body["dist-tags"]?.latest;
-    if (typeof version !== "string" || version.trim() === "") {
-      throw new Error("npm package version is unavailable.");
-    }
-    const release = body.versions?.[version];
-    const tarballUrl = release?.dist?.tarball;
-    if (typeof tarballUrl !== "string" || tarballUrl.trim() === "") {
-      throw new Error("npm package tarball is unavailable.");
-    }
-    assertAllowedTarballUrl(tarballUrl, this.#registryUrl);
-    const integrity =
-      typeof release?.dist?.integrity === "string" ? release.dist.integrity : undefined;
-    const shasum = typeof release?.dist?.shasum === "string" ? release.dist.shasum : undefined;
-    if (integrity === undefined && shasum === undefined) {
-      throw new Error("npm package integrity metadata is unavailable.");
-    }
-    const publisher =
-      typeof release?._npmUser?.name === "string"
-        ? release._npmUser.name
-        : typeof body.maintainers?.[0]?.name === "string"
-          ? body.maintainers[0].name
-          : undefined;
-    const rawLicense = release?.license ?? body.license;
-    const license =
-      typeof rawLicense === "string" && rawLicense.trim() !== "" && rawLicense.length <= 256
-        ? rawLicense.trim()
-        : undefined;
-    return {
-      version,
-      tarballUrl,
-      ...(integrity === undefined ? {} : { integrity }),
-      ...(shasum === undefined ? {} : { shasum }),
-      ...(publisher === undefined ? {} : { publisher }),
-      ...(license === undefined ? {} : { license }),
-    };
-  }
-
-  async #downloadTarball(url: string, signal?: AbortSignal): Promise<Uint8Array> {
-    assertAllowedTarballUrl(url, this.#registryUrl);
-    const response = await this.#fetch(url, {
-      headers: { "user-agent": MARKETPLACE_FETCH_USER_AGENT },
-      redirect: "error",
-      ...(signal === undefined ? {} : { signal }),
-    });
-    if (!response.ok) throw new Error("npm package download failed.");
-    return readBoundedResponseBody(response, MAX_TARBALL_BYTES, "npm package exceeds size limits.");
-  }
-}
-
-async function parseRegistryJson<T>(response: Response): Promise<T> {
-  const bytes = await readBoundedResponseBody(
-    response,
-    MAX_REGISTRY_JSON_BYTES,
-    "npm registry response exceeds size limits.",
-  );
-  try {
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as T;
-  } catch {
-    throw new Error("npm registry returned invalid JSON.");
-  }
-}
-
-/** Reversible catalog entry id: `n` + lowercase base32(utf8 package name). */
-export function encodeNpmEntryId(packageName: string, version?: string): string {
-  if (
-    typeof packageName !== "string" ||
-    packageName.trim() === "" ||
-    packageName.includes("\n") ||
-    (version !== undefined && !NPM_VERSION_PATTERN.test(version))
-  ) {
-    throw new Error("npm package name is required.");
-  }
-  const identity = version === undefined ? packageName : `${packageName}\n${version}`;
-  const id = `n${encodeCompactCatalogIdentity(identity)}`;
-  if (id.length > 96 || !/^[a-z][a-z0-9]*$/.test(id)) {
-    throw new Error("npm package name is too long for catalog identity.");
-  }
-  return id;
-}
-
-export function decodeNpmEntryId(entryId: string): string | undefined {
-  return decodeNpmEntryIdentity(entryId)?.packageName;
-}
-
-function decodeNpmEntryIdentity(
-  entryId: string,
-): { readonly packageName: string; readonly version?: string } | undefined {
-  if (!/^n[a-z2-7]+$/.test(entryId)) return undefined;
-  const decoded = decodeCompactCatalogIdentity(entryId.slice(1));
-  if (decoded === undefined || decoded.trim() === "") return undefined;
-  const separator = decoded.lastIndexOf("\n");
-  if (separator < 0) return { packageName: decoded };
-  const packageName = decoded.slice(0, separator);
-  const version = decoded.slice(separator + 1);
-  if (
-    packageName.trim() === "" ||
-    !NPM_VERSION_PATTERN.test(version) ||
-    packageName.includes("\n")
-  ) {
-    return undefined;
-  }
-  return { packageName, version };
-}
-
-export function verifyNpmTarballIntegrity(
-  tarballBytes: Uint8Array,
-  integrity: string | undefined,
-  shasum: string | undefined,
-): void {
-  if (typeof integrity === "string" && integrity.trim() !== "") {
-    const match = /^(sha512|sha256|sha1)-([A-Za-z0-9+/=]+)$/.exec(integrity.trim());
-    if (match === null) throw new Error("npm package integrity metadata is invalid.");
-    const algorithm = match[1]!;
-    const expected = Buffer.from(match[2]!, "base64");
-    const actual = createHash(algorithm).update(tarballBytes).digest();
-    if (expected.byteLength !== actual.byteLength || !expected.equals(actual)) {
-      throw new Error("npm package integrity check failed.");
-    }
-    return;
-  }
-  if (typeof shasum === "string" && /^[0-9a-f]{40}$/i.test(shasum.trim())) {
-    const actual = createHash("sha1").update(tarballBytes).digest("hex");
-    if (actual !== shasum.trim().toLowerCase()) {
-      throw new Error("npm package integrity check failed.");
-    }
-    return;
-  }
-  throw new Error("npm package integrity metadata is unavailable.");
 }
 
 /**
@@ -419,64 +267,6 @@ export function extractSkillMarkdownFromTarball(
     });
   }
   return found;
-}
-
-function assertAllowedTarballUrl(url: string, registryUrl: string): void {
-  let parsed: URL;
-  let registry: URL;
-  try {
-    parsed = new URL(url);
-    registry = new URL(registryUrl);
-  } catch {
-    throw new Error("npm package tarball URL is invalid.");
-  }
-  if (parsed.protocol !== "https:") {
-    throw new Error("npm package tarball URL must use HTTPS.");
-  }
-  const allowed = new Set([registry.hostname, "registry.npmjs.org"]);
-  if (!allowed.has(parsed.hostname)) {
-    throw new Error("npm package tarball host is not allowed.");
-  }
-}
-
-function parseNpmSearchObject(value: unknown):
-  | {
-      readonly name: string;
-      readonly version: string;
-      readonly description?: string;
-      readonly publisher?: string;
-    }
-  | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
-  const packageValue = (value as { package?: unknown }).package;
-  if (typeof packageValue !== "object" || packageValue === null) return undefined;
-  const pkg = packageValue as {
-    name?: unknown;
-    version?: unknown;
-    description?: unknown;
-    publisher?: { username?: unknown };
-  };
-  if (typeof pkg.name !== "string" || typeof pkg.version !== "string") return undefined;
-  const name = pkg.name.trim();
-  const version = pkg.version.trim();
-  if (name === "" || version === "") return undefined;
-  const description = typeof pkg.description === "string" ? pkg.description.trim() : undefined;
-  const publisher =
-    typeof pkg.publisher?.username === "string" ? pkg.publisher.username.trim() : undefined;
-  return {
-    name,
-    version,
-    ...(description === undefined || description === "" ? {} : { description }),
-    ...(publisher === undefined || publisher === "" ? {} : { publisher }),
-  };
-}
-
-function encodeNpmName(packageName: string): string {
-  if (packageName.startsWith("@")) {
-    const [scope, name] = packageName.slice(1).split("/");
-    return `${encodeURIComponent(`@${scope}`)}/${encodeURIComponent(name ?? "")}`;
-  }
-  return encodeURIComponent(packageName);
 }
 
 function internalSkillToken(value: string): string {

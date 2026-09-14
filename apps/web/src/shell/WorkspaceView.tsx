@@ -9,6 +9,7 @@ import type {
   WorkspaceTab,
 } from "@octant/contracts/shell";
 import { decodeWorkMutationRequestId } from "@octant/contracts";
+import type { ThreadBoardPullRequestIdentity } from "@octant/contracts";
 import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts/browser-automation";
 import type {
   ProjectAvailability,
@@ -212,6 +213,8 @@ export interface WorkspaceViewProps {
   }) => void;
   /** Opens Review in the dock for this Code thread, keeping the transcript in view. */
   readonly onOpenReview?: (threadId: CodeThreadId) => void;
+  /** Selects a pull request named on a pane tab for the dock's Review pane. */
+  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
   readonly onOpenCodeSurface: (
     kind: CodeOverviewSurfaceKind,
     threadId: CodeThreadId,
@@ -526,15 +529,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
             : `${project.name}/${branch}`;
       if (summary === undefined && path === undefined) continue;
       facts.set(String(item.threadId), {
-        ...(summary === undefined
-          ? {}
-          : {
-              pullRequest: {
-                number: summary.identity.number,
-                state: summary.state,
-                checks: summary.checks,
-              },
-            }),
+        ...(summary === undefined ? {} : { pullRequest: summary }),
         ...(path === undefined ? {} : { path }),
       });
     }
@@ -558,6 +553,9 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           onClosePane={(paneId) => void closePane(paneId)}
           onCommitResize={props.onCommitResize}
           onFocus={props.onFocus}
+          {...(props.onSelectPullRequest === undefined
+            ? {}
+            : { onSelectPullRequest: props.onSelectPullRequest })}
           onPreviewResize={props.onPreviewResize}
           onSplitPane={props.onSplitPane}
           activePaneId={props.workspace.activePaneIds[props.mode]}

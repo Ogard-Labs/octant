@@ -1,5 +1,6 @@
 import type {
   AnthropicCompatibleProtocol,
+  DiscoverySnapshot,
   OpenAiCompatibleProtocol,
   ProviderInstance,
   ProviderObservedState,
@@ -48,6 +49,27 @@ export function protocolLabel(
   if (value === "responses") return "Responses";
   if (value === "chat-completions") return "Chat Completions";
   return "Messages";
+}
+
+/**
+ * Why a binary-backed provider cannot be switched on. The copy names the scan
+ * state rather than implying absence: a scan that has not run, failed, or was
+ * cancelled is not evidence that the runtime is gone.
+ */
+export function providerDetectionBlockedReason(snapshot: DiscoverySnapshot | undefined): string {
+  if (snapshot === undefined) {
+    return "This Mac has not been scanned for it yet. Use “Check again” to scan.";
+  }
+  if (snapshot.status === "failed") {
+    return "The last scan failed, so its presence is unknown. Use “Check again” to retry.";
+  }
+  if (snapshot.status === "cancelled") {
+    return "The last scan was cancelled, so its presence is unknown. Use “Check again” to retry.";
+  }
+  if (snapshot.status === "partial") {
+    return "The last scan did not finish, so it may have missed this binary. Use “Check again” to scan again.";
+  }
+  return "The latest scan did not find its binary on this Mac. Use “Check again” to scan again.";
 }
 
 export function driverLabel(

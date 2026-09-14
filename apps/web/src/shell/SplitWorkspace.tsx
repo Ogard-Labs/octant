@@ -5,6 +5,10 @@ import type {
   WorkspacePane,
   WorkspaceTab,
 } from "@octant/contracts/shell";
+import type {
+  ThreadBoardPullRequestIdentity,
+  ThreadBoardPullRequestSummary,
+} from "@octant/contracts";
 import { GripVertical, X } from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { OctantIconButton } from "../ui/base/OctantButton";
@@ -22,7 +26,7 @@ import { WorkspaceDragStatus, WorkspaceDropOverlay } from "./WorkspaceDropOverla
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { workspaceSurfaceTitle } from "./workspaceTabLifecycle";
-import { PullRequestChip, type PullRequestChipProps } from "../code/PullRequestChip";
+import { PullRequestChip } from "../code/PullRequestChip";
 import type { ThreadProviderIdentity } from "./navigationModel";
 
 const splitContainerStyle = { height: "100%", minHeight: 0, minWidth: 0, width: "100%" };
@@ -73,13 +77,19 @@ export interface SplitWorkspaceProps {
    * so two panes on one Project tell apart by more than their titles.
    */
   readonly paneFactsByThreadId?: ReadonlyMap<string, PaneFacts>;
+  /**
+   * Selects a pull request named on a pane tab for the dock's Review pane.
+   * Without it the chip is a mark with nowhere to go.
+   */
+  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
   /** Start screens alone in the window keep the title band clear. */
   readonly showSinglePaneHeader?: boolean;
   readonly totalWorkspacePaneCount: number;
 }
 
 export interface PaneFacts {
-  readonly pullRequest?: Pick<PullRequestChipProps, "number" | "state" | "checks">;
+  /** The pull request the thread carries, with the identity that opens it. */
+  readonly pullRequest?: ThreadBoardPullRequestSummary;
   readonly path?: string;
 }
 
@@ -297,6 +307,8 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
       : props.providerByThreadId?.get(String(surface.threadId));
   const facts =
     "threadId" in surface ? props.paneFactsByThreadId?.get(String(surface.threadId)) : undefined;
+  const pullRequest = facts?.pullRequest;
+  const selectPullRequest = props.onSelectPullRequest;
   const path = "threadId" in surface ? (facts?.path ?? props.contextLabel) : undefined;
   const showHeader = props.layout.kind !== "pane" || props.showSinglePaneHeader !== false;
   const title = workspaceSurfaceTitle(surface);
@@ -356,14 +368,15 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                   />
                 </span>
               )}
-              {facts?.pullRequest === undefined ? null : (
+              {pullRequest === undefined ? null : (
                 <PullRequestChip
                   className="workspace-pane__pull-request"
-                  number={facts.pullRequest.number}
-                  state={facts.pullRequest.state}
-                  {...(facts.pullRequest.checks === undefined
+                  number={pullRequest.identity.number}
+                  state={pullRequest.state}
+                  {...(pullRequest.checks === undefined ? {} : { checks: pullRequest.checks })}
+                  {...(selectPullRequest === undefined
                     ? {}
-                    : { checks: facts.pullRequest.checks })}
+                    : { onOpen: () => selectPullRequest(pullRequest.identity) })}
                 />
               )}
               <span className="workspace-pane__title">{title}</span>

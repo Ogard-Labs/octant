@@ -4,9 +4,11 @@ import {
   GithubCloneProgress,
   decodeGithubCloneCommandResponse,
   decodeGithubCloneOperationList,
+  type CanonicalProjectBinding,
   type GithubAuthenticationSnapshot,
   type GithubCloneCommand,
   type GithubCloneCommandResponse,
+  type GithubCloneDestinationSelection,
   type GithubCloneFailure,
   type GithubCloneFailureCode,
   type GithubCloneOperation,
@@ -29,7 +31,11 @@ import {
   type ManagedDestinationObservation,
 } from "@octant/domain";
 import { Schema } from "effect";
-import type { BindingReceipt, BindingReceiptStorePort } from "../bindingReceiptStore";
+import {
+  BindingReceiptError,
+  type BindingReceipt,
+  type BindingReceiptStorePort,
+} from "../bindingReceiptStore";
 import {
   GITHUB_CLONE_AGGREGATE_TYPE,
   GITHUB_CLONE_REQUESTED,
@@ -40,6 +46,7 @@ import type { Journal } from "../persistence/journal";
 import type { ProjectRootPort } from "../projectRootPort";
 import type { ManagedCloneResult, ManagedGitResult } from "./managedCloneProcessPort";
 import type {
+  ManagedInventoryDerivation,
   ManagedInventoryRefusalCode,
   ManagedRepositoryInventory,
 } from "./managedRepositoryInventory";
@@ -100,6 +107,16 @@ interface ActiveRun {
   readonly completion: Promise<void>;
 }
 
+type DerivedDestination = Extract<ManagedInventoryDerivation, { status: "derived" }>;
+
+type DestinationDerivation =
+  | { readonly kind: "derived"; readonly value: DerivedDestination }
+  | {
+      readonly kind: "refused";
+      readonly reason: GithubCloneRefusalReason;
+      readonly remediation?: string;
+    };
+
 /**
  * Server-authoritative managed-clone workflow: one explicitly confirmed
  * GitHub repository becomes one verified host-owned checkout plus one
@@ -146,7 +163,7 @@ export class ManagedCloneService {
     try {
       switch (command.kind) {
         case "request-clone":
-          return await this.#requestClone(command, signal);
+          return await this.#requestClone(command, context.windowId, signal);
         case "confirm-clone":
           return await this.#confirmClone(command, context.windowId);
         case "attach-existing":
@@ -179,10 +196,9 @@ export class ManagedCloneService {
   async recover(): Promise<void> {
     for (const operation of this.#projection.list()) {
       if (isTerminal(operation.state)) continue;
-      const stagingExists = await this.#inventory.stagingExists(operation.requestId);
-      const destination = await this.#inventory.observeDestination(
-        operation.destination.destinationPath,
-      );
+      const inventory = this.#inventory.forRoot(operation.destination.inventoryPath);
+      const stagingExists = await inventory.stagingExists(operation.requestId);
+      const destination = await inventory.observeDestination(operation.destination.destinationPath);
       const action = decideGithubCloneRecovery({
         state: operation.state,
         mode: operation.mode,
@@ -195,7 +211,7 @@ export class ManagedCloneService {
         continue;
       }
       if (action.action === "quarantine-and-fail") {
-        await this.#inventory.quarantine(operation.requestId);
+        await inventory.quarantine(operation.requestId);
       }
       this.#transition(operation.requestId, "failed", {
         failure: { code: action.code },
@@ -212,6 +228,7 @@ export class ManagedCloneService {
 
   async #requestClone(
     command: Extract<GithubCloneCommand, { kind: "request-clone" }>,
+    windowId: WindowId,
     signal: AbortSignal,
   ): Promise<GithubCloneCommandResponse> {
     const existing = this.#projection.getByRequestId(command.requestId);
@@ -231,19 +248,16 @@ export class ManagedCloneService {
     );
     if (authorized.outcome === "refused") return this.#refuse(authorized.reason);
     const repository = authorized.repository;
-    const segments = deriveManagedRepositorySegments({
-      owner: repository.owner,
-      name: repository.name,
-    });
-    if (segments.kind !== "derived") return this.#refuse("invalid");
-    const derivation = await this.#inventory.deriveDestination(segments.segments);
-    if (derivation.status === "unavailable") return this.#refuse("unavailable");
-    if (derivation.status === "refused") {
-      if (derivation.code === "inventory-unavailable") return this.#refuse("unavailable");
-      return this.#refuse("collision", derivation.code);
+    const derivation =
+      command.destination === undefined
+        ? await this.#deriveInventoryDestination(repository)
+        : await this.#deriveChosenDestination(command.destination, windowId);
+    if (derivation.kind === "refused") {
+      return this.#refuse(derivation.reason, derivation.remediation);
     }
+    const destination = derivation.value;
     const destinationObservation = await this.#observeDestinationShape(
-      derivation.destinationPath,
+      destination.destinationPath,
       repository,
       signal,
     );
@@ -253,7 +267,7 @@ export class ManagedCloneService {
     }
     const conflict = this.#projection.findActiveConflict({
       nodeId: repository.nodeId,
-      digest: derivation.digest,
+      digest: destination.digest,
     });
     if (conflict !== undefined) return this.#refuse("conflict");
     const requestedAt = this.#clock();
@@ -263,9 +277,9 @@ export class ManagedCloneService {
       mode: classification.kind === "attachable" ? "attach-existing" : "clone",
       repository: toRepositoryFacts(repository),
       destination: {
-        inventoryPath: derivation.inventoryPath,
-        destinationPath: derivation.destinationPath,
-        digest: derivation.digest,
+        inventoryPath: destination.inventoryPath,
+        destinationPath: destination.destinationPath,
+        digest: destination.digest,
       },
       version: 1,
       requestedAt,
@@ -292,6 +306,84 @@ export class ManagedCloneService {
     const current = this.#projection.getByRequestId(command.requestId);
     if (current === undefined) return this.#refuse("unavailable");
     return this.#respondOperation(current);
+  }
+
+  /** Derive the destination Octant chooses inside its own repository inventory. */
+  async #deriveInventoryDestination(
+    repository: ManagedCloneRepositoryFacts,
+  ): Promise<DestinationDerivation> {
+    const segments = deriveManagedRepositorySegments({
+      owner: repository.owner,
+      name: repository.name,
+    });
+    if (segments.kind !== "derived") return { kind: "refused", reason: "invalid" };
+    const derivation = await this.#inventory.deriveDestination(segments.segments);
+    return this.#derivationOutcome(derivation, { chosen: false });
+  }
+
+  /**
+   * Derive the destination the person chose: the parent folder arrives as a
+   * one-time host-issued binding receipt, the folder name is one strict
+   * segment, and the final path is computed on the server. The receipt is
+   * consumed here so the confirmed operation is durable even if the receipt
+   * has expired by confirmation time.
+   */
+  async #deriveChosenDestination(
+    selection: GithubCloneDestinationSelection,
+    windowId: WindowId,
+  ): Promise<DestinationDerivation> {
+    let binding: CanonicalProjectBinding;
+    try {
+      binding = this.#bindingReceiptStore.consume({
+        receiptId: selection.parentReceiptId,
+        authenticatedWindowId: windowId,
+        projectType: "code",
+        now: this.#now(),
+      });
+    } catch (error) {
+      return {
+        kind: "refused",
+        reason: "invalid",
+        remediation:
+          error instanceof BindingReceiptError && error.category === "unavailable"
+            ? "The destination folder selection expired. Choose the folder again."
+            : "The destination folder selection is no longer valid. Choose the folder again.",
+      };
+    }
+    let parent: CanonicalProjectBinding;
+    try {
+      parent = await this.#projectRootPort.validate("code", binding.canonicalRoot);
+    } catch {
+      return {
+        kind: "refused",
+        reason: "unavailable",
+        remediation: "The destination folder is not available on the host.",
+      };
+    }
+    const derivation = await this.#inventory
+      .forRoot(parent.canonicalRoot)
+      .deriveDestination([selection.folderName]);
+    return this.#derivationOutcome(derivation, { chosen: true });
+  }
+
+  #derivationOutcome(
+    derivation: ManagedInventoryDerivation,
+    options: { readonly chosen: boolean },
+  ): DestinationDerivation {
+    if (derivation.status === "derived") return { kind: "derived", value: derivation };
+    if (derivation.status === "unavailable" || derivation.code === "inventory-unavailable") {
+      return {
+        kind: "refused",
+        reason: "unavailable",
+        ...(options.chosen
+          ? { remediation: "The destination folder is not available on the host." }
+          : {}),
+      };
+    }
+    if (options.chosen && derivation.code === "path-confinement") {
+      return { kind: "refused", reason: "invalid", remediation: "destination-path-refused" };
+    }
+    return { kind: "refused", reason: "collision", remediation: derivation.code };
   }
 
   async #confirmClone(
@@ -358,7 +450,7 @@ export class ManagedCloneService {
     }
     if (isTerminal(operation.state)) return this.#respondOperation(operation);
     if (operation.state !== "awaiting-confirmation" && operation.state !== "recovery-required") {
-      await this.#inventory.quarantine(requestId);
+      await this.#inventory.forRoot(operation.destination.inventoryPath).quarantine(requestId);
     }
     const cancelled = this.#transition(requestId, "cancelled", {});
     return this.#respondOperation(cancelled);
@@ -389,6 +481,7 @@ export class ManagedCloneService {
     signal: AbortSignal,
   ): Promise<GithubCloneCommandResponse> {
     const requestId = initial.requestId;
+    const inventory = this.#inventory.forRoot(initial.destination.inventoryPath);
     const expected = {
       nodeId: initial.repository.nodeId,
       owner: initial.repository.owner,
@@ -401,7 +494,7 @@ export class ManagedCloneService {
     }
     this.#transition(requestId, "reserved", {});
     if (signal.aborted) return this.#cancelRun(requestId, { quarantine: false });
-    const staging = await this.#inventory.ensureStaging(requestId);
+    const staging = await inventory.ensureStaging(requestId);
     if (staging.status !== "staged") {
       return this.#fail(
         requestId,
@@ -432,7 +525,12 @@ export class ManagedCloneService {
     if (signal.aborted) return this.#cancelRun(requestId, { quarantine: true });
     this.#transition(requestId, "verifying", {});
     this.#recordProgress(requestId, "verifying");
-    const verification = await this.#verifyStaging(staging.stagingPath, expected, signal);
+    const verification = await this.#verifyStaging(
+      staging.stagingPath,
+      expected,
+      inventory,
+      signal,
+    );
     if (verification.decision === "failed") {
       return this.#fail(requestId, verification.code, { quarantine: true });
     }
@@ -448,7 +546,7 @@ export class ManagedCloneService {
     if (signal.aborted) return this.#cancelRun(requestId, { quarantine: true });
     this.#transition(requestId, "attaching", {});
     this.#recordProgress(requestId, "attaching");
-    const promotion = await this.#inventory.promote(
+    const promotion = await inventory.promote(
       staging.stagingPath,
       initial.destination.destinationPath,
     );
@@ -460,6 +558,7 @@ export class ManagedCloneService {
     const revalidated = await this.#revalidatePromoted(
       promotion.canonicalDestination,
       expected,
+      inventory,
       signal,
     );
     if (!revalidated) return this.#fail(requestId, "revalidation-failed");
@@ -479,6 +578,7 @@ export class ManagedCloneService {
     signal: AbortSignal,
   ): Promise<GithubCloneCommandResponse> {
     const requestId = initial.requestId;
+    const inventory = this.#inventory.forRoot(initial.destination.inventoryPath);
     const expected = {
       nodeId: initial.repository.nodeId,
       owner: initial.repository.owner,
@@ -499,7 +599,7 @@ export class ManagedCloneService {
         classification.kind === "collision" ? classification.code : "destination-collision",
       );
     }
-    if (!(await this.#inventory.isConfined(destinationPath))) {
+    if (!(await inventory.isConfined(destinationPath))) {
       return this.#fail(requestId, "path-confinement");
     }
     if (signal.aborted) return this.#cancelRun(requestId, { quarantine: false });
@@ -651,9 +751,10 @@ export class ManagedCloneService {
   async #verifyStaging(
     stagingPath: string,
     expected: { readonly nodeId: string; readonly owner: string; readonly name: string },
+    inventory: ManagedRepositoryInventory,
     signal: AbortSignal,
   ): Promise<ReturnType<typeof verifyClonedRepository>> {
-    const stagingConfined = await this.#inventory.isConfined(stagingPath);
+    const stagingConfined = await inventory.isConfined(stagingPath);
     const bare = await this.#gitStdout(
       ["-C", stagingPath, "rev-parse", "--is-bare-repository"],
       signal,
@@ -758,9 +859,10 @@ export class ManagedCloneService {
   async #revalidatePromoted(
     canonicalDestination: string,
     expected: { readonly owner: string; readonly name: string },
+    inventory: ManagedRepositoryInventory,
     signal: AbortSignal,
   ): Promise<boolean> {
-    if (!(await this.#inventory.isConfined(canonicalDestination))) return false;
+    if (!(await inventory.isConfined(canonicalDestination))) return false;
     const bare = await this.#gitStdout(
       ["-C", canonicalDestination, "rev-parse", "--is-bare-repository"],
       signal,
@@ -785,12 +887,19 @@ export class ManagedCloneService {
     return result.stdout;
   }
 
+  #inventoryForRequest(requestId: string): ManagedRepositoryInventory {
+    const operation = this.#projection.getByRequestId(requestId);
+    if (operation === undefined) return this.#inventory;
+    return this.#inventory.forRoot(operation.destination.inventoryPath);
+  }
+
   async #fail(
     requestId: string,
     code: GithubCloneFailureCode,
     options: { readonly quarantine?: boolean; readonly remediation?: string } = {},
   ): Promise<GithubCloneCommandResponse> {
-    if (options.quarantine === true) await this.#inventory.quarantine(requestId);
+    if (options.quarantine === true)
+      await this.#inventoryForRequest(requestId).quarantine(requestId);
     const failure: GithubCloneFailure = {
       code,
       ...(options.remediation === undefined ? {} : { remediation: options.remediation }),
@@ -803,7 +912,7 @@ export class ManagedCloneService {
     requestId: string,
     options: { readonly quarantine: boolean },
   ): Promise<GithubCloneCommandResponse> {
-    if (options.quarantine) await this.#inventory.quarantine(requestId);
+    if (options.quarantine) await this.#inventoryForRequest(requestId).quarantine(requestId);
     const cancelled = this.#transition(requestId, "cancelled", {});
     return this.#respondOperation(cancelled);
   }

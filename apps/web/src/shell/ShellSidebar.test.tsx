@@ -77,7 +77,7 @@ describe("ShellSidebar", () => {
         onOpenSettings={vi.fn()}
         onSelectMode={vi.fn()}
         projectSection={<nav aria-label="Projects">Project navigation</nav>}
-        settings={defaultShellSettings()}
+        settings={{ ...defaultShellSettings(), sidebarMoreEnabled: false }}
         workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "work" }}
       />,
     );
@@ -111,7 +111,7 @@ describe("ShellSidebar", () => {
         onOpenSettings={vi.fn()}
         onSelectMode={vi.fn()}
         projectSection={<nav aria-label="Projects">Project navigation</nav>}
-        settings={defaultShellSettings()}
+        settings={{ ...defaultShellSettings(), sidebarMoreEnabled: false }}
         workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
       />,
     );
@@ -273,7 +273,7 @@ describe("ShellSidebar", () => {
         onOpenSettings={vi.fn()}
         onSelectMode={vi.fn()}
         projectSection={<nav aria-label="Projects">Project navigation</nav>}
-        settings={defaultShellSettings()}
+        settings={{ ...defaultShellSettings(), sidebarMoreEnabled: false }}
         workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
       />
     );
@@ -620,6 +620,108 @@ describe("ShellSidebar", () => {
     await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
     await screen.findByRole("menuitem", { name: "Settings" });
     expect(screen.queryByRole("menuitem", { name: "Image generator" })).not.toBeInTheDocument();
+  });
+
+  it("closes the destination rows with a More row that reveals the menu-only ones", async () => {
+    const user = userEvent.setup();
+    const plugins = vi.fn();
+    render(
+      <ShellSidebar
+        codeNavigation={{
+          actions: { "new-code-thread": vi.fn(), automations: vi.fn(), plugins },
+        }}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={null}
+        settings={defaultShellSettings()}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />,
+    );
+
+    const more = screen.getByRole("button", { name: "More destinations" });
+    const newTask = screen.getByRole("button", { name: "New task" });
+    // More is the last destination row: after the rows, before the Project tree.
+    expect(newTask.compareDocumentPosition(more)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    await user.click(more);
+    await user.click(await screen.findByRole("menuitem", { name: "Plugins" }));
+    expect(plugins).toHaveBeenCalledOnce();
+  });
+
+  it("puts Customize sidebar behind the destination rows in the More popup", async () => {
+    const user = userEvent.setup();
+    const onOpenSettings = vi.fn();
+    render(
+      <ShellSidebar
+        codeNavigation={{ actions: { "new-code-thread": vi.fn(), plugins: vi.fn() } }}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={onOpenSettings}
+        onSelectMode={vi.fn()}
+        projectSection={null}
+        settings={defaultShellSettings()}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "More destinations" }));
+    const customize = await screen.findByRole("menuitem", { name: "Customize sidebar" });
+    const plugins = screen.getByRole("menuitem", { name: "Plugins" });
+    expect(plugins.compareDocumentPosition(customize)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    await user.click(customize);
+    expect(onOpenSettings).toHaveBeenCalledWith({
+      section: "appearance",
+      setting: "sidebar-destinations",
+    });
+  });
+
+  it("keeps the More row off and the destinations in the account menu when it is turned off", async () => {
+    const user = userEvent.setup();
+    render(
+      <ShellSidebar
+        codeNavigation={{ actions: { "new-code-thread": vi.fn(), plugins: vi.fn() } }}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={null}
+        settings={{ ...defaultShellSettings(), sidebarMoreEnabled: false }}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "More destinations" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
+    expect(await screen.findByRole("menuitem", { name: "Plugins" })).toBeVisible();
+  });
+
+  it("omits the More row when nothing is left to reveal", () => {
+    render(
+      <ShellSidebar
+        codeNavigation={{ actions: { "new-code-thread": vi.fn() } }}
+        automationsEnabled={false}
+        agentsCenterEnabled={false}
+        artifactLibraryAvailable={false}
+        imageLibraryAvailable={false}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={null}
+        settings={{
+          ...defaultShellSettings(),
+          sidebarDestinations: {
+            order: [],
+            visibility: [{ id: "plugins", visibility: "hidden" }],
+          },
+        }}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "More destinations" })).not.toBeInTheDocument();
   });
 
   it("renders the rows in the customized order", () => {

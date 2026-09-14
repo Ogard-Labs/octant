@@ -752,6 +752,67 @@ describe("ExtensionsSettingsView", () => {
     expect(screen.queryByRole("button", { name: /inspect build helper/i })).toBeNull();
   });
 
+  it("labels npm Agent Plugins catalog entries with the npm source", async () => {
+    const c = client();
+    c.execute = vi.fn(async (command: ExtensionCommand) => {
+      c.calls.push(command);
+      if (command.kind === "search-catalog") {
+        return {
+          kind: "catalog-search-results",
+          entries: [
+            {
+              extensionId: extensionId as never,
+              packageId: packageId as never,
+              slug: "demo-plugin" as never,
+              displayName: "Demo Plugin",
+              version: "1.2.3" as never,
+              digest: digest as never,
+              source: {
+                kind: "catalog",
+                catalogId: "npm-agent-plugins" as never,
+                entryId: "npkg" as never,
+              },
+            },
+          ],
+        } as ExtensionCommandResult;
+      }
+      return { kind: "extension-state-updated", snapshot: installedSnapshot() } as never;
+    }) as never;
+
+    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    fireEvent.click(await findViewButton(/marketplace/i));
+    const search = screen.getByRole("searchbox", { name: /search marketplace/i });
+    fireEvent.change(search, { target: { value: "demo" } });
+    fireEvent.click(screen.getByRole("button", { name: /run search/i }));
+
+    const inspect = await screen.findByRole("button", { name: /inspect demo plugin/i });
+    const card = inspect.closest("li");
+    expect(card).not.toBeNull();
+    expect(card).toHaveTextContent("npm · Agent Plugins");
+    expect(card).toHaveTextContent("v1.2.3");
+  });
+
+  it("names npm Agent Plugin packages in the empty catalog search state", async () => {
+    const c = client();
+    c.execute = vi.fn(async (command: ExtensionCommand) => {
+      c.calls.push(command);
+      if (command.kind === "search-catalog") {
+        return { kind: "catalog-search-results", entries: [] } as ExtensionCommandResult;
+      }
+      return { kind: "extension-state-updated", snapshot: installedSnapshot() } as never;
+    }) as never;
+
+    render(<ExtensionsSettingsView client={c} scope={scope} />);
+    fireEvent.click(await findViewButton(/marketplace/i));
+    const search = screen.getByRole("searchbox", { name: /search marketplace/i });
+    fireEvent.change(search, { target: { value: "nothing" } });
+    fireEvent.click(screen.getByRole("button", { name: /run search/i }));
+
+    expect(
+      await screen.findByText(/npm packages published with the agent-plugin keywords/i),
+    ).toBeInTheDocument();
+  });
+
   it("does not issue install-package when inspection fails and surfaces honest diagnostics", async () => {
     const c = client();
     c.execute = vi.fn(async (command: ExtensionCommand) => {

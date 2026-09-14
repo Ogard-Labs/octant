@@ -158,6 +158,7 @@ import {
   rememberHealthyCreateHost,
 } from "./shell/createHostPreference";
 import { useLaunchSession } from "./shell/useLaunchSession";
+import { adoptLegacySidebarRowProperties } from "./shell/sidebarRowProperties";
 import { WorkspaceView } from "./shell/WorkspaceView";
 import {
   SidebarThreadDragContext,
@@ -247,6 +248,7 @@ import {
   type FirstRunOnboardingOutcome,
 } from "./onboarding/useFirstRunOnboardingController";
 import { projectViewEnvironmentOptionsFromHosts } from "./code/codeProjectViewModel";
+import { projectPullRequestKey } from "./code/CodeProjectPullRequests";
 import { ProjectSidebarSection } from "./projects/ProjectSidebarSection";
 import { OctantButton } from "./ui/base/OctantButton";
 import { useProjectController } from "./projects/useProjectController";
@@ -776,6 +778,20 @@ function LaunchedShell(
     if (!zen.active) return;
     void zen.refreshThreads();
   }, [zen.active, zen.refreshThreads]);
+  // A renderer older than the host-backed setting stored each sidebar view's
+  // row choice in localStorage. Adopt it once, as soon as the host's settings
+  // are in hand: after that a person may have changed the host record, and a
+  // stale local copy must never overwrite it.
+  const adoptedLegacySidebarRowProperties = useRef(false);
+  useEffect(() => {
+    const settings = controller.settings;
+    if (adoptedLegacySidebarRowProperties.current || settings === undefined) return;
+    adoptedLegacySidebarRowProperties.current = true;
+    adoptLegacySidebarRowProperties({
+      current: settings.sidebarRowProperties,
+      updateSettings: (sidebarRowProperties) => controller.updateSettings({ sidebarRowProperties }),
+    });
+  }, [controller.settings, controller.updateSettings]);
   const [createOpen, setCreateOpen] = useState(false);
   const [projectCreateMode, setProjectCreateMode] = useState<OctantMode | undefined>(undefined);
   function openProjectCreate(mode?: OctantMode) {
@@ -819,6 +835,10 @@ function LaunchedShell(
   const [selectedProjectPullRequest, setSelectedProjectPullRequest] = useState<
     CodeProjectPullRequestDetailQuery | undefined
   >();
+  const selectedProjectPullRequestKey =
+    selectedProjectPullRequest === undefined
+      ? undefined
+      : projectPullRequestKey(selectedProjectPullRequest);
   const [workBoardOpen, setWorkBoardOpen] = useState(false);
   const [automationCenterOpen, setAutomationCenterOpen] = useState(false);
   const [agentsCenterOpen, setAgentsCenterOpen] = useState(false);
@@ -1366,6 +1386,16 @@ function LaunchedShell(
     () => readLastSelectedHealthyHostId(),
   );
   const [createHostId, setCreateHostId] = useState<HostId>(() => defaultCreateHostId());
+  // The Create Project dialog's GitHub tab rides the same host-scoped GitHub
+  // clients the composer's "New Project from GitHub repository" uses. Disabled
+  // GitHub contributes no tab, exactly as it contributes no composer row.
+  const projectCreateGithub = useMemo(() => {
+    if (FIRST_PARTY_PLUGINS_EFFECTIVE.get("github-integration") !== true) return undefined;
+    const hostName =
+      hosts.find((host) => String(host.hostId) === String(createHostId))?.displayName ??
+      localHostDisplayName();
+    return { client: githubClient, cloneClient: githubCloneClient, hostName };
+  }, [createHostId, githubCloneClient, githubClient, hosts]);
   // Drop removed hosts from the environments filter before create preselect runs,
   // otherwise a lone removed remote leaves createHostId pointing at nothing.
   useEffect(() => {
@@ -2569,6 +2599,8 @@ function LaunchedShell(
         canvasClient={canvasClient}
         chatClient={chatClient}
         chatReadCursorStore={chatReadCursorStore}
+        codeClient={codeClient}
+        onSelectProjectPullRequest={selectProjectPullRequest}
         onOpenWorkFile={(request) => {
           void controller.openPreview({
             mode: "work",
@@ -2626,6 +2658,7 @@ function LaunchedShell(
         }}
         providerController={providerController}
         serverUrl={props.launch.serverUrl}
+        {...(selectedProjectPullRequestKey === undefined ? {} : { selectedProjectPullRequestKey })}
         {...(sidecarThreadId === undefined ? {} : { sidecarThreadId })}
         subject={{
           mode: dockThread.mode,
@@ -5087,6 +5120,10 @@ function LaunchedShell(
                         }
                       : {})}
                     activityMode={activeMode}
+                    rowProperties={controller.settings.sidebarRowProperties}
+                    onRowPropertiesChange={(sidebarRowProperties) => {
+                      void controller.updateSettings({ sidebarRowProperties });
+                    }}
                     {...(activeProjectId === undefined ? {} : { activeProjectId })}
                     {...(activeMode === "chat" && chatProjectThreadListRequest !== undefined
                       ? { expandProjectThreadsRequest: chatProjectThreadListRequest }
@@ -5290,11 +5327,9 @@ function LaunchedShell(
                       enabled ? "enabled" : "disabled",
                     ),
                 }}
-                {...(selectedProjectPullRequest === undefined
+                {...(selectedProjectPullRequestKey === undefined
                   ? {}
-                  : {
-                      selectedProjectPullRequestKey: `${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`,
-                    })}
+                  : { selectedProjectPullRequestKey })}
                 onCloseWorkBoard={() => setWorkBoardOpen(false)}
                 unreadThreadIds={
                   new Set(
@@ -5616,6 +5651,7 @@ function LaunchedShell(
                       void controller.openCodeThread(threadId, title, undefined, projectId)
                     }
                     onOpenReview={(threadId) => openReviewForThread(String(threadId))}
+                    onSelectPullRequest={selectProjectPullRequestIdentity}
                     onOpenCodeSurface={(kind, threadId, title, terminalId) =>
                       void controller.openCodeSurface(
                         kind === "code-terminal"
@@ -5963,6 +5999,7 @@ function LaunchedShell(
         <ShellDialogHost
           createOpen={createOpen}
           folderBrowseClient={folderBrowseClient}
+          {...(projectCreateGithub === undefined ? {} : { github: projectCreateGithub })}
           hostId={createHostId}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
           mode={projectCreateMode ?? controller.workspace.activeMode}

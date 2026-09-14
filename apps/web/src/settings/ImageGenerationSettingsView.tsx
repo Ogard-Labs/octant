@@ -19,7 +19,7 @@ import { ProviderSettingsList } from "../providers/ProviderSettingsList";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { SettingRow } from "./primitives";
+import { SettingRow, SettingsSection } from "./primitives";
 
 // Matches ImageGenerationCustomSource.label's Schema.maxLength(120): reject
 // here so a too-long label never reaches the replace-settings command that
@@ -80,11 +80,14 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
         </p>
       ) : null}
       {imageProviderSettings}
-      <div className="settings-card-section settings-card-section--open">
+      <SettingsSection
+        title="Custom image sources"
+        description="Connect an OpenAI-compatible image API's provider and model, such as Recraft, to use as a custom image source."
+      >
         <div className="setgroup">
           <SettingRow
-            description="Connect an OpenAI-compatible image API's provider and model, such as Recraft, to use as a custom image source."
             label="Custom image sources"
+            labelledBySection
             scope="app"
             settingId="custom-image-sources"
           >
@@ -146,7 +149,7 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
             )}
           </SettingRow>
         </div>
-      </div>
+      </SettingsSection>
     </section>
   );
 }

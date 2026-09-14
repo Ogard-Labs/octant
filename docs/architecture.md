@@ -400,8 +400,10 @@ Work and Code have server-authoritative thread boards
 (Ready / In progress / Waiting / Done) that cannot be dragged between columns;
 Chat has no board. Code also has a Project-scoped Pull requests workspace that
 lists active open and draft pull requests from authorized connected Code
-Projects. The list is a cached read of a private host-local snapshot: opening it,
-navigating, and ordinary board queries do not call GitHub. GitHub is reached
+Projects. The same cached read backs the right dock's Pull requests tool,
+scoped to the active Code thread's Project. The list is a cached read of a
+private host-local snapshot: opening it, navigating, and ordinary board
+queries do not call GitHub. GitHub is reached
 only by an explicit Refresh all or per-Project refresh, or — for Projects that
 opted in — by a bounded background refresh cadence, all through the installed
 authenticated `gh` CLI. The cadence is a journaled per-Project setting, off by
@@ -437,6 +439,20 @@ resulting thread is ordinary Chat, Work, or Code with no GitHub write-back.
 Disabled GitHub, missing capability, and unauthorized or rate-limited states
 fail closed. See
 [security/github-repository-onboarding-threat-model.md](security/github-repository-onboarding-threat-model.md).
+
+**GitHub repository onboarding.** The managed clone flow turns one confirmed GitHub repository
+into one ordinary Code Project: the composer's Project menu offers "New Project from GitHub
+repository" against the host's managed repository inventory, and the Create Project dialog offers
+a Folder | GitHub source switch whose GitHub side clones into a parent folder the person chooses
+through a host-issued binding receipt (native picker or host folder browser, so a headless host is
+served the same way) plus one folder-name segment. Repositories come from the searchable catalogue
+of what the signed-in `gh` account can reach, or from a pasted link or `owner/name` the renderer
+reduces to owner/name for a fresh server-side `gh api repos/<owner>/<name>` resolution — no clone
+URL is ever a client input. The clone stages on the same filesystem as its destination, verifies
+the staged object's GitHub node identity and origin before any working tree is materialized,
+promotes atomically without overwriting, and only then issues the one-time binding receipt the
+Project is created from; everything is journaled, cancels cleanly, quarantines instead of
+deleting, and reconciles after restart without re-running work.
 
 Code also has a host-scoped Linear issues workspace contributed by the
 bundled-off Linear plugin as `sidebar.destination` `linear-issues`, Code mode
@@ -779,8 +795,8 @@ contribution points are rejected. The renderer contribution registry resolves
 `preview.viewer`, `appearance.preset`, and `board.view` from the effective
 first-party catalog; it never decides availability. `apps/server/src/extensions`
 owns the runtime: package store, inspector, marketplaces (skills.sh, npm,
-curated catalog), Agent Plugins ingestion, supervisor, MCP session manager,
-and skill discovery.
+curated catalog, npm Agent Plugins), Agent Plugins ingestion, supervisor, MCP
+session manager, and skill discovery.
 
 **Activation ladder.** `resolveExtensionActivation` resolves each component to
 an effective state with a structured reason. A component is active only when
@@ -800,8 +816,13 @@ prompt, schema, tool, route, model, or capability.
   `~/.agents/skills/`.
 - Marketplace network is on user action: curated catalog search is in-memory;
   inspect/install fetches the pinned GitHub tree; standalone skill search
-  queries skills.sh and npm with the typed text. Opening Settings does not
-  fetch a catalog.
+  queries skills.sh and npm with the typed text; Agent Plugins search queries
+  npm with the publisher-adopted `agent-plugin` / `agent-plugins` keywords,
+  validates every candidate at listing time (bounded tarball bytes, canonical
+  root `plugin.json` `$schema`, unsafe-path and link rejection), lists the real
+  identity and digest, and resolves exactly the listed `name@version` from
+  cache. A candidate that fails validation is not listed. Opening Settings does
+  not fetch a catalog.
 - A structured mention cannot install, trust, enable, or elevate anything.
 - Core capabilities (browser/computer use, tests, Apple validation, approvals,
   memory, subagents) are app-managed and provider-neutral; no core capability

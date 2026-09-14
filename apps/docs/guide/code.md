@@ -160,13 +160,17 @@ Project memory lives on the Code Project Overview. Navigator opens from the
 bottom-left profile and Settings control without changing the active Project
 or thread. The right sidebar is a compact launcher when empty and a tool strip
 when open. It can host Side Chat, Browser, Files, Canvas, Plan when this thread
-has a current plan artifact, Delivery when a target is enabled, Changes,
+has a current plan artifact, Pull requests for the thread's Project, Delivery
+when a target is enabled, Changes,
 Terminal, Tests, or iOS Simulator instead of replacing the Code thread. iOS
 Simulator is absent until Octant has found an Xcode project and Apple
 toolchain. When it is open it shows a live frame for that thread's destination,
 or an honest unavailable or stale-after-restart state when the host cannot
 attach one. Hiding Browser, Terminal, or Simulator does not stop the
 server-owned session.
+**Pull requests** lists the active Project's open and draft requests from the
+cached snapshot and opens a selected row in Review in the same dock; the
+request named on a pane tab opens there too.
 The sidebar follows the pane that last received pointer or keyboard input.
 Each thread remembers its open tools and selected tool.
 

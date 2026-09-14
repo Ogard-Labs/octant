@@ -838,10 +838,12 @@ describe("WorkspaceView pane title facts", () => {
         },
       ],
     };
+    const onSelectPullRequest = vi.fn();
     render(
       <WorkspaceView
         {...base}
         codeController={{ ...(base.codeController as object), navigation, bootstrap } as never}
+        onSelectPullRequest={onSelectPullRequest}
         projects={[project]}
       />,
     );
@@ -853,6 +855,17 @@ describe("WorkspaceView pane title facts", () => {
     expect(chip).toHaveAttribute("data-tone", "open");
     expect(chip).toHaveAttribute("data-checks", "failing");
     expect(within(header).getByText("Octant/fix/validation")).toBeVisible();
+
+    // The pane tab's mention is a control, not a mark: it hands the shell the
+    // request's full identity so the dock can open it.
+    const user = userEvent.setup();
+    await user.click(within(header).getByRole("button", { name: "Pull request #917 · Open" }));
+    expect(onSelectPullRequest).toHaveBeenCalledWith({
+      projectId: ids.project,
+      repositoryOwner: "acme",
+      repositoryName: "octant",
+      number: 917,
+    });
   });
 });
 

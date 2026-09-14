@@ -137,6 +137,7 @@ distilled successor of the earlier long-form design specifications.
 | [0123](0123-explicit-github-pull-request-merges.md) | Explicit GitHub pull-request merges are fresh and approval-gated | Accepted |
 | [0124](0124-built-in-zen-backgrounds-are-workspace-grounds.md) | Built-in Zen backgrounds are workspace grounds | Accepted |
 | [0125](0125-project-provider-data-policy.md) | Projects may restrict providers by residency labels | Accepted |
+| [0126](0126-seatbelt-trust-evaluation-and-launcher-symlinks.md) | Seatbelt opens trust evaluation and launcher symlink metadata | Accepted |
 
 ## Adding an ADR
 

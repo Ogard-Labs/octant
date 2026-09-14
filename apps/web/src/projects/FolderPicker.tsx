@@ -24,6 +24,11 @@ export interface FolderPickerProps {
     selection?: { readonly initializeGit?: boolean },
   ) => void;
   readonly onCancel: () => void;
+  /** Overrides the mode-derived title, e.g. when browsing for a clone destination. */
+  readonly title?: string;
+  readonly hint?: string;
+  /** Defaults to on for Code; the clone destination browser has no Git checkbox. */
+  readonly showGitInit?: boolean;
 }
 
 type PickerStatus = "loading" | "ready" | "error";
@@ -134,11 +139,12 @@ export function FolderPicker(props: FolderPickerProps) {
     props.onCancel();
   }
 
-  const title = props.mode === "work" ? "Add Work folder" : "Add Code folder";
+  const title = props.title ?? (props.mode === "work" ? "Add Work folder" : "Add Code folder");
   const hint =
-    props.mode === "code"
+    props.hint ??
+    (props.mode === "code"
       ? "Navigate into a folder, then Select the directory to bind."
-      : "Navigate into a folder, then Select the confined project root.";
+      : "Navigate into a folder, then Select the confined project root.");
 
   return (
     <OctantDialog className="folder-picker" label="Add folder" onClose={requestClose} open>
@@ -274,7 +280,7 @@ export function FolderPicker(props: FolderPickerProps) {
           {errorMessage}
         </p>
       )}
-      {props.mode === "code" ? (
+      {props.mode === "code" && props.showGitInit !== false ? (
         <label className="folder-picker__git-init" htmlFor="folder-picker-initialize-git">
           <OctantCheckbox
             checked={initializeGit}

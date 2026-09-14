@@ -11,13 +11,8 @@ import {
   parseSkillMarkdown,
 } from "./skillPackageBuilder";
 import { SkillsShMarketplace } from "./skillsShMarketplace";
-import {
-  NpmSkillMarketplace,
-  decodeNpmEntryId,
-  encodeNpmEntryId,
-  extractSkillMarkdownFromTarball,
-  verifyNpmTarballIntegrity,
-} from "./npmSkillMarketplace";
+import { NpmSkillMarketplace, extractSkillMarkdownFromTarball } from "./npmSkillMarketplace";
+import { decodeNpmEntryId, encodeNpmEntryId, verifyNpmTarballIntegrity } from "./npmRegistry";
 import { createCompositeSkillMarketplace } from "./compositeSkillMarketplace";
 import { inspectExtensionPackage } from "./packageInspector";
 import {
@@ -715,6 +710,11 @@ describe("npm skill marketplace", () => {
     const compact = encodeNpmEntryId(longName);
     expect(compact.length).toBeLessThanOrEqual(96);
     expect(decodeNpmEntryId(compact)).toBe(longName);
+  });
+
+  it("refuses a package name the registry request would rename", () => {
+    // A third segment has no npm meaning; encoding it would request `@a/b`.
+    expect(() => encodeNpmEntryId("@a/b/c")).toThrow(/npm package name is invalid/i);
   });
 
   it("extracts SKILL.md plus sibling support files and rejects host escapes", () => {

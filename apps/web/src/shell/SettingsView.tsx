@@ -75,7 +75,7 @@ import { VoiceSettingsView } from "../settings/VoiceSettingsView";
 import { ImageGenerationSettingsView } from "../settings/ImageGenerationSettingsView";
 import { ComputerUseSettingsView } from "../settings/ComputerUseSettingsView";
 import { UserProfileSettingsView } from "../profile/UserProfileSettingsView";
-import { SettingRow, SettingsSection } from "../settings/primitives";
+import { SettingGroup, SettingRow, SettingsSection } from "../settings/primitives";
 import {
   AppBackgroundSettings,
   type BackgroundImageLibrary,
@@ -593,13 +593,11 @@ function ActiveSectionContent({
     case "harness":
       return props.nativeHarnessClient !== undefined ? (
         <div id="settings-harness">
-          <section className="settings-card-section settings-card-section--open">
-            <p className="native-harness-panel__lead">
-              Models connected through API keys or local endpoints appear under{" "}
-              <strong>Octant</strong> in the model picker. Assign models to roles below. Child-agent
-              permissions are managed in Agents.
-            </p>
-          </section>
+          <p className="native-harness-panel__lead">
+            Models connected through API keys or local endpoints appear under{" "}
+            <strong>Octant</strong> in the model picker. Assign models to roles below. Child-agent
+            permissions are managed in Agents.
+          </p>
           <NativeHarnessRoutingPanel
             client={props.nativeHarnessClient}
             hostId={LOCAL_HOST_ID}
@@ -1020,6 +1018,9 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
       ) : null}
       <div className="settings-card-section settings-card-section--open">
         <h2>Workspace and reading</h2>
+        <p className="settings-section-note">
+          How much room the sidebar and the conversation take, and what the sidebar shows.
+        </p>
         <div className="setgroup">
           {isAvailable("sidebar-width") ? (
             <SettingRow
@@ -1052,6 +1053,24 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               <SidebarDestinationSettings
                 customization={props.settings.sidebarDestinations}
                 onChange={(sidebarDestinations) => props.onSettingsChange({ sidebarDestinations })}
+              />
+            </SettingRow>
+          ) : null}
+          {isAvailable("sidebar-more") ? (
+            <SettingRow
+              description="Reveal the menu-only destinations and Customize sidebar under a More row at the end of the sidebar navigation. Off keeps them in the account menu."
+              focused={focusedSetting === settingId("sidebar-more")}
+              label="More row in the sidebar"
+              scope="app"
+              settingId="sidebar-more"
+            >
+              <OctantSwitch
+                checked={props.settings.sidebarMoreEnabled}
+                describedBy="sidebar-more-description"
+                label="More row in the sidebar"
+                onCheckedChange={(checked) =>
+                  props.onSettingsChange({ sidebarMoreEnabled: checked })
+                }
               />
             </SettingRow>
           ) : null}
@@ -1275,46 +1294,258 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               />
             </SettingRow>
           ) : null}
-          {isAvailable("app-background") && props.themeController !== undefined ? (
+        </div>
+      </div>
+      {isAvailable("app-background") && props.themeController !== undefined ? (
+        <SettingsSection className="settings-app-background" title="Background">
+          <AppBackgroundSettings
+            background={
+              (props.themeController.draft ?? props.themeController.settings)?.appBackground ??
+              DEFAULT_APP_BACKGROUND
+            }
+            focused={focusedSetting === settingId("app-background")}
+            increasedContrast={
+              (props.themeController.draft ?? props.themeController.settings)?.increasedContrast ===
+              true
+            }
+            library={props.backgroundImageLibrary}
+            onChange={(appBackground) => {
+              void props.themeController?.applyPatch({ appBackground });
+            }}
+          />
+        </SettingsSection>
+      ) : null}
+      <SettingsSection
+        description="Choose which facts a thread row in the sidebar shows. A hidden property is omitted rather than left as a gap."
+        title="Sidebar thread rows"
+      >
+        <SettingGroup label="Projects rows">
+          {isAvailable("sidebar-projects-branch") ? (
             <SettingRow
-              description="A theme pattern, built-in Zen background, or photo behind the start screen, or behind everything."
-              focused={focusedSetting === settingId("app-background")}
-              label="Background"
+              description="Show the branch or worktree a thread works in."
+              focused={focusedSetting === settingId("sidebar-projects-branch")}
+              label="Branch"
               scope="app"
-              settingId="app-background"
+              settingId="sidebar-projects-branch"
             >
-              <AppBackgroundSettings
-                background={
-                  (props.themeController.draft ?? props.themeController.settings)?.appBackground ??
-                  DEFAULT_APP_BACKGROUND
+              <OctantSwitch
+                checked={props.settings.sidebarRowProperties.projects.branch}
+                label="Branch on Projects rows"
+                onCheckedChange={(branch) =>
+                  props.onSettingsChange({
+                    sidebarRowProperties: {
+                      ...props.settings.sidebarRowProperties,
+                      projects: { ...props.settings.sidebarRowProperties.projects, branch },
+                    },
+                  })
                 }
-                increasedContrast={
-                  (props.themeController.draft ?? props.themeController.settings)
-                    ?.increasedContrast === true
-                }
-                library={props.backgroundImageLibrary}
-                onChange={(appBackground) => {
-                  void props.themeController?.applyPatch({ appBackground });
-                }}
               />
             </SettingRow>
           ) : null}
-        </div>
-      </div>
-      {props.themeController === undefined ? null : (
-        <div className="settings-card-section settings-card-section--open">
-          <h2>Reset</h2>
-          <div className="setgroup">
-            {/* The section says Reset and the description says what returns
-                to its default, so the row and its button each said "Reset
-                appearance" a second and third time. */}
+          {isAvailable("sidebar-projects-pull-request") ? (
             <SettingRow
-              description="Return every appearance setting to its default."
-              label="Appearance"
+              description="Show the number and state of a thread's linked pull request."
+              focused={focusedSetting === settingId("sidebar-projects-pull-request")}
+              label="Pull request"
               scope="app"
-              settingId="reset-appearance"
+              settingId="sidebar-projects-pull-request"
             >
+              <OctantSwitch
+                checked={props.settings.sidebarRowProperties.projects.pullRequest}
+                label="Pull request on Projects rows"
+                onCheckedChange={(pullRequest) =>
+                  props.onSettingsChange({
+                    sidebarRowProperties: {
+                      ...props.settings.sidebarRowProperties,
+                      projects: {
+                        ...props.settings.sidebarRowProperties.projects,
+                        pullRequest,
+                      },
+                    },
+                  })
+                }
+              />
+            </SettingRow>
+          ) : null}
+          {isAvailable("sidebar-projects-last-updated") ? (
+            <SettingRow
+              description="Show how long ago a thread last moved."
+              focused={focusedSetting === settingId("sidebar-projects-last-updated")}
+              label="Last updated"
+              scope="app"
+              settingId="sidebar-projects-last-updated"
+            >
+              <OctantSwitch
+                checked={props.settings.sidebarRowProperties.projects.lastUpdated}
+                label="Last updated on Projects rows"
+                onCheckedChange={(lastUpdated) =>
+                  props.onSettingsChange({
+                    sidebarRowProperties: {
+                      ...props.settings.sidebarRowProperties,
+                      projects: {
+                        ...props.settings.sidebarRowProperties.projects,
+                        lastUpdated,
+                      },
+                    },
+                  })
+                }
+              />
+            </SettingRow>
+          ) : null}
+          {isAvailable("sidebar-projects-status") ? (
+            <SettingRow
+              description="Show a thread's working, waiting, or unread mark."
+              focused={focusedSetting === settingId("sidebar-projects-status")}
+              label="Status"
+              scope="app"
+              settingId="sidebar-projects-status"
+            >
+              <OctantSwitch
+                checked={props.settings.sidebarRowProperties.projects.status}
+                label="Status on Projects rows"
+                onCheckedChange={(status) =>
+                  props.onSettingsChange({
+                    sidebarRowProperties: {
+                      ...props.settings.sidebarRowProperties,
+                      projects: { ...props.settings.sidebarRowProperties.projects, status },
+                    },
+                  })
+                }
+              />
+            </SettingRow>
+          ) : null}
+        </SettingGroup>
+        <SettingGroup label="Activity rows">
+          {isAvailable("sidebar-activity-project") ? (
+            <SettingRow
+              description="Show the Project a thread belongs to."
+              focused={focusedSetting === settingId("sidebar-activity-project")}
+              label="Project"
+              scope="app"
+              settingId="sidebar-activity-project"
+            >
+              <OctantSwitch
+                checked={props.settings.sidebarRowProperties.activity.project}
+                label="Project on Activity rows"
+                onCheckedChange={(project) =>
+                  props.onSettingsChange({
+                    sidebarRowProperties: {
+                      ...props.settings.sidebarRowProperties,
+                      activity: { ...props.settings.sidebarRowProperties.activity, project },
+                    },
+                  })
+                }
+              />
+            </SettingRow>
+          ) : null}
+          {isAvailable("sidebar-activity-branch") ? (
+            <SettingRow
+              description="Show the branch or worktree a thread works in."
+              focused={focusedSetting === settingId("sidebar-activity-branch")}
+              label="Branch"
+              scope="app"
+              settingId="sidebar-activity-branch"
+            >
+              <OctantSwitch
+                checked={props.settings.sidebarRowProperties.activity.branch}
+                label="Branch on Activity rows"
+                onCheckedChange={(branch) =>
+                  props.onSettingsChange({
+                    sidebarRowProperties: {
+                      ...props.settings.sidebarRowProperties,
+                      activity: { ...props.settings.sidebarRowProperties.activity, branch },
+                    },
+                  })
+                }
+              />
+            </SettingRow>
+          ) : null}
+          {isAvailable("sidebar-activity-pull-request") ? (
+            <SettingRow
+              description="Show the number and state of a thread's linked pull request."
+              focused={focusedSetting === settingId("sidebar-activity-pull-request")}
+              label="Pull request"
+              scope="app"
+              settingId="sidebar-activity-pull-request"
+            >
+              <OctantSwitch
+                checked={props.settings.sidebarRowProperties.activity.pullRequest}
+                label="Pull request on Activity rows"
+                onCheckedChange={(pullRequest) =>
+                  props.onSettingsChange({
+                    sidebarRowProperties: {
+                      ...props.settings.sidebarRowProperties,
+                      activity: {
+                        ...props.settings.sidebarRowProperties.activity,
+                        pullRequest,
+                      },
+                    },
+                  })
+                }
+              />
+            </SettingRow>
+          ) : null}
+          {isAvailable("sidebar-activity-last-updated") ? (
+            <SettingRow
+              description="Show how long ago a thread last moved."
+              focused={focusedSetting === settingId("sidebar-activity-last-updated")}
+              label="Last updated"
+              scope="app"
+              settingId="sidebar-activity-last-updated"
+            >
+              <OctantSwitch
+                checked={props.settings.sidebarRowProperties.activity.lastUpdated}
+                label="Last updated on Activity rows"
+                onCheckedChange={(lastUpdated) =>
+                  props.onSettingsChange({
+                    sidebarRowProperties: {
+                      ...props.settings.sidebarRowProperties,
+                      activity: {
+                        ...props.settings.sidebarRowProperties.activity,
+                        lastUpdated,
+                      },
+                    },
+                  })
+                }
+              />
+            </SettingRow>
+          ) : null}
+          {isAvailable("sidebar-activity-status") ? (
+            <SettingRow
+              description="Show a thread's working, waiting, or unread mark."
+              focused={focusedSetting === settingId("sidebar-activity-status")}
+              label="Status"
+              scope="app"
+              settingId="sidebar-activity-status"
+            >
+              <OctantSwitch
+                checked={props.settings.sidebarRowProperties.activity.status}
+                label="Status on Activity rows"
+                onCheckedChange={(status) =>
+                  props.onSettingsChange({
+                    sidebarRowProperties: {
+                      ...props.settings.sidebarRowProperties,
+                      activity: { ...props.settings.sidebarRowProperties.activity, status },
+                    },
+                  })
+                }
+              />
+            </SettingRow>
+          ) : null}
+        </SettingGroup>
+      </SettingsSection>
+      {props.themeController === undefined ? null : (
+        <SettingsSection
+          description="Return every appearance setting to its default."
+          title="Reset"
+        >
+          <div className="setgroup">
+            {/* The section says Reset and its note says what returns to its
+                default, so the row and its button each said "Reset appearance"
+                a second and third time. */}
+            <SettingRow label="Appearance" scope="app" settingId="reset-appearance">
               <OctantButton
+                className="settings-view__action"
                 onClick={() => void props.themeController?.reset()}
                 size="sm"
                 type="button"
@@ -1324,7 +1555,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               </OctantButton>
             </SettingRow>
           </div>
-        </div>
+        </SettingsSection>
       )}
     </section>
   );

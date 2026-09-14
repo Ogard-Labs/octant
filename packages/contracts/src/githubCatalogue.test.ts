@@ -51,6 +51,32 @@ describe("GitHub catalogue contracts", () => {
     ).toMatchObject({ page: { freshness: { status: "stale", staleReason: "rate-limited" } } });
   });
 
+  it("accepts one named repository read with strict identity and a fresh row", () => {
+    expect(
+      decodeGithubCatalogueReadRequest({ kind: "repository", owner: "octant", name: "octant" }),
+    ).toEqual({ kind: "repository", owner: "octant", name: "octant" });
+    for (const owner of ["..", "own/er", ""]) {
+      expect(() =>
+        decodeGithubCatalogueReadRequest({ kind: "repository", owner, name: "repo" }),
+      ).toThrow();
+    }
+    expect(
+      decodeGithubCatalogueReadResponse({
+        kind: "repository",
+        row: repositoryRow,
+        freshness: { status: "fresh" },
+      }),
+    ).toMatchObject({ kind: "repository", row: { nodeId: "R_kgDOG8x1Aa" } });
+    expect(() =>
+      decodeGithubCatalogueReadResponse({
+        kind: "repository",
+        row: repositoryRow,
+        freshness: { status: "fresh" },
+        raw: "{}",
+      }),
+    ).toThrow();
+  });
+
   it("decodes the assigned-work read and its cross-repository page", () => {
     expect(decodeGithubCatalogueReadRequest({ kind: "assigned-work" })).toEqual({
       kind: "assigned-work",

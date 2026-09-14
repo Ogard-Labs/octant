@@ -1822,7 +1822,8 @@ html[data-octant-reduced-motion="true"] .workspace-cross-context-banner--inline 
   margin-right: 6px;
 }
 
-/* The request rides inside the grip with the title, so it drags with it. */
+/* The request rides inside the grip with the title, so it keeps the title's
+   line; its press stops at the chip instead of starting a surface drag. */
 .workspace-pane__pull-request {
   flex: 0 0 auto;
 }
@@ -3052,6 +3053,16 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   font-size: var(--oct-text-sm);
 }
 
+/* The Folder | GitHub source switch sits between the header and the body the
+   chosen side draws, at the enclosed-track segment grammar (0071). */
+.project-dialog__source {
+  margin: var(--oct-space-3) 0 var(--oct-space-4);
+}
+
+.project-dialog__source .segment {
+  flex: 1 1 0;
+}
+
 /* The chooser reads as a field, not as a second submit button: same height,
    border, and radius as the name input directly above it, so the two facts the
    dialog is about sit at the same weight. */
@@ -3125,6 +3136,11 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   justify-content: flex-end;
   gap: var(--oct-space-2);
   margin-top: var(--oct-space-3);
+}
+
+/* The remote folder body leads with its chooser instead of trailing with it. */
+.project-dialog__actions--leading {
+  justify-content: flex-start;
 }
 
 .project-button {
@@ -9313,6 +9329,30 @@ ul.board-col-body {
   grid-column: 1;
   grid-row: auto;
   justify-content: flex-start;
+}
+
+/* The dock lists one thread's Project under the dock's own head: the same rows
+   with the page's outer rhythm tightened to the dock's measure. The dock clips
+   its content, so this root owns the scroll a long Project needs; without it
+   the rows past the dock's height were cut off and unreachable. */
+.code-project-pull-requests[data-presentation="dock"] {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  gap: var(--oct-space-2);
+}
+
+.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__groups {
+  gap: var(--oct-space-4);
+}
+
+.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__project-header {
+  min-height: 32px;
+}
+
+.code-project-pull-requests[data-presentation="dock"] .code-project-pull-requests__row {
+  min-height: 0;
+  padding: var(--oct-space-2) var(--oct-space-1);
 }
 
 .linear-issues {

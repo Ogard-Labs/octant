@@ -55,13 +55,14 @@ describe("WorkFilesPanel", () => {
     );
 
     const made = await screen.findByRole("region", { name: "Made here" });
-    expect(within(made).getByText("summary.docx")).toBeVisible();
+    const authored = within(made).getByTitle("summary.docx");
+    expect(authored).toHaveTextContent("summary.docx");
     // Format and version come from the host's artifact record, never a guess
     // at the extension.
     expect(within(made).getByText("Word · v3 · 2 KB")).toBeVisible();
 
     const folder = screen.getByRole("region", { name: "In this folder" });
-    expect(within(folder).getByText("notes.txt")).toBeVisible();
+    expect(within(folder).getByTitle("notes.txt")).toHaveTextContent("notes.txt");
     expect(within(folder).getByText("research")).toBeVisible();
     expect(within(folder).getByText("Folder")).toBeVisible();
   });
@@ -126,8 +127,23 @@ describe("WorkFilesPanel", () => {
       />,
     );
 
-    expect(await screen.findByText("notes.txt")).toBeVisible();
+    const row = await screen.findByTitle("notes.txt");
+    expect(row).toHaveTextContent("notes.txt");
     expect(screen.queryByRole("button", { name: /notes\.txt/ })).not.toBeInTheDocument();
+  });
+
+  it("shows a nested folder's own name with its parent beside it", async () => {
+    render(
+      <WorkFilesPanel
+        client={client(listing([{ kind: "directory", path: "research/sources" }]))}
+        projectId={projectId}
+        threadId={threadId}
+      />,
+    );
+
+    const row = await screen.findByTitle("research/sources");
+    expect(row).toHaveTextContent("sources");
+    expect(within(row).getByText("research · Folder")).toBeVisible();
   });
 
   it("states no format for a file the folder already held", async () => {

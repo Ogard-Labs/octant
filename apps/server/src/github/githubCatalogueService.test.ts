@@ -73,6 +73,10 @@ function fakePort(overrides: Partial<Record<string, unknown>> = {}) {
       kind: "ok" as const,
       value: issueDetail,
     })),
+    readRepository: vi.fn(async () => ({
+      kind: "ok" as const,
+      value: observationRow,
+    })),
     listPullRequests: vi.fn(async () => ({
       kind: "ok" as const,
       value: { rows: [], hasNextPage: false },
@@ -634,6 +638,81 @@ describe("GithubCatalogueService", () => {
       kind: "unavailable",
       capability: "issues-read",
       reason: "unavailable",
+    });
+  });
+
+  it("resolves one named or pasted repository freshly and remembers it for recents", async () => {
+    const { service: catalogue, port } = service();
+    const response = await catalogue.read(
+      { kind: "repository", owner: "octant", name: "octant" },
+      signal(),
+    );
+    expect(response).toMatchObject({
+      kind: "repository",
+      row: {
+        nodeId: "R_kgDOG8x1Aa",
+        viewerPermission: "admin",
+      },
+      freshness: { status: "fresh" },
+    });
+    if (response.kind !== "repository") throw new Error("expected repository");
+    expect(response.row.capabilities).toContainEqual({ kind: "issues-read", available: true });
+    expect(port.readRepository).toHaveBeenCalledWith(
+      { owner: "octant", name: "octant" },
+      expect.any(AbortSignal),
+    );
+    expect(
+      await catalogue.recordRecentRepository(
+        { kind: "record-recent-repository", nodeId: "R_kgDOG8x1Aa" },
+        signal(),
+      ),
+    ).toMatchObject({ kind: "recent-repositories", rows: [{ nodeId: "R_kgDOG8x1Aa" }] });
+  });
+
+  it("denies a single-repository read without repository-catalogue capability", async () => {
+    const snapshot: GithubAuthenticationSnapshot = {
+      state: "scope-limited",
+      account: { login: "octocat", gitProtocol: "https", scopes: ["repo"] },
+      capabilities: [
+        {
+          kind: "repository-catalogue",
+          available: false,
+          remediation: "repository-catalogue-required",
+        },
+        { kind: "issues-read", available: true },
+        { kind: "pull-requests-read", available: true },
+        { kind: "projects-read", available: true },
+      ],
+    };
+    const { service: catalogue, port } = service({ snapshot });
+    expect(
+      await catalogue.read({ kind: "repository", owner: "octant", name: "octant" }, signal()),
+    ).toEqual({
+      kind: "unavailable",
+      capability: "repository-catalogue",
+      reason: "scope-limited",
+      remediation: "repository-catalogue-required",
+    });
+    expect(port.readRepository).not.toHaveBeenCalled();
+  });
+
+  it("labels a cached single-repository read stale after a later rate-limited fetch", async () => {
+    let clock = 0;
+    let fail = false;
+    const port = fakePort({
+      readRepository: vi.fn(async () =>
+        fail ? { kind: "rate-limited" as const } : { kind: "ok" as const, value: observationRow },
+      ),
+    });
+    const { service: catalogue } = service({ port, now: () => clock });
+    await catalogue.read({ kind: "repository", owner: "octant", name: "octant" }, signal());
+    fail = true;
+    clock += 60_000;
+    expect(
+      await catalogue.read({ kind: "repository", owner: "octant", name: "octant" }, signal()),
+    ).toMatchObject({
+      kind: "repository",
+      freshness: { status: "stale", staleReason: "rate-limited" },
     });
   });
 });

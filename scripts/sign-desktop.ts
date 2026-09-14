@@ -31,6 +31,14 @@ export const SIGNING_ORDER = [
   "Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libffmpeg.dylib",
   "Contents/Frameworks/Electron Framework.framework/Versions/A/Libraries/libvk_swiftshader.dylib",
   "Contents/Frameworks/Electron Framework.framework",
+  // The updater frameworks ship linker-adhoc signatures that strict
+  // verification refuses ("code has no resources but signature indicates they
+  // must be present" at ReactiveObjC), so they are re-signed like every other
+  // nested payload. ShipIt lives inside Squirrel's resources and goes first.
+  "Contents/Frameworks/Mantle.framework",
+  "Contents/Frameworks/ReactiveObjC.framework",
+  "Contents/Frameworks/Squirrel.framework/Versions/A/Resources/ShipIt",
+  "Contents/Frameworks/Squirrel.framework",
   "Contents/Frameworks/Octant Helper.app",
   "Contents/Frameworks/Octant Helper (GPU).app",
   "Contents/Frameworks/Octant Helper (Plugin).app",

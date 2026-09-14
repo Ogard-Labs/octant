@@ -28,10 +28,18 @@ export interface ExtensionPackageResolverPort {
     command: Extract<ExtensionCommand, { readonly kind: "inspect-package" }>,
     signal?: AbortSignal,
   ): Promise<ResolvedExtensionPackage>;
-  searchCatalog?(command: Extract<ExtensionCommand, { readonly kind: "search-catalog" }>): {
-    readonly entries: ReadonlyArray<ExtensionCatalogEntry>;
-    readonly nextCursor?: string;
-  };
+  searchCatalog?(
+    command: Extract<ExtensionCommand, { readonly kind: "search-catalog" }>,
+    signal?: AbortSignal,
+  ):
+    | {
+        readonly entries: ReadonlyArray<ExtensionCatalogEntry>;
+        readonly nextCursor?: string;
+      }
+    | Promise<{
+        readonly entries: ReadonlyArray<ExtensionCatalogEntry>;
+        readonly nextCursor?: string;
+      }>;
 }
 
 export interface ExtensionActivationServicePort {
@@ -73,7 +81,7 @@ export class ExtensionApiService {
       switch (command.kind) {
         case "search-catalog": {
           if (this.#resolver.searchCatalog === undefined) return unsupportedCommand();
-          const result = this.#resolver.searchCatalog(command);
+          const result = await this.#resolver.searchCatalog(command, signal);
           return {
             kind: "catalog-search-results",
             entries: result.entries,

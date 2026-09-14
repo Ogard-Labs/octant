@@ -2044,7 +2044,7 @@ describe("ProviderSettingsView", () => {
     expect(hiddenProps.onHiddenModelsChange).toHaveBeenCalledWith([]);
   });
 
-  it("labels disabled auto-registered providers with detected-host enable copy", () => {
+  it("labels a detected but disabled provider with detected-host enable copy", () => {
     renderExpanded(
       <ProviderSettingsView
         {...fixture({
@@ -2055,16 +2055,7 @@ describe("ProviderSettingsView", () => {
             configuration: { kind: "codex-cli", binaryPath: "/opt/homebrew/bin/codex" },
           }),
           discoverySnapshot: discoverySnapshot({
-            candidates: [
-              {
-                driverKind: "codex",
-                displayName: "Codex CLI",
-                binaryPath: "/opt/homebrew/bin/codex",
-                readiness: "ready",
-                pathSummary: "/opt/homebrew/bin/codex",
-                detectedAt: "2026-07-26T20:00:00.000Z" as never,
-              } as DiscoverySnapshot["candidates"][number],
-            ],
+            candidates: [codexCandidate()],
           }),
         })}
       />,
@@ -2075,7 +2066,7 @@ describe("ProviderSettingsView", () => {
     expect(within(card).getByLabelText("Detected locally")).toBeVisible();
   });
 
-  it("exposes detected-provider enablement without opening Details", () => {
+  it("marks and enables a disabled provider the current scan found", () => {
     renderProviderSettings(
       <ProviderSettingsView
         {...fixture({
@@ -2086,17 +2077,123 @@ describe("ProviderSettingsView", () => {
             configuration: { kind: "codex-cli", binaryPath: "/opt/homebrew/bin/codex" },
           }),
           discoverySnapshot: discoverySnapshot({
-            autoRegisteredInstanceIds: [id],
+            candidates: [codexCandidate()],
           }),
         })}
       />,
     );
 
     const card = screen.getByRole("article", { name: "Detected Codex" });
-    expect(within(card).getByRole("switch", { name: "Enable Detected Codex" })).toBeVisible();
+    expect(within(card).getByLabelText("Detected locally")).toBeVisible();
+    const control = within(card).getByRole("switch", { name: "Enable Detected Codex" });
+    expect(control).toBeVisible();
+    expect(control).not.toHaveAttribute("aria-disabled", "true");
     expect(
       within(card).getByRole("button", { name: "Details for Detected Codex" }),
     ).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("treats a previous auto-registration as history, not as proof the binary is still installed", () => {
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture({
+          instance: provider({ enabled: false }),
+          discoverySnapshot: discoverySnapshot({
+            autoRegisteredInstanceIds: [id],
+            candidates: [],
+          }),
+        })}
+      />,
+    );
+
+    const card = screen.getByRole("article", { name: "Existing CLI" });
+    expect(within(card).queryByLabelText("Detected locally")).toBeNull();
+    const control = within(card).getByRole("switch", { name: "Enable Existing CLI" });
+    expect(control).toHaveAttribute("aria-disabled", "true");
+    expect(control).toHaveAccessibleDescription(/did not find/i);
+  });
+
+  it("refuses to mark or enable a provider from a failed scan's stale candidates", () => {
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture({
+          instance: provider({ enabled: false }),
+          discoverySnapshot: discoverySnapshot({
+            status: "failed",
+            candidates: [opencodeCandidate()],
+          }),
+        })}
+      />,
+    );
+
+    const card = screen.getByRole("article", { name: "Existing CLI" });
+    expect(within(card).queryByLabelText("Detected locally")).toBeNull();
+    const control = within(card).getByRole("switch", { name: "Enable Existing CLI" });
+    expect(control).toHaveAttribute("aria-disabled", "true");
+    expect(control).toHaveAccessibleDescription(/failed/i);
+  });
+
+  it("keeps a binary-backed provider fail-closed until a scan has run", () => {
+    renderProviderSettings(
+      <ProviderSettingsView {...fixture({ instance: provider({ enabled: false }) })} />,
+    );
+
+    const card = screen.getByRole("article", { name: "Existing CLI" });
+    expect(within(card).queryByLabelText("Detected locally")).toBeNull();
+    const control = within(card).getByRole("switch", { name: "Enable Existing CLI" });
+    expect(control).toHaveAttribute("aria-disabled", "true");
+    expect(control).toHaveAccessibleDescription(/has not been scanned/i);
+  });
+
+  it("keeps a manual endpoint provider enable-able without a local detection", () => {
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture({
+          instance: { ...httpProvider(), enabled: false },
+          discoverySnapshot: discoverySnapshot({ candidates: [] }),
+        })}
+      />,
+    );
+
+    const card = screen.getByRole("article", { name: "Private gateway" });
+    expect(within(card).queryByLabelText("Detected locally")).toBeNull();
+    const control = within(card).getByRole("switch", { name: "Enable Private gateway" });
+    expect(control).not.toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("separates providers the scan found from supported providers it did not find", () => {
+    const absent = {
+      ...kiloProvider(),
+      id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000095"),
+    };
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture({ discoverySnapshot: discoverySnapshot({ candidates: [codexCandidate()] }) })}
+        instances={[absent, codexProvider()]}
+      />,
+    );
+
+    const detectedHeading = screen.getByRole("heading", { name: "Detected on this host" });
+    const supportedHeading = screen.getByRole("heading", { name: "Supported, not detected" });
+    const detectedCard = screen.getByRole("article", { name: "Codex local" });
+    const absentCard = screen.getByRole("article", { name: "Kilo local" });
+
+    expect(
+      detectedHeading.compareDocumentPosition(detectedCard) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      detectedCard.compareDocumentPosition(supportedHeading) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      supportedHeading.compareDocumentPosition(absentCard) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    // Reordering must present the stored order the grips edit, not the groups.
+    fireEvent.click(screen.getByRole("button", { name: "Reorder providers" }));
+    expect(screen.queryByRole("heading", { name: "Detected on this host" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Supported, not detected" })).toBeNull();
+    expect(screen.getByRole("article", { name: "Codex local" })).toBeVisible();
+    expect(screen.getByRole("article", { name: "Kilo local" })).toBeVisible();
   });
 
   it("keeps detected Ollama enablement visible after a repeated scan", () => {
@@ -2125,7 +2222,7 @@ describe("ProviderSettingsView", () => {
     expect(within(card).getByRole("switch", { name: "Enable Ollama local" })).toBeVisible();
   });
 
-  it("runs one automatic connection check after enabling a disabled auto-registered provider", async () => {
+  it("runs one automatic connection check after enabling a detected provider", async () => {
     const user = userEvent.setup();
     const props = fixture({
       instance: provider({
@@ -2135,17 +2232,7 @@ describe("ProviderSettingsView", () => {
         configuration: { kind: "codex-cli", binaryPath: "/opt/homebrew/bin/codex" },
       }),
       discoverySnapshot: discoverySnapshot({
-        autoRegisteredInstanceIds: [id],
-        candidates: [
-          {
-            driverKind: "codex",
-            displayName: "Codex CLI",
-            binaryPath: "/opt/homebrew/bin/codex",
-            readiness: "ready",
-            pathSummary: "/opt/homebrew/bin/codex",
-            detectedAt: "2026-07-26T20:00:00.000Z",
-          } as DiscoverySnapshot["candidates"][number],
-        ],
+        candidates: [codexCandidate()],
       }),
     });
     renderExpanded(<ProviderSettingsView {...props} />);
@@ -2167,10 +2254,9 @@ describe("ProviderSettingsView", () => {
       />,
     );
 
-    expect(screen.getByRole("switch", { name: "Enable Existing CLI" })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
+    const control = screen.getByRole("switch", { name: "Enable Existing CLI" });
+    expect(control).toHaveAttribute("aria-disabled", "true");
+    expect(control).toHaveAccessibleDescription(/did not find/i);
     expect(screen.queryByLabelText("Detected locally")).toBeNull();
   });
 
@@ -2786,6 +2872,28 @@ function discoverySnapshot(patch: Partial<DiscoverySnapshot> = {}): DiscoverySna
     status: "completed",
     ...patch,
   });
+}
+
+function codexCandidate(): DiscoverySnapshot["candidates"][number] {
+  return {
+    driverKind: "codex",
+    displayName: "Codex CLI",
+    binaryPath: "/opt/homebrew/bin/codex",
+    readiness: "ready",
+    pathSummary: "/opt/homebrew/bin/codex",
+    detectedAt: "2026-07-26T20:00:00.000Z" as never,
+  } as DiscoverySnapshot["candidates"][number];
+}
+
+function opencodeCandidate(): DiscoverySnapshot["candidates"][number] {
+  return {
+    driverKind: "opencode",
+    displayName: "OpenCode",
+    binaryPath: "/opt/homebrew/bin/opencode",
+    readiness: "ready",
+    pathSummary: "/opt/homebrew/bin/opencode",
+    detectedAt: "2026-07-26T20:00:00.000Z" as never,
+  } as DiscoverySnapshot["candidates"][number];
 }
 
 function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value: T) => void } {

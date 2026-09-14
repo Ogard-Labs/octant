@@ -107,6 +107,12 @@ describe("resolving what the right utility dock shows", () => {
         scope: "thread",
       },
       {
+        id: "pull-requests",
+        label: "Pull requests",
+        modes: ["code"],
+        scope: "thread",
+      },
+      {
         id: "terminal",
         label: "Terminal",
         modes: ["code"],
@@ -172,6 +178,20 @@ describe("resolving what the right utility dock shows", () => {
         connectionState: "connected",
         presentationAvailability: "available",
         savedSurface: "browser",
+      }),
+    ).toEqual({ kind: "closed", reason: "mode-invalid" });
+  });
+
+  it("closes a restored pull-request list on a Work thread instead of promising a list", () => {
+    // A Work Project has no authorized pull-request source, so the tool would
+    // only ever render the dock's "no pull-request source" state there.
+    expect(
+      resolveRightUtilityDockSurface({
+        activeMode: "work",
+        activeThreadId: "30000000-0000-4000-8000-000000000003",
+        connectionState: "connected",
+        presentationAvailability: "available",
+        savedSurface: "pull-requests",
       }),
     ).toEqual({ kind: "closed", reason: "mode-invalid" });
   });

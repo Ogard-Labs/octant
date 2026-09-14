@@ -1,6 +1,11 @@
 import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
 import type { ContextHealth } from "@octant/contracts/context";
-import type { ProjectViewSwitcherPresentation } from "@octant/contracts/shell";
+import {
+  DEFAULT_SIDEBAR_ROW_PROPERTIES,
+  type ProjectViewSwitcherPresentation,
+  type SidebarRowProperties,
+  type SidebarRowPropertyVisibility,
+} from "@octant/contracts/shell";
 import {
   Box,
   Briefcase,
@@ -90,12 +95,9 @@ import {
   SIDEBAR_ROW_PROPERTIES_FOR_VIEW,
   SIDEBAR_ROW_PROPERTY_LABELS,
   SidebarRowPropertiesContext,
-  readSidebarRowProperties,
   sidebarRowPropertiesAll,
   useSidebarRowProperties,
-  writeSidebarRowProperties,
   type SidebarRowPropertyView,
-  type SidebarRowPropertyVisibility,
 } from "../shell/sidebarRowProperties";
 import {
   buildSidebarActivityView,
@@ -259,6 +261,13 @@ export interface ProjectSidebarSectionProps {
   readonly projectViewsEnabled?: boolean;
   readonly projectViewsMode?: ProjectViewMode;
   readonly projectViewSwitcherPresentation?: ProjectViewSwitcherPresentation;
+  /**
+   * Which facts a thread row may show. The host-backed shell settings own the
+   * choice; the sidebar only reads it. Absent keeps each view's defaults.
+   */
+  readonly rowProperties?: SidebarRowProperties;
+  /** Publishes an edited record; only the view the person edited changes. */
+  readonly onRowPropertiesChange?: (next: SidebarRowProperties) => void;
   /** Authoritative host identity for a Project, when the server supplied it. */
   readonly projectViewEnvironments?: ReadonlyMap<string, ProjectViewEnvironment>;
   /** Authoritative host catalog; only these names appear in the filter. */
@@ -292,15 +301,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   const [activityView, setActivityView] = useState(() =>
     readActivityViewEnabled(undefined, globalThis, activityMode),
   );
-  // Both views' choices are held at once: the tree and the feed can reach the
-  // same render — the rested shelves keep tree rows below the feed — so one
-  // "current view" record would hand those shelves the feed's answer.
-  const [rowProperties, setRowProperties] = useState<
-    Readonly<Record<SidebarRowPropertyView, SidebarRowPropertyVisibility>>
-  >(() => ({
-    projects: readSidebarRowProperties("projects"),
-    activity: readSidebarRowProperties("activity"),
-  }));
+  const rowProperties = props.rowProperties ?? DEFAULT_SIDEBAR_ROW_PROPERTIES;
   const searchQuery = props.searchQuery ?? "";
   const searching = searchQuery.trim() !== "";
   // Snoozed and completed threads leave the Project groups for their own
@@ -424,14 +425,6 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   useEffect(() => {
     setActivityView(readActivityViewEnabled(undefined, globalThis, activityMode));
   }, [activityMode]);
-
-  function persistRowProperties(
-    view: SidebarRowPropertyView,
-    next: SidebarRowPropertyVisibility,
-  ): void {
-    setRowProperties((current) => ({ ...current, [view]: next }));
-    writeSidebarRowProperties(view, next);
-  }
 
   function toggleActivityView() {
     setActivityView((current) => {
@@ -571,7 +564,9 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
             }
             filters={currentFilters ?? normalizeProjectViewFilters(undefined)}
             onFiltersChange={persistProjectViewFilters}
-            onRowPropertiesChange={(next) => persistRowProperties(rowPropertyView, next)}
+            onRowPropertiesChange={(next) =>
+              props.onRowPropertiesChange?.({ ...rowProperties, [rowPropertyView]: next })
+            }
             rowProperties={rowProperties[rowPropertyView]}
             rowPropertyView={rowPropertyView}
             environmentOptions={
@@ -1162,9 +1157,9 @@ function CodeProjectViewSwitcher(props: {
   readonly onSelect: (viewId: string) => void;
   readonly filters: ProjectViewFilters;
   readonly onFiltersChange: (filters: ProjectViewFilters) => void;
+  readonly onRowPropertiesChange: (properties: SidebarRowPropertyVisibility) => void;
   readonly rowProperties: SidebarRowPropertyVisibility;
   readonly rowPropertyView: SidebarRowPropertyView;
-  readonly onRowPropertiesChange: (properties: SidebarRowPropertyVisibility) => void;
   readonly environmentOptions: ReadonlyArray<ProjectViewEnvironment>;
   readonly presentation: ProjectViewSwitcherPresentation;
   readonly projectCountFor: (viewId: string) => number;
