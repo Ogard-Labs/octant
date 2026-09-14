@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -235,6 +236,23 @@ describe("shared Seatbelt profile builder", () => {
 
     expect(rules).toContain(seatbeltDenyRule("file-read*", denied));
     expect(rules).not.toContain(seatbeltDenyRule("file-read*", allowed));
+  });
+
+  it("opens Apple trust evaluation only when the launch may reach the network", () => {
+    const root = temporaryRoot();
+    const input = {
+      boundRoot: join(root, "project"),
+      temporaryDirectory: join(root, "tmp"),
+      privateHomeAllowPaths: [] as ReadonlyArray<string>,
+    };
+    const reachable = buildDenyDefaultSeatbeltProfile({ ...input, networkEgress: "allow" });
+    expect(reachable).toContain('(allow mach-lookup (global-name "com.apple.trustd"))');
+    expect(reachable).toContain('(allow mach-lookup (global-name "com.apple.trustd.agent"))');
+    expect(reachable).toContain(seatbeltAllowRule("file-read*", "/System/Library/Keychains"));
+
+    const offline = buildDenyDefaultSeatbeltProfile({ ...input, networkEgress: "none" });
+    expect(offline).not.toContain("mach-lookup");
+    expect(offline).not.toContain("/System/Library/Keychains");
   });
 
   it("wraps a command with sandbox-exec -p profile --", () => {
@@ -562,5 +580,47 @@ describe("host home deny helper defaults", () => {
     const allowed = realpathSync(homedir());
     const rules = privateHomeDenyReadRules({ allowedPaths: [allowed] });
     expect(rules.every((rule) => rule.startsWith("(deny file-read*"))).toBe(true);
+  });
+
+  it("keeps a link that resolves through an allowed directory readable", () => {
+    // A versioned launcher (`~/.local/bin/tool` -> `.../_versions/current/bin/tool`)
+    // is only executable if the kernel can resolve the links on the way, and
+    // resolving a link needs read-metadata on the link itself. The allowed
+    // path is the resolved version directory, so the `current` link is not a
+    // prefix of it and would otherwise be denied.
+    const root = temporaryRoot();
+    const versions = join(root, "versions");
+    const allowedVersion = join(versions, "1.2.3");
+    mkdirSync(join(allowedVersion, "bin"), { recursive: true });
+    const allowedBinary = join(allowedVersion, "bin", "tool");
+    writeFileSync(allowedBinary, "#!/bin/sh\n");
+    symlinkSync("1.2.3", join(versions, "current"));
+    mkdirSync(join(root, "elsewhere"));
+
+    const rules = privateHomeDenyReadRules({
+      allowedPaths: [allowedBinary, allowedVersion, join(root, "bin")],
+      homeDirectory: root,
+      usersDirectory: root,
+    });
+
+    expect(rules).not.toContain(seatbeltDenyRule("file-read*", join(versions, "current")));
+    expect(rules).toContain(seatbeltDenyRule("file-read*", join(root, "elsewhere")));
+  });
+
+  it("keeps a link to a path outside the allowed set denied", () => {
+    const root = temporaryRoot();
+    const allowed = join(root, "allowed");
+    const secrets = join(root, "secrets");
+    mkdirSync(allowed);
+    mkdirSync(secrets);
+    symlinkSync(secrets, join(root, "escape"));
+
+    const rules = privateHomeDenyReadRules({
+      allowedPaths: [allowed],
+      homeDirectory: root,
+      usersDirectory: root,
+    });
+
+    expect(rules).toContain(seatbeltDenyRule("file-read*", join(root, "escape")));
   });
 });

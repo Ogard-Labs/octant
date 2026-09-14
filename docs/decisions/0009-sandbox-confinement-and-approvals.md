@@ -20,7 +20,13 @@ approval categories that stay independent of which provider is running.
   profile builder with a deny-default profile. Reads are scoped to the bound
   root, provider home, runtime directories, and a private temp; writes are
   scoped to provider home and temp, plus the bound root only for non-Plan,
-  non-Chat sessions; the rest of the user's home is enumerated as denied.
+  non-Chat sessions; the rest of the user's home is enumerated as denied. A
+  launch that may reach the network also opens the platform trust-evaluation
+  path — the `trustd` services and the public system root certificates — so a
+  TLS client that verifies through Security.framework can evaluate
+  certificates; `/Library/Keychains` and the rest of the sensitive read set
+  stay denied. A symlink is readable only when its target lies on an allowed
+  path, because resolving a link needs read-metadata on the link itself.
   Missing `sandbox-exec` fails closed as `incompatible`; there is no
   unconfined fallback.
 - Bound roots are exact: the Work Project folder, the Code checkout or

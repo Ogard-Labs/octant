@@ -22,12 +22,13 @@ import {
   existsSync,
   openSync,
   readdirSync,
+  readlinkSync,
   readSync,
   realpathSync,
   statSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, delimiter, dirname, isAbsolute, join, sep } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { buildLinuxConfinementLaunch, DEFAULT_BWRAP_PATH } from "./linuxConfinement";
 import type { OsNetworkEgress } from "./threadEgressPolicy";
 
@@ -315,6 +316,33 @@ function resolveOnSearchPath(program: string, searchPath: string | undefined): s
   return undefined;
 }
 
+/**
+ * Whether the symlink at `link` is a step to an allowed path.
+ *
+ * The kernel resolves a configured binary path through every symlink on it
+ * (a versioned launcher like `~/.local/bin/devin` resolves through
+ * `.../_versions/current`), and resolving a link needs read-metadata on the
+ * link itself. A deny rule on the link therefore made an allowed binary
+ * unlaunchable. Only the link's own target is read, never followed: a link
+ * that points outside the allowed set stays denied, and a broken link
+ * resolves to nothing.
+ */
+function symlinkReachesAllowed(link: string, allowed: ReadonlyArray<string>): boolean {
+  let target: string;
+  try {
+    target = readlinkSync(link);
+  } catch {
+    return false;
+  }
+  const absolute = isAbsolute(target) ? resolve(target) : resolve(dirname(link), target);
+  return allowed.some(
+    (path) =>
+      path === absolute ||
+      path.startsWith(`${absolute}${sep}`) ||
+      absolute.startsWith(`${path}${sep}`),
+  );
+}
+
 export function privateHomeDenyReadRules(
   input: PrivateHomeDenyReadRulesInput,
 ): ReadonlyArray<string> {
@@ -336,8 +364,19 @@ export function privateHomeDenyReadRules(
       const childAllowed = descendants.some(
         (path) => path === child || path.startsWith(`${child}${sep}`),
       );
-      if (!childAllowed) rules.push(seatbeltDenyRule("file-read*", child));
-      else if (entry.isDirectory()) visit(child);
+      if (!childAllowed) {
+        // A symlink that resolves to an allowed path (or to an ancestor of
+        // one) is itself a step the kernel must take to reach it. The
+        // configured binary path is often a launcher link — Devin's
+        // `~/.local/bin/devin` resolves through `_versions/current` — and
+        // resolving a link needs read-metadata on the link. Denying the link
+        // made an allowed binary unlaunchable. Only the link's own target is
+        // read (never followed), so a link to anything outside the allowed
+        // set stays denied and a broken link resolves to nothing.
+        if (!symlinkReachesAllowed(child, allowed)) {
+          rules.push(seatbeltDenyRule("file-read*", child));
+        }
+      } else if (entry.isDirectory()) visit(child);
       if (rules.length > MAX_PRIVATE_DENY_RULES) {
         throw new SeatbeltConfinementError(
           "incompatible",
@@ -412,6 +451,21 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     "(allow signal (target self))",
     "(allow sysctl-read)",
     ...(input.networkEgress === "allow" ? ["(allow network*)"] : []),
+    // TLS clients that verify through Security.framework — Rust's
+    // rustls-platform-verifier, which Devin's CLI uses — need the trust daemon
+    // and the system root certificates. Deny-default otherwise leaves them
+    // unable to evaluate any certificate: the provider starts and negotiates
+    // ACP, then every backend call dies with `OSStatus -26276` and the probe
+    // reports a remote failure. Only public trust material and the trustd XPC
+    // services open; /Library/Keychains stays denied.
+    ...(input.networkEgress === "allow"
+      ? [
+          '(allow mach-lookup (global-name "com.apple.trustd"))',
+          '(allow mach-lookup (global-name "com.apple.trustd.agent"))',
+          seatbeltAllowRule("file-read*", "/System/Library/Keychains"),
+          seatbeltAllowRule("file-read*", "/System/Library/Security"),
+        ]
+      : []),
     ...(input.allowFileReadStar === true ? ["(allow file-read*)"] : []),
     ...denyReadPaths.map((path) => seatbeltDenyRule("file-read*", path)),
     ...privateRules,
