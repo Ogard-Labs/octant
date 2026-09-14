@@ -478,6 +478,30 @@ describe("chat contracts", () => {
     ).toThrow();
   });
 
+  it("decodes a structurally valid answer-chat-turn-question command", () => {
+    const decoded = decodeChatCommand({
+      kind: "answer-chat-turn-question",
+      threadId: ids.thread,
+      turnId: ids.turn,
+      attemptId: ids.attempt,
+      requestId: "q-1",
+      answer: "Approve",
+      expectedVersion: 4,
+    });
+    expect(decoded.kind).toBe("answer-chat-turn-question");
+    expect(() =>
+      decodeChatCommand({
+        kind: "answer-chat-turn-question",
+        threadId: ids.thread,
+        turnId: ids.turn,
+        attemptId: ids.attempt,
+        requestId: "q-1",
+        answer: "   ",
+        expectedVersion: 4,
+      }),
+    ).toThrow();
+  });
+
   it("decodes ChatAttempt with an optional provider resume cursor and rejects invalid cursors", () => {
     const withCursor = decodeChatAttempt({
       ...attemptFixture,
@@ -492,6 +516,35 @@ describe("chat contracts", () => {
       decodeChatAttempt({
         ...attemptFixture,
         resumeCursor: { driverKind: "openai-compatible", value: "" },
+      }),
+    ).toThrow();
+  });
+
+  it("decodes ChatAttempt with a pending provider question and rejects an oversized one", () => {
+    const withQuestion = decodeChatAttempt({
+      ...attemptFixture,
+      pendingQuestion: { requestId: "q-1", prompt: "Which file?", options: ["A", "B"] },
+    });
+    expect(withQuestion.pendingQuestion).toEqual({
+      requestId: "q-1",
+      prompt: "Which file?",
+      options: ["A", "B"],
+    });
+    expect(decodeChatAttempt(attemptFixture).pendingQuestion).toBeUndefined();
+    expect(() =>
+      decodeChatAttempt({
+        ...attemptFixture,
+        pendingQuestion: { requestId: "q-1", prompt: "", options: [] },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeChatAttempt({
+        ...attemptFixture,
+        pendingQuestion: {
+          requestId: "q-1",
+          prompt: "Which file?",
+          options: ["1", "2", "3", "4", "5", "6", "7", "8", "9"],
+        },
       }),
     ).toThrow();
   });

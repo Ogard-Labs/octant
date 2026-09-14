@@ -3,7 +3,7 @@ import type { ChatMessagePart, ChatToolPartStatus } from "@octant/contracts";
 /**
  * Distilled message-part resolution for Octant clients.
  * Prefer structured `parts` when present; otherwise parse body conventions.
- * Shared by mobile now; web/desktop Distilled adoption later.
+ * Shared by mobile and the web chat transcript.
  */
 
 export type MarkdownBlock =
@@ -15,6 +15,9 @@ export type MarkdownBlock =
 const FENCE = /```([^\n`]*)\n([\s\S]*?)```/g;
 const THINKING_TAG = /<thinking>([\s\S]*?)<\/thinking>/gi;
 const REASONING_TAG = /<reasoning>([\s\S]*?)<\/reasoning>/gi;
+// The shorter tag several open models emit inline (GLM, DeepSeek, Qwen) when
+// their reasoning arrives as text rather than a separate channel.
+const THINK_TAG = /<think>([\s\S]*?)<\/think>/gi;
 
 function normalizeStatus(raw: string | undefined): ChatToolPartStatus {
   const value = (raw ?? "").toLowerCase();
@@ -37,7 +40,8 @@ function parseToolMeta(info: string): { name: string; status: ChatToolPartStatus
 
 /**
  * Split a host message body into reasoning / tool / markdown parts.
- * Recognizes ```reasoning|thinking fences, ```tool fences, and <thinking> tags.
+ * Recognizes ```reasoning|thinking fences, ```tool fences, and <thinking>,
+ * <reasoning>, and <think> tags.
  */
 export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePart> {
   if (body.length === 0) return [{ kind: "markdown", text: "" }];
@@ -55,6 +59,14 @@ export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePar
     });
   }
   for (const match of body.matchAll(REASONING_TAG)) {
+    const start = match.index ?? 0;
+    annotated.push({
+      start,
+      end: start + match[0].length,
+      part: { kind: "reasoning", text: (match[1] ?? "").trim() },
+    });
+  }
+  for (const match of body.matchAll(THINK_TAG)) {
     const start = match.index ?? 0;
     annotated.push({
       start,

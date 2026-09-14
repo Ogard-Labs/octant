@@ -24,6 +24,8 @@ import {
   ChatPolicyRejected,
   activeChatTurns,
   chatAttemptAnswered,
+  chatTurnAnsweredAttempt,
+  answerChatTurnQuestion,
   archiveChatThread,
   beginChatTurn,
   changeChatProvider,
@@ -51,6 +53,7 @@ const ids = {
   newSession: decodeProviderSessionId("00000000-0000-4000-8000-000000000000"),
   context: decodeContextManifestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
   newContext: decodeContextManifestId("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+  question: "question-1",
   resumeCursor: decodeProviderResumeCursor({
     driverKind: "openai-compatible",
     value: "opaque-session-reference",
@@ -85,7 +88,10 @@ function makeThread(overrides: Partial<ChatThread> = {}): ChatThread {
 
 function makeAttempt(
   outcome: ChatAttempt["outcome"],
-  options: { readonly resumeCursor?: ChatAttempt["resumeCursor"] } = {},
+  options: {
+    readonly resumeCursor?: ChatAttempt["resumeCursor"];
+    readonly pendingQuestion?: ChatAttempt["pendingQuestion"];
+  } = {},
 ): ChatAttempt {
   return decodeChatAttempt({
     id: ids.attempt,
@@ -99,6 +105,7 @@ function makeAttempt(
     responseRefs: [],
     citationIds: [],
     ...(options.resumeCursor === undefined ? {} : { resumeCursor: options.resumeCursor }),
+    ...(options.pendingQuestion === undefined ? {} : { pendingQuestion: options.pendingQuestion }),
     createdAt: now,
     updatedAt: now,
   });
@@ -352,7 +359,7 @@ describe("chat turn and attempt policy", () => {
     expect(() => beginChatTurn(deleting, input)).toThrow(ChatPolicyRejected);
   });
 
-  it("rejects retry for completed, failed, cancelled, queued, streaming, and waiting attempts", () => {
+  it("rejects retry for cancelled, queued, streaming, and waiting attempts", () => {
     const thread = makeThread();
     const baseRetryInput = {
       turnId: ids.turn,
@@ -364,25 +371,13 @@ describe("chat turn and attempt policy", () => {
       createdAt: now,
     };
 
-    for (const outcome of [
-      "completed",
-      "failed",
-      "cancelled",
-      "queued",
-      "streaming",
-      "waiting",
-      "interrupted",
-    ] as const) {
+    for (const outcome of ["cancelled", "queued", "streaming", "waiting"] as const) {
       const attempt = makeAttempt(outcome);
-      if (outcome === "failed" || outcome === "interrupted") {
-        // handled separately
-        continue;
-      }
       expect(() => retryChatTurn(thread, attempt, baseRetryInput)).toThrow(ChatPolicyRejected);
     }
   });
 
-  it("allows retry only for failed and interrupted attempts", () => {
+  it("allows retry for failed, interrupted, and completed attempts", () => {
     const thread = makeThread();
     const retryInput = {
       turnId: ids.turn,
@@ -394,7 +389,7 @@ describe("chat turn and attempt policy", () => {
       createdAt: now,
     };
 
-    for (const outcome of ["failed", "interrupted"] as const) {
+    for (const outcome of ["failed", "interrupted", "completed"] as const) {
       const attempt = makeAttempt(outcome);
       const retried = retryChatTurn(thread, attempt, retryInput);
       expect(retried.outcome).toBe("queued");
@@ -406,6 +401,62 @@ describe("chat turn and attempt policy", () => {
       expect(retried.responseRefs).toEqual([]);
       expect(retried.citationIds).toEqual([]);
       expect(retried.usage).toBeUndefined();
+    }
+  });
+
+  it("keeps the newest completed attempt as the answer a turn carries onward", () => {
+    const completed: { readonly outcome: string } = { outcome: "completed" };
+    const replaced: { readonly outcome: string } = { outcome: "completed" };
+    const failed: { readonly outcome: string } = { outcome: "failed" };
+    expect(chatTurnAnsweredAttempt({ attempts: [failed, completed] })).toBe(completed);
+    expect(chatTurnAnsweredAttempt({ attempts: [replaced, completed] })).toBe(completed);
+    expect(chatTurnAnsweredAttempt({ attempts: [completed, replaced] })).toBe(replaced);
+    expect(chatTurnAnsweredAttempt({ attempts: [failed] })).toBeUndefined();
+    expect(chatTurnAnsweredAttempt({ attempts: [] })).toBeUndefined();
+  });
+
+  it("answers an open question and puts the attempt back to work", () => {
+    const attempt = makeAttempt("waiting", {
+      pendingQuestion: { requestId: ids.question, prompt: "Proceed?", options: ["Yes", "No"] },
+    });
+    const answered = answerChatTurnQuestion(attempt, {
+      turnId: ids.turn,
+      attemptId: ids.attempt,
+      requestId: ids.question,
+      answer: "Yes",
+      answeredAt: later,
+    });
+    expect(answered.outcome).toBe("streaming");
+    expect(answered.pendingQuestion).toBeUndefined();
+    expect(answered.answeredQuestions).toEqual([
+      {
+        requestId: ids.question,
+        prompt: "Proceed?",
+        options: ["Yes", "No"],
+        answer: "Yes",
+        answeredAt: later,
+      },
+    ]);
+  });
+
+  it("refuses an answer that names no open question", () => {
+    const waiting = makeAttempt("waiting", {
+      pendingQuestion: { requestId: ids.question, prompt: "Proceed?", options: [] },
+    });
+    const silent = makeAttempt("waiting");
+    const completed = makeAttempt("completed", {
+      pendingQuestion: { requestId: ids.question, prompt: "Proceed?", options: [] },
+    });
+    for (const attempt of [waiting, completed, silent]) {
+      expect(() =>
+        answerChatTurnQuestion(attempt, {
+          turnId: ids.turn,
+          attemptId: ids.attempt,
+          requestId: "another-question",
+          answer: "Yes",
+          answeredAt: later,
+        }),
+      ).toThrow(ChatPolicyRejected);
     }
   });
 
@@ -454,6 +505,8 @@ describe("chat turn and attempt policy", () => {
       outcome: "waiting",
       updatedAt: later,
     });
+    const resumed = transitionChatAttempt(waiting, { outcome: "streaming", updatedAt: later });
+    expect(resumed.outcome).toBe("streaming");
     const interrupted = transitionChatAttempt(waiting, {
       outcome: "interrupted",
       updatedAt: later,

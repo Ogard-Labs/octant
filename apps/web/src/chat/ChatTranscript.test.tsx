@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { decodeChatThreadView } from "@octant/contracts/chat";
 import { decodeThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
@@ -501,6 +501,242 @@ describe("ChatTranscript", () => {
 
     expect(onRetryAttempt).toHaveBeenCalledWith(ids.turn, ids.firstAttempt);
     expect(screen.queryByRole("button", { name: /Retry cancelled/i })).not.toBeInTheDocument();
+  });
+
+  it("offers regenerate on a completed attempt and routes it through the server", async () => {
+    const onRetryAttempt = vi.fn();
+    const user = userEvent.setup();
+    render(<ChatTranscript onRetryAttempt={onRetryAttempt} view={viewFixture()} />);
+
+    await user.click(screen.getByRole("button", { name: "Regenerate response" }));
+
+    expect(onRetryAttempt).toHaveBeenCalledWith(ids.turn, ids.secondAttempt);
+  });
+
+  it("shows no regenerate affordance for attempts that did not complete", () => {
+    const view = viewFixture({
+      turns: [
+        {
+          ...viewFixture().turns[0]!,
+          attempts: [
+            { ...viewFixture().turns[0]!.attempts[0]!, outcome: "cancelled" },
+            { ...viewFixture().turns[0]!.attempts[1]!, outcome: "cancelled" },
+          ],
+        },
+      ],
+    });
+    render(<ChatTranscript view={view} />);
+
+    expect(screen.queryByRole("button", { name: "Regenerate response" })).not.toBeInTheDocument();
+  });
+
+  it("says when a reply was regenerated, and only then", () => {
+    const first = viewFixture().turns[0]!.attempts[1]!;
+    const second = {
+      ...first,
+      id: ids.firstAttempt,
+      outcome: "completed",
+      responseRefs: [reference(ids.responseContent2, "e")],
+    };
+    const view = viewFixture({
+      turns: [{ ...viewFixture().turns[0]!, attempts: [first, second] }],
+      contents: [
+        body(ids.userContent, "user", "Please summarize this.", "a"),
+        body(ids.responseContent, "assistant", "First answer.", "b"),
+        body(ids.responseContent2, "assistant", "Second answer.", "e"),
+      ],
+    });
+    render(<ChatTranscript view={view} />);
+
+    expect(screen.getByText("Regenerated")).toBeVisible();
+  });
+
+  it("folds a reply's inline thinking into a collapsed disclosure and keeps the reply readable", async () => {
+    const user = userEvent.setup();
+    const view = viewFixture({
+      turns: [
+        {
+          ...viewFixture().turns[0]!,
+          attempts: [
+            {
+              ...viewFixture().turns[0]!.attempts[1]!,
+              responseRefs: [reference(ids.responseContent, "b")],
+            },
+          ],
+        },
+      ],
+      contents: [
+        body(ids.userContent, "user", "Please summarize this.", "a"),
+        body(
+          ids.responseContent,
+          "assistant",
+          "```reasoning\nWeigh the two sources.\n```\nHere is the summary.",
+          "b",
+        ),
+      ],
+    });
+    render(<ChatTranscript view={view} />);
+
+    const thinking = screen.getByText("Thinking").closest("details");
+    if (!(thinking instanceof HTMLDetailsElement)) {
+      throw new Error("Thinking disclosure is missing.");
+    }
+    expect(thinking.open).toBe(false);
+    // The reasoning stays in the document while closed, so in-page find and
+    // Chromium's find-in-page can reach it.
+    expect(screen.getByText("Weigh the two sources.")).not.toBeVisible();
+    expect(screen.getByText("Here is the summary.")).toBeVisible();
+
+    await user.click(screen.getByText("Thinking"));
+    expect(thinking.open).toBe(true);
+  });
+
+  it("folds a reply's inline tool call into its own collapsed disclosure", () => {
+    const view = viewFixture({
+      turns: [
+        {
+          ...viewFixture().turns[0]!,
+          attempts: [
+            {
+              ...viewFixture().turns[0]!.attempts[1]!,
+              responseRefs: [reference(ids.responseContent, "b")],
+            },
+          ],
+        },
+      ],
+      contents: [
+        body(ids.userContent, "user", "Please summarize this.", "a"),
+        body(
+          ids.responseContent,
+          "assistant",
+          "```tool name=octant_web_research status=done\nquery: octant\n```\nHere is the summary.",
+          "b",
+        ),
+      ],
+    });
+    render(<ChatTranscript view={view} />);
+
+    const tool = screen.getByText("Tool · octant_web_research").closest("details");
+    if (!(tool instanceof HTMLDetailsElement)) {
+      throw new Error("Tool disclosure is missing.");
+    }
+    expect(tool.open).toBe(false);
+    expect(tool).toHaveTextContent("done");
+    expect(tool).toHaveTextContent("query: octant");
+  });
+
+  it("shows an open provider question inline and answers it with the chosen option", async () => {
+    const onAnswerQuestion = vi.fn();
+    const user = userEvent.setup();
+    const view = viewFixture({
+      turns: [
+        {
+          ...viewFixture().turns[0]!,
+          attempts: [
+            {
+              ...viewFixture().turns[0]!.attempts[1]!,
+              outcome: "waiting",
+              pendingQuestion: { requestId: "q1", prompt: "Proceed?", options: ["Yes", "No"] },
+            },
+          ],
+        },
+      ],
+    });
+    render(<ChatTranscript onAnswerQuestion={onAnswerQuestion} view={view} />);
+
+    expect(screen.getByText("Waiting for your answer")).toBeVisible();
+    const question = screen.getByLabelText("Provider question");
+    expect(question).toHaveTextContent("Proceed?");
+    await user.click(within(question).getByRole("button", { name: "Yes" }));
+
+    expect(onAnswerQuestion).toHaveBeenCalledWith({
+      turnId: ids.turn,
+      attemptId: ids.secondAttempt,
+      requestId: "q1",
+      answer: "Yes",
+    });
+  });
+
+  it("answers a provider question with typed text when no option fits", async () => {
+    const onAnswerQuestion = vi.fn();
+    const user = userEvent.setup();
+    const view = viewFixture({
+      turns: [
+        {
+          ...viewFixture().turns[0]!,
+          attempts: [
+            {
+              ...viewFixture().turns[0]!.attempts[1]!,
+              outcome: "waiting",
+              pendingQuestion: { requestId: "q1", prompt: "Proceed?", options: [] },
+            },
+          ],
+        },
+      ],
+    });
+    render(<ChatTranscript onAnswerQuestion={onAnswerQuestion} view={view} />);
+
+    const question = screen.getByLabelText("Provider question");
+    await user.type(within(question).getByLabelText("Answer"), "Go ahead");
+    await user.click(within(question).getByRole("button", { name: "Send answer" }));
+
+    expect(onAnswerQuestion).toHaveBeenCalledWith({
+      turnId: ids.turn,
+      attemptId: ids.secondAttempt,
+      requestId: "q1",
+      answer: "Go ahead",
+    });
+  });
+
+  it("keeps an unanswered question read-only when the host serves no answer route", () => {
+    const view = viewFixture({
+      turns: [
+        {
+          ...viewFixture().turns[0]!,
+          attempts: [
+            {
+              ...viewFixture().turns[0]!.attempts[1]!,
+              outcome: "waiting",
+              pendingQuestion: { requestId: "q1", prompt: "Proceed?", options: ["Yes"] },
+            },
+          ],
+        },
+      ],
+    });
+    render(<ChatTranscript view={view} />);
+
+    expect(screen.getByText("Waiting for your answer")).toBeVisible();
+    expect(screen.queryByLabelText("Provider question")).not.toBeInTheDocument();
+  });
+
+  it("keeps an answered question readable beside the reply", () => {
+    const view = viewFixture({
+      turns: [
+        {
+          ...viewFixture().turns[0]!,
+          attempts: [
+            {
+              ...viewFixture().turns[0]!.attempts[1]!,
+              answeredQuestions: [
+                {
+                  requestId: "q1",
+                  prompt: "Proceed?",
+                  options: ["Yes", "No"],
+                  answer: "Yes",
+                  answeredAt: now,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    render(<ChatTranscript view={view} />);
+
+    const row = screen.getByLabelText("Answered question");
+    expect(row).toHaveTextContent("Proceed?");
+    expect(row).toHaveTextContent("Answered: Yes");
+    expect(screen.queryByRole("button", { name: "Yes" })).not.toBeInTheDocument();
   });
 
   it("shows the durable pool route receipt for a fallback-selected turn", () => {

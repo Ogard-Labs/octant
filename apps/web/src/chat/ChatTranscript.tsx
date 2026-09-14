@@ -1,8 +1,10 @@
 import type {
   ChatAttempt,
   ChatAttemptOutcome,
+  ChatAttemptAnsweredQuestion,
   ChatContentBody,
   ChatContentReference,
+  ChatMessagePart,
   ChatThreadView,
   ChatTurnId,
   ChatTurnRouteDecision,
@@ -10,14 +12,24 @@ import type {
 } from "@octant/contracts/chat";
 import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import { activeChatTurns } from "@octant/domain/chat-policy";
+import { resolveChatMessageParts } from "@octant/domain/chat-message-parts";
 import type { PickerGroup } from "@octant/domain";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import { TurnHeader, TurnTime, turnWorkedFor } from "../transcript/TurnHeader";
-import { memo, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
+import { ChevronRight, CircleCheck } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
+import { ProviderQuestionRow } from "../transcript/ProviderQuestionRow";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
@@ -29,8 +41,22 @@ export interface ChatTranscriptProps {
   readonly view: ChatThreadView;
   /** Connection state is separate from a durable attempt outcome. */
   readonly connectionStatus?: "connected" | "disconnected";
-  /** Retries are intentionally available only for failed and interrupted attempts. */
+  /**
+   * Runs an attempt again: a failed or interrupted attempt retries, and a
+   * completed one regenerates. The server decides what the attempt allows.
+   */
   readonly onRetryAttempt?: (turnId: ChatTurnId, attemptId: ChatAttemptId) => void;
+  /**
+   * Answers a question a running attempt asked and is blocked on. Absent when
+   * the surface cannot answer, which keeps the question read-only instead of
+   * offering a control nothing would deliver.
+   */
+  readonly onAnswerQuestion?: (input: {
+    readonly turnId: ChatTurnId;
+    readonly attemptId: ChatAttemptId;
+    readonly requestId: string;
+    readonly answer: string;
+  }) => void;
   /** Sends the revised message to the server, which decides whether to accept it. */
   readonly onEditTurn?: (turnId: ChatTurnId, prompt: string) => void;
   /** Starts a second thread carrying the conversation through this turn. */
@@ -338,6 +364,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   attempt={attempt}
                   contentById={contentById}
                   key={attempt.id}
+                  onAnswerQuestion={props.onAnswerQuestion}
                   onQuoteSelection={props.onQuoteSelection}
                   onRetryAttempt={props.onRetryAttempt}
                   previousAttempt={turn.attempts[index - 1]}
@@ -469,6 +496,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
   readonly attempt: ChatAttempt;
   readonly citations: ChatThreadView["citations"];
   readonly contentById: ReadonlyMap<string, ChatContentBody>;
+  readonly onAnswerQuestion: ChatTranscriptProps["onAnswerQuestion"];
   readonly onQuoteSelection: ChatTranscriptProps["onQuoteSelection"];
   readonly onRetryAttempt: ChatTranscriptProps["onRetryAttempt"];
   readonly previousAttempt: ChatAttempt | undefined;
@@ -483,6 +511,9 @@ const AttemptBlock = memo(function AttemptBlock(props: {
       ? undefined
       : responseContents.map((content) => content!.body).join("");
   const canRetry = props.attempt.outcome === "failed" || props.attempt.outcome === "interrupted";
+  // A completed attempt may run again: the person is asking for a different
+  // answer to the same prompt. The server decides whether the turn may.
+  const canRegenerate = props.attempt.outcome === "completed" && props.onRetryAttempt !== undefined;
   const canQuote =
     props.onQuoteSelection !== undefined &&
     props.attempt.outcome === "completed" &&
@@ -502,9 +533,17 @@ const AttemptBlock = memo(function AttemptBlock(props: {
           at={props.attempt.updatedAt}
           copyValue={responseBody}
           outcome={props.attempt.outcome}
+          {...(props.attempt.pendingQuestion === undefined
+            ? {}
+            : { label: "Waiting for your answer" })}
           {...(props.providerGroups === undefined
             ? {}
             : { provider: providerModelLabel(props.providerGroups, props.attempt) })}
+          {...(canRegenerate && props.onRetryAttempt !== undefined
+            ? {
+                onRegenerate: () => props.onRetryAttempt?.(props.attempt.turnId, props.attempt.id),
+              }
+            : {})}
           {...(() => {
             const workedFor = turnWorkedFor(
               props.attempt.outcome,
@@ -528,19 +567,38 @@ const AttemptBlock = memo(function AttemptBlock(props: {
         )}
         {props.attempt.responseRefs.length === 0 ? null : responseBody === undefined ? (
           <p role="alert">Response content is unavailable.</p>
-        ) : canQuote ? (
-          <QuoteableAssistantBody
-            body={responseBody}
-            onQuote={(text) => props.onQuoteSelection?.({ turnId: props.attempt.turnId, text })}
-            rootId={`chat-quote-${String(props.attempt.id)}`}
-          />
         ) : (
-          <ChatRichText body={responseBody} />
+          <AssistantResponse
+            attempt={props.attempt}
+            canQuote={canQuote}
+            onQuoteSelection={props.onQuoteSelection}
+            responseBody={responseBody}
+          />
         )}
         {props.attempt.outcome === "failed" ? (
           <SupportCorrelationControl correlationId={String(props.attempt.id)} />
         ) : null}
         {props.citations.length > 0 ? <CitationList citations={props.citations} /> : null}
+        {props.attempt.pendingQuestion === undefined ||
+        props.onAnswerQuestion === undefined ? null : (
+          <ProviderQuestionRow
+            onAnswer={(answer) =>
+              props.onAnswerQuestion?.({
+                turnId: props.attempt.turnId,
+                attemptId: props.attempt.id,
+                requestId: props.attempt.pendingQuestion!.requestId,
+                answer,
+              })
+            }
+            options={props.attempt.pendingQuestion.options}
+            prompt={props.attempt.pendingQuestion.prompt}
+          />
+        )}
+        {(props.attempt.answeredQuestions ?? []).length === 0
+          ? null
+          : props.attempt.answeredQuestions!.map((question) => (
+              <AnsweredQuestionRow key={question.requestId} question={question} />
+            ))}
         {canRetry && props.onRetryAttempt !== undefined ? (
           <OctantButton
             onClick={() => props.onRetryAttempt?.(props.attempt.turnId, props.attempt.id)}
@@ -556,13 +614,95 @@ const AttemptBlock = memo(function AttemptBlock(props: {
 });
 
 /**
+ * One reply as its distilled parts. A reply with no reasoning or tool parts
+ * renders exactly as it always has; the moment the body carries thinking, it
+ * folds into a quiet disclosure so the answer stays the thing a person reads.
+ */
+function AssistantResponse(props: {
+  readonly attempt: ChatAttempt;
+  readonly canQuote: boolean;
+  readonly onQuoteSelection: ChatTranscriptProps["onQuoteSelection"];
+  readonly responseBody: string;
+}) {
+  const parts = useMemo(
+    () => resolveChatMessageParts({ role: "assistant", body: props.responseBody }),
+    [props.responseBody],
+  );
+  const rootId = `chat-quote-${String(props.attempt.id)}`;
+  const folded = parts.some((part) => part.kind === "reasoning" || part.kind === "tool");
+  if (!folded && !props.canQuote) return <ChatRichText body={props.responseBody} />;
+  const rendered = (
+    <div className="chat-transcript__parts">
+      {parts.map((part, index) => (
+        <AssistantResponsePart key={`${part.kind}:${String(index)}`} part={part} />
+      ))}
+    </div>
+  );
+  if (!props.canQuote) return rendered;
+  return (
+    <QuoteableAssistantBody
+      onQuote={(text) => props.onQuoteSelection?.({ turnId: props.attempt.turnId, text })}
+      rootId={rootId}
+    >
+      {rendered}
+    </QuoteableAssistantBody>
+  );
+}
+
+function AssistantResponsePart(props: { readonly part: ChatMessagePart }) {
+  const part = props.part;
+  if (part.kind === "tool") {
+    return (
+      <details className="thinking">
+        <summary aria-label={`Tool · ${part.name}`}>
+          <ChevronRight aria-hidden="true" className="chev" size={14} strokeWidth={2} />
+          <span>{`Tool · ${part.name}`}</span>
+          <span>{part.status}</span>
+        </summary>
+        <div className="thinking-body">{part.summary}</div>
+      </details>
+    );
+  }
+  if (part.kind === "reasoning") {
+    return (
+      <details className="thinking">
+        <summary aria-label="Thinking">
+          <ChevronRight aria-hidden="true" className="chev" size={14} strokeWidth={2} />
+          <span>Thinking</span>
+        </summary>
+        <div className="thinking-body">{part.text}</div>
+      </details>
+    );
+  }
+  return <ChatRichText body={part.text} />;
+}
+
+/**
+ * A question the provider asked and the person answered, kept so the exchange
+ * the reply grew from stays readable after the turn moves on.
+ */
+function AnsweredQuestionRow(props: { readonly question: ChatAttemptAnsweredQuestion }) {
+  return (
+    <div aria-label="Answered question" className="approval-row approval-row--request" role="group">
+      <CircleCheck aria-hidden="true" size={14} strokeWidth={1.8} />
+      <span className="approval-row__text">
+        {props.question.prompt}
+        <span className="approval-row__detail">Answered: {props.question.answer}</span>
+      </span>
+    </div>
+  );
+}
+
+/**
  * Finished assistant prose that offers "Add to chat" when the user selects
- * text. The selection becomes a composer chip, not pasted draft text.
+ * text. The selection becomes a composer chip, not pasted draft text. The
+ * children carry whatever the attempt renders — one plain reply or a reply
+ * with its reasoning folded out of the way.
  */
 function QuoteableAssistantBody(props: {
-  readonly body: string;
   readonly rootId: string;
   readonly onQuote: (text: string) => void;
+  readonly children: ReactNode;
 }) {
   const [offer, setOffer] = useState<{ readonly text: string } | undefined>(undefined);
 
@@ -599,7 +739,7 @@ function QuoteableAssistantBody(props: {
 
   return (
     <div className="chat-transcript__quoteable" id={props.rootId}>
-      <ChatRichText body={props.body} />
+      {props.children}
       {offer === undefined ? null : (
         <div className="chat-transcript__quote-offer">
           <OctantButton
@@ -689,12 +829,14 @@ function resolvedContent(
 }
 
 function handoffLabel(previous: ChatAttempt | undefined, current: ChatAttempt): string | undefined {
+  if (previous === undefined) return undefined;
   if (
-    previous === undefined ||
-    (previous.providerInstanceId === current.providerInstanceId &&
-      previous.modelId === current.modelId)
+    previous.providerInstanceId === current.providerInstanceId &&
+    previous.modelId === current.modelId
   ) {
-    return undefined;
+    // The provider did not change, so the only way a second attempt follows a
+    // completed one is a regeneration; the person asked for a new answer.
+    return previous.outcome === "completed" ? "Regenerated" : undefined;
   }
   return previous.modelId === current.modelId
     ? "Provider handoff · provider changed"

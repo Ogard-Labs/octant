@@ -442,6 +442,15 @@
   position: relative;
 }
 
+/* A reply rendered as its distilled parts: thinking folds into the shared
+   `.thinking` register above, and the blocks keep one grid of spacing so a
+   folded reply reads like one document, not stacked unrelated cards. */
+.chat-transcript__parts {
+  display: grid;
+  gap: var(--oct-space-3);
+  max-width: 72ch;
+}
+
 .chat-transcript__quote-offer {
   display: flex;
   justify-content: flex-end;

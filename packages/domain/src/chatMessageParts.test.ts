@@ -26,6 +26,20 @@ describe("resolveChatMessageParts", () => {
     expect(parts[0]).toEqual({ kind: "reasoning", text: "Consider the host first." });
     expect(parts[1]).toMatchObject({ kind: "markdown" });
   });
+
+  it("parses think tags that models emit inline as reasoning", () => {
+    const parts = parseChatMessageBody("<think>Weighing the two options.</think>The short answer.");
+    expect(parts).toEqual([
+      { kind: "reasoning", text: "Weighing the two options." },
+      { kind: "markdown", text: "The short answer." },
+    ]);
+  });
+
+  it("leaves a reply without reasoning parts as one markdown part", () => {
+    expect(parseChatMessageBody("Just prose, no tags.")).toEqual([
+      { kind: "markdown", text: "Just prose, no tags." },
+    ]);
+  });
 });
 
 describe("parseMarkdownBlocks", () => {

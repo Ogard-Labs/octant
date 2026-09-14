@@ -44,7 +44,6 @@ import {
 } from "../composer/composerThreadDraftStore";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
@@ -77,6 +76,7 @@ import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import { providerLimitWindowLabel } from "../providers/providerLimitWindow";
 import { TurnHeader, TurnTime, type TurnHeaderOutcome } from "../transcript/TurnHeader";
+import { ProviderQuestionRow } from "../transcript/ProviderQuestionRow";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
@@ -1377,8 +1377,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 summary={request.summary}
               />
             ) : (
-              <ProviderInputPrompt
+              <ProviderQuestionRow
                 key={request.requestId}
+                className="code-thread-workspace__provider-request"
                 onAnswer={(response) =>
                   void props.controller.answerProviderRequest({
                     kind: "input",
@@ -1945,51 +1946,6 @@ function ProviderApprovalPrompt(props: {
         </OctantButton>
       </div>
     </div>
-  );
-}
-
-function ProviderInputPrompt(props: {
-  readonly prompt: string;
-  readonly options: ReadonlyArray<string>;
-  readonly onAnswer: (response: string) => void;
-}) {
-  const [answer, setAnswer] = useState("");
-  const trimmed = answer.trim();
-  return (
-    <form
-      aria-label="Provider question"
-      className="approval-row approval-row--request code-thread-workspace__provider-request"
-      noValidate
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (trimmed.length > 0) props.onAnswer(trimmed);
-      }}
-    >
-      <CirclePause aria-hidden="true" size={14} strokeWidth={1.8} />
-      <span className="approval-row__text">{props.prompt}</span>
-      <div className="approval-row__actions">
-        {props.options.map((option) => (
-          <OctantButton
-            key={option}
-            onClick={() => props.onAnswer(option)}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            {option}
-          </OctantButton>
-        ))}
-      </div>
-      <OctantInput
-        aria-label="Answer"
-        onChange={(event) => setAnswer(event.target.value)}
-        placeholder="Type an answer"
-        value={answer}
-      />
-      <OctantButton disabled={trimmed.length === 0} size="sm" type="submit">
-        Send answer
-      </OctantButton>
-    </form>
   );
 }
 

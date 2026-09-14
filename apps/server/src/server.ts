@@ -653,7 +653,7 @@ import {
   activeChatTurns,
   authorizeCanvasInventoryAccess,
   canonicalizeWorkRelativePath,
-  chatAttemptAnswered,
+  chatTurnAnsweredAttempt,
   decidesCodeEffectsByApproval,
   defaultShellSettings,
   formatThreadMentionContext,
@@ -7975,19 +7975,19 @@ export function admittedParentChatContext(
   };
   for (const turn of activeChatTurns(view.turns)) {
     admit("user-message", bodies.get(String(turn.userMessageRef.contentId)));
-    for (const attempt of turn.attempts) {
-      // Skipped before the block budget is spent, not after: an abandoned
-      // fragment that reached `blocks` would occupy a slot the cap below then
-      // charged for, pushing one of the parent's real exchanges out of the
-      // window. A child briefed with a partial reply answers from text the
-      // parent never accepted, and after a retry it would see the abandoned
-      // fragment and the answer side by side with nothing to tell them apart.
-      // No block kind can mark text as partial, so an unfinished attempt
-      // contributes nothing; the turn's prompt is still admitted above.
-      if (!chatAttemptAnswered(attempt)) continue;
-      for (const reference of attempt.responseRefs) {
-        admit("assistant-message", bodies.get(String(reference.contentId)));
-      }
+    // Admitted before the block budget is spent, not after: an abandoned
+    // fragment that reached `blocks` would occupy a slot the cap below then
+    // charged for, pushing one of the parent's real exchanges out of the
+    // window. A child briefed with a partial reply answers from text the
+    // parent never accepted, and after a retry it would see the abandoned
+    // fragment and the answer side by side with nothing to tell them apart.
+    // No block kind can mark text as partial, so an unfinished attempt
+    // contributes nothing, and a regeneration's replaced answer contributes
+    // nothing the same way; the turn's prompt is still admitted above.
+    const attempt = chatTurnAnsweredAttempt(turn);
+    if (attempt === undefined) continue;
+    for (const reference of attempt.responseRefs) {
+      admit("assistant-message", bodies.get(String(reference.contentId)));
     }
   }
   return blocks.slice(-MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS);

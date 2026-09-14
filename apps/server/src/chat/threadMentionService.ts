@@ -29,8 +29,8 @@ import {
 } from "@octant/contracts";
 import {
   activeChatTurns,
-  chatAttemptAnswered,
   boundThreadMentionTranscript,
+  chatTurnAnsweredAttempt,
   rankThreadMentionCandidates,
   sideChatTitle,
 } from "@octant/domain";
@@ -449,24 +449,24 @@ export function createChatThreadMentionDirectory(input: {
         if (prompt !== undefined && prompt.trim().length > 0) {
           entries.push({ role: "user", text: truncateEntry(prompt), occurredAt: turn.createdAt });
         }
-        for (const attempt of turn.attempts) {
-          // Same honesty rule the Work and Code directories below apply: a
-          // mention hands the conversation to another model, and after a retry
-          // an abandoned fragment would reach it side by side with the answer,
-          // indistinguishable. The transcript entry carries no way to mark text
-          // as partial, so an unanswered attempt contributes nothing rather
-          // than an unlabelled fragment; the prompt still rides along, as it
-          // does for an unfinished Work or Code turn.
-          if (!chatAttemptAnswered(attempt)) continue;
-          for (const reference of attempt.responseRefs) {
-            const response = bodies.get(String(reference.contentId));
-            if (response === undefined || response.trim().length === 0) continue;
-            entries.push({
-              role: "assistant",
-              text: truncateEntry(response),
-              occurredAt: attempt.updatedAt,
-            });
-          }
+        // Same honesty rule the Work and Code directories below apply: a
+        // mention hands the conversation to another model, and after a retry
+        // an abandoned fragment would reach it side by side with the answer,
+        // indistinguishable. The transcript entry carries no way to mark text
+        // as partial, so an unanswered attempt contributes nothing rather
+        // than an unlabelled fragment, and a regeneration's replaced answer
+        // contributes nothing the same way — the prompt still rides along,
+        // as it does for an unfinished Work or Code turn.
+        const attempt = chatTurnAnsweredAttempt(turn);
+        if (attempt === undefined) continue;
+        for (const reference of attempt.responseRefs) {
+          const response = bodies.get(String(reference.contentId));
+          if (response === undefined || response.trim().length === 0) continue;
+          entries.push({
+            role: "assistant",
+            text: truncateEntry(response),
+            occurredAt: attempt.updatedAt,
+          });
         }
       }
       return entries;

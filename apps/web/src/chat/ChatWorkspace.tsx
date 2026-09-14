@@ -1124,6 +1124,20 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               return { value: undefined, base: baseFromResult(result) };
             }).catch(() => undefined);
           }}
+          onAnswerQuestion={({ turnId, attemptId, requestId, answer }) => {
+            void enqueueThreadCommand(async (previous) => {
+              const result = await props.controller.execute({
+                kind: "answer-chat-turn-question",
+                threadId: view.thread.id,
+                expectedVersion: queuedVersion(previous),
+                turnId,
+                attemptId,
+                requestId,
+                answer,
+              });
+              return { value: undefined, base: baseFromResult(result) };
+            }).catch(() => undefined);
+          }}
           view={view}
         />
       </div>

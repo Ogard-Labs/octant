@@ -2806,6 +2806,31 @@ describe("admittedParentChatContext", () => {
     ]);
   });
 
+  it("admits only the newest answer after a regeneration, never both answers", () => {
+    const blocks = admittedParentChatContext(
+      view({
+        turns: [
+          {
+            id: "turn-1",
+            userMessageRef: { contentId: "c1" },
+            createdAt: "2026-08-15T10:00:00.000Z",
+            attempts: [attempt("completed", "c2"), attempt("completed", "c3")],
+          },
+        ],
+        contents: [
+          { contentId: "c1", body: "Which service paged first?" },
+          { contentId: "c2", body: "The replaced first answer" },
+          { contentId: "c3", body: "Billing paged first." },
+        ],
+      }),
+    );
+
+    expect(blocks).toEqual([
+      { kind: "user-message", text: "Which service paged first?" },
+      { kind: "assistant-message", text: "Billing paged first." },
+    ]);
+  });
+
   it("admits a completed exchange, and never the branch an edit superseded", () => {
     const blocks = admittedParentChatContext(
       view({

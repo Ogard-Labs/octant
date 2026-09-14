@@ -1,4 +1,14 @@
-import { Ban, Check, Circle, CircleAlert, CircleX, Clock3, Copy, LoaderCircle } from "lucide-react";
+import {
+  Ban,
+  Check,
+  Circle,
+  CircleAlert,
+  CircleX,
+  Clock3,
+  Copy,
+  LoaderCircle,
+  RotateCcw,
+} from "lucide-react";
 
 import { OctantIconButton } from "../ui/base/OctantButton";
 import { copyText } from "./TurnActionMenu";
@@ -28,6 +38,8 @@ export interface TurnHeaderProps {
   /** When the turn last changed, ISO 8601. */
   readonly at?: string;
   readonly copyValue?: string | undefined;
+  /** Runs the attempt again; offered only when the host exposes the command. */
+  readonly onRegenerate?: (() => void) | undefined;
   /** Why the turn failed, stopped, or waits, in the sanitized words the host gives. */
   readonly reason?: string;
 }
@@ -101,7 +113,11 @@ export function TurnHeader(props: TurnHeaderProps) {
         </span>
         {props.at === undefined ? null : (
           <span className="turn-header__time">
-            <TurnTime at={props.at} copyValue={props.copyValue} />
+            <TurnTime
+              at={props.at}
+              copyValue={props.copyValue}
+              {...(props.onRegenerate === undefined ? {} : { onRegenerate: props.onRegenerate })}
+            />
           </span>
         )}
       </header>
@@ -118,7 +134,11 @@ export function TurnHeader(props: TurnHeaderProps) {
  * one time treatment the turn header also uses at its end. Renders nothing
  * for a timestamp the host did not give in a form a clock can read.
  */
-export function TurnTime(props: { readonly at: string; readonly copyValue?: string | undefined }) {
+export function TurnTime(props: {
+  readonly at: string;
+  readonly copyValue?: string | undefined;
+  readonly onRegenerate?: (() => void) | undefined;
+}) {
   const label = turnTimeLabel(props.at);
   if (label === undefined) return null;
   return (
@@ -126,6 +146,16 @@ export function TurnTime(props: { readonly at: string; readonly copyValue?: stri
       <time className="turn-time" dateTime={props.at} title={turnTimeTitle(props.at)}>
         {label}
       </time>
+      {props.onRegenerate === undefined ? null : (
+        <OctantIconButton
+          label="Regenerate response"
+          onClick={props.onRegenerate}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <RotateCcw aria-hidden="true" size={14} />
+        </OctantIconButton>
+      )}
       {props.copyValue === undefined || props.copyValue.length === 0 ? null : (
         <OctantIconButton
           label="Copy message"

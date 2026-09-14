@@ -119,7 +119,7 @@ import {
   activeChatTurns,
   archiveChatThread,
   beginChatTurn,
-  chatAttemptAnswered,
+  chatTurnAnsweredAttempt,
   chatTurnsThrough,
   changeChatProvider,
   changeChatResearch,
@@ -1091,6 +1091,10 @@ export class ChatService {
           return await this.#resumeTurn(command, executionContext);
         case "interrupt-chat-turn":
           return await this.#interruptTurn(command);
+        case "answer-chat-turn-question":
+          return await this.#withThreadAdmission(command.threadId, () =>
+            this.#answerTurnQuestion(command),
+          );
         case "delete-chat-thread":
           return await this.#withThreadAdmission(command.threadId, () =>
             this.#requestDeletion(command),
@@ -2411,7 +2415,11 @@ export class ChatService {
           message: "Chat turn is not part of the active conversation.",
         });
       }
-      if (attempt.outcome !== "failed" && attempt.outcome !== "interrupted") {
+      if (
+        attempt.outcome !== "failed" &&
+        attempt.outcome !== "interrupted" &&
+        attempt.outcome !== "completed"
+      ) {
         throw new ChatServiceError(
           decodeChatFailure({
             category: "invalid",
@@ -2637,6 +2645,49 @@ export class ChatService {
       ],
     });
     return { kind: "attempt-updated", attempt: cancelled };
+  }
+
+  /**
+   * Answers the question a running attempt asked. The runner owns the attempt,
+   * so the answer is delivered through its channel and the returned attempt is
+   * the one it journalled — not a transition this service performs twice.
+   */
+  async #answerTurnQuestion(
+    command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "answer-chat-turn-question" }>,
+  ): Promise<ChatCommandResult> {
+    const thread = this.#requireActiveThread(command.threadId);
+    this.#assertExpectedThreadVersion(thread, command.expectedVersion);
+    const view = this.#requireThreadView(command.threadId);
+    const turn = view.turns.find((candidate) => String(candidate.id) === String(command.turnId));
+    const attempt = turn?.attempts.find(
+      (candidate) => String(candidate.id) === String(command.attemptId),
+    );
+    if (
+      attempt === undefined ||
+      String(attempt.turnId) !== String(command.turnId) ||
+      attempt.outcome !== "waiting" ||
+      attempt.pendingQuestion === undefined ||
+      String(attempt.pendingQuestion.requestId) !== String(command.requestId)
+    ) {
+      throw new ChatServiceError({
+        category: "invalid",
+        message: "Chat attempt has no open question by that identity.",
+      });
+    }
+    const answered = await this.#turnRunner.deliverQuestionAnswer({
+      attemptId: String(command.attemptId),
+      requestId: String(command.requestId),
+      answer: command.answer,
+    });
+    if (answered === undefined) {
+      // The turn is not running in this host: its provider session is gone,
+      // so the question can no longer be answered on it.
+      throw new ChatServiceError({
+        category: "unavailable",
+        message: "The provider is no longer running this turn; interrupt it and ask again.",
+      });
+    }
+    return { kind: "attempt-updated", attempt: answered };
   }
 
   async #requestDeletion(
@@ -3806,47 +3857,48 @@ export class ChatService {
                 { kind: "user-message", text: user.body },
               ),
             ];
-      for (const attempt of turn.attempts) {
-        // Skipped before the text is read, sized, or costed, so an abandoned
-        // reply never occupies budget the plan then charges for — it would
-        // push one of the thread's real exchanges into compaction to pay for
-        // text the thread never accepted. This context is the thread's own
-        // next turn, so a fragment admitted here is not briefed once but fed
-        // back on every turn that follows, and after a retry it stands beside
-        // the real answer with nothing to tell them apart. No block kind can
-        // mark text as partial, so an attempt that failed, was interrupted or
-        // cancelled, or has not finished arriving contributes nothing; the
-        // turn's prompt is still admitted above. The compacted-source keys
-        // above deliberately still cover every attempt, so this skip cannot
-        // change which material counts as already compacted and make the
-        // thread pay for that maintenance a second time.
-        if (!chatAttemptAnswered(attempt)) continue;
-        const assistantText = attempt.responseRefs
-          .map(requireContent)
-          .map((content) => content.body)
-          .join("");
-        if (assistantText.trim().length === 0) continue;
-        const assistantSource = {
-          kind: "message",
-          referenceId: `attempt:${attempt.id}`,
-        } as const;
-        const assistantTokens = Math.max(16, Math.ceil(assistantText.length / 4));
-        const compactedAssistant = compactedEntry(assistantSource, assistantText, assistantTokens);
-        entries.push(
-          compactedAssistant ??
-            contextEntry(
-              this.#contextEntry(
-                thread,
-                "conversation",
-                assistantText,
-                assistantTokens,
-                "compressible",
-                assistantSource,
-              ),
-              { kind: "assistant-message", text: assistantText },
+      // Admitted before the text is read, sized, or costed, so an abandoned
+      // reply never occupies budget the plan then charges for — it would
+      // push one of the thread's real exchanges into compaction to pay for
+      // text the thread never accepted. This context is the thread's own
+      // next turn, so a fragment admitted here is not briefed once but fed
+      // back on every turn that follows, and after a retry it stands beside
+      // the real answer with nothing to tell them apart. No block kind can
+      // mark text as partial, so an attempt that failed, was interrupted or
+      // cancelled, or has not finished arriving contributes nothing, and a
+      // regeneration's replaced answer contributes nothing the same way: the
+      // journal keeps both, the conversation carries the newest answer. The
+      // turn's prompt is still admitted above. The compacted-source keys
+      // above deliberately still cover every attempt, so this skip cannot
+      // change which material counts as already compacted and make the
+      // thread pay for that maintenance a second time.
+      const attempt = chatTurnAnsweredAttempt(turn);
+      if (attempt === undefined) return entries;
+      const assistantText = attempt.responseRefs
+        .map(requireContent)
+        .map((content) => content.body)
+        .join("");
+      if (assistantText.trim().length === 0) return entries;
+      const assistantSource = {
+        kind: "message",
+        referenceId: `attempt:${attempt.id}`,
+      } as const;
+      const assistantTokens = Math.max(16, Math.ceil(assistantText.length / 4));
+      const compactedAssistant = compactedEntry(assistantSource, assistantText, assistantTokens);
+      entries.push(
+        compactedAssistant ??
+          contextEntry(
+            this.#contextEntry(
+              thread,
+              "conversation",
+              assistantText,
+              assistantTokens,
+              "compressible",
+              assistantSource,
             ),
-        );
-      }
+            { kind: "assistant-message", text: assistantText },
+          ),
+      );
       return entries;
     });
     const memoryEntries =
