@@ -94,130 +94,159 @@ export function ComputerUseSettingsView(props: {
   };
   return (
     <section aria-label="Computer use" id="settings-computer-use">
-      <p className="provider-settings__field-guidance">
-        Add <strong>@Computer</strong> to a task to use this bundled plugin with a supported
-        provider.
-      </p>
       <div className="settings-card-section settings-card-section--open">
         <h2>Plugin</h2>
-        <SettingRow
-          settingId="computer-use-enabled"
-          label="Computer use"
-          description="Allow tasks to request access to applications on this Mac."
-          scope="host"
-        >
-          <OctantSwitch
-            label="Enable Computer use"
-            describedBy="computer-use-enabled-description"
-            checked={props.settings.enabled}
-            disabled={busy}
-            onCheckedChange={(enabled) =>
-              props.onSettingsChange({ computerUse: { ...props.settings, enabled } })
-            }
-          />
-        </SettingRow>
+        <p className="settings-section-note">
+          Add <strong>@Computer</strong> to a task to use this bundled plugin with a supported
+          provider.
+        </p>
+        <div className="setgroup">
+          <SettingRow
+            settingId="computer-use-enabled"
+            label="Computer use"
+            description="Allow tasks to request access to applications on this Mac."
+            scope="host"
+          >
+            <OctantSwitch
+              label="Enable Computer use"
+              describedBy="computer-use-enabled-description"
+              checked={props.settings.enabled}
+              disabled={busy}
+              onCheckedChange={(enabled) =>
+                props.onSettingsChange({ computerUse: { ...props.settings, enabled } })
+              }
+            />
+          </SettingRow>
+        </div>
       </div>
       <div className="settings-card-section settings-card-section--open">
         <h2>macOS permissions</h2>
-        <SettingRow
-          settingId="computer-use-accessibility"
-          label="Accessibility"
-          description="Allows interaction with controls in an approved application."
-          scope="host"
-        >
-          <span>
-            {status === undefined
-              ? "Not checked"
-              : status.permissions.accessibility
-                ? "Allowed"
-                : "Not allowed"}
-          </span>
-        </SettingRow>
-        <SettingRow
-          settingId="computer-use-screen-recording"
-          label="Screen recording"
-          description="Allows the agent to see the application window it is working in."
-          scope="host"
-        >
-          <span>
-            {status === undefined
-              ? "Not checked"
-              : status.permissions.screenRecording
-                ? "Allowed"
-                : "Not allowed"}
-          </span>
-        </SettingRow>
-        <div className="settings-view__actions">
-          <OctantButton
-            type="button"
-            size="sm"
-            variant="secondary"
-            disabled={busy || !supported || bridge?.requestComputerUsePermissions === undefined}
-            onClick={() => void run(bridge?.requestComputerUsePermissions)}
+        <p className="settings-section-note">
+          Octant asks macOS the first time a task needs one; a refusal can only be changed in System
+          Settings.
+        </p>
+        <div className="setgroup">
+          <SettingRow
+            settingId="computer-use-accessibility"
+            label="Accessibility"
+            description="Allows interaction with controls in an approved application."
+            scope="host"
           >
-            Set up permissions
-          </OctantButton>
-          <OctantButton
-            type="button"
-            size="sm"
-            variant="ghost"
-            disabled={busy || !supported || bridge?.openComputerUsePermissionSettings === undefined}
-            onClick={() => void run(bridge?.openComputerUsePermissionSettings)}
+            <span>
+              {status === undefined
+                ? "Not checked"
+                : status.permissions.accessibility
+                  ? "Allowed"
+                  : "Not allowed"}
+            </span>
+          </SettingRow>
+          <SettingRow
+            settingId="computer-use-screen-recording"
+            label="Screen recording"
+            description="Allows the agent to see the application window it is working in."
+            scope="host"
           >
-            Open System Settings
-          </OctantButton>
-          <OctantButton
-            type="button"
-            size="sm"
-            variant="ghost"
-            disabled={busy || bridge?.getComputerUseStatus === undefined}
-            onClick={() => void run(bridge?.getComputerUseStatus)}
+            <span>
+              {status === undefined
+                ? "Not checked"
+                : status.permissions.screenRecording
+                  ? "Allowed"
+                  : "Not allowed"}
+            </span>
+          </SettingRow>
+          <SettingRow
+            settingId="computer-use-permission-actions"
+            label="Permission setup"
+            description="Review what macOS has granted, or recheck the current state."
+            scope="host"
           >
-            Recheck
-          </OctantButton>
+            <div className="settings-view__actions">
+              <OctantButton
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={busy || !supported || bridge?.requestComputerUsePermissions === undefined}
+                onClick={() => void run(bridge?.requestComputerUsePermissions)}
+              >
+                Set up permissions
+              </OctantButton>
+              <OctantButton
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={
+                  busy || !supported || bridge?.openComputerUsePermissionSettings === undefined
+                }
+                onClick={() => void run(bridge?.openComputerUsePermissionSettings)}
+              >
+                Open System Settings
+              </OctantButton>
+              <OctantButton
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={busy || bridge?.getComputerUseStatus === undefined}
+                onClick={() => void run(bridge?.getComputerUseStatus)}
+              >
+                Recheck
+              </OctantButton>
+            </div>
+          </SettingRow>
         </div>
       </div>
       <div className="settings-card-section settings-card-section--open">
         <h2>Driver and updates</h2>
-        <SettingRow
-          settingId="computer-use-version"
-          label="Installed driver"
-          description="Octant bundles and manages its own copy of CuaDriver."
-          scope="host"
-        >
-          <span>
-            {status?.version === undefined ? "Unavailable" : `CuaDriver ${status.version}`}
-          </span>
-        </SettingRow>
-        <SettingRow
-          settingId="computer-use-automatic-updates"
-          label="Automatic updates"
-          description="Check daily and upgrade after computer-use tasks finish."
-          scope="host"
-        >
-          <OctantSwitch
-            label="Automatically update Computer use"
-            describedBy="computer-use-automatic-updates-description"
-            checked={props.settings.automaticUpdates}
-            disabled={busy}
-            onCheckedChange={(automaticUpdates) =>
-              props.onSettingsChange({ computerUse: { ...props.settings, automaticUpdates } })
-            }
-          />
-        </SettingRow>
-        <div className="settings-view__actions">
-          <OctantButton
-            type="button"
-            size="sm"
-            variant="secondary"
-            disabled={busy || !supported || bridge?.checkComputerUseUpdates === undefined}
-            onClick={() => void run(bridge?.checkComputerUseUpdates)}
+        <p className="settings-section-note">
+          Which driver build Octant runs, and when it looks for a newer one.
+        </p>
+        <div className="setgroup">
+          <SettingRow
+            settingId="computer-use-version"
+            label="Installed driver"
+            description="Octant bundles and manages its own copy of CuaDriver."
+            scope="host"
           >
-            Check for updates
-          </OctantButton>
-          <span role="status">
-            {status === undefined ? "Checking driver…" : updateLabels[status.update]}
-          </span>
+            <span>
+              {status?.version === undefined ? "Unavailable" : `CuaDriver ${status.version}`}
+            </span>
+          </SettingRow>
+          <SettingRow
+            settingId="computer-use-automatic-updates"
+            label="Automatic updates"
+            description="Check daily and upgrade after computer-use tasks finish."
+            scope="host"
+          >
+            <OctantSwitch
+              label="Automatically update Computer use"
+              describedBy="computer-use-automatic-updates-description"
+              checked={props.settings.automaticUpdates}
+              disabled={busy}
+              onCheckedChange={(automaticUpdates) =>
+                props.onSettingsChange({ computerUse: { ...props.settings, automaticUpdates } })
+              }
+            />
+          </SettingRow>
+          <SettingRow
+            settingId="computer-use-update-check"
+            label="Update check"
+            description="Checks again without waiting for the daily routine."
+            scope="host"
+          >
+            <div className="settings-view__actions">
+              <OctantButton
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={busy || !supported || bridge?.checkComputerUseUpdates === undefined}
+                onClick={() => void run(bridge?.checkComputerUseUpdates)}
+              >
+                Check for updates
+              </OctantButton>
+              <span role="status">
+                {status === undefined ? "Checking driver…" : updateLabels[status.update]}
+              </span>
+            </div>
+          </SettingRow>
         </div>
         {status?.activeSessions ? (
           <p className="provider-settings__field-guidance">

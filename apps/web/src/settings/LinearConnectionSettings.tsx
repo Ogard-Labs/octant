@@ -6,7 +6,7 @@ import type {
 } from "@octant/contracts/integration";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { SettingsFactList, SettingsPanel, SettingsState } from "./primitives";
+import { SettingRow, SettingsFactList, SettingsSection, SettingsState } from "./primitives";
 
 export interface LinearConnectionSettingsProps {
   readonly client: IntegrationClient;
@@ -119,7 +119,7 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
       className="linear-settings"
       id="settings-linear"
     >
-      <SettingsPanel title="Workspace" description="Linear authentication on the selected host.">
+      <SettingsSection description="Linear authentication on the selected host." title="Workspace">
         <SettingsFactList
           facts={[
             { label: "State", value: STATE_LABELS[snapshot.state] },
@@ -128,10 +128,10 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
           ]}
         />
         {snapshot.remediation === undefined ? null : (
-          <p className="linear-settings__note">{snapshot.remediation}</p>
+          <p className="settings-section-line">{snapshot.remediation}</p>
         )}
         {authorizationUri === undefined ? null : (
-          <p className="linear-settings__note">
+          <p className="settings-section-line">
             Continue in Linear:{" "}
             <a href={authorizationUri} rel="noreferrer" target="_blank">
               Approve access
@@ -139,61 +139,71 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
             , then refresh the status.
           </p>
         )}
-      </SettingsPanel>
+      </SettingsSection>
 
-      <SettingsPanel
-        title="Connection"
-        description="Connect, reconnect, or remove local credentials."
-      >
-        <div className="linear-settings__controls">
-          {snapshot.state === "unauthorized" ? (
-            <OctantButton
-              disabled={commandBusy || refreshing}
-              onClick={() => void runCommand("setup")}
-              type="button"
-              variant="secondary"
-            >
-              {reconnect ? "Reconnect" : "Connect"}
-            </OctantButton>
-          ) : null}
-          <OctantButton
-            disabled={commandBusy || refreshing}
-            onClick={() => void refresh()}
-            type="button"
-            variant="secondary"
+      <SettingsSection title="Connection">
+        <div className="setgroup">
+          <SettingRow
+            description="Connect, reconnect, or remove local credentials."
+            label="Connection"
+            labelledBySection
+            scope="host"
+            settingId="linear-connection"
           >
-            Refresh status
-          </OctantButton>
-          {connected ? (
-            disconnectArmed ? (
+            <div className="linear-settings__controls">
+              {snapshot.state === "unauthorized" ? (
+                <OctantButton
+                  disabled={commandBusy || refreshing}
+                  onClick={() => void runCommand("setup")}
+                  type="button"
+                  variant="secondary"
+                >
+                  {reconnect ? "Reconnect" : "Connect"}
+                </OctantButton>
+              ) : null}
               <OctantButton
                 disabled={commandBusy || refreshing}
-                onClick={() => void runCommand("logout")}
-                type="button"
-                variant="destructive"
-              >
-                Confirm disconnect
-              </OctantButton>
-            ) : (
-              <OctantButton
-                disabled={commandBusy || refreshing}
-                onClick={() => setDisconnectArmed(true)}
+                onClick={() => void refresh()}
                 type="button"
                 variant="secondary"
               >
-                Disconnect
+                Refresh status
               </OctantButton>
-            )
-          ) : null}
+              {connected ? (
+                disconnectArmed ? (
+                  <OctantButton
+                    disabled={commandBusy || refreshing}
+                    onClick={() => void runCommand("logout")}
+                    type="button"
+                    variant="destructive"
+                  >
+                    Confirm disconnect
+                  </OctantButton>
+                ) : (
+                  <OctantButton
+                    disabled={commandBusy || refreshing}
+                    onClick={() => setDisconnectArmed(true)}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Disconnect
+                  </OctantButton>
+                )
+              ) : null}
+            </div>
+          </SettingRow>
         </div>
         <div className="settings-feedback-slot" aria-live="polite">
           {commandError === undefined ? null : (
             <SettingsState kind="error">{commandError}</SettingsState>
           )}
         </div>
-      </SettingsPanel>
+      </SettingsSection>
 
-      <SettingsPanel title="Advanced">
+      <SettingsSection
+        description="A personal API key is stored in the same host secret store as OAuth tokens, and is never used as an OAuth fallback."
+        title="Advanced"
+      >
         <div className="linear-settings__controls">
           <OctantButton
             aria-expanded={advancedOpen}
@@ -206,10 +216,6 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
         </div>
         {advancedOpen ? (
           <div className="linear-settings__advanced">
-            <p className="linear-settings__note">
-              A personal API key is stored in the same host secret store as OAuth tokens. It is
-              never used as a fallback when OAuth authorization expires.
-            </p>
             <label className="linear-settings__note" htmlFor="linear-personal-api-key">
               Personal API key
             </label>
@@ -269,7 +275,7 @@ export function LinearConnectionSettings({ client }: LinearConnectionSettingsPro
             </div>
           </div>
         ) : null}
-      </SettingsPanel>
+      </SettingsSection>
     </section>
   );
 }
