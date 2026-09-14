@@ -193,6 +193,112 @@ describe("npm Agent Plugin marketplace", () => {
     expect(search.entries).toHaveLength(25);
   });
 
+  it("returns the plugins it finished inspecting when the search budget runs out", async () => {
+    const { fetch: registry } = registryFetch([
+      {
+        name: "fast-plugin",
+        version: "1.0.0",
+        keywords: ["agent-plugin", "agent-plugins"],
+        tarball: pluginTarball({ name: "fast-plugin" }),
+      },
+      {
+        name: "stalled-plugin",
+        version: "1.0.0",
+        keywords: ["agent-plugin", "agent-plugins"],
+        tarball: pluginTarball({ name: "stalled-plugin" }),
+      },
+    ]);
+    const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("stalled-plugin-1.0.0.tgz")) {
+        return new Promise<Response>((resolve, reject) => {
+          const signal = init?.signal;
+          if (signal === undefined || signal === null) return;
+          if (signal.aborted) reject(signal.reason);
+          else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      }
+      return registry(input, init);
+    }) as MarketplaceFetch;
+    const marketplace = new NpmAgentPluginMarketplace({
+      fetch,
+      platform: "darwin",
+      searchBudgetMs: 1_000,
+    });
+
+    const search = await marketplace.search("plugin");
+
+    expect(search.entries.map((entry) => entry.displayName)).toEqual(["fast-plugin"]);
+  });
+
+  it("keeps result order stable while inspecting packages in parallel", async () => {
+    const { fetch: registry } = registryFetch([
+      {
+        name: "first-plugin",
+        version: "1.0.0",
+        keywords: ["agent-plugin", "agent-plugins"],
+        tarball: pluginTarball({ name: "first-plugin" }),
+      },
+      {
+        name: "second-plugin",
+        version: "1.0.0",
+        keywords: ["agent-plugin", "agent-plugins"],
+        tarball: pluginTarball({ name: "second-plugin" }),
+      },
+    ]);
+    let markSecondTarballServed: () => void = () => {};
+    const secondTarballServed = new Promise<void>((resolve) => {
+      markSecondTarballServed = resolve;
+    });
+    const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("first-plugin-1.0.0.tgz")) {
+        await secondTarballServed;
+      }
+      const response = await registry(input, init);
+      if (url.pathname.endsWith("second-plugin-1.0.0.tgz")) {
+        markSecondTarballServed();
+      }
+      return response;
+    }) as MarketplaceFetch;
+    const marketplace = new NpmAgentPluginMarketplace({ fetch, platform: "darwin" });
+
+    const search = await marketplace.search("plugin");
+
+    expect(search.entries.map((entry) => entry.displayName)).toEqual([
+      "first-plugin",
+      "second-plugin",
+    ]);
+  });
+
+  it("rethrows when the caller cancels a search", async () => {
+    const { fetch: registry } = registryFetch([
+      {
+        name: "stalled-plugin",
+        version: "1.0.0",
+        keywords: ["agent-plugin", "agent-plugins"],
+        tarball: pluginTarball({ name: "stalled-plugin" }),
+      },
+    ]);
+    const caller = new AbortController();
+    const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith(".tgz")) {
+        caller.abort();
+        return new Promise<Response>((resolve, reject) => {
+          const signal = init?.signal;
+          if (signal === undefined || signal === null) return;
+          if (signal.aborted) reject(signal.reason);
+          else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      }
+      return registry(input, init);
+    }) as MarketplaceFetch;
+    const marketplace = new NpmAgentPluginMarketplace({ fetch, platform: "darwin" });
+
+    await expect(marketplace.search("plugin", caller.signal)).rejects.toThrow(/abort/i);
+  });
+
   it("skips a candidate whose tarball exceeds the bounded fetch and cancels the stream", async () => {
     let cancelled = false;
     let chunks = 0;

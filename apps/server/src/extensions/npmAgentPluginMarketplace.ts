@@ -45,6 +45,8 @@ const DEFAULT_LIMIT = 25;
 const MAX_CANDIDATES = 40;
 /** Bound on listed entries per search. */
 const MAX_RESULTS = 25;
+/** Packages inspected at once during a search. */
+const SEARCH_INSPECTION_CONCURRENCY = 4;
 const MAX_EXTRACTED_BYTES = 8 * 1024 * 1024;
 const MAX_PLUGIN_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_TAR_ENTRIES = 4_096;
@@ -60,6 +62,8 @@ export interface NpmAgentPluginMarketplaceOptions {
   readonly platform?: NodeJS.Platform;
   /** When false, no npm request leaves the host. */
   readonly isMarketplaceFetchAllowed?: () => boolean;
+  /** Whole-listing budget for one search; defaults to 60 s. */
+  readonly searchBudgetMs?: number;
 }
 
 /**
@@ -79,6 +83,7 @@ export class NpmAgentPluginMarketplace {
   readonly #registryUrl: string;
   readonly #appVersion: string;
   readonly #platform: NodeJS.Platform;
+  readonly #searchBudgetMs: number;
   readonly #cache = new Map<
     string,
     { readonly resolved: ResolvedExtensionPackage; readonly bytes: number }
@@ -96,6 +101,7 @@ export class NpmAgentPluginMarketplace {
     this.#registryUrl = options.registryUrl ?? DEFAULT_NPM_REGISTRY_URL;
     this.#appVersion = options.appVersion ?? "1.0.0";
     this.#platform = options.platform ?? process.platform;
+    this.#searchBudgetMs = options.searchBudgetMs ?? SEARCH_BUDGET_MS;
   }
 
   async search(
@@ -130,27 +136,50 @@ export class NpmAgentPluginMarketplace {
             ? first.reason
             : new Error("Agent Plugin search failed.");
         }
-        const entries: ExtensionCatalogEntry[] = [];
-        for (const candidate of [...candidates.values()].slice(0, MAX_CANDIDATES)) {
-          if (entries.length >= MAX_RESULTS) break;
-          try {
-            const source = catalogSourceFor(candidate.name, candidate.version);
-            const resolved = await this.#fetchPackage(
-              candidate.name,
-              candidate.version,
-              boundedSignal,
-            );
-            entries.push(catalogEntryFor(source, inspectExtensionPackage(resolved)));
-          } catch (error) {
-            if (boundedSignal.aborted) throw error;
-            // One package that is not a conformant, reviewable Agent Plugin is
-            // skipped. The registry search itself failing already threw above.
-            continue;
+        const inspected = [...candidates.values()].slice(0, MAX_CANDIDATES);
+        // Inspecting serially would make the Extensions page wait on every
+        // tarball before the first entry renders, so a small pool works
+        // through the candidates while results stay in candidate order.
+        const results = Array.from<ExtensionCatalogEntry | undefined>({
+          length: inspected.length,
+        });
+        let cursor = 0;
+        let collected = 0;
+        const inspectNext = async (): Promise<void> => {
+          while (cursor < inspected.length && collected < MAX_RESULTS && !boundedSignal.aborted) {
+            const index = cursor;
+            cursor += 1;
+            const candidate = inspected[index];
+            if (candidate === undefined) continue;
+            try {
+              const source = catalogSourceFor(candidate.name, candidate.version);
+              const resolved = await this.#fetchPackage(
+                candidate.name,
+                candidate.version,
+                boundedSignal,
+              );
+              results[index] = catalogEntryFor(source, inspectExtensionPackage(resolved));
+              collected += 1;
+            } catch (error) {
+              // A cancelled listing has no reader left, so the caller's abort
+              // still fails the search; the search budget only stops
+              // inspection and keeps the entries already gathered.
+              if (signal?.aborted === true) throw error;
+              if (boundedSignal.aborted) return;
+              // One package that is not a conformant, reviewable Agent Plugin is
+              // skipped. The registry search itself failing already threw above.
+              continue;
+            }
           }
-        }
-        return { entries };
+        };
+        await Promise.all(
+          Array.from({ length: SEARCH_INSPECTION_CONCURRENCY }, () => inspectNext()),
+        );
+        return {
+          entries: results.filter((entry) => entry !== undefined).slice(0, MAX_RESULTS),
+        };
       },
-      SEARCH_BUDGET_MS,
+      this.#searchBudgetMs,
     );
   }
 
