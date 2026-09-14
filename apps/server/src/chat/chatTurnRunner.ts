@@ -783,13 +783,29 @@ export class ChatTurnRunner {
                         .pipe(Effect.catchAll(() => Effect.void));
                       return;
                     }
-                    const input2 = JSON.parse(event.inputJson) as {
+                    let parsedInput: {
                       readonly prompt?: unknown;
                       readonly options?: unknown;
                     };
+                    try {
+                      const decoded: unknown = JSON.parse(event.inputJson);
+                      parsedInput =
+                        decoded !== null && typeof decoded === "object" && !Array.isArray(decoded)
+                          ? (decoded as {
+                              readonly prompt?: unknown;
+                              readonly options?: unknown;
+                            })
+                          : {};
+                    } catch {
+                      parsedInput = {};
+                    }
                     const prompt =
-                      typeof input2.prompt === "string" ? boundedQuestionText(input2.prompt) : "";
-                    const rawOptions = Array.isArray(input2.options) ? input2.options : [];
+                      typeof parsedInput.prompt === "string"
+                        ? boundedQuestionText(parsedInput.prompt)
+                        : "";
+                    const rawOptions = Array.isArray(parsedInput.options)
+                      ? parsedInput.options
+                      : [];
                     const options = rawOptions
                       .filter((option): option is string => typeof option === "string")
                       .slice(0, MAX_ATTEMPT_QUESTION_OPTIONS)
