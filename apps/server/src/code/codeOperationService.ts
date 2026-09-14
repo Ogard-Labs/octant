@@ -986,6 +986,17 @@ export class CodeOperationService {
     checkout: CodeCheckoutIdentity,
     cached: CodeOperationResult,
   ): Promise<CodeOperationResult> {
+    // A stale turn can be resumed long after the Project's provider policy
+    // changed, and this path starts a real provider session. The policy admits
+    // every provider turn, so the same refusal as `execute()` applies before
+    // any checkout authority or runtime work happens.
+    if (this.#options.isProviderModelAllowed?.(thread) === false) {
+      return this.#failed(
+        command.operationId,
+        "unauthorized",
+        "This provider or model is not allowed by this Code Project's provider policy.",
+      );
+    }
     const root = await this.#options.authority.resolveCheckoutRoot(windowId, thread, checkout);
     if (root === undefined) {
       return this.#failed(
