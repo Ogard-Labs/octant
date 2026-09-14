@@ -478,6 +478,30 @@ describe("chat contracts", () => {
     ).toThrow();
   });
 
+  it("decodes a structurally valid answer-chat-turn-question command", () => {
+    const decoded = decodeChatCommand({
+      kind: "answer-chat-turn-question",
+      threadId: ids.thread,
+      turnId: ids.turn,
+      attemptId: ids.attempt,
+      requestId: "q-1",
+      answer: "Approve",
+      expectedVersion: 4,
+    });
+    expect(decoded.kind).toBe("answer-chat-turn-question");
+    expect(() =>
+      decodeChatCommand({
+        kind: "answer-chat-turn-question",
+        threadId: ids.thread,
+        turnId: ids.turn,
+        attemptId: ids.attempt,
+        requestId: "q-1",
+        answer: "   ",
+        expectedVersion: 4,
+      }),
+    ).toThrow();
+  });
+
   it("decodes ChatAttempt with an optional provider resume cursor and rejects invalid cursors", () => {
     const withCursor = decodeChatAttempt({
       ...attemptFixture,
@@ -494,6 +518,63 @@ describe("chat contracts", () => {
         resumeCursor: { driverKind: "openai-compatible", value: "" },
       }),
     ).toThrow();
+  });
+
+  it("decodes ChatAttempt with a pending provider question and rejects an oversized one", () => {
+    const withQuestion = decodeChatAttempt({
+      ...attemptFixture,
+      pendingQuestion: {
+        requestId: "q-1",
+        prompt: "Which file?",
+        options: [{ label: "A" }, { label: "B", description: "The second" }],
+      },
+    });
+    expect(withQuestion.pendingQuestion).toEqual({
+      requestId: "q-1",
+      prompt: "Which file?",
+      options: [{ label: "A" }, { label: "B", description: "The second" }],
+    });
+    expect(decodeChatAttempt(attemptFixture).pendingQuestion).toBeUndefined();
+    expect(() =>
+      decodeChatAttempt({
+        ...attemptFixture,
+        pendingQuestion: { requestId: "q-1", prompt: "", options: [] },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeChatAttempt({
+        ...attemptFixture,
+        pendingQuestion: {
+          requestId: "q-1",
+          prompt: "Which file?",
+          options: Array.from({ length: 9 }, (_, i) => ({ label: `o${String(i)}` })),
+        },
+      }),
+    ).toThrow();
+    // A place in a set only travels with the set's size.
+    expect(() =>
+      decodeChatAttempt({
+        ...attemptFixture,
+        pendingQuestion: {
+          requestId: "q-1",
+          prompt: "Which file?",
+          options: [],
+          questionIndex: 1,
+        },
+      }),
+    ).toThrow();
+    const inSet = decodeChatAttempt({
+      ...attemptFixture,
+      pendingQuestion: {
+        requestId: "q-1",
+        prompt: "Which file?",
+        options: [],
+        questionIndex: 1,
+        questionCount: 2,
+      },
+    });
+    expect(inSet.pendingQuestion?.questionIndex).toBe(1);
+    expect(inSet.pendingQuestion?.questionCount).toBe(2);
   });
 
   it("decodes create-chat-thread with title and optional project only", () => {

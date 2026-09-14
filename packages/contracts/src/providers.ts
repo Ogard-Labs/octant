@@ -6,6 +6,7 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
 const brandedString = <B extends string>(brand: B) =>
   Schema.NonEmptyTrimmedString.pipe(Schema.brand(brand));
+const PositiveInt = Schema.Int.pipe(Schema.positive());
 
 export const ProviderInstanceId = brandedUuid("ProviderInstanceId");
 export type ProviderInstanceId = typeof ProviderInstanceId.Type;
@@ -107,6 +108,17 @@ const BoundedProviderToolDescription = Schema.NonEmptyTrimmedString.pipe(Schema.
 const BoundedProviderAttachmentId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
 const BoundedProviderDisplayName = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255));
 const BoundedProviderMediaType = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255));
+
+/**
+ * One answer a provider offers for a question it asked: what the person picks,
+ * and what that choice means. The description is what makes a question
+ * answerable without guessing; a provider that gives none offers bare labels.
+ */
+export const ProviderQuestionOption = Schema.Struct({
+  label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  description: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000))),
+}).annotations(strict);
+export type ProviderQuestionOption = typeof ProviderQuestionOption.Type;
 const MAX_PROVIDER_JSON_BYTES = 65_536;
 const MAX_PROVIDER_JSON_DEPTH = 16;
 const MAX_PROVIDER_JSON_ENTRIES = 256;
@@ -1691,11 +1703,33 @@ export const ProviderRuntimeEvent = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
+    kind: Schema.Literal("approval-request"),
+    requestId: Schema.NonEmptyTrimmedString,
+    action: Schema.NonEmptyTrimmedString,
+    description: Schema.NonEmptyTrimmedString,
+  }).annotations(strict),
+  Schema.Struct({
+    ...ProviderRuntimeEventFields,
     kind: Schema.Literal("user-input-request"),
     requestId: Schema.NonEmptyTrimmedString,
     prompt: Schema.NonEmptyTrimmedString,
-    options: Schema.Array(Schema.NonEmptyTrimmedString),
-  }).annotations(strict),
+    options: Schema.Array(ProviderQuestionOption),
+    /**
+     * Where this question sits in a set the provider asked at once, so a
+     * person can see "1 of 2" while answering. Absent for a single question.
+     * Each question of a set arrives as its own event under the same request
+     * identity and is answered one at a time; the driver holds the set's
+     * answers until the last one and replies once.
+     */
+    questionIndex: Schema.optional(PositiveInt),
+    questionCount: Schema.optional(PositiveInt),
+  })
+    .annotations(strict)
+    .pipe(
+      Schema.filter(
+        (event) => (event.questionIndex === undefined) === (event.questionCount === undefined),
+      ),
+    ),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("tool-request"),

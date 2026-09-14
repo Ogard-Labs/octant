@@ -75,7 +75,16 @@ Side Chat is a separate Chat conversation about one source thread. Open the righ
 Edit, branch, checkpoint, and copy live in each turn's **More actions** menu
 (the ⋯ control that appears when the turn is hovered or focused). The same
 items are on the turn's context menu, so right-click is never the only route.
-Retrying a failed or interrupted response stays on the turn itself.
+Retrying a failed or interrupted response stays on the turn itself; a
+completed response carries a **Regenerate** control next to its timestamp and
+copy control — asking for a different answer to the same message. The previous
+answer stays in the transcript under a **Regenerated** mark, and the thread
+carries the newest answer onward: later turns read the regenerated exchange,
+not the replaced one.
+
+A reply's reasoning folds into a **Thinking** disclosure above the text: shut
+by default, opened only if you want it, and still findable while closed. A
+tool call a reply made folds into its own disclosure the same way.
 
 A checkpoint marker stays on the turn only when that point is marked. Restoring
 it starts a second thread; it does not rewind this one. The restored thread's

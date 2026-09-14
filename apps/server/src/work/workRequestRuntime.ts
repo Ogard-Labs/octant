@@ -273,11 +273,11 @@ function sanitizeRequestText(value: string, fallback: string): string {
   return (withoutPathOrUrl.length === 0 ? fallback : withoutPathOrUrl).slice(0, 2_000).trim();
 }
 
-function requestOptions(options: ReadonlyArray<string>): {
+function requestOptions(options: ReadonlyArray<{ readonly label: string }>): {
   readonly labels: ReadonlyArray<string>;
   readonly values: ReadonlyArray<string>;
 } {
-  const values = options.slice(0, 8);
+  const values = options.slice(0, 8).map((option) => option.label);
   const labels = values.map((option, index) => {
     const label = `Option ${index + 1}: ${sanitizeRequestText(option, "Option unavailable")}`.slice(
       0,

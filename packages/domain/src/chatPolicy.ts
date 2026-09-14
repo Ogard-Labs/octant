@@ -336,6 +336,22 @@ export function chatAttemptAnswered(attempt: { readonly outcome: string }): bool
 }
 
 /**
+ * The attempt whose answer a turn carries onward to every reader after the
+ * transcript — the context planner, mentions, subagents, exports of the
+ * conversation as it now stands: the latest completed attempt.
+ *
+ * Regenerating an answer appends a sibling attempt and the journal keeps every
+ * answer, but only the newest one is the answer the conversation keeps; an
+ * earlier completed attempt is the branch the person replaced, exactly as a
+ * superseded turn is.
+ */
+export function chatTurnAnsweredAttempt<
+  T extends { readonly attempts: ReadonlyArray<{ readonly outcome: string }> },
+>(turn: T): T["attempts"][number] | undefined {
+  return turn.attempts.filter((attempt) => chatAttemptAnswered(attempt)).at(-1);
+}
+
+/**
  * The active conversation up to and including `turnId`, or `undefined` when
  * that turn is not part of the active conversation (it was superseded, or it
  * belongs to another thread).
@@ -365,7 +381,18 @@ export interface RetryChatTurnInput {
   readonly createdAt: UtcTimestamp;
 }
 
-const retryEligibleOutcomes: ReadonlyArray<ChatAttemptOutcome> = ["failed", "interrupted"];
+/**
+ * An attempt the person may run again on the same turn: one that failed or was
+ * interrupted, and one that completed, where running again is a regeneration —
+ * the person asking for a different answer to the same prompt. The previous
+ * attempt and its answer stay journaled; the new attempt is appended beside
+ * them and the conversation carries the newest answer onward.
+ */
+const retryEligibleOutcomes: ReadonlyArray<ChatAttemptOutcome> = [
+  "failed",
+  "interrupted",
+  "completed",
+];
 
 export function retryChatTurn(
   thread: ChatThread,
@@ -457,11 +484,66 @@ export function resumeChatTurn(
   });
 }
 
+export interface AnswerChatTurnQuestionInput {
+  readonly turnId: ChatTurnId;
+  readonly attemptId: ChatAttempt["id"];
+  readonly requestId: string;
+  readonly answer: string;
+  readonly answeredAt: UtcTimestamp;
+}
+
+/**
+ * The attempt after the person answered a question it asked: the turn goes
+ * back to work on the same provider session, the pending question is cleared,
+ * and the answer is kept on the attempt so the transcript can still read the
+ * exchange the continued reply grew from.
+ */
+export function answerChatTurnQuestion(
+  attempt: ChatAttempt,
+  input: AnswerChatTurnQuestionInput,
+): ChatAttempt {
+  if (attempt.outcome !== "waiting") {
+    reject(
+      "retry-not-allowed",
+      `Cannot answer a question on an attempt that is ${attempt.outcome}`,
+    );
+  }
+  const question = attempt.pendingQuestion;
+  if (question === undefined) {
+    reject("retry-not-allowed", "Attempt has no open question");
+  }
+  if (question.requestId !== input.requestId) {
+    reject("retry-not-allowed", "Question identity does not match answer input");
+  }
+  const resumed = transitionChatAttempt(attempt, {
+    outcome: "streaming",
+    updatedAt: input.answeredAt,
+  });
+  // Keep the newest answers when a turn somehow asks more than the record
+  // holds; dropping the oldest is honest, overflowing the record is not.
+  const answered = [
+    ...(attempt.answeredQuestions ?? []),
+    {
+      requestId: question.requestId,
+      prompt: question.prompt,
+      options: [...question.options],
+      ...(question.questionIndex === undefined || question.questionCount === undefined
+        ? {}
+        : { questionIndex: question.questionIndex, questionCount: question.questionCount }),
+      answer: input.answer,
+      answeredAt: input.answeredAt,
+    },
+  ].slice(-8);
+  // The key is dropped, not stored as `undefined`: the journal stores payloads
+  // as JSON, and a present-but-undefined key is not JSON.
+  const { pendingQuestion: _answeredQuestion, ...kept } = resumed;
+  return decodeChatAttempt({ ...kept, answeredQuestions: answered });
+}
+
 export interface TransitionChatAttemptInput {
   readonly outcome: ChatAttemptOutcome;
   readonly updatedAt: UtcTimestamp;
 }
-
 const terminalOutcomes: ReadonlyArray<ChatAttemptOutcome> = [
   "completed",
   "failed",
@@ -472,7 +554,9 @@ const terminalOutcomes: ReadonlyArray<ChatAttemptOutcome> = [
 const transitions = new Map<ChatAttemptOutcome, ReadonlyArray<ChatAttemptOutcome>>([
   ["queued", ["streaming", "waiting", "interrupted", "failed", "cancelled"]],
   ["streaming", ["waiting", "interrupted", "failed", "cancelled", "completed"]],
-  ["waiting", ["interrupted", "failed", "cancelled", "completed"]],
+  // An answered question puts the provider back to work: the person replied,
+  // so the turn is producing again, not parked.
+  ["waiting", ["streaming", "interrupted", "failed", "cancelled", "completed"]],
 ]);
 
 function isValidTransition(from: ChatAttemptOutcome, to: ChatAttemptOutcome): boolean {

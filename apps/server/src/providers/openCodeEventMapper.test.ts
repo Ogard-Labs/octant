@@ -230,7 +230,7 @@ describe("mapOpenCodeEvent", () => {
             {
               header: "Choose",
               question: "Which option?",
-              options: [{ label: "Option 1", description: "private-description-must-not-cross" }],
+              options: [{ label: "Option 1", description: "The plain text one" }],
             },
           ],
         },
@@ -239,7 +239,7 @@ describe("mapOpenCodeEvent", () => {
         kind: "user-input-request",
         requestId: "question-1",
         prompt: "Which option?",
-        options: ["Option 1"],
+        options: [{ label: "Option 1", description: "The plain text one" }],
       },
     },
     {
@@ -254,7 +254,7 @@ describe("mapOpenCodeEvent", () => {
             {
               header: "Choose",
               question: "Continue?",
-              options: [{ label: "Yes", description: "private-description-must-not-cross" }],
+              options: [{ label: "Yes", description: "Go ahead now" }],
             },
           ],
         },
@@ -263,7 +263,7 @@ describe("mapOpenCodeEvent", () => {
         kind: "user-input-request",
         requestId: "question-2",
         prompt: "Continue?",
-        options: ["Yes"],
+        options: [{ label: "Yes", description: "Go ahead now" }],
       },
     },
     {
@@ -375,29 +375,6 @@ describe("mapOpenCodeEvent", () => {
 
   it.each([
     {
-      name: "more than one question group",
-      event: official({
-        id: "event-question-groups",
-        type: "question.v2.asked",
-        properties: {
-          id: "question-groups",
-          sessionID: "provider-session",
-          questions: [
-            {
-              header: "First",
-              question: "First raw question must-not-cross?",
-              options: [{ label: "First raw option must-not-cross", description: "private" }],
-            },
-            {
-              header: "Second",
-              question: "Second raw question must-not-cross?",
-              options: [{ label: "Second raw option must-not-cross", description: "private" }],
-            },
-          ],
-        },
-      }),
-    },
-    {
       name: "a multi-select question",
       event: official({
         id: "event-question-multiple",
@@ -431,6 +408,63 @@ describe("mapOpenCodeEvent", () => {
     ]);
     expect(results).not.toContainEqual(expect.objectContaining({ kind: "user-input-request" }));
     expect(JSON.stringify(results)).not.toMatch(/must-not-cross|metadata|providerID/i);
+  });
+
+  it("maps a multi-question set into one event per question, each with its place", () => {
+    const results = mapped(
+      official({
+        id: "event-question-groups",
+        type: "question.v2.asked",
+        properties: {
+          id: "question-groups",
+          sessionID: "provider-session",
+          questions: [
+            {
+              header: "First",
+              question: "How should I proceed?",
+              options: [
+                {
+                  label: "Dequeue, push, re-queue",
+                  description: "Leave the queue, push the fix, re-enter it.",
+                },
+                { label: "Let it merge", description: "Keep the fix as a follow-up." },
+              ],
+            },
+            {
+              header: "Second",
+              question: "Mark the review threads resolved?",
+              options: [{ label: "Resolve verified", description: "Note each thread briefly." }],
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(results).toMatchObject([
+      {
+        kind: "user-input-request",
+        requestId: "question-groups",
+        prompt: "How should I proceed?",
+        options: [
+          {
+            label: "Dequeue, push, re-queue",
+            description: "Leave the queue, push the fix, re-enter it.",
+          },
+          { label: "Let it merge", description: "Keep the fix as a follow-up." },
+        ],
+        questionIndex: 1,
+        questionCount: 2,
+      },
+      {
+        kind: "user-input-request",
+        requestId: "question-groups",
+        prompt: "Mark the review threads resolved?",
+        options: [{ label: "Resolve verified", description: "Note each thread briefly." }],
+        questionIndex: 2,
+        questionCount: 2,
+      },
+    ]);
+    expect(results).toHaveLength(2);
   });
 
   it("maps an idle status to completion with an opaque resume cursor", () => {

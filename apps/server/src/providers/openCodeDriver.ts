@@ -59,7 +59,7 @@ export interface OpenCodeClientPort {
     requestId: string,
     reply: "once" | "always" | "reject",
   ) => Promise<void>;
-  readonly replyQuestion: (requestId: string, answer: string) => Promise<void>;
+  readonly replyQuestion: (requestId: string, answers: ReadonlyArray<string>) => Promise<void>;
 }
 
 export interface OpenCodeDriverOptions {
@@ -90,6 +90,15 @@ interface SessionState {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly approvals: Set<string>;
   readonly questions: Set<string>;
+  /**
+   * Answers already given for the questions of a set the provider asked at
+   * once, keyed by the set's request identity. The provider expects one reply
+   * carrying every answer, so these are held until the last question of the
+   * set is answered.
+   */
+  readonly questionAnswers: Map<string, string[]>;
+  /** How many questions each open set holds, so the last answer is known. */
+  readonly questionCount: Map<string, number>;
   readonly toolNames: Set<string>;
   readonly pendingToolAnswers: Map<string, PendingToolAnswer>;
   managedTools: ManagedToolsLease | undefined;
@@ -306,12 +315,12 @@ export function makeOfficialOpenCodeClient(
       }
       await client.permission.reply({ requestID: requestId, reply }, { throwOnError: true });
     },
-    replyQuestion: async (requestId, answer) => {
+    replyQuestion: async (requestId, answers) => {
       if (beta) {
         throw fail("incompatible", BETA_INCOMPATIBILITY_MESSAGE);
       }
       await client.question.reply(
-        { requestID: requestId, answers: [[answer]] },
+        { requestID: requestId, answers: answers.map((answer) => [answer]) },
         { throwOnError: true },
       );
     },
@@ -1205,9 +1214,27 @@ function makeConnection(
               ? Effect.fail(fail("protocol", "Provider session is already terminal."))
               : !state.questions.has(input.requestId)
                 ? Effect.fail(fail("protocol", "Provider question request is not pending."))
-                : request(() => activeClient.replyQuestion(input.requestId, input.answer)).pipe(
-                    Effect.tap(() => Effect.sync(() => state.questions.delete(input.requestId))),
-                  );
+                : Effect.suspend(() => {
+                    // A multi-question set is answered one question at a time;
+                    // the provider is replied to once, with the whole set.
+                    const answers = state.questionAnswers.get(input.requestId) ?? [];
+                    const next = [...answers, input.answer];
+                    state.questionAnswers.set(input.requestId, next);
+                    const expected = state.questionCount.get(input.requestId);
+                    if (expected !== undefined && next.length < expected) return Effect.void;
+                    const reply = request(() =>
+                      activeClient.replyQuestion(input.requestId, next),
+                    ).pipe(
+                      Effect.tap(() =>
+                        Effect.sync(() => {
+                          state.questions.delete(input.requestId);
+                          state.questionAnswers.delete(input.requestId);
+                          state.questionCount.delete(input.requestId);
+                        }),
+                      ),
+                    );
+                    return reply;
+                  });
           }),
         ),
       answerTool: (input) =>
@@ -1253,6 +1280,8 @@ function newSessionState(
     executionPolicy,
     approvals: new Set(),
     questions: new Set(),
+    questionAnswers: new Map(),
+    questionCount: new Map(),
     toolNames: new Set(tools.map((tool) => tool.name)),
     pendingToolAnswers: new Map(),
     managedTools: undefined,
@@ -1303,7 +1332,12 @@ function mapAndOffer(
     }
     const normalized = stableTaskIdentity(state, original, occurrence);
     if (normalized.kind === "approval-request") state.approvals.add(normalized.requestId);
-    if (normalized.kind === "user-input-request") state.questions.add(normalized.requestId);
+    if (normalized.kind === "user-input-request") {
+      state.questions.add(normalized.requestId);
+      if (normalized.questionCount !== undefined) {
+        state.questionCount.set(normalized.requestId, normalized.questionCount);
+      }
+    }
     if (isTerminalEvent(normalized)) {
       retire(state);
     }

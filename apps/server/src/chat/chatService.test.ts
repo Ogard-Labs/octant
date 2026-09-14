@@ -793,6 +793,69 @@ function abandonedReplyDriver(
 }
 
 /**
+ * A driver whose reply stops mid-turn to ask the person a two-question set,
+ * and which continues only once both are answered on the same session — the
+ * way a provider that asks a set receives it: one reply carrying every
+ * answer. Reproduces the exchange the transcript must keep: the text before
+ * the questions, each question with its place in the set, and the reply that
+ * grows from the answers.
+ */
+function questionDriver(
+  sent: Array<SentTurn>,
+  answered: Array<{ requestId: string; answer: string }> = [],
+): ProviderDriver {
+  return {
+    acquire: () =>
+      Effect.sync(() => {
+        const queue = Effect.runSync(Queue.unbounded<never>());
+        let sessionId = "";
+        const emit = (event: Record<string, unknown>) =>
+          Queue.offer(queue, { sessionId, ...event } as never);
+        return {
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
+          start: (input: { readonly sessionId: string }) =>
+            Effect.sync(() => {
+              sessionId = input.sessionId;
+              return { sessionId: input.sessionId };
+            }),
+          send: (input: { readonly prompt: string }) =>
+            Effect.gen(function* () {
+              sent.push({ prompt: input.prompt });
+              yield* emit({ kind: "text-delta", text: "Let me check." });
+              yield* emit({
+                kind: "user-input-request",
+                requestId: "q-set",
+                prompt: "How should I proceed?",
+                options: [{ label: "Yes" }, { label: "No" }],
+                questionIndex: 1,
+                questionCount: 2,
+              });
+              yield* emit({
+                kind: "user-input-request",
+                requestId: "q-set",
+                prompt: "Mark it resolved?",
+                options: [{ label: "Resolve" }, { label: "Leave open" }],
+                questionIndex: 2,
+                questionCount: 2,
+              });
+            }),
+          answerUserInput: (input: { readonly requestId: string; readonly answer: string }) =>
+            Effect.gen(function* () {
+              answered.push(input);
+              if (answered.length < 2) return;
+              yield* emit({ kind: "text-delta", text: " Continuing." });
+              yield* emit({ kind: "completed" });
+            }),
+          interrupt: () => Effect.void,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerTool: () => Effect.void,
+        };
+      }),
+  } as unknown as ProviderDriver;
+}
+
+/**
  * The conversation a snapshot's plan says its turn sends, keyed by the opening
  * of the material — which is exactly how the manifest labels an entry.
  *
@@ -4198,12 +4261,13 @@ describe("ChatService", () => {
     expect(purgedAgain.kind).toBe("deleted");
   });
 
-  it("rejects retry for completed attempts", async () => {
-    const { service } = openFixture();
+  it("regenerates a completed attempt by appending a sibling answer the conversation then carries", async () => {
+    const sent: Array<SentTurn> = [];
+    const { service } = openFixture({ driver: compactionDriver(sent) });
     const created = await service.execute({
       kind: "create-chat-thread",
       hostId: "local",
-      title: "Retry policy",
+      title: "Regenerated answer",
     });
     expect(created.kind).toBe("thread-created");
     if (created.kind !== "thread-created") {
@@ -4223,23 +4287,174 @@ describe("ChatService", () => {
       () => service.read(created.thread.id).turns[0]?.attempts[0]?.outcome === "completed",
       { timeoutMs: 10_000 },
     );
-    const view = service.read(created.thread.id);
-    const attempt = view.turns[0]!.attempts[0]!;
-    expect(attempt.outcome).toBe("completed");
-    try {
-      await service.execute({
-        kind: "retry-chat-turn",
-        threadId: created.thread.id,
-        expectedVersion: view.thread.version,
-        turnId: turn.turn.id,
-        attemptId: attempt.id,
-      });
-      expect.unreachable("retry should be rejected");
-    } catch (error) {
-      expect(error).toBeInstanceOf(ChatServiceError);
-      expect((error as ChatServiceError).failure.category).toBe("invalid");
-      expect((error as ChatServiceError).failure.message).toContain("Cannot retry");
+    const before = service.read(created.thread.id);
+    const original = before.turns[0]!.attempts[0]!;
+    expect(original.outcome).toBe("completed");
+    const regenerated = await service.execute({
+      kind: "retry-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: before.thread.version,
+      turnId: turn.turn.id,
+      attemptId: original.id,
+    });
+    expect(regenerated.kind).toBe("attempt-updated");
+    if (regenerated.kind !== "attempt-updated") {
+      throw new Error("Expected attempt-updated result.");
     }
+    expect(String(regenerated.attempt.id)).not.toBe(String(original.id));
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "completed",
+      { timeoutMs: 10_000 },
+    );
+
+    const after = service.read(created.thread.id);
+    expect(after.turns[0]!.attempts).toHaveLength(2);
+    // The replaced answer stays journaled on its own attempt, untouched.
+    expect(after.turns[0]!.attempts[0]!.outcome).toBe("completed");
+    expect(after.turns[0]!.attempts[0]!.responseRefs).toEqual(original.responseRefs);
+
+    // And a later turn is briefed on the conversation as it now stands: one
+    // answer for the turn, the newest one, never both.
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: after.thread.version,
+      prompt: "two",
+    });
+    await until(() => service.read(created.thread.id).turns.length === 2, { timeoutMs: 10_000 });
+    const context = sent.at(-1)?.context ?? [];
+    expect(context.filter((block) => block.kind === "assistant-message")).toEqual([
+      { kind: "assistant-message", text: "Fixture response 2" },
+    ]);
+  });
+
+  it("shows and answers a provider's question set, one question at a time", async () => {
+    const sent: Array<SentTurn> = [];
+    const answered: Array<{ requestId: string; answer: string }> = [];
+    const { service } = openFixture({ driver: questionDriver(sent, answered) });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Provider question",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    // The send resolves only when the turn settles, and the turn parks on the
+    // questions, so the send runs alongside this test instead of before it.
+    const sendPromise = service
+      .execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Ask me anything",
+      })
+      .then((result) => {
+        if (result.kind !== "turn-created") throw new Error("Expected turn-created result.");
+        return result;
+      });
+    const pendingQuestion = () =>
+      service.read(created.thread.id).turns[0]?.attempts[0]?.pendingQuestion;
+    await until(
+      () => pendingQuestion()?.questionIndex === 1 && pendingQuestion()?.questionCount === 2,
+    );
+    const waiting = service.read(created.thread.id);
+    const turnId = waiting.turns[0]!.id;
+    const attempt = waiting.turns[0]!.attempts[0]!;
+    expect(attempt.pendingQuestion).toEqual({
+      requestId: "q-set",
+      prompt: "How should I proceed?",
+      options: [{ label: "Yes" }, { label: "No" }],
+      questionIndex: 1,
+      questionCount: 2,
+    });
+
+    // A stale version is refused before anything reaches the provider.
+    await expect(
+      service.execute({
+        kind: "answer-chat-turn-question",
+        threadId: created.thread.id,
+        expectedVersion: (waiting.thread.version + 1) as never,
+        turnId,
+        attemptId: attempt.id,
+        requestId: "q-set",
+        answer: "Yes",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "stale" } });
+    // And so is an answer naming no open question.
+    await expect(
+      service.execute({
+        kind: "answer-chat-turn-question",
+        threadId: created.thread.id,
+        expectedVersion: waiting.thread.version,
+        turnId,
+        attemptId: attempt.id,
+        requestId: "other",
+        answer: "Yes",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+
+    const first = await service.execute({
+      kind: "answer-chat-turn-question",
+      threadId: created.thread.id,
+      expectedVersion: waiting.thread.version,
+      turnId,
+      attemptId: attempt.id,
+      requestId: "q-set",
+      answer: "Yes",
+    });
+    expect(first).toMatchObject({ kind: "attempt-updated" });
+    if (first.kind !== "attempt-updated") throw new Error("Expected attempt-updated result.");
+    expect(first.attempt.outcome).toBe("streaming");
+    expect(first.attempt.pendingQuestion).toBeUndefined();
+    expect(first.attempt.answeredQuestions?.[0]).toMatchObject({
+      requestId: "q-set",
+      prompt: "How should I proceed?",
+      questionIndex: 1,
+      questionCount: 2,
+      answer: "Yes",
+    });
+
+    // The set continues: the next question of the same request parks the turn.
+    await until(() => pendingQuestion()?.questionIndex === 2);
+    const second = await service.execute({
+      kind: "answer-chat-turn-question",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      turnId,
+      attemptId: attempt.id,
+      requestId: "q-set",
+      answer: "Resolve",
+    });
+    expect(second).toMatchObject({ kind: "attempt-updated" });
+    await sendPromise;
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "completed",
+    );
+    const settled = service.read(created.thread.id);
+    const settledAttempt = settled.turns[0]!.attempts.at(-1)!;
+    expect(settledAttempt.outcome).toBe("completed");
+    expect(settledAttempt.pendingQuestion).toBeUndefined();
+    expect(settledAttempt.answeredQuestions?.map((question) => question.answer)).toEqual([
+      "Yes",
+      "Resolve",
+    ]);
+    // The provider received both answers under the set's one request identity.
+    expect(answered.map((answer) => ({ ...answer, sessionId: undefined }))).toEqual([
+      { requestId: "q-set", answer: "Yes" },
+      { requestId: "q-set", answer: "Resolve" },
+    ]);
+
+    // Answering again names no open question any more.
+    await expect(
+      service.execute({
+        kind: "answer-chat-turn-question",
+        threadId: created.thread.id,
+        expectedVersion: settled.thread.version,
+        turnId,
+        attemptId: attempt.id,
+        requestId: "q-set",
+        answer: "Resolve",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
   });
 
   it("retries failed attempts with a fresh provider session", async () => {

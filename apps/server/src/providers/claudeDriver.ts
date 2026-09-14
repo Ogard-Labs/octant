@@ -84,6 +84,9 @@ const MAX_TOOL_USES_PER_TURN = 64;
 const PRE_TOOL_GRANT_TTL_MS = 30_000;
 const USER_ANSWER_MAX_CHARACTERS = 4_096;
 const USER_QUESTION_MAX_CHARACTERS = 1_024;
+// Claude's AskUserQuestion schema carries at most this many questions in one
+// tool call; a set is answered one question at a time and replied once.
+const MAX_CLAUDE_QUESTIONS = 4;
 
 export interface ClaudeExecutionOptions {
   readonly permissionMode: ClaudePermissionMode;
@@ -254,8 +257,11 @@ interface ClaudePendingApprovalState extends ClaudePendingApproval {
 }
 
 interface ClaudePendingQuestionState extends ClaudePendingQuestion {
-  readonly answer: DeferredValue<string | undefined>;
-  readonly providerPrompt: string;
+  readonly answer: DeferredValue<Record<string, string> | undefined>;
+  /** Answers already given for the set, in question order, until it is full. */
+  readonly received: ReadonlyArray<string>;
+  /** The raw question texts, so the callback's answer map keys them verbatim. */
+  readonly providerPrompts: ReadonlyArray<string>;
 }
 
 interface SessionState {
@@ -425,24 +431,33 @@ function exceedsCodePointLimit(value: string, maximum: number): boolean {
   return false;
 }
 
-function validatedClaudeQuestionPrompt(
+function validatedClaudeQuestionPrompts(
   input: Readonly<Record<string, unknown>>,
-): string | undefined {
+): ReadonlyArray<string> | undefined {
   const questions = input.questions;
-  if (!Array.isArray(questions) || questions.length !== 1) return undefined;
-  const question = questions[0];
-  if (typeof question !== "object" || question === null || Array.isArray(question)) {
-    return undefined;
-  }
-  const prompt = (question as Readonly<Record<string, unknown>>).question;
   if (
-    typeof prompt !== "string" ||
-    exceedsCodePointLimit(prompt, USER_QUESTION_MAX_CHARACTERS) ||
-    prompt.trim().length === 0
+    !Array.isArray(questions) ||
+    questions.length === 0 ||
+    questions.length > MAX_CLAUDE_QUESTIONS
   ) {
     return undefined;
   }
-  return prompt;
+  const prompts: string[] = [];
+  for (const question of questions) {
+    if (typeof question !== "object" || question === null || Array.isArray(question)) {
+      return undefined;
+    }
+    const prompt = (question as Readonly<Record<string, unknown>>).question;
+    if (
+      typeof prompt !== "string" ||
+      exceedsCodePointLimit(prompt, USER_QUESTION_MAX_CHARACTERS) ||
+      prompt.trim().length === 0
+    ) {
+      return undefined;
+    }
+    prompts.push(prompt);
+  }
+  return prompts;
 }
 
 function isTerminalEvent(event: ProviderRuntimeEvent): boolean {
@@ -1198,11 +1213,11 @@ function makeConnection(
           if (request.toolName === "AskUserQuestion" && Object.hasOwn(request.input, "answers")) {
             return deny("Claude user question input was invalid.");
           }
-          const providerPrompt =
+          const providerPrompts =
             request.toolName === "AskUserQuestion"
-              ? validatedClaudeQuestionPrompt(request.input)
+              ? validatedClaudeQuestionPrompts(request.input)
               : undefined;
-          if (request.toolName === "AskUserQuestion" && providerPrompt === undefined) {
+          if (request.toolName === "AskUserQuestion" && providerPrompts === undefined) {
             return deny("Claude user question input was invalid.");
           }
           const reusableApprovalKey = approvalReuseKey(request.toolName, digest);
@@ -1225,18 +1240,19 @@ function makeConnection(
           }
           const mapped = mapClaudeToolRequest(activeState.context!, request);
           if (mapped.kind === "question") {
-            if (providerPrompt === undefined) {
+            if (providerPrompts === undefined) {
               return deny("Claude user question input was invalid.");
             }
             const pending: ClaudePendingQuestionState = {
               ...mapped.request,
-              answer: deferred<string | undefined>(),
-              providerPrompt,
+              answer: deferred<Record<string, string> | undefined>(),
+              received: [],
+              providerPrompts,
             };
             activeState.pendingQuestions.set(pending.requestId, pending);
-            publish(pending.event);
+            for (const event of pending.events) publish(event);
             activeState.outputAccepted = true;
-            const answer = await waitForClaudeAuthorityValue({
+            const answers = await waitForClaudeAuthorityValue({
               promise: pending.answer.promise,
               signal: request.signal,
               cancelledValue: undefined,
@@ -1247,12 +1263,12 @@ function makeConnection(
                 activeState.settledToolUseIds.add(pending.providerToolUseId);
               },
             });
-            if (answer === undefined) {
+            if (answers === undefined) {
               return { behavior: "deny", message: "Claude user question was cancelled." };
             }
             return {
               behavior: "allow",
-              updatedInput: { ...request.input, answers: { [pending.providerPrompt]: answer } },
+              updatedInput: { ...request.input, answers },
             };
           }
           if (mapped.kind !== "approval") {
@@ -1339,7 +1355,7 @@ function makeConnection(
           }
           if (
             request.toolName === "AskUserQuestion" &&
-            validatedClaudeQuestionPrompt(requestInput) === undefined
+            validatedClaudeQuestionPrompts(requestInput) === undefined
           ) {
             return deny("Claude user question input was invalid.");
           }
@@ -1849,9 +1865,21 @@ function makeConnection(
             return Effect.fail(failure("invalid-configuration", "Claude user answer is invalid."));
           }
           return Effect.sync(() => {
+            // A question set is answered one question at a time under the same
+            // request identity; the tool call is answered once, with every
+            // answer, when the set is complete — keyed by each question's own
+            // text, the way the SDK's answer map is keyed.
+            const received = [...pending.received, normalizedAnswer];
+            if (received.length < pending.events.length) {
+              state.pendingQuestions.set(answer.requestId, { ...pending, received });
+              return;
+            }
             state.pendingQuestions.delete(answer.requestId);
             state.settledToolUseIds.add(pending.providerToolUseId);
-            pending.answer.resolve(normalizedAnswer);
+            const answers = Object.fromEntries(
+              pending.providerPrompts.map((prompt, index) => [prompt, received[index] ?? ""]),
+            );
+            pending.answer.resolve(answers);
           });
         }),
       toolRequestSignal: (input) =>

@@ -182,7 +182,7 @@ function makeFakeFixture(options?: {
       occurredAt,
       requestId: "question-1",
       prompt: "Choose an option.",
-      options: ["one", "two"],
+      options: [{ label: "one" }, { label: "two" }],
     },
     {
       kind: "research-started",

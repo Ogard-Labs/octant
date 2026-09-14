@@ -367,6 +367,88 @@ describe("OpenCode driver", () => {
     expect(fixture.calls).toContain("session.abort");
   });
 
+  it("buffers a multi-question set and replies to the provider once, with every answer", async () => {
+    const fixture = driverFixture({
+      events: [
+        questionV2Event("provider-session", "question-set", [
+          {
+            question: "How should I proceed?",
+            options: [{ label: "Dequeue, push, re-queue" }, { label: "Let it merge" }],
+          },
+          {
+            question: "Mark the threads resolved?",
+            options: [{ label: "Resolve" }, { label: "Leave open" }],
+          },
+        ]),
+      ],
+    });
+    const questions: Array<unknown> = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const subscriber = yield* Effect.fork(
+                (yield* connection.subscribe).pipe(
+                  Stream.filter(
+                    (event) => event.sessionId === sessionId && event.kind === "user-input-request",
+                  ),
+                  Stream.runForEach((event) =>
+                    Effect.sync(() => {
+                      questions.push(event);
+                    }),
+                  ),
+                ),
+              );
+              yield* connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+              });
+              yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+              yield* Effect.promise(
+                () =>
+                  new Promise<void>((resolve, reject) => {
+                    const started = Date.now();
+                    const poll = () => {
+                      if (questions.length === 2) {
+                        resolve();
+                        return;
+                      }
+                      if (Date.now() - startedAt() > 5_000) {
+                        reject(new Error("Timed out waiting for the question set."));
+                        return;
+                      }
+                      setTimeout(poll, 10);
+                    };
+                    const startedAt = () => Date.now();
+                    poll();
+                  }),
+              );
+              // The first answer is held: the provider is not replied to until
+              // the whole set is answered.
+              yield* connection.answerUserInput({
+                sessionId,
+                requestId: "question-set",
+                answer: "Dequeue, push, re-queue",
+              });
+              expect(fixture.calls.filter((call) => call.startsWith("question.reply:"))).toEqual(
+                [],
+              );
+              yield* connection.answerUserInput({
+                sessionId,
+                requestId: "question-set",
+                answer: "Resolve",
+              });
+              yield* Fiber.interrupt(subscriber);
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(fixture.calls).toContain("question.reply:Dequeue, push, re-queue|Resolve");
+  });
+
   it("gives each subscriber the same terminal stream and rejects sends after completion", async () => {
     const fixture = driverFixture({
       events: [
@@ -1107,7 +1189,9 @@ function driverFixture(
     replyPermission: async (_id, reply) => {
       calls.push(`permission.reply:${reply}`);
     },
-    replyQuestion: async () => undefined,
+    replyQuestion: async (_id, answers) => {
+      calls.push(`question.reply:${answers.join("|")}`);
+    },
   };
   return {
     calls,
@@ -1236,5 +1320,18 @@ function permissionEvent(id: string, requestId: string): Event {
       metadata: {},
       always: [],
     },
+  } as unknown as Event;
+}
+function questionV2Event(
+  id: string,
+  requestId: string,
+  questions: ReadonlyArray<{
+    readonly question: string;
+    readonly options: ReadonlyArray<{ readonly label: string; readonly description?: string }>;
+  }>,
+): Event {
+  return {
+    type: "question.v2.asked",
+    properties: { id: requestId, sessionID: id, questions },
   } as unknown as Event;
 }

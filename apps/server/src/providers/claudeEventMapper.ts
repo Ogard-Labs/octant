@@ -33,6 +33,9 @@ const SECRET_SHAPED =
   /(?:bearer\s+[A-Za-z0-9._-]{20,}|(?:refresh_token|access_token|api[_-]?key|token)\s*[=:]\s*\S+|authorization\s*:\s*[^\r\n]+|\b(?:sk-[A-Za-z0-9_-]{16,}|gh[opusr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|lin_api_[A-Za-z0-9_]+|xox[abp]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b)/gi;
 const SUMMARY_MAX_CHARACTERS = 1_024;
 const PATH_MAX_CHARACTERS = 4_096;
+// Claude's AskUserQuestion schema itself carries at most this many questions
+// in one tool call; more than that is not a shape the SDK can answer.
+const MAX_QUESTIONS = 4;
 const DIGEST_INPUT_MAX_CHARACTERS = 1_048_576;
 const MAX_RETRY_AFTER_MS = 3_600_000;
 const DECODED_MESSAGE_KINDS = new Set([
@@ -104,16 +107,22 @@ interface ClaudePendingRequestBase {
   readonly providerSessionId: string;
   readonly providerToolUseId: string;
   readonly inputDigest: string;
-  readonly event: ProviderRuntimeEvent;
 }
 
 export interface ClaudePendingApproval extends ClaudePendingRequestBase {
   readonly kind: "approval";
   readonly toolName: string;
+  readonly event: ProviderRuntimeEvent;
 }
 
 export interface ClaudePendingQuestion extends ClaudePendingRequestBase {
   readonly kind: "question";
+  /**
+   * One event per question the tool call asked, in its order, under this one
+   * request identity. Each parks the turn in turn; the answers ride back to
+   * the provider as one callback decision carrying every answer.
+   */
+  readonly events: ReadonlyArray<ProviderRuntimeEvent>;
 }
 
 export type ClaudeMappedMessage =
@@ -984,33 +993,50 @@ function mapQuestion(
   toolName: string,
 ): ClaudeMappedMessage {
   const questions = request.input.questions;
-  if (!Array.isArray(questions) || questions.length !== 1) {
+  if (!Array.isArray(questions) || questions.length === 0 || questions.length > MAX_QUESTIONS) {
     return failure("Claude returned an unsupported user question.", "unsupported");
   }
-  const question = record(questions[0]);
-  const prompt =
-    typeof question?.question === "string"
-      ? normalized(question.question, SUMMARY_MAX_CHARACTERS)
-      : undefined;
-  const rawOptions = question?.options;
-  const options = Array.isArray(rawOptions)
-    ? rawOptions.flatMap((value) => {
-        const option = record(value);
-        const label =
-          typeof option?.label === "string"
-            ? normalized(option.label, LABEL_MAX_CHARACTERS)
-            : undefined;
-        return label === undefined ? [] : [label];
-      })
-    : [];
-  if (
-    prompt === undefined ||
-    question?.multiSelect === true ||
-    !Array.isArray(rawOptions) ||
-    options.length !== rawOptions.length ||
-    options.length === 0 ||
-    options.length > 20
-  ) {
+  const mapped = questions.flatMap((value) => {
+    const question = record(value);
+    const prompt =
+      typeof question?.question === "string"
+        ? normalized(question.question, SUMMARY_MAX_CHARACTERS)
+        : undefined;
+    const rawOptions = question?.options;
+    const options = Array.isArray(rawOptions)
+      ? rawOptions.flatMap((optionValue) => {
+          const option = record(optionValue);
+          const label =
+            typeof option?.label === "string"
+              ? normalized(option.label, LABEL_MAX_CHARACTERS)
+              : undefined;
+          if (label === undefined) return [];
+          const rawDescription = option?.description;
+          const description =
+            typeof rawDescription === "string"
+              ? normalized(rawDescription, SUMMARY_MAX_CHARACTERS)
+              : undefined;
+          return [
+            {
+              label,
+              ...(description === undefined ? {} : { description }),
+            },
+          ];
+        })
+      : [];
+    if (
+      prompt === undefined ||
+      question?.multiSelect === true ||
+      !Array.isArray(rawOptions) ||
+      options.length !== rawOptions.length ||
+      options.length === 0 ||
+      options.length > 20
+    ) {
+      return [];
+    }
+    return [{ prompt, options }];
+  });
+  if (mapped.length !== questions.length) {
     return failure("Claude returned an unsupported user question.", "unsupported");
   }
   const correlated = correlatedRequestId(context, {
@@ -1022,12 +1048,18 @@ function mapQuestion(
   });
   if (correlated.kind === "failure") return correlated;
   const normalizedRequestId = correlated.requestId;
-  const requestEvent = mappedEvent(context, {
-    kind: "user-input-request",
-    requestId: normalizedRequestId,
-    prompt,
-    options,
-  });
+  const events = mapped.map((question, index) =>
+    mappedEvent(context, {
+      kind: "user-input-request",
+      requestId: normalizedRequestId,
+      prompt: question.prompt,
+      options: question.options,
+      // A set arrives as one event per question under the same request
+      // identity, so the host answers them in order and the driver answers
+      // the tool call once, with every answer.
+      ...(mapped.length > 1 ? { questionIndex: index + 1, questionCount: mapped.length } : {}),
+    }),
+  );
   return {
     kind: "question",
     request: {
@@ -1036,7 +1068,7 @@ function mapQuestion(
       providerSessionId: context.claudeSessionId,
       providerToolUseId: request.toolUseId,
       inputDigest: digest,
-      event: requestEvent,
+      events,
     },
   };
 }

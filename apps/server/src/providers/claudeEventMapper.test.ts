@@ -1545,8 +1545,8 @@ describe("mapClaudeToolRequest", () => {
               header: "Choice",
               question: "Which safe option?",
               options: [
-                { label: "One", description: "private option description must-not-cross" },
-                { label: "Two", description: "private second description must-not-cross" },
+                { label: "One", description: "Use the first safe option" },
+                { label: "Two", description: "Use the second safe option" },
               ],
               multiSelect: false,
               rawPrivate: "raw question input must-not-cross",
@@ -1563,15 +1563,69 @@ describe("mapClaudeToolRequest", () => {
         providerSessionId: claudeSessionId,
         providerToolUseId: "sdk-question-private",
         inputDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
-        event: {
-          kind: "user-input-request",
-          requestId: "request-1",
-          prompt: "Which safe option?",
-          options: ["One", "Two"],
-        },
+        events: [
+          {
+            kind: "user-input-request",
+            requestId: "request-1",
+            prompt: "Which safe option?",
+            options: [
+              { label: "One", description: "Use the first safe option" },
+              { label: "Two", description: "Use the second safe option" },
+            ],
+          },
+        ],
       },
     });
-    expect(JSON.stringify(result)).not.toMatch(/private option|raw question input/);
+    expect(JSON.stringify(result)).not.toMatch(/raw question input|must-not-cross/);
+  });
+
+  it("maps a multi-question AskUserQuestion into one event per question under one request", () => {
+    const result = mapClaudeToolRequest(
+      context(),
+      toolRequest({
+        toolName: "AskUserQuestion",
+        toolUseId: "sdk-question-private",
+        input: {
+          questions: [
+            {
+              header: "First",
+              question: "How should I proceed?",
+              options: [{ label: "Yes", description: "Go ahead" }],
+              multiSelect: false,
+            },
+            {
+              header: "Second",
+              question: "Mark it resolved?",
+              options: [{ label: "Resolve" }, { label: "Leave open" }],
+              multiSelect: false,
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({
+      kind: "question",
+      request: {
+        requestId: "request-1",
+        events: [
+          {
+            kind: "user-input-request",
+            requestId: "request-1",
+            prompt: "How should I proceed?",
+            questionIndex: 1,
+            questionCount: 2,
+          },
+          {
+            kind: "user-input-request",
+            requestId: "request-1",
+            prompt: "Mark it resolved?",
+            questionIndex: 2,
+            questionCount: 2,
+          },
+        ],
+      },
+    });
   });
 
   it("reuses one public request ID for an identical callback correlation tuple", () => {

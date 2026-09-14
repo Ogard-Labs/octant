@@ -1,9 +1,11 @@
 import { boundedToolResultJson } from "../providers/toolResultJson";
 import {
+  decodeChatAttemptQuestion,
   decodeChatFailure,
   UtcTimestamp,
   type ChatAttempt,
   type ChatAttemptOutcome,
+  type ChatAttemptQuestion,
   type ChatCitationId,
   type ChatContentReference,
   type ChatFailure,
@@ -20,10 +22,9 @@ import {
   type ProviderServiceLimits,
   upsertThreadTaskProgress,
 } from "@octant/contracts";
-import { Schema } from "effect";
-import { transitionChatAttempt } from "@octant/domain/chat-policy";
+import { answerChatTurnQuestion, transitionChatAttempt } from "@octant/domain/chat-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
-import { Effect, Fiber, Scope, Stream } from "effect";
+import { Deferred, Effect, Fiber, Schema, Scope, Stream } from "effect";
 import type { ContextHarnessService } from "../context/contextHarnessService";
 import type { ProviderCapacityScheduler } from "../context/providerCapacityScheduler";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
@@ -35,7 +36,29 @@ import type { ResearchRouteDecision, ResearchRouter } from "./research/researchR
 
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
+// Discrete events only; streaming deltas are exempt (see turnBudget.ts).
+const DEFAULT_MAX_EVENTS = 4_096;
+// Inactivity window: a turn is cut off after this long without any provider
+// event, not after this much total wall time.
+const DEFAULT_IDLE_TIMEOUT_MS = 2 * 60_000;
+// A question record holds at most this many options, matching the attempt
+// contract; longer option lists are cut, not refused.
+const MAX_ATTEMPT_QUESTION_OPTIONS = 8;
+
+/**
+ * Caps one line of a provider question at the attempt record's bound. The
+ * provider already guarantees the text is non-empty; only the length can
+ * overflow, and a truncated question still beats an unanswerable one.
+ */
+function boundedQuestionText(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= 2_000) return trimmed;
+  return trimmed.slice(0, 2_000).trim();
+}
+
 const RESEARCH_TOOL_NAME = "octant_web_research";
+/** The harness tool a direct-API provider calls to ask the person a question. */
+const HARNESS_ASK_USER_TOOL_NAME = "ask-user";
 const RESEARCH_TOOL_DEFINITION = {
   name: RESEARCH_TOOL_NAME,
   inputSchema: {
@@ -44,11 +67,6 @@ const RESEARCH_TOOL_DEFINITION = {
     required: ["query"],
   },
 } as const;
-// Discrete events only; streaming deltas are exempt (see turnBudget.ts).
-const DEFAULT_MAX_EVENTS = 4_096;
-// Inactivity window: a turn is cut off after this long without any provider
-// event, not after this much total wall time.
-const DEFAULT_IDLE_TIMEOUT_MS = 2 * 60_000;
 
 function researchToolsForRoute(
   researchRoute: ResearchRouteDecision,
@@ -131,6 +149,20 @@ export interface ChatTurnRunnerOptions {
   };
 }
 
+/**
+ * One question a live attempt asked and is parked on, keyed by attempt id.
+ * The answer command reaches the turn through this channel; the runner is the
+ * single writer of the attempt, so it journals the answered question itself.
+ * `abandon` is what keeps an answerer from waiting forever when the turn ends
+ * without an answer.
+ */
+interface OpenChatQuestion {
+  readonly requestId: string;
+  readonly deliver: (answer: string) => void;
+  readonly answered: Promise<ChatAttempt>;
+  readonly abandon: (reason: string) => void;
+}
+
 export interface ChatTurnRunnerInput {
   readonly thread: ChatThread;
   readonly attempt: ChatAttempt;
@@ -186,6 +218,7 @@ export class ChatTurnRunner {
   readonly #maxEvents: number;
   readonly #timeoutMs: number;
   readonly #spendCeiling: ChatTurnRunnerOptions["spendCeiling"];
+  readonly #openQuestions = new Map<string, OpenChatQuestion>();
 
   constructor(options: ChatTurnRunnerOptions) {
     this.#capacityScheduler = options.capacityScheduler;
@@ -193,6 +226,23 @@ export class ChatTurnRunner {
     this.#contextHarness = options.contextHarness;
     this.#maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+  }
+
+  /**
+   * Hands a person's answer to a question a live turn asked, and resolves with
+   * the attempt as the turn journalled it. `undefined` when this host is not
+   * running that attempt — the provider session is gone, the question can no
+   * longer be answered, and the turn must be interrupted instead.
+   */
+  async deliverQuestionAnswer(input: {
+    readonly attemptId: string;
+    readonly requestId: string;
+    readonly answer: string;
+  }): Promise<ChatAttempt | undefined> {
+    const question = this.#openQuestions.get(input.attemptId);
+    if (question === undefined || question.requestId !== input.requestId) return undefined;
+    question.deliver(input.answer);
+    return await question.answered;
   }
 
   run(input: ChatTurnRunnerInput): Effect.Effect<void, ChatFailure, Scope.Scope> {
@@ -203,6 +253,7 @@ export class ChatTurnRunner {
     const maxEvents = this.#maxEvents;
     const timeoutMs = this.#timeoutMs;
     const spendCeiling = this.#spendCeiling;
+    const openQuestions = this.#openQuestions;
 
     return Effect.gen(function* () {
       yield* Effect.addFinalizer(() =>
@@ -226,6 +277,7 @@ export class ChatTurnRunner {
         input.researchRoute.kind === "ready" ? input.researchRoute.backend : "searxng";
       let handledEvents = 0;
       let responseText = "";
+      let parkedQuestionRequestId: string | undefined;
       const updatedAt = () => decodeTimestamp(clock());
       const observeCompleted = () =>
         input.onTurnCompleted === undefined
@@ -371,10 +423,95 @@ export class ChatTurnRunner {
           terminalOutcome = ambiguousRecovery;
         });
 
+      /**
+       * Parks the attempt on one question and resolves with the person's
+       * answer. Shared by the two ways a provider turn asks a person a
+       * question: a question event on the provider stream, and the harness's
+       * own ask-user tool call. The attempt journals the question so the
+       * transcript can show it again after a reload; the caller decides where
+       * the answer goes (the provider session, or the tool result).
+       */
+      const parkOnQuestion = (question: ChatAttemptQuestion): Effect.Effect<string, ChatFailure> =>
+        Effect.gen(function* () {
+          currentAttempt = {
+            ...transitionChatAttempt(currentAttempt, {
+              outcome: "waiting",
+              updatedAt: updatedAt(),
+            }),
+            pendingQuestion: question,
+          };
+          yield* input.persistAttempt(currentAttempt);
+          const answerDeferred = yield* Deferred.make<string>();
+          let resolveAnswered!: (attempt: ChatAttempt) => void;
+          let abandonAnswered!: (reason: string) => void;
+          const answered = new Promise<ChatAttempt>((resolve, reject) => {
+            resolveAnswered = resolve;
+            abandonAnswered = reject;
+          });
+          openQuestions.set(String(input.attempt.id), {
+            requestId: question.requestId,
+            deliver: (answer) => {
+              void Effect.runPromise(Deferred.succeed(answerDeferred, answer)).catch(
+                () => undefined,
+              );
+            },
+            answered,
+            abandon: abandonAnswered,
+          });
+          openAnswerSettle = resolveAnswered;
+          openAnswerAbandon = abandonAnswered;
+          parkedQuestionRequestId = question.requestId;
+          // The turn parks on the person here, so the idle timeout is
+          // suspended for the wait: a question is the provider doing its job,
+          // not silence. Only abort ends it otherwise.
+          const answer = yield* idle.during(Deferred.await(answerDeferred));
+          // One answer only: the channel closes the moment it is read, so a
+          // late or duplicated answer is refused upstream. The settle hooks
+          // stay with the answer's caller until the attempt is journalled.
+          openQuestions.delete(String(input.attempt.id));
+          parkedQuestionRequestId = undefined;
+          return answer;
+        });
+
+      /** The attempt an open question resolves on, once its answer is journalled. */
+      let openAnswerSettle: ((attempt: ChatAttempt) => void) | undefined;
+      let openAnswerAbandon: ((reason: string) => void) | undefined;
+
+      const settleAnsweredAttempt = (answer: string, requestId: string) =>
+        Effect.gen(function* () {
+          currentAttempt = answerChatTurnQuestion(currentAttempt, {
+            turnId: input.attempt.turnId,
+            attemptId: input.attempt.id,
+            requestId,
+            answer,
+            answeredAt: updatedAt(),
+          });
+          const persisted = yield* Effect.either(input.persistAttempt(currentAttempt));
+          if (persisted._tag === "Left") {
+            // The journal did not take the answered state, so the answerer
+            // must not be told it was accepted; the pending failure carries
+            // what the turn now settles as.
+            openAnswerAbandon?.("Chat turn ended before the answer was journalled.");
+            openAnswerSettle = undefined;
+            openAnswerAbandon = undefined;
+            return yield* Effect.fail(persisted.left);
+          }
+          openAnswerSettle?.(currentAttempt);
+          openAnswerSettle = undefined;
+          openAnswerAbandon = undefined;
+          return;
+        });
+
       yield* Effect.addFinalizer(() =>
         Effect.gen(function* () {
           if (cleanup.released) return;
           cleanup.released = true;
+          // A turn that ends without its question being answered — abort,
+          // crash, interrupt — must not leave the answer channel reachable,
+          // and an answerer already parked on the promise must be let go.
+          const unanswered = openQuestions.get(String(input.attempt.id));
+          openQuestions.delete(String(input.attempt.id));
+          unanswered?.abandon("Chat turn ended before the answer was delivered.");
           yield* connection
             .stop(input.attempt.providerSessionId)
             .pipe(Effect.catchAll(() => Effect.void));
@@ -620,6 +757,70 @@ export class ChatTurnRunner {
                         ? requestSignal
                         : AbortSignal.any([input.signal, requestSignal]);
                   if (executionSignal?.aborted) return;
+                  if (event.toolName === HARNESS_ASK_USER_TOOL_NAME) {
+                    // The harness's ask-user tool is the way a turn running on
+                    // a direct-API provider asks the person a question. It
+                    // parks the turn on the question like a provider-native
+                    // ask, and the answer rides back as the tool result, so
+                    // the model continues with it. No question can park
+                    // through a tool call the host did not offer.
+                    const allowed =
+                      input.appManagedTools?.definitions.some(
+                        (definition) => definition.name === event.toolName,
+                      ) === true;
+                    if (!allowed) {
+                      yield* connection.answerTool({
+                        sessionId: input.attempt.providerSessionId,
+                        requestId: event.requestId,
+                        resultJson: JSON.stringify({ error: "tool-unavailable" }),
+                        isError: true,
+                      });
+                      return;
+                    }
+                    if (parkedQuestionRequestId !== undefined) {
+                      yield* connection
+                        .interrupt(input.attempt.providerSessionId)
+                        .pipe(Effect.catchAll(() => Effect.void));
+                      return;
+                    }
+                    const input2 = JSON.parse(event.inputJson) as {
+                      readonly prompt?: unknown;
+                      readonly options?: unknown;
+                    };
+                    const prompt =
+                      typeof input2.prompt === "string" ? boundedQuestionText(input2.prompt) : "";
+                    const rawOptions = Array.isArray(input2.options) ? input2.options : [];
+                    const options = rawOptions
+                      .filter((option): option is string => typeof option === "string")
+                      .slice(0, MAX_ATTEMPT_QUESTION_OPTIONS)
+                      .map(boundedQuestionText)
+                      .filter((label) => label.length > 0)
+                      .map((label) => ({ label }));
+                    if (prompt.length === 0) {
+                      yield* connection.answerTool({
+                        sessionId: input.attempt.providerSessionId,
+                        requestId: event.requestId,
+                        resultJson: JSON.stringify({ error: "question-invalid" }),
+                        isError: true,
+                      });
+                      return;
+                    }
+                    const answer = yield* parkOnQuestion(
+                      decodeChatAttemptQuestion({
+                        requestId: event.requestId,
+                        prompt,
+                        options,
+                      }),
+                    );
+                    yield* connection.answerTool({
+                      sessionId: input.attempt.providerSessionId,
+                      requestId: event.requestId,
+                      resultJson: JSON.stringify({ answer }),
+                      isError: false,
+                    });
+                    yield* settleAnsweredAttempt(answer, event.requestId);
+                    return;
+                  }
                   if (event.toolName === RESEARCH_TOOL_NAME) {
                     if (!input.researchEnabled) {
                       yield* connection.answerTool({
@@ -737,6 +938,46 @@ export class ChatTurnRunner {
                 if (event.kind === "waiting") {
                   yield* persistOutcome("waiting");
                   terminalOutcome = "waiting";
+                  return;
+                }
+                if (event.kind === "user-input-request") {
+                  if (parkedQuestionRequestId !== undefined) {
+                    // The turn parks on one question at a time; a second
+                    // concurrent one cannot both be answered from one
+                    // surface. A multi-question set queues behind the park and
+                    // is asked right after its predecessor is answered, so
+                    // this interrupt is only for genuinely concurrent asks.
+                    yield* connection
+                      .interrupt(input.attempt.providerSessionId)
+                      .pipe(Effect.catchAll(() => Effect.void));
+                    return;
+                  }
+                  const answer = yield* parkOnQuestion(
+                    decodeChatAttemptQuestion({
+                      requestId: event.requestId,
+                      prompt: boundedQuestionText(event.prompt),
+                      options: event.options
+                        .slice(0, MAX_ATTEMPT_QUESTION_OPTIONS)
+                        .map((option) => ({
+                          label: boundedQuestionText(option.label),
+                          ...(option.description === undefined
+                            ? {}
+                            : { description: boundedQuestionText(option.description) }),
+                        })),
+                      ...(event.questionIndex === undefined || event.questionCount === undefined
+                        ? {}
+                        : {
+                            questionIndex: event.questionIndex,
+                            questionCount: event.questionCount,
+                          }),
+                    }),
+                  );
+                  yield* connection.answerUserInput({
+                    sessionId: input.attempt.providerSessionId,
+                    requestId: event.requestId,
+                    answer,
+                  });
+                  yield* settleAnsweredAttempt(answer, event.requestId);
                   return;
                 }
                 if (event.kind === "completed") {

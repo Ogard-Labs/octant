@@ -925,6 +925,383 @@ describe("ChatTurnRunner", () => {
     expect(updates.some((entry) => entry.outcome === "completed")).toBe(false);
   });
 
+  it("parks a turn on a provider question, delivers the answer, and finishes the reply", async () => {
+    const updates: ChatAttempt[] = [];
+    const answered: Array<{ readonly requestId: string; readonly answer: string }> = [];
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const continueAfterAnswer = (_input: { readonly requestId: string; readonly answer: string }) =>
+      Effect.gen(function* () {
+        yield* Queue.offer(queue, {
+          kind: "text-delta",
+          sessionId,
+          text: " Continuing.",
+        } as never);
+        yield* Queue.offer(queue, { kind: "completed", sessionId } as never);
+      });
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: () =>
+        Effect.gen(function* () {
+          yield* Queue.offer(queue, {
+            kind: "text-delta",
+            sessionId,
+            text: "Let me check.",
+          } as never);
+          yield* Queue.offer(queue, {
+            kind: "user-input-request",
+            sessionId,
+            requestId: "q1",
+            prompt: "Proceed?",
+            options: [{ label: "Yes" }, { label: "No" }],
+          } as never);
+        }),
+      answerUserInput: (input: { readonly requestId: string; readonly answer: string }) =>
+        Effect.gen(function* () {
+          answered.push(input);
+          yield* continueAfterAnswer(input);
+        }),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        providerNativeExecute: async () => ({
+          query: "x",
+          backend: "provider-native",
+          results: [],
+        }),
+      }),
+    });
+
+    const completed = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fiber = yield* Effect.fork(
+            runner.run({
+              thread: thread(),
+              attempt: attempt(),
+              prompt: "hello",
+              scratchRoot: "/tmp/octant-scratch/thread",
+              driver: { acquire: () => Effect.succeed(connection) } as never,
+              providerInstanceId,
+              serviceLimits: serviceLimits(),
+              contextSubject: subject,
+              contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+              requestShape: "chat-turn",
+              varianceReserve: 20,
+              reservationId: reservation,
+              estimatedTokens: 100,
+              researchEnabled: false,
+              researchRoute: researchRoute({ kind: "disabled" }),
+              attachments: [],
+              persistAttempt: (next) => {
+                updates.push(next);
+                return Effect.void;
+              },
+              persistResponse: () =>
+                Effect.succeed({
+                  contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+                  digest: "b".repeat(64),
+                  byteLength: 5,
+                }),
+            }),
+          );
+          // The turn parks until the person answers; delivery resolves with
+          // the attempt the runner journalled the answer on.
+          const answeredAttempt = yield* Effect.tryPromise(() =>
+            Effect.runPromise(
+              Effect.gen(function* () {
+                for (;;) {
+                  const delivered = yield* Effect.promise(() =>
+                    runner.deliverQuestionAnswer({
+                      attemptId: String(attemptId),
+                      requestId: "q1",
+                      answer: "Yes",
+                    }),
+                  );
+                  if (delivered !== undefined) return delivered;
+                  yield* Effect.sleep(10);
+                }
+              }),
+            ),
+          );
+          expect(answeredAttempt.outcome).toBe("streaming");
+          expect(answeredAttempt.pendingQuestion).toBeUndefined();
+          expect(answeredAttempt.answeredQuestions?.[0]).toMatchObject({
+            requestId: "q1",
+            answer: "Yes",
+          });
+          yield* Fiber.join(fiber);
+          // The park was journaled before the answer moved the turn on.
+          expect(
+            updates.some(
+              (entry) => entry.outcome === "waiting" && entry.pendingQuestion?.requestId === "q1",
+            ),
+          ).toBe(true);
+          return true;
+        }),
+      ),
+    );
+
+    expect(completed).toBe(true);
+    expect(answered).toEqual([{ sessionId, requestId: "q1", answer: "Yes" }]);
+    expect(updates.at(-1)?.outcome).toBe("completed");
+    // The answered exchange stays on the attempt the transcript renders.
+    expect(updates.at(-1)?.answeredQuestions?.[0]).toMatchObject({
+      prompt: "Proceed?",
+      answer: "Yes",
+    });
+  });
+
+  it("parks a turn on the harness ask-user tool call and answers the tool with the reply", async () => {
+    const updates: ChatAttempt[] = [];
+    const toolAnswers: Array<{ readonly requestId: string; readonly resultJson: string }> = [];
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: () =>
+        Effect.gen(function* () {
+          yield* Queue.offer(queue, {
+            kind: "text-delta",
+            sessionId,
+            text: "Let me check.",
+          } as never);
+          yield* Queue.offer(queue, {
+            kind: "tool-request",
+            sessionId,
+            requestId: "tool-ask-1",
+            toolName: "ask-user",
+            inputJson: JSON.stringify({
+              prompt: "How should I proceed?",
+              options: ["Dequeue, push, re-queue", "Let it merge"],
+            }),
+          } as never);
+        }),
+      answerTool: (input: { readonly requestId: string; readonly resultJson: string }) =>
+        Effect.gen(function* () {
+          toolAnswers.push(input);
+          yield* Queue.offer(queue, {
+            kind: "text-delta",
+            sessionId,
+            text: " Continuing.",
+          } as never);
+          yield* Queue.offer(queue, { kind: "completed", sessionId } as never);
+        }),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        providerNativeExecute: async () => ({
+          query: "x",
+          backend: "provider-native",
+          results: [],
+        }),
+      }),
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fiber = yield* Effect.fork(
+            runner.run({
+              thread: thread(),
+              attempt: attempt(),
+              prompt: "hello",
+              scratchRoot: "/tmp/octant-scratch/thread",
+              driver: { acquire: () => Effect.succeed(connection) } as never,
+              providerInstanceId,
+              serviceLimits: serviceLimits(),
+              contextSubject: subject,
+              contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+              requestShape: "chat-turn",
+              varianceReserve: 20,
+              reservationId: reservation,
+              estimatedTokens: 100,
+              researchEnabled: false,
+              researchRoute: researchRoute({ kind: "disabled" }),
+              attachments: [],
+              appManagedTools: {
+                definitions: [{ name: "ask-user" } as never],
+                execute: () => {
+                  throw new Error("The ask-user tool never reaches the tool set.");
+                },
+                close: async () => undefined,
+              },
+              persistAttempt: (next) => {
+                updates.push(next);
+                return Effect.void;
+              },
+              persistResponse: () =>
+                Effect.succeed({
+                  contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+                  digest: "d".repeat(64),
+                  byteLength: 5,
+                }),
+            }),
+          );
+          const answeredAttempt = yield* Effect.tryPromise(() =>
+            Effect.runPromise(
+              Effect.gen(function* () {
+                for (;;) {
+                  const delivered = yield* Effect.promise(() =>
+                    runner.deliverQuestionAnswer({
+                      attemptId: String(attemptId),
+                      requestId: "tool-ask-1",
+                      answer: "Dequeue, push, re-queue",
+                    }),
+                  );
+                  if (delivered !== undefined) return delivered;
+                  yield* Effect.sleep(10);
+                }
+              }),
+            ),
+          );
+          expect(answeredAttempt.pendingQuestion).toBeUndefined();
+          yield* Fiber.join(fiber);
+        }),
+      ),
+    );
+
+    expect(toolAnswers).toEqual([
+      {
+        sessionId,
+        requestId: "tool-ask-1",
+        resultJson: JSON.stringify({ answer: "Dequeue, push, re-queue" }),
+        isError: false,
+      },
+    ]);
+    expect(updates.at(-1)?.outcome).toBe("completed");
+    expect(updates.at(-1)?.answeredQuestions?.[0]).toMatchObject({
+      prompt: "How should I proceed?",
+      options: [{ label: "Dequeue, push, re-queue" }, { label: "Let it merge" }],
+      answer: "Dequeue, push, re-queue",
+    });
+  });
+
+  it("refuses a late answer once the question was already answered", async () => {
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: () =>
+        Effect.gen(function* () {
+          yield* Queue.offer(queue, {
+            kind: "text-delta",
+            sessionId,
+            text: "Let me check.",
+          } as never);
+          yield* Queue.offer(queue, {
+            kind: "user-input-request",
+            sessionId,
+            requestId: "q1",
+            prompt: "Proceed?",
+            options: [{ label: "Yes" }],
+          } as never);
+        }),
+      answerUserInput: (_input: { readonly requestId: string; readonly answer: string }) =>
+        Effect.gen(function* () {
+          yield* Queue.offer(queue, {
+            kind: "text-delta",
+            sessionId,
+            text: " Continuing.",
+          } as never);
+          yield* Queue.offer(queue, { kind: "completed", sessionId } as never);
+        }),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        providerNativeExecute: async () => ({
+          query: "x",
+          backend: "provider-native",
+          results: [],
+        }),
+      }),
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fiber = yield* Effect.fork(
+            runner.run({
+              thread: thread(),
+              attempt: attempt(),
+              prompt: "hello",
+              scratchRoot: "/tmp/octant-scratch/thread",
+              driver: { acquire: () => Effect.succeed(connection) } as never,
+              providerInstanceId,
+              serviceLimits: serviceLimits(),
+              contextSubject: subject,
+              contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+              requestShape: "chat-turn",
+              varianceReserve: 20,
+              reservationId: reservation,
+              estimatedTokens: 100,
+              researchEnabled: false,
+              researchRoute: researchRoute({ kind: "disabled" }),
+              attachments: [],
+              persistAttempt: () => Effect.void,
+              persistResponse: () =>
+                Effect.succeed({
+                  contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+                  digest: "c".repeat(64),
+                  byteLength: 5,
+                }),
+            }),
+          );
+          yield* Effect.tryPromise(() =>
+            Effect.runPromise(
+              Effect.gen(function* () {
+                for (;;) {
+                  const answered = yield* Effect.promise(() =>
+                    runner.deliverQuestionAnswer({
+                      attemptId: String(attemptId),
+                      requestId: "q1",
+                      answer: "Yes",
+                    }),
+                  );
+                  if (answered !== undefined) return;
+                  yield* Effect.sleep(10);
+                }
+              }),
+            ),
+          );
+          yield* Fiber.join(fiber);
+        }),
+      ),
+    );
+
+    expect(
+      await runner.deliverQuestionAnswer({
+        attemptId: String(attemptId),
+        requestId: "q1",
+        answer: "Again",
+      }),
+    ).toBeUndefined();
+  });
+
   it.each([
     ["rate-limited", "waiting", "waiting"],
     ["interrupted", "interrupted", "interrupted"],

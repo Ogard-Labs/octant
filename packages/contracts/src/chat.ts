@@ -86,6 +86,57 @@ const ChatMessagePartText = Schema.String.pipe(Schema.maxLength(1_000_000));
 export const ChatToolPartStatus = Schema.Literal("running", "done", "failed");
 export type ChatToolPartStatus = typeof ChatToolPartStatus.Type;
 
+const ChatQuestionText = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000));
+
+/** One answer a provider offered: what it is called and what choosing means. */
+export const ChatQuestionOption = Schema.Struct({
+  label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  description: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000))),
+}).annotations(strict);
+export type ChatQuestionOption = typeof ChatQuestionOption.Type;
+
+/**
+ * A question a provider asked mid-turn. Journaled on the attempt so the
+ * transcript can show it again after a reload, and so the answer rides the
+ * same provider session the turn is parked on. A set the provider asked at
+ * once arrives as one record per question under the same request identity,
+ * each carrying its place in the set.
+ */
+export const ChatAttemptQuestion = Schema.Struct({
+  requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  prompt: ChatQuestionText,
+  options: Schema.Array(ChatQuestionOption).pipe(Schema.maxItems(8)),
+  questionIndex: Schema.optional(PositiveInt),
+  questionCount: Schema.optional(PositiveInt),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (question) =>
+        (question.questionIndex === undefined) === (question.questionCount === undefined),
+    ),
+  );
+export type ChatAttemptQuestion = typeof ChatAttemptQuestion.Type;
+
+/** A question the person answered, kept on the attempt that asked it. */
+export const ChatAttemptAnsweredQuestion = Schema.Struct({
+  requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  prompt: ChatQuestionText,
+  options: Schema.Array(ChatQuestionOption).pipe(Schema.maxItems(8)),
+  questionIndex: Schema.optional(PositiveInt),
+  questionCount: Schema.optional(PositiveInt),
+  answer: ChatQuestionText,
+  answeredAt: UtcTimestamp,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (question) =>
+        (question.questionIndex === undefined) === (question.questionCount === undefined),
+    ),
+  );
+export type ChatAttemptAnsweredQuestion = typeof ChatAttemptAnsweredQuestion.Type;
+
 /** Octant structured message parts (optional on content). */
 export const ChatMessagePart = Schema.Union(
   Schema.Struct({
@@ -187,6 +238,19 @@ export const ChatAttempt = Schema.Struct({
    * matrix states instead of this field implying.
    */
   tasks: Schema.optional(ThreadTaskProgressList),
+  /**
+   * A question the provider asked mid-turn and is blocked on, journaled so the
+   * transcript can show it again after a reload. Present only while the turn
+   * waits for the person's answer; answering removes it.
+   */
+  pendingQuestion: Schema.optional(ChatAttemptQuestion),
+  /**
+   * Questions this attempt already asked and the person answered, kept so the
+   * exchange the reply grew from stays readable in the transcript.
+   */
+  answeredQuestions: Schema.optional(
+    Schema.Array(ChatAttemptAnsweredQuestion).pipe(Schema.maxItems(8)),
+  ),
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
 }).annotations(strict);
@@ -500,6 +564,21 @@ export const InterruptChatTurnCommand = Schema.Struct({
   attemptId: ChatAttemptId,
 }).annotations(strict);
 
+/**
+ * Answers a question a running attempt asked and is blocked on. The server
+ * hands the answer to the live turn, which journals the answered question and
+ * lets the provider continue; the attempt it returns reflects the moment the
+ * answer was accepted, not the resumed turn that follows.
+ */
+export const AnswerChatTurnQuestionCommand = Schema.Struct({
+  kind: Schema.Literal("answer-chat-turn-question"),
+  ...ChatThreadCommandFields,
+  turnId: ChatTurnId,
+  attemptId: ChatAttemptId,
+  requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  answer: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000)),
+}).annotations(strict);
+
 export const DeleteChatThreadCommand = Schema.Struct({
   kind: Schema.Literal("delete-chat-thread"),
   ...ChatThreadCommandFields,
@@ -628,6 +707,7 @@ export const ChatCommand = Schema.Union(
   RetryChatTurnCommand,
   ResumeChatTurnCommand,
   InterruptChatTurnCommand,
+  AnswerChatTurnQuestionCommand,
   DeleteChatThreadCommand,
   UpdateChatSettingsCommand,
   ThreadWorkCommand,
@@ -949,6 +1029,7 @@ export const decodeChatAttachmentMediaType = Schema.decodeUnknownSync(ChatAttach
 export const decodeChatContentRole = Schema.decodeUnknownSync(ChatContentRole);
 export const decodeChatAttachment = Schema.decodeUnknownSync(ChatAttachment);
 export const decodeChatCitation = Schema.decodeUnknownSync(ChatCitation);
+export const decodeChatAttemptQuestion = Schema.decodeUnknownSync(ChatAttemptQuestion);
 export const decodeChatAttempt = Schema.decodeUnknownSync(ChatAttempt);
 export const decodeChatTurn = Schema.decodeUnknownSync(ChatTurn);
 export const decodeChatThread = Schema.decodeUnknownSync(ChatThread);
