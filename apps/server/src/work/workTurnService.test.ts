@@ -77,6 +77,36 @@ describe("WorkTurnService", () => {
     });
   });
 
+  it("refuses a Work follow-up before native admission when its Project policy no longer accepts it", async () => {
+    const admitTurn = vi.fn(() => ({
+      kind: "paused" as const,
+      status: "paused-by-advisor" as const,
+      detail: "Policy should win before this admission.",
+    }));
+    const fixture = serviceFixture({
+      project: {
+        ...workProject(),
+        providerPolicy: { mode: "eu-zdr", providerInstanceIds: [] },
+      },
+      nativeHarness: {
+        admitTurn,
+        contextFor: () => [],
+        turnStarted: vi.fn(),
+        turnCompleted: vi.fn(async () => undefined),
+      },
+    });
+
+    await expect(fixture.service.startFirstTurn(ids.window, startCommand())).rejects.toEqual(
+      new WorkTurnServiceError({
+        category: "unauthorized",
+        message:
+          "This provider or model is not tagged EU or ZDR, so it is not allowed by this Project's provider policy.",
+      }),
+    );
+    expect(admitTurn).not.toHaveBeenCalled();
+    expect(fixture.acquireInputs).toHaveLength(0);
+  });
+
   it("refuses an explicit skill until Work has a material resolver", async () => {
     const fixture = serviceFixture();
     const result = await fixture.service.startFirstTurn(ids.window, {
@@ -730,6 +760,7 @@ function serviceFixture(
     readonly resolveFileMentionContext?: WorkTurnServiceDependencies["resolveFileMentionContext"];
     readonly resolveAppManagedTools?: WorkTurnServiceDependencies["resolveAppManagedTools"];
     readonly spendCeiling?: WorkTurnServiceDependencies["spendCeiling"];
+    readonly nativeHarness?: WorkTurnServiceDependencies["nativeHarness"];
     readonly projectStatusFiles?: WorkProjectStatusFiles;
     readonly turnFileObserver?: WorkTurnServiceDependencies["turnFileObserver"];
   } = {},
@@ -871,6 +902,7 @@ function serviceFixture(
     ...(options.resolveAppManagedTools === undefined
       ? {}
       : { resolveAppManagedTools: options.resolveAppManagedTools }),
+    ...(options.nativeHarness === undefined ? {} : { nativeHarness: options.nativeHarness }),
     ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
     ...(options.projectStatusFiles === undefined
       ? {}
@@ -931,7 +963,7 @@ function inMemoryStatusFiles(disk: Map<string, string>): WorkProjectStatusFiles 
   });
 }
 
-function workProject(): Project {
+function workProject(): Extract<Project, { readonly type: "work" }> {
   return {
     id: ids.project,
     type: "work",
@@ -955,7 +987,7 @@ function workProject(): Project {
         changedAt: now as never,
       },
     ],
-  } as Project;
+  } as Extract<Project, { readonly type: "work" }>;
 }
 
 function deferred<T>() {

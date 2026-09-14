@@ -1024,6 +1024,33 @@ describe("ProjectService", () => {
     );
   });
 
+  it("changes a bound Project provider policy through one journaled event", async () => {
+    const fixture = fixtureService({ projects: [codeProject()] });
+    const result = await fixture.service.executeProject(windowId, {
+      kind: "change-project-provider-policy",
+      projectId: workId,
+      expectedVersion: 1,
+      policy: {
+        mode: "whitelist",
+        providerInstanceIds: ["00000000-0000-0000-0000-000000000607"],
+      },
+    });
+    expect(result).toMatchObject({
+      kind: "project-provider-policy-changed",
+      project: {
+        providerPolicy: {
+          mode: "whitelist",
+          providerInstanceIds: ["00000000-0000-0000-0000-000000000607"],
+        },
+        version: 2,
+      },
+    });
+    expect(fixture.append).toHaveBeenCalledTimes(1);
+    expect(fixture.append.mock.calls[0]?.[0]?.events?.[0]?.eventName).toBe(
+      "project.provider-policy-changed@1",
+    );
+  });
+
   it("replays the pull-request background refresh opt-in across persistence restart", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-project-pr-cadence-service-"));
     const codeId = decodeProjectId("00000000-0000-4000-8000-000000000698");

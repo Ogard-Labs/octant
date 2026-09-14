@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { AggregateVersion, UtcTimestamp } from "./events";
+import { ZenBuiltinBackgroundId } from "./backgroundCatalog";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedString = <B extends string>(brand: B) =>
@@ -172,14 +173,18 @@ export const DEFAULT_SIDEBAR_BACKGROUND: SidebarBackground = Schema.decodeSync(S
   vibrancyMode: "subtle",
 });
 
-// The application ground: the theme's own animated pattern, a photo from the
-// shared background image store, or the plain page. A photo reuses the sidebar
-// background id because both point at one image library on the host; the
-// ground does not keep a second copy. The tuning fields travel with every
-// kind so switching away and back keeps what a person dialled in; each is
-// optional on the wire so rows written before it existed still decode.
-export const AppBackgroundKind = Schema.Literal("theme", "photo", "none");
+// The application ground: the theme's own animated pattern, a first-party
+// built-in image, a photo from the shared background image store, or the plain
+// page. A photo reuses the sidebar background id because both point at one
+// image library on the host; the ground does not keep a second copy. The
+// tuning fields travel with every kind so switching away and back keeps what a
+// person dialled in; each is optional on the wire so old rows still decode.
+export const AppBackgroundKind = Schema.Literal("theme", "builtin", "photo", "none");
 export type AppBackgroundKind = typeof AppBackgroundKind.Type;
+
+/** The first-party image catalog shared with Zen's Appearance panel. */
+export const AppBackgroundPresetId = ZenBuiltinBackgroundId;
+export type AppBackgroundPresetId = typeof AppBackgroundPresetId.Type;
 
 /** Where the ground shows: behind the start screens only, or behind everything. */
 export const AppBackgroundScope = Schema.Literal("welcome", "everywhere");
@@ -217,6 +222,12 @@ const PhotoAppBackground = Schema.Struct({
   ...AppBackgroundTuning,
 }).annotations(strict);
 
+const BuiltinAppBackground = Schema.Struct({
+  kind: Schema.Literal("builtin"),
+  presetId: AppBackgroundPresetId,
+  ...AppBackgroundTuning,
+}).annotations(strict);
+
 const NoneAppBackground = Schema.Struct({
   kind: Schema.Literal("none"),
   ...AppBackgroundTuning,
@@ -224,6 +235,7 @@ const NoneAppBackground = Schema.Struct({
 
 export const AppBackground = Schema.Union(
   ThemeAppBackground,
+  BuiltinAppBackground,
   PhotoAppBackground,
   NoneAppBackground,
 );

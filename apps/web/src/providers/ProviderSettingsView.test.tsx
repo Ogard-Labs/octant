@@ -2072,6 +2072,7 @@ describe("ProviderSettingsView", () => {
 
     const card = screen.getByRole("article", { name: "Detected Codex" });
     expect(within(card).getByText("Detected on this host — enable to use")).toBeVisible();
+    expect(within(card).getByLabelText("Detected locally")).toBeVisible();
   });
 
   it("exposes detected-provider enablement without opening Details", () => {
@@ -2154,6 +2155,23 @@ describe("ProviderSettingsView", () => {
     expect(props.onSetEnabled).toHaveBeenCalledWith(id, true);
     expect(props.onProbe).toHaveBeenCalledWith(id, { quiet: true });
     expect(props.onProbe).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a local CLI disabled when the completed scan cannot find its binary", () => {
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture({
+          instance: provider({ enabled: false }),
+          discoverySnapshot: discoverySnapshot({ candidates: [] }),
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("switch", { name: "Enable Existing CLI" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.queryByLabelText("Detected locally")).toBeNull();
   });
 
   it("renders the Bedrock Mantle setup guide only for an OpenAI-compatible endpoint", async () => {
@@ -2240,6 +2258,8 @@ function ControllerBackedProviderSettings(props: {
       onRename={controller.rename}
       onRetry={controller.retry}
       onSetEnabled={controller.setEnabled}
+      onDataTagsChange={controller.setDataTags}
+      onModelDataTagsChange={controller.setModelDataTags}
       probingIds={controller.probingIds}
       updatingIds={controller.updatingIds}
       status={controller.status}
@@ -2453,6 +2473,8 @@ function fixture(
     onProviderCredentialStatus: vi.fn(async () => "stored" as const),
     onClearProviderCredential: vi.fn(async () => true),
     onSetEnabled: vi.fn(async () => true),
+    onDataTagsChange: vi.fn(async () => true),
+    onModelDataTagsChange: vi.fn(async () => true),
     onRemove: vi.fn(async () => true),
     onProbe: vi.fn(async () => true),
     onVerifyFoundryTools: vi.fn(async () => true),

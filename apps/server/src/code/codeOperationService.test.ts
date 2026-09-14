@@ -912,6 +912,129 @@ describe("CodeOperationService", () => {
     expect(events.append).not.toHaveBeenCalled();
   });
 
+  it("refuses to recover a stale provider turn the Project provider policy no longer accepts", async () => {
+    const providerOperation = decodeCodeOperationId("49494949-4949-4494-8494-494949494949");
+    const prompt = decodeCodeEvidenceReference({
+      contentId: "62626262-6262-4262-8262-626262626262",
+      digest: "f".repeat(64),
+      byteLength: 6,
+    });
+    const activeThread = decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" });
+    const turns = {
+      start: vi.fn(async () => ({ state: "running" as const })),
+      answerInput: vi.fn(),
+      answerApproval: vi.fn(),
+      cancel: vi.fn(),
+    };
+    const events = {
+      append: vi.fn(),
+      historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
+      replay: vi.fn(() => ({
+        status: "ok" as const,
+        frames: [
+          {
+            threadId: ids.thread,
+            operationId: providerOperation,
+            cursor: 0,
+            occurredAt: "2026-07-21T10:00:00.000Z",
+            event: {
+              kind: "conversation-turn-started",
+              providerInstanceId: activeThread.providerInstanceId,
+              modelId: activeThread.modelId,
+              sessionId: "60606060-6060-4060-8060-606060606060",
+              prompt,
+            },
+          },
+          {
+            threadId: ids.thread,
+            operationId: providerOperation,
+            cursor: 1,
+            occurredAt: "2026-07-21T10:00:01.000Z",
+            event: {
+              kind: "operation-result",
+              result: {
+                kind: "provider-turn-state",
+                operationId: providerOperation,
+                state: "running",
+              },
+            },
+          },
+        ],
+        nextCursor: 2,
+      })),
+    };
+    const authority = {
+      readThread: vi.fn(() => activeThread),
+      readCheckout: vi.fn(() =>
+        decodeCodeCheckoutIdentity({
+          id: ids.checkout,
+          repositoryId: activeThread.repositoryId,
+          kind: "existing-worktree",
+          availability: "available",
+          head: { kind: "branch", name: "development", oid: "a".repeat(40) },
+          observedAt: "2026-07-21T10:00:00.000Z",
+        }),
+      ),
+      canAccessProject: vi.fn(async () => true),
+      resolveCheckoutRoot: vi.fn(async () => ({
+        checkoutRoot: "/tmp/repo",
+        credentialReferences: [],
+      })),
+    };
+    const service = new CodeOperationService({
+      authority: authority as never,
+      approvals: { validate: vi.fn(async () => true) },
+      terminals: {
+        launch: vi.fn(),
+        attach: vi.fn(),
+        write: vi.fn(),
+        resize: vi.fn(),
+        terminate: vi.fn(),
+      },
+      repositoryTests: { run: vi.fn(), cancel: vi.fn() } as never,
+      git: {
+        observe: vi.fn(),
+        stage: vi.fn(),
+        commit: vi.fn(),
+        push: vi.fn(),
+      } as never,
+      pullRequests: {
+        createPullRequest: vi.fn(),
+        observePullRequest: vi.fn(),
+        mergePullRequest: vi.fn(),
+      } as never,
+      reviewFindings: {
+        createFinding: vi.fn(),
+        updateFinding: vi.fn(),
+      } as never,
+      turns: turns as never,
+      evidence: { put: vi.fn(), read: vi.fn(async () => "prompt") } as never,
+      events: events as never,
+      // The Project's policy changed while the turn was open.
+      isProviderModelAllowed: () => false,
+    });
+
+    await expect(
+      service.execute(ids.window, {
+        kind: "start-provider-turn",
+        operationId: providerOperation,
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        sessionId: "60606060-6060-4060-8060-606060606060",
+        prompt,
+      }),
+    ).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: {
+        category: "unauthorized",
+        message: "This provider or model is not allowed by this Code Project's provider policy.",
+      },
+    });
+    // The stale turn was never resumed and no checkout work was started.
+    expect(turns.start).not.toHaveBeenCalled();
+    expect(authority.resolveCheckoutRoot).not.toHaveBeenCalled();
+  });
+
   it("never discards uncommitted work on an auto-accepting thread without an approval", async () => {
     const discard = vi.fn(async () => ({ status: "applied" as const }));
     let approved = false;
@@ -1071,6 +1194,20 @@ describe("CodeOperationService", () => {
     );
     // The journal names the image by what the host measured, never its bytes.
     expect(journalled().at(-1)).toMatchObject({ attachments: [reference] });
+  });
+
+  it("refuses a Code follow-up when its Project provider policy no longer accepts it", async () => {
+    const fixture = providerTurnFixture({ isProviderModelAllowed: () => false });
+
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: {
+        category: "unauthorized",
+        message: "This provider or model is not allowed by this Code Project's provider policy.",
+      },
+    });
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+    expect(fixture.events.append).not.toHaveBeenCalled();
   });
 
   it("runs only a definition the server discovered for the checkout", async () => {
@@ -1658,6 +1795,7 @@ function providerTurnFixture(
       | "attachments"
       | "supportsAttachments"
       | "git"
+      | "isProviderModelAllowed"
     >
   > & { readonly thread?: CodeThread } = {},
 ) {

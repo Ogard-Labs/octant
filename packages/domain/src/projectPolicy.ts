@@ -14,6 +14,7 @@ import {
   type ProjectId,
   type ProjectLifecycle,
   type ProjectOrigin,
+  type ProjectProviderPolicy,
   type ProjectRank,
 } from "@octant/contracts/projects";
 
@@ -191,6 +192,32 @@ export function changeCodeProjectAccess(
   return {
     ...project,
     codeAccessPersistence,
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
+export function changeProjectProviderPolicy(
+  project: Project,
+  providerPolicy: ProjectProviderPolicy,
+  updatedAt: UtcTimestamp,
+): BoundProject {
+  if (project.type === "chat") {
+    reject("binding-not-allowed", "Only Work and Code Projects have a provider policy");
+  }
+  const current = project.providerPolicy ?? { mode: "all" as const, providerInstanceIds: [] };
+  if (
+    current.mode === providerPolicy.mode &&
+    current.providerInstanceIds.length === providerPolicy.providerInstanceIds.length &&
+    current.providerInstanceIds.every(
+      (id, index) => String(id) === String(providerPolicy.providerInstanceIds[index]),
+    )
+  ) {
+    reject("invalid-lifecycle", "Project provider policy is already selected");
+  }
+  return {
+    ...project,
+    providerPolicy,
     version: nextVersion(project),
     updatedAt,
   };

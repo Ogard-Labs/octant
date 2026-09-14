@@ -51,6 +51,9 @@ afterEach(() => {
 const APP_GROUND: ResolvedAppBackground = {
   kind: "theme",
   backgroundId: null,
+  backgroundUrl: null,
+  backgroundStillUrl: null,
+  backgroundAnimated: false,
   animated: false,
   patternEnabled: true,
   patternOpacity: 0.55,

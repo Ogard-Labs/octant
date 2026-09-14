@@ -55,12 +55,14 @@ import {
   ProjectCreated,
   ProjectLifecycleChanged,
   ProjectOrderChanged,
+  ProjectProviderPolicyChanged,
   ProjectRenamed,
   ProviderDefaultsUpdated,
   ProviderCatalogUpdated,
   ProviderInstanceBinaryChanged,
   ProviderInstanceConfigurationChanged,
   ProviderInstanceCreated,
+  ProviderInstanceDataTagsChanged,
   ProviderInstanceEnabledChanged,
   ProviderInstanceRemoved,
   ProviderInstanceRenamed,
@@ -251,6 +253,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       1,
       CodeProjectPullRequestBackgroundRefreshChanged,
     )
+    .register("project.provider-policy-changed@1", 1, ProjectProviderPolicyChanged)
     .register("memory.entry-created@1", 1, MemoryEntryCreated)
     .register("memory.entry-superseded@1", 1, MemoryEntrySuperseded)
     .register("memory.entry-retracted@1", 1, MemoryEntryRetracted)
@@ -259,6 +262,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("provider.instance-renamed@1", 1, ProviderInstanceRenamed)
     .register("provider.instance-binary-changed@1", 1, ProviderInstanceBinaryChanged)
     .register("provider.instance-configuration-changed@1", 1, ProviderInstanceConfigurationChanged)
+    .register("provider.instance-data-tags-changed@1", 1, ProviderInstanceDataTagsChanged)
     .register("provider.instance-enabled-changed@1", 1, ProviderInstanceEnabledChanged)
     .register("provider.instance-removed@1", 1, ProviderInstanceRemoved)
     .register("provider.defaults-updated@1", 1, ProviderDefaultsUpdated)

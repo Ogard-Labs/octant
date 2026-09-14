@@ -13,6 +13,9 @@ const dials = {
   photoOpacity: 0.42,
   scope: "welcome",
   coversSidebar: false,
+  backgroundUrl: null,
+  backgroundStillUrl: null,
+  backgroundAnimated: false,
 } as const;
 
 describe("AppBackdrop", () => {
@@ -93,6 +96,31 @@ describe("AppBackdrop", () => {
     await waitFor(() => {
       expect(fetcher).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000b01");
     });
+  });
+
+  it("renders a built-in background without asking the photo library", () => {
+    const fetcher = vi.fn();
+    const { container } = render(
+      <AppBackdrop
+        fetcher={fetcher}
+        placement="shell"
+        resolved={{
+          ...dials,
+          kind: "builtin",
+          backgroundId: "perspective-dot-plane-animated",
+          backgroundUrl: "/zen-backgrounds/perspective-dot-plane-dark.webp",
+          backgroundStillUrl: "/zen-backgrounds/perspective-dot-plane.jpg",
+          backgroundAnimated: true,
+          animated: false,
+        }}
+      />,
+    );
+    const ground = container.querySelector("[data-octant-app-backdrop]");
+    expect(ground).toHaveAttribute("data-octant-app-backdrop", "builtin");
+    expect(container.querySelector(".app-backdrop__builtin")).toHaveStyle({
+      backgroundImage: 'url("/zen-backgrounds/perspective-dot-plane-dark.webp")',
+    });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("marks a photo as clean when dithering and the pattern are disabled", () => {

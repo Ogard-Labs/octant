@@ -86,11 +86,12 @@ forces it off.
 
 The app sits on a ground of its own. **Theme pattern** (the default) is an
 ordered-dither cloud drawn in the theme's accent, so switching presets or
-overriding the accent recolours it at once. **Photo** prints a picture of
-yours through the same dither, with the cloud over it; upload a PNG, JPEG, or
-WebP up to 8 MiB and 4096×4096 pixels, or pick one already on this host. The
-sidebar and the ground share one photo library, and a photo in use cannot be
-deleted. **None** keeps the plain page.
+overriding the accent recolours it at once. **Built-in** uses the same still or
+animated first-party image catalog as Zen, with a preview tile for every
+choice. **Photo** prints a picture of yours through the same dither, with the
+cloud over it; upload a PNG, JPEG, or WebP up to 8 MiB and 4096×4096 pixels, or
+pick one already on this host. The sidebar and the ground share one photo
+library, and a photo in use cannot be deleted. **None** keeps the plain page.
 
 **Show behind** puts the ground behind the start screens only, where it is
 masked away behind the composer and fades out below it, or behind everything,
@@ -114,9 +115,9 @@ under **Reduced Motion**. Built-in loops use animated WebP.
 **App background**, above the built-in pictures, stands the space on the same
 ground as the rest of Octant: whatever **Background** is set to in Settings ›
 Appearance, with the dials you set there. It carries none of its own, so
-changing the cloud once changes every space that uses it. **Background
-opacity** still dims it, Reduced motion still holds it still, and Increased
-contrast still turns it off.
+changing a pattern, built-in image, or photo once changes every space that
+uses it. **Background opacity** still dims it, **Reduced motion** keeps animated
+backgrounds on their still frame, and **Increased contrast** still turns it off.
 
 ### Handing the theme to a project
 

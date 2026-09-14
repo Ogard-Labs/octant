@@ -3,6 +3,7 @@ import type {
   AppBackgroundPercent,
   SidebarBackgroundMetadata,
 } from "@octant/contracts/theme";
+import { ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
 import { Image as ImageIcon, Images, Upload } from "lucide-react";
 import { useEffect, useId, useRef, useState, type ChangeEvent } from "react";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
@@ -60,7 +61,9 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   const library = props.library;
   const background = props.background;
   const selectedId = background.kind === "photo" ? String(background.backgroundId) : null;
+  const selectedPresetId = background.kind === "builtin" ? background.presetId : null;
   const showPhoto = choice === "photo" || selectedId !== null;
+  const showBuiltin = choice === "builtin" || selectedPresetId !== null;
   const showDials = background.kind !== "none";
   const patternDialsActive = background.patternEnabled;
   const patternDialsHintId = useId();
@@ -99,7 +102,17 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
       props.onChange({ ...carry(background), kind });
       return;
     }
+    if (kind === "builtin") {
+      setChoice("builtin");
+      setStatus(undefined);
+      return;
+    }
     if (kind === "photo") setChoice("photo");
+  };
+
+  const pickBuiltin = (presetId: (typeof ZEN_BUILTIN_BACKGROUNDS)[number]["id"]) => {
+    setStatus(undefined);
+    props.onChange({ ...carry(background), kind: "builtin", presetId });
   };
 
   const pick = (photo: SidebarBackgroundMetadata) => {
@@ -142,12 +155,60 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
           onValueChange={choose}
           options={[
             { id: "theme", label: "Theme pattern" },
+            { id: "builtin", label: "Built-in" },
             { id: "photo", label: "Photo" },
             { id: "none", label: "None" },
           ]}
           value={choice}
         />
       </label>
+      {showBuiltin ? (
+        <fieldset className="settings-app-background__presets">
+          <legend>Built-in backgrounds</legend>
+          {(["landscape", "forest", "wood", "abstract"] as const).map((group) => {
+            const presets = ZEN_BUILTIN_BACKGROUNDS.filter((preset) => preset.group === group);
+            return (
+              <div className="settings-app-background__group" key={group}>
+                <h3>{group}</h3>
+                <div
+                  aria-label={`${group} built-in backgrounds`}
+                  className="settings-app-background__preset-grid"
+                  role="radiogroup"
+                >
+                  {presets.map((preset) => (
+                    <OctantButton
+                      aria-checked={selectedPresetId === preset.id}
+                      aria-label={preset.title}
+                      className="settings-app-background__preset"
+                      key={preset.id}
+                      onClick={() => pickBuiltin(preset.id)}
+                      role="radio"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <img
+                        alt={`${preset.title} preview`}
+                        className="settings-app-background__preset-thumb"
+                        loading="lazy"
+                        src={"stillSrc" in preset ? preset.stillSrc : preset.src}
+                      />
+                      <span className="settings-app-background__preset-name">{preset.title}</span>
+                      {preset.motion === "animated" ? (
+                        <span className="settings-app-background__preset-motion">Animated</span>
+                      ) : null}
+                      {selectedPresetId === preset.id ? (
+                        <span aria-hidden="true" className="settings-view__selection-mark">
+                          ✓
+                        </span>
+                      ) : null}
+                    </OctantButton>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </fieldset>
+      ) : null}
       {showPhoto ? (
         <div className="settings-view__field">
           <span>Photo</span>

@@ -51,6 +51,14 @@ export const ProviderDriverKind = Schema.Literal(
 );
 export type ProviderDriverKind = typeof ProviderDriverKind.Type;
 
+/** User-maintained data handling labels used by Project provider policy. */
+export const ProviderDataTag = Schema.Literal("eu", "zdr");
+export type ProviderDataTag = typeof ProviderDataTag.Type;
+export const ProviderDataTags = Schema.Array(ProviderDataTag).pipe(
+  Schema.filter((tags) => new Set(tags).size === tags.length && tags.length <= 2),
+);
+export type ProviderDataTags = typeof ProviderDataTags.Type;
+
 export const ProviderCapabilitySupport = Schema.Literal("supported", "unsupported", "unavailable");
 export type ProviderCapabilitySupport = typeof ProviderCapabilitySupport.Type;
 export const ProviderInputModality = Schema.Literal("text", "image", "audio", "document");
@@ -529,6 +537,8 @@ const ProviderInstanceFields = {
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
+  /** Optional so existing provider rows remain valid and default to untagged. */
+  dataTags: Schema.optional(ProviderDataTags),
 } as const;
 
 export const OpenCodeProviderInstance = Schema.Struct({
@@ -814,6 +824,10 @@ export const ProviderInstanceConfigurationChanged = Schema.Struct({
   ),
 }).annotations(strict);
 export type ProviderInstanceConfigurationChanged = typeof ProviderInstanceConfigurationChanged.Type;
+export const ProviderInstanceDataTagsChanged = Schema.Struct({
+  instance: ProviderInstance,
+}).annotations(strict);
+export type ProviderInstanceDataTagsChanged = typeof ProviderInstanceDataTagsChanged.Type;
 export const ProviderInstanceEnabledChanged = Schema.Struct({
   instance: ProviderInstance,
 }).annotations(strict);
@@ -833,6 +847,7 @@ export const PROVIDER_EVENT_NAMES = [
   "provider.instance-renamed@1",
   "provider.instance-binary-changed@1",
   "provider.instance-configuration-changed@1",
+  "provider.instance-data-tags-changed@1",
   "provider.instance-enabled-changed@1",
   "provider.instance-removed@1",
   "provider.defaults-updated@1",
@@ -954,6 +969,8 @@ const ProviderModelFields = {
   imageInput: Schema.optional(ImageInputCapability),
   options: Schema.Array(ProviderModelOption),
   capabilityEvidence: Schema.optional(Schema.Array(CapabilityEvidence)),
+  /** User-maintained residency/privacy labels; absent means untagged. */
+  dataTags: Schema.optional(ProviderDataTags),
 } as const;
 
 export const ProviderModel = Schema.Union(
@@ -1399,6 +1416,17 @@ export const ProviderRegistryCommand = Schema.Union(
     enabled: Schema.Boolean,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("set-provider-data-tags"),
+    ...ProviderInstanceCommandFields,
+    dataTags: ProviderDataTags,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("set-provider-model-data-tags"),
+    ...ProviderInstanceCommandFields,
+    modelId: ProviderModelId,
+    dataTags: ProviderDataTags,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("remove-provider"),
     ...ProviderInstanceCommandFields,
   }).annotations(strict),
@@ -1450,6 +1478,10 @@ export const ProviderRegistryCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("provider-updated"),
     instance: ProviderInstance,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("provider-model-tags-updated"),
+    snapshot: ProviderCatalogSnapshot,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("provider-removed"),
@@ -1731,6 +1763,9 @@ export const decodeProviderInstanceConfigurationChanged = Schema.decodeUnknownSy
 );
 export const decodeProviderInstanceEnabledChanged = Schema.decodeUnknownSync(
   ProviderInstanceEnabledChanged,
+);
+export const decodeProviderInstanceDataTagsChanged = Schema.decodeUnknownSync(
+  ProviderInstanceDataTagsChanged,
 );
 export const decodeProviderInstanceRemoved = Schema.decodeUnknownSync(ProviderInstanceRemoved);
 export const decodeProviderDefaultsUpdated = Schema.decodeUnknownSync(ProviderDefaultsUpdated);

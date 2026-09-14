@@ -30,6 +30,7 @@ import {
   type ProviderAttachmentInput,
   type ProviderContextBlock,
   type ProviderInstance,
+  type ProviderModel,
   type ThreadTaskProgressList,
   type ThreadWorkingDirectory,
   type WindowId,
@@ -47,6 +48,8 @@ import type {
 } from "../harness/nativeHarnessTurnObserver";
 import {
   decideWorkTurnAuthority,
+  assertProviderAllowedByProjectPolicy,
+  ProjectProviderPolicyRejected,
   FILE_MENTION_UNREADABLE_CONTEXT,
   THREAD_MENTION_UNREADABLE_CONTEXT,
 } from "@octant/domain";
@@ -136,6 +139,10 @@ export interface WorkTurnServiceDependencies {
     readonly readProviderInstance: (
       instanceId: WorkThread["providerInstanceId"],
     ) => ProviderInstance | undefined;
+    readonly readProviderModel?: (
+      instanceId: WorkThread["providerInstanceId"],
+      modelId: WorkThread["modelId"],
+    ) => ProviderModel | undefined;
     readonly journal: {
       append: (request: {
         readonly aggregate: {
@@ -354,6 +361,34 @@ export class WorkTurnService {
     }
 
     const thread = await this.#threads.read(authenticatedWindowId, command.threadId);
+    const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);
+    const accessible = projectBootstrap.active.some(
+      (project) =>
+        project.type === "work" &&
+        project.lifecycle === "active" &&
+        String(project.id) === String(command.authority.projectId),
+    );
+    if (!accessible) {
+      throw this.#failure("unauthorized", "Work Project is unavailable for this window.");
+    }
+    if (thread !== undefined) {
+      const policyProject = this.#persistence.readProject(thread.projectId);
+      const policyProvider = this.#persistence.readProviderInstance(thread.providerInstanceId);
+      if (policyProject?.type === "work" && policyProvider !== undefined) {
+        try {
+          assertProviderAllowedByProjectPolicy(
+            policyProject,
+            policyProvider,
+            this.#persistence.readProviderModel?.(thread.providerInstanceId, thread.modelId),
+          );
+        } catch (error) {
+          if (error instanceof ProjectProviderPolicyRejected) {
+            throw this.#failure("unauthorized", error.message);
+          }
+          throw error;
+        }
+      }
+    }
     const admission =
       thread === undefined
         ? undefined
@@ -369,16 +404,6 @@ export class WorkTurnService {
         "unavailable",
         `${admission.status === "paused-by-advisor" ? "The advisor paused this thread" : "This thread is paused"}: ${admission.detail} Resume the harness session to continue.`,
       );
-    }
-    const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);
-    const accessible = projectBootstrap.active.some(
-      (project) =>
-        project.type === "work" &&
-        project.lifecycle === "active" &&
-        String(project.id) === String(command.authority.projectId),
-    );
-    if (!accessible) {
-      throw this.#failure("unauthorized", "Work Project is unavailable for this window.");
     }
     if (thread !== undefined) this.#onTurnRequested?.(thread.id);
     const project = this.#persistence.readProject(command.authority.projectId);
@@ -433,6 +458,21 @@ export class WorkTurnService {
     const provider = this.#persistence.readProviderInstance(command.authority.providerInstanceId);
     if (provider === undefined || !provider.enabled) {
       throw this.#failure("unavailable", "Selected Work provider is unavailable.");
+    }
+    try {
+      assertProviderAllowedByProjectPolicy(
+        project,
+        provider,
+        this.#persistence.readProviderModel?.(
+          command.authority.providerInstanceId,
+          command.authority.modelId,
+        ),
+      );
+    } catch (error) {
+      if (error instanceof ProjectProviderPolicyRejected) {
+        throw this.#failure("unauthorized", error.message);
+      }
+      throw error;
     }
     const driver = this.#resolveDriver(command.authority.providerInstanceId);
     if (driver === undefined) {

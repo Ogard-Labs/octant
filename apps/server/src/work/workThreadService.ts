@@ -19,13 +19,18 @@ import {
   type ProjectId,
   type ProviderInstance,
   type ProviderModelId,
+  type ProviderModel,
   type ProviderProbeResult,
   type WorkStatusDatedItem,
   type ThreadWorkingDirectory,
   type WindowId,
 } from "@octant/contracts";
 import { Schema } from "effect";
-import { hasWorkToolAuthority } from "@octant/domain";
+import {
+  assertProviderAllowedByProjectPolicy,
+  hasWorkToolAuthority,
+  ProjectProviderPolicyRejected,
+} from "@octant/domain";
 import {
   completedThreadArchiveDue,
   decideCompleteThread,
@@ -120,6 +125,10 @@ export interface WorkThreadServiceDependencies {
   readonly probeProvider?: (
     providerInstanceId: WorkThread["providerInstanceId"],
   ) => Promise<ProviderProbeResult>;
+  readonly readProviderModel?: (
+    providerInstanceId: WorkThread["providerInstanceId"],
+    modelId: ProviderModelId,
+  ) => ProviderModel | undefined;
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly workingDirectories: {
@@ -168,6 +177,7 @@ export class WorkThreadService {
   readonly #projects: WorkThreadServiceDependencies["projects"];
   readonly #projection: WorkThreadProjection;
   readonly #probeProvider: WorkThreadServiceDependencies["probeProvider"];
+  readonly #readProviderModel: WorkThreadServiceDependencies["readProviderModel"];
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #workingDirectories: WorkThreadServiceDependencies["workingDirectories"];
@@ -182,6 +192,7 @@ export class WorkThreadService {
     this.#projects = dependencies.projects;
     this.#projection = dependencies.projection;
     this.#probeProvider = dependencies.probeProvider;
+    this.#readProviderModel = dependencies.readProviderModel;
     this.#uuid = dependencies.uuid;
     this.#clock = dependencies.clock;
     this.#workingDirectories = dependencies.workingDirectories;
@@ -298,12 +309,11 @@ export class WorkThreadService {
         if (command.hostId !== "local") {
           throw this.#failure("unauthorized", "Work thread host is not authorized.");
         }
-        await this.#requireAccessibleActiveWorkProject(authenticatedWindowId, command.projectId);
-        await this.#requireProviderModel(command.providerInstanceId, command.modelId);
         const project = await this.#requireAccessibleActiveWorkProject(
           authenticatedWindowId,
           command.projectId,
         );
+        await this.#requireProviderModel(command.providerInstanceId, command.modelId, project);
         const latestBinding = project.bindingHistory.at(-1);
         if (
           latestBinding === undefined ||
@@ -446,7 +456,7 @@ export class WorkThreadService {
         return { kind: "thread-completion-confirmed", thread: confirmed };
       }
       if (command.kind === "change-work-thread-provider") {
-        await this.#requireProviderModel(command.providerInstanceId, command.modelId);
+        await this.#requireProviderModel(command.providerInstanceId, command.modelId, project);
       } else if (command.kind === "change-work-thread-working-directory") {
         try {
           await this.#workingDirectories.resolve(
@@ -641,10 +651,26 @@ export class WorkThreadService {
   async #requireProviderModel(
     providerInstanceId: WorkThread["providerInstanceId"],
     modelId: ProviderModelId,
+    project: Project,
   ): Promise<void> {
     const provider = this.#persistence.readProviderInstance(providerInstanceId);
     if (provider === undefined || !provider.enabled) {
       throw this.#failure("unavailable", "Selected Work provider is unavailable.");
+    }
+    if (project.type !== "work") {
+      throw this.#failure("unauthorized", "Work Project is unavailable for this window.");
+    }
+    try {
+      assertProviderAllowedByProjectPolicy(
+        project,
+        provider,
+        this.#readProviderModel?.(providerInstanceId, modelId),
+      );
+    } catch (error) {
+      if (error instanceof ProjectProviderPolicyRejected) {
+        throw this.#failure("unauthorized", error.message);
+      }
+      throw error;
     }
     if (this.#probeProvider === undefined) return;
     let probe: ProviderProbeResult;
@@ -667,6 +693,26 @@ export class WorkThreadService {
     }
     if (!modelAvailable) {
       throw this.#failure("invalid", "Selected Work model is unavailable.");
+    }
+    const refreshedProject = this.#persistence.readProject(project.id);
+    if (
+      refreshedProject?.type !== "work" ||
+      refreshedProject.lifecycle !== "active" ||
+      refreshedProject.version !== project.version
+    ) {
+      throw this.#failure("unauthorized", "Work Project is unavailable for this window.");
+    }
+    try {
+      assertProviderAllowedByProjectPolicy(
+        refreshedProject,
+        provider,
+        this.#readProviderModel?.(providerInstanceId, modelId) ?? selectedModel,
+      );
+    } catch (error) {
+      if (error instanceof ProjectProviderPolicyRejected) {
+        throw this.#failure("unauthorized", error.message);
+      }
+      throw error;
     }
     if (
       !hasWorkToolAuthority(provider.driverKind, selectedModel, probe.verifiedToolModelIds ?? [])

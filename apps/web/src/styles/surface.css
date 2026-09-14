@@ -509,6 +509,7 @@
   z-index: 0;
 }
 
+.app-backdrop__builtin,
 .app-backdrop__photo,
 .app-backdrop__pattern {
   position: absolute;
@@ -516,6 +517,12 @@
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.app-backdrop__builtin {
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
 }
 
 /* The pattern and a dithered photo are a coarse grid scaled up with

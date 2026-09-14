@@ -156,8 +156,8 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
           App background
         </OctantButton>
         <p className="zen-appearance__note">
-          Follows Settings › Appearance › Background — the theme&rsquo;s dither cloud or your photo,
-          with the dials you set there.
+          Follows Settings › Appearance › Background, including its theme pattern, built-in image,
+          or photo, with the dials you set there.
         </p>
       </fieldset>
 

@@ -25,6 +25,7 @@ import {
   type PiProviderConfiguration,
   type PermissionPersistence,
   type ProviderDefaults,
+  type ProviderDataTags,
   type ProviderInstanceId,
   type ProviderModelId,
   type ProviderAuthenticationAttempt,
@@ -66,6 +67,27 @@ function findProvider(current: ProviderRegistrySnapshot, instanceId: ProviderIns
   return current.instances.find((instance) => instance.id === instanceId);
 }
 
+/**
+ * Fold the catalog's user-maintained model tags into a probe observation.
+ *
+ * Model `dataTags` live on the catalog, not on a probe result, and Project
+ * provider policy reads them. Both the authoritative and the presentation
+ * observations carry them so every picker filters by the same facts.
+ */
+function withCatalogModelTags(
+  observed: ProviderObservedState,
+  tags: ReadonlyMap<string, ProviderDataTags | undefined> | undefined,
+): ProviderObservedState {
+  if (tags === undefined) return observed;
+  return {
+    ...observed,
+    models: observed.models.map((model) => {
+      const dataTags = tags.get(String(model.id));
+      return dataTags === undefined ? model : { ...model, dataTags };
+    }),
+  };
+}
+
 function configurationAuthentication(instance: ProviderInstance): string | undefined {
   return "authentication" in instance.configuration
     ? instance.configuration.authentication
@@ -104,6 +126,9 @@ export function useProviderController(options: ProviderControllerOptions) {
   const credentialCleanupRequired = useRef<Set<ProviderInstanceId>>(new Set());
   const credentialStatusUnconfirmed = useRef<Set<ProviderInstanceId>>(new Set());
   const [snapshot, setSnapshot] = useState<ProviderRegistrySnapshot>();
+  const [observedSnapshot, setObservedSnapshot] = useState<
+    ReadonlyMap<ProviderInstanceId, ProviderObservedState>
+  >(new Map());
   const [presentationObservedSnapshot, setPresentationObservedSnapshot] = useState<
     ReadonlyMap<ProviderInstanceId, ProviderObservedState>
   >(new Map());
@@ -122,10 +147,19 @@ export function useProviderController(options: ProviderControllerOptions) {
     }
     authoritative.current = value;
     const nextPresentation = new Map<ProviderInstanceId, ProviderObservedState>();
+    const nextObserved = new Map<ProviderInstanceId, ProviderObservedState>();
     const preserved = pendingProbes.current;
     const instanceIds = new Set(value.instances.map((instance) => instance.id));
+    const catalogModels = new Map(
+      (value.catalogs ?? []).map((catalog) => [
+        String(catalog.instanceId),
+        new Map(catalog.models.map((model) => [String(model.id), model.dataTags] as const)),
+      ]),
+    );
     for (const observed of value.observedStates) {
-      nextPresentation.set(observed.instanceId, observed);
+      const tags = catalogModels.get(String(observed.instanceId));
+      nextObserved.set(observed.instanceId, withCatalogModelTags(observed, tags));
+      nextPresentation.set(observed.instanceId, withCatalogModelTags(observed, tags));
     }
     for (const instanceId of preserved) {
       if (!instanceIds.has(instanceId) || nextPresentation.has(instanceId)) continue;
@@ -134,6 +168,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     }
     presentationObserved.current = nextPresentation;
     if (!mounted.current) return;
+    setObservedSnapshot(new Map(nextObserved));
     setPresentationObservedSnapshot(new Map(nextPresentation));
     setSnapshot(value);
     setStatus("ready");
@@ -2588,6 +2623,37 @@ export function useProviderController(options: ProviderControllerOptions) {
       }),
     [execute],
   );
+  const setDataTags = useCallback(
+    (instanceId: ProviderInstanceId, dataTags: ProviderDataTags) =>
+      execute((current) => {
+        const instance = findProvider(current, instanceId);
+        return instance === undefined
+          ? undefined
+          : {
+              kind: "set-provider-data-tags",
+              instanceId,
+              expectedVersion: instance.version,
+              dataTags,
+            };
+      }),
+    [execute],
+  );
+  const setModelDataTags = useCallback(
+    (instanceId: ProviderInstanceId, modelId: ProviderModelId, dataTags: ProviderDataTags) =>
+      execute((current) => {
+        const instance = findProvider(current, instanceId);
+        return instance === undefined
+          ? undefined
+          : {
+              kind: "set-provider-model-data-tags",
+              instanceId,
+              expectedVersion: instance.version,
+              modelId,
+              dataTags,
+            };
+      }),
+    [execute],
+  );
   const remove = useCallback(
     (instanceId: ProviderInstanceId) =>
       queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, async () => {
@@ -2863,9 +2929,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     instances: snapshot?.instances ?? [],
     readInstances: () => authoritative.current?.instances ?? [],
     defaults: snapshot?.defaults ?? emptyDefaults,
-    observedByInstance: new Map(
-      snapshot?.observedStates.map((value) => [value.instanceId, value] as const) ?? [],
-    ) as ReadonlyMap<ProviderInstanceId, ProviderObservedState>,
+    observedByInstance: observedSnapshot,
     presentationObservedByInstance: presentationObservedSnapshot,
     busy,
     probingIds,
@@ -2913,6 +2977,8 @@ export function useProviderController(options: ProviderControllerOptions) {
     changeAnthropicCompatibleConfiguration,
     changeAzureFoundryConfiguration,
     setEnabled,
+    setDataTags,
+    setModelDataTags,
     remove,
     providerCredentialStatus,
     clearProviderCredential,

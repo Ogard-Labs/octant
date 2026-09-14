@@ -4,11 +4,13 @@ import type {
   HiddenProviderModelRef,
   ProviderInstance,
   ProviderInstanceId,
+  ProviderDataTag,
+  ProviderDataTags,
   ProviderModelId,
   ProviderObservedState,
 } from "@octant/contracts";
 import { isImageProfileDriverKind, supportsProviderCliUpdate } from "@octant/domain";
-import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
@@ -90,6 +92,8 @@ export type ProviderSettingsListProps = Pick<
   | "onCompleteProviderAuthentication"
   | "onUpdateProviderCli"
   | "onSetEnabled"
+  | "onDataTagsChange"
+  | "onModelDataTagsChange"
   | "onRemove"
   | "onProbe"
   | "onVerifyFoundryTools"
@@ -248,6 +252,8 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
                 onRemove={props.onRemove}
                 onRename={props.onRename}
                 onSetEnabled={props.onSetEnabled}
+                onDataTagsChange={props.onDataTagsChange}
+                onModelDataTagsChange={props.onModelDataTagsChange}
                 probing={props.probingIds.has(instance.id)}
                 updating={props.updatingIds?.has(instance.id) === true}
                 reordering={reordering}
@@ -466,6 +472,8 @@ interface ProviderRowProps {
   readonly onCompleteProviderAuthentication: ProviderSettingsViewProps["onCompleteProviderAuthentication"];
   readonly onUpdateProviderCli?: ProviderSettingsViewProps["onUpdateProviderCli"];
   readonly onSetEnabled: ProviderSettingsViewProps["onSetEnabled"];
+  readonly onDataTagsChange: ProviderSettingsViewProps["onDataTagsChange"];
+  readonly onModelDataTagsChange: ProviderSettingsViewProps["onModelDataTagsChange"];
   readonly onRemove: ProviderSettingsViewProps["onRemove"];
   readonly onProbe: ProviderSettingsViewProps["onProbe"];
   readonly onVerifyFoundryTools: ProviderSettingsViewProps["onVerifyFoundryTools"];
@@ -505,6 +513,8 @@ function ProviderRow(props: ProviderRowProps) {
     props.instance,
     props.discoverySnapshot,
   );
+  const detectedLocally = isDetectedLocally(props.instance, props.discoverySnapshot);
+  const canEnable = canEnableProvider(props.instance, props.discoverySnapshot, detectedLocally);
   const isCli =
     props.instance.driverKind === "codex" ||
     props.instance.driverKind === "opencode" ||
@@ -545,6 +555,7 @@ function ProviderRow(props: ProviderRowProps) {
     usesCredential ||
     (setupGuidance !== null && setupGuidance !== undefined);
   const label = driverLabel(props.instance.driverKind);
+  const providerTags = props.instance.dataTags ?? [];
   const runtimeLabel = isClaude
     ? "Agent SDK"
     : isVibe ||
@@ -614,7 +625,18 @@ function ProviderRow(props: ProviderRowProps) {
         <ProviderGlyph displayName={name} driverKind={props.instance.driverKind} size={16} />
       </span>
       <span className="prov-main">
-        <span className="prov-name oct-row-label">{name}</span>
+        <span className="prov-name oct-row-label">
+          {name}
+          {detectedLocally ? (
+            <span
+              aria-label="Detected locally"
+              className="provider-settings__local-mark"
+              title="Detected locally on this host"
+            >
+              <CheckCircle2 aria-hidden="true" size={14} strokeWidth={2} />
+            </span>
+          ) : null}
+        </span>
         <span className="prov-meta oct-meta">
           {label} {runtimeLabel}
         </span>
@@ -656,7 +678,7 @@ function ProviderRow(props: ProviderRowProps) {
         </OctantButton>
         <OctantSwitch
           checked={props.instance.enabled}
-          disabled={disabled}
+          disabled={disabled || (!props.instance.enabled && !canEnable)}
           label={`Enable ${name}`}
           onCheckedChange={() => void toggleEnabled()}
         />
@@ -685,6 +707,28 @@ function ProviderRow(props: ProviderRowProps) {
               ) : null}
             </section>
           ) : null}
+          <section
+            aria-label={`Data handling labels for ${name}`}
+            className="provider-details__section provider-data-tags"
+          >
+            <div>
+              <h4 className="oct-section-label">Data handling</h4>
+              <p className="oct-row-detail">Use these labels for project residency policies.</p>
+            </div>
+            <div className="provider-data-tags__controls">
+              {(["eu", "zdr"] as const).map((tag) => (
+                <DataTagButton
+                  disabled={disabled}
+                  key={tag}
+                  selected={providerTags.includes(tag)}
+                  tag={tag}
+                  onClick={() =>
+                    void props.onDataTagsChange(props.instance.id, toggleDataTag(providerTags, tag))
+                  }
+                />
+              ))}
+            </div>
+          </section>
           <div className="provider-card__actions">
             {isImageProfile ? null : (
               <OctantButton
@@ -1040,6 +1084,26 @@ function ProviderRow(props: ProviderRowProps) {
                         <li key={model.id}>
                           <span className="provider-model-visibility__name" title={modelLabel}>
                             {modelLabel}
+                            <span
+                              aria-label={`Data handling labels for ${model.displayName}`}
+                              className="provider-data-tags__inline"
+                            >
+                              {(["eu", "zdr"] as const).map((tag) => (
+                                <DataTagButton
+                                  disabled={disabled}
+                                  key={tag}
+                                  selected={(model.dataTags ?? []).includes(tag)}
+                                  tag={tag}
+                                  onClick={() =>
+                                    void props.onModelDataTagsChange(
+                                      props.instance.id,
+                                      model.id,
+                                      toggleDataTag(model.dataTags ?? [], tag),
+                                    )
+                                  }
+                                />
+                              ))}
+                            </span>
                           </span>
                           <OctantSwitch
                             checked={!hidden}
@@ -1393,6 +1457,40 @@ function isDisabledDiscoveryInstance(
   );
 }
 
+function isDetectedLocally(
+  instance: ProviderInstance,
+  snapshot: DiscoverySnapshot | undefined,
+): boolean {
+  if (snapshot === undefined) return false;
+  if (snapshot.autoRegisteredInstanceIds?.includes(instance.id) === true) return true;
+  if (
+    instance.driverKind === "ollama" &&
+    snapshot.candidates.some((candidate) => candidate.driverKind === "ollama")
+  ) {
+    return true;
+  }
+  const binaryPath = providerBinaryPath(instance);
+  return (
+    binaryPath !== undefined &&
+    snapshot.candidates.some(
+      (candidate) =>
+        candidate.driverKind === instance.driverKind && candidate.binaryPath === binaryPath,
+    )
+  );
+}
+
+function canEnableProvider(
+  instance: ProviderInstance,
+  snapshot: DiscoverySnapshot | undefined,
+  detectedLocally: boolean,
+): boolean {
+  if (!("binaryPath" in instance.configuration)) return true;
+  if (detectedLocally || snapshot === undefined) return true;
+  // A failed or cancelled scan does not prove absence. A completed or partial
+  // scan does, so keep the switch fail-closed until the binary is detected.
+  return snapshot.status === "failed" || snapshot.status === "cancelled";
+}
+
 function providerBinaryPath(instance: ProviderInstance): string | undefined {
   return "binaryPath" in instance.configuration ? instance.configuration.binaryPath : undefined;
 }
@@ -1521,4 +1619,32 @@ function guidance(
       </p>
     );
   return message === undefined ? null : <p className="provider-card__guidance">{message}</p>;
+}
+
+function toggleDataTag(
+  tags: ReadonlyArray<ProviderDataTag>,
+  tag: ProviderDataTag,
+): ProviderDataTags {
+  return tags.includes(tag) ? tags.filter((candidate) => candidate !== tag) : [...tags, tag];
+}
+
+function DataTagButton(props: {
+  readonly tag: ProviderDataTag;
+  readonly selected: boolean;
+  readonly disabled: boolean;
+  readonly onClick: () => void;
+}) {
+  return (
+    <OctantButton
+      aria-pressed={props.selected}
+      className="provider-data-tags__button"
+      disabled={props.disabled}
+      onClick={props.onClick}
+      size="sm"
+      type="button"
+      variant={props.selected ? "secondary" : "ghost"}
+    >
+      {props.tag.toUpperCase()}
+    </OctantButton>
+  );
 }

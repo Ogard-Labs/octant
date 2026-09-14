@@ -57,11 +57,13 @@ import type {
   OpenAiCompatibleProviderConfiguration,
   OpenAiCompatibleProviderInstance,
   ProviderDefaults,
+  ProviderDataTags,
   ProviderDriverKind,
   ProviderExecutionPolicy,
   ProviderInstance,
   ProviderInstanceId,
   ProviderModelId,
+  ProviderModel,
   OpenCodeProviderInstance,
 } from "@octant/contracts/providers";
 
@@ -1703,6 +1705,26 @@ export function setProviderEnabled(
     version: nextVersion(provider.version),
     updatedAt: input.updatedAt,
   };
+}
+
+export function setProviderDataTags(
+  provider: ProviderInstance,
+  dataTags: ProviderDataTags,
+  updatedAt: UtcTimestamp,
+): ProviderInstance {
+  return {
+    ...provider,
+    dataTags,
+    version: nextVersion(provider.version),
+    updatedAt,
+  };
+}
+
+export function setProviderModelDataTags(
+  model: ProviderModel,
+  dataTags: ProviderDataTags,
+): ProviderModel {
+  return { ...model, dataTags };
 }
 
 interface RemoveProviderInput {

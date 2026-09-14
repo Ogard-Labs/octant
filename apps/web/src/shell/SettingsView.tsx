@@ -813,6 +813,8 @@ function ProvidersSection(props: {
         onRename={props.providerController.rename}
         onRetry={props.providerController.retry}
         onSetEnabled={props.providerController.setEnabled}
+        onDataTagsChange={props.providerController.setDataTags}
+        onModelDataTagsChange={props.providerController.setModelDataTags}
         probingIds={props.providerController.probingIds}
         updatingIds={props.providerController.updatingIds}
         status={props.providerController.status}
@@ -1275,7 +1277,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
           ) : null}
           {isAvailable("app-background") && props.themeController !== undefined ? (
             <SettingRow
-              description="The theme's own pattern or a photo of yours behind the start screen, or behind everything."
+              description="A theme pattern, built-in Zen background, or photo behind the start screen, or behind everything."
               focused={focusedSetting === settingId("app-background")}
               label="Background"
               scope="app"

@@ -470,9 +470,19 @@ describe("application background contracts", () => {
     coversSidebar: false,
   };
 
-  it("decodes the theme pattern, a photo, and none, and rejects a photo without an image", () => {
+  it("decodes the theme pattern, a built-in, a photo, and none, and rejects invalid sources", () => {
     expect(decodeAppBackground({ kind: "theme" })).toEqual({ kind: "theme", ...tuning });
     expect(decodeAppBackground({ kind: "none" })).toEqual({ kind: "none", ...tuning });
+    expect(
+      decodeAppBackground({
+        kind: "builtin",
+        presetId: "nordic-fjord-aurora",
+      }),
+    ).toEqual({
+      kind: "builtin",
+      presetId: "nordic-fjord-aurora",
+      ...tuning,
+    });
     expect(
       decodeAppBackground({
         kind: "photo",
@@ -490,6 +500,8 @@ describe("application background contracts", () => {
       patternOpacity: 30,
     });
     expect(() => decodeAppBackground({ kind: "photo" })).toThrow();
+    expect(() => decodeAppBackground({ kind: "builtin" })).toThrow();
+    expect(() => decodeAppBackground({ kind: "builtin", presetId: "not-a-preset" })).toThrow();
     expect(() => decodeAppBackground({ kind: "theme", backgroundId: "x" })).toThrow();
     expect(() => decodeAppBackground({ kind: "pattern" })).toThrow();
     expect(() => decodeAppBackground({ kind: "theme", patternSpeed: 140 })).toThrow();
