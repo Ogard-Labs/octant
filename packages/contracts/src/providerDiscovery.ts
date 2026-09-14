@@ -52,6 +52,10 @@ export const DiscoverySnapshot = Schema.Struct({
   scanDurationMs: Schema.Int.pipe(Schema.nonNegative()),
   status: DiscoveryScanStatus,
   message: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  /**
+   * Instances auto-registered by this scan. This records what the scan created,
+   * not current presence — `candidates` is the evidence a runtime is installed.
+   */
   autoRegisteredInstanceIds: Schema.optional(Schema.Array(ProviderInstanceId)),
 }).annotations(strict);
 export type DiscoverySnapshot = typeof DiscoverySnapshot.Type;
