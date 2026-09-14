@@ -174,6 +174,8 @@ describe("shell settings policy", () => {
       // Sidebar destinations start untouched: default rows, workspace
       // destinations in the account menu.
       sidebarDestinations: { order: [], visibility: [] },
+      // The More row is part of the sidebar until the person turns it off.
+      sidebarMoreEnabled: true,
       environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
       firstRunOnboarding: "pending",
       automaticUpdateChecks: true,

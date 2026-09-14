@@ -401,6 +401,13 @@ export const ShellSettings = Schema.Struct({
   sidebarDestinations: Schema.optionalWith(SidebarDestinationCustomization, {
     default: () => ({ order: [], visibility: [] }),
   }),
+  /**
+   * Whether the sidebar ends in a More row that reveals the destinations set
+   * to "Menu only" (plus Customize sidebar) beside the rail. Off keeps them in
+   * the account menu, the home they kept before the More row shipped. A store
+   * persisted before this setting shipped decodes to on.
+   */
+  sidebarMoreEnabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   environmentPresentationByMode: Schema.optionalWith(EnvironmentPresentationByMode, {
     default: () => DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE,
   }),

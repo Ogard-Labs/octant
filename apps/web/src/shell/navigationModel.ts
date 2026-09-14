@@ -417,6 +417,14 @@ export interface SidebarDestinationLayout {
   readonly menu: ReadonlyArray<
     SidebarNavigationDescriptor & { readonly id: SidebarAppMenuDescriptorId }
   >;
+  /**
+   * The same workspace destinations when the sidebar's More row carries them
+   * instead of the account menu. Exactly one of `menu` and `more` holds them:
+   * a destination has one home, so nothing renders twice.
+   */
+  readonly more: ReadonlyArray<
+    SidebarNavigationDescriptor & { readonly id: SidebarAppMenuDescriptorId }
+  >;
 }
 
 function destinationRowId(
@@ -474,18 +482,23 @@ function menuDestinationRowId(id: SidebarDestinationId): SidebarAppMenuDescripto
 
 /**
  * Resolves the person's customization against what this host can offer right
- * now: a hidden destination is gone from rows and menu alike, a promoted one
- * renders as a row only where the host serves it, and an unavailable
- * destination stays absent no matter what was requested.
+ * now: a hidden destination is gone from rows, menu, and More alike, a
+ * promoted one renders as a row only where the host serves it, and an
+ * unavailable destination stays absent no matter what was requested.
+ *
+ * Where the menu-only destinations wait is the More row setting: beside the
+ * rail under a More row, or in the account menu as they did before it shipped.
  */
 export function layoutSidebarDestinations({
   activeMode,
   input,
   customization,
+  moreEnabled,
 }: {
   readonly activeMode: OctantMode;
   readonly input: SidebarNavigationInput;
   readonly customization: SidebarDestinationCustomization;
+  readonly moreEnabled: boolean;
 }): SidebarDestinationLayout {
   const availableRows = new Set(buildSidebarNavigation(input).map((row) => row.id));
   const availableMenu = new Map(
@@ -493,6 +506,8 @@ export function layoutSidebarDestinations({
   );
   const rows: SidebarNavigationDescriptorId[] = [];
   const menu: Array<SidebarNavigationDescriptor & { readonly id: SidebarAppMenuDescriptorId }> = [];
+  const more: Array<SidebarNavigationDescriptor & { readonly id: SidebarAppMenuDescriptorId }> = [];
+  const menuDestinations = moreEnabled ? more : menu;
   for (const destination of sidebarDestinationOrder(customization)) {
     const visibility = sidebarDestinationVisibility(customization, destination.id);
     if (visibility === "hidden") continue;
@@ -500,7 +515,7 @@ export function layoutSidebarDestinations({
     if (menuId !== undefined) {
       const descriptor = availableMenu.get(menuId);
       if (descriptor !== undefined) {
-        if (visibility === "menu") menu.push(descriptor);
+        if (visibility === "menu") menuDestinations.push(descriptor);
         else rows.push(descriptor.id);
       }
       continue;
@@ -508,5 +523,5 @@ export function layoutSidebarDestinations({
     const rowId = destinationRowId(destination.id, activeMode);
     if (availableRows.has(rowId)) rows.push(rowId);
   }
-  return { rows, menu };
+  return { rows, menu, more };
 }

@@ -23,12 +23,18 @@ edit it.
 ### Sidebar destinations
 
 **Sidebar destinations** controls where navigation destinations live: as a
-sidebar row, in the account menu, or nowhere. Open **Customize sidebar** from
-the account menu or use **Settings → Appearance → Sidebar destinations**. Use
-the visibility control to choose **Always show**, **Menu only** where the
-destination offers that placement, or **Don't show**, and use the chevrons to
-move it up or down. **Reset sidebar destinations** restores the untouched
-placement and order.
+sidebar row, under the sidebar's More row, in the account menu, or nowhere.
+Open **Customize sidebar** from the More row or the account menu, or use
+**Settings → Appearance → Sidebar destinations**. Use the visibility control to
+choose **Always show**, **Menu only** where the destination offers that
+placement, or **Don't show**, and use the chevrons to move it up or down.
+**Reset sidebar destinations** restores the untouched placement and order.
+
+**More row in the sidebar** (on by default) ends the sidebar's navigation with
+a More row whose popup holds the **Menu only** destinations and **Customize
+sidebar**, so a destination set to Menu only opens from the rail it was hidden
+from. Turning it off returns those destinations to the account menu. A
+**Don't show** destination appears nowhere either way.
 
 Availability still follows the active mode and the host's capabilities: a
 destination that is unavailable or unauthorized does not appear merely because
