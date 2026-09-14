@@ -1060,6 +1060,139 @@ describe("ChatTurnRunner", () => {
     });
   });
 
+  it("parks a turn on the harness ask-user tool call and answers the tool with the reply", async () => {
+    const updates: ChatAttempt[] = [];
+    const toolAnswers: Array<{ readonly requestId: string; readonly resultJson: string }> = [];
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: () =>
+        Effect.gen(function* () {
+          yield* Queue.offer(queue, {
+            kind: "text-delta",
+            sessionId,
+            text: "Let me check.",
+          } as never);
+          yield* Queue.offer(queue, {
+            kind: "tool-request",
+            sessionId,
+            requestId: "tool-ask-1",
+            toolName: "ask-user",
+            inputJson: JSON.stringify({
+              prompt: "How should I proceed?",
+              options: ["Dequeue, push, re-queue", "Let it merge"],
+            }),
+          } as never);
+        }),
+      answerTool: (input: { readonly requestId: string; readonly resultJson: string }) =>
+        Effect.gen(function* () {
+          toolAnswers.push(input);
+          yield* Queue.offer(queue, {
+            kind: "text-delta",
+            sessionId,
+            text: " Continuing.",
+          } as never);
+          yield* Queue.offer(queue, { kind: "completed", sessionId } as never);
+        }),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        providerNativeExecute: async () => ({
+          query: "x",
+          backend: "provider-native",
+          results: [],
+        }),
+      }),
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fiber = yield* Effect.fork(
+            runner.run({
+              thread: thread(),
+              attempt: attempt(),
+              prompt: "hello",
+              scratchRoot: "/tmp/octant-scratch/thread",
+              driver: { acquire: () => Effect.succeed(connection) } as never,
+              providerInstanceId,
+              serviceLimits: serviceLimits(),
+              contextSubject: subject,
+              contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+              requestShape: "chat-turn",
+              varianceReserve: 20,
+              reservationId: reservation,
+              estimatedTokens: 100,
+              researchEnabled: false,
+              researchRoute: researchRoute({ kind: "disabled" }),
+              attachments: [],
+              appManagedTools: {
+                definitions: [{ name: "ask-user" } as never],
+                execute: () => {
+                  throw new Error("The ask-user tool never reaches the tool set.");
+                },
+                close: async () => undefined,
+              },
+              persistAttempt: (next) => {
+                updates.push(next);
+                return Effect.void;
+              },
+              persistResponse: () =>
+                Effect.succeed({
+                  contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+                  digest: "d".repeat(64),
+                  byteLength: 5,
+                }),
+            }),
+          );
+          const answeredAttempt = yield* Effect.tryPromise(() =>
+            Effect.runPromise(
+              Effect.gen(function* () {
+                for (;;) {
+                  const delivered = yield* Effect.promise(() =>
+                    runner.deliverQuestionAnswer({
+                      attemptId: String(attemptId),
+                      requestId: "tool-ask-1",
+                      answer: "Dequeue, push, re-queue",
+                    }),
+                  );
+                  if (delivered !== undefined) return delivered;
+                  yield* Effect.sleep(10);
+                }
+              }),
+            ),
+          );
+          expect(answeredAttempt.pendingQuestion).toBeUndefined();
+          yield* Fiber.join(fiber);
+        }),
+      ),
+    );
+
+    expect(toolAnswers).toEqual([
+      {
+        sessionId,
+        requestId: "tool-ask-1",
+        resultJson: JSON.stringify({ answer: "Dequeue, push, re-queue" }),
+        isError: false,
+      },
+    ]);
+    expect(updates.at(-1)?.outcome).toBe("completed");
+    expect(updates.at(-1)?.answeredQuestions?.[0]).toMatchObject({
+      prompt: "How should I proceed?",
+      options: [{ label: "Dequeue, push, re-queue" }, { label: "Let it merge" }],
+      answer: "Dequeue, push, re-queue",
+    });
+  });
+
   it("refuses a late answer once the question was already answered", async () => {
     const queue = Effect.runSync(Queue.unbounded<never>());
     const connection = {
