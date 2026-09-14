@@ -1,8 +1,11 @@
-# Nightly preview ring.
+# Nightly preview ring and on-demand candidate ring.
 #
-# Builds what is on `main`, signs and notarizes darwin-arm64, packages the
-# linux-x64 AppImage dogfood artifact, and publishes signed feeds at
-# `<base>/preview/<platform>-<arch>.json` when feed signing material is present.
+# Scheduled runs build what is on `main`, sign and notarize darwin-arm64,
+# package the linux-x64 AppImage dogfood artifact, and publish signed feeds at
+# `<base>/preview/<platform>-<arch>.json` when feed signing material is
+# present. A manual run does the same for whatever ref it was started on and
+# publishes to `<base>/candidate/…` instead, so a test install can follow the
+# candidate ring without the live preview feed being disturbed.
 # Per `docs/decisions/0034` an updater fed by unsigned builds is an
 # unauthenticated code-delivery channel, so a ring either publishes a signed
 # feed or refuses — never an unsigned document at the live path.
@@ -19,11 +22,6 @@ on:
     # failure is waiting rather than interrupting.
     - cron: "0 0 * * *"
   workflow_dispatch:
-    inputs:
-      force:
-        description: Build even if main has not moved since the last preview
-        type: boolean
-        default: false
 
 concurrency:
   group: release-preview
@@ -42,6 +40,7 @@ jobs:
     outputs:
       build: ${{ steps.decide.outputs.build }}
       version: ${{ steps.decide.outputs.version }}
+      ring: ${{ steps.decide.outputs.ring }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -55,15 +54,21 @@ jobs:
       - id: decide
         env:
           GH_TOKEN: ${{ github.token }}
-          FORCE: ${{ inputs.force }}
+          # A scheduled run is the preview ring and builds only when main
+          # moved. A dispatched run is a candidate of whichever ref it was
+          # started on; clicking the button is the intent, so it always builds.
+          FORCE: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           set -euo pipefail
           declared=$(grep -oE 'version: "[^"]+"' scripts/package-desktop.ts | head -1 | cut -d'"' -f2)
+          ring="preview"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then ring="candidate"; fi
+          echo "ring=${ring}" >> "$GITHUB_OUTPUT"
           # The date and the run number both go in: the date is for whoever
           # reads the version, and the run number keeps two builds on one day
           # distinct. Both are numeric, so they order the way the updater
           # compares prerelease identifiers.
-          version="${declared}-preview.$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}"
+          version="${declared}-${ring}.$(date -u +%Y%m%d).${GITHUB_RUN_NUMBER}"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           # Compare HEAD to the peeled commit of the latest published preview
           # tag. `gh release list` has no `targetCommitish` JSON field, and a
@@ -159,23 +164,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.decide.outputs.version }}
+          RING: ${{ needs.decide.outputs.ring }}
           ARTIFACT_GLOB: ${{ matrix.artifact_glob }}
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
           archive=$(ls ${ARTIFACT_GLOB})
           tag="v${VERSION}"
-          # Matrix rows share one preview tag. The first arch creates the
-          # release; later arches attach their artifact without racing a second
-          # create.
+          # Matrix rows share one tag. The first arch creates the release;
+          # later arches attach their artifact without racing a second create.
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "$archive" --clobber
           else
             gh release create "$tag" "$archive" \
               --prerelease \
               --target "${GITHUB_SHA}" \
-              --title "Octant ${VERSION} (preview)" \
-              --notes "Preview build of main at ${GITHUB_SHA}. Not a stable release." \
+              --title "Octant ${VERSION} (${RING})" \
+              --notes "${RING} build of ${GITHUB_REF_NAME} at ${GITHUB_SHA}. Not a stable release." \
               || gh release upload "$tag" "$archive" --clobber
           fi
           # Constructed rather than read back from the API: the download URL of
@@ -190,6 +195,7 @@ jobs:
         env:
           OCTANT_UPDATE_FEED_PRIVATE_KEY: ${{ secrets.OCTANT_UPDATE_FEED_PRIVATE_KEY }}
           VERSION: ${{ needs.decide.outputs.version }}
+          RING: ${{ needs.decide.outputs.ring }}
           ARTIFACT_URL: ${{ steps.release.outputs.url }}
           ARCHIVE: ${{ steps.release.outputs.archive }}
           PLATFORM: ${{ matrix.platform }}
@@ -198,10 +204,10 @@ jobs:
           APPLE_SIGNING: ${{ matrix.apple_signing }}
         run: |
           set -euo pipefail
-          out="${RUNNER_TEMP}/feed/preview/${TARGET}.json"
+          out="${RUNNER_TEMP}/feed/${RING}/${TARGET}.json"
           args=(
             --version "$VERSION"
-            --ring preview
+            --ring "$RING"
             --platform "$PLATFORM"
             --arch "$ARCH"
             --url "$ARTIFACT_URL"
@@ -232,6 +238,7 @@ jobs:
           SSH_USER: ${{ vars.OCTANT_FEED_SSH_USER }}
           SSH_KNOWN_HOSTS: ${{ vars.OCTANT_FEED_SSH_KNOWN_HOSTS }}
           REMOTE_PATH: ${{ vars.OCTANT_FEED_REMOTE_PATH }}
+          RING: ${{ needs.decide.outputs.ring }}
         run: |
           set -euo pipefail
           umask 077
@@ -247,5 +254,5 @@ jobs:
           # each matrix arch owns one file under the ring directory.
           rsync --archive --compress \
             --rsh "ssh -i ~/.ssh/octant_feed -o IdentitiesOnly=yes" \
-            "${RUNNER_TEMP}/feed/preview" \
+            "${RUNNER_TEMP}/feed/${RING}" \
             "${SSH_USER}@${SSH_HOST}:${REMOTE_PATH}/"

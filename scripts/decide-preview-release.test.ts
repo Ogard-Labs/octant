@@ -194,7 +194,10 @@ describe("deciding whether to build a preview release", () => {
     expect(decision.kind === "failed" ? decision.reason : undefined).toBe("tag-unresolvable");
   });
 
-  it("fails when the latest published preview has no tag name", async () => {
+  it("ignores a prerelease whose tag is not a preview-ring tag", async () => {
+    // Only `v…-preview.…` tags describe what the ring last shipped; anything
+    // else — a candidate, a stray prerelease, a blank name — is not the
+    // baseline and is never resolved.
     const decision = await decidePreviewRelease({
       headCommit: HEAD,
       force: false,
@@ -202,17 +205,48 @@ describe("deciding whether to build a preview release", () => {
       resolveTagCommit: neverResolve,
     });
 
-    expect(decision.kind).toBe("failed");
-    expect(decision.kind === "failed" ? decision.reason : undefined).toBe("tag-unresolvable");
+    expect(decision).toEqual({ kind: "build", reason: "no-previous-preview" });
+  });
+
+  it("ignores candidate-ring prereleases when picking the preview baseline", async () => {
+    // A candidate tag names whatever ref a manual run was started on, which
+    // need not be a commit main has ever contained. Comparing against it would
+    // answer the wrong question.
+    const resolved: string[] = [];
+
+    const decision = await decidePreviewRelease({
+      headCommit: HEAD,
+      force: false,
+      listReleases: async () => [
+        { tagName: "v0.1.0-candidate.20260914.20", isPrerelease: true, isDraft: false },
+        publishedPreview,
+      ],
+      resolveTagCommit: async (tagName) => {
+        resolved.push(tagName);
+        return PREVIOUS;
+      },
+    });
+
+    expect(resolved).toEqual([publishedPreview.tagName]);
+    expect(decision).toEqual({
+      kind: "build",
+      reason: "head-moved",
+      previousTag: publishedPreview.tagName,
+      previousCommit: PREVIOUS,
+    });
   });
 
   it("peels a lightweight tag to the commit it names", async () => {
     const decision = await decidePreviewRelease({
       headCommit: HEAD,
       force: false,
-      listReleases: async () => [{ tagName: "preview-light", isPrerelease: true, isDraft: false }],
+      listReleases: async () => [
+        { tagName: "v0.1.0-preview.light", isPrerelease: true, isDraft: false },
+      ],
       resolveTagCommit: async (tagName) => {
-        expect(gitPeelTagToCommitArgv(tagName).at(-1)).toBe("refs/tags/preview-light^{commit}");
+        expect(gitPeelTagToCommitArgv(tagName).at(-1)).toBe(
+          "refs/tags/v0.1.0-preview.light^{commit}",
+        );
         return HEAD;
       },
     });
@@ -226,10 +260,12 @@ describe("deciding whether to build a preview release", () => {
       headCommit: HEAD,
       force: false,
       listReleases: async () => [
-        { tagName: "preview-annotated", isPrerelease: true, isDraft: false },
+        { tagName: "v0.1.0-preview.annotated", isPrerelease: true, isDraft: false },
       ],
       resolveTagCommit: async (tagName) => {
-        expect(gitPeelTagToCommitArgv(tagName).at(-1)).toBe("refs/tags/preview-annotated^{commit}");
+        expect(gitPeelTagToCommitArgv(tagName).at(-1)).toBe(
+          "refs/tags/v0.1.0-preview.annotated^{commit}",
+        );
         return HEAD;
       },
     });
@@ -272,9 +308,9 @@ describe("peeling preview tags with git", () => {
     git(repo, ["config", "user.name", "Octant"]);
     git(repo, ["commit", "--allow-empty", "-m", "preview-head"]);
     commit = git(repo, ["rev-parse", "HEAD"]);
-    git(repo, ["tag", "preview-light"]);
-    git(repo, ["tag", "-a", "preview-annotated", "-m", "annotated preview"]);
-    annotatedTagObject = git(repo, ["rev-parse", "refs/tags/preview-annotated"]);
+    git(repo, ["tag", "v0.1.0-preview.light"]);
+    git(repo, ["tag", "-a", "v0.1.0-preview.annotated", "-m", "annotated preview"]);
+    annotatedTagObject = git(repo, ["rev-parse", "refs/tags/v0.1.0-preview.annotated"]);
   });
 
   afterAll(async () => {
@@ -282,13 +318,15 @@ describe("peeling preview tags with git", () => {
   });
 
   it("resolves a lightweight tag to the commit it names", () => {
-    expect(resolveGitTagCommit("preview-light", { cwd: repo })).toBe(commit);
+    expect(resolveGitTagCommit("v0.1.0-preview.light", { cwd: repo })).toBe(commit);
   });
 
   it("resolves an annotated tag to the commit, not the tag object", () => {
     expect(annotatedTagObject).not.toBe(commit);
-    expect(resolveGitTagCommit("preview-annotated", { cwd: repo })).toBe(commit);
-    expect(resolveGitTagCommit("preview-annotated", { cwd: repo })).not.toBe(annotatedTagObject);
+    expect(resolveGitTagCommit("v0.1.0-preview.annotated", { cwd: repo })).toBe(commit);
+    expect(resolveGitTagCommit("v0.1.0-preview.annotated", { cwd: repo })).not.toBe(
+      annotatedTagObject,
+    );
   });
 });
 

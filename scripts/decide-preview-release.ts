@@ -18,6 +18,14 @@ import { appendFile } from "node:fs/promises";
 /** Newest-first window. A published preview older than this is not compared. */
 export const PREVIEW_RELEASE_LIST_LIMIT = 30;
 
+/**
+ * What a preview-ring release tag looks like. Candidate builds publish
+ * prereleases too, but a `v…-candidate.…` tag is not evidence of what the
+ * preview ring last shipped — counting it would make the nightly compare HEAD
+ * to a commit `main` may never have contained.
+ */
+export const PREVIEW_RING_TAG_PATTERN = /^v\d+\.\d+\.\d+-preview\./;
+
 export const PREVIEW_RELEASE_LIST_JSON_FIELDS = "tagName,isPrerelease,isDraft" as const;
 
 export interface ListedGitHubRelease {
@@ -110,7 +118,10 @@ export async function decidePreviewRelease(
     };
   }
 
-  const previous = releases.find((release) => release.isPrerelease && !release.isDraft);
+  const previous = releases.find(
+    (release) =>
+      release.isPrerelease && !release.isDraft && PREVIEW_RING_TAG_PATTERN.test(release.tagName),
+  );
   if (previous === undefined) {
     return { kind: "build", reason: "no-previous-preview" };
   }

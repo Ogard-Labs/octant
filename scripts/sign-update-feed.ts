@@ -23,6 +23,7 @@ import {
   type AppReleaseRing,
   type AppUpdateFeed,
   type AppUpdateRelease,
+  APP_RELEASE_RINGS,
   decodeAppUpdateFeed,
   decodeAppUpdateRelease,
   isAppReleaseRing,
@@ -193,7 +194,11 @@ export function parseFeedCommand(argv: ReadonlyArray<string>): FeedCommand {
     return value;
   };
   const ring = required("ring");
-  if (!isAppReleaseRing(ring)) throw new Error(`--ring must be stable or preview, not ${ring}.`);
+  if (!isAppReleaseRing(ring)) {
+    throw new Error(
+      `--ring must be a known release ring (${APP_RELEASE_RINGS.join(", ")}), not ${ring}.`,
+    );
+  }
   const notesFile = values.get("notes-file");
   return {
     version: required("version"),
