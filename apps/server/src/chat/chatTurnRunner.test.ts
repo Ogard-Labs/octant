@@ -1193,6 +1193,109 @@ describe("ChatTurnRunner", () => {
     });
   });
 
+  it("answers a null ask-user body with question-invalid instead of failing the turn", async () => {
+    const updates: ChatAttempt[] = [];
+    const toolAnswers: Array<{ readonly requestId: string; readonly resultJson: string }> = [];
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: () =>
+        Effect.gen(function* () {
+          yield* Queue.offer(queue, {
+            kind: "text-delta",
+            sessionId,
+            text: "Checking.",
+          } as never);
+          yield* Queue.offer(queue, {
+            kind: "tool-request",
+            sessionId,
+            requestId: "tool-ask-null",
+            toolName: "ask-user",
+            inputJson: "null",
+          } as never);
+          yield* Queue.offer(queue, {
+            kind: "text-delta",
+            sessionId,
+            text: " Done.",
+          } as never);
+          yield* Queue.offer(queue, { kind: "completed", sessionId } as never);
+        }),
+      answerTool: (input: { readonly requestId: string; readonly resultJson: string }) =>
+        Effect.gen(function* () {
+          toolAnswers.push(input);
+        }),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        providerNativeExecute: async () => ({
+          query: "x",
+          backend: "provider-native",
+          results: [],
+        }),
+      }),
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        runner.run({
+          thread: thread(),
+          attempt: attempt(),
+          prompt: "hello",
+          scratchRoot: "/tmp/octant-scratch/thread",
+          driver: { acquire: () => Effect.succeed(connection) } as never,
+          providerInstanceId,
+          serviceLimits: serviceLimits(),
+          contextSubject: subject,
+          contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+          requestShape: "chat-turn",
+          varianceReserve: 20,
+          reservationId: reservation,
+          estimatedTokens: 100,
+          researchEnabled: false,
+          researchRoute: researchRoute({ kind: "disabled" }),
+          attachments: [],
+          appManagedTools: {
+            definitions: [{ name: "ask-user" } as never],
+            execute: () => {
+              throw new Error("The ask-user tool never reaches the tool set.");
+            },
+            close: async () => undefined,
+          },
+          persistAttempt: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
+          persistResponse: () =>
+            Effect.succeed({
+              contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+              digest: "d".repeat(64),
+              byteLength: 5,
+            }),
+        }),
+      ),
+    );
+
+    expect(toolAnswers).toEqual([
+      {
+        sessionId,
+        requestId: "tool-ask-null",
+        resultJson: JSON.stringify({ error: "question-invalid" }),
+        isError: true,
+      },
+    ]);
+    expect(updates.at(-1)?.outcome).toBe("completed");
+    expect(updates.at(-1)?.pendingQuestion).toBeUndefined();
+  });
+
   it("refuses a late answer once the question was already answered", async () => {
     const queue = Effect.runSync(Queue.unbounded<never>());
     const connection = {

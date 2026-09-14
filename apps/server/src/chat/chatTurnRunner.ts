@@ -788,10 +788,14 @@ export class ChatTurnRunner {
                       readonly options?: unknown;
                     };
                     try {
-                      parsedInput = JSON.parse(event.inputJson) as {
-                        readonly prompt?: unknown;
-                        readonly options?: unknown;
-                      };
+                      const decoded: unknown = JSON.parse(event.inputJson);
+                      parsedInput =
+                        decoded !== null && typeof decoded === "object" && !Array.isArray(decoded)
+                          ? (decoded as {
+                              readonly prompt?: unknown;
+                              readonly options?: unknown;
+                            })
+                          : {};
                     } catch {
                       parsedInput = {};
                     }
