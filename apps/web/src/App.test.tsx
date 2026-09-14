@@ -1895,6 +1895,44 @@ describe("App", () => {
     );
   }, 15_000);
 
+  it("adopts sidebar row choices a renderer stored before the host owned them", async () => {
+    const legacyActivity = {
+      project: false,
+      branch: false,
+      pullRequest: false,
+      lastUpdated: true,
+      status: true,
+    };
+    window.localStorage.setItem(
+      "octant.sidebar.row-properties.v1.activity",
+      JSON.stringify(legacyActivity),
+    );
+    const shellApi = client();
+
+    render(
+      <App
+        codeClient={codes()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={shellApi}
+      />,
+    );
+
+    const defaults = settingsPastFirstRun().sidebarRowProperties;
+    await vi.waitFor(() =>
+      expect(shellApi.execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "replace-settings",
+          settings: expect.objectContaining({
+            sidebarRowProperties: { ...defaults, activity: legacyActivity },
+          }),
+        }),
+      ),
+    );
+    expect(window.localStorage.getItem("octant.sidebar.row-properties.v1.activity")).toBeNull();
+  });
+
   it("keeps the committed desktop width and omits horizontal resizing when responsive", async () => {
     render(
       <App

@@ -158,6 +158,7 @@ import {
   rememberHealthyCreateHost,
 } from "./shell/createHostPreference";
 import { useLaunchSession } from "./shell/useLaunchSession";
+import { adoptLegacySidebarRowProperties } from "./shell/sidebarRowProperties";
 import { WorkspaceView } from "./shell/WorkspaceView";
 import {
   SidebarThreadDragContext,
@@ -777,6 +778,20 @@ function LaunchedShell(
     if (!zen.active) return;
     void zen.refreshThreads();
   }, [zen.active, zen.refreshThreads]);
+  // A renderer older than the host-backed setting stored each sidebar view's
+  // row choice in localStorage. Adopt it once, as soon as the host's settings
+  // are in hand: after that a person may have changed the host record, and a
+  // stale local copy must never overwrite it.
+  const adoptedLegacySidebarRowProperties = useRef(false);
+  useEffect(() => {
+    const settings = controller.settings;
+    if (adoptedLegacySidebarRowProperties.current || settings === undefined) return;
+    adoptedLegacySidebarRowProperties.current = true;
+    adoptLegacySidebarRowProperties({
+      current: settings.sidebarRowProperties,
+      updateSettings: (sidebarRowProperties) => controller.updateSettings({ sidebarRowProperties }),
+    });
+  }, [controller.settings, controller.updateSettings]);
   const [createOpen, setCreateOpen] = useState(false);
   const [projectCreateMode, setProjectCreateMode] = useState<OctantMode | undefined>(undefined);
   function openProjectCreate(mode?: OctantMode) {
