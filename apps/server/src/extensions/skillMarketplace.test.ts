@@ -712,6 +712,11 @@ describe("npm skill marketplace", () => {
     expect(decodeNpmEntryId(compact)).toBe(longName);
   });
 
+  it("refuses a package name the registry request would rename", () => {
+    // A third segment has no npm meaning; encoding it would request `@a/b`.
+    expect(() => encodeNpmEntryId("@a/b/c")).toThrow(/npm package name is invalid/i);
+  });
+
   it("extracts SKILL.md plus sibling support files and rejects host escapes", () => {
     const skill = `---
 name: demo-skill

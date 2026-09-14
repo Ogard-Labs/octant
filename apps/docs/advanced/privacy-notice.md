@@ -114,16 +114,18 @@ is **provisional** until signed self-updating releases are final. See
 ### Marketplace fetches
 
 Opening **Settings → Skills & Extensions** or the Marketplace tab does not
-contact a registry. Extension catalog **search** is local; **Inspect** and
-install fetch a pinned GitHub tree. Standalone skill **Search skills**
-queries [skills.sh](https://skills.sh/) and the npm registry with the text
-you typed; preview and install then fetch the package. An empty query is
-not sent.
+contact a registry. Extension catalog **search** sends your query plus the
+`agent-plugin` keywords to npm, then downloads candidate metadata and
+tarballs; **Inspect** and install of a curated entry fetch its pinned GitHub
+tree. Standalone skill **Search skills** queries [skills.sh](https://skills.sh/)
+and the npm registry with the text you typed; preview and install then fetch
+the package. An empty query is not sent.
 
-Those requests disclose the query you typed (for skill search), the IP
-address, and ordinary HTTP metadata. They do not send the journal,
-credentials, or thread contents. Turn marketplace fetches off in
-**Settings → General → Marketplace**; off means no request is made.
+Those requests disclose the query you typed, the IP address, and ordinary
+HTTP metadata. They do not send the journal, credentials, or thread
+contents. Turn marketplace fetches off in
+**Settings → General → Marketplace**; off means no request is made and
+catalog search stays with the in-memory curated entries.
 
 Local disk imports and `.agents/skills/` discovery do not contact a
 catalog. Details live under
