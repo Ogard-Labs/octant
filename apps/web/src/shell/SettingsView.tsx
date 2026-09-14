@@ -1396,17 +1396,17 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
           ) : null}
         </SettingGroup>
         <SettingGroup label="Activity rows">
-          {isAvailable("sidebar-activity-repository") ? (
+          {isAvailable("sidebar-activity-project") ? (
             <SettingRow
-              description="Show the Project or repository a thread belongs to."
-              focused={focusedSetting === settingId("sidebar-activity-repository")}
-              label="Repository"
+              description="Show the Project a thread belongs to."
+              focused={focusedSetting === settingId("sidebar-activity-project")}
+              label="Project"
               scope="app"
-              settingId="sidebar-activity-repository"
+              settingId="sidebar-activity-project"
             >
               <OctantSwitch
                 checked={props.settings.sidebarRowProperties.activity.project}
-                label="Repository on Activity rows"
+                label="Project on Activity rows"
                 onCheckedChange={(project) =>
                   props.onSettingsChange({
                     sidebarRowProperties: {

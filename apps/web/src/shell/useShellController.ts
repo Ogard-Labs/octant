@@ -84,7 +84,7 @@ export type ImplementedSettingId =
   | "sidebar-projects-pull-request"
   | "sidebar-projects-last-updated"
   | "sidebar-projects-status"
-  | "sidebar-activity-repository"
+  | "sidebar-activity-project"
   | "sidebar-activity-branch"
   | "sidebar-activity-pull-request"
   | "sidebar-activity-last-updated"
@@ -313,8 +313,7 @@ const settingSearchText: Readonly<Record<ImplementedSettingId, string>> = {
     "sidebar projects rows last updated age timestamp show hide metadata appearance",
   "sidebar-projects-status":
     "sidebar projects rows status mark working waiting unread show hide metadata appearance",
-  "sidebar-activity-repository":
-    "sidebar activity rows repository project name show hide metadata appearance",
+  "sidebar-activity-project": "sidebar activity rows project name show hide metadata appearance",
   "sidebar-activity-branch":
     "sidebar activity rows branch worktree checkout show hide metadata appearance",
   "sidebar-activity-pull-request":

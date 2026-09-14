@@ -160,10 +160,10 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "sidebar projects rows status mark working waiting unread show hide metadata appearance",
         },
         {
-          id: settingId("sidebar-activity-repository"),
-          label: "Repository on Activity rows",
+          id: settingId("sidebar-activity-project"),
+          label: "Project on Activity rows",
           scope: "app",
-          keywords: "sidebar activity rows repository project name show hide metadata appearance",
+          keywords: "sidebar activity rows project name show hide metadata appearance",
         },
         {
           id: settingId("sidebar-activity-branch"),

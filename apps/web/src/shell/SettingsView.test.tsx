@@ -597,7 +597,7 @@ describe("SettingsView", () => {
       "aria-checked",
       "true",
     );
-    expect(screen.getByRole("switch", { name: "Repository on Activity rows" })).toHaveAttribute(
+    expect(screen.getByRole("switch", { name: "Project on Activity rows" })).toHaveAttribute(
       "aria-checked",
       "true",
     );
