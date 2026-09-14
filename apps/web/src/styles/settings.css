@@ -529,9 +529,10 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 }
 
 /* Compound editors (multi-field controls) stack under their label instead of
-   hanging off the right edge as a one-line value. */
+   hanging off the right edge as a one-line value. Background's rebuilt rows
+   are ordinary value rows, so only its catalog is compound, and the row no
+   longer appears here. */
 .setrow[data-setting-id="sidebar-background"],
-.setrow[data-setting-id="app-background"],
 .setrow[data-setting-id="environment-presentation"],
 .setrow[data-setting-id="user-profile"],
 .setrow[data-setting-id="keybindings"],
@@ -546,7 +547,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 }
 
 .setrow[data-setting-id="sidebar-background"] > .setrow-control,
-.setrow[data-setting-id="app-background"] > .setrow-control,
 .setrow[data-setting-id="environment-presentation"] > .setrow-control,
 .setrow[data-setting-id="user-profile"] > .setrow-control,
 .setrow[data-setting-id="keybindings"] > .setrow-control,
@@ -2228,13 +2228,138 @@ textarea.settings-view__text-input {
   margin-top: var(--oct-space-3);
 }
 
-/* Welcome background: the photo in use is a small frame beside two icon
-   buttons, upload and library; the library opens as a popover grid whose
-   pictures reuse the preset swatch as a radio, sized for a picture. */
+/* Background: one open section of shared setting rows. The source row, the
+   scope and pattern dials, and the photo frame are ordinary rows on the
+   page's control column; the built-in catalog is the section's one compound
+   block, so it spans the column under its own quiet group headings. */
+
+/* The catalog sits between two row groups, so it owns the hairline that
+   separates it from the rows above; the group below brings its own. */
+.settings-app-background__catalog {
+  display: grid;
+  min-inline-size: 0;
+  gap: 0;
+  margin: 0;
+  padding: 12px 0 16px;
+  border: 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.settings-app-background__catalog-title {
+  margin: 0;
+  padding: 0 0 10px;
+  color: var(--octant-text-secondary);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-medium);
+  letter-spacing: var(--oct-tracking-snug);
+  line-height: 1.35;
+  text-transform: none;
+}
+
+.settings-app-background__group {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-2);
+}
+
+.settings-app-background__group + .settings-app-background__group {
+  padding-top: var(--oct-space-3);
+}
+
+.settings-app-background__group-title {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+  line-height: 1.35;
+}
+
+/* A background picker shows backgrounds: an even grid of 16:10 stills.
+   The tile is a picture first, so it drops the button recipe's single-line
+   height; the name wraps to the two lines it may need, and the motion
+   caption keeps its line on every tile, so no label is ever clipped by the
+   tile below it and every row is one height. */
+.settings-app-background__preset-grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: var(--oct-space-3);
+  max-width: 100%;
+}
+
+.settings-app-background__preset {
+  position: relative;
+  display: grid;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-1);
+  align-items: stretch;
+  justify-items: stretch;
+  white-space: normal;
+  text-align: left;
+}
+
+.settings-app-background__preset-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  border-radius: var(--oct-radius-sm);
+}
+
+/* A picture that can be chosen carries its own selected state; the accent
+   ring is drawn on the still, never on the button recipe. */
+.settings-app-background__preset[aria-checked="true"] .settings-app-background__preset-thumb {
+  outline: 2px solid var(--octant-accent);
+  outline-offset: 1px;
+}
+
+.settings-app-background__preset[aria-checked="true"] .settings-app-background__preset-name {
+  color: var(--octant-text-primary);
+  font-weight: var(--oct-weight-medium);
+}
+
+.settings-app-background__preset-name {
+  display: -webkit-box;
+  min-height: 2.6em;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: var(--oct-text-xs);
+  line-height: 1.3;
+  white-space: normal;
+}
+
+.settings-app-background__preset-motion {
+  min-height: 1.3em;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  line-height: 1.3;
+}
+
+.settings-app-background__preset-mark {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  background: var(--octant-accent);
+  color: var(--octant-accent-foreground);
+}
+
+/* The photo in use is a small frame beside two icon buttons, upload and
+   library; the library opens as a popover grid whose pictures reuse the
+   preset swatch as a radio, sized for a picture. */
 .settings-app-background__photo {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--oct-space-2);
 }
 
 .settings-app-background__thumb {
@@ -2260,8 +2385,8 @@ textarea.settings-view__text-input {
 .settings-app-background__grid {
   display: grid;
   grid-template-columns: repeat(3, 64px);
-  gap: 8px;
-  padding: 4px;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-1);
 }
 
 .settings-view__preset-swatch--photo {
@@ -2271,12 +2396,21 @@ textarea.settings-view__text-input {
   overflow: hidden;
 }
 
+/* Quiet lines inside the section: the pattern hint between two rows, and the
+   upload or contrast status at the end. */
 .settings-app-background__note {
-  grid-column: 1 / -1;
   margin: 0;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-  line-height: 1.4;
+  padding: 8px 0 0;
+  max-width: 68ch;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+  line-height: 1.45;
+}
+
+/* The hint sits between two rows, so the dial row after it keeps the
+   separator the adjacent-sibling rule would otherwise drop. */
+.setgroup > .settings-app-background__note + .setrow {
+  border-top: 1px solid var(--oct-hairline);
 }
 
 .settings-app-background__file {
@@ -2288,76 +2422,10 @@ textarea.settings-view__text-input {
   white-space: nowrap;
 }
 
-/* Built-in Zen imagery is also a workspace ground. Keep the same still-frame
-   previews and grouped rhythm as Zen's picker, while leaving the Settings
-   collection open rather than turning it into a raised card. */
-.settings-app-background__presets {
-  display: grid;
-  gap: var(--oct-space-2);
-  min-width: 0;
-  min-inline-size: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.settings-app-background__presets > legend {
-  padding: 0;
-  color: var(--oct-fg);
-  font-size: var(--oct-text-detail);
-  font-weight: 500;
-}
-
-.settings-app-background__group {
-  display: grid;
-  gap: var(--oct-space-1);
-}
-
-.settings-app-background__group h3 {
-  margin: 0;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-  font-weight: 500;
-  text-transform: capitalize;
-}
-
-.settings-app-background__preset-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
-  gap: var(--oct-space-2);
-  max-width: 100%;
-}
-
-.settings-app-background__preset {
-  position: relative;
-  display: grid;
-  min-width: 0;
-  min-height: 0;
-  gap: 4px;
-  padding: 4px;
-  justify-items: stretch;
-  text-align: left;
-}
-
-.settings-app-background__preset-thumb {
-  display: block;
-  width: 100%;
-  aspect-ratio: 16 / 10;
-  border-radius: var(--oct-radius-sm);
-  object-fit: cover;
-}
-
-.settings-app-background__preset-name {
-  overflow: hidden;
-  font-size: var(--oct-text-xs);
-  line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.settings-app-background__preset-motion {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
+/* A slider in a compound editor's row lands on the same control column as
+   every other value on the page, with its readout at the column's edge. */
+.settings-app-background .setrow-control > .settings-view__slider-field {
+  width: var(--oct-settings-control);
 }
 
 /* The same compact chooser is used in Settings and conversation composers. */

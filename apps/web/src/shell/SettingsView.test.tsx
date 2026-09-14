@@ -815,6 +815,19 @@ describe("SettingsView", () => {
     ).toHaveFocus();
   });
 
+  it("deep-links to the Background setting and focuses its source control", () => {
+    renderSettings({
+      initialDeepLink: { section: "appearance", setting: "app-background" },
+      themeController: {
+        draft: DEFAULT_THEME_SETTINGS,
+        applyPatch: vi.fn(async () => true),
+      } as never,
+    });
+
+    expect(screen.getByRole("heading", { name: "Background" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Application background" })).toHaveFocus();
+  });
+
   it("applies a pending deep link from another app surface and reports it consumed", () => {
     const onDeepLinkApplied = vi.fn();
     const { rerender } = renderSettings({ onDeepLinkApplied });
