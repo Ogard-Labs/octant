@@ -138,6 +138,7 @@ distilled successor of the earlier long-form design specifications.
 | [0124](0124-built-in-zen-backgrounds-are-workspace-grounds.md) | Built-in Zen backgrounds are workspace grounds | Accepted |
 | [0125](0125-project-provider-data-policy.md) | Projects may restrict providers by residency labels | Accepted |
 | [0126](0126-seatbelt-trust-evaluation-and-launcher-symlinks.md) | Seatbelt opens trust evaluation and launcher symlink metadata | Accepted |
+| [0127](0127-a-manually-built-candidate-ring.md) | A manually built candidate ring | Accepted |
 
 ## Adding an ADR
 

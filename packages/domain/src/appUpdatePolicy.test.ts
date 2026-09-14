@@ -45,8 +45,10 @@ describe("ringForVersion", () => {
     // everyone on the stable ring.
     expect(ringForVersion(version("0.2.0"))).toBe("stable");
     expect(ringForVersion(version("0.2.0-preview.20260828.4"))).toBe("preview");
-    // A prerelease that is not a preview — a release candidate — still belongs
-    // to the stable stream it is a candidate for.
+    expect(ringForVersion(version("0.2.0-candidate.20260914.3"))).toBe("candidate");
+    // A prerelease carrying no ring tag still belongs to the stable stream it
+    // leads to — a manually published build must never default onto a ring its
+    // version does not name.
     expect(ringForVersion(version("0.2.0-rc.1"))).toBe("stable");
   });
 });

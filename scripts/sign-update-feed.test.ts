@@ -181,7 +181,13 @@ describe("reading the publish command", () => {
   });
 
   it("refuses a ring it does not publish", () => {
-    expect(() => parseFeedCommand([...argv, "--ring", "nightly"])).toThrow(/stable or preview/);
+    expect(() => parseFeedCommand([...argv, "--ring", "nightly"])).toThrow(
+      /release ring \(stable, preview, candidate\)/,
+    );
+  });
+
+  it("accepts the candidate ring a manual run publishes", () => {
+    expect(parseFeedCommand([...argv, "--ring", "candidate"]).ring).toBe("candidate");
   });
 
   it("refuses a missing field rather than signing a release built from guesses", () => {

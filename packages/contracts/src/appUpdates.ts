@@ -54,16 +54,18 @@ export type AppUpdateArchitecture = typeof AppUpdateArchitecture.Type;
  * `main`, built on a schedule, and its versions carry a `-preview.…` tag so
  * they sort below the release they lead to — which is what lets someone on a
  * preview move to stable the day stable catches up, without anything having to
- * special-case the handover.
+ * special-case the handover. `candidate` is a build produced on demand from a
+ * chosen ref, published to its own feed so a test install can follow it and
+ * exercise the real update path; its versions carry a `-candidate.…` tag.
  */
-export const AppReleaseRing = Schema.Literal("stable", "preview");
+export const AppReleaseRing = Schema.Literal("stable", "preview", "candidate");
 export type AppReleaseRing = typeof AppReleaseRing.Type;
 
-export const APP_RELEASE_RINGS: ReadonlyArray<AppReleaseRing> = ["stable", "preview"];
+export const APP_RELEASE_RINGS: ReadonlyArray<AppReleaseRing> = ["stable", "preview", "candidate"];
 
 /** Narrow an unchecked value to a ring, for the boundaries a schema does not cover. */
 export function isAppReleaseRing(value: unknown): value is AppReleaseRing {
-  return value === "stable" || value === "preview";
+  return value === "stable" || value === "preview" || value === "candidate";
 }
 
 /**
@@ -74,6 +76,12 @@ export function isAppReleaseRing(value: unknown): value is AppReleaseRing {
  * wrong here is the one deciding which feed an app reads.
  */
 export const PREVIEW_PRERELEASE_TAG = "preview";
+
+/**
+ * The prerelease tag that marks a build as belonging to the candidate ring,
+ * derived the same way the preview tag is.
+ */
+export const CANDIDATE_PRERELEASE_TAG = "candidate";
 
 /**
  * The release a feed offers.
@@ -198,7 +206,7 @@ export type AppUpdateState = typeof AppUpdateState.Type;
 export const OCTANT_UPDATE_CHECK_DISCLOSURE = [
   "The Octant version you are running, so the service can say whether anything is newer.",
   "Your platform and processor architecture, so it offers a build that runs on this machine.",
-  "Which release ring you follow, stable or preview, because each ring has its own feed address.",
+  "Which release ring you follow — stable, preview, or candidate — because each ring has its own feed address.",
   "The IP address the request comes from, as any network request discloses.",
   "The time of the request.",
 ] as const;

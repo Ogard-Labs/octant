@@ -1511,8 +1511,8 @@ function decodeBrowserSurfaceState(value: unknown): BrowserSurfaceState {
  * The rings, mirrored rather than imported, for the same reason the statuses
  * below are: the preload is sandboxed and must not pull a runtime package in.
  */
-function isReleaseRing(value: unknown): value is "stable" | "preview" {
-  return value === "stable" || value === "preview";
+function isReleaseRing(value: unknown): value is "stable" | "preview" | "candidate" {
+  return value === "stable" || value === "preview" || value === "candidate";
 }
 
 const APP_UPDATE_STATUSES = [

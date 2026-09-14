@@ -202,7 +202,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
       )}
 
       <SettingRow
-        description="Stable is the released build; Preview is a nightly build of what has been merged and takes effect at the next check."
+        description="Stable is the released build; Preview is a nightly build of what has been merged; Candidate is a one-off build run by hand. Switching takes effect at the next check."
         label="Release ring"
         scope="app"
         settingId="app-update-ring"
@@ -219,6 +219,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
         >
           <OctantToggleGroupItem value="stable">Stable</OctantToggleGroupItem>
           <OctantToggleGroupItem value="preview">Preview</OctantToggleGroupItem>
+          <OctantToggleGroupItem value="candidate">Candidate</OctantToggleGroupItem>
         </OctantToggleGroup>
       </SettingRow>
 
