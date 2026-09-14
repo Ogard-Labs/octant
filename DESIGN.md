@@ -536,7 +536,11 @@ row with its threads nested beneath it, pinned Projects leading in their own
 labelled band that is absent when nothing is pinned), then Chats (threads filed
 in no Project; Work and Code call the group Recents). Rows are hairline rails, never
 cards; provider marks are fixed-size inline and can be hidden without changing
-row height or indentation. A hovered row takes the soft ink wash and the row
+row height or indentation. What a thread row carries — its Project
+attribution, branch, linked pull request, last updated, or status mark — is the
+view's own choice, edited in Settings › Appearance › Sidebar thread rows or the
+view filter menu's Property visibility submenu; a hidden property is omitted
+rather than left as a gap. A hovered row takes the soft ink wash and the row
 the workspace is showing takes the selection fill with a hairline edge, the
 same two states the thread tab strip draws, so pointing never looks like
 being there. Provider identity remains at the leading edge. One fixed trailing

@@ -568,6 +568,100 @@ describe("SettingsView", () => {
     });
   });
 
+  it("writes each view's sidebar thread-row properties through the shell settings patch", async () => {
+    const user = userEvent.setup();
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+    navigateTo("Appearance");
+
+    expect(screen.getByRole("heading", { name: "Sidebar thread rows" })).toBeVisible();
+    expect(screen.getByRole("group", { name: "Projects rows" })).toBeVisible();
+    expect(screen.getByRole("group", { name: "Activity rows" })).toBeVisible();
+
+    // Each view starts with what its rows already carried: the tree shows
+    // branch, pull request, age, and status; the feed shows the Project name
+    // and status alone.
+    expect(screen.getByRole("switch", { name: "Branch on Projects rows" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByRole("switch", { name: "Pull request on Projects rows" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByRole("switch", { name: "Last updated on Projects rows" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByRole("switch", { name: "Status on Projects rows" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByRole("switch", { name: "Project on Activity rows" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByRole("switch", { name: "Branch on Activity rows" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    expect(screen.getByRole("switch", { name: "Pull request on Activity rows" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    expect(screen.getByRole("switch", { name: "Last updated on Activity rows" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    expect(screen.getByRole("switch", { name: "Status on Activity rows" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getAllByText("Show the branch or worktree a thread works in.")).toHaveLength(2);
+
+    // Turning the Projects branch off leaves every Activity value as it was.
+    await user.click(screen.getByRole("switch", { name: "Branch on Projects rows" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({
+      sidebarRowProperties: {
+        projects: {
+          project: false,
+          branch: false,
+          pullRequest: true,
+          lastUpdated: true,
+          status: true,
+        },
+        activity: {
+          project: true,
+          branch: false,
+          pullRequest: false,
+          lastUpdated: false,
+          status: true,
+        },
+      },
+    });
+
+    // Turning the Activity age on says nothing about the Projects rows.
+    await user.click(screen.getByRole("switch", { name: "Last updated on Activity rows" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith({
+      sidebarRowProperties: {
+        projects: {
+          project: false,
+          branch: true,
+          pullRequest: true,
+          lastUpdated: true,
+          status: true,
+        },
+        activity: {
+          project: true,
+          branch: false,
+          pullRequest: false,
+          lastUpdated: true,
+          status: true,
+        },
+      },
+    });
+  });
+
   it("keeps saved On while exposing the generic effective opaque fallback note", () => {
     const { container, rerender } = renderSettings({ visibleSettings: ["sidebar-material"] });
     navigateTo("Appearance");

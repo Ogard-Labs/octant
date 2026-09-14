@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { decodeProjectId, type ThreadBoardPullRequestSummaries } from "@octant/contracts";
+import type { SidebarRowPropertyVisibility } from "@octant/contracts/shell";
 import { ProjectThreadRows } from "./ProjectThreadList";
+import { SidebarRowPropertiesContext } from "../shell/sidebarRowProperties";
 
 const thread = {
   threadId: "thread-one",
@@ -1152,5 +1154,115 @@ describe("completing and snoozing from a thread row", () => {
     expect(Date.parse((onSnoozeThread.mock.calls[0] as [string, string])[1])).toBeGreaterThan(
       Date.now(),
     );
+  });
+});
+
+describe("ProjectThreadRows display properties", () => {
+  const carried = {
+    ...thread,
+    checkoutChip: { checkoutKind: "managed-worktree", label: "feature/x" },
+    pullRequests: { items: [pullRequest(12, { state: "open" })], hiddenCount: 0 },
+    updatedAt: new Date(Date.now() - 2 * 60 * 60_000).toISOString(),
+  } as const;
+
+  const projectsDefaults: SidebarRowPropertyVisibility = {
+    project: false,
+    branch: true,
+    pullRequest: true,
+    lastUpdated: true,
+    status: true,
+  };
+
+  function renderRows(rowProperties: SidebarRowPropertyVisibility) {
+    return render(
+      <SidebarRowPropertiesContext.Provider value={rowProperties}>
+        <ProjectThreadRows onSelectThread={vi.fn()} threads={[carried]} />
+      </SidebarRowPropertiesContext.Provider>,
+    );
+  }
+
+  it("shows the branch, pull request, age, and status a Projects row carries by default", () => {
+    renderRows(projectsDefaults);
+
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    expect(within(row).getByText("#12")).toBeVisible();
+    expect(within(row).getByText("feature/x")).toBeVisible();
+    expect(within(row).getByRole("img", { name: "Pull request #12 · open" })).toBeVisible();
+    expect(within(row).getByText("2h")).toBeVisible();
+    expect(row.querySelector(".sidebar-navigation__thread-status")).not.toBeNull();
+  });
+
+  it("omits a hidden property without leaving a gap in its place", () => {
+    renderRows({
+      project: false,
+      branch: false,
+      pullRequest: false,
+      lastUpdated: false,
+      status: false,
+    });
+
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    expect(within(row).queryByText("#12")).toBeNull();
+    expect(within(row).queryByText("feature/x")).toBeNull();
+    expect(within(row).queryByRole("img", { name: "Pull request #12 · open" })).toBeNull();
+    expect(within(row).queryByText("2h")).toBeNull();
+    expect(row.querySelector(".sidebar-navigation__thread-status")).toBeNull();
+    // Nothing is left in their place: the copy holds the title alone.
+    expect(row.querySelector(".sidebar-navigation__thread-copy")?.children).toHaveLength(1);
+  });
+
+  it("keeps a snoozed row's wake time when Last updated is hidden", () => {
+    render(
+      <SidebarRowPropertiesContext.Provider value={{ ...projectsDefaults, lastUpdated: false }}>
+        <ProjectThreadRows
+          onSelectThread={vi.fn()}
+          threads={[
+            {
+              ...carried,
+              shelf: "snoozed",
+              snooze: { until: "2099-01-01T00:00:00.000Z", at: "2026-07-21T12:00:00.000Z" },
+              wakeLabel: "3d",
+            },
+          ]}
+        />
+      </SidebarRowPropertiesContext.Provider>,
+    );
+
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    // The timestamp is gone; the promise of when the thread returns is not.
+    expect(within(row).queryByText("2h")).toBeNull();
+    expect(within(row).getByText("3d")).toBeVisible();
+  });
+
+  it("keeps a hidden pull request reachable from the row's own info card", async () => {
+    const user = userEvent.setup();
+    const onOpenPullRequest = vi.fn();
+    render(
+      <SidebarRowPropertiesContext.Provider
+        value={{
+          project: false,
+          branch: false,
+          pullRequest: false,
+          lastUpdated: true,
+          status: true,
+        }}
+      >
+        <ProjectThreadRows
+          actions={{ onOpenPullRequest }}
+          onSelectThread={vi.fn()}
+          threads={[carried]}
+        />
+      </SidebarRowPropertiesContext.Provider>,
+    );
+
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    await user.hover(row);
+
+    // Hiding the row's chip is not hiding the link: the card the row already
+    // owns keeps the exact pull request and its destinations.
+    const card = await screen.findByRole("group", { name: "Thread details" });
+    expect(within(card).getByRole("group", { name: "Linked pull requests" })).toBeVisible();
+    await user.click(within(card).getByRole("button", { name: /Open pull request #12/ }));
+    expect(onOpenPullRequest).toHaveBeenCalledWith(expect.objectContaining({ number: 12 }));
   });
 });

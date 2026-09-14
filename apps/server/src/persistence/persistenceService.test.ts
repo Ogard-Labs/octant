@@ -238,6 +238,24 @@ describe("PersistenceLive", () => {
       ...decodePersistedShellSettings(legacySettings),
       defaultFolder: "/Users/ada/Documents/Octant",
     });
+    // A store written before row properties shipped keeps showing what each
+    // view's rows already carried: nothing disappears on the upgrade.
+    expect(result.bootstrap.settings.sidebarRowProperties).toEqual({
+      projects: {
+        project: false,
+        branch: true,
+        pullRequest: true,
+        lastUpdated: true,
+        status: true,
+      },
+      activity: {
+        project: true,
+        branch: false,
+        pullRequest: false,
+        lastUpdated: false,
+        status: true,
+      },
+    });
     expect(result.bootstrap.settingsVersion).toBe(1);
     expect(result.event).toEqual({ payload_json: legacyPayloadJson });
     expect(result.projection).toEqual({ settings_json: legacySettingsJson });

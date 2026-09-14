@@ -2,6 +2,7 @@ import {
   DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS,
   DEFAULT_OPEN_IN_APPLICATIONS,
   DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE,
+  DEFAULT_SIDEBAR_ROW_PROPERTIES,
   LOCAL_HOST_ID,
   MAX_CONTEXT_SIDEBAR_WIDTH,
   MAX_SIDEBAR_WIDTH,
@@ -162,6 +163,10 @@ export function defaultShellSettings(): ShellSettings {
     transcriptTextSize: "medium",
     transcriptWidth: "narrow",
     showThreadProviderIcons: true,
+    sidebarRowProperties: {
+      projects: { ...DEFAULT_SIDEBAR_ROW_PROPERTIES.projects },
+      activity: { ...DEFAULT_SIDEBAR_ROW_PROPERTIES.activity },
+    },
     navigatorAssistant: {},
     voice: {},
     imageGeneration: { customSources: [] },

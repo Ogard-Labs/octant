@@ -80,6 +80,15 @@ export type ImplementedSettingId =
   | "transcript-text-size"
   | "transcript-width"
   | "thread-provider-icons"
+  | "sidebar-projects-branch"
+  | "sidebar-projects-pull-request"
+  | "sidebar-projects-last-updated"
+  | "sidebar-projects-status"
+  | "sidebar-activity-project"
+  | "sidebar-activity-branch"
+  | "sidebar-activity-pull-request"
+  | "sidebar-activity-last-updated"
+  | "sidebar-activity-status"
   | "open-in-applications"
   | "theme-mode"
   | "theme-preset"
@@ -296,6 +305,23 @@ const settingSearchText: Readonly<Record<ImplementedSettingId, string>> = {
   "transcript-text-size": "transcript conversation text font size small medium large",
   "transcript-width": "transcript conversation composer width narrow medium wide centered",
   "thread-provider-icons": "thread provider icon avatar logo sidebar compact visibility",
+  "sidebar-projects-branch":
+    "sidebar projects rows branch worktree checkout show hide metadata appearance",
+  "sidebar-projects-pull-request":
+    "sidebar projects rows pull request pr number state chip show hide metadata appearance",
+  "sidebar-projects-last-updated":
+    "sidebar projects rows last updated age timestamp show hide metadata appearance",
+  "sidebar-projects-status":
+    "sidebar projects rows status mark working waiting unread show hide metadata appearance",
+  "sidebar-activity-project": "sidebar activity rows project name show hide metadata appearance",
+  "sidebar-activity-branch":
+    "sidebar activity rows branch worktree checkout show hide metadata appearance",
+  "sidebar-activity-pull-request":
+    "sidebar activity rows pull request pr number state chip show hide metadata appearance",
+  "sidebar-activity-last-updated":
+    "sidebar activity rows last updated age timestamp show hide metadata appearance",
+  "sidebar-activity-status":
+    "sidebar activity rows status mark working waiting unread show hide metadata appearance",
   "open-in-applications": "open in vscode cursor zed finder terminal ghostty xcode",
   "theme-mode": "theme mode system light dark appearance",
   "theme-preset": "theme preset Octant palette light dark",
