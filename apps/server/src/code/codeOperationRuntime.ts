@@ -1112,17 +1112,11 @@ function approvalPrompt(
 ): { readonly message: string; readonly detail: string } {
   const head =
     checkout.head.kind === "branch"
-      ? `${checkout.head.name} @ ${checkout.head.oid}`
+      ? `Branch: ${checkout.head.name}`
       : checkout.head.kind === "detached"
-        ? `detached @ ${checkout.head.oid}`
-        : "no Git repository";
-  const scope = [
-    `Project: ${thread.projectId}`,
-    `Thread: ${thread.title} (${thread.id})`,
-    `Repository: ${checkout.repositoryId}`,
-    `Checkout: ${checkout.id}`,
-    `HEAD: ${head}`,
-  ].join("\n");
+        ? "Detached checkout"
+        : "Folder without Git";
+  const scope = [`Thread: ${thread.title}`, head].join("\n");
   let message: string;
   let effectDetail: string;
   if (effect.kind === "create-thread-full-access") {
