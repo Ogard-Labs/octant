@@ -7,7 +7,7 @@ import {
   type ProviderObservedState,
   type ProviderRegistrySnapshot,
 } from "@octant/contracts";
-import type { ProviderClient } from "@octant/client-runtime/provider-client";
+import { createProviderClient, type ProviderClient } from "@octant/client-runtime/provider-client";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useProviderController } from "./useProviderController";
@@ -332,6 +332,37 @@ describe("useProviderController", () => {
     expect(result.current.message).toBe("Provider CLI updated from 1.0.0 to 1.1.0.");
     expect(result.current.observedByInstance.get(id)).toBeUndefined();
     expect(result.current.presentationObservedByInstance.get(id)).toBeUndefined();
+  });
+
+  it("shows updater diagnostics received through the real HTTP client", async () => {
+    const api = createProviderClient({
+      baseUrl: "http://localhost",
+      windowCapability: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      fetch: async (input) =>
+        new URL(String(input)).pathname.endsWith("bootstrap")
+          ? Response.json(snapshot())
+          : Response.json(
+              {
+                category: "provider-failed",
+                message: "Private updater output",
+                diagnostic: {
+                  stage: "update",
+                  kind: "exited",
+                  exitCode: 23,
+                  stderrContext: "Provider process rejected its configured arguments.",
+                },
+              },
+              { status: 500 },
+            ),
+    });
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await act(async () => {
+      await result.current.updateProviderCli(id);
+    });
+    expect(result.current.message).toBe(
+      "Provider CLI update failed: Exited with code 23. Provider process rejected its configured arguments.",
+    );
   });
 
   it("refreshes provider state when a CLI update fails", async () => {

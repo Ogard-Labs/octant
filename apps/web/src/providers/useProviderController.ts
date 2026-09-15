@@ -37,7 +37,11 @@ import {
   type ProviderRegistryCommandResult,
   type ProviderRegistrySnapshot,
 } from "@octant/contracts";
-import { createProviderClient, type ProviderClient } from "@octant/client-runtime/provider-client";
+import {
+  createProviderClient,
+  ProviderClientFailure,
+  type ProviderClient,
+} from "@octant/client-runtime/provider-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getInjectedHostBridge,
@@ -3154,7 +3158,15 @@ function domainValidationMessage(error: unknown): string {
 function redactedProbeFailureMessage(error: unknown): string {
   let failure;
   try {
-    failure = decodeProviderFailure(error);
+    failure = decodeProviderFailure(
+      error instanceof ProviderClientFailure
+        ? {
+            category: error.category,
+            message: error.message,
+            ...(error.diagnostic === undefined ? {} : { diagnostic: error.diagnostic }),
+          }
+        : error,
+    );
   } catch {
     return "Octant Provider service is unavailable.";
   }

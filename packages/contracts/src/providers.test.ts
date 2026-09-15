@@ -2381,6 +2381,20 @@ describe("provider runtime contracts", () => {
     ).toThrow();
   });
 
+  it("rejects arbitrary private prose in provider diagnostics", () => {
+    expect(() =>
+      decodeProviderFailure({
+        category: "provider-failed",
+        message: "Provider failed.",
+        diagnostic: {
+          stage: "update",
+          kind: "exited",
+          stderrContext: "Customer Alice private project Acme",
+        },
+      }),
+    ).toThrow();
+  });
+
   it("decodes bounded retry timing only", () => {
     expect(
       decodeProviderFailure({

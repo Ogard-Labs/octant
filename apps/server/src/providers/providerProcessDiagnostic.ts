@@ -22,7 +22,7 @@ export function makeBoundedProviderStderr(limit = DEFAULT_STDERR_BYTES): Bounded
 export function classifyProviderStderr(value: string): ProviderProcessDiagnostic["stderrContext"] {
   if (value.trim().length === 0) return undefined;
   if (/operation not permitted|permission denied/i.test(value)) {
-    return "Provider process was denied by host confinement.";
+    return "Provider process was denied by host permissions or confinement.";
   }
   if (/unexpected argument|unrecognized (?:option|argument)|unknown option|usage:/i.test(value)) {
     return "Provider process rejected its configured arguments.";

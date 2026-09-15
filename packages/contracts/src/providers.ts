@@ -1,5 +1,4 @@
 import { Schema } from "effect";
-import { DiagnosticSafeText } from "./diagnostics";
 import { AggregateVersion, CorrelationId, UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
 
@@ -1146,7 +1145,22 @@ export const ProviderProcessDiagnostic = Schema.Struct({
   ),
   detectedVersion: Schema.optional(ProviderDiagnosticVersion),
   supportedVersion: Schema.optional(ProviderDiagnosticVersion),
-  stderrContext: Schema.optional(DiagnosticSafeText),
+  stderrContext: Schema.optional(
+    Schema.Literal(
+      "Provider process was denied by host permissions or confinement.",
+      "Provider process rejected its configured arguments.",
+      "Provider authentication is required.",
+      "Provider TLS trust verification failed.",
+      "Provider network connection failed.",
+      "Provider process wrote redacted diagnostic output.",
+      "Provider reported an incompatible installed version.",
+      "Provider refused the ACP request because its configuration was invalid.",
+      "Provider refused the ACP request for the managed workspace.",
+      "Provider refused the ACP request because no usable model was available.",
+      "Provider could not reach its remote service.",
+      "Provider refused the ACP request without a classified reason.",
+    ),
+  ),
 }).annotations(strict);
 export type ProviderProcessDiagnostic = typeof ProviderProcessDiagnostic.Type;
 
