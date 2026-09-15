@@ -1466,6 +1466,105 @@ describe("Claude execution policy", () => {
     await acquired.close();
   });
 
+  it.each(["complete", "cancel"] as const)(
+    "keeps question answers distinct when a set must %s",
+    async (outcome) => {
+      const f = harness();
+      const acquired = await acquire(f.driver);
+      try {
+        await Effect.runPromise(
+          acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+        );
+        const open = f.opens[0];
+        if (open === undefined) throw new Error("Missing provider session");
+        const controller = new AbortController();
+        const signal = controller.signal;
+        const input = {
+          questions: [
+            { question: "First?", options: [{ label: "One" }] },
+            { question: "Second?", options: [{ label: "Two" }] },
+          ],
+        };
+        const collected = Effect.runPromise(
+          Stream.runCollect(
+            Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+              Stream.filter((event) => event.kind === "user-input-request"),
+              Stream.take(2),
+            ),
+          ),
+        );
+        await open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "AskUserQuestion",
+          input,
+          toolUseId: "question-set",
+          signal,
+        });
+        const callback = open.canUseTool({
+          toolName: "AskUserQuestion",
+          input,
+          toolUseId: "question-set",
+          signal,
+        });
+        const [first, second] = Array.from(await collected);
+        if (first?.kind !== "user-input-request" || second?.kind !== "user-input-request")
+          throw new Error("Missing questions");
+        expect(first.requestId).not.toBe(second.requestId);
+        let settled = false;
+        void callback.then(() => {
+          settled = true;
+        });
+        await Effect.runPromise(
+          acquired.connection.answerUserInput({
+            sessionId,
+            requestId: second.requestId,
+            answer: "Two",
+          }),
+        );
+        expect(settled).toBe(false);
+        const duplicate = await Effect.runPromise(
+          Effect.exit(
+            acquired.connection.answerUserInput({
+              sessionId,
+              requestId: second.requestId,
+              answer: "Wrong",
+            }),
+          ),
+        );
+        expect(duplicate._tag).toBe("Failure");
+        if (outcome === "cancel") {
+          controller.abort();
+          await expect(callback).resolves.toMatchObject({ behavior: "deny" });
+          const late = await Effect.runPromise(
+            Effect.exit(
+              acquired.connection.answerUserInput({
+                sessionId,
+                requestId: first.requestId,
+                answer: "One",
+              }),
+            ),
+          );
+          expect(late._tag).toBe("Failure");
+          return;
+        }
+        await Effect.runPromise(
+          acquired.connection.answerUserInput({
+            sessionId,
+            requestId: first.requestId,
+            answer: "One",
+          }),
+        );
+        await expect(callback).resolves.toEqual({
+          behavior: "allow",
+          updatedInput: { ...input, answers: { "First?": "One", "Second?": "Two" } },
+        });
+      } finally {
+        await acquired.close();
+      }
+    },
+  );
+
   it("terminal-fails and settles the active question when a second becomes pending", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);

@@ -103,7 +103,11 @@ function mapQuestion(
   }>,
 ): ReadonlyArray<ProviderRuntimeEvent> {
   if (questions.length === 0) return [];
-  if (questions.some((question) => question.multiple === true)) {
+  if (
+    questions.some(
+      (question) => question.multiple === true || normalizeText(question.question) === undefined,
+    )
+  ) {
     return [
       mappedEvent(context, {
         kind: "failed",
@@ -135,16 +139,19 @@ function mapQuestion(
       ];
     });
     return [
-      mappedEvent(context, {
-        kind: "user-input-request",
-        requestId: normalizedRequestId,
-        prompt,
-        options,
-        // A set arrives as one event per question under the same request
-        // identity, so the host answers them in order and the driver replies
-        // to the provider once, with every answer.
-        ...(count > 1 ? { questionIndex: index + 1, questionCount: count } : {}),
-      }),
+      mappedEvent(
+        context,
+        {
+          kind: "user-input-request",
+          requestId: normalizedRequestId,
+          prompt,
+          options,
+          // Keep the provider callback here; the connection assigns each
+          // question its own answer identity before publishing it.
+          ...(count > 1 ? { questionIndex: index + 1, questionCount: count } : {}),
+        },
+        index,
+      ),
     ];
   });
 }

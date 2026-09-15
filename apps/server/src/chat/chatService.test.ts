@@ -824,7 +824,7 @@ function questionDriver(
               yield* emit({ kind: "text-delta", text: "Let me check." });
               yield* emit({
                 kind: "user-input-request",
-                requestId: "q-set",
+                requestId: "q-first",
                 prompt: "How should I proceed?",
                 options: [{ label: "Yes" }, { label: "No" }],
                 questionIndex: 1,
@@ -832,7 +832,7 @@ function questionDriver(
               });
               yield* emit({
                 kind: "user-input-request",
-                requestId: "q-set",
+                requestId: "q-second",
                 prompt: "Mark it resolved?",
                 options: [{ label: "Resolve" }, { label: "Leave open" }],
                 questionIndex: 2,
@@ -4360,7 +4360,7 @@ describe("ChatService", () => {
     const turnId = waiting.turns[0]!.id;
     const attempt = waiting.turns[0]!.attempts[0]!;
     expect(attempt.pendingQuestion).toEqual({
-      requestId: "q-set",
+      requestId: "q-first",
       prompt: "How should I proceed?",
       options: [{ label: "Yes" }, { label: "No" }],
       questionIndex: 1,
@@ -4375,7 +4375,7 @@ describe("ChatService", () => {
         expectedVersion: (waiting.thread.version + 1) as never,
         turnId,
         attemptId: attempt.id,
-        requestId: "q-set",
+        requestId: "q-first",
         answer: "Yes",
       }),
     ).rejects.toMatchObject({ failure: { category: "stale" } });
@@ -4398,7 +4398,7 @@ describe("ChatService", () => {
       expectedVersion: waiting.thread.version,
       turnId,
       attemptId: attempt.id,
-      requestId: "q-set",
+      requestId: "q-first",
       answer: "Yes",
     });
     expect(first).toMatchObject({ kind: "attempt-updated" });
@@ -4406,14 +4406,14 @@ describe("ChatService", () => {
     expect(first.attempt.outcome).toBe("streaming");
     expect(first.attempt.pendingQuestion).toBeUndefined();
     expect(first.attempt.answeredQuestions?.[0]).toMatchObject({
-      requestId: "q-set",
+      requestId: "q-first",
       prompt: "How should I proceed?",
       questionIndex: 1,
       questionCount: 2,
       answer: "Yes",
     });
 
-    // The set continues: the next question of the same request parks the turn.
+    // The set continues: the next question of the set parks the turn.
     await until(() => pendingQuestion()?.questionIndex === 2);
     const second = await service.execute({
       kind: "answer-chat-turn-question",
@@ -4421,7 +4421,7 @@ describe("ChatService", () => {
       expectedVersion: service.read(created.thread.id).thread.version,
       turnId,
       attemptId: attempt.id,
-      requestId: "q-set",
+      requestId: "q-second",
       answer: "Resolve",
     });
     expect(second).toMatchObject({ kind: "attempt-updated" });
@@ -4437,10 +4437,10 @@ describe("ChatService", () => {
       "Yes",
       "Resolve",
     ]);
-    // The provider received both answers under the set's one request identity.
+    // The provider received each answer under its own question identity.
     expect(answered.map((answer) => ({ ...answer, sessionId: undefined }))).toEqual([
-      { requestId: "q-set", answer: "Yes" },
-      { requestId: "q-set", answer: "Resolve" },
+      { requestId: "q-first", answer: "Yes" },
+      { requestId: "q-second", answer: "Resolve" },
     ]);
 
     // Answering again names no open question any more.
@@ -4451,7 +4451,7 @@ describe("ChatService", () => {
         expectedVersion: settled.thread.version,
         turnId,
         attemptId: attempt.id,
-        requestId: "q-set",
+        requestId: "q-first",
         answer: "Resolve",
       }),
     ).rejects.toMatchObject({ failure: { category: "invalid" } });

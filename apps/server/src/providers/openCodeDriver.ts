@@ -89,16 +89,15 @@ interface SessionState {
   sourceId: string | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly approvals: Set<string>;
-  readonly questions: Set<string>;
-  /**
-   * Answers already given for the questions of a set the provider asked at
-   * once, keyed by the set's request identity. The provider expects one reply
-   * carrying every answer, so these are held until the last question of the
-   * set is answered.
-   */
-  readonly questionAnswers: Map<string, string[]>;
-  /** How many questions each open set holds, so the last answer is known. */
-  readonly questionCount: Map<string, number>;
+  readonly questions: Map<
+    string,
+    {
+      readonly providerRequestId: string;
+      readonly index: number;
+      readonly count: number;
+    }
+  >;
+  readonly questionAnswers: Map<string, Map<number, string>>;
   readonly toolNames: Set<string>;
   readonly pendingToolAnswers: Map<string, PendingToolAnswer>;
   managedTools: ManagedToolsLease | undefined;
@@ -579,6 +578,7 @@ function makeConnection(
       cancelPendingTools(state);
       state.approvals.clear();
       state.questions.clear();
+      state.questionAnswers.clear();
       deactivate(state);
       void releaseManagedTools(state).catch(() => undefined);
     };
@@ -1152,7 +1152,11 @@ function makeConnection(
         usableStateFor(sessionId).pipe(
           Effect.flatMap(([source, state]) => {
             const activeClient = client;
-            return Effect.sync(() => cancelPendingTools(state)).pipe(
+            return Effect.sync(() => {
+              cancelPendingTools(state);
+              state.questions.clear();
+              state.questionAnswers.clear();
+            }).pipe(
               Effect.zipRight(
                 activeClient === undefined
                   ? Effect.fail(fail("protocol", "OpenCode provider process is not active."))
@@ -1215,23 +1219,38 @@ function makeConnection(
               : !state.questions.has(input.requestId)
                 ? Effect.fail(fail("protocol", "Provider question request is not pending."))
                 : Effect.suspend(() => {
-                    // A multi-question set is answered one question at a time;
-                    // the provider is replied to once, with the whole set.
-                    const answers = state.questionAnswers.get(input.requestId) ?? [];
-                    const next = [...answers, input.answer];
-                    state.questionAnswers.set(input.requestId, next);
-                    const expected = state.questionCount.get(input.requestId);
-                    if (expected !== undefined && next.length < expected) return Effect.void;
+                    const question = state.questions.get(input.requestId);
+                    if (question === undefined)
+                      return Effect.fail(
+                        fail("protocol", "Provider question request is not pending."),
+                      );
+                    const answers =
+                      state.questionAnswers.get(question.providerRequestId) ??
+                      new Map<number, string>();
+                    if (answers.has(question.index))
+                      return Effect.fail(
+                        fail("protocol", "Provider question was already answered."),
+                      );
+                    answers.set(question.index, input.answer);
+                    state.questionAnswers.set(question.providerRequestId, answers);
+                    if (answers.size < question.count) return Effect.void;
+                    const ordered = Array.from(
+                      { length: question.count },
+                      (_, index) => answers.get(index + 1) ?? "",
+                    );
                     const reply = request(() =>
-                      activeClient.replyQuestion(input.requestId, next),
+                      activeClient.replyQuestion(question.providerRequestId, ordered),
                     ).pipe(
                       Effect.tap(() =>
                         Effect.sync(() => {
-                          state.questions.delete(input.requestId);
-                          state.questionAnswers.delete(input.requestId);
-                          state.questionCount.delete(input.requestId);
+                          for (const [id, pending] of state.questions) {
+                            if (pending.providerRequestId === question.providerRequestId)
+                              state.questions.delete(id);
+                          }
+                          state.questionAnswers.delete(question.providerRequestId);
                         }),
                       ),
+                      Effect.tapError(() => Effect.sync(() => answers.delete(question.index))),
                     );
                     return reply;
                   });
@@ -1279,9 +1298,8 @@ function newSessionState(
     sourceId: undefined,
     executionPolicy,
     approvals: new Set(),
-    questions: new Set(),
+    questions: new Map(),
     questionAnswers: new Map(),
-    questionCount: new Map(),
     toolNames: new Set(tools.map((tool) => tool.name)),
     pendingToolAnswers: new Map(),
     managedTools: undefined,
@@ -1330,13 +1348,19 @@ function mapAndOffer(
     if (original.kind === "task-progress") {
       taskOccurrences.set(original.summary, occurrence + 1);
     }
-    const normalized = stableTaskIdentity(state, original, occurrence);
+    let normalized = stableTaskIdentity(state, original, occurrence);
     if (normalized.kind === "approval-request") state.approvals.add(normalized.requestId);
     if (normalized.kind === "user-input-request") {
-      state.questions.add(normalized.requestId);
-      if (normalized.questionCount !== undefined) {
-        state.questionCount.set(normalized.requestId, normalized.questionCount);
-      }
+      const providerRequestId = normalized.requestId;
+      const index = normalized.questionIndex ?? 1;
+      const count = normalized.questionCount ?? 1;
+      const existing = [...state.questions].find(
+        ([, pending]) => pending.providerRequestId === providerRequestId && pending.index === index,
+      );
+      const requestId = existing?.[0] ?? (count === 1 ? providerRequestId : crypto.randomUUID());
+      if (state.questionAnswers.get(providerRequestId)?.has(index)) continue;
+      state.questions.set(requestId, { providerRequestId, index, count });
+      normalized = { ...normalized, requestId };
     }
     if (isTerminalEvent(normalized)) {
       retire(state);

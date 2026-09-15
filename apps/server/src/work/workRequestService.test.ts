@@ -483,6 +483,49 @@ describe("WorkRequestService.resolve", () => {
     expect(calls).toEqual([`answer:${ids.session}:provider-input-1:PDF`]);
   });
 
+  it("keeps both questions independently answerable in the same provider session", async () => {
+    const delivered: Array<string> = [];
+    const { service } = createService({
+      providerSessions: {
+        answerApproval: async () => undefined,
+        answerUserInput: async (input) => {
+          delivered.push(input.requestId);
+        },
+      },
+    });
+    const first = service.record({
+      requestId: ids.request,
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "question-1",
+      detail: { kind: "user-input", prompt: "First?", options: [] },
+    });
+    const second = service.record({
+      requestId: decodeWorkRequestId("11111111-1111-4111-8111-111111111112"),
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "question-2",
+      detail: { kind: "user-input", prompt: "Second?", options: [] },
+    });
+    if (first.status !== "ok" || second.status !== "ok") throw new Error("Missing questions");
+    expect(first.request.requestId).not.toBe(second.request.requestId);
+    for (const request of [second.request, first.request]) {
+      expect(
+        await service.resolve({
+          kind: "resolve-work-request",
+          requestId: request.requestId,
+          expectedVersion: request.version,
+          resolution: { kind: "user-input", answer: "Yes" },
+        }),
+      ).toMatchObject({ status: "ok" });
+    }
+    expect(delivered).toEqual(["question-2", "question-1"]);
+  });
+
   it("keeps the request pending when the provider rejects the answer", async () => {
     const { service, projection } = createService({
       providerSessions: {

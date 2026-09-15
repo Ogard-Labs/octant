@@ -691,11 +691,23 @@ describe("CodeOperationRuntime", () => {
       ),
     );
 
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "user-input-request",
+          requestId: "question-2",
+          prompt: "Choose another",
+          options: ["A", "B"],
+        }),
+      ),
+    );
+
     let frames: readonly OperationFrame[] = [];
     await vi.waitFor(async () => {
       frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
       expect(frames.some((frame) => frame.event.kind === "approval-requested")).toBe(true);
-      expect(frames.some((frame) => frame.event.kind === "input-requested")).toBe(true);
+      expect(frames.filter((frame) => frame.event.kind === "input-requested")).toHaveLength(2);
     });
     fixture.setThread(
       decodeCodeThread({
@@ -727,6 +739,19 @@ describe("CodeOperationRuntime", () => {
       checkoutId,
       requestId: "question-1",
       response: fixture.response,
+    });
+    await fixture.runtime.execute(windowId, {
+      kind: "answer-provider-input",
+      operationId: operationId(14),
+      threadId,
+      checkoutId,
+      requestId: "question-2",
+      response: fixture.response,
+    });
+    expect(connection.answerUserInput).toHaveBeenCalledWith({
+      sessionId,
+      requestId: "question-2",
+      answer: "A",
     });
     await fixture.runtime.execute(windowId, {
       kind: "answer-provider-approval",
