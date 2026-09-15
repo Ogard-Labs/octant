@@ -97,6 +97,7 @@ describe("CodeOperationRuntime", () => {
       message: "Allow terminal access?",
     });
     expect(challenge?.detail).toContain(`Thread: ${thread().title} (${threadId})`);
+    expect(challenge?.detail).toMatch(/^Start repository terminal/);
     await expect(
       fixture.runtime.confirmApproval(windowId, { challengeId: challenge!.challengeId }),
     ).resolves.toMatchObject({ approvalId: expect.any(String) });

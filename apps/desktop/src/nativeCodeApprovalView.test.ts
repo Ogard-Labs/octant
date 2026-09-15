@@ -19,6 +19,7 @@ vi.mock("electron", () => ({
       },
     };
     destroyed = false;
+    setBackgroundColor = vi.fn();
     setBounds = vi.fn();
     setVisible = vi.fn();
   },
@@ -28,7 +29,10 @@ describe("native Code approval views", () => {
   it("attaches the native view to the window instead of its controller port", () => {
     const host = createNativeCodeApprovalViewHost("/fixture/preload.js", vi.fn());
     const port = host.createView("fixture-token");
-    const addChildView = vi.fn((view) => expect(view).toBeInstanceOf(WebContentsView));
+    const addChildView = vi.fn((view) => {
+      expect(view).toBeInstanceOf(WebContentsView);
+      expect(view.setBackgroundColor).toHaveBeenCalledWith("#00000000");
+    });
     const removeChildView = vi.fn();
     const window = { contentView: { addChildView, removeChildView } };
     host.attach(window, port);

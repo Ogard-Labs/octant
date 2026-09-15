@@ -93,7 +93,7 @@ Octant stores local data at:
 ~/Library/Application Support/Octant/
 ```
 
-The authoritative SQLite store is `octant.sqlite3`. Native window state lives in `octant-window-state.json`. Set `OCTANT_DATA_DIR` to an absolute path to override the default location.
+The authoritative SQLite store is `octant.sqlite3`. Native window state lives in `octant-window-state.json`. New windows default to 1440 × 900 logical pixels, limited to the display’s usable area; a saved window size and position are restored. Set `OCTANT_DATA_DIR` to an absolute path to override the default location.
 
 ### Linux
 

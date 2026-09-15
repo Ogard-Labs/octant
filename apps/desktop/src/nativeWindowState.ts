@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 export const NATIVE_WINDOW_STATE_FILENAME = "octant-window-state.json";
 export const MINIMUM_WINDOW_SIZE = { width: 900, height: 600 } as const;
-export const DEFAULT_WINDOW_SIZE = { width: 1000, height: 720 } as const;
+export const DEFAULT_WINDOW_SIZE = { width: 1440, height: 900 } as const;
 
 export interface WindowBounds {
   readonly x: number;

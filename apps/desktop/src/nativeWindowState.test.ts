@@ -60,11 +60,28 @@ describe("native window state", () => {
       await expect(store.load()).resolves.toEqual({
         schemaVersion: 1,
         windowId: uuid,
-        bounds: { x: 220, y: 90, width: 1000, height: 720 },
+        bounds: { x: 0, y: 0, width: 1440, height: 900 },
         maximized: false,
       });
     },
   );
+
+  it("fits fresh windows to smaller work areas while retaining saved custom bounds", async () => {
+    const fresh = createNativeWindowStateStore({
+      directory: "/data",
+      displays: [{ x: 20, y: 30, width: 1280, height: 760 }],
+      files: memoryFiles().files,
+      uuid: () => uuid,
+    });
+    expect((await fresh.load()).bounds).toEqual({ x: 20, y: 30, width: 1280, height: 760 });
+    const restored = createNativeWindowStateStore({
+      directory: "/data",
+      displays,
+      files: memoryFiles(persisted()).files,
+      uuid: () => uuid,
+    });
+    expect((await restored.load()).bounds).toEqual({ x: 100, y: 80, width: 1100, height: 720 });
+  });
 
   it("keeps the stable window id while clamping minimum size into the intersecting display", async () => {
     const { files } = memoryFiles(
@@ -99,7 +116,7 @@ describe("native window state", () => {
     const state = await store.load();
 
     expect(state.windowId).toBe(uuid);
-    expect(state.bounds).toEqual({ x: 220, y: 90, width: 1000, height: 720 });
+    expect(state.bounds).toEqual({ x: 0, y: 0, width: 1440, height: 900 });
     expect(state.maximized).toBe(false);
   });
 
