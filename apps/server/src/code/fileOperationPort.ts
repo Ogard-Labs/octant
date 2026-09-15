@@ -166,7 +166,10 @@ export class FileOperationPort {
   #input: Uint8Array<ArrayBufferLike> = new Uint8Array();
   #terminalFailure: FileOperationFailure | undefined;
 
-  constructor(transport: FileHelperTransport, newCorrelationId: () => string = crypto.randomUUID) {
+  constructor(
+    transport: FileHelperTransport,
+    newCorrelationId: () => string = () => crypto.randomUUID(),
+  ) {
     this.#transport = transport;
     this.#newCorrelationId = newCorrelationId;
     transport.onData((chunk) => this.#receive(chunk));

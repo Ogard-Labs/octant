@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   FILE_HELPER_MAX_FRAME_BYTES,
   FILE_HELPER_PROTOCOL_VERSION,
@@ -61,6 +61,29 @@ const root = {
 } as const;
 
 describe("FileOperationPort", () => {
+  it("creates default request IDs on runtimes that require the Crypto receiver", async () => {
+    const helper = new FakeHelper();
+    const uuid = "11111111-1111-4111-8111-111111111111";
+    const randomUUID = vi.spyOn(crypto, "randomUUID").mockImplementation(function (this: Crypto) {
+      if (this !== crypto) throw new TypeError("Invalid Crypto receiver");
+      return uuid;
+    });
+    try {
+      const port = new FileOperationPort(helper);
+      const pending = port.execute({ operation: "inspect", ...root });
+      helper.send({
+        protocolVersion: FILE_HELPER_PROTOCOL_VERSION,
+        correlationId: uuid,
+        ok: true,
+        result: { kind: "file" },
+      });
+      await expect(pending).resolves.toEqual({ ok: true, result: { kind: "file" } });
+      expect(randomUUID).toHaveBeenCalledOnce();
+    } finally {
+      randomUUID.mockRestore();
+    }
+  });
+
   it("writes strict versioned big-endian frames and resolves partial and coalesced replies", async () => {
     const helper = new FakeHelper();
     let correlation = 0;
