@@ -381,7 +381,7 @@ function ThreadRowInfoCard(props: {
  * the sidebar, and it is a preview card rather than a tooltip because the
  * pull-request references inside it are controls the pointer has to reach.
  */
-function ThreadRowInfoPopup(props: {
+export function ThreadRowInfoPopup(props: {
   readonly actions: ThreadRowActions;
   readonly children: ReactElement;
   readonly lineageParentTitle?: string;

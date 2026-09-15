@@ -63,3 +63,11 @@ The server does not retarget tools to a different Project or root.
 
 - [Shared Memory](/guide/memory) for Project-scoped memory management
 - [Chat](/guide/chat), [Work](/guide/work), and [Code](/guide/code) for mode-specific details
+
+Activity rows use the same thread-details hover card as the Projects tree.
+When Branch is enabled, both existing repository checkouts and managed worktrees
+show their recorded branch. Plain folders have no branch label. Linked pull
+requests use state colors (open green, merged purple, closed red); their separate
+control opens Review without switching threads. Cmd-click or Ctrl-click opens
+GitHub when that destination is available. Hover details show the full cached
+PR list and its available destinations without refreshing GitHub.

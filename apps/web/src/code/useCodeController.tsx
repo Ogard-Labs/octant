@@ -139,7 +139,7 @@ export interface CodeConversationMessage {
 
 export interface CodeThreadNavigationItem {
   readonly checkoutChip?: {
-    readonly checkoutKind: "managed-worktree";
+    readonly checkoutKind: "existing-worktree" | "managed-worktree";
     readonly label: string;
   };
   /** Exact linked pull requests joined by the host; absent when it has none. */
@@ -1368,7 +1368,7 @@ export function useCodeController(options: CodeControllerOptions) {
       {
         readonly executing: boolean;
         readonly checkoutChip?: {
-          readonly checkoutKind: "managed-worktree";
+          readonly checkoutKind: "existing-worktree" | "managed-worktree";
           readonly label: string;
         };
         readonly pullRequestSummaries?: ThreadBoardPullRequestSummaries;

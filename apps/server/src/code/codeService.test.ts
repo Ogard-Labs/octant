@@ -71,8 +71,11 @@ const checkout = decodeCodeCheckoutIdentity({
 });
 
 describe("codeNavigationCheckoutChip", () => {
-  it("names only a thread's own managed worktree, and stays quiet on the project default", () => {
-    expect(codeNavigationCheckoutChip(checkout)).toBeUndefined();
+  it("names the branch for both existing and managed worktrees", () => {
+    expect(codeNavigationCheckoutChip(checkout)).toEqual({
+      checkoutKind: "existing-worktree",
+      label: "feature/phase-7",
+    });
     expect(
       codeNavigationCheckoutChip(
         decodeCodeCheckoutIdentity({
@@ -168,8 +171,16 @@ describe("CodeService reads", () => {
       checkouts: [checkout],
       activity: [],
       runtime: [
-        { threadId: allowed.id, executing: false },
-        { threadId: otherProject.id, executing: false },
+        {
+          threadId: allowed.id,
+          executing: false,
+          checkoutChip: { checkoutKind: "existing-worktree", label: "feature/phase-7" },
+        },
+        {
+          threadId: otherProject.id,
+          executing: false,
+          checkoutChip: { checkoutKind: "existing-worktree", label: "feature/phase-7" },
+        },
       ],
     });
     expect(fixture.access.canBrowseProject).toHaveBeenCalledWith(ids.project);
@@ -306,8 +317,16 @@ describe("CodeService reads", () => {
         { threadId: hidden.id, lastSequence: 12 },
       ],
       runtime: [
-        { threadId: allowed.id, executing: false },
-        { threadId: hidden.id, executing: false },
+        {
+          threadId: allowed.id,
+          executing: false,
+          checkoutChip: { checkoutKind: "existing-worktree", label: "feature/phase-7" },
+        },
+        {
+          threadId: hidden.id,
+          executing: false,
+          checkoutChip: { checkoutKind: "existing-worktree", label: "feature/phase-7" },
+        },
       ],
     });
     expect(fixture.checkouts.observe).not.toHaveBeenCalled();
@@ -354,6 +373,7 @@ describe("CodeService reads", () => {
       {
         threadId: linked.id,
         executing: false,
+        checkoutChip: { checkoutKind: "existing-worktree", label: "feature/phase-7" },
         pullRequestSummaries: {
           items: [
             {
@@ -375,7 +395,11 @@ describe("CodeService reads", () => {
           hiddenCount: 0,
         },
       },
-      { threadId: quiet.id, executing: false },
+      {
+        threadId: quiet.id,
+        executing: false,
+        checkoutChip: { checkoutKind: "existing-worktree", label: "feature/phase-7" },
+      },
     ]);
   });
 

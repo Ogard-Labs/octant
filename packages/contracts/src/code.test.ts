@@ -412,11 +412,18 @@ describe("Code aggregate contracts", () => {
         checkouts: [checkout],
       }),
     ).toThrow();
-    expect(() =>
+    expect(
       codeContracts.decodeCodeNavigationRuntime({
         threadId: ids.thread,
         executing: true,
         checkoutChip: { checkoutKind: "existing-worktree", label: "main" },
+      }),
+    ).toMatchObject({ checkoutChip: { checkoutKind: "existing-worktree", label: "main" } });
+    expect(() =>
+      codeContracts.decodeCodeNavigationRuntime({
+        threadId: ids.thread,
+        executing: true,
+        checkoutChip: { checkoutKind: "plain-folder", label: "main" },
       }),
     ).toThrow();
     expect(() =>
