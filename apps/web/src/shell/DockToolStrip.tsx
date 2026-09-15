@@ -76,8 +76,31 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
       const mountedTabs = node.querySelectorAll<HTMLElement>(".dock-tool-strip__tab");
       mountedTabs.forEach((element, index) => {
         const tool = visible[index];
-        if (tool !== undefined)
-          tabWidths.current.set(tool.id, element.getBoundingClientRect().width);
+        if (tool !== undefined) {
+          const label = element.querySelector<HTMLElement>(".dock-tool-strip__select > span");
+          // Overflow can clip the tab before its buttons shrink. Measure the
+          // contents so switching into overflow cannot create apparent space.
+          const clippedWidth =
+            label === null ? 0 : Math.max(0, label.scrollWidth - label.clientWidth);
+          const tabStyle = getComputedStyle(element);
+          const inset =
+            (Number.parseFloat(tabStyle.paddingLeft) || 0) +
+            (Number.parseFloat(tabStyle.paddingRight) || 0) +
+            (Number.parseFloat(tabStyle.borderLeftWidth) || 0) +
+            (Number.parseFloat(tabStyle.borderRightWidth) || 0);
+          const childGap = Number.parseFloat(tabStyle.columnGap) || 0;
+          const contentWidth = [...element.children].reduce(
+            (sum, child) => sum + child.getBoundingClientRect().width,
+            inset + Math.max(0, element.children.length - 1) * childGap,
+          );
+          tabWidths.current.set(
+            tool.id,
+            Math.min(
+              UNMEASURED_TOOL_WIDTH,
+              Math.max(element.getBoundingClientRect().width, contentWidth) + clippedWidth,
+            ),
+          );
+        }
       });
       const currentIds = new Set(props.tabs.map((tab) => tab.id));
       for (const id of tabWidths.current.keys())

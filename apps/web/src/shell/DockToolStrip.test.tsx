@@ -17,6 +17,68 @@ const tests = surface("tests");
 const canvas = surface("canvas");
 
 describe("the dock tool strip", () => {
+  it.each(["label", "buttons"])(
+    "keeps a narrow restored strip stable when overflow clips its %s",
+    (clippedPart) => {
+      const overflowing = (element: HTMLElement) =>
+        Boolean(element.closest(".dock-tool-strip")?.querySelector(".dock-tool-strip__overflow"));
+      const width = vi
+        .spyOn(HTMLElement.prototype, "clientWidth", "get")
+        .mockImplementation(function (this: HTMLElement) {
+          if (this.dataset.testCluster === "true") return 160;
+          return this.matches(".dock-tool-strip__select > span")
+            ? clippedPart === "buttons"
+              ? 20
+              : overflowing(this)
+                ? 40
+                : 104
+            : 0;
+        });
+      const scrollWidth = vi
+        .spyOn(HTMLElement.prototype, "scrollWidth", "get")
+        .mockImplementation(function (this: HTMLElement) {
+          return this.matches(".dock-tool-strip__select > span")
+            ? clippedPart === "buttons"
+              ? 20
+              : 104
+            : 0;
+        });
+      const bounds = vi
+        .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+        .mockImplementation(function (this: HTMLElement) {
+          return DOMRect.fromRect({
+            width: this.classList.contains("dock-tool-strip__tab")
+              ? overflowing(this)
+                ? 40
+                : 104
+              : clippedPart === "buttons" && this.tagName === "BUTTON"
+                ? 52
+                : 0,
+            height: 30,
+          });
+        });
+      try {
+        render(
+          <div data-test-cluster="true">
+            <DockToolStrip
+              active="tests"
+              onClose={vi.fn()}
+              onSelect={vi.fn()}
+              tabs={[files, tests]}
+            />
+          </div>,
+        );
+        expect(screen.getAllByRole("tab")).toHaveLength(1);
+        expect(screen.getByRole("tab", { name: "Tests" })).toBeVisible();
+        expect(screen.getByRole("button", { name: "More tools" })).toBeVisible();
+      } finally {
+        width.mockRestore();
+        scrollWidth.mockRestore();
+        bounds.mockRestore();
+      }
+    },
+  );
+
   it("keeps tabs out of the space reserved for window controls", () => {
     const width = vi
       .spyOn(HTMLElement.prototype, "clientWidth", "get")
