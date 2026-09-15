@@ -81,6 +81,20 @@ function source(values: ReadonlyArray<LocalUsageHistoryRecord>): ProviderLocalUs
 }
 
 describe("local usage history aggregation", () => {
+  it("orders daily readings chronologically regardless of provider scan order", async () => {
+    const response = await readLocalUsageHistoryDashboard({
+      sources: [source([...records].reverse())],
+      request,
+      queryAt: "2026-09-11T00:00:00.000Z",
+    });
+    expect(response.dailyTotals.map((row) => row.day)).toEqual(["2026-09-09", "2026-09-10"]);
+    expect(response.days.map((row) => `${row.day}/${row.providerKey}`)).toEqual([
+      "2026-09-09/codex",
+      "2026-09-10/claude-code",
+      "2026-09-10/codex",
+    ]);
+  });
+
   it("deduplicates copied source events and keeps provider/model groups distinct", async () => {
     const response = await readLocalUsageHistoryDashboard({
       sources: [source(records), source([records[0]!])],
