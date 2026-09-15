@@ -3662,18 +3662,18 @@ function LaunchedShell(
 
   async function openSelectedProject(project: ProjectSummary) {
     closeThreadSearch();
-    if (project.lifecycle !== "active") return;
     await controller.openProject(project.id, project.type, project.name);
   }
 
   function openProjects() {
     closeWorkspaceReaders();
     const selected = projectController.allProjects.find(
-      (project) => project.lifecycle === "active" && String(project.id) === String(activeProjectId),
+      (project) => String(project.id) === String(activeProjectId),
     );
     const project =
       selected ??
-      projectController.allProjects.find((candidate) => candidate.lifecycle === "active");
+      projectController.allProjects.find((candidate) => candidate.lifecycle === "active") ??
+      projectController.allProjects[0];
     if (project === undefined) {
       openProjectCreate();
       return;
@@ -5120,6 +5120,7 @@ function LaunchedShell(
                     <ProjectsDirectory
                       availabilityByProject={projectController.availabilityByProject}
                       onAddProject={() => openProjectCreate()}
+                      onDismiss={() => setSidebarCollapsedPersistent(true)}
                       onOpenProject={(project) => void openSelectedProject(project)}
                       projects={projectController.allProjects}
                       selectedProjectId={activeProjectId}

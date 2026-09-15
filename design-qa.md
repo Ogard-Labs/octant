@@ -2,10 +2,7 @@
 
 ## Evidence
 
-- Source visual truth: `/var/folders/vb/jn90x_6d5s349fcjcv580w6w0000gn/T/codex-clipboard-34d82eea-eba7-4d3e-bbfb-38760043575f.png`
-- Rendered implementation: `/Users/henrik/.codex/visualizations/2026/09/15/01a0a5c1-00cd-7091-93a0-bc8e558b059d/projects-option-3-sidebar-corrected.jpg`
-- Shared-material verification: `/Users/henrik/.codex/visualizations/2026/09/15/01a0a5c1-00cd-7091-93a0-bc8e558b059d/projects-shared-material-corrected.jpg`
-- Side-by-side material comparison: `/Users/henrik/.codex/visualizations/2026/09/15/01a0a5c1-00cd-7091-93a0-bc8e558b059d/projects-shared-material-comparison.jpg`
+- Source visual truth, rendered implementation, shared-material verification, and the side-by-side material comparison were captured in a local QA session. Those image files are not stored in the repository.
 - Source pixels: 1487 × 1058.
 - Implementation pixels and browser viewport: 800 × 902 at device pixel ratio 1.
 - Shared-material capture: a 1487 × 1058 CSS app surface scaled to 0.53 inside a 1280 × 720 browser viewport at device pixel ratio 1.

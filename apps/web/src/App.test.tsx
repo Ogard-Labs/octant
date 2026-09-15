@@ -229,6 +229,54 @@ describe("App", () => {
     expect(codeApi.subscribe).toHaveBeenCalledWith(codeThreadId, 0, expect.any(AbortSignal));
   });
 
+  it("opens an archived Project from the collection as a read-only overview", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        chatClient={chats()}
+        codeClient={codes()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projectsWithArchivedCodeProject()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Projects" }));
+    const directory = document.querySelector<HTMLElement>(".projects-directory");
+    if (directory === null) throw new Error("Expected the Projects directory.");
+    await user.click(
+      within(directory).getByRole("button", {
+        name: /Retired repo, Code Project, Archived/,
+      }),
+    );
+    expect(await screen.findByText("Archived Project · read-only")).toBeVisible();
+  });
+
+  it("closes the narrow Projects pane from the collection itself", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        chatClient={chats()}
+        codeClient={codes()}
+        isNarrow
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Projects" }));
+    const directory = document.querySelector<HTMLElement>(".projects-directory");
+    if (directory === null) throw new Error("Expected the Projects directory.");
+    await user.click(within(directory).getByRole("button", { name: "Close Projects" }));
+    expect(screen.queryByRole("complementary", { name: "Octant sidebar" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Show sidebar" })).toBeVisible();
+  });
+
   it("hides the sidebar from its own control and brings it back from the window chrome", async () => {
     const user = userEvent.setup();
     render(

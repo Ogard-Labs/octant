@@ -1311,6 +1311,10 @@ html[data-octant-native-host="true"]
     display: none;
   }
 
+  .projects-directory__dismiss {
+    display: inline-flex;
+  }
+
   .sidebar__native-leading {
     height: 30px;
     flex-basis: 30px;

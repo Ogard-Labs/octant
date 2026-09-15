@@ -3449,6 +3449,17 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   padding-inline: 6px 2px;
 }
 
+.projects-directory__header-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.projects-directory__dismiss {
+  display: none;
+}
+
 .projects-directory__header h1 {
   margin: 0;
 }

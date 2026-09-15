@@ -77,6 +77,44 @@ describe("ProjectOverview", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("opens an archived Project and dismisses the collection pane", async () => {
+    const user = userEvent.setup();
+    const onDismiss = vi.fn();
+    const onOpenProject = vi.fn();
+    const archivedProject = {
+      id: "20000000-0000-4000-8000-000000000003",
+      name: "Retired repo",
+      lifecycle: "archived",
+      pinned: false,
+      rank: "0/2",
+      version: 1,
+      createdAt: "2026-07-21T12:00:00.000Z",
+      updatedAt: "2026-07-21T12:00:00.000Z",
+      type: "code",
+      binding: { canonicalRoot: "/opaque/retired" },
+      codeAccessPersistence: "current-session",
+    } as unknown as ProjectSummary;
+
+    render(
+      <ProjectsDirectory
+        onDismiss={onDismiss}
+        onOpenProject={onOpenProject}
+        projects={[archivedProject]}
+        selectedProjectId={archivedProject.id}
+      />,
+    );
+
+    const directory = screen.getByRole("navigation", { name: "Projects" });
+    await user.click(
+      within(directory).getByRole("button", {
+        name: /Retired repo, Code Project, Archived/,
+      }),
+    );
+    expect(onOpenProject).toHaveBeenCalledWith(archivedProject);
+    await user.click(within(directory).getByRole("button", { name: "Close Projects" }));
+    expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
   it("composes the Chat overview into a virtual Chat Project", () => {
     render(
       <ProjectOverview

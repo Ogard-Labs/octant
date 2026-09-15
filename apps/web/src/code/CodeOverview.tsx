@@ -365,6 +365,7 @@ function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projec
         }
         onOpenThread={props.onOpenThread}
         onRetry={() => setReload((current) => current + 1)}
+        {...(props.showQuickStart === undefined ? {} : { showQuickStart: props.showQuickStart })}
       />
       {props.showQuickStart === false ? null : (
         <CodeProjectQuickStart
@@ -428,6 +429,7 @@ function CodeProjectSessions(props: {
   readonly onPinThread?: (threadId: string, pinned: boolean) => void;
   readonly onOpenThread: (threadId: CodeThreadId) => void;
   readonly onRetry: () => void;
+  readonly showQuickStart?: boolean;
 }) {
   const cardsByThread = new Map(props.cards.map((card) => [String(card.threadId), card]));
   const navigationIds = new Set(props.navigationThreads.map((thread) => String(thread.threadId)));
@@ -474,7 +476,7 @@ function CodeProjectSessions(props: {
         </div>
       ) : rows.length === 0 ? (
         <p className="code-project-overview__note" role="status">
-          No threads yet. Start one below.
+          {props.showQuickStart === false ? "No threads yet." : "No threads yet. Start one below."}
         </p>
       ) : (
         <ul className="code-project-overview__threads">
