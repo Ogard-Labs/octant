@@ -41,7 +41,8 @@ function parseToolMeta(info: string): { name: string; status: ChatToolPartStatus
 /**
  * Split a host message body into reasoning / tool / markdown parts.
  * Recognizes ```reasoning|thinking fences, ```tool fences, and <thinking>,
- * <reasoning>, and <think> tags.
+ * <reasoning>, and <think> tags — the closed pairs, plus an open tail at the end of a
+ * body that is still streaming.
  */
 export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePart> {
   if (body.length === 0) return [{ kind: "markdown", text: "" }];
@@ -115,6 +116,24 @@ export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePar
     }
     parts.push(item.part);
     cursor = item.end;
+  }
+  // A reply that is still streaming ends inside its reasoning: the opener has
+  // arrived but the closer has not. Parse the open tail as reasoning so the
+  // person can watch the thinking while it streams, rather than reading
+  // nothing until the block finally closes.
+  const tail = body.slice(cursor);
+  const tailOpeners = [
+    ...tail.matchAll(/<(?:think|thinking|reasoning)>/gi),
+    ...tail.matchAll(/^```(?:reasoning|thinking)[^\n]*\n/gm),
+  ].sort((left, right) => (right.index ?? 0) - (left.index ?? 0));
+  const openTail = tailOpeners[0];
+  if (openTail !== undefined) {
+    const openerAt = openTail.index ?? 0;
+    const before = tail.slice(0, openerAt).trim();
+    if (before.length > 0) parts.push({ kind: "markdown", text: before });
+    const streaming = tail.slice(openerAt + openTail[0].length).trim();
+    if (streaming.length > 0) parts.push({ kind: "reasoning", text: streaming });
+    return parts.length === 0 ? [{ kind: "markdown", text: body }] : parts;
   }
   if (cursor < body.length) {
     const text = body.slice(cursor).trim();

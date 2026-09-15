@@ -591,6 +591,56 @@ describe("ChatTranscript", () => {
     expect(thinking.open).toBe(true);
   });
 
+  it("renders a reply's streaming reasoning open, and folds it once the turn settles", () => {
+    const attempt = viewFixture().turns[0]!.attempts[1]!;
+    const streamingBody = " <think>Weighing the two options.";
+    const settledBody = " <think>Weighing the two options.</think>Here is the summary.";
+    const streaming = viewFixture({
+      turns: [
+        {
+          ...viewFixture().turns[0]!,
+          attempts: [
+            {
+              ...attempt,
+              outcome: "streaming",
+              responseRefs: [reference(ids.responseContent, "b")],
+            },
+          ],
+        },
+      ],
+      contents: [
+        body(ids.userContent, "user", "Please summarize this.", "a"),
+        body(ids.responseContent, "assistant", streamingBody, "b"),
+      ],
+    });
+    const { rerender } = render(<ChatTranscript view={streaming} />);
+
+    const live = screen.getByText("Thinking").closest("details");
+    if (!(live instanceof HTMLDetailsElement)) throw new Error("Thinking disclosure missing.");
+    expect(live.open).toBe(true);
+    expect(screen.getByText("Weighing the two options.")).toBeVisible();
+
+    rerender(
+      <ChatTranscript
+        view={viewFixture({
+          turns: [
+            {
+              ...viewFixture().turns[0]!,
+              attempts: [{ ...attempt, responseRefs: [reference(ids.responseContent, "b")] }],
+            },
+          ],
+          contents: [
+            body(ids.userContent, "user", "Please summarize this.", "a"),
+            body(ids.responseContent, "assistant", settledBody, "b"),
+          ],
+        })}
+      />,
+    );
+    const settled = screen.getByText("Thinking").closest("details");
+    if (!(settled instanceof HTMLDetailsElement)) throw new Error("Thinking disclosure missing.");
+    expect(settled.open).toBe(false);
+  });
+
   it("folds a reply's inline tool call into its own collapsed disclosure", () => {
     const view = viewFixture({
       turns: [

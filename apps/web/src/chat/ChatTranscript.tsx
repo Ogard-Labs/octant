@@ -644,12 +644,20 @@ function AssistantResponse(props: {
     [props.responseBody],
   );
   const rootId = `chat-quote-${String(props.attempt.id)}`;
+  // A reply still streaming ends inside its reasoning; that open tail renders
+  // open so the person can watch the thinking as it arrives, and folds with
+  // the rest once the turn settles.
+  const live = props.attempt.outcome === "queued" || props.attempt.outcome === "streaming";
   const folded = parts.some((part) => part.kind === "reasoning" || part.kind === "tool");
   if (!folded && !props.canQuote) return <ChatRichText body={props.responseBody} />;
   const rendered = (
     <div className="chat-transcript__parts">
       {parts.map((part, index) => (
-        <AssistantResponsePart key={`${part.kind}:${String(index)}`} part={part} />
+        <AssistantResponsePart
+          key={`${part.kind}:${String(index)}`}
+          {...(live && index === parts.length - 1 ? { live: true } : {})}
+          part={part}
+        />
       ))}
     </div>
   );
@@ -664,7 +672,10 @@ function AssistantResponse(props: {
   );
 }
 
-function AssistantResponsePart(props: { readonly part: ChatMessagePart }) {
+function AssistantResponsePart(props: {
+  readonly live?: boolean | undefined;
+  readonly part: ChatMessagePart;
+}) {
   const part = props.part;
   if (part.kind === "tool") {
     return (
@@ -680,7 +691,7 @@ function AssistantResponsePart(props: { readonly part: ChatMessagePart }) {
   }
   if (part.kind === "reasoning") {
     return (
-      <details className="thinking">
+      <details className="thinking" {...(props.live === true ? { open: true } : {})}>
         <summary aria-label="Thinking">
           <ChevronRight aria-hidden="true" className="chev" size={14} strokeWidth={2} />
           <span>Thinking</span>
