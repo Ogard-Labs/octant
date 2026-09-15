@@ -264,6 +264,8 @@ export class ChatTurnRunner {
       let currentAttempt = input.attempt;
       let actualInputTokens = 0;
       let actualOutputTokens = 0;
+      let contextTokens: number | undefined;
+      let contextWindow: number | undefined;
       let reasoningTokens: number | undefined;
       let cacheReadInputTokens: number | undefined;
       let cacheWriteInputTokens: number | undefined;
@@ -532,6 +534,8 @@ export class ChatTurnRunner {
                 requestShape: input.requestShape,
                 actualInputTokens,
                 actualOutputTokens,
+                ...(contextTokens === undefined ? {} : { contextTokens }),
+                ...(contextWindow === undefined ? {} : { contextWindow }),
                 ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
                 ...(cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens }),
                 ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens }),
@@ -717,6 +721,8 @@ export class ChatTurnRunner {
                   sawUsage = true;
                   actualInputTokens = event.inputTokens;
                   actualOutputTokens = event.outputTokens;
+                  contextTokens = event.contextTokens ?? contextTokens;
+                  contextWindow = event.contextWindow ?? contextWindow;
                   const observation = usageFromRuntimeEvent(event);
                   if (observation !== undefined) {
                     actualInputTokens = observation.inputTokens;

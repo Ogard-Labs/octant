@@ -101,6 +101,7 @@ describe("ComposerContextMeter", () => {
     const button = screen.getByRole("button", { name: /Show context usage for Fixture thread/i });
     expect(button).toBeVisible();
     expect(button).toHaveAccessibleName(/104 \/ 1K \(10%\)/);
+    expect(button).toHaveAccessibleName(/Next turn: Healthy/);
     expect(button.querySelector(".composer-context-meter__ring")).not.toBeNull();
     expect(button.querySelector(".composer-context-meter__used")).not.toBeNull();
     expect(

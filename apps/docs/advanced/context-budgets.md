@@ -72,8 +72,14 @@ limits appear in a separate section, and only when the host reported them.
 For Codex CLI turns, the meter uses the latest request's context occupancy and
 window size reported by the app-server, rather than cumulative input tokens
 or account quota. These values are retained with the turn and restored when
-the thread is reopened. Older turns recorded without context values need a
-new provider usage report before a context percentage can appear.
+the thread is reopened, including Chat usage reconciliations. The meter labels
+planner health as **Next turn** so it is distinct from the last reported window
+reading. Older Chat reconciliations without these fields retain the legacy
+input-token and planned-window fallback until a new provider usage report arrives;
+they cannot recover runtime occupancy retroactively. Code turns without context
+values need a new provider usage report before a context percentage can appear. A thread that
+has no plan yet is checked again when its turns advance; reopening the app is
+not required to pick up its first plan.
 Opening the popover does not make a further provider or network call.
 Inspect context opens the composition list so you can pin, exclude, or
 rebuild the next-turn plan. Switching the active pane closes a popover or

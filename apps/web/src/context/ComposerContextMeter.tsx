@@ -82,7 +82,7 @@ export function ComposerContextMeter() {
     windowModel,
     ...(fallback === undefined ? {} : { fallback }),
     ...(snapshot === undefined ? {} : { snapshotLabel: snapshot.displayLabel }),
-    ...(health === undefined ? {} : { healthLabel: contextHealthLabel(health) }),
+    ...(health === undefined ? {} : { healthLabel: `Next turn: ${contextHealthLabel(health)}` }),
   });
 
   // The panel shows one of three things, and a screen reader that is told the
@@ -159,7 +159,9 @@ export function ComposerContextMeter() {
           windowModel,
           ...(fallback === undefined ? {} : { fallback }),
           ...(snapshot === undefined ? {} : { snapshotLabel: snapshot.displayLabel }),
-          ...(health === undefined ? {} : { healthLabel: contextHealthLabel(health) }),
+          ...(health === undefined
+            ? {}
+            : { healthLabel: `Next turn: ${contextHealthLabel(health)}` }),
         })}
       </span>
       {inspecting && snapshot !== undefined ? (

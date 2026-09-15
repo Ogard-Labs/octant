@@ -437,6 +437,8 @@ export const UsageReconciliation = Schema.Struct({
   plannedInputTokens: NonNegativeInt,
   actualInputTokens: NonNegativeInt,
   actualOutputTokens: NonNegativeInt,
+  contextTokens: Schema.optional(NonNegativeInt),
+  contextWindow: Schema.optional(PositiveInt),
   reasoningTokens: Schema.optional(NonNegativeInt),
   cacheReadInputTokens: Schema.optional(NonNegativeInt),
   cacheWriteInputTokens: Schema.optional(NonNegativeInt),
