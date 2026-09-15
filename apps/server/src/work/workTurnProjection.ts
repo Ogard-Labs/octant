@@ -40,6 +40,9 @@ export class WorkTurnProjection {
         ...(accepted.attachments === undefined || accepted.attachments.length === 0
           ? {}
           : { attachments: accepted.attachments }),
+        ...(accepted.extensionSelections === undefined || accepted.extensionSelections.length === 0
+          ? {}
+          : { extensionSelections: accepted.extensionSelections }),
         capabilities: accepted.capabilities,
         version: 1,
         acceptedAt: accepted.acceptedAt,

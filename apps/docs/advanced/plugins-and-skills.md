@@ -199,10 +199,10 @@ ambiguous unqualified invocation opens a chooser or fails closed.
 
 Type `/` in a Chat, Work, or Code composer to find commands and enabled skills.
 Choosing a skill creates a visible selection that can be removed before sending;
-it does not enable a disabled skill. Chat resolves selected skill content through
-the extension service. Work and Code currently refuse skill selections before
-starting the provider because their skill-content resolver is not connected.
-The draft remains available when that refusal occurs.
+it does not enable a disabled skill. Chat, Work, and Code resolve selected skill
+instructions through the extension service before provider execution. Unavailable
+selections are refused; retrying an accepted Work request with different skill
+selections is an identity conflict rather than a new turn.
 
 ## Core Apple independence
 

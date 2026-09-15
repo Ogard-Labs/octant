@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   decodeWorkAttachmentId,
+  decodeWorkTurnAccepted,
   decodeWorkThread,
   decodeWorkThreadId,
   decodeWorkTurnId,
@@ -138,6 +139,40 @@ describe("WorkTurnService", () => {
       kind: "instructions",
       text: "Use the synthetic Work checklist.",
     });
+  });
+
+  it("refuses changed skill selections when a Work request is retried", async () => {
+    const fixture = serviceFixture({
+      resolveSelectedSkillContext: async () => ({
+        kind: "resolved",
+        context: [{ kind: "instructions", text: "Synthetic review instructions." }],
+      }),
+    });
+    const command = {
+      ...startCommand(),
+      extensionSelections: [
+        {
+          kind: "skill",
+          skillId: `agents-skills-directory:project:review:sha256:${"a".repeat(64)}`,
+          packageDigest: `sha256:${"a".repeat(64)}`,
+          catalogEpoch: `sha256:${"b".repeat(64)}`,
+          origin: { kind: "draft", reference: "review" },
+        },
+      ],
+    };
+    await fixture.service.startFirstTurn(ids.window, command);
+    await fixture.waitForIdle();
+    const replayed = new WorkTurnProjection();
+    const accepted = fixture.persistence.journal.append.mock.calls[0]?.[0]?.events[0]?.payload;
+    replayed.apply(decodeWorkTurnAccepted(accepted));
+    expect(replayed.lookup(ids.request)?.extensionSelections).toEqual(command.extensionSelections);
+
+    await expect(fixture.service.startFirstTurn(ids.window, command)).resolves.toMatchObject({
+      kind: "accepted",
+    });
+    await expect(
+      fixture.service.startFirstTurn(ids.window, { ...command, extensionSelections: [] }),
+    ).rejects.toMatchObject({ failure: { category: "stale" } });
   });
 
   it("refuses selected skill instructions that exceed the Work input budget", async () => {

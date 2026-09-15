@@ -588,6 +588,9 @@ export class WorkTurnService {
         providerSessionId,
         prompt: command.prompt,
         ...(starting.attachments.length === 0 ? {} : { attachments: starting.attachments }),
+        ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
+          ? {}
+          : { extensionSelections: command.extensionSelections }),
         capabilities: WORK_TURN_CAPABILITIES,
         acceptedAt,
       });
@@ -1257,6 +1260,8 @@ export class WorkTurnService {
       String(existing.threadId) !== String(command.threadId) ||
       String(existing.turnId) !== String(command.turnId) ||
       existing.prompt !== command.prompt ||
+      JSON.stringify(existing.extensionSelections ?? []) !==
+        JSON.stringify(command.extensionSelections ?? []) ||
       !sameAttachmentIds(existing.attachments, command.attachmentIds)
     ) {
       throw this.#failure("stale", "Work turn request identity conflict.");
