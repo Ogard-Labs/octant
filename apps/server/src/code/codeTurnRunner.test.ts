@@ -26,6 +26,25 @@ const providerInstanceId = decodeProviderInstanceId("87000000-0000-4000-8000-000
 const sessionId = decodeProviderSessionId("87000000-0000-4000-8000-000000000002");
 
 describe("CodeTurnRunner", () => {
+  it("starts the provider with the reasoning choice saved on the Code thread", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(Stream.make(event({ kind: "completed" }))),
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            thread: thread({ modelOptionValues: { effort: "high" } }),
+            provider: { acquire: () => Effect.succeed(connection) },
+          }),
+        ),
+      ),
+    );
+    expect(connection.start).toHaveBeenCalledWith(
+      expect.objectContaining({ modelOptionValues: { effort: "high" } }),
+    );
+  });
+
   it("cancels a pending app tool when its transport request expires without answering a stale call", async () => {
     const request = new AbortController();
     const connection = fakeConnection({

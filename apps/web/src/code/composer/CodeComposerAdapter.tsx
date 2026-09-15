@@ -29,6 +29,7 @@ import type {
   ProviderExecutionPolicy,
   ProviderInstanceId,
   ProviderModelId,
+  ProviderModelOptionValues,
   PermissionPersistence,
 } from "@octant/contracts/providers";
 import type { CreateHostViewScope, PickerGroup } from "@octant/domain";
@@ -168,6 +169,7 @@ export interface CodeComposerSuggestion {
 }
 
 export interface CodeComposerSubmitInput {
+  readonly modelOptionValues?: ProviderModelOptionValues;
   readonly computerUseSelection?: ExtensionSelection;
   readonly extensionSelections?: ReadonlyArray<ExtensionSelection>;
   readonly prompt: string;
@@ -215,6 +217,14 @@ const LAST_RESORT_BASE_BRANCH = "development";
 
 export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const [prompt, setPrompt] = useState("");
+  const modelKey = `${props.selectedProviderInstanceId}:${props.selectedModelId}`;
+  const [modelChoice, setModelChoice] = useState<{
+    readonly key: string;
+    readonly values: ProviderModelOptionValues;
+  }>({ key: modelKey, values: {} });
+  if (modelChoice.key !== modelKey) setModelChoice({ key: modelKey, values: {} });
+  const modelOptionValues = modelChoice.key === modelKey ? modelChoice.values : {};
+
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,
     draft: prompt,
@@ -519,6 +529,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       .then(async (threadMentionIds) => {
         const created = await props.onCreateThread({
           prompt: trimmed,
+          modelOptionValues,
           ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
           ...(extensionSelections.length === 0 ? {} : { extensionSelections }),
           executionPolicy,
@@ -553,6 +564,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     extensionDraft,
     canSubmit,
     trimmed,
+    modelOptionValues,
     executionPolicy,
     permissionPersistence,
     workspace,
@@ -808,6 +820,16 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     <ComposerModelPicker
                       ariaLabel="Provider and model"
                       groups={props.providerGroups}
+                      modelOptionValues={modelOptionValues}
+                      onModelOptionChange={(id, value) => {
+                        const remaining = Object.fromEntries(
+                          Object.entries(modelOptionValues).filter(([key]) => key !== id),
+                        );
+                        setModelChoice({
+                          key: modelKey,
+                          values: value === undefined ? remaining : { ...remaining, [id]: value },
+                        });
+                      }}
                       menuSide="bottom"
                       onSelect={props.onSelectProvider}
                       {...(props.selectedModelId === undefined

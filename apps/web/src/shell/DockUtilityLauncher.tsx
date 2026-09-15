@@ -134,7 +134,7 @@ export function DockToolLaunchList(props: {
           variant="ghost"
         >
           <DockToolIcon surface={surface.id} />
-          <span>{surface.id === "browser" ? `New ${surface.label}` : surface.label}</span>
+          <span>{surface.label}</span>
         </OctantButton>
       ))}
     </>

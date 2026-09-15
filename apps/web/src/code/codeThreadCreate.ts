@@ -63,6 +63,9 @@ export function planCodeThreadCreate(input: CodeThreadCreateInput): CodeThreadCr
         title: input.title,
         providerInstanceId: input.providerInstanceId,
         modelId: input.modelId,
+        ...(input.composer.modelOptionValues === undefined
+          ? {}
+          : { modelOptionValues: input.composer.modelOptionValues }),
         executionPolicy: input.composer.executionPolicy,
         permissionPersistence: input.composer.permissionPersistence,
         deliveryTarget,
@@ -105,6 +108,9 @@ export function planCodeThreadCreate(input: CodeThreadCreateInput): CodeThreadCr
         lifecycle: "active",
         providerInstanceId: input.providerInstanceId,
         modelId: input.modelId,
+        ...(input.composer.modelOptionValues === undefined
+          ? {}
+          : { modelOptionValues: input.composer.modelOptionValues }),
         executionPolicy: input.composer.executionPolicy,
         permissionPersistence: input.composer.permissionPersistence,
         // Work in the existing checkout lands on the branch that checkout is

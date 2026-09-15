@@ -1,3 +1,4 @@
+import { unsupportedModelOptionValues } from "@octant/domain";
 import {
   decodeGitHistoryQuery,
   type GitHistoryQuery,
@@ -70,6 +71,7 @@ import {
   type ProjectId,
   type ProviderExecutionPolicy,
   type ProviderModelId,
+  type ProviderModelOptionValues,
   type ProviderProbeResult,
   type WindowId,
   type ThreadWorkingDirectory,
@@ -1049,6 +1051,13 @@ export class CodeService {
         if (this.#persistence.readCodeThread(command.threadId) !== undefined) {
           throw this.#failure("conflict", "Code thread already exists.");
         }
+        if (Object.keys(command.modelOptionValues ?? {}).length > 0) {
+          await this.#requireProviderModel(
+            command.providerInstanceId,
+            command.modelId,
+            command.modelOptionValues,
+          );
+        }
         const preparedIssueContexts = await this.#requireCreateIssueContexts(command);
         // The profile narrows the posture before any gate reads it, so a
         // profile that pulls the thread below Full access also removes the
@@ -1121,6 +1130,9 @@ export class CodeService {
           lifecycle: "active",
           providerInstanceId: command.providerInstanceId,
           modelId: command.modelId,
+          ...(command.modelOptionValues === undefined
+            ? {}
+            : { modelOptionValues: command.modelOptionValues }),
           executionPolicy: managedAuthority.executionPolicy,
           permissionPersistence: managedAuthority.permissionPersistence,
           deliveryTarget: command.deliveryTarget,
@@ -1429,6 +1441,13 @@ export class CodeService {
         if (this.#persistence.readCodeThread(command.thread.id) !== undefined) {
           throw this.#failure("conflict", "Code thread already exists.");
         }
+        if (Object.keys(command.thread.modelOptionValues ?? {}).length > 0) {
+          await this.#requireProviderModel(
+            command.thread.providerInstanceId,
+            command.thread.modelId,
+            command.thread.modelOptionValues,
+          );
+        }
         const preparedIssueContexts = await this.#requireCreateIssueContexts(command);
         let prepared;
         try {
@@ -1661,7 +1680,11 @@ export class CodeService {
         throw this.#failure("unauthorized", "Full access requires native confirmation.");
       }
       if (command.kind === "change-code-thread-provider") {
-        await this.#requireProviderModel(command.providerInstanceId, command.modelId);
+        await this.#requireProviderModel(
+          command.providerInstanceId,
+          command.modelId,
+          command.modelOptionValues,
+        );
         if (
           this.#isProviderModelAllowed?.({
             projectId: current.projectId,
@@ -1785,13 +1808,26 @@ export class CodeService {
                             ...current,
                             providerInstanceId: command.providerInstanceId,
                             modelId: command.modelId,
-                            providerHandoff: {
-                              previousProviderInstanceId: current.providerInstanceId,
-                              previousModelId: current.modelId,
-                              nextProviderInstanceId: command.providerInstanceId,
-                              nextModelId: command.modelId,
-                              changedAt: updatedAt,
-                            },
+                            modelOptionValues:
+                              command.modelOptionValues ??
+                              (String(current.providerInstanceId) ===
+                                String(command.providerInstanceId) &&
+                              String(current.modelId) === String(command.modelId)
+                                ? current.modelOptionValues
+                                : undefined),
+                            ...(String(current.providerInstanceId) ===
+                              String(command.providerInstanceId) &&
+                            String(current.modelId) === String(command.modelId)
+                              ? {}
+                              : {
+                                  providerHandoff: {
+                                    previousProviderInstanceId: current.providerInstanceId,
+                                    previousModelId: current.modelId,
+                                    nextProviderInstanceId: command.providerInstanceId,
+                                    nextModelId: command.modelId,
+                                    changedAt: updatedAt,
+                                  },
+                                }),
                             version: command.expectedVersion + 1,
                             updatedAt,
                           }
@@ -2790,15 +2826,21 @@ export class CodeService {
   async #requireProviderModel(
     providerInstanceId: CodeThread["providerInstanceId"],
     modelId: ProviderModelId,
+    modelOptionValues?: ProviderModelOptionValues,
   ): Promise<void> {
-    if (this.#probeProvider === undefined) return;
+    if (this.#probeProvider === undefined) {
+      if (Object.keys(modelOptionValues ?? {}).length > 0)
+        throw this.#failure("unavailable", "Selected Code model options cannot be verified.");
+      return;
+    }
     let probe: ProviderProbeResult;
     try {
       probe = await this.#probeProvider(providerInstanceId);
     } catch {
       throw this.#failure("unavailable", "Selected Code provider is unavailable.");
     }
-    const modelAvailable = probe.models.some((model) => String(model.id) === String(modelId));
+    const selectedModel = probe.models.find((model) => String(model.id) === String(modelId));
+    const modelAvailable = selectedModel !== undefined;
     if (probe.readiness !== "ready" && !(probe.readiness === "degraded" && modelAvailable)) {
       throw this.#failure(
         probe.readiness === "unauthenticated"
@@ -2809,8 +2851,11 @@ export class CodeService {
         "Selected Code provider is not ready.",
       );
     }
-    if (!modelAvailable) {
+    if (selectedModel === undefined) {
       throw this.#failure("invalid", "Selected Code model is unavailable.");
+    }
+    if (unsupportedModelOptionValues(modelOptionValues, selectedModel.options).length > 0) {
+      throw this.#failure("invalid", "Selected Code model does not offer these options.");
     }
   }
 

@@ -35,6 +35,7 @@ import {
   type EventActor,
   type ProviderCapabilities,
   type ProviderRuntimeEvent,
+  type ProviderProbeResult,
   type WindowId,
   decodeCodeFailure,
 } from "@octant/contracts";
@@ -62,6 +63,7 @@ import {
   clampTurnAccessPosture,
   decidesCodeEffectsByApproval,
   harnessAutoReviewEffective,
+  unsupportedModelOptionValues,
 } from "@octant/domain";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import { WORK_TURN_SAFE_INPUT_TOKENS } from "../work/workTurnContext";
@@ -178,6 +180,9 @@ export interface CodeOperationRuntimeOptions {
   readonly onProviderTurnRequested?: (threadId: CodeThreadId) => void;
   /** Refuses every new Code turn whose current Project policy no longer accepts its provider/model. */
   readonly isProviderModelAllowed?: (thread: CodeThread) => boolean;
+  readonly probeProvider?: (
+    instanceId: CodeThread["providerInstanceId"],
+  ) => Promise<Pick<ProviderProbeResult, "readiness" | "models">>;
   readonly ghExecutable?: string;
   readonly pullRequestPort?: CodeOperationPullRequestPort;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
@@ -830,6 +835,38 @@ export function createCodeOperationRuntime(
                 "This provider or model is not allowed by this Code Project's provider policy.",
             }),
           );
+        }
+        if (thread !== undefined && Object.keys(thread.modelOptionValues ?? {}).length > 0) {
+          const probe = await options
+            .probeProvider?.(thread.providerInstanceId)
+            .catch(() => undefined);
+          const model = probe?.models.find(
+            (candidate) => String(candidate.id) === String(thread.modelId),
+          );
+          if (
+            probe === undefined ||
+            (probe.readiness !== "ready" && probe.readiness !== "degraded")
+          ) {
+            throw new CodeServiceError(
+              decodeCodeFailure({
+                category: "unavailable",
+                message:
+                  "Selected Code model options cannot be verified. Check the provider before sending.",
+              }),
+            );
+          }
+          if (
+            model === undefined ||
+            unsupportedModelOptionValues(thread.modelOptionValues, model.options).length > 0
+          ) {
+            throw new CodeServiceError(
+              decodeCodeFailure({
+                category: "unsupported",
+                message:
+                  "Selected Code model no longer offers these options. Choose an available option before sending.",
+              }),
+            );
+          }
         }
         const admission =
           thread === undefined

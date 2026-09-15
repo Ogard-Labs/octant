@@ -11,6 +11,7 @@ import {
   ProviderExecutionPolicy,
   ProviderInstanceId,
   ProviderModelId,
+  ProviderModelOptionValues,
   ThreadProviderHandoff,
 } from "./providers";
 import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
@@ -266,6 +267,7 @@ export const CodeThread = Schema.Struct({
   lifecycle: CodeThreadLifecycle,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
+  modelOptionValues: Schema.optional(ProviderModelOptionValues),
   providerHandoff: Schema.optional(ThreadProviderHandoff),
   executionPolicy: ProviderExecutionPolicy,
   permissionPersistence: PermissionPersistence,
@@ -455,6 +457,7 @@ export const CreateManagedCodeThreadCommand = Schema.Struct({
   title: Schema.NonEmptyTrimmedString,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
+  modelOptionValues: Schema.optional(ProviderModelOptionValues),
   executionPolicy: ProviderExecutionPolicy,
   permissionPersistence: PermissionPersistence,
   deliveryTarget: CodeDeliveryTarget,
@@ -606,6 +609,7 @@ export const CodeCommand = Schema.Union(
     ...CodeThreadCommandFields,
     providerInstanceId: ProviderInstanceId,
     modelId: ProviderModelId,
+    modelOptionValues: Schema.optional(ProviderModelOptionValues),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-working-directory"),
