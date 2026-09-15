@@ -139,6 +139,22 @@ export function createNotarizeArgv(input: {
     // Without this the pipeline would report success while the submission was
     // still in a queue, and staple a ticket that does not exist yet.
     "--wait",
+    "--output-format",
+    "json",
+  ];
+}
+
+export function createNotarizationLogArgv(input: {
+  readonly submissionId: string;
+  readonly notaryProfile: string;
+}): ReadonlyArray<string> {
+  return [
+    "/usr/bin/xcrun",
+    "notarytool",
+    "log",
+    input.submissionId,
+    "--keychain-profile",
+    input.notaryProfile,
   ];
 }
 
@@ -163,6 +179,34 @@ export function createArchiveArgv(input: {
 }
 
 export type CommandRunner = (argv: ReadonlyArray<string>) => Promise<void>;
+export interface CommandOutput {
+  readonly exitCode: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+export type CommandOutputRunner = (argv: ReadonlyArray<string>) => Promise<CommandOutput>;
+
+export interface NotarizationSubmission {
+  readonly id: string;
+  readonly status: string;
+}
+
+export function parseNotarizationSubmission(output: string): NotarizationSubmission {
+  const value: unknown = JSON.parse(output);
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("id" in value) ||
+    typeof value.id !== "string" ||
+    value.id.trim() === ""
+  ) {
+    throw new Error("Apple notarization did not return a submission id.");
+  }
+  if (!("status" in value) || typeof value.status !== "string" || value.status.trim() === "") {
+    throw new Error("Apple notarization did not return a status.");
+  }
+  return { id: value.id, status: value.status };
+}
 
 /**
  * Sign every nested payload, then the bundle, then notarize and staple.
@@ -178,6 +222,7 @@ export async function signAndNotarizeDesktop(input: {
   readonly archivePath: string;
   readonly credentials: SigningCredentials;
   readonly run: CommandRunner;
+  readonly runForOutput: CommandOutputRunner;
 }): Promise<void> {
   const entitlements = resolve(input.repositoryRoot, ENTITLEMENTS_PATH);
   for (const relativePath of SIGNING_ORDER) {
@@ -198,11 +243,22 @@ export async function signAndNotarizeDesktop(input: {
   );
   await input.run(createVerifyArgv(input.appPath));
   await input.run(createArchiveArgv({ appPath: input.appPath, archivePath: input.archivePath }));
-  await input.run(
-    createNotarizeArgv({
-      archivePath: input.archivePath,
-      notaryProfile: input.credentials.notaryProfile,
-    }),
-  );
+  const notarizationCommand = createNotarizeArgv({
+    archivePath: input.archivePath,
+    notaryProfile: input.credentials.notaryProfile,
+  });
+  const notarizationResult = await input.runForOutput(notarizationCommand);
+  const submission = parseNotarizationSubmission(notarizationResult.stdout);
+  if (notarizationResult.exitCode !== 0 || submission.status !== "Accepted") {
+    await input.run(
+      createNotarizationLogArgv({
+        submissionId: submission.id,
+        notaryProfile: input.credentials.notaryProfile,
+      }),
+    );
+    throw new Error(
+      `Apple notarization returned ${submission.status} for submission ${submission.id}.`,
+    );
+  }
   await input.run(createStapleArgv(input.appPath));
 }
