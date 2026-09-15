@@ -2890,6 +2890,45 @@ describe("App", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("keeps unsent Code text across navigation until New task explicitly clears it", async () => {
+    const user = userEvent.setup();
+    const projectApi = projects({ ...projectBootstrap(), availability: [] });
+    render(
+      <App
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projectApi}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "New task" }));
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
+    await user.click(await screen.findByRole("option", { name: /Octant/ }));
+    expect(screen.getByRole("button", { name: "Project: Octant" })).toBeVisible();
+
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Keep my unsent draft");
+    await openSettingsFromSidebar(user);
+    await screen.findByRole("heading", { level: 1, name: "General" });
+    await user.click(screen.getByRole("button", { name: "Back to app" }));
+
+    expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue(
+      "Keep my unsent draft",
+    );
+    await user.click(screen.getByRole("button", { name: "Workspace mode, Code" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Chat" }));
+    expect(screen.queryByDisplayValue("Keep my unsent draft")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "New chat" }));
+    await user.click(screen.getByRole("button", { name: "Workspace mode, Chat" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Code" }));
+    expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue(
+      "Keep my unsent draft",
+    );
+    await user.click(screen.getByRole("button", { name: "New task" }));
+    expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue("");
+  });
+
   it("uses one narrow modal dock and restores focus through Escape dismissal", async () => {
     const user = userEvent.setup();
     const projectApi = projects();

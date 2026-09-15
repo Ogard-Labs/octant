@@ -1,3 +1,4 @@
+import { NewTaskDraftScopeContext } from "../composer/useNewTaskPrompt";
 import { ComposerNoticeProvider } from "../composer/ComposerNotice";
 import type {
   LayoutNodeId,
@@ -1036,98 +1037,83 @@ function renderNonCodeTab(
     const recentThreads = draftRecentThreads(tab.mode, props);
     const draftProjectId = tab.projectId ?? props.draftProjectSelection?.[tab.mode];
     return (
-      <DraftThreadWorkspace
-        greetingName={props.greetingName}
-        key={`${String(paneId)}:${tab.mode}:${String(props.draftResetRevision ?? 0)}`}
-        {...(recentThreads.length === 0 ? {} : { recentThreads })}
-        mode={tab.mode}
-        {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-        {...(props.selectedCreateHostId === undefined
-          ? {}
-          : { selectedHostId: props.selectedCreateHostId })}
-        {...(tab.projectId !== undefined && props.selectedCreateHostId !== undefined
-          ? { fixedHostId: props.selectedCreateHostId }
-          : {})}
-        {...(props.lastSelectedHealthyHostId === undefined
-          ? {}
-          : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-        {...(props.createHostViewScope === undefined
-          ? {}
-          : { viewScope: props.createHostViewScope })}
-        {...(props.onSelectCreateHost === undefined
-          ? {}
-          : { onSelectHost: props.onSelectCreateHost })}
-        projects={props.projects}
-        availabilityByProject={props.availabilityByProject}
-        {...(props.folderBrowseClient === undefined
-          ? {}
-          : { folderBrowseClient: props.folderBrowseClient })}
-        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-        {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
-        browserAvailable={props.browserAutomationClient !== undefined}
-        {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
-        {...(props.githubClient === undefined ? {} : { githubClient: props.githubClient })}
-        {...(props.githubCloneClient === undefined
-          ? {}
-          : { githubCloneClient: props.githubCloneClient })}
-        {...(props.githubPluginEnabled === undefined
-          ? {}
-          : { githubPluginEnabled: props.githubPluginEnabled })}
-        {...(props.linearClient === undefined ? {} : { linearClient: props.linearClient })}
-        {...(props.linearPluginEnabled === undefined
-          ? {}
-          : { linearPluginEnabled: props.linearPluginEnabled })}
-        {...(props.codeHome === undefined ? {} : { codeHome: props.codeHome })}
-        {...(draftProjectId === undefined ? {} : { projectId: draftProjectId })}
-        {...(props.onDraftSelectProject === undefined
-          ? {}
-          : { onSelectProject: (projectId) => props.onDraftSelectProject?.(tab.mode, projectId) })}
-        {...(props.draftProjectName === undefined ? {} : { projectName: props.draftProjectName })}
-        {...(props.draftProjectRoot === undefined ? {} : { projectRoot: props.draftProjectRoot })}
-        {...(props.draftBranchName === undefined ? {} : { branchName: props.draftBranchName })}
-        {...(props.draftApprovalLabel === undefined
-          ? {}
-          : { approvalLabel: props.draftApprovalLabel })}
-        providerGroups={props.draftProviderGroups ?? []}
-        {...(props.draftSelectedProviderInstanceId === undefined
-          ? {}
-          : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
-        {...(props.draftSelectedModelId === undefined
-          ? {}
-          : { selectedModelId: props.draftSelectedModelId })}
-        {...(props.draftDefaultExecutionPolicy === undefined
-          ? {}
-          : { defaultExecutionPolicy: props.draftDefaultExecutionPolicy })}
-        onSelectProvider={props.onDraftSelectProvider ?? (() => {})}
-        {...(props.draftCodeExecute === undefined ? {} : { codeExecute: props.draftCodeExecute })}
-        {...(props.onDraftCreateCodeThread === undefined
-          ? {}
-          : { onCreateCodeThread: props.onDraftCreateCodeThread })}
-        {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
-        {...(props.projectWindowCapability === undefined
-          ? {}
-          : { windowCapability: props.projectWindowCapability })}
-        onCreateThread={(
-          prompt,
-          folderSelection,
-          deliveryOutcome,
-          images,
-          threadMentionIds,
-          issueContext,
-          linearIssueContext,
-          computerUseSelection,
-          extensionSelections,
-          executionPolicy,
-          permissionPersistence,
-        ) => {
-          // Returning quietly here made a wired-up composer look dead: the user
-          // pressed Create thread and nothing happened anywhere. A missing
-          // handler is a wiring defect, so it fails where it can be seen.
-          if (props.onDraftCreateThread === undefined) {
-            throw new Error("Draft thread creation is not wired to this workspace.");
-          }
-          return props.onDraftCreateThread(
-            tab.mode,
+      <NewTaskDraftScopeContext.Provider value={`${tab.mode}:${String(paneId)}`}>
+        <DraftThreadWorkspace
+          greetingName={props.greetingName}
+          key={`${String(paneId)}:${tab.mode}:${String(props.draftResetRevision ?? 0)}`}
+          {...(recentThreads.length === 0 ? {} : { recentThreads })}
+          mode={tab.mode}
+          {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+          {...(props.selectedCreateHostId === undefined
+            ? {}
+            : { selectedHostId: props.selectedCreateHostId })}
+          {...(tab.projectId !== undefined && props.selectedCreateHostId !== undefined
+            ? { fixedHostId: props.selectedCreateHostId }
+            : {})}
+          {...(props.lastSelectedHealthyHostId === undefined
+            ? {}
+            : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+          {...(props.createHostViewScope === undefined
+            ? {}
+            : { viewScope: props.createHostViewScope })}
+          {...(props.onSelectCreateHost === undefined
+            ? {}
+            : { onSelectHost: props.onSelectCreateHost })}
+          projects={props.projects}
+          availabilityByProject={props.availabilityByProject}
+          {...(props.folderBrowseClient === undefined
+            ? {}
+            : { folderBrowseClient: props.folderBrowseClient })}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          {...(props.extensionClient === undefined
+            ? {}
+            : { extensionClient: props.extensionClient })}
+          browserAvailable={props.browserAutomationClient !== undefined}
+          {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
+          {...(props.githubClient === undefined ? {} : { githubClient: props.githubClient })}
+          {...(props.githubCloneClient === undefined
+            ? {}
+            : { githubCloneClient: props.githubCloneClient })}
+          {...(props.githubPluginEnabled === undefined
+            ? {}
+            : { githubPluginEnabled: props.githubPluginEnabled })}
+          {...(props.linearClient === undefined ? {} : { linearClient: props.linearClient })}
+          {...(props.linearPluginEnabled === undefined
+            ? {}
+            : { linearPluginEnabled: props.linearPluginEnabled })}
+          {...(props.codeHome === undefined ? {} : { codeHome: props.codeHome })}
+          {...(draftProjectId === undefined ? {} : { projectId: draftProjectId })}
+          {...(props.onDraftSelectProject === undefined
+            ? {}
+            : {
+                onSelectProject: (projectId) => props.onDraftSelectProject?.(tab.mode, projectId),
+              })}
+          {...(props.draftProjectName === undefined ? {} : { projectName: props.draftProjectName })}
+          {...(props.draftProjectRoot === undefined ? {} : { projectRoot: props.draftProjectRoot })}
+          {...(props.draftBranchName === undefined ? {} : { branchName: props.draftBranchName })}
+          {...(props.draftApprovalLabel === undefined
+            ? {}
+            : { approvalLabel: props.draftApprovalLabel })}
+          providerGroups={props.draftProviderGroups ?? []}
+          {...(props.draftSelectedProviderInstanceId === undefined
+            ? {}
+            : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
+          {...(props.draftSelectedModelId === undefined
+            ? {}
+            : { selectedModelId: props.draftSelectedModelId })}
+          {...(props.draftDefaultExecutionPolicy === undefined
+            ? {}
+            : { defaultExecutionPolicy: props.draftDefaultExecutionPolicy })}
+          onSelectProvider={props.onDraftSelectProvider ?? (() => {})}
+          {...(props.draftCodeExecute === undefined ? {} : { codeExecute: props.draftCodeExecute })}
+          {...(props.onDraftCreateCodeThread === undefined
+            ? {}
+            : { onCreateCodeThread: props.onDraftCreateCodeThread })}
+          {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
+          {...(props.projectWindowCapability === undefined
+            ? {}
+            : { windowCapability: props.projectWindowCapability })}
+          onCreateThread={(
             prompt,
             folderSelection,
             deliveryOutcome,
@@ -1139,29 +1125,52 @@ function renderNonCodeTab(
             extensionSelections,
             executionPolicy,
             permissionPersistence,
-          );
-        }}
-        {...(props.onCreateProject === undefined ? {} : { onCreateProject: props.onCreateProject })}
-        {...(props.defaultFolder === undefined ? {} : { defaultFolder: props.defaultFolder })}
-        {...(props.codeDefaultFolderThreads === undefined
-          ? {}
-          : { codeDefaultFolderThreads: props.codeDefaultFolderThreads })}
-        {...(props.onEnsureDefaultProject === undefined
-          ? {}
-          : { onEnsureDefaultProject: props.onEnsureDefaultProject })}
-        onCancel={() => {
-          void props.onClosePane(paneId);
-        }}
-        {...(props.onDraftCreating === undefined ? {} : { creating: props.onDraftCreating })}
-        {...(props.onDraftError === undefined ? {} : { errorMessage: props.onDraftError })}
-        {...(props.onDraftPendingMessage === undefined
-          ? {}
-          : { pendingMessage: props.onDraftPendingMessage })}
-        {...(props.onDraftCancelFirstTurn === undefined
-          ? {}
-          : { onCancelFirstTurn: props.onDraftCancelFirstTurn })}
-        {...(props.onAttachFolder === undefined ? {} : { onAttachFolder: props.onAttachFolder })}
-      />
+          ) => {
+            // Returning quietly here made a wired-up composer look dead: the user
+            // pressed Create thread and nothing happened anywhere. A missing
+            // handler is a wiring defect, so it fails where it can be seen.
+            if (props.onDraftCreateThread === undefined) {
+              throw new Error("Draft thread creation is not wired to this workspace.");
+            }
+            return props.onDraftCreateThread(
+              tab.mode,
+              prompt,
+              folderSelection,
+              deliveryOutcome,
+              images,
+              threadMentionIds,
+              issueContext,
+              linearIssueContext,
+              computerUseSelection,
+              extensionSelections,
+              executionPolicy,
+              permissionPersistence,
+            );
+          }}
+          {...(props.onCreateProject === undefined
+            ? {}
+            : { onCreateProject: props.onCreateProject })}
+          {...(props.defaultFolder === undefined ? {} : { defaultFolder: props.defaultFolder })}
+          {...(props.codeDefaultFolderThreads === undefined
+            ? {}
+            : { codeDefaultFolderThreads: props.codeDefaultFolderThreads })}
+          {...(props.onEnsureDefaultProject === undefined
+            ? {}
+            : { onEnsureDefaultProject: props.onEnsureDefaultProject })}
+          onCancel={() => {
+            void props.onClosePane(paneId);
+          }}
+          {...(props.onDraftCreating === undefined ? {} : { creating: props.onDraftCreating })}
+          {...(props.onDraftError === undefined ? {} : { errorMessage: props.onDraftError })}
+          {...(props.onDraftPendingMessage === undefined
+            ? {}
+            : { pendingMessage: props.onDraftPendingMessage })}
+          {...(props.onDraftCancelFirstTurn === undefined
+            ? {}
+            : { onCancelFirstTurn: props.onDraftCancelFirstTurn })}
+          {...(props.onAttachFolder === undefined ? {} : { onAttachFolder: props.onAttachFolder })}
+        />
+      </NewTaskDraftScopeContext.Provider>
     );
   }
   if (tab.kind === "chat-thread") {

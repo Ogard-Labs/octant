@@ -1,3 +1,4 @@
+import { useNewTaskPrompt } from "../composer/useNewTaskPrompt";
 import { useComposerTip } from "../composer/useComposerTip";
 import { ComputerUseMention, useComputerUseMention } from "../computerUse/ComputerUseMention";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
@@ -789,7 +790,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   }
 
   const presentation = draftThreadModePresentation(props.mode);
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useNewTaskPrompt();
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,
     draft: prompt,
