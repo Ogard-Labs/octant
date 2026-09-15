@@ -197,18 +197,24 @@ export async function readLocalUsageHistoryDashboard(input: {
           value.totals,
         ),
       ),
-    days: [...days.values()].slice(0, MAX_DAYS).map((value) => ({
-      day: value.day,
-      providerKey: value.providerKey,
-      totals: tokenTotals(value.totals),
-      cost: costTotals(value.totals.costs),
-    })),
-    dailyTotals: [...dailyTotals.entries()].slice(0, MAX_DAYS).map(([day, value]) => ({
-      day,
-      providerKey: "all",
-      totals: tokenTotals(value),
-      cost: costTotals(value.costs),
-    })),
+    days: [...days.values()]
+      .sort((a, b) => a.day.localeCompare(b.day) || a.providerKey.localeCompare(b.providerKey))
+      .slice(0, MAX_DAYS)
+      .map((value) => ({
+        day: value.day,
+        providerKey: value.providerKey,
+        totals: tokenTotals(value.totals),
+        cost: costTotals(value.totals.costs),
+      })),
+    dailyTotals: [...dailyTotals.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(0, MAX_DAYS)
+      .map(([day, value]) => ({
+        day,
+        providerKey: "all",
+        totals: tokenTotals(value),
+        cost: costTotals(value.costs),
+      })),
     coverage: sourceCoverage,
   });
 }

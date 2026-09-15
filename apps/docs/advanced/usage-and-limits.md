@@ -14,7 +14,8 @@ can overlap, so their totals are never added together.
 Choose **Tokens** or **Cost**, then a period: past 24 hours, 7 days, 30 days, or
 90 days. The overview shows a total, provider breakdown, and daily chart. The
 Model and Day tables show the breakdown; **View chart data** exposes individual
-provider readings without requiring the chart.
+provider readings without requiring the chart. Both daily tables run from the
+earliest date to the latest, regardless of provider file scan order.
 
 Large histories are read in bounded batches. Available totals appear while the
 import continues. Changing the period cancels the previous query. Refresh keeps
