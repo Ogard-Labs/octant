@@ -140,6 +140,8 @@ distilled successor of the earlier long-form design specifications.
 | [0126](0126-seatbelt-trust-evaluation-and-launcher-symlinks.md) | Seatbelt opens trust evaluation and launcher symlink metadata | Accepted |
 | [0127](0127-a-manually-built-candidate-ring.md) | A manually built candidate ring | Accepted |
 
+| [0128](0128-workspace-background-owns-covered-sidebar.md) | Workspace background owns a covered sidebar | Accepted |
+
 ## Adding an ADR
 
 - Take the next number (`00NN-short-slug.md`); never renumber existing records.

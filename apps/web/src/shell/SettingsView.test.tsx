@@ -779,6 +779,54 @@ describe("SettingsView", () => {
     expect(legacyStyles).not.toMatch(/(?:^|\n)\.settings-view h1\s*\{/);
   });
 
+  it("suspends sidebar decoration while the workspace background covers it", () => {
+    const applyPatch = vi.fn(async () => true);
+    renderSettings({
+      themeController: {
+        draft: {
+          ...DEFAULT_THEME_SETTINGS,
+          appBackground: {
+            ...DEFAULT_THEME_SETTINGS.appBackground,
+            kind: "theme",
+            scope: "everywhere",
+            coversSidebar: true,
+          },
+        },
+        applyPatch,
+      } as never,
+    });
+    navigateTo("Appearance");
+    expect(screen.getByRole("combobox", { name: "Sidebar background type" })).toBeDisabled();
+    expect(screen.getByLabelText("Sidebar overlay color")).toBeDisabled();
+    expect(screen.getByRole("slider", { name: "Sidebar overlay opacity" })).toBeDisabled();
+    expect(screen.getByText(/Workspace background covers the sidebar/)).toBeVisible();
+    expect(applyPatch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { kind: "none", scope: "everywhere", coversSidebar: true, increasedContrast: false },
+    { kind: "theme", scope: "welcome", coversSidebar: true, increasedContrast: false },
+    { kind: "theme", scope: "everywhere", coversSidebar: false, increasedContrast: false },
+    { kind: "theme", scope: "everywhere", coversSidebar: true, increasedContrast: true },
+  ])(
+    "keeps separate sidebar controls available when no effective background covers it: %j",
+    (state) => {
+      renderSettings({
+        themeController: {
+          draft: {
+            ...DEFAULT_THEME_SETTINGS,
+            increasedContrast: state.increasedContrast,
+            appBackground: { ...DEFAULT_THEME_SETTINGS.appBackground, ...state },
+          },
+          applyPatch: vi.fn(async () => true),
+        } as never,
+      });
+      navigateTo("Appearance");
+      expect(screen.getByRole("combobox", { name: "Sidebar background type" })).toBeEnabled();
+      expect(screen.queryByText(/Workspace background covers the sidebar/)).not.toBeInTheDocument();
+    },
+  );
+
   it("gives sidebar background presets a visible, keyboard-targetable grid", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 

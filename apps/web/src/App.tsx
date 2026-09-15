@@ -770,7 +770,8 @@ function LaunchedShell(
       ),
     [resolvedAppBackground, sidebarBackgroundFetcher],
   );
-  const shellBackdropCoversSidebar = resolvedAppBackground?.coversSidebar === true;
+  const shellBackdropCoversSidebar =
+    shellBackdrop !== undefined && resolvedAppBackground?.coversSidebar === true;
   const zen = useZenController({
     ...(props.zenClient === undefined ? {} : { client: props.zenClient }),
     serverUrl: props.launch.serverUrl,
@@ -5111,6 +5112,7 @@ function LaunchedShell(
             inboxCount={inboxCount}
             settings={presentedShellSettings ?? controller.settings}
             workspace={controller.workspace}
+            backgroundCoveredByWorkspace={shellBackdropCoversSidebar}
             resolvedSidebarBackground={resolvedSidebarBackground}
             backgroundFetcher={sidebarBackgroundFetcher}
             {...(selectedProjectTabId === undefined || activeProjectId === undefined
