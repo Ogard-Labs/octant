@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import type {
   LocalUsageHistoryRecord,
   LocalUsageHistoryRequest,
@@ -67,6 +67,7 @@ export function createCodexLocalUsageHistorySource(
                 ...readerOptions,
                 sourceKind: "codex",
                 providerKey: "codex",
+                parserCheckpoint: codexParserCheckpoint(state),
                 onSourceInvalidated: (relativePath) => {
                   options.onSourceInvalidated?.(relativePath);
                   for (const [sessionId, paths] of state.sessionFiles) {
@@ -375,4 +376,42 @@ function nonNegativeNumber(value: unknown): number | undefined {
 function sessionIdFromPath(value: string): string {
   const match = value.match(/([0-9a-f]{8}-[0-9a-f-]{27,})$/i);
   return match?.[1] ?? value.slice(0, 512);
+}
+
+const CodexCheckpoint = Schema.Struct({
+  models: Schema.Array(Schema.Tuple(Schema.String, Schema.String)),
+  cumulative: Schema.Array(
+    Schema.Tuple(
+      Schema.String,
+      Schema.Struct({
+        inputTokens: Schema.Number,
+        outputTokens: Schema.Number,
+        cacheReadInputTokens: Schema.optional(Schema.Number),
+        cacheWriteInputTokens: Schema.optional(Schema.Number),
+        reasoningTokens: Schema.optional(Schema.Number),
+        totalTokens: Schema.optional(Schema.Number),
+      }),
+    ),
+  ),
+  sessionFiles: Schema.Array(Schema.Tuple(Schema.String, Schema.Array(Schema.String))),
+});
+function codexParserCheckpoint(state: CodexParserState) {
+  return {
+    save: () =>
+      JSON.stringify({
+        models: [...state.models],
+        cumulative: [...state.cumulative],
+        sessionFiles: [...state.sessionFiles].map(([id, files]) => [id, [...files]]),
+      }),
+    restore: (value: string): void => {
+      const saved = Schema.decodeUnknownSync(CodexCheckpoint)(JSON.parse(value));
+      state.models.clear();
+      state.cumulative.clear();
+      state.sessionFiles.clear();
+      for (const [id, model] of saved.models) setBounded(state.models, id, model);
+      for (const [id, usage] of saved.cumulative) setBounded(state.cumulative, id, usage);
+      for (const [id, files] of saved.sessionFiles)
+        setBounded(state.sessionFiles, id, new Set(files));
+    },
+  };
 }

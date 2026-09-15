@@ -1,3 +1,4 @@
+import { createLocalUsageHistoryCheckpointStore } from "./persistence/localUsageHistoryCheckpointStore";
 import { createSelectedSkillContextResolver } from "./extensions/selectedSkillContext";
 import {
   createDesktopComputerUsePort,
@@ -3555,6 +3556,9 @@ export function startOctantServer(
         createLocalUsageHistorySourceForDriver({
           driverKind: instance.driverKind,
           home: homedir(),
+          checkpointStore: createLocalUsageHistoryCheckpointStore(
+            join(persistence.dataDirectory, "local-usage-cache.sqlite3"),
+          ),
         }),
     };
     const localUsageHistoryRoutes = createLocalUsageHistoryRouteHandler({
