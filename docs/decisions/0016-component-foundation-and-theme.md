@@ -57,6 +57,9 @@ resulting stack and the theme rules that make it Octant-owned.
   reduced transparency, increased contrast, readability, performance, and
   unsupported hosts resolve to opaque without changing the saved preference.
   Accessibility fallbacks live beside the materials they replace.
+- Sidebar navigation labels are application controls and do not allow text
+  selection. Editable sidebar fields retain normal text selection; message
+  and document content outside the sidebar remain selectable.
 - Density targets: compact navigation and list rows of 28 to 32 px, radii of
   6 px for chips, 8 px for controls, 10 px for panels, 14 px for composers,
   brief functional motion that respects Reduced Motion.
