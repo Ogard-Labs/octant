@@ -24,3 +24,12 @@ it("streams the answer by default", () => {
   render(<AssistantMessageBody body="The partial answer" streaming />);
   expect(screen.getByText("The partial answer")).toBeVisible();
 });
+
+it("includes the tool status in its accessible name", () => {
+  render(
+    <AssistantMessageBody body={"```tool name=search status=running\nLooking up sources\n```"} />,
+  );
+  expect(screen.getByText("Tool · search").closest("summary")).toHaveAccessibleName(
+    "Tool · search · running",
+  );
+});

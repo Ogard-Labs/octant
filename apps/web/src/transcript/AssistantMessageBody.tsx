@@ -35,7 +35,7 @@ function AssistantResponsePart(props: { readonly part: ChatMessagePart }) {
   if (part.kind === "tool") {
     return (
       <details className="thinking">
-        <summary aria-label={`Tool · ${part.name}`}>
+        <summary aria-label={`Tool · ${part.name} · ${part.status}`}>
           <ChevronRight aria-hidden="true" className="chev" size={14} strokeWidth={2} />
           <span>{`Tool · ${part.name}`}</span>
           <span>{part.status}</span>
