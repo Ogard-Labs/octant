@@ -22,6 +22,7 @@ const ARTIFACT_DIRECTORIES: ReadonlyArray<{ readonly name: string; readonly rela
 ];
 
 const CACHE_DIRECTORIES: ReadonlyArray<{ readonly name: string; readonly relative: string }> = [
+  { name: "Local provider usage history", relative: "local-usage-cache.sqlite3" },
   { name: "Chat scratch", relative: "scratch" },
   { name: "Chat attachments", relative: "threads" },
   { name: "Work attachments", relative: "work-threads" },
