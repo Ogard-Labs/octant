@@ -3424,11 +3424,129 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   justify-content: flex-end;
 }
 
-/* The Project page is a document with a measure, not a full-bleed control
-   panel: one title, a quiet line of facts under it, and sections that read
-   as sentence-case labels over hairlines. Measured before this pass it had
-   mono eyebrows, three bordered strips before any content, and two copies of
-   the repository path. */
+/* Projects is a master-detail workspace: the collection remains visible while
+   the selected Project changes, and the detail keeps one readable measure. */
+.projects-workspace {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.projects-workspace--detail-only {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+}
+
+.projects-directory {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  padding: 24px 12px 16px;
+  overflow: hidden;
+  background: var(--octant-sidebar);
+  border-right: 1px solid var(--oct-border);
+}
+
+.projects-directory__header {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  padding-inline: 6px 2px;
+}
+
+.projects-directory__header h1 {
+  margin: 0;
+}
+
+.projects-directory__search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.projects-directory__search > svg {
+  position: absolute;
+  left: 9px;
+  z-index: 1;
+  color: var(--octant-text-muted);
+  pointer-events: none;
+}
+
+.projects-directory__search input {
+  width: 100%;
+  padding-left: 30px;
+}
+
+.projects-directory__modes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2px;
+  margin-top: 8px;
+}
+
+.projects-directory__modes button {
+  min-width: 0;
+  padding-inline: 4px;
+}
+
+.projects-directory__list {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 14px;
+  overflow: auto;
+}
+
+.projects-directory__project {
+  width: 100%;
+  min-height: 48px;
+  gap: 9px;
+  padding-inline: 9px;
+}
+
+.projects-directory__project-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 1px;
+  text-align: left;
+}
+
+.projects-directory__project-copy > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projects-directory__project-status {
+  flex: none;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.projects-directory__project-status[data-status="Available"] {
+  color: var(--octant-success-text);
+}
+
+.projects-directory__project-status[data-status="Relink required"] {
+  color: var(--octant-warning-text);
+}
+
+.projects-directory__empty {
+  margin: 10px 8px;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
 .project-overview {
   display: flex;
   width: min(100% - 48px, 920px);
@@ -3436,6 +3554,15 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   flex-direction: column;
   margin-inline: auto;
   padding: 20px 0 48px;
+}
+
+.projects-workspace > .project-overview {
+  width: 100%;
+  max-width: 980px;
+  min-height: 0;
+  margin-inline: auto;
+  padding: 30px 36px 56px;
+  overflow: auto;
 }
 
 .project-overview__toolbar {
@@ -3547,6 +3674,101 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   line-height: 1.5;
+}
+
+.project-overview__primary {
+  min-width: 0;
+  flex: 1 0 auto;
+}
+
+.project-overview__inspectors {
+  display: grid;
+  margin-top: 34px;
+  border-top: 1px solid var(--oct-border);
+}
+
+.project-overview-inspector {
+  min-width: 0;
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.project-overview-inspector__row {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 9px 0;
+}
+
+.project-overview-inspector__row h2,
+.project-overview-inspector__row p {
+  margin: 0;
+}
+
+.project-overview-inspector__row h2 {
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+}
+
+.project-overview-inspector__row p {
+  margin-top: 2px;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.project-overview-inspector__chevron {
+  transition: transform var(--oct-motion-fast) ease;
+}
+
+button[aria-expanded="true"] > .project-overview-inspector__chevron {
+  transform: rotate(180deg);
+}
+
+.project-overview-inspector__content {
+  padding: 0 0 20px;
+}
+
+.project-overview-inspector__content > .project-provider-policy,
+.project-overview-inspector__content > .project-overview__memory {
+  margin-top: 0;
+}
+
+.project-overview-inspector__content > .project-provider-policy {
+  padding-top: 12px;
+  border-top: 0;
+}
+
+@media (max-width: 920px) {
+  .projects-workspace {
+    grid-template-columns: minmax(190px, 230px) minmax(0, 1fr);
+  }
+
+  .projects-workspace > .project-overview {
+    padding-inline: 24px;
+  }
+
+  .projects-directory__project-status {
+    display: none;
+  }
+}
+
+@media (max-width: 680px) {
+  .projects-workspace {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(190px, 34vh) minmax(0, 1fr);
+  }
+
+  .projects-directory {
+    padding-top: 14px;
+    border-right: 0;
+    border-bottom: 1px solid var(--oct-border);
+  }
+
+  .projects-workspace > .project-overview {
+    padding: 20px 18px 40px;
+  }
 }
 
 .project-provider-policy {

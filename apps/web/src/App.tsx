@@ -3665,6 +3665,21 @@ function LaunchedShell(
     await controller.openProject(project.id, project.type, project.name);
   }
 
+  function openProjects() {
+    closeWorkspaceReaders();
+    const selected = projectController.allProjects.find(
+      (project) => project.lifecycle === "active" && String(project.id) === String(activeProjectId),
+    );
+    const project =
+      selected ??
+      projectController.allProjects.find((candidate) => candidate.lifecycle === "active");
+    if (project === undefined) {
+      openProjectCreate();
+      return;
+    }
+    void openSelectedProject(project);
+  }
+
   function viewAllChatProjectThreads(projectId: ProjectId) {
     setChatProjectThreadListRequest((current) => ({
       projectId,
@@ -5001,6 +5016,9 @@ function LaunchedShell(
         transcriptWidth={controller.settings.transcriptWidth}
         sidebar={
           <ShellSidebar
+            {...(selectedProjectTabId === undefined
+              ? {}
+              : { activeDestination: "projects" as const })}
             imageLibraryAvailable={imageGenerationClient !== undefined}
             {...(federatedHostStates.length < 2
               ? {}
@@ -5031,6 +5049,7 @@ function LaunchedShell(
                       agents: openAgentsCenter,
                       "artifact-library": openArtifactLibrary,
                       "image-library": openImageLibrary,
+                      projects: openProjects,
                       plugins: openSkillsSettings,
                     },
                   },
@@ -5046,6 +5065,7 @@ function LaunchedShell(
                       automations: openAutomationCenter,
                       "artifact-library": openArtifactLibrary,
                       "image-library": openImageLibrary,
+                      projects: openProjects,
                       plugins: openSkillsSettings,
                       ...pluginSidebarDestinationActions,
                     },
@@ -5062,6 +5082,7 @@ function LaunchedShell(
                       automations: openAutomationCenter,
                       "artifact-library": openArtifactLibrary,
                       "image-library": openImageLibrary,
+                      projects: openProjects,
                       plugins: openSkillsSettings,
                       ...pluginSidebarDestinationActions,
                     },
@@ -5508,6 +5529,8 @@ function LaunchedShell(
                       void binding.catch(() => undefined);
                     }}
                     onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
+                    onAddProject={() => openProjectCreate()}
+                    onOpenProject={(project) => void openSelectedProject(project)}
                     appleToolchainClient={appleToolchainClient}
                     agentRunClient={agentRunClient}
                     onAddAgent={invokeAddAgent}

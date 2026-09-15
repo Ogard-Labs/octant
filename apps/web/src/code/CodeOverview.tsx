@@ -72,6 +72,7 @@ export type CodeOverviewProps =
       readonly creating?: boolean;
       readonly errorMessage?: string;
       readonly pendingMessage?: string;
+      readonly showQuickStart?: boolean;
     };
 
 export function CodeOverview(props: CodeOverviewProps) {
@@ -292,7 +293,7 @@ function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projec
   const { remoteFacts } = useWorktreeRemoteFacts({
     execute: props.controller.execute,
     projectId: props.projectId,
-    enabled: ready && props.onCreateThread !== undefined,
+    enabled: ready && props.onCreateThread !== undefined && props.showQuickStart !== false,
   });
 
   useEffect(() => {
@@ -365,33 +366,37 @@ function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projec
         onOpenThread={props.onOpenThread}
         onRetry={() => setReload((current) => current + 1)}
       />
-      <CodeProjectQuickStart
-        controller={props.controller}
-        projectId={props.projectId}
-        providerGroups={props.providerGroups ?? []}
-        {...(props.errorMessage === undefined ? {} : { errorMessage: props.errorMessage })}
-        {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-        {...(props.onCreateThread === undefined ? {} : { onCreateThread: props.onCreateThread })}
-        {...(props.onChangeNewThreadWorkspace === undefined
-          ? {}
-          : { onChangeNewThreadWorkspace: props.onChangeNewThreadWorkspace })}
-        {...(props.newThreadWorkspace === undefined
-          ? {}
-          : { newThreadWorkspace: props.newThreadWorkspace })}
-        {...(props.onSelectProvider === undefined
-          ? {}
-          : { onSelectProvider: props.onSelectProvider })}
-        {...(props.pendingMessage === undefined ? {} : { pendingMessage: props.pendingMessage })}
-        {...(props.projectName === undefined ? {} : { projectName: props.projectName })}
-        {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
-        {...(props.baseRepository === undefined ? {} : { baseRepository: props.baseRepository })}
-        {...(remoteFacts === undefined ? {} : { remoteFacts })}
-        {...(props.selectedModelId === undefined ? {} : { selectedModelId: props.selectedModelId })}
-        {...(props.selectedProviderInstanceId === undefined
-          ? {}
-          : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-        {...(props.creating === undefined ? {} : { creating: props.creating })}
-      />
+      {props.showQuickStart === false ? null : (
+        <CodeProjectQuickStart
+          controller={props.controller}
+          projectId={props.projectId}
+          providerGroups={props.providerGroups ?? []}
+          {...(props.errorMessage === undefined ? {} : { errorMessage: props.errorMessage })}
+          {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+          {...(props.onCreateThread === undefined ? {} : { onCreateThread: props.onCreateThread })}
+          {...(props.onChangeNewThreadWorkspace === undefined
+            ? {}
+            : { onChangeNewThreadWorkspace: props.onChangeNewThreadWorkspace })}
+          {...(props.newThreadWorkspace === undefined
+            ? {}
+            : { newThreadWorkspace: props.newThreadWorkspace })}
+          {...(props.onSelectProvider === undefined
+            ? {}
+            : { onSelectProvider: props.onSelectProvider })}
+          {...(props.pendingMessage === undefined ? {} : { pendingMessage: props.pendingMessage })}
+          {...(props.projectName === undefined ? {} : { projectName: props.projectName })}
+          {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
+          {...(props.baseRepository === undefined ? {} : { baseRepository: props.baseRepository })}
+          {...(remoteFacts === undefined ? {} : { remoteFacts })}
+          {...(props.selectedModelId === undefined
+            ? {}
+            : { selectedModelId: props.selectedModelId })}
+          {...(props.selectedProviderInstanceId === undefined
+            ? {}
+            : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+          {...(props.creating === undefined ? {} : { creating: props.creating })}
+        />
+      )}
     </section>
   );
 }

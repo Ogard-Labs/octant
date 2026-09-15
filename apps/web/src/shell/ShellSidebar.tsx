@@ -26,6 +26,7 @@ import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigat
 import { layoutSidebarDestinations, type SidebarNavigationInput } from "./navigationModel";
 
 export interface ShellSidebarProps {
+  readonly activeDestination?: SidebarNavigationProps["activeDestination"];
   /**
    * Overrides the Automation Center navigation gate.
    * Defaults to {@link AUTOMATION_CENTER_NAVIGATION_ENABLED}.
@@ -230,6 +231,9 @@ export function ShellSidebar(props: ShellSidebarProps) {
           presentation={props.settings.modeSwitcherPresentation}
         />
         <SidebarNavigation
+          {...(props.activeDestination === undefined
+            ? {}
+            : { activeDestination: props.activeDestination })}
           actions={navigationActions}
           {...(props.inboxCount === undefined || props.inboxCount === 0
             ? {}

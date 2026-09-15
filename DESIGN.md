@@ -18,8 +18,9 @@ star is a quiet graphite workbench:
   navigation. One unpinned conversation is the current preview; pinned
   conversations remain within reach. Selecting one reopens it through the
   authoritative shell command rather than keeping a hidden transcript alive.
-- Navigation is a compact Project and thread tree. Low-frequency actions live
-  in the bottom-left identity menu or an accessible overflow menu.
+- Navigation is a compact destination and thread rail. Projects is a first-class
+  destination that opens the complete Project collection; low-frequency actions
+  live in the bottom-left identity menu or an accessible overflow menu.
 - The right dock and bottom panel are contextual working regions for the active
   pane. A capable region with no selected tool shows a compact launcher; a pane
   with no valid tool exposes no dock toggle. Neither region fabricates a tab or
@@ -531,12 +532,15 @@ same thing, and the notice landed on top of it.
 The app has three server-enforced modes—Chat, Work, and Code. Mode switching is
 available as a labeled selector, compact list, or icon presentation according
 to the user's setting. Code and Work keep separate Project View sets. The
-sidebar reads as two flat groups parted by one hairline: Projects (each Project
-row with its threads nested beneath it, pinned Projects leading in their own
-labelled band that is absent when nothing is pinned), then Chats (threads filed
-in no Project; Work and Code call the group Recents). Rows are hairline rails, never
-cards; provider marks are fixed-size inline and can be hidden without changing
-row height or indentation. What a thread row carries — its Project
+sidebar keeps Projects as a first-class destination alongside the active mode's
+compact thread list. Opening Projects reveals a persistent collection pane with
+search and All, Chat, Work, and Code filters; selecting a Project updates the
+adjacent detail pane without leaving the collection. The detail is thread-first,
+with Project memory, provider access, and canvases in compact expandable rows
+below the primary work. The thread list is named Chats for threads filed in no
+Project; Work and Code call it Recents. Rows are hairline rails, never cards;
+provider marks are fixed-size inline and can be hidden without changing row
+height or indentation. What a thread row carries — its Project
 attribution, branch, linked pull request, last updated, or status mark — is the
 view's own choice, edited in Settings › Appearance › Sidebar thread rows or the
 view filter menu's Property visibility submenu; a hidden property is omitted
@@ -549,8 +553,8 @@ snooze ends, or a neutral unread dot, in that priority order. Its accessible
 label and hover details retain overlapping states; a row never renders a
 second activity dot or a separate "Woke" label. A list longer than eight rows folds behind one quiet "Show
 more (n)" row that becomes "Show less"; the active thread stays visible while
-folded. Keyboard focus uses neutral fill and text emphasis, and the Project row keeps
-its context menu. Project View and Project Overview are real features, not
+folded. Keyboard focus uses neutral fill and text emphasis. Project View and
+Project Overview are real features, not
 decorative shortcuts.
 
 Primary sidebar destinations are New thread, Board, and Pull requests
