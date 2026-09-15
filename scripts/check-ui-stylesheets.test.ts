@@ -5,10 +5,20 @@ import {
   findStylesheetFindings,
   serializeBaseline,
 } from "./check-ui-stylesheets";
+import { findUiColorLiteralViolations } from "./check-ui-color-literals";
 
 const CSS = "apps/web/src/styles/feature.css";
 
 describe("UI stylesheet check", () => {
+  it("keeps raw colors in mobile theme data and out of mobile feature views", () => {
+    expect(
+      findUiColorLiteralViolations({
+        "apps/mobile/design-system/tokens.ts": 'export const ink = "#1b1b1b";',
+        "apps/mobile/src/ui/StatusCard.tsx": 'const style = { color: "#1b1b1b" };',
+      }),
+    ).toEqual(["apps/mobile/src/ui/StatusCard.tsx:1 uses a hardcoded color: #1b1b1b"]);
+  });
+
   it("flags a raw colour in a rule but not in a token definition", () => {
     expect(
       findStylesheetFindings({

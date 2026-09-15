@@ -4,9 +4,11 @@ description: Semantic themes, presets, typography, sidebar destinations and appe
 
 # Themes and Appearance
 
-Octant uses a semantic theme engine shared across the desktop and web. A
-set of `--octant-*` tokens is the source of truth; controls and surfaces project
-those tokens, so theme choices stay consistent across the app.
+Octant uses one semantic theme foundation across desktop, web, mobile, public
+documentation, and marketing material. `@octant/theme` is the source of truth;
+CSS and React Native adapters project those roles into platform controls and
+surfaces. Platform-specific materials and touch geometry may differ, but they do
+not own a second core palette.
 
 ## Settings → Appearance
 

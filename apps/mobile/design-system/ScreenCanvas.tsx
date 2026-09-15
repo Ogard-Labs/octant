@@ -62,11 +62,7 @@ export function ScreenCanvas(props: ScreenCanvasProps) {
             testID={`mobile-canvas-atmosphere-${scheme}`}
           />
           <LinearGradient
-            colors={[
-              scheme === "dark" ? "rgba(26,26,26,0.55)" : "rgba(255,255,255,0.30)",
-              "transparent",
-              scheme === "dark" ? "rgba(26,26,26,0.70)" : "rgba(255,255,255,0.44)",
-            ]}
+            colors={[colors.atmosphereScrimStart, "transparent", colors.atmosphereScrimEnd]}
             end={{ x: 0.5, y: 1 }}
             start={{ x: 0.2, y: 0 }}
             style={StyleSheet.absoluteFill}

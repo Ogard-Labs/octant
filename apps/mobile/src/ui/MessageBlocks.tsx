@@ -75,7 +75,7 @@ export function MessageBlocks(props: MessageBlocksProps) {
           fontFamily: fonts.mono,
           fontSize: typography.mono.fontSize + 1,
           color: textColor,
-          backgroundColor: "rgba(127,127,127,0.18)",
+          backgroundColor: user ? colors.onBubbleFill : colors.primarySoft,
           borderRadius: 4,
         },
       }),

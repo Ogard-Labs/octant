@@ -1,10 +1,10 @@
 # Octant design system
 
-This is the implementation-authoritative visual contract for the shared
-renderer in `apps/web`. It describes the system that is in the repository now;
-it is not a proposal or a visual mood board. When this document and a touched
-surface disagree, update the surface or record the intentional exception in
-the same change.
+This is the implementation-authoritative visual contract for every Octant
+surface: desktop and web, mobile, public documentation, and marketing material.
+It describes the system that is in the repository now; it is not a proposal or
+a visual mood board. When this document and a touched surface disagree, update
+the surface or record the intentional platform adaptation in the same change.
 
 ## Product character
 
@@ -38,9 +38,10 @@ a person's photo under it, behind the start screens or behind everything.
 
 ## Language
 
-This section is the part of the system that travels: the app, the docs site,
-and the marketing site use the same words, the same face, and the same
-hierarchy. Everything after it is renderer implementation.
+This section is the part of the system that travels: every app surface, the docs
+site, and the marketing site use the same words, the same face, and the same
+hierarchy. Platform adapters may express the system through CSS or React Native,
+but they do not own a second palette or visual language.
 
 ### Voice
 
@@ -166,6 +167,8 @@ There is one runtime theme authority and one owned control layer:
 | Runtime bridge        | Maps theme-resolvable `--octant-*` roles to the static system's `--oct-*` roles                                   | `apps/web/src/styles/octant-bridge.css`                                    |
 | shadcn projection     | Projects `--octant-*` roles into `--background`, `--primary`, `--border`, and the other shadcn/Tailwind variables | `apps/web/src/styles/shadcn-theme.css`, `apps/web/src/styles/tailwind.css` |
 | Owned recipes         | Editable Base UI-native shadcn recipes and the product-facing adapter API                                         | `apps/web/src/ui/shadcn/`, `apps/web/src/ui/base/`                         |
+| Native projection     | Maps the same semantic defaults into React Native colors; mobile-only material and touch geometry stay local      | `apps/mobile/design-system/`                                               |
+| Public projection     | Emits the semantic defaults for public documentation and the marketing-site stack                                 | `apps/docs/.vitepress/theme/semanticTokens.ts`                             |
 
 The import order in `apps/web/src/styles.css` is load-bearing:
 

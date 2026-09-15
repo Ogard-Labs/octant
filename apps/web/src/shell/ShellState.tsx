@@ -27,7 +27,7 @@ const stateIcons: Record<ShellStateKind, LucideIcon> = {
 };
 
 const stateTones: Record<ShellStateKind, "neutral" | "warning"> = {
-  disconnected: "warning",
+  disconnected: "neutral",
   loading: "neutral",
   neutral: "neutral",
   warning: "warning",

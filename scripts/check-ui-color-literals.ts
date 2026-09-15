@@ -6,15 +6,13 @@ const MOBILE_SOURCE = "apps/mobile";
 const SOURCE_EXTENSION = /\.(?:ts|tsx)$/;
 
 // Allow hex/rgb/rgba/hsl literals in theme data, theme-editing UI, tests,
-// and the mobile design-system token source. All other .tsx views should
-// consume CSS variables or theme tokens.
-const EXEMPT_PREFIXES = [
-  `${WEB_SOURCE}/ui/shadcn/`,
-  `${WEB_SOURCE}/theme/`,
-  `${WEB_SOURCE}/zen/`,
-  // TODO: remove the mobile exemption once design-system tokens come from @octant/theme.
-  `${MOBILE_SOURCE}/`,
-];
+// and the two mobile theme-data modules. All other views consume CSS variables
+// or theme tokens, including React Native views.
+const EXEMPT_PREFIXES = [`${WEB_SOURCE}/ui/shadcn/`, `${WEB_SOURCE}/theme/`, `${WEB_SOURCE}/zen/`];
+const EXEMPT_FILES = new Set([
+  `${MOBILE_SOURCE}/design-system/materials.ts`,
+  `${MOBILE_SOURCE}/design-system/tokens.ts`,
+]);
 const EXEMPT_SUFFIXES = [".test.ts", ".test.tsx"];
 
 // Match a CSS color literal: #RGB, #RGBA, #RRGGBB, #RRGGBBAA, rgb, rgba, hsl, hsla.
@@ -22,6 +20,7 @@ const COLOR_LITERAL =
   /(?:#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\b|\b(?:rgb|hsl)a?\([^)]*\))/g;
 
 function isExempt(normalized: string): boolean {
+  if (EXEMPT_FILES.has(normalized)) return true;
   for (const prefix of EXEMPT_PREFIXES) {
     if (normalized.startsWith(prefix)) return true;
   }
