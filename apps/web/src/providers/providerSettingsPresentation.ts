@@ -36,7 +36,7 @@ export function providerRowReadinessLabel(
   modelCount: number,
 ): string {
   if (value === "unauthenticated") return "Sign in required";
-  if (value === "incompatible") return "Update required";
+  if (value === "incompatible") return "Incompatible";
   if (value === "degraded" && modelCount === 0) return "Needs setup";
   if (value === "degraded") return "Limited";
   return titleCase(value);
@@ -171,8 +171,29 @@ export function incompatibleReadinessFacts(
     },
     ...(binaryPath === undefined ? [] : [{ label: "Binary", value: binaryPath }]),
     { label: "Version", value: observed?.detectedVersion ?? "Unavailable" },
+    ...providerProcessDiagnosticFacts(observed),
     ...(authentication === undefined ? [] : [{ label: "Authentication", value: authentication }]),
     { label: "Capabilities", value: capabilityMismatch },
+  ];
+}
+
+export function providerProcessDiagnosticFacts(
+  observed: ProviderObservedState | undefined,
+): ReadonlyArray<{ readonly label: string; readonly value: string }> {
+  const diagnostic = observed?.diagnostic;
+  if (diagnostic === undefined) return [];
+  const processResult =
+    diagnostic.kind === "exited" && diagnostic.exitCode !== undefined
+      ? `Exited with code ${diagnostic.exitCode}`
+      : diagnostic.kind === "signaled" && diagnostic.signal !== undefined
+        ? `Ended by ${diagnostic.signal}`
+        : titleCase(diagnostic.kind);
+  return [
+    { label: "Failure stage", value: titleCase(diagnostic.stage) },
+    { label: "Process result", value: processResult },
+    ...(diagnostic.stderrContext === undefined
+      ? []
+      : [{ label: "Safe stderr context", value: diagnostic.stderrContext }]),
   ];
 }
 

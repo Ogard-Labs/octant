@@ -350,7 +350,9 @@ export function privateHomeDenyReadRules(
   const users = realpathSync(input.usersDirectory ?? dirname(home));
   const allowed = [
     ...new Set(
-      input.allowedPaths.filter((path) => existsSync(path)).map((path) => realpathSync(path)),
+      input.allowedPaths
+        .filter((path) => existsSync(path))
+        .flatMap((path) => [path, realpathSync(path)]),
     ),
   ];
   const rules: string[] = [];

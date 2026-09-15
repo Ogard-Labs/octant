@@ -37,6 +37,11 @@ the rest of the user's home is enumerated as denied.
   link's own target text is read, never followed: a link whose target is
   unrelated to the allowed set stays denied, and a broken link that points
   onto an allowed path grants link metadata only.
+- Allowed executables and interpreters retain both their lexical launcher path
+  and canonical target. Private-home deny enumeration must not deny the
+  lexical parent needed by `/usr/bin/env` or another already-allowed launcher
+  to open that exact interpreter. Sibling binaries remain denied unless they
+  have their own allowlisted path.
 
 Every remaining rule of 0009 stands unchanged: deny-default, the enumerated
 home denials, exact bound roots, the sanitized environment, and Plan/Chat

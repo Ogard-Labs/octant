@@ -48,6 +48,7 @@ import {
   incompatibleReadinessFacts,
   protocolLabel,
   providerDetectionBlockedReason,
+  providerProcessDiagnosticFacts,
   providerRowReadinessLabel,
   titleCase,
 } from "./providerSettingsPresentation";
@@ -1252,6 +1253,25 @@ function ProviderRow(props: ProviderRowProps) {
                     </span>
                   </div>
                 )}
+                {providerBinaryPath(props.instance) === undefined ? null : (
+                  <div className="provider-card__facts provider-card__facts--cli-update">
+                    <span>
+                      CLI updates:{" "}
+                      {supportsProviderCliUpdate(props.instance.driverKind)
+                        ? "Provider-owned update available on this host"
+                        : "Manual installation required on this host"}
+                    </span>
+                  </div>
+                )}
+                {props.observed?.readiness === "incompatible" ? null : (
+                  <div className="provider-card__facts provider-card__facts--diagnostic">
+                    {providerProcessDiagnosticFacts(props.observed).map((fact) => (
+                      <span key={fact.label}>
+                        {fact.label}: {fact.value}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {!isHttp ? null : (
                   <div className="provider-card__facts provider-card__facts--http">
                     <span>{props.instance.configuration.baseUrl}</span>
@@ -1673,7 +1693,9 @@ function guidance(
           ? "The loopback endpoint returned an incompatible native Ollama response. Update Ollama or verify the native API endpoint."
           : driverKind === "kimi-code"
             ? "The Kimi Code runtime or its provider-owned profile is incompatible. Review the connection detail and supported version before retrying."
-            : `Update your ${label} installation to a compatible version, then retry.`;
+            : observed?.diagnostic?.kind === "version-mismatch"
+              ? `The installed ${label} version is incompatible. Review the installed and supported versions before retrying.`
+              : `The ${label} runtime is incompatible. Review the connection details before retrying.`;
     return (
       <>
         <p className="provider-card__guidance">{nextAction}</p>

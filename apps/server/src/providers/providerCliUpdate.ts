@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { dirname } from "node:path";
 import type { ProviderFailure } from "@octant/contracts";
+import { makeBoundedProviderStderr } from "./providerProcessDiagnostic";
 
 export { providerCliUpdateArgs } from "@octant/domain";
 
@@ -69,6 +70,7 @@ export async function runProviderCliUpdate(
       else defaultKillProcessGroup(child, pid, signal);
     };
     const decoder = new TextDecoder("utf8");
+    const boundedStderr = makeBoundedProviderStderr();
     const captured: Uint8Array[] = [];
     let capturedBytes = 0;
     let settled = false;
@@ -95,28 +97,42 @@ export async function runProviderCliUpdate(
     const terminateTree = async (reason: "timeout" | "close") => {
       const released = await ensureProcessTreeExited(groupExists, killGroup, graceMs);
       if (released !== "released") {
-        settle(() => reject(failure("unavailable", PROVIDER_CLI_UPDATE_UNCONFIRMED_MESSAGE)));
+        settle(() =>
+          reject({
+            ...failure("unavailable", PROVIDER_CLI_UPDATE_UNCONFIRMED_MESSAGE),
+            diagnostic: { stage: "cleanup", kind: "cleanup-unconfirmed" },
+          }),
+        );
         return;
       }
       if (reason === "timeout" || timedOut) {
-        settle(() => reject(failure("unavailable", "Provider CLI update timed out.")));
+        settle(() =>
+          reject({
+            ...failure("unavailable", "Provider CLI update timed out."),
+            diagnostic: {
+              stage: "update",
+              kind: "timed-out",
+              ...(boundedStderr.context() === undefined
+                ? {}
+                : { stderrContext: boundedStderr.context() }),
+            },
+          }),
+        );
         return;
       }
     };
     child.stdout.on("data", capture);
-    child.stderr.on("data", capture);
-    child.once("error", (error) => {
+    child.stderr.on("data", boundedStderr.append);
+    child.once("error", () => {
       if (settled || timedOut) return;
       settle(() =>
-        reject(
-          failure(
-            "unavailable",
-            `Provider CLI update could not start: ${error instanceof Error ? error.message : "unknown error"}`,
-          ),
-        ),
+        reject({
+          ...failure("unavailable", "Provider CLI update could not start."),
+          diagnostic: { stage: "update", kind: "spawn-failed" },
+        }),
       );
     });
-    child.once("close", (exitCode) => {
+    child.once("close", (exitCode, signal) => {
       if (settled) return;
       void (async () => {
         if (timedOut) {
@@ -125,11 +141,29 @@ export async function runProviderCliUpdate(
         }
         const released = await ensureProcessTreeExited(groupExists, killGroup, graceMs);
         if (released !== "released") {
-          settle(() => reject(failure("unavailable", PROVIDER_CLI_UPDATE_UNCONFIRMED_MESSAGE)));
+          settle(() =>
+            reject({
+              ...failure("unavailable", PROVIDER_CLI_UPDATE_UNCONFIRMED_MESSAGE),
+              diagnostic: { stage: "cleanup", kind: "cleanup-unconfirmed" },
+            }),
+          );
           return;
         }
         if (exitCode === null || exitCode !== 0) {
-          settle(() => reject(failure("provider-failed", "Provider CLI update failed.")));
+          settle(() =>
+            reject({
+              ...failure("provider-failed", "Provider CLI update failed."),
+              diagnostic: {
+                stage: "update",
+                kind: exitCode === null ? "signaled" : "exited",
+                ...(exitCode === null ? {} : { exitCode }),
+                ...(signal === null ? {} : { signal }),
+                ...(boundedStderr.context() === undefined
+                  ? {}
+                  : { stderrContext: boundedStderr.context() }),
+              },
+            }),
+          );
           return;
         }
         settle(() => resolve({ output: capturedText(), exitCode }));

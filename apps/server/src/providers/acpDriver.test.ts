@@ -326,6 +326,25 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     expect(released()).toBe(1);
   });
 
+  it("keeps a safe stage and installed version when session discovery is refused", async () => {
+    const { driver, client } = fixture(profile);
+    client.newSession.mockRejectedValueOnce(
+      new AcpFailure("remote", "ACP request failed.", "configuration"),
+    );
+
+    await expect(
+      Effect.runPromise(Effect.scoped(Effect.flip(driver.probe({ instanceId })))),
+    ).resolves.toMatchObject({
+      category: "provider-failed",
+      diagnostic: {
+        stage: "model-discovery",
+        kind: "protocol-failed",
+        detectedVersion: "7.4.11",
+        stderrContext: "Provider refused the ACP request because its configuration was invalid.",
+      },
+    });
+  });
+
   it("does not claim resume when ACP negotiation omits load and resume support", async () => {
     const { driver, connection } = fixture(profile);
     const capabilities = connection.initialized.agentCapabilities as {

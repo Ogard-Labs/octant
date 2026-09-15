@@ -200,7 +200,14 @@ function failure(category: ProviderFailure["category"], message: string): Provid
   return { category, message };
 }
 
-function providerFailure(profile: AcpProviderProfile, error: unknown): ProviderFailure {
+function providerFailure(
+  profile: AcpProviderProfile,
+  error: unknown,
+  processContext?: {
+    readonly stage: "authentication" | "model-discovery";
+    readonly detectedVersion: string;
+  },
+): ProviderFailure {
   const name = profile.displayName;
   try {
     return decodeProviderFailure(error);
@@ -212,6 +219,27 @@ function providerFailure(profile: AcpProviderProfile, error: unknown): ProviderF
       if (error.kind === "protocol") return failure("protocol", `${name} ACP protocol failed.`);
       if (error.kind === "timeout") return failure("unavailable", `${name} ACP request timed out.`);
       if (error.kind === "closed") return failure("interrupted", `${name} ACP connection closed.`);
+      if (error.kind === "remote" && processContext !== undefined) {
+        const context =
+          error.remoteReason === "configuration"
+            ? "Provider refused the ACP request because its configuration was invalid."
+            : error.remoteReason === "workspace"
+              ? "Provider refused the ACP request for the managed workspace."
+              : error.remoteReason === "model"
+                ? "Provider refused the ACP request because no usable model was available."
+                : error.remoteReason === "network"
+                  ? "Provider could not reach its remote service."
+                  : "Provider refused the ACP request without a classified reason.";
+        return {
+          ...failure("provider-failed", `${name} request failed.`),
+          diagnostic: {
+            stage: processContext.stage,
+            kind: "protocol-failed",
+            detectedVersion: processContext.detectedVersion,
+            stderrContext: context,
+          },
+        };
+      }
     }
     return failure("provider-failed", `${name} request failed.`);
   }
@@ -362,8 +390,14 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
     makeRequestId: options.requestId ?? (() => crypto.randomUUID()),
   };
   const resumeIdentities = new Map<string, ResumeIdentity>();
-  const request = <A>(operation: () => Promise<A>): Effect.Effect<A, ProviderFailure> =>
-    Effect.tryPromise({ try: operation, catch: (error) => providerFailure(profile, error) });
+  const request = <A>(
+    operation: () => Promise<A>,
+    processContext?: Parameters<typeof providerFailure>[2],
+  ): Effect.Effect<A, ProviderFailure> =>
+    Effect.tryPromise({
+      try: operation,
+      catch: (error) => providerFailure(profile, error, processContext),
+    });
 
   /** A managed-home process used for probing and delegated authentication. */
   const managedHomeClient = Effect.gen(function* () {
@@ -406,6 +440,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
     client: AcpClientPort,
     reviewed: ReadonlyArray<string>,
     root: string,
+    detectedVersion: string,
   ) =>
     Effect.gen(function* () {
       let observedCommands: ReadonlyArray<string> | undefined;
@@ -419,7 +454,10 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
       let scratch: AcpNewSessionResult;
       let commands: ReadonlyArray<string>;
       try {
-        scratch = yield* request(() => client.newSession(root));
+        scratch = yield* request(() => client.newSession(root), {
+          stage: "model-discovery",
+          detectedVersion,
+        });
         commands =
           observedCommands ??
           (yield* Effect.promise(
@@ -487,8 +525,16 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
         if (profile.authenticateOnProbe) yield* request(() => client.authenticate());
         const scratch =
           profile.reviewedCommands === undefined
-            ? yield* request(() => client.newSession(connection.root))
-            : yield* probeCommandInventory(client, profile.reviewedCommands, connection.root);
+            ? yield* request(() => client.newSession(connection.root), {
+                stage: "model-discovery",
+                detectedVersion: connection.version,
+              })
+            : yield* probeCommandInventory(
+                client,
+                profile.reviewedCommands,
+                connection.root,
+                connection.version,
+              );
         if (profile.closesSessions) yield* request(() => client.closeSession(scratch.sessionId));
         const observed = normalizeProbe(
           profile,

@@ -98,7 +98,7 @@ function fixture(profile: AcpProviderProfile, mode = "ready") {
   }
   writeFileSync(
     binaryPath,
-    `#!/bin/sh\nif [ "\${1:-}" = "--version" ]; then printf '%s\\n' '${versionOutput}'; exit 0; fi\nFAKE_ACP_MODE='${mode}' FAKE_ACP_ROOT='${root}' FAKE_ACP_AGENT_NAME='${profile.process.agentName}' exec /usr/bin/python3 '${fakeCliPath}' "$@"\n`,
+    `#!/bin/sh\nif [ "\${1:-}" = "--version" ]; then printf '%s\\n' '${versionOutput}'; exit 0; fi\nif [ '${mode}' = 'startup-argument-error' ]; then printf '%s\\n' 'error: unexpected argument --private-token=must-not-cross' >&2; exit 2; fi\nFAKE_ACP_MODE='${mode}' FAKE_ACP_ROOT='${root}' FAKE_ACP_AGENT_NAME='${profile.process.agentName}' exec /usr/bin/python3 '${fakeCliPath}' "$@"\n`,
   );
   chmodSync(binaryPath, 0o755);
   const sandboxPath = join(root, "sandbox-exec");
@@ -289,6 +289,34 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
 });
 
 describe("ACP process lifecycle", () => {
+  it("reports a bounded classified diagnostic when the provider rejects startup arguments", async () => {
+    const target = fixture(devin, "startup-argument-error");
+    const result = await failureOf(
+      Effect.scoped(
+        port({ confinement: passthroughConfinement }).start({
+          profile: devin,
+          binaryPath: target.binaryPath,
+          root: target.root,
+          managedHome: target.root,
+          mode: "code",
+          executionPolicy: "approval-gated",
+        }),
+      ),
+    );
+
+    expect(result).toMatchObject({
+      category: "unavailable",
+      diagnostic: {
+        stage: "initialization",
+        kind: "exited",
+        exitCode: 2,
+        detectedVersion: readyVersions.devin,
+        stderrContext: "Provider process rejected its configured arguments.",
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("must-not-cross");
+  });
+
   it("uses Devin's supported ACP launch flags", () => {
     const managedHome = "/private/tmp/octant-devin-home";
     expect(devin.process.args({ root: "/private/tmp/octant-root", managedHome })).toEqual([
@@ -315,6 +343,10 @@ describe("ACP process lifecycle", () => {
     expect(files.find((file) => file.path.endsWith("/config.json"))?.content).toContain(
       '"subagents_enabled": false',
     );
+  });
+
+  it("does not send the unsupported session close method to Devin", () => {
+    expect(devin.closesSessions).toBe(false);
   });
 
   it("injects a Mistral Vibe API key only when selected", () => {

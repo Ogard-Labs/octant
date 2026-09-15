@@ -35,6 +35,11 @@ bundling another binary.
   re-probes the resulting version. The user must stop active sessions first.
   Providers without a verified update command report the action as unsupported.
   Octant never silently updates a CLI.
+- The server that owns the provider instance owns the update. A remote client
+  can request the same action, but the configured executable, active-session
+  claim, updater process, and post-update probe all remain on that selected
+  host. The renderer never receives an updater command or arbitrary shell
+  authority.
 - An explicit provider-owned updater is a documented spawn exception to 0009's
   deny-default confinement. Session work stays sandboxed. The updater runs only
   the configured absolute binary with the verified argv, inherits the host
@@ -46,6 +51,12 @@ bundling another binary.
   raw, and the owned process group must exit before another session or updater
   is admitted against that executable. This is not a general unconstrained
   spawn exception.
+- Provider process and updater failures cross the client boundary only as a
+  bounded diagnostic: lifecycle stage, classified result, optional exit code
+  or signal, installed and supported versions when known, and a fixed safe
+  context classification. Raw stderr, stdout, arguments, environment, paths,
+  and provider response text never cross. A completed updater and its required
+  follow-up probe are reported as separate outcomes.
 - This is a scoped exception to the no-update rule in 0005 and its first-run
   restatement in 0112: discovery still never installs or automatically updates
   a runtime, but an explicit user action may invoke a verified provider-owned

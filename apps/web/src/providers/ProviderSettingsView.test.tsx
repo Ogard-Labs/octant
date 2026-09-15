@@ -698,6 +698,14 @@ describe("ProviderSettingsView", () => {
 
     const update = screen.getByRole("button", { name: "Update Kimi local CLI" });
     expect(update).toHaveTextContent("Update CLI");
+    await user.click(
+      within(screen.getByRole("article", { name: "Kimi local" })).getByRole("button", {
+        name: "Connection details",
+      }),
+    );
+    expect(
+      screen.getByText("CLI updates: Provider-owned update available on this host"),
+    ).toBeVisible();
     await user.click(update);
     expect(onUpdateProviderCli).toHaveBeenCalledWith(id);
     expect(screen.queryByText(/login profile was preserved/i)).not.toBeInTheDocument();
@@ -728,6 +736,9 @@ describe("ProviderSettingsView", () => {
       <ProviderSettingsView {...fixture()} onUpdateProviderCli={vi.fn(async () => true)} />,
     );
     expect(screen.queryByRole("button", { name: /Update .* CLI/ })).not.toBeInTheDocument();
+    expect(
+      screen.getByText("CLI updates: Manual installation required on this host"),
+    ).toBeVisible();
   });
 
   it("offers Check connection with failed-auth guidance without opening Details first", () => {
@@ -770,6 +781,36 @@ describe("ProviderSettingsView", () => {
     expect(within(card).getByText(/Devin subscription/i)).toBeVisible();
     expect(within(card).queryByLabelText(/api key|credential/i)).not.toBeInTheDocument();
     expect(card.textContent).not.toMatch(/account|team|oauth token|credentials\.toml|raw acp/i);
+  });
+
+  it("shows bounded process diagnostics for a failed Devin connection check", () => {
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: devinProvider(),
+          observed: observation({
+            readiness: "unavailable",
+            detectedVersion: "3000.10.27",
+            message: "Provider process rejected its configured arguments.",
+            diagnostic: {
+              stage: "initialization",
+              kind: "exited",
+              exitCode: 2,
+              stderrContext: "Provider process rejected its configured arguments.",
+            },
+          }),
+        })}
+      />,
+    );
+
+    const card = screen.getByRole("article", { name: "Devin local" });
+    expect(within(card).getByText("Failure stage: Initialization")).toBeVisible();
+    expect(within(card).getByText("Process result: Exited with code 2")).toBeVisible();
+    expect(
+      within(card).getByText(
+        "Safe stderr context: Provider process rejected its configured arguments.",
+      ),
+    ).toBeVisible();
   });
 
   it("renders Pi RPC identity, provider-owned authentication guidance, and strict configuration", async () => {
@@ -894,7 +935,7 @@ describe("ProviderSettingsView", () => {
 
     const card = screen.getByRole("article", { name: "Claude local" });
     const details = within(card).getByLabelText("Incompatibility details");
-    expect(within(card).getByText(/update your Claude installation/i)).toBeVisible();
+    expect(within(card).getByText(/Claude runtime is incompatible/i)).toBeVisible();
     expect(
       within(details).getByText(
         "Host check: Claude initialization version did not match the configured binary.",
@@ -1830,7 +1871,7 @@ describe("ProviderSettingsView", () => {
 
   it.each([
     ["unauthenticated", /authenticate with OpenCode/i],
-    ["incompatible", /update your OpenCode installation/i],
+    ["incompatible", /OpenCode runtime is incompatible/i],
     ["degraded", /review unavailable capabilities/i],
   ] as const)("provides actionable %s guidance", (readiness, guidance) => {
     renderExpanded(<ProviderSettingsView {...fixture({ observed: observation({ readiness }) })} />);

@@ -2461,6 +2461,43 @@ describe("ProviderService", () => {
     expect(JSON.stringify(observed)).not.toContain("secret provider diagnostic");
   });
 
+  it("preserves bounded process diagnostics and detected version after a failed probe", async () => {
+    const fixture = serviceFixture({
+      instances: [provider()],
+      probe: async () => {
+        throw {
+          category: "incompatible",
+          message: "private provider diagnostic",
+          diagnostic: {
+            stage: "version-check",
+            kind: "version-mismatch",
+            detectedVersion: "18.0.10",
+            supportedVersion: "17.2.1",
+            stderrContext: "Provider reported an incompatible installed version.",
+          },
+        };
+      },
+    });
+
+    await expect(fixture.service.probe(windowId, instanceId)).rejects.toMatchObject({
+      failure: { category: "incompatible" },
+    });
+    expect(fixture.runtime.observedState(instanceId)).toMatchObject({
+      readiness: "incompatible",
+      detectedVersion: "18.0.10",
+      message: "Provider reported an incompatible installed version.",
+      diagnostic: {
+        stage: "version-check",
+        kind: "version-mismatch",
+        detectedVersion: "18.0.10",
+        supportedVersion: "17.2.1",
+      },
+    });
+    expect(JSON.stringify(fixture.runtime.observedState(instanceId))).not.toContain(
+      "private provider diagnostic",
+    );
+  });
+
   it("clears prior discovery when probing a missing or disabled provider", async () => {
     const disabled = serviceFixture({ instances: [provider({ enabled: false })] });
     disabled.runtime.setObservedState(observation());
@@ -2914,13 +2951,20 @@ describe("ProviderService", () => {
     });
   });
 
-  it("reports an unknown version change when the follow-up probe has no comparable versions", async () => {
+  it("reports a failed follow-up probe when the updated runtime is unavailable", async () => {
     const fixture = serviceFixture({
       instances: [kimiProvider()],
       probe: async (instance) =>
         observation({
           instanceId: instance.id,
           readiness: "unavailable",
+          detectedVersion: "0.27.0",
+          diagnostic: {
+            stage: "initialization",
+            kind: "exited",
+            exitCode: 2,
+            stderrContext: "Provider process rejected its configured arguments.",
+          },
         }),
       runCliUpdate: async () => ({ output: "", exitCode: 0 }),
     });
@@ -2929,7 +2973,14 @@ describe("ProviderService", () => {
       fixture.service.execute(windowId, { kind: "update-provider-cli", instanceId }),
     ).resolves.toMatchObject({
       kind: "provider-cli-updated",
-      status: "version-unknown",
+      status: "probe-failed",
+      currentVersion: "0.27.0",
+      diagnostic: {
+        stage: "post-update-probe",
+        kind: "exited",
+        exitCode: 2,
+        stderrContext: "Provider process rejected its configured arguments.",
+      },
     });
   });
 
@@ -2937,7 +2988,15 @@ describe("ProviderService", () => {
     const fixture = serviceFixture({
       instances: [kimiProvider()],
       probe: async () => {
-        throw { category: "unavailable", message: "secret provider diagnostic" };
+        throw {
+          category: "unavailable",
+          message: "secret provider diagnostic",
+          diagnostic: {
+            stage: "initialization",
+            kind: "timed-out",
+            detectedVersion: "0.27.0",
+          },
+        };
       },
       runCliUpdate: async () => ({ output: "secret-token-value", exitCode: 0 }),
     });
@@ -2949,6 +3008,12 @@ describe("ProviderService", () => {
       kind: "provider-cli-updated",
       status: "probe-failed",
       previousVersion: "0.26.0",
+      currentVersion: "0.27.0",
+      diagnostic: {
+        stage: "post-update-probe",
+        kind: "timed-out",
+        detectedVersion: "0.27.0",
+      },
     });
   });
 

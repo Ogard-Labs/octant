@@ -1,5 +1,6 @@
 import {
   decodeProviderInstanceId,
+  decodeProviderFailure,
   type AgentEligibleModelRef,
   type HiddenProviderModelRef,
   type AnthropicCompatibleProviderConfiguration,
@@ -30,6 +31,7 @@ import {
   type ProviderModelId,
   type ProviderAuthenticationAttempt,
   type ProviderObservedState,
+  type ProviderProcessDiagnostic,
   type ProviderInstance,
   type ProviderRegistryCommand,
   type ProviderRegistryCommandResult,
@@ -3092,7 +3094,9 @@ function cliUpdateMessage(
       : `The provider CLI is already up to date (${result.currentVersion}).`;
   }
   if (result.status === "probe-failed") {
-    return "Provider CLI update finished, but the follow-up connection check failed.";
+    const version = result.currentVersion === undefined ? "" : ` at ${result.currentVersion}`;
+    const diagnostic = formatProviderProcessDiagnostic(result.diagnostic);
+    return `Provider CLI update finished${version}, but the follow-up connection check failed${diagnostic === undefined ? "." : `: ${diagnostic}`}`;
   }
   if (result.status === "version-unknown") {
     return "Provider CLI update finished. The installed version could not be compared.";
@@ -3101,6 +3105,23 @@ function cliUpdateMessage(
     return `Provider CLI updated from ${result.previousVersion} to ${result.currentVersion}.`;
   }
   return "Provider CLI updated.";
+}
+
+function formatProviderProcessDiagnostic(
+  diagnostic: ProviderProcessDiagnostic | undefined,
+): string | undefined {
+  if (diagnostic === undefined) return undefined;
+  const result =
+    diagnostic.kind === "exited" && diagnostic.exitCode !== undefined
+      ? `Exited with code ${diagnostic.exitCode}`
+      : diagnostic.kind === "signaled" && diagnostic.signal !== undefined
+        ? `Ended by ${diagnostic.signal}`
+        : diagnostic.kind === "timed-out"
+          ? "Timed out"
+          : diagnostic.kind === "cleanup-unconfirmed"
+            ? "Process cleanup could not be confirmed"
+            : "Provider process failed";
+  return `${result}.${diagnostic.stderrContext === undefined ? "" : ` ${diagnostic.stderrContext}`}`;
 }
 
 function failureMessage(error: unknown): string {
@@ -3131,24 +3152,26 @@ function domainValidationMessage(error: unknown): string {
 }
 
 function redactedProbeFailureMessage(error: unknown): string {
-  if (typeof error !== "object" || error === null || !("category" in error)) {
+  let failure;
+  try {
+    failure = decodeProviderFailure(error);
+  } catch {
     return "Octant Provider service is unavailable.";
   }
-  if (error.category === "unauthenticated") return "Provider authentication is required.";
-  if (error.category === "invalid-configuration") return "Provider configuration is invalid.";
-  if (error.category === "unsupported") return "Provider operation is unsupported.";
-  if (error.category === "unauthorized") return "Provider operation is not authorized.";
-  if (error.category === "interrupted") return "Provider operation was interrupted.";
-  if (error.category === "stale-resume") return "Provider session state is stale.";
-  if (error.category === "protocol") return "Provider returned an invalid response.";
-  if (error.category === "provider-failed") return "Provider operation failed.";
-  if (
-    error.category === "unavailable" &&
-    "message" in error &&
-    typeof error.message === "string" &&
-    error.message.startsWith("Provider CLI update")
-  ) {
-    return error.message;
+  const diagnostic = formatProviderProcessDiagnostic(failure.diagnostic);
+  if (failure.diagnostic?.stage === "update" && diagnostic !== undefined) {
+    return `Provider CLI update failed: ${diagnostic}`;
+  }
+  if (failure.category === "unauthenticated") return "Provider authentication is required.";
+  if (failure.category === "invalid-configuration") return "Provider configuration is invalid.";
+  if (failure.category === "unsupported") return "Provider operation is unsupported.";
+  if (failure.category === "unauthorized") return "Provider operation is not authorized.";
+  if (failure.category === "interrupted") return "Provider operation was interrupted.";
+  if (failure.category === "stale-resume") return "Provider session state is stale.";
+  if (failure.category === "protocol") return "Provider returned an invalid response.";
+  if (failure.category === "provider-failed") return "Provider operation failed.";
+  if (failure.category === "unavailable" && failure.message.startsWith("Provider CLI update")) {
+    return failure.message;
   }
   return "Octant Provider service is unavailable.";
 }
