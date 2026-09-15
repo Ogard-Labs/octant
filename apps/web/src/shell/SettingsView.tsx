@@ -15,7 +15,7 @@ import {
   type SidebarVibrancyMode,
 } from "@octant/contracts/theme";
 import { SIDEBAR_BACKGROUND_PRESETS } from "@octant/theme/backgrounds";
-import { isImageProfileDriverKind } from "@octant/domain";
+import { isImageProfileDriverKind, resolveAppBackground } from "@octant/domain";
 import type { ImplementedSettingId } from "./useShellController";
 import type { ProviderController } from "../providers/useProviderController";
 import type { DiscoveryController } from "../providers/useDiscoveryController";
@@ -1009,6 +1009,12 @@ interface AppearanceSectionProps extends SectionProps {
 }
 
 function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSectionProps) {
+  const theme = props.themeController?.draft ?? props.themeController?.settings;
+  const resolvedBackground = theme === undefined ? undefined : resolveAppBackground(theme);
+  const sidebarDecorationSuspended =
+    resolvedBackground !== undefined &&
+    resolvedBackground.kind !== "none" &&
+    resolvedBackground.coversSidebar;
   const isAvailable = (id: string) =>
     isSettingAvailable(findSetting(APPEARANCE_SECTION(), settingId(id))!, capabilities);
   return (
@@ -1289,6 +1295,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               settingId="sidebar-background"
             >
               <SidebarBackgroundSettings
+                suspended={sidebarDecorationSuspended}
                 background={
                   props.themeController?.draft?.sidebarBackground ??
                   props.settings.sidebarBackground
@@ -1707,12 +1714,14 @@ function AdvancedSection({
 }
 
 interface SidebarBackgroundSettingsProps {
+  readonly suspended: boolean;
   readonly background: SidebarBackground;
   readonly onSettingsChange: (patch: Partial<ShellSettings>) => void;
   readonly sidebarVibrancySupported: boolean;
 }
 
 function SidebarBackgroundSettings({
+  suspended,
   background,
   onSettingsChange,
   sidebarVibrancySupported,
@@ -1727,10 +1736,17 @@ function SidebarBackgroundSettings({
 
   return (
     <div className="settings-view__setting">
+      {suspended ? (
+        <p className="settings-view__hint">
+          Workspace background covers the sidebar. Turn off Cover the sidebar to use these saved
+          settings.
+        </p>
+      ) : null}
       <label className="settings-view__field">
         <span>Background type</span>
         <OctantSelectField
           aria-label="Sidebar background type"
+          disabled={suspended}
           className="settings-view__select"
           onValueChange={(kind) => {
             if (kind === "none") {
@@ -1784,6 +1800,7 @@ function SidebarBackgroundSettings({
                 <OctantButton
                   aria-checked={selected}
                   aria-label={preset.displayName}
+                  disabled={suspended}
                   className="settings-view__preset-swatch"
                   key={preset.id}
                   onClick={() =>
@@ -1820,6 +1837,7 @@ function SidebarBackgroundSettings({
         <span>Overlay color</span>
         <OctantInput
           aria-label="Sidebar overlay color"
+          disabled={suspended}
           className="settings-view__text-input"
           onChange={(event) =>
             setBackground({
@@ -1835,6 +1853,7 @@ function SidebarBackgroundSettings({
         <span>Overlay opacity</span>
         <SliderField
           aria-label="Sidebar overlay opacity"
+          disabled={suspended}
           className="settings-view__range"
           format={(value) => `${String(value)}%`}
           max={100}
@@ -1854,6 +1873,7 @@ function SidebarBackgroundSettings({
           <span>Vibrancy mode</span>
           <OctantSelectField
             aria-label="Sidebar vibrancy mode"
+            disabled={suspended}
             className="settings-view__select"
             onValueChange={(value) =>
               setBackground({

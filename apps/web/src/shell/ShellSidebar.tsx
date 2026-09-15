@@ -26,6 +26,7 @@ import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigat
 import { layoutSidebarDestinations, type SidebarNavigationInput } from "./navigationModel";
 
 export interface ShellSidebarProps {
+  readonly backgroundCoveredByWorkspace?: boolean;
   readonly activeDestination?: SidebarNavigationProps["activeDestination"];
   /**
    * Overrides the Automation Center navigation gate.
@@ -174,7 +175,9 @@ export function ShellSidebar(props: ShellSidebarProps) {
       className={`sidebar${props.projectsDirectory === undefined ? "" : " sidebar--projects"}`}
       data-octant-sidebar
     >
-      {props.resolvedSidebarBackground !== undefined && props.backgroundFetcher !== undefined ? (
+      {props.backgroundCoveredByWorkspace !== true &&
+      props.resolvedSidebarBackground !== undefined &&
+      props.backgroundFetcher !== undefined ? (
         <SidebarBackgroundLayer
           resolved={props.resolvedSidebarBackground}
           fetcher={props.backgroundFetcher}
