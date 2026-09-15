@@ -69,6 +69,7 @@ export type ShellControllerStatus =
 export type ImplementedSettingId =
   | "enable-chat"
   | "enable-work"
+  | "stream-replies"
   | "sidebar-width"
   | "sidebar-destinations"
   | "sidebar-more"
@@ -292,6 +293,7 @@ function nextAnnouncement(current: AnnouncementEvent, message: string): Announce
 const settingSearchText: Readonly<Record<ImplementedSettingId, string>> = {
   "enable-chat": "enable chat mode",
   "enable-work": "enable work mode",
+  "stream-replies": "stream replies answer presentation",
   "sidebar-width": "sidebar width",
   "sidebar-destinations": "sidebar destinations customize show hide rows menu reorder order",
   "sidebar-more":

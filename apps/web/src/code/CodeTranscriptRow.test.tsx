@@ -39,6 +39,21 @@ function disclosure(name: string): HTMLDetailsElement {
 }
 
 describe("CodeTranscriptRow", () => {
+  it("reveals reasoning-only history with one disclosure instead of nested Thinking rows", async () => {
+    render(
+      <CodeTranscriptRow
+        activity={{ reasoning: "Check the two sources.", rows: [] }}
+        running={false}
+        settled
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Thinking" }));
+    expect(screen.getByText("Check the two sources.")).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "Thinking" })).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "Thinking" }));
+    expect(screen.getByText("Check the two sources.")).not.toBeVisible();
+  });
+
   it("stops presenting unfinished tools as running after the turn settles", () => {
     render(
       <CodeTranscriptRow
@@ -311,6 +326,22 @@ describe("CodeTranscriptRow", () => {
     );
     expect(screen.getByText("exit 0")).not.toBeVisible();
     expect(screen.getByText("Check the failing suite first.")).not.toBeVisible();
+  });
+
+  it("keeps expanded reasoning visible when a tool turn finishes", async () => {
+    const user = userEvent.setup();
+    const activity: CodeTurnActivity = {
+      reasoning: "Check the failing suite first.",
+      rows: [
+        { kind: "tool", id: "call-1", toolName: "Bash", state: "completed", summary: "exit 0" },
+      ],
+    };
+    const { rerender } = render(<CodeTranscriptRow activity={activity} running />);
+    await user.click(screen.getByRole("button", { name: "Thinking" }));
+    expect(screen.getByText("Check the failing suite first.")).toBeVisible();
+    rerender(<CodeTranscriptRow activity={activity} running={false} settled />);
+    expect(screen.getByText("Check the failing suite first.")).toBeVisible();
+    expect(disclosure("1 tool call").open).toBe(false);
   });
 
   it("keeps a waiting approval row visible outside the settled fold", () => {

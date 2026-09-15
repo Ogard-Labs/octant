@@ -1,11 +1,11 @@
 import {
   Ban,
-  Check,
   Circle,
   CircleAlert,
   CircleX,
   Clock3,
   Copy,
+  GitBranch,
   LoaderCircle,
   RotateCcw,
 } from "lucide-react";
@@ -40,6 +40,8 @@ export interface TurnHeaderProps {
   readonly copyValue?: string | undefined;
   /** Runs the attempt again; offered only when the host exposes the command. */
   readonly onRegenerate?: (() => void) | undefined;
+  readonly onFork?: (() => void) | undefined;
+  readonly forkDisabled?: boolean | undefined;
   /** Why the turn failed, stopped, or waits, in the sanitized words the host gives. */
   readonly reason?: string;
 }
@@ -75,12 +77,12 @@ function outcomeIcon(outcome: TurnHeaderOutcome) {
     case "cancelled":
       return Ban;
     case "completed":
-      return Check;
+      return undefined;
   }
 }
 
 /**
- * One line above every assistant reply: how the turn ended and when. The
+ * Shared turn metadata: active or exceptional status, and quiet completion details. The
  * provider/model stays available in the hover details with the timestamp so
  * the transcript keeps its focus on the reply itself without losing
  * provenance.
@@ -97,25 +99,32 @@ export function TurnHeader(props: TurnHeaderProps) {
         data-outcome={props.outcome}
         {...(hoverDetails.length === 0 ? {} : { title: hoverDetails })}
       >
-        <span
-          className="turn-header__status"
-          // Only a turn still in flight, or paused on the person, is a live
-          // region; a finished outcome is static text, not an announcement.
-          {...(LIVE_OUTCOMES.has(props.outcome) || props.outcome === "waiting"
-            ? { "aria-live": "polite" as const, role: "status" }
-            : {})}
-        >
-          <Icon aria-hidden="true" size={12} strokeWidth={1.8} />
-          <span>{props.label ?? OUTCOME_LABELS[props.outcome]}</span>
-          {props.workedFor === undefined ? null : (
-            <span className="turn-header__worked-for">{props.workedFor}</span>
-          )}
-        </span>
-        {props.at === undefined ? null : (
+        {props.outcome === "completed" ? null : (
+          <span
+            className="turn-header__status"
+            // Only a turn still in flight, or paused on the person, is a live
+            // region; a finished outcome is static text, not an announcement.
+            {...(LIVE_OUTCOMES.has(props.outcome) || props.outcome === "waiting"
+              ? { "aria-live": "polite" as const, role: "status" }
+              : {})}
+          >
+            {Icon === undefined ? null : <Icon aria-hidden="true" size={12} strokeWidth={1.8} />}
+            <span>{props.label ?? OUTCOME_LABELS[props.outcome]}</span>
+          </span>
+        )}
+        {props.workedFor === undefined ? null : (
+          <span className="turn-header__worked-for">{props.workedFor}</span>
+        )}
+        {props.at === undefined &&
+        props.onFork === undefined &&
+        props.copyValue === undefined &&
+        props.onRegenerate === undefined ? null : (
           <span className="turn-header__time">
             <TurnTime
               at={props.at}
               copyValue={props.copyValue}
+              onFork={props.onFork}
+              forkDisabled={props.forkDisabled}
               {...(props.onRegenerate === undefined ? {} : { onRegenerate: props.onRegenerate })}
             />
           </span>
@@ -135,17 +144,37 @@ export function TurnHeader(props: TurnHeaderProps) {
  * for a timestamp the host did not give in a form a clock can read.
  */
 export function TurnTime(props: {
-  readonly at: string;
+  readonly at?: string | undefined;
   readonly copyValue?: string | undefined;
   readonly onRegenerate?: (() => void) | undefined;
+  readonly onFork?: (() => void) | undefined;
+  readonly forkDisabled?: boolean | undefined;
 }) {
   const label = turnTimeLabel(props.at);
-  if (label === undefined) return null;
+
   return (
     <span className="turn-message-meta">
-      <time className="turn-time" dateTime={props.at} title={turnTimeTitle(props.at)}>
-        {label}
-      </time>
+      {props.copyValue === undefined || props.copyValue.length === 0 ? null : (
+        <OctantIconButton
+          label="Copy message"
+          onClick={() => void copyText(props.copyValue ?? "")}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <Copy aria-hidden="true" size={14} />
+        </OctantIconButton>
+      )}
+      {props.onFork === undefined ? null : (
+        <OctantIconButton
+          label="Fork from here"
+          onClick={props.onFork}
+          disabled={props.forkDisabled}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <GitBranch aria-hidden="true" size={14} />
+        </OctantIconButton>
+      )}
       {props.onRegenerate === undefined ? null : (
         <OctantIconButton
           label="Regenerate response"
@@ -156,15 +185,10 @@ export function TurnTime(props: {
           <RotateCcw aria-hidden="true" size={14} />
         </OctantIconButton>
       )}
-      {props.copyValue === undefined || props.copyValue.length === 0 ? null : (
-        <OctantIconButton
-          label="Copy message"
-          onClick={() => void copyText(props.copyValue ?? "")}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <Copy aria-hidden="true" size={14} />
-        </OctantIconButton>
+      {label === undefined ? null : (
+        <time className="turn-time" dateTime={props.at} title={turnTimeTitle(props.at)}>
+          {label}
+        </time>
       )}
     </span>
   );

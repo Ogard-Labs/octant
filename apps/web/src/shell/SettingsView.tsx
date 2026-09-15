@@ -1022,6 +1022,21 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
           How much room the sidebar and the conversation take, and what the sidebar shows.
         </p>
         <div className="setgroup">
+          {isAvailable("stream-replies") ? (
+            <SettingRow
+              label="Stream replies"
+              description="Show answers as they arrive. Turn off to wait for the finished answer; reasoning stays expandable."
+              scope="app"
+              settingId="stream-replies"
+              focused={focusedSetting === settingId("stream-replies")}
+            >
+              <OctantSwitch
+                label="Stream replies"
+                checked={props.settings.streamReplies !== false}
+                onCheckedChange={(checked) => props.onSettingsChange({ streamReplies: checked })}
+              />
+            </SettingRow>
+          ) : null}
           {isAvailable("sidebar-width") ? (
             <SettingRow
               focused={focusedSetting === settingId("sidebar-width")}

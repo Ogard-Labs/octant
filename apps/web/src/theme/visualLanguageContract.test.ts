@@ -200,7 +200,7 @@ describe("the public-block visual language", () => {
       expect(source).toContain("turn-user");
       expect(source).toContain("turn-agent");
       expect(source).toContain("<TurnTime");
-      expect(source).toContain("<ChatRichText");
+      expect(source).toContain("<AssistantMessageBody");
     }
     for (const source of composers) {
       expect(source).toContain("thread-composer");

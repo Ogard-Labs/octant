@@ -1,3 +1,4 @@
+import { ChatRichText } from "../chat/ChatRichText";
 import { Check, ChevronRight, Circle, CircleX, Clock3, LoaderCircle } from "lucide-react";
 import { useState, type KeyboardEvent, type ReactNode, type ToggleEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -141,8 +142,7 @@ export function CodeTranscriptRow(props: CodeTranscriptRowProps) {
   const pinnedIds = new Set(pinnedRows.map(rowKey));
   const foldableRows = activity.rows.filter((row) => !pinnedIds.has(rowKey(row)));
   const summary = settledTurnActivitySummary(activity);
-  const foldSettledToolchain =
-    settled && !running && summary.length > 0 && (foldableRows.length > 0 || hasReasoning);
+  const foldSettledToolchain = settled && !running && summary.length > 0 && foldableRows.length > 0;
 
   const onToggle = (id: string) => (event: ToggleEvent<HTMLDetailsElement>) => {
     const nextOpen = event.newState === "open";
@@ -191,16 +191,11 @@ export function CodeTranscriptRow(props: CodeTranscriptRowProps) {
         />
         <span className="code-transcript-row__name">Thinking</span>
       </summary>
-      <p className="code-transcript-row__thinking-body">{activity.reasoning}</p>
+      <div className="code-transcript-row__thinking-body">
+        <ChatRichText body={activity.reasoning} />
+      </div>
     </details>
   ) : null;
-
-  const foldableBody = (
-    <>
-      {thinkingDisclosure}
-      {foldableRows.map(renderDisclosure)}
-    </>
-  );
 
   // Live turns keep every row in one stable list so a tool finishing does not
   // remount its disclosure (and clear the open state the user just set). The
@@ -210,6 +205,7 @@ export function CodeTranscriptRow(props: CodeTranscriptRowProps) {
       {activity.truncated === true ? (
         <p className="code-transcript-row__truncated">Earliest steps kept</p>
       ) : null}
+      {thinkingDisclosure}
       {foldSettledToolchain ? (
         <>
           {pinnedRows.map(renderDisclosure)}
@@ -236,14 +232,13 @@ export function CodeTranscriptRow(props: CodeTranscriptRowProps) {
               />
               <span className="code-transcript-row__name">{summary}</span>
             </summary>
-            <div className="code-transcript-row__toolchain">{foldableBody}</div>
+            <div className="code-transcript-row__toolchain">
+              {foldableRows.map(renderDisclosure)}
+            </div>
           </details>
         </>
       ) : (
-        <>
-          {thinkingDisclosure}
-          {activity.rows.map(renderDisclosure)}
-        </>
+        <>{activity.rows.map(renderDisclosure)}</>
       )}
     </div>
   );

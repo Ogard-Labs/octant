@@ -1171,6 +1171,7 @@ describe("ShellService", () => {
     const service = new ShellService({ persistence, uuid: uuidSequence(), clock: () => now });
     const settings = decodeShellSettings({
       chatEnabled: false,
+      streamReplies: false,
       workEnabled: true,
       sidebarWidth: 320,
       contextSidebarWidth: 360,

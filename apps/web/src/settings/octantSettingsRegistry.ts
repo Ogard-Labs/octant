@@ -79,6 +79,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         "appearance theme sidebar translucency layout width material background mode switcher",
       settings: [
         {
+          id: settingId("stream-replies"),
+          label: "Stream replies",
+          scope: "app",
+          keywords: "stream streaming answer response finished partial",
+        },
+        {
           id: settingId("sidebar-width"),
           label: "Sidebar width",
           scope: "app",

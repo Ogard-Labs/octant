@@ -6,6 +6,16 @@ import {
 } from "./chatMessageParts";
 
 describe("resolveChatMessageParts", () => {
+  it.each([
+    "```xml\n<think>example payload</think>\n```",
+    "Use `<thinking>example</thinking>` literally.",
+    "Use ``<reasoning>example `value`</reasoning>`` literally.",
+    "~~~xml\n<think>example payload</think>\n~~~",
+    "```xml\n<think>streaming example</think>",
+  ])("keeps reasoning markers inside code literal: %s", (body) => {
+    expect(parseChatMessageBody(body)).toEqual([{ kind: "markdown", text: body }]);
+  });
+
   it("prefers structured parts when present", () => {
     const parts = resolveChatMessageParts({
       role: "assistant",
@@ -52,5 +62,28 @@ describe("parseMarkdownBlocks", () => {
       { type: "code", language: "ts", code: "const x = 1" },
       { type: "paragraph", text: "Tail prose." },
     ]);
+  });
+});
+
+describe("parseChatMessageBody while streaming", () => {
+  it("parses an open think tail as reasoning while a reply streams", () => {
+    const parts = parseChatMessageBody("<think>Weighing the two options.");
+    expect(parts).toEqual([{ kind: "reasoning", text: "Weighing the two options." }]);
+  });
+
+  it("keeps prose before an open reasoning tail as markdown", () => {
+    const parts = parseChatMessageBody("The short answer is coming. <think>weighing options");
+    expect(parts[0]).toMatchObject({ kind: "markdown" });
+    expect(parts[1]).toMatchObject({ kind: "reasoning", text: "weighing options" });
+  });
+
+  it("parses an open reasoning fence tail as reasoning", () => {
+    const parts = parseChatMessageBody("```reasoning\nWeighing the two options.\n");
+    expect(parts).toEqual([{ kind: "reasoning", text: "Weighing the two options." }]);
+  });
+
+  it("keeps a reply without any reasoning opener as plain markdown", () => {
+    const parts = parseChatMessageBody("Just prose, still streaming.");
+    expect(parts).toEqual([{ kind: "markdown", text: "Just prose, still streaming." }]);
   });
 });

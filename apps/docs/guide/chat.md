@@ -83,8 +83,10 @@ carries the newest answer onward: later turns read the regenerated exchange,
 not the replaced one.
 
 A reply's reasoning folds into a **Thinking** disclosure above the text: shut
-by default, opened only if you want it, and still findable while closed. A
-tool call a reply made folds into its own disclosure the same way.
+by default, opened only if you want it, and still findable while closed. While
+the reply is still streaming, you can expand the reasoning to watch it arrive.
+It stays in the state you choose when the turn settles. A tool call a
+reply made folds into its own disclosure the same way.
 
 A checkpoint marker stays on the turn only when that point is marked. Restoring
 it starts a second thread; it does not rewind this one. The restored thread's
@@ -134,3 +136,18 @@ host.
 - [Work](/guide/work) for local knowledge work with a bound folder
 - [Code](/guide/code) for repository engineering with Git authority
 - [Projects](/guide/projects) for managing Projects across modes
+
+Successful replies show their text without a Completed status label. Their duration
+appears below the reply; hover over the reply to reveal its timestamp and actions. The timestamp hides
+when the pointer leaves. Keyboard focus can still reveal the action buttons.
+Chat and Code offer Copy and Fork below the reply; Chat also offers Regenerate.
+Fork creates a new thread with history through the selected response and leaves
+the original unchanged. Failures, interruptions, and requests for
+input remain visible. Chat, Work, and Code share this history treatment and fold
+inline reasoning into an expandable Thinking disclosure. Code also keeps its
+provider-reported reasoning channel in the turn’s existing disclosure.
+
+In Settings → Appearance, turn off **Stream replies** to wait for the finished
+answer in Chat, Work, and Code. Reasoning remains expandable during the turn;
+approval requests and provider questions remain available immediately. Streaming
+is enabled by default. This preference changes presentation, not provider execution.

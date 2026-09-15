@@ -85,7 +85,7 @@ import { useWorkFileMentions } from "./useWorkFileMentions";
 import { samePollingData } from "../polling/samePollingData";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
-import { ChatRichText } from "../chat/ChatRichText";
+import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import {
   documentIsVisible,
   scheduleVisibleInterval,
@@ -137,6 +137,7 @@ type WorkTranscriptRow =
       readonly kind: "message";
       readonly key: string;
       readonly entry: WorkTurnState["transcript"][number];
+      readonly streaming: boolean;
       /** When the person's message was accepted; assistant entries carry the time on their header. */
       readonly at?: string;
       /** The turn header, when this is the turn's first reply and so opens with it. */
@@ -486,6 +487,8 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           kind: "message",
           key: `${String(turn.requestId)}-${String(turnIndex)}-${entry.role}-${String(index)}`,
           entry,
+          streaming:
+            turn.status === "running" || turn.status === "accepted" || turn.status === "waiting",
           ...(entry.role === "user" ? { at: turn.acceptedAt } : {}),
           ...(opensTurn ? { head: turn } : {}),
         });
@@ -1207,7 +1210,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                     turn={row.head}
                   />
                 )}
-                {row.entry.text === "" ? null : <ChatRichText body={row.entry.text} />}
+                {row.entry.text === "" ? null : (
+                  <AssistantMessageBody body={row.entry.text} streaming={row.streaming} />
+                )}
               </article>
             );
           }

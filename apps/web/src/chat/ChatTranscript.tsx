@@ -4,7 +4,6 @@ import type {
   ChatAttemptAnsweredQuestion,
   ChatContentBody,
   ChatContentReference,
-  ChatMessagePart,
   ChatThreadView,
   ChatTurnId,
   ChatTurnRouteDecision,
@@ -12,7 +11,6 @@ import type {
 } from "@octant/contracts/chat";
 import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import { activeChatTurns } from "@octant/domain/chat-policy";
-import { resolveChatMessageParts } from "@octant/domain/chat-message-parts";
 import type { PickerGroup } from "@octant/domain";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import { TurnHeader, TurnTime, turnWorkedFor } from "../transcript/TurnHeader";
@@ -24,7 +22,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
-import { ChevronRight, CircleCheck } from "lucide-react";
+import { CircleCheck } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
@@ -33,7 +31,7 @@ import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
-import { ChatRichText } from "./ChatRichText";
+import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import { ChatTurnEditor } from "./ChatTurnEditor";
 
 export interface ChatTranscriptProps {
@@ -366,6 +364,12 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   attempt={attempt}
                   contentById={contentById}
                   key={attempt.id}
+                  onFork={
+                    props.onBranchTurn === undefined
+                      ? undefined
+                      : () => props.onBranchTurn?.(turn.id)
+                  }
+                  forkDisabled={props.busy === true}
                   onAnswerQuestion={props.onAnswerQuestion}
                   onDismissQuestion={props.onDismissQuestion}
                   onQuoteSelection={props.onQuoteSelection}
@@ -503,6 +507,8 @@ const AttemptBlock = memo(function AttemptBlock(props: {
   readonly onDismissQuestion: ChatTranscriptProps["onDismissQuestion"];
   readonly onQuoteSelection: ChatTranscriptProps["onQuoteSelection"];
   readonly onRetryAttempt: ChatTranscriptProps["onRetryAttempt"];
+  readonly onFork: (() => void) | undefined;
+  readonly forkDisabled: boolean;
   readonly previousAttempt: ChatAttempt | undefined;
   readonly providerGroups: ChatTranscriptProps["providerGroups"];
 }) {
@@ -536,6 +542,8 @@ const AttemptBlock = memo(function AttemptBlock(props: {
         <TurnHeader
           at={props.attempt.updatedAt}
           copyValue={responseBody}
+          onFork={props.attempt.outcome === "completed" ? props.onFork : undefined}
+          forkDisabled={props.forkDisabled}
           outcome={props.attempt.outcome}
           {...(props.attempt.pendingQuestion === undefined
             ? {}
@@ -639,57 +647,26 @@ function AssistantResponse(props: {
   readonly onQuoteSelection: ChatTranscriptProps["onQuoteSelection"];
   readonly responseBody: string;
 }) {
-  const parts = useMemo(
-    () => resolveChatMessageParts({ role: "assistant", body: props.responseBody }),
-    [props.responseBody],
-  );
   const rootId = `chat-quote-${String(props.attempt.id)}`;
-  const folded = parts.some((part) => part.kind === "reasoning" || part.kind === "tool");
-  if (!folded && !props.canQuote) return <ChatRichText body={props.responseBody} />;
   const rendered = (
-    <div className="chat-transcript__parts">
-      {parts.map((part, index) => (
-        <AssistantResponsePart key={`${part.kind}:${String(index)}`} part={part} />
-      ))}
-    </div>
+    <AssistantMessageBody
+      body={props.responseBody}
+      streaming={
+        props.attempt.outcome === "streaming" ||
+        props.attempt.outcome === "queued" ||
+        props.attempt.outcome === "waiting"
+      }
+    />
   );
-  if (!props.canQuote) return rendered;
   return (
     <QuoteableAssistantBody
+      enabled={props.canQuote}
       onQuote={(text) => props.onQuoteSelection?.({ turnId: props.attempt.turnId, text })}
       rootId={rootId}
     >
       {rendered}
     </QuoteableAssistantBody>
   );
-}
-
-function AssistantResponsePart(props: { readonly part: ChatMessagePart }) {
-  const part = props.part;
-  if (part.kind === "tool") {
-    return (
-      <details className="thinking">
-        <summary aria-label={`Tool · ${part.name}`}>
-          <ChevronRight aria-hidden="true" className="chev" size={14} strokeWidth={2} />
-          <span>{`Tool · ${part.name}`}</span>
-          <span>{part.status}</span>
-        </summary>
-        <div className="thinking-body">{part.summary}</div>
-      </details>
-    );
-  }
-  if (part.kind === "reasoning") {
-    return (
-      <details className="thinking">
-        <summary aria-label="Thinking">
-          <ChevronRight aria-hidden="true" className="chev" size={14} strokeWidth={2} />
-          <span>Thinking</span>
-        </summary>
-        <div className="thinking-body">{part.text}</div>
-      </details>
-    );
-  }
-  return <ChatRichText body={part.text} />;
 }
 
 /**
@@ -715,6 +692,7 @@ function AnsweredQuestionRow(props: { readonly question: ChatAttemptAnsweredQues
  * with its reasoning folded out of the way.
  */
 function QuoteableAssistantBody(props: {
+  readonly enabled: boolean;
   readonly rootId: string;
   readonly onQuote: (text: string) => void;
   readonly children: ReactNode;
@@ -722,6 +700,7 @@ function QuoteableAssistantBody(props: {
   const [offer, setOffer] = useState<{ readonly text: string } | undefined>(undefined);
 
   useEffect(() => {
+    if (!props.enabled) return;
     function onSelectionChange() {
       const selection = document.getSelection();
       if (selection === null || selection.isCollapsed || selection.rangeCount === 0) {
@@ -750,12 +729,12 @@ function QuoteableAssistantBody(props: {
     }
     document.addEventListener("selectionchange", onSelectionChange);
     return () => document.removeEventListener("selectionchange", onSelectionChange);
-  }, [props.rootId]);
+  }, [props.rootId, props.enabled]);
 
   return (
     <div className="chat-transcript__quoteable" id={props.rootId}>
       {props.children}
-      {offer === undefined ? null : (
+      {!props.enabled || offer === undefined ? null : (
         <div className="chat-transcript__quote-offer">
           <OctantButton
             onClick={(event: ReactMouseEvent<HTMLButtonElement>) => {

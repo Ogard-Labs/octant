@@ -194,7 +194,7 @@ describe("ChatTranscript", () => {
     expect(screen.getByText("diagram.png")).toBeVisible();
     expect(screen.queryByText(/managed\//i)).not.toBeInTheDocument();
     expect(screen.getByText("Interrupted")).toBeVisible();
-    expect(screen.getByText("Completed")).toBeVisible();
+    expect(screen.queryByText("Completed")).not.toBeInTheDocument();
     expect(screen.getByText("Provider handoff · model-b")).toBeVisible();
     expect(screen.getByRole("link", { name: "Octant guide · SearXNG" })).toHaveAttribute(
       "href",
@@ -203,9 +203,8 @@ describe("ChatTranscript", () => {
 
     const content = screen.getByRole("list", { name: "Chat transcript" });
     expect(content.textContent).toMatch(
-      // The outcome heads the reply, so a finished turn reads "Completed" and
-      // then what it said.
-      /Please summarize this\.\s*diagram\.png[\s\S]*Interrupted[\s\S]*Provider handoff · model-b[\s\S]*Completed[\s\S]*Here is the summary\./,
+      // Exceptional outcomes stay visible; successful replies speak for themselves.
+      /Please summarize this\.\s*diagram\.png[\s\S]*Interrupted[\s\S]*Provider handoff · model-b[\s\S]*Here is the summary\./,
     );
   });
 
@@ -436,7 +435,6 @@ describe("ChatTranscript", () => {
       "Interrupted",
       "Failed",
       "Cancelled",
-      "Completed",
     ]) {
       expect(screen.getByText(label)).toBeVisible();
     }
@@ -589,6 +587,62 @@ describe("ChatTranscript", () => {
 
     await user.click(screen.getByText("Thinking"));
     expect(thinking.open).toBe(true);
+  });
+
+  it("lets the reader expand streaming reasoning and keeps their choice after completion", () => {
+    const attempt = viewFixture().turns[0]!.attempts[1]!;
+    const streamingBody = " <think>Weighing the two options.";
+    const settledBody = " <think>Weighing the two options.</think>Here is the summary.";
+    const streaming = viewFixture({
+      turns: [
+        {
+          ...viewFixture().turns[0]!,
+          attempts: [
+            {
+              ...attempt,
+              outcome: "streaming",
+              responseRefs: [reference(ids.responseContent, "b")],
+            },
+          ],
+        },
+      ],
+      contents: [
+        body(ids.userContent, "user", "Please summarize this.", "a"),
+        body(ids.responseContent, "assistant", streamingBody, "b"),
+      ],
+    });
+    const onQuoteSelection = vi.fn();
+    const { rerender } = render(
+      <ChatTranscript onQuoteSelection={onQuoteSelection} view={streaming} />,
+    );
+
+    const live = screen.getByText("Thinking").closest("details");
+    if (!(live instanceof HTMLDetailsElement)) throw new Error("Thinking disclosure missing.");
+    expect(live.open).toBe(false);
+    fireEvent.click(screen.getByText("Thinking"));
+    expect(live.open).toBe(true);
+    expect(screen.getByText("Weighing the two options.")).toBeVisible();
+
+    rerender(
+      <ChatTranscript
+        onQuoteSelection={onQuoteSelection}
+        view={viewFixture({
+          turns: [
+            {
+              ...viewFixture().turns[0]!,
+              attempts: [{ ...attempt, responseRefs: [reference(ids.responseContent, "b")] }],
+            },
+          ],
+          contents: [
+            body(ids.userContent, "user", "Please summarize this.", "a"),
+            body(ids.responseContent, "assistant", settledBody, "b"),
+          ],
+        })}
+      />,
+    );
+    const settled = screen.getByText("Thinking").closest("details");
+    if (!(settled instanceof HTMLDetailsElement)) throw new Error("Thinking disclosure missing.");
+    expect(settled.open).toBe(true);
   });
 
   it("folds a reply's inline tool call into its own collapsed disclosure", () => {
@@ -990,7 +1044,7 @@ describe("ChatTranscript", () => {
     expect(screen.queryByRole("button", { name: "Forget" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry interrupted response" })).toBeVisible();
     expect(screen.getByText("Interrupted")).toBeVisible();
-    expect(screen.getByText("Completed")).toBeVisible();
+    expect(screen.queryByText("Completed")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "More actions" }));
     expect(await screen.findByRole("menuitemradio", { name: "Restore from here" })).toBeVisible();

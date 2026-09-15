@@ -41,10 +41,22 @@ function parseToolMeta(info: string): { name: string; status: ChatToolPartStatus
 /**
  * Split a host message body into reasoning / tool / markdown parts.
  * Recognizes ```reasoning|thinking fences, ```tool fences, and <thinking>,
- * <reasoning>, and <think> tags.
+ * <reasoning>, and <think> tags — the closed pairs, plus an open tail at the end of a
+ * body that is still streaming.
  */
 export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePart> {
   if (body.length === 0) return [{ kind: "markdown", text: "" }];
+
+  // Reasoning markers inside code samples are literal source, including an
+  // unfinished fenced sample arriving over a live stream.
+  const literalRanges = [
+    ...body.matchAll(
+      /^ {0,3}((`|~)\2{2,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1\2*[ \t]*(?:\n|$)|(?![\s\S]))/gm,
+    ),
+    ...body.matchAll(/(?<!`)(`+)(?!`)[\s\S]*?\1(?!`)/g),
+  ].map((match) => ({ start: match.index, end: match.index + match[0].length }));
+  const insideCode = (position: number) =>
+    literalRanges.some((range) => position >= range.start && position < range.end);
 
   const parts: ChatMessagePart[] = [];
   let cursor = 0;
@@ -52,6 +64,7 @@ export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePar
 
   for (const match of body.matchAll(THINKING_TAG)) {
     const start = match.index ?? 0;
+    if (insideCode(start)) continue;
     annotated.push({
       start,
       end: start + match[0].length,
@@ -60,6 +73,7 @@ export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePar
   }
   for (const match of body.matchAll(REASONING_TAG)) {
     const start = match.index ?? 0;
+    if (insideCode(start)) continue;
     annotated.push({
       start,
       end: start + match[0].length,
@@ -68,6 +82,7 @@ export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePar
   }
   for (const match of body.matchAll(THINK_TAG)) {
     const start = match.index ?? 0;
+    if (insideCode(start)) continue;
     annotated.push({
       start,
       end: start + match[0].length,
@@ -115,6 +130,31 @@ export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePar
     }
     parts.push(item.part);
     cursor = item.end;
+  }
+  // A reply that is still streaming ends inside its reasoning: the opener has
+  // arrived but the closer has not. Parse the open tail as reasoning so the
+  // person can watch the thinking while it streams, rather than reading
+  // nothing until the block finally closes.
+  const tail = body.slice(cursor);
+  const tailOpeners = [
+    ...Array.from(tail.matchAll(/<(?:think|thinking|reasoning)>/gi)).filter(
+      (match) => !insideCode(cursor + match.index),
+    ),
+    ...Array.from(tail.matchAll(/^```(?:reasoning|thinking)[^\n]*\n/gm)).filter(
+      (match) =>
+        !literalRanges.some(
+          (range) => range.start < cursor + match.index && cursor + match.index < range.end,
+        ),
+    ),
+  ].sort((left, right) => (right.index ?? 0) - (left.index ?? 0));
+  const openTail = tailOpeners[0];
+  if (openTail !== undefined) {
+    const openerAt = openTail.index ?? 0;
+    const before = tail.slice(0, openerAt).trim();
+    if (before.length > 0) parts.push({ kind: "markdown", text: before });
+    const streaming = tail.slice(openerAt + openTail[0].length).trim();
+    if (streaming.length > 0) parts.push({ kind: "reasoning", text: streaming });
+    return parts.length === 0 ? [{ kind: "markdown", text: body }] : parts;
   }
   if (cursor < body.length) {
     const text = body.slice(cursor).trim();

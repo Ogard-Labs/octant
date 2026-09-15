@@ -960,6 +960,7 @@ describe("useCodeController", () => {
       }),
       expect.objectContaining({
         role: "assistant",
+        at: now,
         providerInstanceId: ids.provider,
         modelId: "model-a",
       }),
@@ -1833,6 +1834,171 @@ describe("useCodeController", () => {
       expect.any(AbortSignal),
     );
 
+    unmount();
+  });
+
+  it("shows source history through the chosen response in a fork", async () => {
+    const promptId = "60000000-0000-4000-8000-000000000010";
+    const replyId = "60000000-0000-4000-8000-000000000011";
+    const operationId = "70000000-0000-4000-8000-000000000010";
+    const conversation = vi.fn(async () => ({
+      version: 3 as const,
+      threadId: ids.thread,
+      turns: [
+        {
+          operationId,
+          providerInstanceId: ids.provider,
+          modelId: "model-before-rebind",
+          sessionId: "80000000-0000-4000-8000-000000000010",
+          prompt: { contentId: promptId, digest: "a".repeat(64), byteLength: 11 },
+          assistant: [{ contentId: replyId, digest: "b".repeat(64), byteLength: 12 }],
+          status: "failed" as const,
+          startedAt: now,
+          updatedAt: now,
+        },
+      ],
+      nextCursor: 42,
+      hasMore: false,
+    }));
+    const operationContent = vi.fn();
+    const operationContents = vi.fn(async (request) => ({
+      threadId: request.threadId,
+      items: [
+        { operationId, contentId: promptId, text: "check tests" },
+        { operationId, contentId: replyId, text: "tests failed" },
+      ],
+    }));
+    const parentId = "10000000-0000-4000-8000-000000000099" as CodeThreadId;
+    const sourceConversation = conversation;
+    const refresh = deferred<void>();
+    async function* refreshStream(signal: AbortSignal) {
+      await refresh.promise;
+      yield {
+        threadId: ids.thread,
+        sequence: 2,
+        event: { kind: "thread-updated", thread: thread(2) },
+      } as never;
+      yield* idleStream(signal);
+    }
+    const client = fakeClient({
+      subscribe: vi.fn((_id, _cursor, signal) => refreshStream(signal)),
+      thread: vi.fn(async (threadId) =>
+        threadId === parentId
+          ? { ...view(1), thread: { ...view(1).thread, id: parentId } }
+          : {
+              ...view(1),
+              thread: {
+                ...view(1).thread,
+                forkedFrom: { threadId: parentId, throughOperationId: operationId },
+              },
+            },
+      ),
+      conversation: vi.fn(async (threadId) =>
+        threadId === parentId
+          ? { ...(await sourceConversation()), threadId: parentId }
+          : { version: 3, threadId, turns: [], nextCursor: 0, hasMore: false },
+      ) as never,
+      operationContent,
+      operationContents,
+    } as never);
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+
+    await waitFor(() =>
+      expect(result.current.conversation.map((message) => message.text)).toEqual([
+        "check tests",
+        "tests failed",
+      ]),
+    );
+    expect(result.current.conversation[1]).toMatchObject({
+      operationId,
+      sourceThreadId: parentId,
+      providerInstanceId: ids.provider,
+      modelId: "model-before-rebind",
+      status: "failed",
+    });
+
+    expect(operationContents).toHaveBeenCalledOnce();
+    expect(operationContent).not.toHaveBeenCalled();
+    refresh.resolve();
+    await waitFor(() => expect(client.conversation).toHaveBeenCalledTimes(3));
+    expect(result.current.conversation.map((message) => message.text)).toEqual([
+      "check tests",
+      "tests failed",
+    ]);
+    unmount();
+  });
+
+  it("keeps a fork readable when its source history is unavailable", async () => {
+    const promptId = "60000000-0000-4000-8000-000000000010";
+    const replyId = "60000000-0000-4000-8000-000000000011";
+    const operationId = "70000000-0000-4000-8000-000000000010";
+    const conversation = vi.fn(async () => ({
+      version: 3 as const,
+      threadId: ids.thread,
+      turns: [
+        {
+          operationId,
+          providerInstanceId: ids.provider,
+          modelId: "model-before-rebind",
+          sessionId: "80000000-0000-4000-8000-000000000010",
+          prompt: { contentId: promptId, digest: "a".repeat(64), byteLength: 11 },
+          assistant: [{ contentId: replyId, digest: "b".repeat(64), byteLength: 12 }],
+          status: "failed" as const,
+          startedAt: now,
+          updatedAt: now,
+        },
+      ],
+      nextCursor: 42,
+      hasMore: false,
+    }));
+    const operationContent = vi.fn();
+    const operationContents = vi.fn(async (request) => ({
+      threadId: request.threadId,
+      items: [
+        { operationId, contentId: promptId, text: "check tests" },
+        { operationId, contentId: replyId, text: "tests failed" },
+      ],
+    }));
+    const parentId = "10000000-0000-4000-8000-000000000099" as CodeThreadId;
+    const client = fakeClient({
+      thread: vi.fn(async (threadId) =>
+        threadId === parentId
+          ? Promise.reject(new Error("Source unavailable"))
+          : {
+              ...view(1),
+              thread: {
+                ...view(1).thread,
+                forkedFrom: { threadId: parentId, throughOperationId: operationId },
+              },
+            },
+      ),
+      conversation,
+      operationContent,
+      operationContents,
+    } as never);
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+
+    await waitFor(() =>
+      expect(result.current.conversation.map((message) => message.text)).toEqual([
+        "check tests",
+        "tests failed",
+      ]),
+    );
+    expect(result.current.conversation[1]).toMatchObject({
+      operationId,
+      providerInstanceId: ids.provider,
+      modelId: "model-before-rebind",
+      status: "failed",
+    });
+
+    expect(operationContents).toHaveBeenCalledOnce();
+    expect(operationContent).not.toHaveBeenCalled();
+    expect(result.current.conversationHistory).toBe("loaded");
+    expect(result.current.turnError).toBe("Inherited conversation history could not be loaded.");
     unmount();
   });
 

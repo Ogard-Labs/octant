@@ -112,6 +112,7 @@ export interface CodeConversationMessage {
   readonly role: "user" | "assistant";
   readonly text: string;
   readonly operationId?: CodeOperationId;
+  readonly sourceThreadId?: CodeThreadId;
   readonly providerInstanceId?: CodeThread["providerInstanceId"];
   readonly modelId?: CodeThread["modelId"];
   readonly status?: "waiting" | "completed" | "interrupted" | "failed" | "incomplete";
@@ -242,6 +243,7 @@ const MAX_CODE_RECONNECT_DELAY_MS = 10_000;
  * so a retried thread does not keep wearing a stale history banner.
  */
 const HISTORY_UNAVAILABLE_MESSAGE = "Conversation history could not be loaded.";
+const INHERITED_HISTORY_UNAVAILABLE_MESSAGE = "Inherited conversation history could not be loaded.";
 
 /** The first wait after a failed catch-up, before the delay starts doubling. */
 const MIN_CODE_RECONNECT_BACKOFF_MS = 100;
@@ -383,6 +385,7 @@ export function useCodeController(options: CodeControllerOptions) {
     knownDraftThreads.current = new Set(threadIds);
   }, []);
   const [conversation, setConversation] = useState<ReadonlyArray<CodeConversationMessage>>([]);
+  const inheritedConversation = useRef<ReadonlyArray<CodeConversationMessage>>([]);
   /*
    * Whether an empty transcript is still loading, authoritatively empty, or
    * unavailable. Only the loaded state is an invitation to start something.
@@ -824,7 +827,7 @@ export function useCodeController(options: CodeControllerOptions) {
         nextCursor = page.nextCursor;
         setThreadUsage({ ...totalTurnUsage(usageByOperation.current), limits: pageLimits });
         setRestoreUndo(pageRestoreUndo);
-        setConversation([...messages]);
+        setConversation([...inheritedConversation.current, ...messages]);
         if (projected.activity.size > 0) {
           setTurnActivity((current) => new Map([...current, ...projected.activity]));
         }
@@ -868,6 +871,7 @@ export function useCodeController(options: CodeControllerOptions) {
   const activateThread = useCallback(
     async (threadId: CodeThreadId) => {
       const request = ++threadGeneration.current;
+      inheritedConversation.current = [];
       streamAbort.current?.abort();
       const controller = new AbortController();
       streamAbort.current = controller;
@@ -902,13 +906,32 @@ export function useCodeController(options: CodeControllerOptions) {
           // banner down. Only that message: a first-turn failure noted just
           // before activation still belongs to the user's bounced prompt.
           setTurnError((current) =>
-            current === HISTORY_UNAVAILABLE_MESSAGE ? undefined : current,
+            current === HISTORY_UNAVAILABLE_MESSAGE ||
+            current === INHERITED_HISTORY_UNAVAILABLE_MESSAGE
+              ? undefined
+              : current,
           );
         } catch {
           if (!isActive(request, threadGeneration, mounted)) return;
           setConversation([]);
           setConversationHistory("unavailable");
           setTurnError(HISTORY_UNAVAILABLE_MESSAGE);
+        }
+        if (initial.thread.forkedFrom !== undefined) {
+          try {
+            const inherited = await readForkConversation(
+              client,
+              initial.thread.forkedFrom,
+              controller.signal,
+            );
+            if (!isActive(request, threadGeneration, mounted)) return;
+            inheritedConversation.current = inherited.messages;
+            setConversation((current) => [...inherited.messages, ...current]);
+            setTurnActivity((current) => new Map([...inherited.activity, ...current]));
+          } catch {
+            if (!isActive(request, threadGeneration, mounted)) return;
+            setTurnError((current) => current ?? INHERITED_HISTORY_UNAVAILABLE_MESSAGE);
+          }
         }
         if (!isActive(request, threadGeneration, mounted)) return;
         // The thread is open in front of the user now: its recorded turns when
@@ -2062,6 +2085,7 @@ export function useCodeController(options: CodeControllerOptions) {
         ]);
 
         let cursor = 0;
+        let assistantAt: string | undefined;
         let assistantText = "";
         let terminal = false;
         const settleActiveTurn = (
@@ -2076,7 +2100,12 @@ export function useCodeController(options: CodeControllerOptions) {
           setConversation((current) =>
             current.map((entry) =>
               entry.id === assistantId
-                ? { ...entry, text: entry.text.trim().length > 0 ? entry.text : message, status }
+                ? {
+                    ...entry,
+                    ...(assistantAt === undefined ? {} : { at: assistantAt }),
+                    text: entry.text.trim().length > 0 ? entry.text : message,
+                    status,
+                  }
                 : entry,
             ),
           );
@@ -2091,6 +2120,7 @@ export function useCodeController(options: CodeControllerOptions) {
           )) {
             received += 1;
             cursor = Number(frame.cursor);
+            assistantAt = frame.occurredAt;
             const event = frame.event;
             noteProviderRequest(event);
             noteActivity(operationId, event);
@@ -2142,7 +2172,9 @@ export function useCodeController(options: CodeControllerOptions) {
                 const nextText = assistantText;
                 setConversation((current) =>
                   current.map((message) =>
-                    message.id === assistantId ? { ...message, text: nextText } : message,
+                    message.id === assistantId
+                      ? { ...message, text: nextText, at: frame.occurredAt }
+                      : message,
                   ),
                 );
               }
@@ -2199,6 +2231,7 @@ export function useCodeController(options: CodeControllerOptions) {
               ? {
                   ...message,
                   status: "completed",
+                  ...(assistantAt === undefined ? {} : { at: assistantAt }),
                   text:
                     assistantText.trim() === ""
                       ? "The provider turn finished without a visible reply."
@@ -2468,6 +2501,56 @@ async function readOperationText(
   } catch {
     return undefined;
   }
+}
+
+async function readForkConversation(
+  client: CodeClient,
+  origin: NonNullable<CodeThread["forkedFrom"]>,
+  signal: AbortSignal,
+  visited: ReadonlySet<string> = new Set(),
+): Promise<{
+  readonly messages: ReadonlyArray<CodeConversationMessage>;
+  readonly activity: ReadonlyMap<string, CodeTurnActivity>;
+}> {
+  const sourceId = String(origin.threadId);
+  if (visited.has(sourceId) || visited.size >= 32)
+    throw new Error("Fork history contains an invalid lineage.");
+  const source = await client.thread(origin.threadId, signal);
+  const inherited =
+    source.thread.forkedFrom === undefined
+      ? { messages: [], activity: new Map<string, CodeTurnActivity>() }
+      : await readForkConversation(
+          client,
+          source.thread.forkedFrom,
+          signal,
+          new Set([...visited, sourceId]),
+        );
+  const messages: CodeConversationMessage[] = [...inherited.messages];
+  const activity = new Map(inherited.activity);
+  let cursor = 0;
+  for (let pageIndex = 0; pageIndex < 100; pageIndex += 1) {
+    const page = await client.conversation(origin.threadId, cursor, 50, signal);
+    const boundary = page.turns.findIndex(
+      (turn) => String(turn.operationId) === String(origin.throughOperationId),
+    );
+    const turns = boundary < 0 ? page.turns : page.turns.slice(0, boundary + 1);
+    const evidence = await readConversationEvidence(client, origin.threadId, turns, signal);
+    const projected = await projectConversationTurns(
+      client,
+      origin.threadId,
+      turns,
+      evidence,
+      signal,
+    );
+    messages.push(
+      ...projected.messages.map((message) => ({ ...message, sourceThreadId: origin.threadId })),
+    );
+    for (const [key, value] of projected.activity) activity.set(key, value);
+    if (boundary >= 0) return { messages, activity };
+    if (!page.hasMore || page.nextCursor <= cursor) break;
+    cursor = page.nextCursor;
+  }
+  throw new Error("The source response for this fork is unavailable.");
 }
 
 async function projectConversationTurns(

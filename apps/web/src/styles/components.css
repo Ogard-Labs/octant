@@ -924,7 +924,8 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 }
 
 /* ── Turn header ───────────────────────────────────────────────────────────
-   One line above every assistant reply, in every mode: outcome and time.
+   Active and exceptional outcomes stay above the reply; successful metadata
+   follows the reply without a redundant success announcement.
    Provider/model provenance is available in the header's hover details.
    Status colour is the only colour; the interface face, not the code face,
    because "Failed" is a sentence to the person, not an identifier. */
@@ -948,11 +949,6 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   gap: 4px;
 }
 
-.turn-header__worked-for::before {
-  content: "·";
-  margin-inline-end: 4px;
-}
-
 .turn-header[data-outcome="failed"] .turn-header__status,
 .turn-header[data-outcome="interrupted"] .turn-header__status {
   color: var(--octant-danger-text);
@@ -962,8 +958,20 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   color: var(--octant-warning-text);
 }
 
-.turn-header[data-outcome="completed"] .turn-header__status {
-  color: var(--octant-success-text);
+.turn-agent:has(> .turn-header[data-outcome="completed"]),
+.turn-agent > .turn-action-menu:has(> .turn-header[data-outcome="completed"]) {
+  display: flex;
+  flex-direction: column;
+}
+
+.turn-agent > .turn-header[data-outcome="completed"],
+.turn-agent > .turn-action-menu > .turn-header[data-outcome="completed"] {
+  order: 1;
+  margin: var(--oct-space-2) 0 0;
+}
+
+.turn-header[data-outcome="completed"] .turn-header__time {
+  margin-inline-start: 0;
 }
 
 .turn-header[data-outcome="streaming"] .turn-header__status > svg,
@@ -1084,4 +1092,12 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
     opacity: 1;
     pointer-events: auto;
   }
+}
+
+/* Keyboard focus may reveal actions, but the response clock follows the pointer. */
+.turn-agent .turn-time {
+  visibility: hidden;
+}
+.turn-agent:hover .turn-time {
+  visibility: visible;
 }
