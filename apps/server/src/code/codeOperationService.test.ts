@@ -1516,6 +1516,32 @@ describe("CodeOperationService", () => {
     expect(fixture.turns.start.mock.calls[0]![0].context).toBeUndefined();
   });
 
+  it("sends approved selected skill instructions to the Code provider", async () => {
+    const fixture = providerTurnFixture({
+      resolveSelectedSkillContext: async () => ({
+        kind: "resolved",
+        context: [{ kind: "instructions", text: "Use the synthetic project review checklist." }],
+      }),
+    });
+    const result = await fixture.service.execute(ids.window, {
+      ...startProviderTurn,
+      extensionSelections: [
+        {
+          kind: "skill",
+          skillId: `agents-skills-directory:project:review:sha256:${"a".repeat(64)}`,
+          packageDigest: `sha256:${"a".repeat(64)}`,
+          catalogEpoch: `sha256:${"b".repeat(64)}`,
+          origin: { kind: "draft", reference: "review" },
+        },
+      ],
+    });
+    expect(result.kind).toBe("provider-turn-state");
+    expect(fixture.turns.start.mock.calls[0]?.[0].context).toContainEqual({
+      kind: "instructions",
+      text: "Use the synthetic project review checklist.",
+    });
+  });
+
   it("refuses a selected skill before Code provider execution when no material resolver exists", async () => {
     const fixture = providerTurnFixture();
     const result = await fixture.service.execute(ids.window, {
@@ -1792,6 +1818,7 @@ function providerTurnFixture(
       | "resolveThreadMentionContext"
       | "resolveForkHandoff"
       | "resolveProfileSkills"
+      | "resolveSelectedSkillContext"
       | "attachments"
       | "supportsAttachments"
       | "git"

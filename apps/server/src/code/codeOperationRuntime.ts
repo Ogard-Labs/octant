@@ -291,6 +291,7 @@ export interface CodeOperationRuntimeOptions {
   readonly resolveBaseCheckoutRoot?: (thread: CodeThread) => Promise<string | undefined>;
   readonly resolveForkHandoff?: CodeOperationServiceOptions["resolveForkHandoff"];
   readonly resolveProfileSkills?: CodeOperationServiceOptions["resolveProfileSkills"];
+  readonly resolveSelectedSkillContext?: CodeOperationServiceOptions["resolveSelectedSkillContext"];
   /**
    * Where a curated scaffold runs. Absent on a host that offers none, which
    * refuses the operation rather than running a generator nobody configured.
@@ -617,6 +618,9 @@ export function createCodeOperationRuntime(
     ...(options.resolveForkHandoff === undefined
       ? {}
       : { resolveForkHandoff: options.resolveForkHandoff }),
+    ...(options.resolveSelectedSkillContext === undefined
+      ? {}
+      : { resolveSelectedSkillContext: options.resolveSelectedSkillContext }),
     ...(options.resolveProfileSkills === undefined
       ? {}
       : { resolveProfileSkills: options.resolveProfileSkills }),

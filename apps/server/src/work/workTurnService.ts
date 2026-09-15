@@ -1,3 +1,4 @@
+import type { SelectedSkillContextResolver } from "../extensions/selectedSkillContext";
 import {
   ActorId,
   CorrelationId,
@@ -133,6 +134,7 @@ export class WorkTurnServiceError extends Error {
 }
 
 export interface WorkTurnServiceDependencies {
+  readonly resolveSelectedSkillContext?: SelectedSkillContextResolver;
   readonly persistence: {
     readonly status: () => { readonly state: string; readonly integrity: string };
     readonly readProject: (projectId: ProjectId) => Project | undefined;
@@ -278,6 +280,7 @@ export interface WorkTurnServiceDependencies {
 }
 
 export class WorkTurnService {
+  readonly #resolveSelectedSkillContext: SelectedSkillContextResolver | undefined;
   readonly #persistence: WorkTurnServiceDependencies["persistence"];
   readonly #threads: WorkTurnServiceDependencies["threads"];
   readonly #projects: WorkTurnServiceDependencies["projects"];
@@ -314,6 +317,7 @@ export class WorkTurnService {
   readonly #liveTasks = new Map<string, ThreadTaskProgressList>();
 
   constructor(dependencies: WorkTurnServiceDependencies) {
+    this.#resolveSelectedSkillContext = dependencies.resolveSelectedSkillContext;
     this.#persistence = dependencies.persistence;
     this.#threads = dependencies.threads;
     this.#projects = dependencies.projects;
@@ -494,6 +498,24 @@ export class WorkTurnService {
       throw this.#failure("unavailable", "An image attached to this turn is unavailable.");
     }
 
+    const selections =
+      command.extensionSelections?.filter((selection) => !isBrowserUseSelection(selection)) ?? [];
+    let skillContext: ReadonlyArray<ProviderContextBlock> = [];
+    if (selections.length > 0) {
+      const resolved =
+        thread === undefined
+          ? undefined
+          : await this.#resolveSelectedSkillContext?.({ mode: "work", thread, selections }).catch(
+              () => undefined,
+            );
+      if (resolved === undefined || resolved.kind === "unavailable") {
+        throw this.#failure(
+          "unavailable",
+          resolved?.message ?? "Selected skill context is unavailable for Work on this host.",
+        );
+      }
+      skillContext = resolved.context;
+    }
     const acceptedAt = decodeTimestamp(this.#clock());
     const providerSessionId = decodeProviderSessionId(this.#uuid());
     const planned = planWorkTurnContext({
@@ -504,6 +526,16 @@ export class WorkTurnService {
       createdAt: this.#clock(),
       safeInputBudget: this.#safeInputBudgetTokens,
       contributions: [
+        ...skillContext.map(
+          (block, index): WorkTurnContextContribution => ({
+            text: block.text,
+            sourceKind: "instruction",
+            referenceId: `selected-skill:${index}`,
+            category: "workspace-context",
+            posture: "required",
+            block,
+          }),
+        ),
         ...(await this.#projectBriefContributions(project, command.threadId)),
         ...this.#priorTranscriptContributions(command.threadId),
         ...(await this.#threadMentionContributions(
@@ -794,21 +826,6 @@ export class WorkTurnService {
         ...input,
         context: [...input.context, { kind: "instructions", text: BROWSER_SELECTION_GUIDANCE }],
       };
-    }
-    // Work does not yet have an approved skill-material resolver. Refuse an
-    // explicit skill selection before provider execution instead of silently
-    // dropping the instruction the person chose. Host-owned Browser selections
-    // remain valid because Browser is already composed through app-managed
-    // tools above.
-    if (input.command.extensionSelections?.some((selection) => !isBrowserUseSelection(selection))) {
-      this.#persistUpdate(current, {
-        status: "failed",
-        failure: {
-          category: "unavailable",
-          message: "Selected skill context is unavailable for Work on this host.",
-        },
-      });
-      return;
     }
     const harnessScope: NativeHarnessTurnScope | undefined =
       input.thread === undefined

@@ -107,9 +107,21 @@ describe("WorkTurnService", () => {
     expect(fixture.acquireInputs).toHaveLength(0);
   });
 
-  it("refuses an explicit skill until Work has a material resolver", async () => {
-    const fixture = serviceFixture();
-    const result = await fixture.service.startFirstTurn(ids.window, {
+  it("sends approved selected skill instructions to the Work provider", async () => {
+    const contexts: Array<ReadonlyArray<{ readonly kind: string; readonly text: string }>> = [];
+    const fixture = serviceFixture({
+      resolveSelectedSkillContext: async () => ({
+        kind: "resolved",
+        context: [{ kind: "instructions", text: "Use the synthetic Work checklist." }],
+      }),
+      turnRuntime: {
+        run: async (input) => {
+          contexts.push(input.context ?? []);
+          return { kind: "completed", response: "Ready" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, {
       ...startCommand(),
       extensionSelections: [
         {
@@ -121,17 +133,57 @@ describe("WorkTurnService", () => {
         },
       ],
     });
-    expect(result.kind).toBe("accepted");
     await fixture.waitForIdle();
-    const lookup = await fixture.service.lookupFirstTurn(ids.window, ids.request);
-    expect(lookup).toMatchObject({
-      kind: "accepted",
-      turn: {
-        status: "failed",
-        failure: {
-          category: "unavailable",
-          message: "Selected skill context is unavailable for Work on this host.",
-        },
+    expect(contexts.flat()).toContainEqual({
+      kind: "instructions",
+      text: "Use the synthetic Work checklist.",
+    });
+  });
+
+  it("refuses selected skill instructions that exceed the Work input budget", async () => {
+    const fixture = serviceFixture({
+      safeInputBudgetTokens: 500,
+      resolveSelectedSkillContext: async () => ({
+        kind: "resolved",
+        context: [{ kind: "instructions", text: "Synthetic required instructions. ".repeat(1000) }],
+      }),
+    });
+    await expect(
+      fixture.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        extensionSelections: [
+          {
+            kind: "skill",
+            skillId: `agents-skills-directory:project:review:sha256:${"a".repeat(64)}`,
+            packageDigest: `sha256:${"a".repeat(64)}`,
+            catalogEpoch: `sha256:${"b".repeat(64)}`,
+            origin: { kind: "draft", reference: "review" },
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.acquireInputs).toHaveLength(0);
+  });
+
+  it("refuses an explicit skill before acceptance when no material resolver exists", async () => {
+    const fixture = serviceFixture();
+    await expect(
+      fixture.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        extensionSelections: [
+          {
+            kind: "skill",
+            skillId: `agents-skills-directory:project:review:sha256:${"a".repeat(64)}`,
+            packageDigest: `sha256:${"a".repeat(64)}`,
+            catalogEpoch: `sha256:${"b".repeat(64)}`,
+            origin: { kind: "draft", reference: "review" },
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "unavailable",
+        message: "Selected skill context is unavailable for Work on this host.",
       },
     });
     expect(fixture.acquireInputs).toHaveLength(0);
@@ -757,6 +809,7 @@ function serviceFixture(
     readonly attachments?: WorkAttachmentStore;
     readonly supportsAttachments?: () => boolean;
     readonly safeInputBudgetTokens?: number;
+    readonly resolveSelectedSkillContext?: WorkTurnServiceDependencies["resolveSelectedSkillContext"];
     readonly resolveFileMentionContext?: WorkTurnServiceDependencies["resolveFileMentionContext"];
     readonly resolveAppManagedTools?: WorkTurnServiceDependencies["resolveAppManagedTools"];
     readonly spendCeiling?: WorkTurnServiceDependencies["spendCeiling"];
@@ -896,6 +949,9 @@ function serviceFixture(
     ...(options.safeInputBudgetTokens === undefined
       ? {}
       : { safeInputBudgetTokens: options.safeInputBudgetTokens }),
+    ...(options.resolveSelectedSkillContext === undefined
+      ? {}
+      : { resolveSelectedSkillContext: options.resolveSelectedSkillContext }),
     ...(options.resolveFileMentionContext === undefined
       ? {}
       : { resolveFileMentionContext: options.resolveFileMentionContext }),

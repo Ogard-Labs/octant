@@ -50,6 +50,12 @@ diagnostics. A **Name collisions** section appears when the same skill name
 exists from multiple sources; you choose the exact source before use — a
 collision is never silently merged or shadowed.
 
+A reviewed and enabled standalone skill can be selected with `$skill` in Chat,
+Work, or Code. Octant checks the exact source, content digest, and current
+thread scope before adding its instructions to the provider context. A changed,
+disabled, or unavailable selection refuses the turn instead of silently dropping
+the skill. Selected Work instructions also count toward the turn's input budget.
+
 ### Marketplace
 
 The **Marketplace** tab searches the extension catalog: the curated package

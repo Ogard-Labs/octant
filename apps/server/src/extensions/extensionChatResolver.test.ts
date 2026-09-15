@@ -1,3 +1,6 @@
+import { decodeExtensionSnapshot } from "@octant/contracts/extension-rpc";
+import { Schema } from "effect";
+import { ExtensionSelection, ExtensionProviderFamily } from "@octant/contracts/extensions";
 import { MAX_PROVIDER_TOOLS, type ChatThread } from "@octant/contracts";
 import type {
   ExtensionEffectiveSnapshot,
@@ -570,5 +573,62 @@ describe("scoping a selection to the thread it belongs to", () => {
     });
 
     expect(catalogs.request.activeScope.mode.referenceId).toBe("mode:work");
+  });
+});
+
+describe("standalone skill material", () => {
+  it("loads the exact reviewed filesystem skill into Chat context", async () => {
+    const state = snapshots({ kind: "effective" });
+    const qualifiedId = `agents-skills-directory:project:review:${digest}`;
+    const snapshot = decodeExtensionSnapshot({
+      ...state.snapshot,
+      packages: [],
+      skills: [
+        {
+          skill: {
+            qualifiedId,
+            name: "review",
+            sourceKind: "agents-skills-directory",
+            digest,
+            available: true,
+          },
+          source: { kind: "agents-skills-directory", sourceRef: "project" },
+          displayName: "Review",
+          contentBytes: 29,
+          instructions: "Use the synthetic checklist.",
+          provenance: { reviewed: true },
+          reviewed: true,
+          desiredEnabled: true,
+          effectiveState: { kind: "effective" },
+        },
+      ],
+    });
+    const resolver = createExtensionChatResolver({
+      snapshot: () => snapshot,
+      resolveEffectiveState: () => ({ ...state.effective, packages: [] }),
+      providerFamily: () => Schema.decodeUnknownSync(ExtensionProviderFamily)("openai-compatible"),
+      materialLoader: createStoredExtensionMaterialLoader({
+        readVerifiedComponentText: async () => {
+          throw new Error("No installed package");
+        },
+      }),
+      toolExecution: UNAVAILABLE_EXTENSION_TOOL_EXECUTION,
+    });
+    const result = await resolver({
+      phase: "send",
+      thread: thread(),
+      selections: [
+        Schema.decodeUnknownSync(ExtensionSelection)({
+          kind: "skill",
+          skillId: qualifiedId,
+          packageDigest: digest,
+          catalogEpoch,
+          origin: { kind: "draft", reference: "review" },
+        }),
+      ],
+    });
+    expect(result.entries.map((entry) => entry.providerContext)).toEqual([
+      { kind: "instructions", text: "Use the synthetic checklist." },
+    ]);
   });
 });

@@ -1,3 +1,4 @@
+import type { SelectedSkillContextResolver } from "../extensions/selectedSkillContext";
 import { randomUUID } from "node:crypto";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import {
@@ -638,6 +639,7 @@ export interface CodeOperationExecuteOptions {
 }
 
 export interface CodeOperationServiceOptions {
+  readonly resolveSelectedSkillContext?: SelectedSkillContextResolver;
   readonly authority: CodeOperationAuthorityPort;
   /**
    * Runs after the command has passed thread, checkout, lifecycle, and Project
@@ -2308,12 +2310,21 @@ export class CodeOperationService {
         "unavailable",
         "Provider prompt evidence is unavailable.",
       );
-    if (command.extensionSelections?.some((selection) => !isBrowserUseSelection(selection))) {
-      return this.#failed(
-        command.operationId,
-        "unavailable",
-        "Selected skill context is unavailable for Code on this host.",
-      );
+    const selections =
+      command.extensionSelections?.filter((selection) => !isBrowserUseSelection(selection)) ?? [];
+    let skillContext: ReadonlyArray<ProviderContextBlock> = [];
+    if (selections.length > 0) {
+      const resolved = await this.#options
+        .resolveSelectedSkillContext?.({ mode: "code", thread, selections })
+        .catch(() => undefined);
+      if (resolved === undefined || resolved.kind === "unavailable") {
+        return this.#failed(
+          command.operationId,
+          "unavailable",
+          resolved?.message ?? "Selected skill context is unavailable for Code on this host.",
+        );
+      }
+      skillContext = resolved.context;
     }
     const supportsImages = this.#options.supportsAttachments?.(thread) === true;
     // Notes the user pointed at the running product ride with the next turn
@@ -2331,6 +2342,7 @@ export class CodeOperationService {
       this.#options.peekIssueContextFramed?.(String(thread.id)) ??
       this.#options.takeIssueContextFramed?.(String(thread.id));
     const context = [
+      ...skillContext,
       ...profileContext,
       ...(await this.#resolveForkHandoff(thread, windowId, command.operationId)),
       ...(await this.#resolveThreadMentions(command.threadMentionIds, windowId)),
