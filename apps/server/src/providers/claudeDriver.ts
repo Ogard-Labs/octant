@@ -451,7 +451,8 @@ function validatedClaudeQuestionPrompts(
     if (
       typeof prompt !== "string" ||
       exceedsCodePointLimit(prompt, USER_QUESTION_MAX_CHARACTERS) ||
-      prompt.trim().length === 0
+      prompt.trim().length === 0 ||
+      prompts.includes(prompt)
     ) {
       return undefined;
     }

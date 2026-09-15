@@ -1692,6 +1692,36 @@ describe("Claude execution policy", () => {
     await acquired.close();
   });
 
+  it("refuses a question set whose answers would overwrite the same provider key", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      const open = f.opens[0];
+      if (open === undefined) throw new Error("Missing provider session");
+      const input = {
+        questions: [
+          { question: "Choose?", options: [{ label: "First" }] },
+          { question: "Choose?", options: [{ label: "Second" }] },
+        ],
+      };
+      await expect(
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "AskUserQuestion",
+          input,
+          toolUseId: "duplicate-prompts",
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toMatchObject({ behavior: "deny" });
+    } finally {
+      await acquired.close();
+    }
+  });
+
   it("rejects invalid questions at the pre-tool gate and tombstones their tool-use ID", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);
