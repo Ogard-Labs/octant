@@ -1,6 +1,10 @@
-import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts";
+import type {
+  ProviderInstanceId,
+  ProviderModelId,
+  ProviderModelOptionValues,
+} from "@octant/contracts";
 import type { ModelPickerSelection, PickerGroup, PickerModel } from "@octant/domain";
-import { pickerCatalogs } from "@octant/domain";
+import { findPickerModel, pickerCatalogs } from "@octant/domain";
 import { ChevronDown, Search, Star } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -60,6 +64,7 @@ export interface ComposerModelPickerProps {
    * hard it thinks are one decision.
    */
   readonly modelOptions?: ReadonlyArray<ComposerModelPickerModelOption>;
+  readonly modelOptionValues?: ProviderModelOptionValues;
   /** Absent leaves the inline level control out; undefined restores the default. */
   readonly onModelOptionChange?: (optionId: string, value: string | undefined) => void;
   /**
@@ -164,12 +169,40 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     props.groups[0]!;
   const selectedLabel =
     selectedModelLabel(props.groups, props.selectedProviderInstanceId, props.selectedModelId) ??
+    (props.selectedModelId === undefined ? undefined : String(props.selectedModelId)) ??
     props.unselectedLabel ??
-    activeGroup.sections[0]?.models[0]?.model.displayName ??
-    activeGroup.instance.displayName;
+    selectedGroup?.sections[0]?.models[0]?.model.displayName ??
+    selectedGroup?.instance.displayName ??
+    "Choose model";
   // The inline level control shows only when the caller owns the option value
   // and the selected model actually declares a reasoning/effort option.
-  const levelOption = props.modelOptions?.find(isComposerReasoningOption);
+  const declaredOptions =
+    findPickerModel(
+      props.groups,
+      props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
+        ? undefined
+        : {
+            providerInstanceId: props.selectedProviderInstanceId,
+            modelId: props.selectedModelId,
+          },
+    )?.model.options ?? [];
+  const modelOptions =
+    props.modelOptions ??
+    declaredOptions.flatMap((option) =>
+      option.kind === "selection"
+        ? [
+            {
+              id: option.id,
+              displayName: option.displayName,
+              values: option.values,
+              ...(props.modelOptionValues?.[option.id] === undefined
+                ? {}
+                : { value: props.modelOptionValues[option.id] }),
+            },
+          ]
+        : [],
+    );
+  const levelOption = modelOptions.find(isComposerReasoningOption);
   const levelValue =
     levelOption !== undefined &&
     levelOption.value !== undefined &&

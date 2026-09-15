@@ -232,15 +232,17 @@ ends with the honest state **"Provider turn interrupted."**
 
 ## Effort, reasoning and speed
 
-When a provider declares per-model options, the Chat composer shows one
-compact selector per option right after the model picker: **Effort** for
-Claude models that support effort levels, and **Reasoning** and **Service
-tier** (speed) for Codex models that advertise them. Each selector starts at
-**Default**, meaning the provider's own default. Your choice is stored on the
-thread and handed to the provider when the next turn's session starts. Only
-values the selected model actually declares are accepted; switching to a model
-that does not offer an option clears that option back to Default. Models that
-declare no options show no selectors.
+When a provider declares reasoning or effort levels, the model picker in Chat
+and Code shows the selected model's levels below the model list. Code offers
+this control both when creating a thread and in an existing thread's composer.
+**Default** uses the provider's own default. The choice is saved on the thread
+and passed to the provider when the next turn's session starts. Only values the
+selected model declares are accepted; changing the Code provider or model resets
+the choice to Default. Models without a declared reasoning option do not show
+this control.
+
+Chat also offers the model's other declared options, such as Codex **Service
+tier**, in its composer. Work does not yet expose per-model option controls.
 
 ## Readiness and capabilities
 

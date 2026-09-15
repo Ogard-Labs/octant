@@ -1,3 +1,4 @@
+import type { ProviderModelOptionValues } from "@octant/contracts";
 import { useComposerTip } from "../composer/useComposerTip";
 import {
   ApplicationMentionTypeahead,
@@ -949,11 +950,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   }
 
-  async function changeProvider(selection: {
-    readonly providerInstanceId: typeof thread.providerInstanceId;
-    readonly modelId: typeof thread.modelId;
-  }) {
+  async function changeProvider(
+    selection: {
+      readonly providerInstanceId: typeof thread.providerInstanceId;
+      readonly modelId: typeof thread.modelId;
+    },
+    modelOptionValues?: ProviderModelOptionValues,
+  ) {
     if (
+      modelOptionValues === undefined &&
       selection.providerInstanceId === thread.providerInstanceId &&
       selection.modelId === thread.modelId
     ) {
@@ -967,6 +972,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         expectedVersion: thread.version,
         providerInstanceId: selection.providerInstanceId,
         modelId: selection.modelId,
+        ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
       });
     } finally {
       setProviderChanging(false);
@@ -1636,6 +1642,18 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 ariaLabel="Provider and model"
                 disabled={busy || providerChanging}
                 groups={providerGroups}
+                {...(thread.modelOptionValues === undefined
+                  ? {}
+                  : { modelOptionValues: thread.modelOptionValues })}
+                onModelOptionChange={(id, value) => {
+                  const remaining = Object.fromEntries(
+                    Object.entries(thread.modelOptionValues ?? {}).filter(([key]) => key !== id),
+                  );
+                  void changeProvider(
+                    { providerInstanceId: thread.providerInstanceId, modelId: thread.modelId },
+                    value === undefined ? remaining : { ...remaining, [id]: value },
+                  );
+                }}
                 onSelect={(selection) => void changeProvider(selection)}
                 selectedModelId={thread.modelId}
                 selectedProviderInstanceId={thread.providerInstanceId}

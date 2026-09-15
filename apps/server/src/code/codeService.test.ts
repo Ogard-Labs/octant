@@ -1,5 +1,6 @@
 import {
   decodeAgentProfile,
+  decodeProviderObservedState,
   decodeCodeCheckoutIdentity,
   decodeCodeCommandResult,
   decodeBindingRevisionId,
@@ -696,6 +697,72 @@ describe("CodeService commands", () => {
         ],
       }),
     );
+  });
+
+  it("stores a declared reasoning choice without creating a provider handoff", async () => {
+    const probe = reasoningProbe();
+    const fixture = serviceFixture({ threads: [thread()], probeProvider: async () => probe });
+    const result = await fixture.service.execute(ids.window, {
+      kind: "change-code-thread-provider",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+      modelOptionValues: { effort: "high" },
+    });
+    expect(result).toMatchObject({
+      kind: "thread-updated",
+      thread: { modelOptionValues: { effort: "high" }, version: 2 },
+    });
+    expect(result.kind === "thread-updated" && result.thread.providerHandoff).toBeUndefined();
+  });
+
+  it.each([{ effort: "invented" }, { unknown: "high" }])(
+    "refuses undeclared model options before journaling %j",
+    async (modelOptionValues) => {
+      const fixture = serviceFixture({
+        threads: [thread()],
+        probeProvider: async () => reasoningProbe(),
+      });
+      await expect(
+        fixture.service.execute(ids.window, {
+          kind: "change-code-thread-provider",
+          threadId: ids.thread,
+          expectedVersion: 1,
+          providerInstanceId: ids.provider,
+          modelId: "model-a",
+          modelOptionValues,
+        }),
+      ).rejects.toMatchObject({ failure: { category: "invalid" } });
+      expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    },
+  );
+
+  it("returns to provider defaults when a reasoning choice is cleared or the model changes", async () => {
+    const fixture = serviceFixture({
+      threads: [thread({ modelOptionValues: { effort: "high" } })],
+      probeProvider: async () => reasoningProbe(),
+    });
+    const reset = await fixture.service.execute(ids.window, {
+      kind: "change-code-thread-provider",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+      modelOptionValues: {},
+    });
+    expect(reset).toMatchObject({ kind: "thread-updated", thread: { modelOptionValues: {} } });
+    const switching = serviceFixture({
+      threads: [thread({ modelOptionValues: { effort: "high" } })],
+    });
+    const changed = await switching.service.execute(ids.window, {
+      kind: "change-code-thread-provider",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      providerInstanceId: ids.provider,
+      modelId: "model-b",
+    });
+    expect(changed.kind === "thread-updated" && changed.thread.modelOptionValues).toBeUndefined();
   });
 
   it("changes provider/model without changing Code authority or delivery", async () => {
@@ -3965,3 +4032,46 @@ describe("completing and snoozing a Code thread", () => {
     ).toEqual({ status: "skipped", reason: "not-found" });
   });
 });
+
+function reasoningProbe() {
+  return decodeProviderObservedState({
+    instanceId: ids.provider,
+    readiness: "ready",
+    processState: "running",
+    observedAt: now,
+    models: [
+      {
+        id: "model-a",
+        displayName: "Model A",
+        reasoning: "supported",
+        inputModalities: ["text"],
+        options: [
+          { id: "effort", displayName: "Reasoning", kind: "selection", values: ["low", "high"] },
+        ],
+        source: "discovered",
+        verification: "verified",
+      },
+    ],
+    capabilities: Object.fromEntries(
+      [
+        "streaming",
+        "resume",
+        "interruption",
+        "approvals",
+        "userQuestions",
+        "reasoning",
+        "usage",
+        "toolActivity",
+        "fileChanges",
+        "diffs",
+        "taskProgress",
+        "nativeChildAgents",
+        "harnessAutoReview",
+        "nativeAttachments",
+        "nativeWebResearch",
+        "appManagedTools",
+        "citations",
+      ].map((key) => [key, "supported"]),
+    ),
+  });
+}

@@ -68,6 +68,29 @@ function plan(workspace: CodeComposerSubmitInput["workspace"], head?: never) {
 }
 
 describe("planCodeThreadCreate", () => {
+  it.each(["current-checkout", "managed-worktree"] as const)(
+    "carries reasoning through creation in %s",
+    (workspace) => {
+      const result = planCodeThreadCreate({
+        composer: composer(workspace, { modelOptionValues: { effort: "high" } }),
+        modelId: "qwen-3.6" as never,
+        prepared: prepared() as never,
+        projectId: ids.project as never,
+        providerInstanceId: ids.provider as never,
+        threadId: ids.thread,
+        timestamp: now,
+        title: "Fix search",
+      });
+      expect(result).toMatchObject({
+        kind: "command",
+        command:
+          workspace === "managed-worktree"
+            ? { modelOptionValues: { effort: "high" } }
+            : { thread: { modelOptionValues: { effort: "high" } } },
+      });
+    },
+  );
+
   it("creates a managed worktree for the managed-worktree habit", () => {
     const result = plan("managed-worktree");
     expect(result).toMatchObject({

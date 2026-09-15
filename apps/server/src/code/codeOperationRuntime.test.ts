@@ -359,6 +359,45 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("refuses a saved reasoning choice that discovery no longer offers before admitting the turn", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const admit = vi.fn();
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+      spendCeiling: { admit, settle: vi.fn() },
+      probeProvider: async () => ({
+        readiness: "ready",
+        models: [
+          {
+            id: thread().modelId,
+            displayName: "Model A",
+            reasoning: "supported",
+            inputModalities: ["text"],
+            source: "discovered",
+            verification: "verified",
+            options: [{ id: "effort", displayName: "Effort", kind: "selection", values: ["low"] }],
+          },
+        ],
+      }),
+    });
+    fixture.setThread({ ...thread(), modelOptionValues: { effort: "high" } });
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(13),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
+    expect(admit).not.toHaveBeenCalled();
+    expect(connection.start).not.toHaveBeenCalled();
+    fixture.close();
+  });
+
   it("refuses a provider turn before admission when the Project policy no longer allows it", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -1775,6 +1814,7 @@ function runtimeFixture(options: {
   failRuntimeWorkJournal?: boolean;
   throwRuntimeWorkReporter?: boolean;
   onProviderTurnRequested?: (threadId: CodeThreadId) => void;
+  probeProvider?: Parameters<typeof createCodeOperationRuntime>[0]["probeProvider"];
   isProviderModelAllowed?: (thread: CodeThread) => boolean;
   spendCeiling?: Parameters<typeof createCodeOperationRuntime>[0]["spendCeiling"];
   evidencePut?: (
@@ -1841,6 +1881,7 @@ function runtimeFixture(options: {
       readReviewFinding: () => undefined,
       readReviewFindings: () => [],
     },
+    ...(options.probeProvider === undefined ? {} : { probeProvider: options.probeProvider }),
     windowAccess: { canAccessProject: access },
     resolveCheckoutRoot: async () => ({
       checkoutRoot: "/private/exact",

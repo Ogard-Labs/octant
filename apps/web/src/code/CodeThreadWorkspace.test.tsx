@@ -986,6 +986,66 @@ describe("CodeThreadWorkspace", () => {
     );
   });
 
+  it("saves reasoning for an existing Code thread through the authoritative command", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async () => undefined);
+    const group = providerGroup();
+    const reasoningGroup = {
+      ...group,
+      sections: group.sections.map((section) => ({
+        ...section,
+        models: section.models.map((entry) => ({
+          ...entry,
+          model: {
+            ...entry.model,
+            options: [
+              {
+                id: "effort",
+                displayName: "Effort",
+                kind: "selection" as const,
+                values: ["low", "high"] as const,
+              },
+            ],
+          },
+        })),
+      })),
+    };
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        controller={controller({ execute })}
+        providerGroups={[reasoningGroup]}
+        threadId={threadId}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await user.click(screen.getByRole("button", { name: "High" }));
+    expect(execute).toHaveBeenCalledWith({
+      kind: "change-code-thread-provider",
+      threadId,
+      expectedVersion: 1,
+      providerInstanceId: providerId,
+      modelId,
+      modelOptionValues: { effort: "high" },
+    });
+    const refreshed = controller({ execute });
+    if (refreshed.activeView === undefined) throw new Error("Expected active thread");
+    rerender(
+      <CodeThreadWorkspace
+        controller={{
+          ...refreshed,
+          activeView: {
+            ...refreshed.activeView,
+            thread: { ...refreshed.activeView.thread, modelOptionValues: { effort: "high" } },
+          },
+        }}
+        providerGroups={[reasoningGroup]}
+        threadId={threadId}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Default" }));
+    expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ modelOptionValues: {} }));
+  });
+
   it("changes provider and model through the authoritative Code command", async () => {
     const user = userEvent.setup();
     const execute = vi.fn(async () => undefined) as CodeController["execute"];

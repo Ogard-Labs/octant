@@ -229,6 +229,9 @@ export class CodeTurnRunner {
         .start({
           sessionId: input.sessionId,
           modelId: input.thread.modelId,
+          ...(input.thread.modelOptionValues === undefined
+            ? {}
+            : { modelOptionValues: input.thread.modelOptionValues }),
           executionPolicy: input.thread.executionPolicy,
           tools: input.appManagedTools?.definitions ?? [],
           ...(input.harnessAutoReviewEnabled === true ? { autoApprove: true } : {}),

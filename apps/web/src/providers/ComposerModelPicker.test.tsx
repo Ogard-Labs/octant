@@ -23,6 +23,64 @@ describe("ComposerModelPicker", () => {
     localStorage.clear();
   });
 
+  it("keeps the current model label while hovering providers that do not contain it", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    render(
+      <ComposerModelPicker
+        groups={groups()}
+        onSelect={onSelect}
+        selectedProviderInstanceId={decodeProviderInstanceId(
+          "80000000-0000-4000-8000-0000000000a3",
+        )}
+        selectedModelId={decodeProviderModelId("current-model")}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "Provider and model" });
+    expect(trigger).toHaveTextContent("current-model");
+    await user.click(trigger);
+    await user.hover(screen.getByRole("option", { name: "Remote Claude" }));
+    expect(screen.getByRole("option", { name: "Model Three" })).toBeVisible();
+    expect(trigger).toHaveTextContent("current-model");
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("does not borrow reasoning options from another provider with the same model id", async () => {
+    const source = groups().map((group) => ({
+      ...group,
+      sections: group.sections.map((section) => ({
+        ...section,
+        models: section.models.map((entry) => ({
+          ...entry,
+          model: {
+            ...entry.model,
+            options: [
+              {
+                id: "effort",
+                displayName: "Effort",
+                kind: "selection" as const,
+                values: ["low", "high"] as const,
+              },
+            ],
+          },
+        })),
+      })),
+    }));
+    render(
+      <ComposerModelPicker
+        groups={source}
+        onSelect={vi.fn()}
+        onModelOptionChange={vi.fn()}
+        selectedProviderInstanceId={decodeProviderInstanceId(
+          "80000000-0000-4000-8000-0000000000a3",
+        )}
+        selectedModelId={modelOne}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Provider and model" }));
+    expect(screen.queryByRole("group", { name: "Effort level" })).not.toBeInTheDocument();
+  });
+
   it("names a hidden bound model without offering it as a new selection", async () => {
     const source = groups();
     const first = source[0];

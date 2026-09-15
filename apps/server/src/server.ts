@@ -3785,6 +3785,7 @@ export function startOctantServer(
           readReviewFinding: persistence.readCodeReviewFinding,
           readReviewFindings: persistence.readCodeReviewFindings,
         },
+        probeProvider: (instanceId) => probeProviderForThreads(instanceId),
         isProviderModelAllowed: (thread) =>
           isCodeProviderModelAllowed({
             projectId: thread.projectId,

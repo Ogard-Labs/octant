@@ -1,3 +1,5 @@
+import { decodeProviderInstance, decodeProviderModelId } from "@octant/contracts";
+import type { PickerGroup } from "@octant/domain";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -31,6 +33,78 @@ const defaultProps = {
 };
 
 describe("CodeComposerAdapter", () => {
+  it("submits the chosen reasoning level with a new Code thread", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    const instance = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-0000000000a1",
+      displayName: "Local Codex",
+      driverKind: "codex",
+      configuration: { kind: "codex-cli", binaryPath: "/opt/homebrew/bin/codex" },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-09-15T10:00:00.000Z",
+      updatedAt: "2026-09-15T10:00:00.000Z",
+    });
+    const modelId = decodeProviderModelId("model-one");
+    const group: PickerGroup = {
+      instance,
+      runtime: "provider",
+      readiness: "ready",
+      driverLabel: "Codex",
+      endpointHost: undefined,
+      executionHost: "Local host",
+      sections: [
+        {
+          id: "all-models",
+          label: "Models",
+          models: [
+            {
+              model: {
+                id: modelId,
+                displayName: "Model One",
+                reasoning: "supported",
+                inputModalities: ["text"],
+                source: "discovered",
+                verification: "verified",
+                options: [
+                  {
+                    id: "effort",
+                    displayName: "Effort",
+                    kind: "selection",
+                    values: ["low", "high"],
+                  },
+                ],
+              },
+              badges: [],
+              toolCapable: true,
+            },
+          ],
+        },
+      ],
+    };
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        providerGroups={[group]}
+        selectedProviderInstanceId={instance.id}
+        selectedModelId={modelId}
+        onCreateThread={onCreateThread}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await user.click(screen.getByRole("button", { name: "High" }));
+    await user.keyboard("{Escape}");
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix search");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await waitFor(() =>
+      expect(onCreateThread).toHaveBeenCalledWith(
+        expect.objectContaining({ modelOptionValues: { effort: "high" } }),
+      ),
+    );
+  });
+
   it("renders composer with project and branch context", () => {
     const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
     expect(html).toContain("What should we build");
