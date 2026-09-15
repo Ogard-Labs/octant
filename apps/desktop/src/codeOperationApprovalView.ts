@@ -352,8 +352,9 @@ export function createCodeOperationApprovalViewController<TWindow>(
           : input.anchor.kind !== "thread" || input.anchor.threadId !== pending.threadId)
       ) {
         if (pending !== undefined) {
-          pending.anchor = undefined;
-          pending.generation += 1;
+          // An already visible trusted view must not outlive its composer owner.
+          // Clearing geometry alone still allowed that view to confirm a receipt.
+          finish(pending, undefined);
         }
         return;
       }
