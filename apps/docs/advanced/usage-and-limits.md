@@ -36,9 +36,9 @@ configuration, credentials, and auth files are not returned or stored as usage
 records. Codex worktrees, repositories, and other sibling directories are not
 scanned. The original provider files remain unchanged.
 
-The reader's cache and cursors are local to the host process and rebuild from
-the provider files after a restart. Discovery and retained records are bounded;
-coverage remains partial when those bounds prevent a complete reading.
+The reader saves accounting records and import cursors in the host's local data
+directory and restores them after a restart. Discovery and retained records are
+bounded; coverage remains partial when those bounds prevent a complete reading.
 
 ## Cost and cache savings
 
