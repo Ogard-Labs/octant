@@ -1211,6 +1211,14 @@ describe("useCodeController", () => {
     expect(result.current.threadUsage.costUsd).toBeCloseTo(0.02);
   });
 
+  it("keeps usage unknown until the thread has a provider report", async () => {
+    const client = fakeClient();
+    const { result } = renderHook(() => useCodeController({ activeThreadId: ids.thread, client }));
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+    expect(result.current.threadUsage.inputTokens).toBeUndefined();
+    expect(result.current.threadUsage.outputTokens).toBeUndefined();
+  });
+
   it("refuses a second follow-up while a turn is still running", async () => {
     const operationId = "70000000-0000-4000-8000-000000000041";
     let settleFirstTurn = () => {};

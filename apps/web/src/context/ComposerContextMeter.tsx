@@ -224,6 +224,13 @@ function bindingLimit(
   return binding;
 }
 
+function providerUsageLabel(fallback: ComposerContextUsageFallback): string {
+  if (fallback.inputTokens === undefined || fallback.outputTokens === undefined) {
+    return "Usage not reported";
+  }
+  return `Provider reported ${compactTokens(fallback.inputTokens)} input and ${compactTokens(fallback.outputTokens)} output`;
+}
+
 function ContextUsageFallback(props: { readonly fallback: ComposerContextUsageFallback }) {
   const reported = reportedWindow(props.fallback);
   return (
@@ -232,14 +239,17 @@ function ContextUsageFallback(props: { readonly fallback: ComposerContextUsageFa
         <span>{reported === undefined ? "Provider usage" : "Context window"}</span>
         <strong>
           {reported === undefined
-            ? `${formatTokens(props.fallback.inputTokens)} in`
+            ? props.fallback.inputTokens === undefined
+              ? "Not reported"
+              : `${formatTokens(props.fallback.inputTokens)} in`
             : reported.label}
         </strong>
       </header>
       {reported === undefined ? (
         <p className="context-window-popover__source">
-          This provider reports what a turn spent, but not a context-window maximum, so there is no
-          share of a window to show.
+          {props.fallback.inputTokens === undefined || props.fallback.outputTokens === undefined
+            ? "No usage has been reported for this thread."
+            : "This provider reports what a turn spent, but not a context-window maximum, so there is no share of a window to show."}
         </p>
       ) : (
         <>
@@ -261,8 +271,22 @@ function ContextUsageFallback(props: { readonly fallback: ComposerContextUsageFa
         </>
       )}
       <dl className="context-window-popover__facts">
-        <Fact label="Input" value={formatTokens(props.fallback.inputTokens)} />
-        <Fact label="Output" value={formatTokens(props.fallback.outputTokens)} />
+        <Fact
+          label="Input"
+          value={
+            props.fallback.inputTokens === undefined
+              ? "Not reported"
+              : formatTokens(props.fallback.inputTokens)
+          }
+        />
+        <Fact
+          label="Output"
+          value={
+            props.fallback.outputTokens === undefined
+              ? "Not reported"
+              : formatTokens(props.fallback.outputTokens)
+          }
+        />
         {props.fallback.costUsd === undefined ? null : (
           <Fact
             label="Cost"
@@ -461,7 +485,7 @@ function meterLabel(input: {
         limit === undefined
           ? ""
           : ` The ring shows ${String(Math.round(limit.percent))}% of the ${providerLimitWindowLabel(limit.window)} used.`;
-      return `${action} context usage. Provider reported ${compactTokens(input.fallback.inputTokens)} input and ${compactTokens(input.fallback.outputTokens)} output. Context window maximum unavailable.${limitText}`;
+      return `${action} context usage. ${providerUsageLabel(input.fallback)}. Context window maximum unavailable.${limitText}`;
     }
     return `${action} context usage. ${emptyMessage(input.status)}`;
   }
@@ -540,7 +564,7 @@ function liveLabel(input: {
         limit === undefined
           ? ""
           : ` The ring shows ${String(Math.round(limit.percent))}% of the ${providerLimitWindowLabel(limit.window)} used.`;
-      return `Provider reported ${compactTokens(input.fallback.inputTokens)} input and ${compactTokens(input.fallback.outputTokens)} output. Context window maximum unavailable.${limitText}`;
+      return `${providerUsageLabel(input.fallback)}. Context window maximum unavailable.${limitText}`;
     }
     return emptyMessage(input.status);
   }
