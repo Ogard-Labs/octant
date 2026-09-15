@@ -31,6 +31,10 @@ describe("composeHostDataMap", () => {
       path: `${dataDirectory}/octant.sqlite3`,
     });
     expect(decoded.host.projections).toEqual(decoded.host.journal);
+    expect(decoded.host.caches).toContainEqual({
+      name: "Local provider usage history",
+      location: { kind: "known", path: `${dataDirectory}/local-usage-cache.sqlite3` },
+    });
     expect(decoded.host.credentials).toEqual({
       kind: "known",
       backend: "keychain",
