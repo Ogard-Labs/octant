@@ -1121,6 +1121,11 @@ export async function signPackagedDesktop(input: {
   readonly appPath: string;
   readonly environment: Record<string, string | undefined>;
   readonly run: (argv: ReadonlyArray<string>) => Promise<void>;
+  readonly runForOutput: (argv: ReadonlyArray<string>) => Promise<{
+    readonly exitCode: number;
+    readonly stdout: string;
+    readonly stderr: string;
+  }>;
 }): Promise<DesktopSigningOutcome> {
   const resolution = resolveSigningCredentials(input.environment);
   if (resolution.kind === "absent") {
@@ -1140,6 +1145,7 @@ export async function signPackagedDesktop(input: {
     archivePath,
     credentials: resolution.credentials,
     run: input.run,
+    runForOutput: input.runForOutput,
   });
   return { kind: "signed", archivePath };
 }
@@ -1374,6 +1380,7 @@ if (import.meta.main) {
       appPath: packaged.artifactPath,
       environment: process.env,
       run: (argv) => runCommand(argv),
+      runForOutput: (argv) => runCommandForOutput(argv),
     });
     if (outcome.kind === "signed") {
       console.log(`Packaged, signed, and notarized Apple Silicon app: ${packaged.artifactPath}`);
@@ -1415,4 +1422,26 @@ async function runCommand(
   if ((await child.exited) !== 0) {
     throw new Error(`${command} failed while packaging the desktop app.`);
   }
+}
+
+async function runCommandForOutput(argv: ReadonlyArray<string>): Promise<{
+  readonly exitCode: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}> {
+  const [command, ...args] = argv;
+  if (command === undefined) throw new Error("Empty command.");
+  const child = Bun.spawn([command, ...args], {
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  if (stdout !== "") process.stdout.write(stdout);
+  if (stderr !== "") process.stderr.write(stderr);
+  return { exitCode, stdout, stderr };
 }

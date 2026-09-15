@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   createArchiveArgv,
   createCodesignArgv,
+  createNotarizationLogArgv,
   createNotarizeArgv,
   createStapleArgv,
   createVerifyArgv,
   ENTITLEMENTS_PATH,
+  parseNotarizationSubmission,
   requireSigned,
   resolveSigningCredentials,
   signAndNotarizeDesktop,
@@ -72,6 +74,9 @@ describe("signPackagedDesktop", () => {
       appPath: "/repo/out/Octant.app",
       environment: {},
       run,
+      runForOutput: async () => {
+        throw new Error("nothing should be run without credentials");
+      },
     });
 
     expect(outcome).toEqual({
@@ -89,6 +94,7 @@ describe("signPackagedDesktop", () => {
         appPath: "/repo/out/Octant.app",
         environment: { OCTANT_RELEASE_BUILD: "1" },
         run: async () => undefined,
+        runForOutput: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
       }),
     ).rejects.toThrow(/must be signed/);
   });
@@ -101,6 +107,14 @@ describe("signPackagedDesktop", () => {
       appPath: "/repo/out/Octant.app",
       environment: { ...credentials, OCTANT_RELEASE_BUILD: "1" },
       run: async (command) => void argv.push([...command]),
+      runForOutput: async (command) => {
+        argv.push([...command]);
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ id: "submission-id", status: "Accepted" }),
+          stderr: "",
+        };
+      },
     });
 
     expect(outcome.kind).toBe("signed");
@@ -120,6 +134,14 @@ describe("signAndNotarizeDesktop", () => {
       archivePath: "/repo/out/Octant-0.1.0-arm64.zip",
       credentials: { identity: "Developer ID", notaryProfile: "profile", teamId: "TEAM" },
       run: async (command) => void argv.push([...command]),
+      runForOutput: async (command) => {
+        argv.push([...command]);
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ id: "submission-id", status: "Accepted" }),
+          stderr: "",
+        };
+      },
     });
     return argv;
   }
@@ -166,6 +188,45 @@ describe("signAndNotarizeDesktop", () => {
     const stapleIndex = argv.findIndex((command) => command.includes("stapler"));
     expect(stapleIndex).toBeGreaterThan(notarizeIndex);
   });
+
+  it("prints Apple's issue log and refuses to staple a rejected submission", async () => {
+    const argv: string[][] = [];
+
+    await expect(
+      signAndNotarizeDesktop({
+        repositoryRoot: "/repo",
+        appPath: "/repo/out/Octant.app",
+        archivePath: "/repo/out/Octant-0.1.0-arm64.zip",
+        credentials: { identity: "Developer ID", notaryProfile: "profile", teamId: "TEAM" },
+        run: async (command) => void argv.push([...command]),
+        runForOutput: async (command) => {
+          argv.push([...command]);
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify({ id: "rejected-submission", status: "Invalid" }),
+            stderr: "",
+          };
+        },
+      }),
+    ).rejects.toThrow(/notarization.*Invalid/i);
+
+    expect(argv).toContainEqual(
+      createNotarizationLogArgv({
+        submissionId: "rejected-submission",
+        notaryProfile: "profile",
+      }),
+    );
+    expect(argv.some((command) => command.includes("stapler"))).toBe(false);
+  });
+});
+
+describe("parseNotarizationSubmission", () => {
+  it("requires a submission id and a terminal Apple status", () => {
+    expect(
+      parseNotarizationSubmission(JSON.stringify({ id: "submission-id", status: "Accepted" })),
+    ).toEqual({ id: "submission-id", status: "Accepted" });
+    expect(() => parseNotarizationSubmission('{"status":"Invalid"}')).toThrow(/submission id/i);
+  });
 });
 
 describe("hardened runtime entitlements", () => {
@@ -209,6 +270,9 @@ describe("hardened runtime entitlements", () => {
     expect(createStapleArgv("/a/Octant.app")).toContain("staple");
     expect(createNotarizeArgv({ archivePath: "/a/Octant.zip", notaryProfile: "p" })).toContain(
       "--keychain-profile",
+    );
+    expect(createNotarizeArgv({ archivePath: "/a/Octant.zip", notaryProfile: "p" })).toContain(
+      "json",
     );
   });
 });
