@@ -6,7 +6,7 @@ import {
   type ProjectMemoryView,
   type ProjectSummary,
 } from "@octant/contracts/projects";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ProjectMemorySection } from "./ProjectMemorySection";
 import { ProjectOverview } from "./ProjectOverview";
@@ -125,6 +125,7 @@ describe("Project memory in Project Overview", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Manage Memory" }));
     const memory = await screen.findByRole("region", { name: "Project memory" });
     expect(memory).toHaveTextContent("Keep memory explicit.");
     expect(memory).toHaveTextContent("Old layout.");

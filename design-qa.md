@@ -1,47 +1,61 @@
-# Right utility sidebar design QA
+# Projects sidebar design QA
 
-## Visual truth
+## Evidence
 
-- Utility-sidebar reference: maintainer-supplied screenshot, reviewed in session.
-- Tabbed-sidebar reference: maintainer-supplied screenshot, reviewed in session.
+- Source visual truth, rendered implementation, shared-material verification, and the side-by-side material comparison were captured in a local QA session. Those image files are not stored in the repository.
+- Source pixels: 1487 × 1058.
+- Implementation pixels and browser viewport: 800 × 902 at device pixel ratio 1.
+- Shared-material capture: a 1487 × 1058 CSS app surface scaled to 0.53 inside a 1280 × 720 browser viewport at device pixel ratio 1.
+- Normalization: the combined material comparison places the source and shared-material capture in equal `object-fit: contain` regions. The material capture is authoritative for the column backgrounds and hairlines; the production-component capture is authoritative for component density and typography.
+- State: dark Code workspace, Projects selected, one available Code Project selected, recent threads visible, management rows collapsed.
 
-## Implementation evidence
+## Full-view comparison
 
-- Closed sidebar: `/private/tmp/octant-final-start.png`
-- Empty sidebar with compact summary: `/private/tmp/octant-sidebar-tabs-open-empty.png`
-- Utility launcher menu: `/private/tmp/octant-sidebar-tabs-menu-polished.png`
-- Browser tab: `/private/tmp/octant-sidebar-pre-browser-final.png`
+Both artifacts now show the same three-part shell: Octant's global navigation at the far left, a Projects collection pane beside it, and the selected Project detail in the main workspace. The collection remains outside the workspace in the DOM, but its fill now uses the workspace material rather than the sidebar material. A hairline separates collection and detail without making the middle pane look like another navigation sidebar.
 
-The Electron window measured 2280 x 1538 points. Captures were normalized to
-1568 x 1058 pixels by the native QA driver, preserving the full-window aspect
-ratio. The checked states use the same live Code thread and project so the
-visual comparison includes the actual surrounding shell rather than an isolated
-fixture.
+The implementation retains Octant's semantic theme tokens and existing relink/archive actions instead of copying the mock's warmer one-off tint or speculative controls. It uses additional sample Projects and threads to prove collection density and truncation.
 
-## Comparison
+## Focused-region comparison
 
-- Structure: matches the references' optional right rail, compact top context,
-  horizontal tab strip, adjacent add button, and one active utility occupying
-  the remaining height.
-- Hierarchy: the active utility is primary. Context, Project memory, and
-  Navigator later left those compact summary rows — Context to the composer
-  meter, memory to Project Overview, Navigator to the profile control.
-- Density: tabs, rows, borders, and type reuse Octant's incumbent compact shell
-  scale. The dock does not introduce the large cards, badges, or excess section
-  chrome visible in the discarded implementation.
-- Color and type: semantic Octant surface, border, text, muted, accent, focus,
-  and typography tokens are used throughout. No new palette or font was added.
-- Icons: utility actions use the existing Lucide icon dependency. No raster,
-  emoji, inline SVG, or approximation assets were introduced.
-- Behavior: the launcher fits inside the dock without clipping, the selected
-  Browser tab is closable, and the main thread remains visible.
+No separate crop was required. The combined image keeps the three shell boundaries, Projects heading, search and filters, selected Project row, detail heading, and recent-thread hierarchy legible. Those are the fidelity-sensitive regions for this correction; there are no logos, illustrations, photographs, or custom raster assets to compare.
 
-## Iteration history
+## Required fidelity surfaces
 
-1. The first launcher placement clipped the menu against the dock edge.
-2. The tab strip was separated into a scrollable region and the launcher menu
-   was anchored inward.
-3. Browser and launcher captures were compared with both supplied references;
-   no remaining P0, P1, or P2 visual mismatch was found.
+- Fonts and typography: the implementation retains Octant's bundled Inter declarations, type scale, weights, and truncation. The isolated Vite harness fell back to the system sans face because its filesystem allow-list excluded the canonical checkout's font file; typography fidelity therefore relies on the earlier production-component capture and unchanged theme wiring, while this corrected capture verifies layout ownership.
+- Spacing and layout rhythm: the desktop shell uses the saved global-sidebar width, a 320px Projects collection pane, and the remaining width for Project detail. At the captured 800px breakpoint the two left tracks compress while staying distinct; the workspace does not absorb the collection.
+- Colors and visual tokens: the global sidebar keeps `--octant-sidebar-*`; the Projects collection and detail both use `--oct-bg` or the matching `--octant-workspace-translucent*` tier. Hairlines provide separation and the middle pane adds no shadow or elevation.
+- Image quality and asset fidelity: the selected direction contains no required imagery. Visible icons use Octant's existing Lucide set; no generated image, handcrafted SVG, emoji, or placeholder substitutes a source asset.
+- Copy and content: Projects, Search Projects, All/Chat/Work/Code, Recent threads, New thread, relink, archive, and availability labels are product-accurate. Mock-only sample values are not shipped.
+
+## Findings
+
+- No actionable P0, P1, or P2 mismatch remains.
+- P3: the source uses a warmer graphite cast. The implementation intentionally inherits the active Octant theme rather than defining a Projects-only palette.
+- P3: the source exposes a Canvas hand-off row. The implementation retains the existing compact Canvases disclosure because the public canvas inventory owns that data and interaction.
+
+## Comparison history
+
+1. The first implementation put the Projects collection in a master-detail grid inside the main workspace. This was a P1 information-architecture mismatch: Option 3 shows the collection as a sidebar entity.
+2. The collection was moved into `ShellSidebar` as a dedicated sibling of the primary navigation pane. `ProjectOverview` now renders detail only, and `ShellFrame` expands the sidebar track while Projects is active.
+3. The next comparison showed the middle pane inheriting sidebar material, which made it look like a newly added navigation sidebar. This was a P2 surface-hierarchy mismatch against the maintainer's reference.
+4. The collection pane now follows the workspace's opaque, translucent, subtle, strong, and reduced-transparency material states while retaining hairline boundaries and no elevation.
+5. The revised material comparison shows the middle and right regions sharing one fill. Automated DOM assertions also prove that the Projects navigation remains contained by the app sidebar and has no `.workspace-layer` ancestor.
+
+## Interaction and runtime checks
+
+- Automated interaction coverage exercises the Projects destination, mode filters, search, Project selection, Add Project, New thread, and Memory disclosure.
+- The browser-rendered capture uses production components and styles. The corrected sidebar remained visible during responsive capture with no visible runtime error surface; the harness logged only its known font allow-list warning and a transient hot-reload root warning before the final full-page reload.
+- Focused shell and Projects tests pass, including explicit sidebar ownership and workspace exclusion assertions.
+- Native-window capture remains unavailable because the Mac display is locked; the browser-rendered shell and integration tests cover the changed React surface.
+
+## Implementation checklist
+
+- [x] Projects is a first-class global-sidebar destination.
+- [x] Opening Projects adds a dedicated secondary Projects sidebar.
+- [x] The complete Project collection is outside the main workspace.
+- [x] Selecting a Project updates only the adjacent detail workspace.
+- [x] Search, mode filters, selection, and Project creation remain interactive.
+- [x] Recent threads remain the primary Project detail content.
+- [x] The changed shell ownership is covered by integration and component tests.
 
 final result: passed

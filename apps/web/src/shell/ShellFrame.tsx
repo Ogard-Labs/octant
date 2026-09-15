@@ -21,6 +21,7 @@ export interface ShellFrameProps {
   readonly onPreviewSidebarWidth: (width: number) => void;
   readonly sidebar: ReactNode;
   readonly sidebarCollapsed?: boolean;
+  readonly projectsSidebarOpen?: boolean;
   readonly sidebarResizable: boolean;
   readonly sidebarVibrancyMode?: SidebarVibrancyMode;
   readonly sidebarWidth: number;
@@ -97,7 +98,9 @@ export function ShellFrame(props: ShellFrameProps) {
               : ""
           }${props.wideContextOpen ? " shell--wide-context-open" : ""}${
             props.sidebarCollapsed ? " shell--sidebar-collapsed" : ""
-          }${props.backdrop === undefined ? "" : " shell--app-backdrop"}${
+          }${props.projectsSidebarOpen ? " shell--projects-sidebar-open" : ""}${
+            props.backdrop === undefined ? "" : " shell--app-backdrop"
+          }${
             props.backdrop !== undefined && props.backdropCoversSidebar === true
               ? " shell--app-backdrop-sidebar"
               : ""

@@ -5,9 +5,116 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ProjectOverview } from "./ProjectOverview";
+import { ProjectsDirectory } from "./ProjectsDirectory";
 import { ProjectThreadsProvider, type ProjectThreadsAccess } from "./ProjectThreadsSection";
 
 describe("ProjectOverview", () => {
+  it("shows every Project in a searchable mode-filtered collection and opens the chosen Project", async () => {
+    const user = userEvent.setup();
+    const onAddProject = vi.fn();
+    const onNewThread = vi.fn();
+    const onOpenProject = vi.fn();
+    const codeProject = {
+      id: "20000000-0000-4000-8000-000000000001",
+      name: "Octant",
+      lifecycle: "active",
+      pinned: true,
+      rank: "0/1",
+      version: 1,
+      createdAt: "2026-07-21T12:00:00.000Z",
+      updatedAt: "2026-07-21T12:00:00.000Z",
+      type: "code",
+      binding: { canonicalRoot: "/opaque/repository" },
+      codeAccessPersistence: "current-session",
+    } as unknown as ProjectSummary;
+    const workProject = {
+      ...codeProject,
+      id: "20000000-0000-4000-8000-000000000002",
+      name: "Field notes",
+      type: "work",
+      binding: { canonicalRoot: "/opaque/notes" },
+    } as unknown as ProjectSummary;
+
+    render(
+      <>
+        <ProjectsDirectory
+          onAddProject={onAddProject}
+          onOpenProject={onOpenProject}
+          projects={[codeProject, workProject]}
+          selectedProjectId={codeProject.id}
+        />
+        <ProjectOverview
+          onArchive={vi.fn()}
+          onNewThread={onNewThread}
+          onRelink={vi.fn()}
+          onRename={vi.fn()}
+          project={codeProject}
+        />
+      </>,
+    );
+
+    const directory = screen.getByRole("navigation", { name: "Projects" });
+    await user.click(within(directory).getByRole("button", { name: "Add Project" }));
+    expect(onAddProject).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole("button", { name: "New thread" }));
+    expect(onNewThread).toHaveBeenCalledOnce();
+    expect(within(directory).getByRole("button", { name: /Octant/ })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(within(directory).getByRole("button", { name: /Field notes/ })).toBeVisible();
+
+    await user.click(within(directory).getByRole("button", { name: "Work" }));
+    expect(within(directory).queryByRole("button", { name: /Octant/ })).not.toBeInTheDocument();
+    await user.click(within(directory).getByRole("button", { name: /Field notes/ }));
+    expect(onOpenProject).toHaveBeenCalledWith(workProject);
+
+    await user.click(within(directory).getByRole("button", { name: "All" }));
+    await user.type(within(directory).getByRole("searchbox", { name: "Search Projects" }), "oct");
+    expect(within(directory).getByRole("button", { name: /Octant/ })).toBeVisible();
+    expect(
+      within(directory).queryByRole("button", { name: /Field notes/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens an archived Project and dismisses the collection pane", async () => {
+    const user = userEvent.setup();
+    const onDismiss = vi.fn();
+    const onOpenProject = vi.fn();
+    const archivedProject = {
+      id: "20000000-0000-4000-8000-000000000003",
+      name: "Retired repo",
+      lifecycle: "archived",
+      pinned: false,
+      rank: "0/2",
+      version: 1,
+      createdAt: "2026-07-21T12:00:00.000Z",
+      updatedAt: "2026-07-21T12:00:00.000Z",
+      type: "code",
+      binding: { canonicalRoot: "/opaque/retired" },
+      codeAccessPersistence: "current-session",
+    } as unknown as ProjectSummary;
+
+    render(
+      <ProjectsDirectory
+        onDismiss={onDismiss}
+        onOpenProject={onOpenProject}
+        projects={[archivedProject]}
+        selectedProjectId={archivedProject.id}
+      />,
+    );
+
+    const directory = screen.getByRole("navigation", { name: "Projects" });
+    await user.click(
+      within(directory).getByRole("button", {
+        name: /Retired repo, Code Project, Archived/,
+      }),
+    );
+    expect(onOpenProject).toHaveBeenCalledWith(archivedProject);
+    await user.click(within(directory).getByRole("button", { name: "Close Projects" }));
+    expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
   it("composes the Chat overview into a virtual Chat Project", () => {
     render(
       <ProjectOverview
@@ -89,8 +196,11 @@ describe("ProjectOverview", () => {
       />,
     );
 
-    expect(await screen.findByRole("region", { name: "Project memory" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Memory" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Project memory" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Manage Memory" }));
+    const memory = await screen.findByRole("region", { name: "Project memory" });
+    expect(memory).toBeVisible();
+    expect(within(memory).getByRole("heading", { name: "Memory" })).toBeVisible();
     expect(screen.getByText("Keep this Project's memory on the Overview.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Add memory" })).toBeVisible();
     expect(projectClient.memory).toHaveBeenCalledWith(projectId);

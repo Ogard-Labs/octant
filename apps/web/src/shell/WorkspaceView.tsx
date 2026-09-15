@@ -1479,6 +1479,9 @@ function renderNonCodeTab(
         {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
         memoryProjects={props.projects}
         {...(props.onMemoryChanged === undefined ? {} : { onMemoryChanged: props.onMemoryChanged })}
+        {...(props.onNewThreadInProject === undefined || project.lifecycle !== "active"
+          ? {}
+          : { onNewThread: () => props.onNewThreadInProject?.(project.id) })}
         {...(project.type === "chat"
           ? {
               chatOverview: (
@@ -1555,6 +1558,7 @@ function renderNonCodeTab(
                   projectId={project.id}
                   projectName={project.name}
                   projectRoot={project.binding.canonicalRoot}
+                  showQuickStart={false}
                   {...(project.connectedRepository === undefined
                     ? {}
                     : {

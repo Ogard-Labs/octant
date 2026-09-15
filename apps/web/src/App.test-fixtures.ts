@@ -33,7 +33,7 @@ import {
 } from "@octant/domain/shell-policy";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { contextFixture } from "./context/contextFixtures";
@@ -1030,13 +1030,10 @@ export function canvasFetchPassthrough(url: string): Response | undefined {
 }
 
 export async function openSidebarProject(user: ReturnType<typeof userEvent.setup>, name: string) {
-  const trigger = await screen.findByRole("button", { name: `Project actions for ${name}` });
-  // A focus-then-ArrowDown open raced the menu's async Positioner under CI's
-  // slower layout timing, leaving findByRole's default wait to expire before
-  // the item ever mounted. A click drives the same open path without the
-  // extra keyboard round trip, so there is one fewer place for it to lag.
-  await user.click(trigger);
-  await user.click(await screen.findByRole("menuitem", { name: "Open Project" }));
+  await user.click(await screen.findByRole("button", { name: "Projects" }));
+  const directory = document.querySelector<HTMLElement>(".projects-directory");
+  if (directory === null) throw new Error("Expected the Projects directory.");
+  await user.click(within(directory).getByRole("button", { name: new RegExp(`^${name},`) }));
 }
 
 /**

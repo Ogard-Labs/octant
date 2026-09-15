@@ -252,6 +252,7 @@ import {
 import { projectViewEnvironmentOptionsFromHosts } from "./code/codeProjectViewModel";
 import { projectPullRequestKey } from "./code/CodeProjectPullRequests";
 import { ProjectSidebarSection } from "./projects/ProjectSidebarSection";
+import { ProjectsDirectory } from "./projects/ProjectsDirectory";
 import { OctantButton } from "./ui/base/OctantButton";
 import { useProjectController } from "./projects/useProjectController";
 import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
@@ -3661,8 +3662,23 @@ function LaunchedShell(
 
   async function openSelectedProject(project: ProjectSummary) {
     closeThreadSearch();
-    if (project.lifecycle !== "active") return;
     await controller.openProject(project.id, project.type, project.name);
+  }
+
+  function openProjects() {
+    closeWorkspaceReaders();
+    const selected = projectController.allProjects.find(
+      (project) => String(project.id) === String(activeProjectId),
+    );
+    const project =
+      selected ??
+      projectController.allProjects.find((candidate) => candidate.lifecycle === "active") ??
+      projectController.allProjects[0];
+    if (project === undefined) {
+      openProjectCreate();
+      return;
+    }
+    void openSelectedProject(project);
   }
 
   function viewAllChatProjectThreads(projectId: ProjectId) {
@@ -4995,12 +5011,16 @@ function LaunchedShell(
         }}
         onPreviewSidebarWidth={setPreviewSidebarWidth}
         sidebarCollapsed={sidebarCollapsed}
+        projectsSidebarOpen={selectedProjectTabId !== undefined}
         sidebarVibrancyMode={presentedShellSettings?.sidebarBackground.vibrancyMode ?? "off"}
         showThreadProviderIcons={controller.settings.showThreadProviderIcons}
         transcriptTextSize={controller.settings.transcriptTextSize}
         transcriptWidth={controller.settings.transcriptWidth}
         sidebar={
           <ShellSidebar
+            {...(selectedProjectTabId === undefined
+              ? {}
+              : { activeDestination: "projects" as const })}
             imageLibraryAvailable={imageGenerationClient !== undefined}
             {...(federatedHostStates.length < 2
               ? {}
@@ -5031,6 +5051,7 @@ function LaunchedShell(
                       agents: openAgentsCenter,
                       "artifact-library": openArtifactLibrary,
                       "image-library": openImageLibrary,
+                      projects: openProjects,
                       plugins: openSkillsSettings,
                     },
                   },
@@ -5046,6 +5067,7 @@ function LaunchedShell(
                       automations: openAutomationCenter,
                       "artifact-library": openArtifactLibrary,
                       "image-library": openImageLibrary,
+                      projects: openProjects,
                       plugins: openSkillsSettings,
                       ...pluginSidebarDestinationActions,
                     },
@@ -5062,6 +5084,7 @@ function LaunchedShell(
                       automations: openAutomationCenter,
                       "artifact-library": openArtifactLibrary,
                       "image-library": openImageLibrary,
+                      projects: openProjects,
                       plugins: openSkillsSettings,
                       ...pluginSidebarDestinationActions,
                     },
@@ -5090,6 +5113,20 @@ function LaunchedShell(
             workspace={controller.workspace}
             resolvedSidebarBackground={resolvedSidebarBackground}
             backgroundFetcher={sidebarBackgroundFetcher}
+            {...(selectedProjectTabId === undefined || activeProjectId === undefined
+              ? {}
+              : {
+                  projectsDirectory: (
+                    <ProjectsDirectory
+                      availabilityByProject={projectController.availabilityByProject}
+                      onAddProject={() => openProjectCreate()}
+                      onDismiss={() => setSidebarCollapsedPersistent(true)}
+                      onOpenProject={(project) => void openSelectedProject(project)}
+                      projects={projectController.allProjects}
+                      selectedProjectId={activeProjectId}
+                    />
+                  ),
+                })}
             projectSection={
               <>
                 {projectController.status === "loading" ? (

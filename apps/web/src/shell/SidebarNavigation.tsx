@@ -2,6 +2,7 @@ import {
   CircleDot,
   Columns3,
   FileStack,
+  Folder,
   GitFork,
   GitPullRequest,
   Inbox,
@@ -22,6 +23,7 @@ import {
 import { OctantButton } from "../ui/base/OctantButton";
 
 export interface SidebarNavigationProps {
+  readonly activeDestination?: SidebarNavigationDescriptorId;
   readonly actions: Partial<Readonly<Record<SidebarNavigationDescriptorId, () => void>>>;
   /** Row counts (e.g. threads waiting in the Inbox); zero and absent render nothing. */
   readonly counts?: Partial<Readonly<Record<SidebarNavigationDescriptorId, number>>>;
@@ -56,7 +58,31 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
   let morePending = props.more !== undefined;
   for (const descriptor of descriptors) {
     if (descriptor.id === "projects") {
-      if (props.projectSection !== undefined && props.projectSection !== null) {
+      const action = props.actions.projects;
+      if (action !== undefined) {
+        rows.push(
+          <OctantButton
+            aria-current={props.activeDestination === "projects" ? "page" : undefined}
+            aria-label={descriptor.label}
+            className="sidebar-item window-no-drag justify-start"
+            data-navigation-id={descriptor.id}
+            key={descriptor.id}
+            onClick={() => action()}
+            type="button"
+            variant="ghost"
+          >
+            <Folder aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+            <span className="sidebar-label">{descriptor.label}</span>
+          </OctantButton>,
+        );
+        if (props.projectSection !== undefined && props.projectSection !== null) {
+          rows.push(
+            <div className="sidebar-navigation__project-threads" key="project-threads">
+              {props.projectSection}
+            </div>,
+          );
+        }
+      } else if (props.projectSection !== undefined && props.projectSection !== null) {
         if (projectsLast && morePending) {
           rows.push(<Fragment key="sidebar-more">{props.more}</Fragment>);
           morePending = false;
@@ -82,6 +108,7 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
         // shell's accessibility tree has reported these rows as unnamed
         // buttons. The name always starts with the visible label.
         aria-label={count > 0 ? `${descriptor.label}, ${count} waiting` : descriptor.label}
+        aria-current={props.activeDestination === descriptor.id ? "page" : undefined}
         className="sidebar-item window-no-drag justify-start"
         data-navigation-id={descriptor.id}
         key={descriptor.id}
@@ -133,6 +160,8 @@ export function navigationIcon(id: SidebarNavigationDescriptorId) {
       return CircleDot;
     case "linear-issues":
       return ListTodo;
+    case "projects":
+      return Folder;
     default:
       return undefined;
   }

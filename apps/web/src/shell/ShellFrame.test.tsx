@@ -277,7 +277,9 @@ describe("ShellFrame", () => {
 
   it("keeps the primary workspace full-height while the narrow sidebar becomes an overlay", () => {
     const shell = cssRule(".shell.shell-frame");
-    const sidebarContent = cssRule(".shell-frame > .sidebar > .sidebar__content");
+    const sidebarContent = cssRule(
+      ".shell-frame > .sidebar > .sidebar__primary > .sidebar__content",
+    );
 
     expect(shell).toContain("height: 100vh;");
     expect(shell).toContain("max-width: 100vw;");
@@ -302,6 +304,19 @@ describe("ShellFrame", () => {
     expect(shellStyles).toMatch(
       /@media \(max-width: 960px\)[\s\S]*\.shell-frame__sidebar-resize\s*\{[\s\S]*display:\s*none;/,
     );
+  });
+
+  it("gives the Projects collection the workspace material with only a dividing hairline", () => {
+    const primarySidebar = cssRule(".sidebar--projects > .sidebar__primary");
+    const projectsPane = cssRule(".sidebar__projects-pane");
+    const translucentProjectsPane = cssRule(
+      ".shell--workspace-material-translucent.shell-frame > .sidebar > .sidebar__projects-pane",
+    );
+
+    expect(primarySidebar).toContain("border-right: 1px solid var(--oct-border);");
+    expect(projectsPane).toContain("background: var(--oct-bg);");
+    expect(projectsPane).not.toContain("box-shadow:");
+    expect(translucentProjectsPane).toContain("background: var(--octant-workspace-translucent);");
   });
 
   it("shares the wide Electron titlebar row with workspace tabs without a separator", () => {

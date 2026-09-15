@@ -20,6 +20,27 @@ const truthfulInput = {
 } as const satisfies SidebarNavigationInput;
 
 describe("SidebarNavigation", () => {
+  it("opens Projects as a first-class destination alongside the Project thread tree", async () => {
+    const user = userEvent.setup();
+    const openProjects = vi.fn();
+
+    render(
+      <SidebarNavigation
+        activeDestination="projects"
+        actions={{ projects: openProjects }}
+        input={truthfulInput}
+        projectSection={<nav aria-label="Legacy Project tree">Legacy tree</nav>}
+      />,
+    );
+
+    const projects = screen.getByRole("button", { name: "Projects" });
+    expect(projects).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("navigation", { name: "Legacy Project tree" })).toBeVisible();
+
+    await user.click(projects);
+    expect(openProjects).toHaveBeenCalledOnce();
+  });
+
   it("renders capability-backed Code destinations and invokes their exact handlers", async () => {
     const user = userEvent.setup();
     const actions = {

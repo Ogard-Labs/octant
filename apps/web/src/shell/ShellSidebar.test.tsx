@@ -11,6 +11,30 @@ import { ShellSidebar } from "./ShellSidebar";
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
 
 describe("ShellSidebar", () => {
+  it("renders the Projects collection as a dedicated sidebar pane", () => {
+    const { container } = render(
+      <ShellSidebar
+        activeDestination="projects"
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={<nav aria-label="Project threads">Project threads</nav>}
+        projectsDirectory={<nav aria-label="Projects">All Projects</nav>}
+        settings={defaultShellSettings()}
+        workspace={defaultWindowWorkspace(windowId)}
+      />,
+    );
+
+    const sidebar = screen.getByRole("complementary", { name: "Octant sidebar" });
+    const projectsPane = screen.getByRole("region", { name: "Projects sidebar" });
+    expect(sidebar).toHaveClass("sidebar--projects");
+    expect(sidebar).toContainElement(projectsPane);
+    expect(projectsPane).toContainElement(screen.getByRole("navigation", { name: "Projects" }));
+    expect(container.querySelector(".sidebar__primary")).not.toContainElement(projectsPane);
+    expect(screen.queryByRole("navigation", { name: "Project threads" })).toBeNull();
+  });
+
   it("keeps the native leading row unbranded while preserving window affordances", () => {
     const { container } = render(
       <ShellSidebar

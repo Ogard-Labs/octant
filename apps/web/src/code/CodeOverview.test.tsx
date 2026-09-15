@@ -404,6 +404,20 @@ describe("CodeOverview", () => {
     expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent("Managed worktree");
   });
 
+  it("does not tell the person to start a thread below when quick start is hidden", async () => {
+    render(
+      <CodeOverview
+        controller={controller()}
+        onOpenThread={vi.fn()}
+        projectId={ids.project as never}
+        showQuickStart={false}
+      />,
+    );
+
+    expect(await screen.findByText("No threads yet.")).toBeVisible();
+    expect(screen.queryByText("No threads yet. Start one below.")).not.toBeInTheDocument();
+  });
+
   it("keeps quick-start creation read-only until the ordinary callback is supplied", async () => {
     const value = controller();
     value.client = {

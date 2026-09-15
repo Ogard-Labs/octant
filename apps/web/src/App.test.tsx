@@ -219,11 +219,12 @@ describe("App", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Controller foundation" })).toBeVisible();
-    expect(
-      within(screen.getByRole("navigation", { name: "Projects" })).getByRole("button", {
-        name: /Controller foundation/,
-      }),
-    ).toBeVisible();
+    const projectsDestination = screen.getByRole("button", { name: "Projects" });
+    expect(projectsDestination).toBeVisible();
+    await userEvent.click(projectsDestination);
+    const directory = document.querySelector<HTMLElement>(".projects-directory");
+    if (directory === null) throw new Error("Expected the Projects directory.");
+    expect(within(directory).getByRole("button", { name: /Octant, Code Project/ })).toBeVisible();
     expect(codeApi.thread).toHaveBeenCalledWith(codeThreadId, expect.any(AbortSignal));
     expect(codeApi.subscribe).toHaveBeenCalledWith(codeThreadId, 0, expect.any(AbortSignal));
   });
@@ -2064,6 +2065,7 @@ describe("App", () => {
     await openSidebarProject(user, "Octant");
     const overview = (await screen.findByDisplayValue("Octant")).closest(".project-overview");
     if (!(overview instanceof HTMLElement)) throw new Error("Expected Octant Overview.");
+    await user.click(within(overview).getByRole("button", { name: "Manage Memory" }));
     expect(await within(overview).findByText("Keep this Project's memory visible.")).toBeVisible();
     expect(document.querySelector("#environment-hub, #context-sidebar")).toBeNull();
     expect(screen.queryByRole("tab", { name: "Project memory" })).not.toBeInTheDocument();
@@ -2078,6 +2080,7 @@ describe("App", () => {
     await openSidebarProject(user, "Other Repository");
     const otherOverview = screen.getByDisplayValue("Other Repository").closest(".project-overview");
     if (!(otherOverview instanceof HTMLElement)) throw new Error("Expected other Overview.");
+    await user.click(within(otherOverview).getByRole("button", { name: "Manage Memory" }));
     await waitFor(() => expect(projectApi.memory).toHaveBeenCalledWith(otherProjectId));
     expect(within(otherOverview).queryByText("Keep this Project's memory visible.")).toBeNull();
   });
@@ -2236,11 +2239,13 @@ describe("App", () => {
     const alphaOverview = await screen.findByDisplayValue("Project Alpha");
     const alphaProject = alphaOverview.closest(".project-overview");
     if (!(alphaProject instanceof HTMLElement)) throw new Error("Expected Project Alpha overview.");
+    await user.click(within(alphaProject).getByRole("button", { name: "Manage Memory" }));
     const alphaMemory = await within(alphaProject).findByRole("region", { name: "Project memory" });
     expect(await within(alphaMemory).findByText("Memory 1")).toBeVisible();
 
     const betaOverview = screen.getByDisplayValue("Project Beta").closest(".project-overview");
     if (!(betaOverview instanceof HTMLElement)) throw new Error("Expected Project Beta overview.");
+    await user.click(within(betaOverview).getByRole("button", { name: "Manage Memory" }));
     const betaMemoryRegion = within(betaOverview).getByRole("region", { name: "Project memory" });
     expect(within(betaMemoryRegion).queryByText("Memory 1")).not.toBeInTheDocument();
     expect(within(betaMemoryRegion).getByRole("button", { name: "Add memory" })).toBeDisabled();
@@ -2333,13 +2338,13 @@ describe("App", () => {
     const alphaOverview = await screen.findByDisplayValue("Project Alpha");
     const alphaProject = alphaOverview.closest(".project-overview");
     if (!(alphaProject instanceof HTMLElement)) throw new Error("Expected Project Alpha overview.");
-    expect(await within(alphaProject).findByRole("heading", { name: "Memory" })).toBeVisible();
+    expect(within(alphaProject).getByRole("button", { name: "Manage Memory" })).toBeVisible();
 
     await user.click(screen.getByDisplayValue("Project Beta"));
     const betaOverview = screen.getByDisplayValue("Project Beta").closest(".project-overview");
     if (!(betaOverview instanceof HTMLElement)) throw new Error("Expected Project Beta overview.");
     expect(within(betaOverview).queryByText("Project Alpha")).not.toBeInTheDocument();
-    expect(within(betaOverview).getByRole("heading", { name: "Memory" })).toBeVisible();
+    expect(within(betaOverview).getByRole("button", { name: "Manage Memory" })).toBeVisible();
     await waitFor(() => expect(projectApi.memory).toHaveBeenCalledWith(otherProjectId));
   });
 
@@ -2435,6 +2440,7 @@ describe("App", () => {
     const alphaOverview = await screen.findByDisplayValue("Project Alpha");
     const alphaProject = alphaOverview.closest(".project-overview");
     if (!(alphaProject instanceof HTMLElement)) throw new Error("Expected Project Alpha overview.");
+    await user.click(within(alphaProject).getByRole("button", { name: "Manage Memory" }));
     const alphaMemory = await within(alphaProject).findByRole("region", { name: "Project memory" });
     await within(alphaMemory).findByText("Alpha remembers the roadmap.");
 
@@ -3494,7 +3500,7 @@ describe("App", () => {
     ).toBe(false);
   });
 
-  it("bootstraps the durable shell and exposes the honest Project hierarchy", async () => {
+  it("bootstraps the durable shell and exposes Projects as a first-class workspace", async () => {
     const user = userEvent.setup();
     const codeApi = codes();
     const readyCodeBootstrap = await codeApi.bootstrap();
@@ -3571,31 +3577,28 @@ describe("App", () => {
     for (const button of within(sidebar).getAllByRole("button")) {
       expect(button).toHaveClass("window-no-drag");
     }
-    expect(await screen.findByRole("button", { name: "Project actions for Octant" })).toBeVisible();
+    const projectsDestination = await screen.findByRole("button", { name: "Projects" });
+    expect(projectsDestination).toBeVisible();
     expect(screen.getByRole("button", { name: "New task" })).toBeVisible();
     await user.click(within(sidebar).getByRole("button", { name: "More destinations" }));
     expect(await screen.findByRole("menuitem", { name: "Plugins" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Board" })).toBeVisible();
     expect(within(sidebar).getByRole("button", { name: "Pull requests" })).toBeVisible();
-    const addFolder = screen.getByRole("button", { name: "Add folder" });
-    expect(addFolder).toHaveClass("project-section__add");
-    expect(addFolder).not.toHaveTextContent("Add folder");
+    await user.click(projectsDestination);
+    const projectsDirectory = document.querySelector<HTMLElement>(".projects-directory");
+    if (projectsDirectory === null) throw new Error("Expected the Projects directory.");
+    const projectsSidebar = within(sidebar).getByRole("region", { name: "Projects sidebar" });
+    expect(projectsSidebar).toContainElement(projectsDirectory);
+    expect(document.querySelector(".shell-frame")).toHaveClass("shell--projects-sidebar-open");
+    expect(projectsDirectory.closest(".workspace-layer")).toBeNull();
+    expect(within(projectsDirectory).getByRole("button", { name: "Add Project" })).toBeVisible();
     expect(
-      addFolder.compareDocumentPosition(screen.getByRole("heading", { name: "Projects" })),
-    ).toBe(Node.DOCUMENT_POSITION_PRECEDING);
-    screen.getByRole("button", { name: "Project actions for Octant" }).focus();
-    await user.keyboard("{ArrowDown}");
-    expect(await screen.findByRole("menuitem", { name: "Move up" })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-    expect(screen.getByRole("menuitem", { name: "Move down" })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-    await user.keyboard("{Escape}");
+      within(projectsDirectory).getByRole("searchbox", { name: "Search Projects" }),
+    ).toBeVisible();
     expect(
-      within(screen.getByRole("navigation", { name: "Projects" })).getByText("Relink required"),
+      within(projectsDirectory).getByRole("button", {
+        name: /Octant, Code Project, Relink required/,
+      }),
     ).toBeVisible();
     await act(async () => {
       codeBootstrap.resolve(readyCodeBootstrap);
@@ -3607,14 +3610,12 @@ describe("App", () => {
       }),
     ).toBeVisible();
     expect(await screen.findByRole("button", { name: "New task" })).toBeVisible();
-    expect(
-      await screen.findByRole("textbox", { name: "Follow-up message" }, { timeout: 5_000 }),
-    ).toBeVisible();
-
     await openSidebarProject(user, "Octant");
     const overview = await screen.findByRole("region", { name: "Workspace pane: Octant" });
     expect(overview).toBeVisible();
-    expect(within(overview).getByText("Relink required")).toBeVisible();
+    const projectDetail = overview.querySelector<HTMLElement>(".project-overview");
+    if (projectDetail === null) throw new Error("Expected the selected Project detail.");
+    expect(within(projectDetail).getByText("Relink required")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Choose new root" }));
     expect(hostBridge.selectProjectRoot).toHaveBeenCalledWith("code");
     expect(projectApi.executeProject).toHaveBeenCalledWith({
@@ -3819,7 +3820,10 @@ describe("App", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "Add folder" }));
+    await user.click(await screen.findByRole("button", { name: "Projects" }));
+    const directory = document.querySelector<HTMLElement>(".projects-directory");
+    if (directory === null) throw new Error("Expected the Projects directory.");
+    await user.click(within(directory).getByRole("button", { name: "Add Project" }));
     await user.click(await screen.findByRole("button", { name: "Choose a folder" }));
 
     await waitFor(() => expect(hostBridge.selectProjectRoot).toHaveBeenCalledWith("code"));
