@@ -6879,7 +6879,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   gap: var(--oct-space-2);
   cursor: pointer;
   list-style: none;
-  font-family: var(--oct-font-mono);
+  font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   color: var(--oct-meta);
 }
@@ -6896,7 +6896,6 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   margin-top: var(--oct-space-2);
   font-family: var(--oct-font-transcript);
   font-size: var(--oct-text-sm);
-  font-style: italic;
   line-height: var(--oct-leading-body);
   color: var(--oct-muted);
 }

@@ -1,3 +1,4 @@
+import { StreamRepliesContext } from "./transcript/AssistantMessageBody";
 import { ComputerUseEnabledContext } from "./computerUse/ComputerUseMention";
 import { UsageNamesProvider } from "./usage/UsageName";
 import type { ContextClient } from "@octant/client-runtime/context-client";
@@ -6173,7 +6174,11 @@ function LaunchedShell(
           />
           <TrackerReferenceProvider ports={trackerReferencePorts}>
             <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
-              <ProjectThreadsProvider value={projectThreadsAccess}>{shell}</ProjectThreadsProvider>
+              <ProjectThreadsProvider value={projectThreadsAccess}>
+                <StreamRepliesContext.Provider value={controller.settings?.streamReplies !== false}>
+                  {shell}
+                </StreamRepliesContext.Provider>
+              </ProjectThreadsProvider>
             </SidebarThreadDragContext.Provider>
           </TrackerReferenceProvider>
         </OctantCommandProvider>

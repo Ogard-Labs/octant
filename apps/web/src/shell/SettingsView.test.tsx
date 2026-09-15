@@ -140,6 +140,15 @@ function defaultProps(): SettingsViewProps {
 }
 
 describe("SettingsView", () => {
+  it("lets the reader choose to wait for finished replies", async () => {
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+    navigateTo("Appearance");
+    const control = screen.getByRole("switch", { name: "Stream replies" });
+    expect(control).toHaveAttribute("aria-checked", "true");
+    await userEvent.setup().click(control);
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ streamReplies: false });
+  });
   it("falls back to General for a retired execution-profile link and offers no profile page", async () => {
     renderSettings({ initialDeepLink: { section: "profiles" } });
     expect(await screen.findByRole("button", { name: "General" })).toHaveAttribute(

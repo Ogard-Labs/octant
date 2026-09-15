@@ -6,6 +6,16 @@ import {
 } from "./chatMessageParts";
 
 describe("resolveChatMessageParts", () => {
+  it.each([
+    "```xml\n<think>example payload</think>\n```",
+    "Use `<thinking>example</thinking>` literally.",
+    "Use ``<reasoning>example `value`</reasoning>`` literally.",
+    "~~~xml\n<think>example payload</think>\n~~~",
+    "```xml\n<think>streaming example</think>",
+  ])("keeps reasoning markers inside code literal: %s", (body) => {
+    expect(parseChatMessageBody(body)).toEqual([{ kind: "markdown", text: body }]);
+  });
+
   it("prefers structured parts when present", () => {
     const parts = resolveChatMessageParts({
       role: "assistant",

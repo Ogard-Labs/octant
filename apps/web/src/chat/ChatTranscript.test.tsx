@@ -194,7 +194,7 @@ describe("ChatTranscript", () => {
     expect(screen.getByText("diagram.png")).toBeVisible();
     expect(screen.queryByText(/managed\//i)).not.toBeInTheDocument();
     expect(screen.getByText("Interrupted")).toBeVisible();
-    expect(screen.getByText("Completed")).toBeVisible();
+    expect(screen.queryByText("Completed")).not.toBeInTheDocument();
     expect(screen.getByText("Provider handoff · model-b")).toBeVisible();
     expect(screen.getByRole("link", { name: "Octant guide · SearXNG" })).toHaveAttribute(
       "href",
@@ -203,9 +203,8 @@ describe("ChatTranscript", () => {
 
     const content = screen.getByRole("list", { name: "Chat transcript" });
     expect(content.textContent).toMatch(
-      // The outcome heads the reply, so a finished turn reads "Completed" and
-      // then what it said.
-      /Please summarize this\.\s*diagram\.png[\s\S]*Interrupted[\s\S]*Provider handoff · model-b[\s\S]*Completed[\s\S]*Here is the summary\./,
+      // Exceptional outcomes stay visible; successful replies speak for themselves.
+      /Please summarize this\.\s*diagram\.png[\s\S]*Interrupted[\s\S]*Provider handoff · model-b[\s\S]*Here is the summary\./,
     );
   });
 
@@ -436,7 +435,6 @@ describe("ChatTranscript", () => {
       "Interrupted",
       "Failed",
       "Cancelled",
-      "Completed",
     ]) {
       expect(screen.getByText(label)).toBeVisible();
     }
@@ -990,7 +988,7 @@ describe("ChatTranscript", () => {
     expect(screen.queryByRole("button", { name: "Forget" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry interrupted response" })).toBeVisible();
     expect(screen.getByText("Interrupted")).toBeVisible();
-    expect(screen.getByText("Completed")).toBeVisible();
+    expect(screen.queryByText("Completed")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "More actions" }));
     expect(await screen.findByRole("menuitemradio", { name: "Restore from here" })).toBeVisible();

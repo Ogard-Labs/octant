@@ -6918,7 +6918,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .code-transcript-row__disclosure--thinking > summary .code-transcript-row__name {
   color: var(--oct-muted);
-  font-style: italic;
 }
 
 .code-transcript-row__outcome {
@@ -6966,13 +6965,12 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .code-transcript-row__thinking-body {
   margin: 0 0 8px 20px;
-  padding: 8px 10px;
-  border-radius: var(--oct-radius-sm);
-  background: var(--oct-fill-4);
+  padding: 0 0 0 var(--oct-space-4);
+  border-left: 2px solid var(--oct-border);
   color: var(--oct-muted);
-  font-size: var(--oct-text-detail);
-  font-style: italic;
-  line-height: 1.5;
+  font-family: var(--oct-font-transcript);
+  font-size: var(--oct-text-sm);
+  line-height: var(--oct-leading-body);
   white-space: pre-wrap;
 }
 

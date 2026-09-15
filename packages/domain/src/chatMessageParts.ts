@@ -46,12 +46,24 @@ function parseToolMeta(info: string): { name: string; status: ChatToolPartStatus
 export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePart> {
   if (body.length === 0) return [{ kind: "markdown", text: "" }];
 
+  // Reasoning markers inside code samples are literal source, including an
+  // unfinished fenced sample arriving over a live stream.
+  const literalRanges = [
+    ...body.matchAll(
+      /^ {0,3}((`|~)\2{2,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1\2*[ \t]*(?:\n|$)|(?![\s\S]))/gm,
+    ),
+    ...body.matchAll(/(?<!`)(`+)(?!`)[\s\S]*?\1(?!`)/g),
+  ].map((match) => ({ start: match.index, end: match.index + match[0].length }));
+  const insideCode = (position: number) =>
+    literalRanges.some((range) => position >= range.start && position < range.end);
+
   const parts: ChatMessagePart[] = [];
   let cursor = 0;
   const annotated: Array<{ start: number; end: number; part: ChatMessagePart }> = [];
 
   for (const match of body.matchAll(THINKING_TAG)) {
     const start = match.index ?? 0;
+    if (insideCode(start)) continue;
     annotated.push({
       start,
       end: start + match[0].length,
@@ -60,6 +72,7 @@ export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePar
   }
   for (const match of body.matchAll(REASONING_TAG)) {
     const start = match.index ?? 0;
+    if (insideCode(start)) continue;
     annotated.push({
       start,
       end: start + match[0].length,
@@ -68,6 +81,7 @@ export function parseChatMessageBody(body: string): ReadonlyArray<ChatMessagePar
   }
   for (const match of body.matchAll(THINK_TAG)) {
     const start = match.index ?? 0;
+    if (insideCode(start)) continue;
     annotated.push({
       start,
       end: start + match[0].length,

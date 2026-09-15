@@ -152,6 +152,11 @@ const presentationState = {
 } as const;
 
 describe("shell bootstrap contracts", () => {
+  it("preserves an explicit choice to wait for finished replies", () => {
+    expect(decodeShellSettings({ ...settings, streamReplies: false }).streamReplies).toBe(false);
+    expect(decodeShellSettings(settings).streamReplies).toBeUndefined();
+    expect(() => decodeShellSettings({ ...settings, streamReplies: "no" })).toThrow();
+  });
   it("accepts only supported mode-switcher presentations", () => {
     expect(decodeShellSettings({ ...settings, modeSwitcherPresentation: "buttons" })).toMatchObject(
       { modeSwitcherPresentation: "buttons" },

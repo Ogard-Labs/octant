@@ -269,6 +269,32 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("folds inline reasoning in Code history while leaving the answer readable", async () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "reply",
+              role: "assistant",
+              text: "<think>Check the two sources.</think>Here is the answer.",
+              status: "completed",
+            },
+          ],
+        })}
+        threadId={threadId}
+      />,
+    );
+    expect(screen.getByText("Here is the answer.")).toBeVisible();
+    const thinking = screen.getByText("Thinking").closest("details");
+    expect(thinking).not.toHaveAttribute("open");
+    await userEvent.click(screen.getByText("Thinking"));
+    expect(thinking).toHaveAttribute("open");
+    expect(screen.getByText("Check the two sources.")).toBeVisible();
+    await userEvent.click(screen.getByText("Thinking"));
+    expect(thinking).not.toHaveAttribute("open");
+  });
+
   it("reads a plan the assistant wrote as a plan, not as one long line", () => {
     render(
       <CodeThreadWorkspace
@@ -465,8 +491,7 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Fork from here" })).not.toBeInTheDocument();
-    await chooseTurnAction(user, "Fork from here", "done");
+    await user.click(screen.getByRole("button", { name: "Fork from here" }));
 
     await waitFor(() =>
       expect(forkThread).toHaveBeenCalledWith({

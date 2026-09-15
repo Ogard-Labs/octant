@@ -407,6 +407,8 @@ export const ShellSettings = Schema.Struct({
    * it in on read so every client sees the folder that is actually in effect.
    */
   defaultFolder: Schema.optional(DefaultFolder),
+  /** Absent preserves streaming replies for existing installations. */
+  streamReplies: Schema.optional(Schema.Boolean),
   sidebarWidth: SidebarWidth,
   contextSidebarWidth: ContextSidebarWidth,
   lastContextSurface: Schema.NullOr(ContextSurfaceId),

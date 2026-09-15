@@ -48,7 +48,7 @@ import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeConversationMessage, CodeController, CodeTurnStatus } from "./useCodeController";
-import { ChatRichText } from "../chat/ChatRichText";
+import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import { CodeCheckoutBar } from "./CodeCheckoutBar";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
@@ -884,7 +884,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     setForking(true);
     try {
       const forked = await props.controller.forkThread({
-        threadId: view.thread.id,
+        threadId: message.sourceThreadId ?? view.thread.id,
         throughOperationId: String(operationId),
         title: forkTitle(view.thread.title),
       });
@@ -1125,7 +1125,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   {...(props.attachmentClient === undefined
                     ? {}
                     : { client: props.attachmentClient })}
-                  threadId={props.threadId}
+                  threadId={message.sourceThreadId ?? props.threadId}
                 />
               );
             return (
@@ -1155,12 +1155,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         message.status === "completed" &&
                         message.text.trim().length > 0,
                       canCheckpoint:
+                        message.sourceThreadId === undefined &&
                         message.role === "assistant" &&
                         message.operationId !== undefined &&
                         message.status === "completed" &&
                         checkpoints.available,
                       canRestoreFiles:
-                        message.role === "user" && message.checkpoint !== undefined && mayRestore,
+                        message.sourceThreadId === undefined &&
+                        message.role === "user" &&
+                        message.checkpoint !== undefined &&
+                        mayRestore,
                       checkpointBusy: checkpoints.busy,
                       forking,
                       marked: markedCheckpoint !== undefined,
@@ -1203,6 +1207,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       <>
                         <TurnHeader
                           copyValue={message.text}
+                          onFork={
+                            message.operationId !== undefined &&
+                            message.status === "completed" &&
+                            props.onOpenCodeThread !== undefined
+                              ? () => void forkFrom(message)
+                              : undefined
+                          }
+                          forkDisabled={forking}
                           outcome={turnHeaderOutcome(message.status)}
                           provider={
                             message.providerInstanceId === undefined ||
@@ -1239,7 +1251,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                             heading and a numbered list, and rendering it as one
                             long line is what made plans unreadable here. */}
                         {message.text.length > 0 ? (
-                          <ChatRichText body={message.text} />
+                          <AssistantMessageBody
+                            body={message.text}
+                            streaming={
+                              message.status === "incomplete" || message.status === "waiting"
+                            }
+                          />
                         ) : (
                           <p>{busy ? "Thinking…" : ""}</p>
                         )}

@@ -4,7 +4,6 @@ import type {
   ChatAttemptAnsweredQuestion,
   ChatContentBody,
   ChatContentReference,
-  ChatMessagePart,
   ChatThreadView,
   ChatTurnId,
   ChatTurnRouteDecision,
@@ -12,7 +11,6 @@ import type {
 } from "@octant/contracts/chat";
 import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import { activeChatTurns } from "@octant/domain/chat-policy";
-import { resolveChatMessageParts } from "@octant/domain/chat-message-parts";
 import type { PickerGroup } from "@octant/domain";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import { TurnHeader, TurnTime, turnWorkedFor } from "../transcript/TurnHeader";
@@ -24,7 +22,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
-import { ChevronRight, CircleCheck } from "lucide-react";
+import { CircleCheck } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
@@ -33,7 +31,7 @@ import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
-import { ChatRichText } from "./ChatRichText";
+import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import { ChatTurnEditor } from "./ChatTurnEditor";
 
 export interface ChatTranscriptProps {
@@ -366,6 +364,12 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   attempt={attempt}
                   contentById={contentById}
                   key={attempt.id}
+                  onFork={
+                    props.onBranchTurn === undefined
+                      ? undefined
+                      : () => props.onBranchTurn?.(turn.id)
+                  }
+                  forkDisabled={props.busy === true}
                   onAnswerQuestion={props.onAnswerQuestion}
                   onDismissQuestion={props.onDismissQuestion}
                   onQuoteSelection={props.onQuoteSelection}
@@ -503,6 +507,8 @@ const AttemptBlock = memo(function AttemptBlock(props: {
   readonly onDismissQuestion: ChatTranscriptProps["onDismissQuestion"];
   readonly onQuoteSelection: ChatTranscriptProps["onQuoteSelection"];
   readonly onRetryAttempt: ChatTranscriptProps["onRetryAttempt"];
+  readonly onFork: (() => void) | undefined;
+  readonly forkDisabled: boolean;
   readonly previousAttempt: ChatAttempt | undefined;
   readonly providerGroups: ChatTranscriptProps["providerGroups"];
 }) {
@@ -536,6 +542,8 @@ const AttemptBlock = memo(function AttemptBlock(props: {
         <TurnHeader
           at={props.attempt.updatedAt}
           copyValue={responseBody}
+          onFork={props.attempt.outcome === "completed" ? props.onFork : undefined}
+          forkDisabled={props.forkDisabled}
           outcome={props.attempt.outcome}
           {...(props.attempt.pendingQuestion === undefined
             ? {}
@@ -639,19 +647,16 @@ function AssistantResponse(props: {
   readonly onQuoteSelection: ChatTranscriptProps["onQuoteSelection"];
   readonly responseBody: string;
 }) {
-  const parts = useMemo(
-    () => resolveChatMessageParts({ role: "assistant", body: props.responseBody }),
-    [props.responseBody],
-  );
   const rootId = `chat-quote-${String(props.attempt.id)}`;
-  const folded = parts.some((part) => part.kind === "reasoning" || part.kind === "tool");
-  if (!folded && !props.canQuote) return <ChatRichText body={props.responseBody} />;
   const rendered = (
-    <div className="chat-transcript__parts">
-      {parts.map((part, index) => (
-        <AssistantResponsePart key={`${part.kind}:${String(index)}`} part={part} />
-      ))}
-    </div>
+    <AssistantMessageBody
+      body={props.responseBody}
+      streaming={
+        props.attempt.outcome === "streaming" ||
+        props.attempt.outcome === "queued" ||
+        props.attempt.outcome === "waiting"
+      }
+    />
   );
   if (!props.canQuote) return rendered;
   return (
@@ -662,34 +667,6 @@ function AssistantResponse(props: {
       {rendered}
     </QuoteableAssistantBody>
   );
-}
-
-function AssistantResponsePart(props: { readonly part: ChatMessagePart }) {
-  const part = props.part;
-  if (part.kind === "tool") {
-    return (
-      <details className="thinking">
-        <summary aria-label={`Tool · ${part.name}`}>
-          <ChevronRight aria-hidden="true" className="chev" size={14} strokeWidth={2} />
-          <span>{`Tool · ${part.name}`}</span>
-          <span>{part.status}</span>
-        </summary>
-        <div className="thinking-body">{part.summary}</div>
-      </details>
-    );
-  }
-  if (part.kind === "reasoning") {
-    return (
-      <details className="thinking">
-        <summary aria-label="Thinking">
-          <ChevronRight aria-hidden="true" className="chev" size={14} strokeWidth={2} />
-          <span>Thinking</span>
-        </summary>
-        <div className="thinking-body">{part.text}</div>
-      </details>
-    );
-  }
-  return <ChatRichText body={part.text} />;
 }
 
 /**

@@ -39,6 +39,21 @@ function disclosure(name: string): HTMLDetailsElement {
 }
 
 describe("CodeTranscriptRow", () => {
+  it("reveals reasoning-only history with one disclosure instead of nested Thinking rows", async () => {
+    render(
+      <CodeTranscriptRow
+        activity={{ reasoning: "Check the two sources.", rows: [] }}
+        running={false}
+        settled
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Thinking" }));
+    expect(screen.getByText("Check the two sources.")).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "Thinking" })).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "Thinking" }));
+    expect(screen.getByText("Check the two sources.")).not.toBeVisible();
+  });
+
   it("stops presenting unfinished tools as running after the turn settles", () => {
     render(
       <CodeTranscriptRow

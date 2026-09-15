@@ -1,3 +1,4 @@
+import { ChatRichText } from "../chat/ChatRichText";
 import { Check, ChevronRight, Circle, CircleX, Clock3, LoaderCircle } from "lucide-react";
 import { useState, type KeyboardEvent, type ReactNode, type ToggleEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -141,8 +142,7 @@ export function CodeTranscriptRow(props: CodeTranscriptRowProps) {
   const pinnedIds = new Set(pinnedRows.map(rowKey));
   const foldableRows = activity.rows.filter((row) => !pinnedIds.has(rowKey(row)));
   const summary = settledTurnActivitySummary(activity);
-  const foldSettledToolchain =
-    settled && !running && summary.length > 0 && (foldableRows.length > 0 || hasReasoning);
+  const foldSettledToolchain = settled && !running && summary.length > 0 && foldableRows.length > 0;
 
   const onToggle = (id: string) => (event: ToggleEvent<HTMLDetailsElement>) => {
     const nextOpen = event.newState === "open";
@@ -191,7 +191,9 @@ export function CodeTranscriptRow(props: CodeTranscriptRowProps) {
         />
         <span className="code-transcript-row__name">Thinking</span>
       </summary>
-      <p className="code-transcript-row__thinking-body">{activity.reasoning}</p>
+      <div className="code-transcript-row__thinking-body">
+        <ChatRichText body={activity.reasoning} />
+      </div>
     </details>
   ) : null;
 
