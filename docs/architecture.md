@@ -38,6 +38,10 @@ The design rests on a small set of invariants that every package obeys:
   policy and state transitions with no I/O.
 - **Dependencies point inward.** Apps consume packages; contracts and domain
   never import apps. Provider-specific payloads stop at the provider adapter.
+- **A provider question has one answer identity.** Each question in a provider
+  question set reaches Chat, Work, and Code with a distinct request id. The
+  adapter collects answers in the provider's original question order, rejects
+  duplicate answers, and settles the underlying callback only when complete.
 - **Capabilities are honest and fail closed.** Every provider reports what it
   supports in every mode; an unsupported capability is disabled or refused,
   never silently emulated. No core capability may require a specific provider.

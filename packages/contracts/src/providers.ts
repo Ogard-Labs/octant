@@ -1717,9 +1717,9 @@ export const ProviderRuntimeEvent = Schema.Union(
     /**
      * Where this question sits in a set the provider asked at once, so a
      * person can see "1 of 2" while answering. Absent for a single question.
-     * Each question of a set arrives as its own event under the same request
-     * identity and is answered one at a time; the driver holds the set's
-     * answers until the last one and replies once.
+     * Each question has its own request identity and can be answered once.
+     * The driver collects answers in question order and replies to the
+     * provider once the complete set has been answered.
      */
     questionIndex: Schema.optional(PositiveInt),
     questionCount: Schema.optional(PositiveInt),

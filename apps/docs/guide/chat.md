@@ -83,8 +83,10 @@ carries the newest answer onward: later turns read the regenerated exchange,
 not the replaced one.
 
 A reply's reasoning folds into a **Thinking** disclosure above the text: shut
-by default, opened only if you want it, and still findable while closed. A
-tool call a reply made folds into its own disclosure the same way.
+by default, opened only if you want it, and still findable while closed. While
+the reply is still streaming, you can expand the reasoning to watch it arrive.
+It stays in the state you choose when the turn settles. A tool call a
+reply made folds into its own disclosure the same way.
 
 A checkpoint marker stays on the turn only when that point is marked. Restoring
 it starts a second thread; it does not rewind this one. The restored thread's

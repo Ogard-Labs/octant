@@ -1,6 +1,7 @@
 import {
   decodeProviderInstanceId,
   type ProviderModelId,
+  type ProviderRuntimeEvent,
   type ProviderResumeCursor,
   decodeProviderSessionId,
 } from "@octant/contracts";
@@ -367,87 +368,118 @@ describe("OpenCode driver", () => {
     expect(fixture.calls).toContain("session.abort");
   });
 
-  it("buffers a multi-question set and replies to the provider once, with every answer", async () => {
-    const fixture = driverFixture({
-      events: [
-        questionV2Event("provider-session", "question-set", [
-          {
-            question: "How should I proceed?",
-            options: [{ label: "Dequeue, push, re-queue" }, { label: "Let it merge" }],
-          },
-          {
-            question: "Mark the threads resolved?",
-            options: [{ label: "Resolve" }, { label: "Leave open" }],
-          },
-        ]),
-      ],
-    });
-    const questions: Array<unknown> = [];
-    await Effect.runPromise(
-      Effect.scoped(
-        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
-          Effect.flatMap((connection) =>
-            Effect.gen(function* () {
-              const subscriber = yield* Effect.fork(
-                (yield* connection.subscribe).pipe(
-                  Stream.filter(
-                    (event) => event.sessionId === sessionId && event.kind === "user-input-request",
+  it.each(["complete", "interrupt"] as const)(
+    "keeps question answers distinct when a set must %s",
+    async (outcome) => {
+      const fixture = driverFixture({
+        events: [
+          questionV2Event("provider-session", "question-set", [
+            {
+              question: "How should I proceed?",
+              options: [{ label: "Dequeue, push, re-queue" }, { label: "Let it merge" }],
+            },
+            {
+              question: "Mark the threads resolved?",
+              options: [{ label: "Resolve" }, { label: "Leave open" }],
+            },
+          ]),
+        ],
+      });
+      const questions: Array<Extract<ProviderRuntimeEvent, { kind: "user-input-request" }>> = [];
+      await Effect.runPromise(
+        Effect.scoped(
+          fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+            Effect.flatMap((connection) =>
+              Effect.gen(function* () {
+                const subscriber = yield* Effect.fork(
+                  (yield* connection.subscribe).pipe(
+                    Stream.filter(
+                      (event) =>
+                        event.sessionId === sessionId && event.kind === "user-input-request",
+                    ),
+                    Stream.runForEach((event) =>
+                      Effect.sync(() => {
+                        if (event.kind === "user-input-request") questions.push(event);
+                      }),
+                    ),
                   ),
-                  Stream.runForEach((event) =>
-                    Effect.sync(() => {
-                      questions.push(event);
+                );
+                yield* connection.start({
+                  sessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                });
+                yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+                yield* Effect.promise(
+                  () =>
+                    new Promise<void>((resolve, reject) => {
+                      const started = Date.now();
+                      const poll = () => {
+                        if (questions.length === 2) {
+                          resolve();
+                          return;
+                        }
+                        if (Date.now() - started > 5_000) {
+                          reject(new Error("Timed out waiting for the question set."));
+                          return;
+                        }
+                        setTimeout(poll, 10);
+                      };
+                      poll();
                     }),
-                  ),
-                ),
-              );
-              yield* connection.start({
-                sessionId,
-                modelId,
-                executionPolicy: "approval-gated",
-              });
-              yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
-              yield* Effect.promise(
-                () =>
-                  new Promise<void>((resolve, reject) => {
-                    const started = Date.now();
-                    const poll = () => {
-                      if (questions.length === 2) {
-                        resolve();
-                        return;
-                      }
-                      if (Date.now() - startedAt() > 5_000) {
-                        reject(new Error("Timed out waiting for the question set."));
-                        return;
-                      }
-                      setTimeout(poll, 10);
-                    };
-                    const startedAt = () => Date.now();
-                    poll();
+                );
+                const first = questions[0];
+                const second = questions[1];
+                if (first === undefined || second === undefined)
+                  throw new Error("Missing questions");
+                expect(first.requestId).not.toBe(second.requestId);
+                expect(second.sequence).toBe(first.sequence + 1);
+                // Answers can arrive from different surfaces in either order.
+                yield* connection.answerUserInput({
+                  sessionId,
+                  requestId: second.requestId,
+                  answer: "Resolve",
+                });
+                expect(fixture.calls.filter((call) => call.startsWith("question.reply:"))).toEqual(
+                  [],
+                );
+                const duplicate = yield* Effect.exit(
+                  connection.answerUserInput({
+                    sessionId,
+                    requestId: second.requestId,
+                    answer: "Leave open",
                   }),
-              );
-              // The first answer is held: the provider is not replied to until
-              // the whole set is answered.
-              yield* connection.answerUserInput({
-                sessionId,
-                requestId: "question-set",
-                answer: "Dequeue, push, re-queue",
-              });
-              expect(fixture.calls.filter((call) => call.startsWith("question.reply:"))).toEqual(
-                [],
-              );
-              yield* connection.answerUserInput({
-                sessionId,
-                requestId: "question-set",
-                answer: "Resolve",
-              });
-              yield* Fiber.interrupt(subscriber);
-            }),
+                );
+                expect(duplicate._tag).toBe("Failure");
+                if (outcome === "interrupt") {
+                  yield* connection.interrupt(sessionId);
+                  const late = yield* Effect.exit(
+                    connection.answerUserInput({
+                      sessionId,
+                      requestId: first.requestId,
+                      answer: "Late",
+                    }),
+                  );
+                  expect(late._tag).toBe("Failure");
+                  yield* Fiber.interrupt(subscriber);
+                  return;
+                }
+                yield* connection.answerUserInput({
+                  sessionId,
+                  requestId: first.requestId,
+                  answer: "Dequeue, push, re-queue",
+                });
+                yield* Fiber.interrupt(subscriber);
+              }),
+            ),
           ),
         ),
-      ),
-    );
-    expect(fixture.calls).toContain("question.reply:Dequeue, push, re-queue|Resolve");
-  });
+      );
+      expect(fixture.calls.filter((call) => call.startsWith("question.reply:"))).toEqual(
+        outcome === "complete" ? ["question.reply:Dequeue, push, re-queue|Resolve"] : [],
+      );
+    },
+  );
 
   it("gives each subscriber the same terminal stream and rejects sends after completion", async () => {
     const fixture = driverFixture({
