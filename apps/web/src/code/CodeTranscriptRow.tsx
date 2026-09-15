@@ -197,13 +197,6 @@ export function CodeTranscriptRow(props: CodeTranscriptRowProps) {
     </details>
   ) : null;
 
-  const foldableBody = (
-    <>
-      {thinkingDisclosure}
-      {foldableRows.map(renderDisclosure)}
-    </>
-  );
-
   // Live turns keep every row in one stable list so a tool finishing does not
   // remount its disclosure (and clear the open state the user just set). The
   // pinned/foldable split only applies once the outer settled fold is active.
@@ -212,6 +205,7 @@ export function CodeTranscriptRow(props: CodeTranscriptRowProps) {
       {activity.truncated === true ? (
         <p className="code-transcript-row__truncated">Earliest steps kept</p>
       ) : null}
+      {thinkingDisclosure}
       {foldSettledToolchain ? (
         <>
           {pinnedRows.map(renderDisclosure)}
@@ -238,14 +232,13 @@ export function CodeTranscriptRow(props: CodeTranscriptRowProps) {
               />
               <span className="code-transcript-row__name">{summary}</span>
             </summary>
-            <div className="code-transcript-row__toolchain">{foldableBody}</div>
+            <div className="code-transcript-row__toolchain">
+              {foldableRows.map(renderDisclosure)}
+            </div>
           </details>
         </>
       ) : (
-        <>
-          {thinkingDisclosure}
-          {activity.rows.map(renderDisclosure)}
-        </>
+        <>{activity.rows.map(renderDisclosure)}</>
       )}
     </div>
   );

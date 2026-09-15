@@ -611,7 +611,10 @@ describe("ChatTranscript", () => {
         body(ids.responseContent, "assistant", streamingBody, "b"),
       ],
     });
-    const { rerender } = render(<ChatTranscript view={streaming} />);
+    const onQuoteSelection = vi.fn();
+    const { rerender } = render(
+      <ChatTranscript onQuoteSelection={onQuoteSelection} view={streaming} />,
+    );
 
     const live = screen.getByText("Thinking").closest("details");
     if (!(live instanceof HTMLDetailsElement)) throw new Error("Thinking disclosure missing.");
@@ -622,6 +625,7 @@ describe("ChatTranscript", () => {
 
     rerender(
       <ChatTranscript
+        onQuoteSelection={onQuoteSelection}
         view={viewFixture({
           turns: [
             {

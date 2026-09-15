@@ -1930,6 +1930,78 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("keeps a fork readable when its source history is unavailable", async () => {
+    const promptId = "60000000-0000-4000-8000-000000000010";
+    const replyId = "60000000-0000-4000-8000-000000000011";
+    const operationId = "70000000-0000-4000-8000-000000000010";
+    const conversation = vi.fn(async () => ({
+      version: 3 as const,
+      threadId: ids.thread,
+      turns: [
+        {
+          operationId,
+          providerInstanceId: ids.provider,
+          modelId: "model-before-rebind",
+          sessionId: "80000000-0000-4000-8000-000000000010",
+          prompt: { contentId: promptId, digest: "a".repeat(64), byteLength: 11 },
+          assistant: [{ contentId: replyId, digest: "b".repeat(64), byteLength: 12 }],
+          status: "failed" as const,
+          startedAt: now,
+          updatedAt: now,
+        },
+      ],
+      nextCursor: 42,
+      hasMore: false,
+    }));
+    const operationContent = vi.fn();
+    const operationContents = vi.fn(async (request) => ({
+      threadId: request.threadId,
+      items: [
+        { operationId, contentId: promptId, text: "check tests" },
+        { operationId, contentId: replyId, text: "tests failed" },
+      ],
+    }));
+    const parentId = "10000000-0000-4000-8000-000000000099" as CodeThreadId;
+    const client = fakeClient({
+      thread: vi.fn(async (threadId) =>
+        threadId === parentId
+          ? Promise.reject(new Error("Source unavailable"))
+          : {
+              ...view(1),
+              thread: {
+                ...view(1).thread,
+                forkedFrom: { threadId: parentId, throughOperationId: operationId },
+              },
+            },
+      ),
+      conversation,
+      operationContent,
+      operationContents,
+    } as never);
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+
+    await waitFor(() =>
+      expect(result.current.conversation.map((message) => message.text)).toEqual([
+        "check tests",
+        "tests failed",
+      ]),
+    );
+    expect(result.current.conversation[1]).toMatchObject({
+      operationId,
+      providerInstanceId: ids.provider,
+      modelId: "model-before-rebind",
+      status: "failed",
+    });
+
+    expect(operationContents).toHaveBeenCalledOnce();
+    expect(operationContent).not.toHaveBeenCalled();
+    expect(result.current.conversationHistory).toBe("loaded");
+    expect(result.current.turnError).toBe("Inherited conversation history could not be loaded.");
+    unmount();
+  });
+
   it("hydrates authoritative conversation evidence after reload", async () => {
     const promptId = "60000000-0000-4000-8000-000000000010";
     const replyId = "60000000-0000-4000-8000-000000000011";

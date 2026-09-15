@@ -243,6 +243,7 @@ const MAX_CODE_RECONNECT_DELAY_MS = 10_000;
  * so a retried thread does not keep wearing a stale history banner.
  */
 const HISTORY_UNAVAILABLE_MESSAGE = "Conversation history could not be loaded.";
+const INHERITED_HISTORY_UNAVAILABLE_MESSAGE = "Inherited conversation history could not be loaded.";
 
 /** The first wait after a failed catch-up, before the delay starts doubling. */
 const MIN_CODE_RECONNECT_BACKOFF_MS = 100;
@@ -900,7 +901,24 @@ export function useCodeController(options: CodeControllerOptions) {
           conversationIncomplete = hydrated?.incomplete === true;
           conversationOperationId = hydrated?.activeOperationId;
           conversationCursor = hydrated?.nextCursor ?? 0;
-          if (initial.thread.forkedFrom !== undefined) {
+          setConversationHistory("loaded");
+          // A retried activation that succeeds must also take its own error
+          // banner down. Only that message: a first-turn failure noted just
+          // before activation still belongs to the user's bounced prompt.
+          setTurnError((current) =>
+            current === HISTORY_UNAVAILABLE_MESSAGE ||
+            current === INHERITED_HISTORY_UNAVAILABLE_MESSAGE
+              ? undefined
+              : current,
+          );
+        } catch {
+          if (!isActive(request, threadGeneration, mounted)) return;
+          setConversation([]);
+          setConversationHistory("unavailable");
+          setTurnError(HISTORY_UNAVAILABLE_MESSAGE);
+        }
+        if (initial.thread.forkedFrom !== undefined) {
+          try {
             const inherited = await readForkConversation(
               client,
               initial.thread.forkedFrom,
@@ -910,19 +928,10 @@ export function useCodeController(options: CodeControllerOptions) {
             inheritedConversation.current = inherited.messages;
             setConversation((current) => [...inherited.messages, ...current]);
             setTurnActivity((current) => new Map([...inherited.activity, ...current]));
+          } catch {
+            if (!isActive(request, threadGeneration, mounted)) return;
+            setTurnError((current) => current ?? INHERITED_HISTORY_UNAVAILABLE_MESSAGE);
           }
-          setConversationHistory("loaded");
-          // A retried activation that succeeds must also take its own error
-          // banner down. Only that message: a first-turn failure noted just
-          // before activation still belongs to the user's bounced prompt.
-          setTurnError((current) =>
-            current === HISTORY_UNAVAILABLE_MESSAGE ? undefined : current,
-          );
-        } catch {
-          if (!isActive(request, threadGeneration, mounted)) return;
-          setConversation([]);
-          setConversationHistory("unavailable");
-          setTurnError(HISTORY_UNAVAILABLE_MESSAGE);
         }
         if (!isActive(request, threadGeneration, mounted)) return;
         // The thread is open in front of the user now: its recorded turns when

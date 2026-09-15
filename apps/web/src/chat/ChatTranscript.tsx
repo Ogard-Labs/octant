@@ -658,9 +658,9 @@ function AssistantResponse(props: {
       }
     />
   );
-  if (!props.canQuote) return rendered;
   return (
     <QuoteableAssistantBody
+      enabled={props.canQuote}
       onQuote={(text) => props.onQuoteSelection?.({ turnId: props.attempt.turnId, text })}
       rootId={rootId}
     >
@@ -692,6 +692,7 @@ function AnsweredQuestionRow(props: { readonly question: ChatAttemptAnsweredQues
  * with its reasoning folded out of the way.
  */
 function QuoteableAssistantBody(props: {
+  readonly enabled: boolean;
   readonly rootId: string;
   readonly onQuote: (text: string) => void;
   readonly children: ReactNode;
@@ -699,6 +700,7 @@ function QuoteableAssistantBody(props: {
   const [offer, setOffer] = useState<{ readonly text: string } | undefined>(undefined);
 
   useEffect(() => {
+    if (!props.enabled) return;
     function onSelectionChange() {
       const selection = document.getSelection();
       if (selection === null || selection.isCollapsed || selection.rangeCount === 0) {
@@ -727,12 +729,12 @@ function QuoteableAssistantBody(props: {
     }
     document.addEventListener("selectionchange", onSelectionChange);
     return () => document.removeEventListener("selectionchange", onSelectionChange);
-  }, [props.rootId]);
+  }, [props.rootId, props.enabled]);
 
   return (
     <div className="chat-transcript__quoteable" id={props.rootId}>
       {props.children}
-      {offer === undefined ? null : (
+      {!props.enabled || offer === undefined ? null : (
         <div className="chat-transcript__quote-offer">
           <OctantButton
             onClick={(event: ReactMouseEvent<HTMLButtonElement>) => {
