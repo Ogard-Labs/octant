@@ -1,3 +1,4 @@
+import { createNewTaskDrafts, NewTaskDraftsContext } from "./composer/useNewTaskPrompt";
 import { StreamRepliesContext } from "./transcript/AssistantMessageBody";
 import { ComputerUseEnabledContext } from "./computerUse/ComputerUseMention";
 import { UsageNamesProvider } from "./usage/UsageName";
@@ -802,6 +803,15 @@ function LaunchedShell(
   const [draftCreating, setDraftCreating] = useState(false);
   const [draftError, setDraftError] = useState<string>();
   const [draftResetRevision, setDraftResetRevision] = useState(0);
+  const newTaskDrafts = useMemo(
+    () => createNewTaskDrafts(),
+    [props.launch.serverUrl, props.launch.windowId],
+  );
+  function resetNewTaskDraft(mode: OctantMode): void {
+    const paneId = controller.workspace?.activePaneIds[mode];
+    if (paneId !== undefined) newTaskDrafts.write(`${mode}:${String(paneId)}`, "");
+    setDraftResetRevision((revision) => revision + 1);
+  }
   // The Project an unbound draft composer targets, per mode. The draft lives
   // in local state and unmounts while Settings covers the workspace; this is
   // what lets it come back with the same Project instead of "Choose a Project".
@@ -2985,7 +2995,7 @@ function LaunchedShell(
     closeWorkspaceReaders();
     setDraftError(undefined);
     setDraftPendingMessage(prompt);
-    setDraftResetRevision((revision) => revision + 1);
+    resetNewTaskDraft("chat");
     setDraftProjectSelection(({ chat: _previous, ...rest }) => rest);
     void controller.openDraftThread("chat");
   }
@@ -3736,7 +3746,7 @@ function LaunchedShell(
     // handoff must not reappear as this draft's text.
     setDraftError(undefined);
     setDraftPendingMessage(undefined);
-    setDraftResetRevision((revision) => revision + 1);
+    resetNewTaskDraft(mode);
     await controller.openDraftThread(mode, projectId);
   }
 
@@ -3747,7 +3757,7 @@ function LaunchedShell(
     closeWorkspaceReaders();
     setDraftError(undefined);
     setDraftPendingMessage(undefined);
-    setDraftResetRevision((revision) => revision + 1);
+    resetNewTaskDraft(mode);
     setDraftProjectSelection(({ [mode]: _previous, ...rest }) => rest);
     void controller.openDraftThread(mode);
   }
@@ -3757,7 +3767,7 @@ function LaunchedShell(
       closeWorkspaceReaders();
       setDraftError(undefined);
       setDraftPendingMessage(undefined);
-      setDraftResetRevision((revision) => revision + 1);
+      resetNewTaskDraft("chat");
       setDraftProjectSelection(({ chat: _previous, ...rest }) => rest);
       void controller.openDraftThread("chat");
       return;
@@ -6172,9 +6182,13 @@ function LaunchedShell(
           <TrackerReferenceProvider ports={trackerReferencePorts}>
             <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
               <ProjectThreadsProvider value={projectThreadsAccess}>
-                <StreamRepliesContext.Provider value={controller.settings?.streamReplies !== false}>
-                  {shell}
-                </StreamRepliesContext.Provider>
+                <NewTaskDraftsContext.Provider value={newTaskDrafts}>
+                  <StreamRepliesContext.Provider
+                    value={controller.settings?.streamReplies !== false}
+                  >
+                    {shell}
+                  </StreamRepliesContext.Provider>
+                </NewTaskDraftsContext.Provider>
               </ProjectThreadsProvider>
             </SidebarThreadDragContext.Provider>
           </TrackerReferenceProvider>

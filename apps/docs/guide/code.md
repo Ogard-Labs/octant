@@ -35,6 +35,11 @@ rather than sending it behind your back.
 
 ## Unsent drafts
 
+New-task text stays with its mode and pane while you visit Settings or switch
+modes in the same window session. Choosing another Project preserves that text;
+an explicit New task starts over. This temporary text does not survive an app
+restart.
+
 Each Code thread keeps one unsent composer draft on this client. Leaving the
 thread, switching tabs, or restarting the app restores the text and caret.
 Sending or clearing the composer removes it. Mentions that are part of the

@@ -1,3 +1,4 @@
+import { useNewTaskPrompt } from "../../composer/useNewTaskPrompt";
 import { useComposerTip } from "../../composer/useComposerTip";
 import {
   ApplicationMentionTypeahead,
@@ -93,7 +94,7 @@ export interface WorkComposerAdapterProps {
 }
 
 export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useNewTaskPrompt();
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,
     draft: prompt,

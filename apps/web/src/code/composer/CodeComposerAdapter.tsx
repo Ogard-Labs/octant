@@ -1,3 +1,4 @@
+import { useNewTaskPrompt } from "../../composer/useNewTaskPrompt";
 import { useComposerTip } from "../../composer/useComposerTip";
 import {
   ApplicationMentionTypeahead,
@@ -216,7 +217,7 @@ function selectedProviderFamily(
 const LAST_RESORT_BASE_BRANCH = "development";
 
 export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useNewTaskPrompt();
   const modelKey = `${props.selectedProviderInstanceId}:${props.selectedModelId}`;
   const [modelChoice, setModelChoice] = useState<{
     readonly key: string;
