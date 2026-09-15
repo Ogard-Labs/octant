@@ -1,13 +1,15 @@
 # Octant Mobile Design System
 
-Owned Octant language for `@octant/mobile`, aligned to the desktop/web palette.
-It uses Octant tokens, copy, assets, and components; do not import third-party
-product assets, copy, registries, or distinctive implementation structures.
+The React Native projection of Octant's product-wide design language.
+Shared semantic colors come from `@octant/theme`; this directory owns only the
+native mapping, mobile-only materials and touch geometry. Do not copy the core
+palette here or import third-party product assets, copy, registries, or
+distinctive implementation structures.
 
 ## Layering (do not invert)
 
-1. **Tokens** — neutral greys, ink-on-canvas light / workspace-grey dark; accent
-   is monochrome like the desktop.
+1. **Tokens** — shared neutral greys and semantic statuses from `@octant/theme`;
+   the base accent is monochrome on every surface.
 2. **Home** — status cards + Workspaces (unchanged by chat chrome).
 3. **Surfaces** — flat opaque panels (default, desktop-consistent) or Apple
    liquid-glass; user-selectable.

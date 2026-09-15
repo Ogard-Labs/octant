@@ -43,8 +43,7 @@ export function CodePatternOverlay(props: CodePatternOverlayProps) {
             {
               left: -40 + i * 48,
               opacity: 0.4,
-              backgroundColor:
-                scheme === "dark" ? "rgba(245, 78, 0, 0.28)" : "rgba(245, 78, 0, 0.18)",
+              backgroundColor: colors.primarySoft,
             },
           ]}
         />

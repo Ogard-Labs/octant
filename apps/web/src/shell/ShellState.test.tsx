@@ -42,6 +42,9 @@ describe("ShellState", () => {
     );
 
     expect(screen.getByRole("alert")).toHaveTextContent("The local Octant server is unavailable.");
+    expect(screen.getByRole("alert").querySelector('[data-slot="empty-media"]')).not.toHaveClass(
+      "text-[var(--octant-warning-text)]",
+    );
     await user.click(screen.getByRole("button", { name: "Retry connection" }));
     expect(onAction).toHaveBeenCalledOnce();
   });
