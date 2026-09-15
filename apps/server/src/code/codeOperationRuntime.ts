@@ -28,6 +28,7 @@ import {
   type CodeOperationEvent,
   type CodeOperationEventFrame,
   type CodeOperationId,
+  type CodeRuntimeWorkId,
   type CodeOperationResult,
   type CodeThread,
   type CodeThreadId,
@@ -120,6 +121,7 @@ import {
 type Awaitable<T> = T | Promise<T>;
 
 interface RuntimePersistence extends ReviewFindingPersistencePort {
+  readonly readCodeRuntimeWorkAggregateVersion: (id: CodeRuntimeWorkId) => number;
   readonly journal: Journal;
   readonly readCodeCheckout: (
     checkoutId: CodeCheckoutIdentity["id"],
@@ -379,6 +381,7 @@ export function createCodeOperationRuntime(
   });
   const runtimeWork = new CodeRuntimeWorkRecorder({
     journal: options.persistence.journal,
+    readVersion: options.persistence.readCodeRuntimeWorkAggregateVersion,
     actor: options.actor,
     clock: options.clock,
     uuid: options.uuid,

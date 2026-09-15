@@ -573,6 +573,9 @@ flowchart LR
   only a revoked, expired, lost, or host-changed credential forces a new pair.
   Revoke-self drops that host's sessions and streams before the client clears
   the local registry entry.
+  Reopened Code terminals retain their runtime-work identity and resume at the
+  persisted aggregate version, including restart interruption events. Live
+  recorders keep their expected version so conflicting writes remain refused.
 - **Fast thread reads.** A thread paints from an authoritative snapshot before
   auxiliary Files, Git, Browser, or Computer Use observations begin. Code
   conversation evidence is read in bounded batches and page results paint as

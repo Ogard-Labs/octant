@@ -1,3 +1,14 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Journal } from "../persistence/journal";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
+import { openSqlite } from "../persistence/sqlitePort";
+import {
+  readCodeRuntimeWork,
+  readCodeRuntimeWorkAggregateVersion,
+} from "../persistence/codeProjection";
 import {
   CodeGitOperationId,
   CodeTerminalId,
@@ -6,6 +17,7 @@ import {
   decodeCodeThreadId,
   decodeCodeTerminalId,
   decodeCodeCheckoutId,
+  decodeCodeRuntimeWorkId,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -30,6 +42,7 @@ const uuid = (() => {
 function recorder(append: () => void = () => undefined) {
   return new CodeRuntimeWorkRecorder({
     journal: { append },
+    readVersion: () => 0,
     uuid,
     clock,
     actor,
@@ -41,6 +54,77 @@ function eventInput(id: CodeTerminalId) {
 }
 
 describe("CodeRuntimeWorkRecorder", () => {
+  it("preserves reopened terminal history and refuses a stale settlement after restart", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-recorder-reopen-"));
+    const connection = openSqlite(join(directory, "journal.sqlite3"));
+    try {
+      applyMigrations(connection, MIGRATIONS, clock);
+      const registry = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: registry.events,
+        projections: registry.projections,
+        clock,
+      });
+      const createRecorder = () =>
+        new CodeRuntimeWorkRecorder({
+          journal,
+          readVersion: (id) => readCodeRuntimeWorkAggregateVersion(connection, id),
+          uuid,
+          clock,
+          actor,
+        });
+      const id = decodeCodeTerminalId("90000000-0000-4000-8000-000000000007");
+      const input = eventInput(id);
+      const first = createRecorder();
+      expect(first.open(input)).toEqual({ status: "recorded" });
+      expect(first.settle({ ...input, state: "interrupted" })).toEqual({ status: "recorded" });
+      const restarted = createRecorder();
+      expect(restarted.open(input)).toEqual({ status: "recorded" });
+      expect(readCodeRuntimeWork(connection, decodeCodeRuntimeWorkId(String(id)))).toMatchObject({
+        state: "running",
+        threadId,
+      });
+      expect(restarted.settle({ ...input, state: "completed" })).toEqual({ status: "recorded" });
+      expect(readCodeRuntimeWork(connection, decodeCodeRuntimeWorkId(String(id)))).toMatchObject({
+        state: "completed",
+      });
+      expect(
+        journal
+          .replayAggregate({
+            aggregateType: "code-runtime",
+            aggregateId: String(id),
+            afterVersion: 0,
+            limit: 10,
+          })
+          .map((event) => event.aggregateVersion),
+      ).toEqual([1, 2, 3, 4]);
+      // A later owner must not be overwritten by the live recorder's stale version.
+      expect(restarted.open(input)).toEqual({ status: "recorded" });
+      expect(createRecorder().open(input)).toEqual({ status: "recorded" });
+      expect(restarted.settle({ ...input, state: "completed" })).toEqual({
+        status: "failed",
+        kind: "journal-unavailable",
+      });
+      expect(readCodeRuntimeWork(connection, decodeCodeRuntimeWorkId(String(id)))).toMatchObject({
+        state: "running",
+      });
+      expect(
+        journal
+          .replayAggregate({
+            aggregateType: "code-runtime",
+            aggregateId: String(id),
+            afterVersion: 4,
+            limit: 10,
+          })
+          .map((event) => event.aggregateVersion),
+      ).toEqual([5, 6]);
+    } finally {
+      connection.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("returns a typed failure when a runtime work id cannot be decoded", () => {
     const append = vi.fn();
     const runtime = recorder(append);

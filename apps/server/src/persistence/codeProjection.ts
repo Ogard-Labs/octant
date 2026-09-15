@@ -793,6 +793,16 @@ export function readCodeFileReferences(
   ).map(decodeFileRow);
 }
 
+export function readCodeRuntimeWorkAggregateVersion(
+  connection: SqliteConnection,
+  workId: CodeRuntimeWorkId,
+): number {
+  const row = connection
+    .prepare("SELECT aggregate_version FROM code_runtime_projection WHERE runtime_work_id = ?")
+    .get(workId) as { readonly aggregate_version: number } | undefined;
+  return row?.aggregate_version ?? 0;
+}
+
 export function readCodeRuntimeWork(
   connection: SqliteConnection,
   workId: CodeRuntimeWorkId,

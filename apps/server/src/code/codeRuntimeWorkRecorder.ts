@@ -2,6 +2,7 @@ import {
   decodeCodeRuntimeWork,
   decodeCodeRuntimeWorkId,
   type CodeRuntimeWork,
+  type CodeRuntimeWorkId,
   type CodeRuntimeWorkKind,
   type CodeRuntimeWorkState,
   type CodeOperationCommand,
@@ -24,6 +25,7 @@ type JournalPort = {
 
 export interface CodeRuntimeWorkRecorderOptions {
   readonly journal: JournalPort;
+  readonly readVersion: (id: CodeRuntimeWorkId) => number;
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly actor: typeof EventActor.Type;
@@ -67,17 +69,18 @@ export interface CodeRuntimeWorkPlan {
  * looking at it.
  *
  * A record opens `running` when the work starts and closes on its terminal
- * state; nothing else writes to it afterwards. The unit's own id is the
- * aggregate id, which is what lets a later state land on the record its work
- * opened rather than on a fresh row.
+ * state. A terminal can reopen with the same identity after it exits or the
+ * host restarts. The unit's own id is the aggregate id, which is what lets a
+ * later state land on the record its work opened rather than on a fresh row.
  *
  * Aggregate versions are counted in memory because this process is the only
- * writer while the work is live. After a restart the work is no longer live:
- * `reconcileCodeRestart` reads the projected version instead, and this recorder
- * never touches the record again.
+ * writer while the work is live. Opening an unowned unit reads its persisted
+ * version, including any interruption appended by restart reconciliation.
+ * Live records retain their expected version so competing writes still fail.
  */
 export class CodeRuntimeWorkRecorder {
   readonly #journal: JournalPort;
+  readonly #readVersion: (id: CodeRuntimeWorkId) => number;
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #actor: typeof EventActor.Type;
@@ -88,6 +91,7 @@ export class CodeRuntimeWorkRecorder {
 
   constructor(options: CodeRuntimeWorkRecorderOptions) {
     this.#journal = options.journal;
+    this.#readVersion = options.readVersion;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     this.#actor = options.actor;
@@ -140,7 +144,7 @@ export class CodeRuntimeWorkRecorder {
     // was opened has not moved, and a row saying so would push its work past
     // work that actually finished in between.
     if (current?.state === state) return { status: "unchanged" };
-    const expectedVersion = current?.version ?? 0;
+    let expectedVersion: number;
     let work: CodeRuntimeWork;
     try {
       work = decodeCodeRuntimeWork({
@@ -157,6 +161,7 @@ export class CodeRuntimeWorkRecorder {
       return { status: "failed", kind: "invalid-runtime-work" };
     }
     try {
+      expectedVersion = current?.version ?? this.#readVersion(work.id);
       this.#journal.append({
         aggregate: { aggregateType: CODE_RUNTIME_AGGREGATE_TYPE, aggregateId: work.id },
         expectedVersion,
