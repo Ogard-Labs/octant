@@ -20,9 +20,9 @@ export interface ComposerContextMeterScopeValue {
 
 export interface ComposerContextUsageFallback {
   readonly costUsd?: number;
-  readonly inputTokens: number;
+  readonly inputTokens?: number;
   readonly limits: ReadonlyArray<CodeProviderLimit>;
-  readonly outputTokens: number;
+  readonly outputTokens?: number;
   /** The provider's own account of its window, when it reported one. */
   readonly contextWindow?: number;
   readonly contextTokens?: number;

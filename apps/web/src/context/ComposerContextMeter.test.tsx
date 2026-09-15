@@ -60,6 +60,42 @@ function ShortcutTrigger() {
 }
 
 describe("ComposerContextMeter", () => {
+  it.each([undefined, 0])(
+    "distinguishes absent usage from a reported zero (%s)",
+    async (tokens) => {
+      const user = userEvent.setup();
+      render(
+        <ComposerContextMeterProvider
+          fallback={{
+            ...(tokens === undefined ? {} : { inputTokens: tokens, outputTokens: tokens }),
+            limits: [{ window: "five_hour", status: "warning", utilization: 0.91 }],
+          }}
+          status="not-planned"
+          subjectKey="code-thread:unused"
+        >
+          <ComposerContextMeterGate enabled>
+            <ComposerContextMeter />
+          </ComposerContextMeterGate>
+        </ComposerContextMeterProvider>,
+      );
+      await user.click(
+        screen.getByRole("button", {
+          name:
+            tokens === undefined ? /Usage not reported/ : /Provider reported 0 input and 0 output/,
+        }),
+      );
+      const popover = screen.getByRole("dialog", { name: "Provider usage" });
+      expect(popover).toHaveTextContent("91% used");
+      if (tokens === undefined) {
+        expect(popover).toHaveTextContent("No usage has been reported for this thread.");
+        expect(within(popover).getAllByText("Not reported").length).toBeGreaterThan(0);
+      } else {
+        expect(popover).not.toHaveTextContent("No usage has been reported for this thread.");
+        expect(within(popover).getAllByText("0")).toHaveLength(2);
+      }
+    },
+  );
+
   it("shows a circular used-versus-available meter with an accessible text label", () => {
     render(<Harness />);
     const button = screen.getByRole("button", { name: /Show context usage for Fixture thread/i });

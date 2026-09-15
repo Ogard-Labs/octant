@@ -254,8 +254,8 @@ const MIN_CODE_RECONNECT_BACKOFF_MS = 100;
  * no cost leaves `costUsd` absent rather than showing a derived number.
  */
 export interface CodeThreadUsage {
-  readonly inputTokens: number;
-  readonly outputTokens: number;
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
   readonly costUsd?: number;
   /** The model's window and its fill after the latest turn that named them. */
   readonly contextWindow?: number;
@@ -263,7 +263,7 @@ export interface CodeThreadUsage {
   readonly limits: ReadonlyArray<CodeProviderLimit>;
 }
 
-const EMPTY_THREAD_USAGE: CodeThreadUsage = { inputTokens: 0, outputTokens: 0, limits: [] };
+const EMPTY_THREAD_USAGE: CodeThreadUsage = { limits: [] };
 
 interface CodeTurnUsage {
   readonly inputTokens: number;
@@ -283,12 +283,13 @@ interface CodeTurnUsage {
  * journal projects when the thread is reopened.
  */
 function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>): {
-  readonly inputTokens: number;
-  readonly outputTokens: number;
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
   readonly costUsd?: number;
   readonly contextWindow?: number;
   readonly contextTokens?: number;
 } {
+  if (byOperation.size === 0) return {};
   let inputTokens = 0;
   let outputTokens = 0;
   let costUsd: number | undefined;

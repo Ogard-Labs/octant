@@ -98,6 +98,12 @@ servers, replacing raw results with artifact references, reducing the output
 reserve, switching to a larger-context model, or starting a fresh thread with
 a structured handoff.
 
+## Unreported thread usage
+
+A new or unused fork has no provider usage report of its own. Its context
+disclosure shows **Not reported** until a report arrives; a provider-reported
+zero remains zero. Available account-limit readings are shown independently.
+
 ## Next steps
 
 - [Usage and limits](/advanced/usage-and-limits) for cross-app history and remaining capacity
