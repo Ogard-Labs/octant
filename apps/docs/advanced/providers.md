@@ -106,6 +106,10 @@ OpenCode CLI, Kilo ACP, Pi RPC, Oh My Pi, Devin ACP, Mistral Vibe ACP,
 Ollama, Kimi Code ACP, Grok Build ACP, Goose ACP, GLM Agent, Gemini CLI ACP,
 GitHub Copilot ACP, Cline ACP, and Qwen Code ACP.
 
+Codex commentary and subsequent answer messages retain paragraph boundaries
+in new responses, including when the provider sends a completed message
+without streaming its text. Previously saved responses are not rewritten.
+
 Provider-owned CLI login is the default. Octant launches the configured
 provider executable at its stored absolute path and points it at the provider's
 documented native profile (for example `~/.vibe`, `~/.grok`, `~/.gemini`,

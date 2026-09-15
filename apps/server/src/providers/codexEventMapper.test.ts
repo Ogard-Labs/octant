@@ -221,6 +221,40 @@ describe("mapCodexMessage", () => {
     expect(chunks.join("")).not.toContain("�");
   });
 
+  it.each([true, false])(
+    "separates successive assistant messages while preserving chunks (streamed: %s)",
+    (streamed) => {
+      const ctx = context();
+      const complete = (id: string, text: string) =>
+        notification("item/completed", {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: { type: "agentMessage", id, text },
+          completedAtMs: 20,
+        });
+      const delta = (text: string) =>
+        notification("item/agentMessage/delta", {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          itemId: "final",
+          delta: text,
+        });
+      const events = [
+        ...map(ctx, complete("commentary", "I will inspect.")),
+        ...map(ctx, complete("empty", "")),
+        ...(streamed ? [...map(ctx, delta("Result")), ...map(ctx, delta(" ready."))] : []),
+        ...map(ctx, complete("final", "Result ready.")),
+      ];
+      expect(
+        events
+          .flatMap((entry) =>
+            entry.kind === "event" && entry.event.kind === "text-delta" ? [entry.event.text] : [],
+          )
+          .join(""),
+      ).toBe("I will inspect.\n\nResult ready.");
+    },
+  );
+
   it("reconciles an incomplete agent delta stream from the authoritative completed item", () => {
     const ctx = context();
     expect(
