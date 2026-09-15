@@ -1,6 +1,10 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import type { LocalUsageHistoryRecord } from "@octant/contracts";
+import {
+  decodeLocalUsageHistoryRecord,
+  decodeLocalUsageHistoryRequest,
+  type LocalUsageHistoryRecord,
+} from "@octant/contracts";
 import type { ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
 import { readLocalUsageHistoryDashboard } from "./localUsageHistoryService";
 
@@ -81,6 +85,87 @@ function source(values: ReadonlyArray<LocalUsageHistoryRecord>): ProviderLocalUs
 }
 
 describe("local usage history aggregation", () => {
+  it.each([
+    {
+      label: "Oslo summer midnight",
+      timeZone: "Europe/Oslo",
+      timestamps: ["2026-09-15T21:59:59.000Z", "2026-09-15T22:00:00.000Z"],
+      expected: [
+        ["2026-09-15", 1],
+        ["2026-09-16", 1],
+      ],
+    },
+    {
+      label: "Los Angeles midnight",
+      timeZone: "America/Los_Angeles",
+      timestamps: ["2026-09-16T06:59:59.000Z", "2026-09-16T07:00:00.000Z"],
+      expected: [
+        ["2026-09-15", 1],
+        ["2026-09-16", 1],
+      ],
+    },
+    {
+      label: "Oslo spring clock jump",
+      timeZone: "Europe/Oslo",
+      timestamps: [
+        "2026-03-28T23:00:00.000Z",
+        "2026-03-29T00:59:59.000Z",
+        "2026-03-29T01:00:00.000Z",
+        "2026-03-29T21:59:59.000Z",
+        "2026-03-29T22:00:00.000Z",
+      ],
+      expected: [
+        ["2026-03-29", 4],
+        ["2026-03-30", 1],
+      ],
+    },
+    {
+      label: "Oslo repeated autumn hour",
+      timeZone: "Europe/Oslo",
+      timestamps: [
+        "2026-10-25T00:30:00.000Z",
+        "2026-10-25T01:30:00.000Z",
+        "2026-10-25T22:59:59.000Z",
+        "2026-10-25T23:00:00.000Z",
+      ],
+      expected: [
+        ["2026-10-25", 3],
+        ["2026-10-26", 1],
+      ],
+    },
+  ])(
+    "groups both daily tables by the viewing timezone across $label",
+    async ({ timeZone, timestamps, expected }) => {
+      const values = timestamps.map((observedAt, index) =>
+        decodeLocalUsageHistoryRecord({
+          sourceKind: "codex",
+          sourceInstallationId: "timezone-fixture",
+          sourceSessionId: "session",
+          sourceEventId: String(index),
+          providerKey: "codex",
+          modelId: "fixture",
+          observedAt,
+          inputTokens: 10,
+          outputTokens: 2,
+        }),
+      );
+      const response = await readLocalUsageHistoryDashboard({
+        sources: [source([...values].reverse())],
+        request: decodeLocalUsageHistoryRequest({
+          from: "2026-01-01T00:00:00.000Z",
+          to: "2026-12-31T23:59:59.999Z",
+          timeZone,
+        }),
+        queryAt: "2026-12-31T23:59:59.999Z",
+      });
+      expect(response.dailyTotals.map((row) => [row.day, row.totals.requestCount])).toEqual(
+        expected,
+      );
+      expect(response.days.map((row) => [row.day, row.totals.requestCount])).toEqual(expected);
+      expect(response.totals.totalTokens).toBe(values.length * 12);
+    },
+  );
+
   it("orders daily readings chronologically regardless of provider scan order", async () => {
     const response = await readLocalUsageHistoryDashboard({
       sources: [source([...records].reverse())],

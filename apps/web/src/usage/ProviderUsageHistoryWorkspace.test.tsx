@@ -97,6 +97,35 @@ describe("Local provider usage history", () => {
     expect(screen.getByRole("heading", { name: "1.2K" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Refresh provider history" })).toBeEnabled();
   });
+  it("retains the selected range and tokens through a failed refresh and recovers on retry", async () => {
+    const load = vi.fn().mockResolvedValue(history());
+    render(<ProviderUsageHistoryWorkspace client={{ load }} />);
+    await showTokens();
+    fireEvent.click(screen.getByRole("button", { name: "7 days" }));
+    expect(await screen.findByRole("heading", { name: "1.2K" })).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Refresh provider history" })).toBeEnabled(),
+    );
+    load.mockRejectedValueOnce(new Error("offline"));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh provider history" }));
+    expect(
+      await screen.findByText("Refresh failed. Last successful readings are shown."),
+    ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "1.2K" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Tokens" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "7 days" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Refresh provider history" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Refresh failed. Last successful readings are shown."),
+      ).not.toBeInTheDocument(),
+    );
+    expect(await screen.findByRole("heading", { name: "1.2K" })).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Refresh provider history" })).toBeEnabled(),
+    );
+  });
+
   it("explains when no supported history reader is enabled", async () => {
     const empty = history();
     render(
