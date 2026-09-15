@@ -258,8 +258,8 @@ interface ClaudePendingApprovalState extends ClaudePendingApproval {
 
 interface ClaudePendingQuestionState extends ClaudePendingQuestion {
   readonly answer: DeferredValue<Record<string, string> | undefined>;
-  /** Answers already given for the set, in question order, until it is full. */
-  readonly received: ReadonlyArray<string>;
+  /** Answers keyed by question position, never by arrival order. */
+  readonly received: Map<number, string>;
   /** The raw question texts, so the callback's answer map keys them verbatim. */
   readonly providerPrompts: ReadonlyArray<string>;
 }
@@ -451,7 +451,8 @@ function validatedClaudeQuestionPrompts(
     if (
       typeof prompt !== "string" ||
       exceedsCodePointLimit(prompt, USER_QUESTION_MAX_CHARACTERS) ||
-      prompt.trim().length === 0
+      prompt.trim().length === 0 ||
+      prompts.includes(prompt)
     ) {
       return undefined;
     }
@@ -1246,7 +1247,12 @@ function makeConnection(
             const pending: ClaudePendingQuestionState = {
               ...mapped.request,
               answer: deferred<Record<string, string> | undefined>(),
-              received: [],
+              events: mapped.request.events.map((event) =>
+                event.kind === "user-input-request" && mapped.request.events.length > 1
+                  ? { ...event, requestId: randomUUID() }
+                  : event,
+              ),
+              received: new Map(),
               providerPrompts,
             };
             activeState.pendingQuestions.set(pending.requestId, pending);
@@ -1844,13 +1850,25 @@ function makeConnection(
       answerUserInput: (answer) =>
         Effect.suspend(() => {
           const state = sessions.get(answer.sessionId);
-          const pending = state?.pendingQuestions.get(answer.requestId);
+          const pending = [...(state?.pendingQuestions.values() ?? [])].find((candidate) =>
+            candidate.events.some(
+              (event) =>
+                event.kind === "user-input-request" && event.requestId === answer.requestId,
+            ),
+          );
+          const index =
+            pending?.events.findIndex(
+              (event) =>
+                event.kind === "user-input-request" && event.requestId === answer.requestId,
+            ) ?? -1;
           if (
             state === undefined ||
             state.terminal ||
             state.releasing ||
             state.released ||
-            pending === undefined
+            pending === undefined ||
+            index < 0 ||
+            pending.received.has(index)
           ) {
             return Effect.fail(failure("protocol", "Claude user question is not active."));
           }
@@ -1865,19 +1883,15 @@ function makeConnection(
             return Effect.fail(failure("invalid-configuration", "Claude user answer is invalid."));
           }
           return Effect.sync(() => {
-            // A question set is answered one question at a time under the same
-            // request identity; the tool call is answered once, with every
-            // answer, when the set is complete — keyed by each question's own
-            // text, the way the SDK's answer map is keyed.
-            const received = [...pending.received, normalizedAnswer];
-            if (received.length < pending.events.length) {
-              state.pendingQuestions.set(answer.requestId, { ...pending, received });
-              return;
-            }
-            state.pendingQuestions.delete(answer.requestId);
+            pending.received.set(index, normalizedAnswer);
+            if (pending.received.size < pending.events.length) return;
+            state.pendingQuestions.delete(pending.requestId);
             state.settledToolUseIds.add(pending.providerToolUseId);
             const answers = Object.fromEntries(
-              pending.providerPrompts.map((prompt, index) => [prompt, received[index] ?? ""]),
+              pending.providerPrompts.map((prompt, position) => [
+                prompt,
+                pending.received.get(position) ?? "",
+              ]),
             );
             pending.answer.resolve(answers);
           });

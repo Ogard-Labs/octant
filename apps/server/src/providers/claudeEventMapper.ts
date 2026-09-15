@@ -1054,9 +1054,8 @@ function mapQuestion(
       requestId: normalizedRequestId,
       prompt: question.prompt,
       options: question.options,
-      // A set arrives as one event per question under the same request
-      // identity, so the host answers them in order and the driver answers
-      // the tool call once, with every answer.
+      // Keep the private callback correlation here; the connection assigns
+      // each question its own answer identity before publishing it.
       ...(mapped.length > 1 ? { questionIndex: index + 1, questionCount: mapped.length } : {}),
     }),
   );

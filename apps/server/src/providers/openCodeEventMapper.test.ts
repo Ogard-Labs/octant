@@ -467,6 +467,33 @@ describe("mapOpenCodeEvent", () => {
     expect(results).toHaveLength(2);
   });
 
+  it("refuses a question set with an unanswerable blank item", () => {
+    const results = mapOpenCodeEvent(
+      context(),
+      official({
+        id: "malformed-set",
+        type: "question.v2.asked",
+        properties: {
+          id: "question-set",
+          sessionID: "provider-session",
+          questions: [
+            {
+              header: "First",
+              question: "First?",
+              options: [{ label: "Yes", description: "Continue" }],
+            },
+            {
+              header: "Second",
+              question: "   ",
+              options: [{ label: "Yes", description: "Continue" }],
+            },
+          ],
+        },
+      }),
+    );
+    expect(results).toMatchObject([{ kind: "failed", failure: { category: "unsupported" } }]);
+  });
+
   it("maps an idle status to completion with an opaque resume cursor", () => {
     expect(
       mapped(
