@@ -100,7 +100,17 @@ describe("CodeOperationRuntime", () => {
       checkoutHead: { kind: "branch", name: "feature/runtime", oid: "a".repeat(40) },
       message: "Allow terminal access?",
     });
-    expect(challenge?.detail).toContain(`Thread: ${thread().title} (${threadId})`);
+    expect(challenge?.detail).toContain(`Thread: ${thread().title}`);
+    expect(challenge?.detail).toContain("Branch: feature/runtime");
+    for (const identity of [
+      threadId,
+      checkoutId,
+      thread().projectId,
+      thread().repositoryId,
+      "a".repeat(40),
+    ]) {
+      expect(challenge?.detail).not.toContain(identity);
+    }
     expect(challenge?.detail).toMatch(/^Start repository terminal/);
     await expect(
       fixture.runtime.confirmApproval(windowId, { challengeId: challenge!.challengeId }),
