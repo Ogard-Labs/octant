@@ -1,3 +1,4 @@
+import { createSelectedSkillContextResolver } from "./extensions/selectedSkillContext";
 import {
   createDesktopComputerUsePort,
   type DesktopComputerUsePort,
@@ -57,7 +58,7 @@ import {
   type OctantMode,
   type WorkThreadId,
 } from "@octant/contracts";
-import type { ExtensionProviderFamily, StandaloneSkillScope } from "@octant/contracts/extensions";
+import { ExtensionProviderFamily, type StandaloneSkillScope } from "@octant/contracts/extensions";
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import type { ProviderDriver, ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
 import {
@@ -3258,6 +3259,13 @@ export function startOctantServer(
             revision: Number(thread?.version ?? 0),
           };
         }
+        if (scope.mode === "work") {
+          const thread = workThreadProjection.read(decodeWorkThreadId(scope.threadId));
+          return {
+            allowed: thread?.lifecycle === "active" && thread.projectId === scope.projectId,
+            revision: Number(thread?.version ?? 0),
+          };
+        }
         const thread = persistence.readCodeThread(decodeCodeThreadId(scope.threadId));
         return {
           allowed: thread?.lifecycle === "active" && thread.projectId === scope.projectId,
@@ -3288,6 +3296,21 @@ export function startOctantServer(
         // lifecycle state changed; unrelated in-flight MCP calls remain intact.
         await agentPluginMcpSessionManager.reconcileLifecycleSnapshot(snapshot);
       },
+    });
+    const resolveSelectedSkillContext = createSelectedSkillContextResolver({
+      snapshot: async () => {
+        await standaloneSkillService.reconcile();
+        return extensionApiService.snapshot();
+      },
+      resolveEffectiveState: (snapshot, query) =>
+        extensionActivationService.resolve(snapshot, query),
+      providerFamily: (thread) => {
+        const instance = persistence.readProviderInstance(thread.providerInstanceId);
+        return instance === undefined
+          ? undefined
+          : Schema.decodeUnknownSync(ExtensionProviderFamily)(instance.driverKind);
+      },
+      materialLoader: createStoredExtensionMaterialLoader(extensionPackageStore),
     });
     githubExtensionSnapshot.read = () => extensionApiService.snapshot();
     const extensionRoutes = createExtensionRouteHandler({
@@ -3729,6 +3752,7 @@ export function startOctantServer(
       });
       const rootProbePath = decodeCodeRelativePath("package.json");
       codeOperationRuntime = createCodeOperationRuntime({
+        resolveSelectedSkillContext,
         computerUseTools: ({ windowId, thread, selection }) =>
           computerToolsFor(
             decodeComputerUseOwner({
@@ -5075,6 +5099,7 @@ export function startOctantServer(
       linearIssueContext: linearIssueContextService,
     });
     const workTurnService = new WorkTurnService({
+      resolveSelectedSkillContext,
       spendCeiling,
       onTurnRequested: (threadId) => workThreadService.noteTurnRequested(threadId),
       persistence: {

@@ -50,6 +50,12 @@ diagnostics. A **Name collisions** section appears when the same skill name
 exists from multiple sources; you choose the exact source before use — a
 collision is never silently merged or shadowed.
 
+A reviewed and enabled standalone skill can be selected with `$skill` in Chat,
+Work, or Code. Octant checks the exact source, content digest, and current
+thread scope before adding its instructions to the provider context. A changed,
+disabled, or unavailable selection refuses the turn instead of silently dropping
+the skill. Selected Work instructions also count toward the turn's input budget.
+
 ### Marketplace
 
 The **Marketplace** tab searches the extension catalog: the curated package
@@ -193,10 +199,10 @@ ambiguous unqualified invocation opens a chooser or fails closed.
 
 Type `/` in a Chat, Work, or Code composer to find commands and enabled skills.
 Choosing a skill creates a visible selection that can be removed before sending;
-it does not enable a disabled skill. Chat resolves selected skill content through
-the extension service. Work and Code currently refuse skill selections before
-starting the provider because their skill-content resolver is not connected.
-The draft remains available when that refusal occurs.
+it does not enable a disabled skill. Chat, Work, and Code resolve selected skill
+instructions through the extension service before provider execution. Unavailable
+selections are refused; retrying an accepted Work request with different skill
+selections is an identity conflict rather than a new turn.
 
 ## Core Apple independence
 

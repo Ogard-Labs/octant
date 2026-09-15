@@ -80,7 +80,7 @@ export function createStoredExtensionMaterialLoader(
   return {
     async load({ entry, effectiveSnapshot, snapshot }) {
       const source = entry.source;
-      if (source.kind === "agents-skills-directory") {
+      if (source.kind === "agents-skills-directory" || source.kind === "skill-package") {
         const skillId = source.referenceId;
         const record = snapshot?.skills?.find(
           (candidate) => String(candidate.skill.qualifiedId) === skillId,
@@ -142,7 +142,7 @@ export function createStoredExtensionMaterialLoader(
  */
 export interface ExtensionSelectionSubject {
   readonly mode: OctantMode;
-  readonly threadId: string;
+  readonly threadId: string | null;
   readonly projectId: string | null;
   readonly threadVersion: number;
   readonly providerInstanceId: ChatThread["providerInstanceId"];
@@ -284,6 +284,7 @@ export function buildCatalogs(
                     packageId: String(packageState.packageId),
                     component: componentState.component,
                     componentKind,
+                    sourceKind: "plugin-package",
                     label: componentState.component.displayName,
                     providerInstanceId: subject.providerInstanceId,
                     activeScope,
@@ -315,10 +316,13 @@ export function buildCatalogs(
       );
     }
   }
-  const scopedSkills = filterSkillCatalogForScope(
-    { skills: snapshot.skills ?? [], collisions: snapshot.collisions },
-    { mode: subject.mode, projectId: subject.projectId, threadRef: subject.threadId },
-  ).skills;
+  const scopedSkills =
+    subject.threadId === null
+      ? (snapshot.skills ?? []).filter((skill) => skill.scope === undefined)
+      : filterSkillCatalogForScope(
+          { skills: snapshot.skills ?? [], collisions: snapshot.collisions },
+          { mode: subject.mode, projectId: subject.projectId, threadRef: subject.threadId },
+        ).skills;
   const skills = scopedSkills.map((skill) => {
     const installed = installedSkills.get(skill.skill.qualifiedId);
     const effectiveState: ExtensionEffectiveState =
@@ -332,6 +336,7 @@ export function buildCatalogs(
           packageId: String(installed.packageState.packageId),
           component: installed.component.component,
           componentKind: "plugin-instruction",
+          sourceKind: "plugin-package",
           label: skill.displayName,
           providerInstanceId: subject.providerInstanceId,
           activeScope,
@@ -350,6 +355,10 @@ export function buildCatalogs(
             declaredCapabilities: [],
           },
           componentKind: "skill-instruction",
+          sourceKind:
+            skill.skill.sourceKind === "agents-skills-directory"
+              ? "agents-skills-directory"
+              : "skill-package",
           label: skill.displayName,
           providerInstanceId: subject.providerInstanceId,
           activeScope,
@@ -410,6 +419,7 @@ function addCapability(
     readonly packageId: string;
     readonly component: ExtensionComponent;
     readonly componentKind: CapabilityComponentKind;
+    readonly sourceKind: "plugin-package" | "skill-package" | "agents-skills-directory";
     readonly label: string;
     readonly providerInstanceId: ChatThread["providerInstanceId"];
     readonly activeScope: CapabilityActiveScope;
@@ -418,7 +428,7 @@ function addCapability(
   entries.push({
     id: input.id,
     source: {
-      kind: "plugin-package",
+      kind: input.sourceKind,
       referenceId: input.referenceId,
       packageId: input.packageId,
       componentId: input.component.id,

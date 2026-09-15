@@ -327,6 +327,7 @@ export const WorkTurnAccepted = Schema.Struct({
   attachments: Schema.optional(
     Schema.Array(WorkAttachmentReference).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),
   ),
+  extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
   capabilities: WorkTurnCapabilityFacts,
   acceptedAt: UtcTimestamp,
 }).annotations(strict);
