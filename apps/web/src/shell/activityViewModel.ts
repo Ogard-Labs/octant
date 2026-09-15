@@ -41,7 +41,7 @@ export interface SidebarActivityProject {
   readonly name: string;
 }
 
-export interface SidebarActivityThread {
+export interface SidebarActivityThread extends ChatThreadNavigationItem {
   readonly activity: ThreadRowActivity;
   /**
    * The row properties the Activity feed can show beside the Project name.
@@ -189,6 +189,7 @@ function toActivityThread(
       : (projectNames.get(thread.projectId) ?? unfiledLabel);
   const activity = threadRowActivity(thread);
   return {
+    ...thread,
     activity,
     ...(thread.checkoutChip === undefined ? {} : { checkoutChip: thread.checkoutChip }),
     ...(thread.pullRequests === undefined ? {} : { pullRequests: thread.pullRequests }),

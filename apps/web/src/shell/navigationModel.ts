@@ -117,14 +117,14 @@ export type ThreadRowActivity = "working" | "attention" | "unread" | "idle";
  * for the Project's default checkout so those rows stay quiet.
  */
 export interface ThreadCheckoutChip {
-  readonly checkoutKind: "managed-worktree";
+  readonly checkoutKind: "existing-worktree" | "managed-worktree";
   readonly label: string;
 }
 
 export interface ChatThreadNavigationItem {
   /** Absent leaves the row's dot idle rather than inventing a state. */
   readonly activity?: ThreadRowActivity;
-  /** Present when the host projected a non-default Code checkout for this row. */
+  /** Present when the host projected a Git checkout for this row. */
   readonly checkoutChip?: ThreadCheckoutChip;
   readonly followUp?: boolean;
   /**

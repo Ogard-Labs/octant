@@ -282,16 +282,16 @@ function repeatsJournaledCheckout(
 }
 
 /**
- * Compact checkout chip for a Code sidebar row. Only a thread's own managed
- * worktree is named; the Project's default existing-worktree checkout leaves
- * the row quiet. Label comes from the persisted head, never a live probe.
+ * Compact Git checkout chip for a Code sidebar row. Both existing and managed
+ * worktrees name their persisted head; plain folders have no branch to show.
+ * Reading navigation never probes Git.
  */
 export function codeNavigationCheckoutChip(
   checkout: CodeCheckoutIdentity | undefined,
 ): CodeNavigationRuntime["checkoutChip"] {
-  if (checkout === undefined || checkout.kind !== "managed-worktree") return undefined;
+  if (checkout === undefined || checkout.kind === "plain-folder") return undefined;
   const label = checkout.head.kind === "branch" ? checkout.head.name : "Detached HEAD";
-  return { checkoutKind: "managed-worktree", label };
+  return { checkoutKind: checkout.kind, label };
 }
 
 function currentCheckoutDigest(

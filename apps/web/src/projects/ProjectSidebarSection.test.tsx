@@ -1731,6 +1731,29 @@ describe("ProjectSidebarSection row property visibility", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Property visibility" }));
   }
 
+  it("shows thread details and opens a colored activity pull request without selecting the thread", async () => {
+    const user = userEvent.setup();
+    const onOpenPullRequest = vi.fn();
+    const props = sidebarProps({
+      ...DEFAULT_SIDEBAR_ROW_PROPERTIES,
+      activity: { project: true, branch: true, pullRequest: true, lastUpdated: true, status: true },
+    });
+    render(<ProjectSidebarSection {...props} threadActions={{ onOpenPullRequest }} />);
+    await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+    const row = screen.getByRole("button", { name: /Planning/ });
+    expect(within(row).getByText("feature/sidebar")).toBeVisible();
+    await user.hover(row);
+    const details = await screen.findByRole("group", { name: "Thread details" });
+    expect(details).toHaveTextContent("Planning");
+    expect(details).toHaveTextContent("feature/sidebar");
+    await user.unhover(row);
+    const reference = screen.getByRole("button", { name: "Open pull request #12" });
+    expect(reference).toHaveAttribute("data-state", "open");
+    await user.click(reference);
+    expect(onOpenPullRequest).toHaveBeenCalledWith(codeThread.pullRequests.items[0].identity);
+    expect(props.onSelectThread).not.toHaveBeenCalled();
+  });
+
   it("starts each view showing exactly what its rows carried before the choice existed", async () => {
     const user = userEvent.setup();
     renderSidebar();

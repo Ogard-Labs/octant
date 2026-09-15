@@ -975,7 +975,7 @@ export type CodeThreadActivity = typeof CodeThreadActivity.Type;
  * Kept off durable {@link CodeThread}: executing is runtime-derived the same
  * way board reasons are, and the chip is a projection over the persisted
  * checkout identity (no filesystem probe on a navigation tick). `checkoutChip`
- * is absent for the Project's default checkout so the row stays quiet there.
+ * is absent for plain folders; existing and managed Git worktrees name their head.
  *
  * `pullRequestSummaries` carries the same bounded, authority-filtered join the
  * board card shows, read from the cached snapshot and never from GitHub. It is
@@ -988,7 +988,7 @@ export const CodeNavigationRuntime = Schema.Struct({
   executing: Schema.Boolean,
   checkoutChip: Schema.optional(
     Schema.Struct({
-      checkoutKind: Schema.Literal("managed-worktree"),
+      checkoutKind: Schema.Literal("existing-worktree", "managed-worktree"),
       label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
     }).annotations(strict),
   ),

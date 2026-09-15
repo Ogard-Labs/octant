@@ -112,6 +112,7 @@ import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import { groupThreadsByProject } from "./projectThreadGrouping";
 import {
   ProjectThreadList,
+  ThreadRowInfoPopup,
   ProjectThreadRows,
   ProjectThreadStatus,
   ThreadStatusMark,
@@ -626,6 +627,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
               {...(filteringThreads && threadsReady
                 ? { emptyLabel: FILTERED_THREADS_EMPTY_MESSAGE }
                 : {})}
+              actions={props.threadActions ?? {}}
               groups={activity.groups}
               onSelectThread={props.onSelectThread!}
             />
@@ -1037,6 +1039,7 @@ function ActivityViewToggle(props: { readonly enabled: boolean; readonly onToggl
 }
 
 function ActivityThreadList(props: {
+  readonly actions: ThreadRowActions;
   readonly activeThreadId?: string;
   readonly openThreadIds?: ReadonlyArray<string>;
   readonly emptyLabel?: string;
@@ -1060,6 +1063,7 @@ function ActivityThreadList(props: {
           <div className="activity-nav__threads">
             {group.threads.map((thread) => (
               <ActivityThreadButton
+                actions={props.actions}
                 {...(props.activeThreadId === undefined
                   ? {}
                   : { activeThreadId: props.activeThreadId })}
@@ -1076,6 +1080,7 @@ function ActivityThreadList(props: {
 }
 
 function ActivityThreadButton(props: {
+  readonly actions: ThreadRowActions;
   readonly activeThreadId?: string;
   readonly openThreadIds?: ReadonlyArray<string>;
   readonly onSelectThread: (threadId: string) => void;
@@ -1086,7 +1091,7 @@ function ActivityThreadButton(props: {
   const pullRequest = shows.pullRequest ? props.thread.pullRequests?.items[0] : undefined;
   const checkout = shows.branch ? props.thread.checkoutChip : undefined;
   const age = shows.lastUpdated ? threadRowShortAge(props.thread.updatedAt) : undefined;
-  return (
+  const row = (
     <OctantButton
       aria-current={selected ? "page" : undefined}
       className="sidebar-navigation__thread activity-nav__thread justify-start"
@@ -1099,8 +1104,11 @@ function ActivityThreadButton(props: {
       <span className="sidebar-navigation__thread-copy">
         <span className="sidebar-navigation__thread-headline">
           <span className="sidebar-navigation__thread-title">{props.thread.title}</span>
-          {pullRequest === undefined ? null : (
-            <span className="sidebar-navigation__thread-pr">
+          {pullRequest === undefined || props.actions.onOpenPullRequest !== undefined ? null : (
+            <span
+              className="sidebar-navigation__thread-pr sidebar-navigation__thread-pr-mark"
+              data-state={pullRequest.state}
+            >
               #{String(pullRequest.identity.number)}
             </span>
           )}
@@ -1115,7 +1123,7 @@ function ActivityThreadButton(props: {
           </span>
         )}
       </span>
-      {pullRequest === undefined ? null : (
+      {pullRequest === undefined || props.actions.onOpenPullRequest !== undefined ? null : (
         <span
           aria-label={`Pull request #${String(pullRequest.identity.number)} · ${pullRequest.state}`}
           className="sidebar-navigation__thread-pr-mark"
@@ -1147,6 +1155,39 @@ function ActivityThreadButton(props: {
         />
       ) : null}
     </OctantButton>
+  );
+  return (
+    <div className="activity-nav__row">
+      <ThreadRowInfoPopup
+        actions={props.actions}
+        projectName={props.thread.projectName}
+        thread={props.thread}
+      >
+        {row}
+      </ThreadRowInfoPopup>
+      {pullRequest === undefined || props.actions.onOpenPullRequest === undefined ? null : (
+        <OctantButton
+          aria-label={`Open pull request #${String(pullRequest.identity.number)}`}
+          className="activity-nav__pr"
+          data-state={pullRequest.state}
+          title={`Pull request #${String(pullRequest.identity.number)} · ${pullRequest.state}`}
+          onClick={(event) => {
+            if (event.metaKey || event.ctrlKey) {
+              props.actions.onOpenPullRequestOnGithub?.(pullRequest.identity);
+              return;
+            }
+            props.actions.onOpenPullRequest?.(pullRequest.identity);
+          }}
+          variant="ghost"
+          type="button"
+        >
+          <span className="sidebar-navigation__thread-pr-mark" data-state={pullRequest.state}>
+            <GitPullRequest aria-hidden="true" size={12} strokeWidth={1.8} />#
+            {String(pullRequest.identity.number)}
+          </span>
+        </OctantButton>
+      )}
+    </div>
   );
 }
 
