@@ -252,6 +252,7 @@ import {
 import { projectViewEnvironmentOptionsFromHosts } from "./code/codeProjectViewModel";
 import { projectPullRequestKey } from "./code/CodeProjectPullRequests";
 import { ProjectSidebarSection } from "./projects/ProjectSidebarSection";
+import { ProjectsDirectory } from "./projects/ProjectsDirectory";
 import { OctantButton } from "./ui/base/OctantButton";
 import { useProjectController } from "./projects/useProjectController";
 import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
@@ -5010,6 +5011,7 @@ function LaunchedShell(
         }}
         onPreviewSidebarWidth={setPreviewSidebarWidth}
         sidebarCollapsed={sidebarCollapsed}
+        projectsSidebarOpen={selectedProjectTabId !== undefined}
         sidebarVibrancyMode={presentedShellSettings?.sidebarBackground.vibrancyMode ?? "off"}
         showThreadProviderIcons={controller.settings.showThreadProviderIcons}
         transcriptTextSize={controller.settings.transcriptTextSize}
@@ -5111,6 +5113,19 @@ function LaunchedShell(
             workspace={controller.workspace}
             resolvedSidebarBackground={resolvedSidebarBackground}
             backgroundFetcher={sidebarBackgroundFetcher}
+            {...(selectedProjectTabId === undefined || activeProjectId === undefined
+              ? {}
+              : {
+                  projectsDirectory: (
+                    <ProjectsDirectory
+                      availabilityByProject={projectController.availabilityByProject}
+                      onAddProject={() => openProjectCreate()}
+                      onOpenProject={(project) => void openSelectedProject(project)}
+                      projects={projectController.allProjects}
+                      selectedProjectId={activeProjectId}
+                    />
+                  ),
+                })}
             projectSection={
               <>
                 {projectController.status === "loading" ? (
@@ -5529,8 +5544,6 @@ function LaunchedShell(
                       void binding.catch(() => undefined);
                     }}
                     onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
-                    onAddProject={() => openProjectCreate()}
-                    onOpenProject={(project) => void openSelectedProject(project)}
                     appleToolchainClient={appleToolchainClient}
                     agentRunClient={agentRunClient}
                     onAddAgent={invokeAddAgent}

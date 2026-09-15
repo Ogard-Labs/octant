@@ -5,6 +5,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ProjectOverview } from "./ProjectOverview";
+import { ProjectsDirectory } from "./ProjectsDirectory";
 import { ProjectThreadsProvider, type ProjectThreadsAccess } from "./ProjectThreadsSection";
 
 describe("ProjectOverview", () => {
@@ -35,16 +36,21 @@ describe("ProjectOverview", () => {
     } as unknown as ProjectSummary;
 
     render(
-      <ProjectOverview
-        onAddProject={onAddProject}
-        onArchive={vi.fn()}
-        onNewThread={onNewThread}
-        onOpenProject={onOpenProject}
-        onRelink={vi.fn()}
-        onRename={vi.fn()}
-        project={codeProject}
-        projects={[codeProject, workProject]}
-      />,
+      <>
+        <ProjectsDirectory
+          onAddProject={onAddProject}
+          onOpenProject={onOpenProject}
+          projects={[codeProject, workProject]}
+          selectedProjectId={codeProject.id}
+        />
+        <ProjectOverview
+          onArchive={vi.fn()}
+          onNewThread={onNewThread}
+          onRelink={vi.fn()}
+          onRename={vi.fn()}
+          project={codeProject}
+        />
+      </>,
     );
 
     const directory = screen.getByRole("navigation", { name: "Projects" });

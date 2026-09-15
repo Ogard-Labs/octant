@@ -12,7 +12,6 @@ import { FolderPicker } from "./FolderPicker";
 import { ProjectMemorySection } from "./ProjectMemorySection";
 import { ProjectThreadsSection } from "./ProjectThreadsSection";
 import { ProjectProviderPolicySection } from "./ProjectProviderPolicySection";
-import { ProjectsDirectory } from "./ProjectsDirectory";
 
 export interface ProjectOverviewProps {
   readonly allowRootRelink?: boolean;
@@ -27,13 +26,9 @@ export interface ProjectOverviewProps {
   readonly hostBridge?: OctantHostBridge;
   readonly hostId?: string;
   readonly memoryProjects?: ReadonlyArray<ProjectSummary>;
-  readonly projects?: ReadonlyArray<ProjectSummary>;
-  readonly availabilityByProject?: ReadonlyMap<ProjectId, ProjectAvailability>;
-  readonly onAddProject?: () => void;
   readonly onArchive: (projectId: ProjectId) => void;
   readonly onMemoryChanged?: () => void;
   readonly onNewThread?: () => void;
-  readonly onOpenProject?: (project: ProjectSummary) => void;
   readonly onRelink: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
   readonly onRename: (projectId: ProjectId, name: string) => Promise<boolean>;
   readonly onProviderPolicyChange?: (
@@ -57,7 +52,6 @@ export function ProjectOverview(props: ProjectOverviewProps) {
   const allowRootRelink = props.allowRootRelink !== false;
   const unavailable = props.project.type !== "chat" && props.availability?.status === "unavailable";
   const boundMode = props.project.type === "code" ? "code" : "work";
-  const directoryVisible = props.projects !== undefined && props.onOpenProject !== undefined;
 
   useEffect(() => {
     alive.current = true;
@@ -132,20 +126,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
   }
 
   return (
-    <section
-      className={directoryVisible ? "projects-workspace" : "projects-workspace--detail-only"}
-    >
-      {directoryVisible ? (
-        <ProjectsDirectory
-          {...(props.availabilityByProject === undefined
-            ? {}
-            : { availabilityByProject: props.availabilityByProject })}
-          {...(props.onAddProject === undefined ? {} : { onAddProject: props.onAddProject })}
-          onOpenProject={props.onOpenProject!}
-          projects={props.projects!}
-          selectedProjectId={props.project.id}
-        />
-      ) : null}
+    <section className="projects-workspace--detail-only">
       <section className="project-overview">
         {connectionStale ? (
           <div className="project-overview__warning" role="status">

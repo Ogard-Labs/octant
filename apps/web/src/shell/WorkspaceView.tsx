@@ -299,8 +299,6 @@ export interface WorkspaceViewProps {
   readonly isNarrow?: boolean;
   readonly availabilityByProject: ReadonlyMap<ProjectId, ProjectAvailability>;
   readonly onArchiveProject: (projectId: ProjectId) => void;
-  readonly onAddProject?: () => void;
-  readonly onOpenProject?: (project: ProjectSummary) => void;
   readonly onRelinkProject: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
   readonly onRenameProject: (projectId: ProjectId, name: string) => Promise<boolean>;
   readonly onProviderPolicyChange?: (
@@ -1479,12 +1477,8 @@ function renderNonCodeTab(
     return (
       <ProjectOverview
         {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
-        availabilityByProject={props.availabilityByProject}
         memoryProjects={props.projects}
-        projects={props.projects}
-        {...(props.onAddProject === undefined ? {} : { onAddProject: props.onAddProject })}
         {...(props.onMemoryChanged === undefined ? {} : { onMemoryChanged: props.onMemoryChanged })}
-        {...(props.onOpenProject === undefined ? {} : { onOpenProject: props.onOpenProject })}
         {...(props.onNewThreadInProject === undefined || project.lifecycle !== "active"
           ? {}
           : { onNewThread: () => props.onNewThreadInProject?.(project.id) })}

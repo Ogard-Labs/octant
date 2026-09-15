@@ -533,9 +533,13 @@ The app has three server-enforced modes—Chat, Work, and Code. Mode switching i
 available as a labeled selector, compact list, or icon presentation according
 to the user's setting. Code and Work keep separate Project View sets. The
 sidebar keeps Projects as a first-class destination alongside the active mode's
-compact thread list. Opening Projects reveals a persistent collection pane with
-search and All, Chat, Work, and Code filters; selecting a Project updates the
-adjacent detail pane without leaving the collection. The detail is thread-first,
+compact thread list. Opening Projects keeps global navigation in the primary
+sidebar and places the complete Project collection in a persistent adjacent pane,
+never in the main workspace. The collection remains sidebar-owned for navigation
+and responsive behavior, but uses the same material as the Project detail with only
+a hairline division, so it does not read as a second navigation sidebar. It provides
+search and All, Chat, Work, and Code filters; selecting a Project updates the adjacent
+main detail pane without leaving the collection. The detail is thread-first,
 with Project memory, provider access, and canvases in compact expandable rows
 below the primary work. The thread list is named Chats for threads filed in no
 Project; Work and Code call it Recents. Rows are hairline rails, never cards;
