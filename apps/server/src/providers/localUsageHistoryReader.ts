@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import { createHash } from "node:crypto";
 import { constants, createReadStream } from "node:fs";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
@@ -29,6 +30,7 @@ const scanOffsets = new Map<
   {
     readonly offset: number;
     readonly size: number;
+    readonly mtimeMs: number;
     readonly dev: number;
     readonly ino: number;
     readonly prefixRevision: string;
@@ -41,6 +43,7 @@ const fileIdentities = new Map<
   {
     readonly offset: number;
     readonly size: number;
+    readonly mtimeMs: number;
     readonly dev: number;
     readonly ino: number;
     readonly prefixRevision: string;
@@ -75,7 +78,19 @@ interface LocalUsageHistoryReadResult {
   readonly coverage: LocalUsageHistoryCoverage;
 }
 
+export interface LocalUsageHistoryCheckpointStore {
+  read(source: string): string | undefined;
+  write(source: string, snapshot: string): void;
+}
+
 export interface LocalUsageHistoryReaderOptions {
+  readonly checkpointStore?: LocalUsageHistoryCheckpointStore;
+  readonly checkpointRevision?: string;
+  readonly parserCheckpoint?: {
+    readonly save: () => string;
+    readonly restore: (value: string) => void;
+  };
+
   readonly sourceKind: LocalUsageHistorySourceKind;
   readonly providerKey: string;
   readonly root: string;
@@ -101,8 +116,8 @@ export type LocalUsageHistoryLineParser = (input: {
 /**
  * Bounded metadata-only JSONL reader shared by local provider adapters.
  * Symlinked children are skipped, paths never leave the configured root, and
- * only parser-returned accounting records survive. Raw lines and paths never
- * leave this function.
+ * only accounting records and file checkpoints survive in the local cache.
+ * Raw lines are discarded; file paths are never returned to clients.
  */
 export function readLocalUsageHistory(
   options: LocalUsageHistoryReaderOptions,
@@ -140,9 +155,17 @@ export function readLocalUsageHistory(
           () => undefined,
         );
   const controller = new AbortController();
-  const operation = previousDone.then(() =>
-    readLocalUsageHistoryImpl(options, request, parse, controller.signal),
-  );
+  const operation = previousDone.then(async () => {
+    try {
+      return await readLocalUsageHistoryImpl(options, request, parse, controller.signal);
+    } catch (error) {
+      if (options.checkpointStore !== undefined) {
+        const root = await realpath(options.root).catch(() => options.root);
+        clearSource(installationId(options.sourceKind, root));
+      }
+      throw error;
+    }
+  });
   const entry: ActiveRead = { operation, controller, waiters: 0, settled: false };
   activeReads.set(key, entry);
   sourceLocks.set(sourceKey, operation);
@@ -272,7 +295,17 @@ async function readLocalUsageHistoryImpl(
   }
 
   const sourceInstallationId = installationId(options.sourceKind, root);
+  const needsRestore = !fileSeen.has(sourceInstallationId);
   trackSource(sourceInstallationId);
+  const checkpointKey = `${sourceInstallationId}:v1:${options.checkpointRevision ?? "1"}:${JSON.stringify(options.allowedRelativeRoots ?? [])}`;
+  if (needsRestore && options.checkpointStore !== undefined) {
+    try {
+      const saved = options.checkpointStore.read(checkpointKey);
+      if (saved !== undefined) restoreCheckpoint(sourceInstallationId, saved, options);
+    } catch {
+      // A disposable or obsolete cache must never prevent a bounded source read.
+    }
+  }
   const collected = await collectFiles(
     root,
     MAX_DISCOVERED_FILES,
@@ -353,6 +386,7 @@ async function readLocalUsageHistoryImpl(
         (fileSize < previous.size ||
           previous.dev !== fileStat.dev ||
           previous.ino !== fileStat.ino ||
+          (fileSize === previous.size && previous.mtimeMs !== fileStat.mtimeMs) ||
           previous.prefixRevision !== prefixRevision);
       if (replaced) {
         cacheInvalidated = true;
@@ -370,6 +404,7 @@ async function readLocalUsageHistoryImpl(
         fileIdentities.set(cursorKey, {
           offset: 0,
           size: 0,
+          mtimeMs: fileStat.mtimeMs,
           dev: fileStat.dev,
           ino: fileStat.ino,
           prefixRevision,
@@ -493,6 +528,7 @@ async function readLocalUsageHistoryImpl(
         const identity = {
           offset: cursorOffset,
           size: fileSize,
+          mtimeMs: fileStat.mtimeMs,
           dev: fileStat.dev,
           ino: fileStat.ino,
           prefixRevision,
@@ -609,25 +645,106 @@ async function readLocalUsageHistoryImpl(
     }),
     {},
   );
+  let checkpointFailed = false;
+  if (options.checkpointStore !== undefined) {
+    try {
+      throwIfAborted(signal);
+      options.checkpointStore.write(checkpointKey, saveCheckpoint(sourceInstallationId, options));
+    } catch {
+      throwIfAborted(signal);
+      checkpointFailed = true;
+    }
+  }
   return {
     records: responseRecords,
     coverage: coverage(
       options,
       sourceInstallationId,
-      status,
+      checkpointFailed ? "partial" : status,
       scannedFileCount,
       responseRecords.length,
       coverageOmittedRecordCount,
       truncated,
       hasMore,
-      sourceFailed
-        ? "Some provider history files could not be read."
-        : truncated
-          ? "Bounded provider history scan is partial; the next refresh resumes its cursor."
-          : "Provider accounting history was scanned.",
+      checkpointFailed
+        ? "Usage was read, but its restart checkpoint could not be saved."
+        : sourceFailed
+          ? "Some provider history files could not be read."
+          : truncated
+            ? "Bounded provider history scan is partial; the next refresh resumes its cursor."
+            : "Provider accounting history was scanned.",
       range,
     ),
   };
+}
+
+const CursorSnapshot = Schema.Struct({
+  offset: Schema.Number,
+  size: Schema.Number,
+  mtimeMs: Schema.Number,
+  dev: Schema.Number,
+  ino: Schema.Number,
+  prefixRevision: Schema.String,
+  prefixLength: Schema.Number,
+  waitingForAppend: Schema.Boolean,
+});
+const CheckpointSnapshot = Schema.Struct({
+  version: Schema.Literal(1),
+  offsets: Schema.Array(Schema.Tuple(Schema.String, CursorSnapshot)),
+  identities: Schema.Array(Schema.Tuple(Schema.String, CursorSnapshot)),
+  cursor: Schema.optional(Schema.String),
+  seen: Schema.Array(Schema.String),
+  qualities: Schema.Array(
+    Schema.Tuple(
+      Schema.String,
+      Schema.Struct({ omittedRecordCount: Schema.Number, failed: Schema.Boolean }),
+    ),
+  ),
+  records: Schema.Array(Schema.Unknown),
+  owners: Schema.Array(Schema.Tuple(Schema.String, Schema.Array(Schema.String))),
+  truncated: Schema.Boolean,
+  parser: Schema.optional(Schema.String),
+});
+
+function saveCheckpoint(id: string, options: LocalUsageHistoryReaderOptions): string {
+  const cursor = fileCursors.get(id);
+  return JSON.stringify({
+    version: 1,
+    offsets: [...scanOffsets].filter(([key]) => key.startsWith(`${id}\0`)),
+    identities: [...fileIdentities].filter(([key]) => key.startsWith(`${id}\0`)),
+    ...(cursor === undefined ? {} : { cursor }),
+    seen: [...(fileSeen.get(id) ?? [])],
+    qualities: [...(fileQualities.get(id) ?? [])],
+    records: [...(recordCaches.get(id)?.values() ?? [])],
+    owners: [...(recordOwners.get(id) ?? [])].map(([path, keys]) => [path, [...keys]]),
+    truncated: recordCacheTruncated.has(id),
+    ...(options.parserCheckpoint === undefined ? {} : { parser: options.parserCheckpoint.save() }),
+  });
+}
+
+function restoreCheckpoint(
+  id: string,
+  value: string,
+  options: LocalUsageHistoryReaderOptions,
+): void {
+  const saved = Schema.decodeUnknownSync(CheckpointSnapshot)(JSON.parse(value));
+  const records = saved.records.map((record) => decodeLocalUsageHistoryRecord(record));
+  if (records.length > MAX_CACHED_RECORDS || saved.seen.length > MAX_DISCOVERED_FILES) return;
+  if (options.parserCheckpoint !== undefined) {
+    if (saved.parser === undefined) return;
+    options.parserCheckpoint.restore(saved.parser);
+  }
+  // Decode the entire snapshot before exposing records or advancing any cursor.
+  for (const [key, cursor] of saved.offsets)
+    if (key.startsWith(`${id}\0`)) scanOffsets.set(key, cursor);
+  for (const [key, cursor] of saved.identities)
+    if (key.startsWith(`${id}\0`)) fileIdentities.set(key, cursor);
+  if (saved.cursor !== undefined) fileCursors.set(id, saved.cursor);
+  fileSeen.set(id, new Set(saved.seen));
+  fileQualities.set(id, new Map(saved.qualities));
+  recordCaches.set(id, new Map(records.map((record) => [recordKey(record), record])));
+  recordOwners.set(id, new Map(saved.owners.map(([path, keys]) => [path, new Set(keys)])));
+  if (saved.truncated) recordCacheTruncated.add(id);
 }
 
 async function filePrefixRevision(
@@ -664,24 +781,24 @@ function clearScanOffsetForFile(sourceInstallationId: string, filePath: string):
   fileIdentities.delete(key);
 }
 
+function clearSource(id: string): void {
+  fileSeen.delete(id);
+  fileQualities.delete(id);
+  fileCursors.delete(id);
+  recordCaches.delete(id);
+  recordOwners.delete(id);
+  recordCacheTruncated.delete(id);
+  for (const key of scanOffsets.keys()) if (key.startsWith(`${id}\0`)) scanOffsets.delete(key);
+  for (const key of fileIdentities.keys())
+    if (key.startsWith(`${id}\0`)) fileIdentities.delete(key);
+}
+
 function trackSource(sourceInstallationId: string): void {
   if (fileSeen.has(sourceInstallationId)) return;
   if (fileSeen.size >= MAX_TRACKED_SOURCES) {
     const oldest = fileSeen.keys().next().value;
     if (oldest !== undefined) {
-      fileSeen.delete(oldest);
-      fileQualities.delete(oldest);
-      fileCursors.delete(oldest);
-      recordCaches.delete(oldest);
-      recordOwners.delete(oldest);
-      recordCacheTruncated.delete(oldest);
-      const prefix = `${oldest}\0`;
-      for (const key of scanOffsets.keys()) {
-        if (key.startsWith(prefix)) scanOffsets.delete(key);
-      }
-      for (const key of fileIdentities.keys()) {
-        if (key.startsWith(prefix)) fileIdentities.delete(key);
-      }
+      clearSource(oldest);
     }
   }
   fileSeen.set(sourceInstallationId, new Set());

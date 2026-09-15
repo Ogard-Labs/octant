@@ -74,6 +74,19 @@ A failed refresh retains the previous reading with a stale label. Limits are
 available to the local authenticated host interface, not automatically to a
 remote client merely because it can read a Project.
 
+## Restart-safe local history
+
+Octant saves its bounded local accounting index and import checkpoints in its
+own data directory. Restarting restores imported usage instead of recounting
+unchanged provider logs. Refresh reads new or changed files and continues any
+unfinished import. Changing the date range or viewing timezone summarizes the
+saved accounting records; it does not reset the importer.
+
+This cache contains accounting facts and file checkpoints, not conversation
+text or credentials. It remains separate from Octant-attributed usage. An old
+or invalid cache is rebuilt from the recognized provider files; if the cache
+cannot be saved, Usage reports partial coverage and explains the problem.
+
 ## Related
 
 - [Context budgets](/advanced/context-budgets)

@@ -32,6 +32,15 @@ are different measurements.
   prompts, messages, tool arguments, account identities, and raw records are
   never persisted, returned, logged, or attached to provider context. Oversized
   or malformed input makes coverage partial instead of producing a false zero.
+- Persist a versioned, bounded accounting checkpoint in a separate local SQLite
+  cache under the host data directory. Normalized records, file identities and
+  offsets, deduplication ownership, coverage, and adapter cumulative-counter
+  state commit atomically. This cache is rebuildable from provider logs and is
+  not part of Octant's authoritative event journal or attributed usage ledger.
+  Restart restores the checkpoint, skips unchanged file contents, and resumes
+  incomplete scans. Replaced/deleted files invalidate their contributions;
+  unsupported cache or pricing revisions rebuild through the bounded importer.
+  Cache write failures retain the current reading with explicit partial coverage.
 - Records retain opaque source-installation, session, and event identities.
   Repeated reads, copied files, cumulative counters, and multiple configured
   instances must not multiply the same event. Each adapter defines and tests
