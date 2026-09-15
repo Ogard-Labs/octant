@@ -95,3 +95,8 @@ limits only when the provider reports reliable usage or cost.
 - [Context budgets and limits](/advanced/context-budgets) for shared capacity
 - [Git and worktrees](/advanced/git-worktrees) for child isolation in Code
 - [Recovery and troubleshooting](/advanced/recovery) for interrupted runs
+
+Agents Center and the thread hierarchy offer steering only for running or waiting
+runs. Waiting runs and recoverable interrupted runs offer Resume. If a restart
+left no resumable execution, use Retry instead; the host still validates every
+control request against the current run state.

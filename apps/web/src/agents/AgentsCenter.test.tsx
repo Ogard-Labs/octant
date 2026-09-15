@@ -59,6 +59,44 @@ function createClient(overrides: Partial<AgentRunClient> = {}): AgentRunClient {
 }
 
 describe("AgentsCenter", () => {
+  it("offers resume after a recoverable provider process death", async () => {
+    const item = {
+      ...summary,
+      lifecycleStatus: "interrupted" as const,
+      recoveryReason: "provider-process-death" as const,
+    };
+    render(
+      <AgentsCenter client={createClient({ center: vi.fn(async () => ({ items: [item] })) })} />,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: summary.task }));
+    expect(screen.getByRole("button", { name: /^Resume$/ })).toBeVisible();
+  });
+
+  it("does not offer steering on a completed run", async () => {
+    const item = { ...summary, lifecycleStatus: "completed" as const };
+    render(
+      <AgentsCenter client={createClient({ center: vi.fn(async () => ({ items: [item] })) })} />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /^History$/ }));
+    await userEvent.click(await screen.findByRole("button", { name: summary.task }));
+    expect(screen.queryByRole("button", { name: /^Steer$/ })).not.toBeInTheDocument();
+  });
+
+  it("offers retry instead of resume when restart lost resumable execution", async () => {
+    const item = {
+      ...summary,
+      lifecycleStatus: "interrupted" as const,
+      recoveryReason: "restart-without-resumable-execution" as const,
+    };
+    render(
+      <AgentsCenter client={createClient({ center: vi.fn(async () => ({ items: [item] })) })} />,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: summary.task }));
+    expect(screen.queryByRole("button", { name: /^Resume$/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Retry$/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^Steer$/ })).not.toBeInTheDocument();
+  });
+
   it("shows a loading state while the center query is in flight", () => {
     render(
       <AgentsCenter

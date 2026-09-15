@@ -344,7 +344,7 @@ function AgentsCenterDetail(props: {
   const canResume =
     lifecycleStatus === "waiting" ||
     (lifecycleStatus === "interrupted" &&
-      props.summary.recoveryReason === "provider-session-resumable");
+      props.summary.recoveryReason !== "restart-without-resumable-execution");
   const recovery = agentRunRecoveryLabel(props.summary.recoveryReason);
   return (
     <section aria-label="Agent run details" className="agents-center-detail">
@@ -475,30 +475,32 @@ function AgentsCenterDetail(props: {
         </div>
       ) : null}
 
-      <label className="agents-center-detail__steer">
-        <span>Steer message</span>
-        <OctantInput
-          onChange={(event) => setSteerMessage(event.target.value)}
-          value={steerMessage}
-        />
-        <OctantButton
-          onClick={() =>
-            void props.controls
-              .steer({
-                runId: String(props.summary.runId),
-                version: props.summary.version,
-                message: steerMessage,
-              })
-              .then((message) => {
-                if (message !== undefined) props.controller.setNotice(message);
-              })
-          }
-          type="button"
-          variant="secondary"
-        >
-          Steer
-        </OctantButton>
-      </label>
+      {lifecycleStatus === "running" || lifecycleStatus === "waiting" ? (
+        <label className="agents-center-detail__steer">
+          <span>Steer message</span>
+          <OctantInput
+            onChange={(event) => setSteerMessage(event.target.value)}
+            value={steerMessage}
+          />
+          <OctantButton
+            onClick={() =>
+              void props.controls
+                .steer({
+                  runId: String(props.summary.runId),
+                  version: props.summary.version,
+                  message: steerMessage,
+                })
+                .then((message) => {
+                  if (message !== undefined) props.controller.setNotice(message);
+                })
+            }
+            type="button"
+            variant="secondary"
+          >
+            Steer
+          </OctantButton>
+        </label>
+      ) : null}
 
       <dl className="agents-center-detail__facts">
         <div>
