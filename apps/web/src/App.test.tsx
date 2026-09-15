@@ -541,6 +541,69 @@ describe("App", () => {
     expect(document.querySelector(".workspace-pane-actions")).toBeNull();
   });
 
+  it("hands off a sidebar thread without inserting operation text into the Project list", async () => {
+    const user = userEvent.setup();
+    const handOff = deferred<Response>();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/api/threads/hand-off")) return await handOff.promise;
+      const canvasResponse = canvasFetchPassthrough(url);
+      if (canvasResponse !== undefined) return canvasResponse;
+      return new Response("not found", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <App
+        chatClient={chats()}
+        codeClient={codes()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    const projectsNavigation = await screen.findByRole("navigation", { name: "Projects" });
+    await user.pointer({
+      target: within(projectsNavigation).getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+    await user.click(await screen.findByRole("menuitem", { name: "Hand off…" }));
+
+    const progress = await screen.findByText(
+      "Writing the hand-off document for Controller foundation…",
+    );
+    expect(progress).toHaveClass("toast");
+    expect(within(projectsNavigation).queryByText(/Writing the hand-off document/)).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:13773/api/threads/hand-off",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ mode: "code", threadId: String(codeThreadId) }),
+      }),
+    );
+
+    handOff.resolve(
+      new Response(
+        JSON.stringify({
+          kind: "handed-off",
+          canvasId: "30000000-0000-4000-8000-000000000001",
+          versionId: "30000000-0000-4000-8000-000000000002",
+          projectId,
+          title: "Hand-off: Controller foundation",
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    expect(await screen.findByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
+    expect(
+      await screen.findByText("Hand-off: Controller foundation is open in the dock."),
+    ).toHaveClass("toast");
+  });
+
   it("opens one App-level command palette that runs a host-derived navigation command", async () => {
     const user = userEvent.setup();
     const shellApi = client(chatShellBootstrap());

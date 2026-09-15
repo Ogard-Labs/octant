@@ -1239,9 +1239,8 @@ function LaunchedShell(
       }),
     [props.launch.serverUrl, props.projectWindowCapability],
   );
-  // The export receipt is a receipt, not a state the sidebar keeps: it clears
-  // itself so a "Saved …" line from ten minutes ago is not still standing over
-  // the Project list.
+  // A row command has no local surface after its context menu closes. Keep its
+  // feedback transient so a stale receipt does not linger over the workspace.
   useEffect(() => {
     if (threadExportNotice === undefined) return;
     const timer = setTimeout(() => setThreadExportNotice(undefined), 8000);
@@ -3315,11 +3314,7 @@ function LaunchedShell(
   // navigation id, which for a Project-backed thread is its Code thread id;
   // the controller refuses anything its bootstrap does not hold rather than
   // guessing at a thread it cannot see.
-  /**
-   * The Export item for a thread row, or nothing when this window has no
-   * export client. The receipt is shown in the sidebar rather than swallowed:
-   * a refused export leaves no file behind, so silence would read as success.
-   */
+  /** The Export item for a thread row, or nothing when this window has no export client. */
   function exportThreadFromRow(
     mode: OctantMode,
   ): ((threadId: string, title: string) => void) | undefined {
@@ -3335,7 +3330,7 @@ function LaunchedShell(
   const exportWorkThread = exportThreadFromRow("work");
   /**
    * The Hand off item for a thread row. The host writes the document and
-   * keeps it; the sidebar shows the receipt and the dock opens on the Canvas.
+   * keeps it; transient feedback reports progress and the dock opens on the Canvas.
    */
   function handOffThreadFromRow(
     mode: OctantMode,
@@ -5086,11 +5081,6 @@ function LaunchedShell(
             backgroundFetcher={sidebarBackgroundFetcher}
             projectSection={
               <>
-                {threadExportNotice === undefined ? null : (
-                  <p className="project-nav__status" role="status">
-                    {threadExportNotice}
-                  </p>
-                )}
                 {projectController.status === "loading" ? (
                   <p className="project-nav__status" role="status">
                     Loading Projects…
@@ -6146,6 +6136,13 @@ function LaunchedShell(
           projectAnnouncementSequence={projectController.announcementSequence}
         />
       </ShellFrame>
+      {threadExportNotice === undefined ? null : (
+        <div className="toast-stack">
+          <p className="toast" role="status">
+            {threadExportNotice}
+          </p>
+        </div>
+      )}
       <ComputerUseActivitySurface
         changeRevision={machineChanges.computerUse}
         client={computerUseClient}
