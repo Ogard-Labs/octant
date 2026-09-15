@@ -33,9 +33,12 @@ describe("provider-owned CLI updates", () => {
       runProviderCliUpdate({
         binaryPath: process.execPath,
         args: ["-e", "process.once('SIGTERM', () => {}); setTimeout(() => {}, 10000)"],
-        timeoutMs: 100,
+        timeoutMs: 1_000,
       }),
-    ).rejects.toMatchObject({ category: "unavailable" });
+    ).rejects.toMatchObject({
+      category: "unavailable",
+      diagnostic: { stage: "update", kind: "timed-out" },
+    });
 
     expect(Date.now() - started).toBeGreaterThanOrEqual(800);
   });
@@ -56,7 +59,7 @@ const child = spawn(process.execPath, ["-e", "process.once('SIGTERM', () => {});
 writeFileSync(${JSON.stringify(pidFile)}, JSON.stringify({ parent: process.pid, child: child.pid }));
 setInterval(() => {}, 1000);`,
           ],
-          timeoutMs: 150,
+          timeoutMs: 1_000,
           terminationGraceMs: 200,
         }),
       ).rejects.toMatchObject({
@@ -80,7 +83,7 @@ setInterval(() => {}, 1000);`,
       runProviderCliUpdate({
         binaryPath: process.execPath,
         args: ["-e", "process.once('SIGTERM', () => {}); setInterval(() => {}, 1000)"],
-        timeoutMs: 50,
+        timeoutMs: 500,
         terminationGraceMs: 20,
         processGroupExists: () => true,
         killProcessGroup: (pid, signal) => {
@@ -110,6 +113,34 @@ setInterval(() => {}, 1000);`,
     expect(Buffer.byteLength(result.output, "utf8")).toBeLessThanOrEqual(16_384);
     expect(result.output).not.toContain("secret-token-value");
     expect(result.exitCode).toBe(0);
+  });
+
+  it("returns only bounded classified stderr metadata when an updater exits unsuccessfully", async () => {
+    await expect(
+      runProviderCliUpdate({
+        binaryPath: process.execPath,
+        args: [
+          "-e",
+          'process.stderr.write("error: unexpected argument --private-token=must-not-cross"); process.exit(23);',
+        ],
+        timeoutMs: 5_000,
+      }),
+    ).rejects.toMatchObject({
+      category: "provider-failed",
+      diagnostic: {
+        stage: "update",
+        kind: "exited",
+        exitCode: 23,
+        stderrContext: "Provider process rejected its configured arguments.",
+      },
+    });
+    await expect(
+      runProviderCliUpdate({
+        binaryPath: process.execPath,
+        args: ["-e", 'process.stderr.write("private-token=must-not-cross"); process.exit(24);'],
+        timeoutMs: 5_000,
+      }),
+    ).rejects.not.toMatchObject({ message: expect.stringContaining("must-not-cross") });
   });
 
   it("applies a disposable updater fixture that writes a new version marker", async () => {

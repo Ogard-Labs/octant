@@ -352,7 +352,10 @@ const devinProfile: AcpProviderProfile = {
   chatSessionRoot: "managed-home",
   userQuestions: "supported",
   resumeMethod: "session/load",
-  closesSessions: true,
+  // Devin 3000.10.27 accepts session/new but refuses the optional
+  // session/close RPC. Process-scope cleanup still tears down the scratch
+  // session without making an otherwise healthy probe fail.
+  closesSessions: false,
   authenticateOnProbe: false,
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage:

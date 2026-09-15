@@ -7,7 +7,7 @@ import {
   type ProviderObservedState,
   type ProviderRegistrySnapshot,
 } from "@octant/contracts";
-import type { ProviderClient } from "@octant/client-runtime/provider-client";
+import { createProviderClient, type ProviderClient } from "@octant/client-runtime/provider-client";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useProviderController } from "./useProviderController";
@@ -334,11 +334,48 @@ describe("useProviderController", () => {
     expect(result.current.presentationObservedByInstance.get(id)).toBeUndefined();
   });
 
+  it("shows updater diagnostics received through the real HTTP client", async () => {
+    const api = createProviderClient({
+      baseUrl: "http://localhost",
+      windowCapability: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      fetch: async (input) =>
+        new URL(String(input)).pathname.endsWith("bootstrap")
+          ? Response.json(snapshot())
+          : Response.json(
+              {
+                category: "provider-failed",
+                message: "Private updater output",
+                diagnostic: {
+                  stage: "update",
+                  kind: "exited",
+                  exitCode: 23,
+                  stderrContext: "Provider process rejected its configured arguments.",
+                },
+              },
+              { status: 500 },
+            ),
+    });
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await act(async () => {
+      await result.current.updateProviderCli(id);
+    });
+    expect(result.current.message).toBe(
+      "Provider CLI update failed: Exited with code 23. Provider process rejected its configured arguments.",
+    );
+  });
+
   it("refreshes provider state when a CLI update fails", async () => {
     const api = client();
     vi.mocked(api.execute).mockRejectedValueOnce({
       category: "provider-failed",
       message: "secret-token-value updater failed",
+      diagnostic: {
+        stage: "update",
+        kind: "exited",
+        exitCode: 23,
+        stderrContext: "Provider process rejected its configured arguments.",
+      },
     });
     vi.mocked(api.bootstrap)
       .mockResolvedValueOnce(snapshot())
@@ -352,7 +389,9 @@ describe("useProviderController", () => {
 
     expect(api.bootstrap).toHaveBeenCalledTimes(2);
     expect(result.current.instances[0]?.version).toBe(2);
-    expect(result.current.message).toBe("Provider operation failed.");
+    expect(result.current.message).toBe(
+      "Provider CLI update failed: Exited with code 23. Provider process rejected its configured arguments.",
+    );
     expect(result.current.message).not.toMatch(/secret-token-value/i);
   });
 
@@ -418,11 +457,20 @@ describe("useProviderController", () => {
       instanceId: id,
       status: "probe-failed",
       previousVersion: "1.1.0",
+      currentVersion: "1.2.0",
+      diagnostic: {
+        stage: "post-update-probe",
+        kind: "exited",
+        exitCode: 2,
+        stderrContext: "Provider process rejected its configured arguments.",
+      },
     });
     await act(async () => {
       await expect(result.current.updateProviderCli(id)).resolves.toBe(true);
     });
-    expect(result.current.message).toMatch(/follow-up connection check failed/i);
+    expect(result.current.message).toBe(
+      "Provider CLI update finished at 1.2.0, but the follow-up connection check failed: Exited with code 2. Provider process rejected its configured arguments.",
+    );
   });
 
   it("keeps an explicit CLI update message when a quiet probe runs", async () => {

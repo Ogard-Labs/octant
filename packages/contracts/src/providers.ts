@@ -1107,6 +1107,63 @@ export const ProviderToolAnswer = Schema.Struct({
 }).annotations(strict);
 export type ProviderToolAnswer = typeof ProviderToolAnswer.Type;
 
+const ProviderDiagnosticVersion = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(64),
+  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._+-]*$/),
+);
+
+/**
+ * Bounded process facts that are safe to show on any authenticated client.
+ * Raw stdout, stderr, argv, environment, prompts, credentials, and filesystem
+ * paths are deliberately not representable.
+ */
+export const ProviderProcessDiagnostic = Schema.Struct({
+  stage: Schema.Literal(
+    "version-check",
+    "launch",
+    "initialization",
+    "authentication",
+    "model-discovery",
+    "update",
+    "post-update-probe",
+    "cleanup",
+  ),
+  kind: Schema.Literal(
+    "spawn-failed",
+    "exited",
+    "signaled",
+    "timed-out",
+    "version-mismatch",
+    "confinement-denied",
+    "protocol-failed",
+    "authentication-failed",
+    "cleanup-unconfirmed",
+  ),
+  exitCode: Schema.optional(Schema.Int.pipe(Schema.nonNegative(), Schema.lessThanOrEqualTo(255))),
+  signal: Schema.optional(
+    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(32), Schema.pattern(/^SIG[A-Z0-9]+$/)),
+  ),
+  detectedVersion: Schema.optional(ProviderDiagnosticVersion),
+  supportedVersion: Schema.optional(ProviderDiagnosticVersion),
+  stderrContext: Schema.optional(
+    Schema.Literal(
+      "Provider process was denied by host permissions or confinement.",
+      "Provider process rejected its configured arguments.",
+      "Provider authentication is required.",
+      "Provider TLS trust verification failed.",
+      "Provider network connection failed.",
+      "Provider process wrote redacted diagnostic output.",
+      "Provider reported an incompatible installed version.",
+      "Provider refused the ACP request because its configuration was invalid.",
+      "Provider refused the ACP request for the managed workspace.",
+      "Provider refused the ACP request because no usable model was available.",
+      "Provider could not reach its remote service.",
+      "Provider refused the ACP request without a classified reason.",
+    ),
+  ),
+}).annotations(strict);
+export type ProviderProcessDiagnostic = typeof ProviderProcessDiagnostic.Type;
+
 export const ProviderObservedState = Schema.Struct({
   instanceId: ProviderInstanceId,
   readiness: ProviderReadiness,
@@ -1123,6 +1180,7 @@ export const ProviderObservedState = Schema.Struct({
   // for other deployments in the same profile.
   verifiedToolModelIds: Schema.optional(Schema.Array(ProviderModelId)),
   message: Schema.optional(Schema.NonEmptyTrimmedString),
+  diagnostic: Schema.optional(ProviderProcessDiagnostic),
   lastSuccessfulProbeAt: Schema.optional(UtcTimestamp),
   observedAt: UtcTimestamp,
 }).annotations(strict);
@@ -1515,6 +1573,7 @@ export const ProviderRegistryCommandResult = Schema.Union(
     previousVersion: Schema.optional(Schema.NonEmptyTrimmedString),
     currentVersion: Schema.optional(Schema.NonEmptyTrimmedString),
     message: Schema.optional(Schema.NonEmptyTrimmedString),
+    diagnostic: Schema.optional(ProviderProcessDiagnostic),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("foundry-tools-verified"),
@@ -1558,6 +1617,7 @@ export type ProviderFailureCategory = typeof ProviderFailureCategory.Type;
 export const ProviderFailure = Schema.Struct({
   category: ProviderFailureCategory,
   message: Schema.NonEmptyTrimmedString,
+  diagnostic: Schema.optional(ProviderProcessDiagnostic),
   retryAfterMs: Schema.optional(
     Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(3_600_000)),
   ),
