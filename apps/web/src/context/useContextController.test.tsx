@@ -42,6 +42,23 @@ describe("useContextController", () => {
     await waitFor(() => expect(inspect).toHaveBeenCalledTimes(2));
   });
 
+  it("loads the first context plan when a previously unplanned thread advances", async () => {
+    const inspect = vi
+      .fn<ContextClient["inspect"]>()
+      .mockRejectedValueOnce(new ContextClientFailure("not-planned", "No plan yet."))
+      .mockResolvedValue(contextFixture());
+    const client = fakeClient({ inspect });
+    const { rerender, result } = renderHook(
+      ({ revision }) => useContextController({ client, revision, subject }),
+      { initialProps: { revision: 1 } },
+    );
+    await waitFor(() => expect(result.current.status).toBe("not-planned"));
+    rerender({ revision: 2 });
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(inspect).toHaveBeenLastCalledWith({ subject }, expect.any(AbortSignal));
+    expect(inspect).toHaveBeenCalledTimes(2);
+  });
+
   it("does not ask again while the subject and its turns are unchanged", async () => {
     const inspect = vi.fn<ContextClient["inspect"]>(async () => contextFixture());
     const client = fakeClient({ inspect });

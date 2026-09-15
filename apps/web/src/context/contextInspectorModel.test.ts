@@ -47,6 +47,21 @@ describe("context inspector presentation model", () => {
     expect(contextWindowUsedSourceLabel("provider-reported")).toBe("Provider reported");
   });
 
+  it("uses the reported window occupancy and capacity instead of cumulative usage and fallback limits", () => {
+    const fixture = contextFixture();
+    if (fixture.latestUsage === undefined) throw new Error("Fixture has no usage");
+    const model = contextWindowModel({
+      ...fixture,
+      latestUsage: {
+        ...fixture.latestUsage,
+        actualInputTokens: 29_800,
+        contextTokens: 12_000,
+        contextWindow: 200_000,
+      },
+    });
+    expect(model).toMatchObject({ usedTokens: 12_000, totalTokens: 200_000, percent: 6 });
+  });
+
   it("keeps pane focus explicit while preserving thread attention", () => {
     expect(
       contextStatusModel(contextFixture({ health: "blocked" }), {

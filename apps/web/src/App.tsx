@@ -1615,13 +1615,14 @@ function LaunchedShell(
     activeMode,
     activeWorkThreadId,
   ]);
-  // The context snapshot measures a conversation that keeps growing, so it has
-  // to be asked again when the subject's own turns move on. Work threads run
+  // Chat transcripts belong to pane controllers, not the navigation-only App
+  // controller. The host change feed also covers newly created threads before
+  // they appear in its bootstrap list. Work threads run
   // their controller inside their workspace rather than here, so their meter
   // still only refreshes on thread change.
   const contextRevision =
     activeMode === "chat"
-      ? chatController.activeView?.lastSequence
+      ? machineChanges.chatNavigation
       : activeMode === "code"
         ? activeCodeThreadView?.lastSequence
         : undefined;

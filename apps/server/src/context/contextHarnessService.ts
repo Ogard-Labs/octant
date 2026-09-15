@@ -104,6 +104,8 @@ export interface ReconcileContextUsageInput {
   readonly requestShape: string;
   readonly actualInputTokens: number;
   readonly actualOutputTokens: number;
+  readonly contextTokens?: number;
+  readonly contextWindow?: number;
   readonly reasoningTokens?: number;
   readonly cacheReadInputTokens?: number;
   readonly cacheWriteInputTokens?: number;
@@ -347,6 +349,8 @@ export class ContextHarnessService {
       plannedInputTokens: current.next.plan.plannedInputTokens,
       actualInputTokens: input.actualInputTokens,
       actualOutputTokens: input.actualOutputTokens,
+      ...(input.contextTokens === undefined ? {} : { contextTokens: input.contextTokens }),
+      ...(input.contextWindow === undefined ? {} : { contextWindow: input.contextWindow }),
       ...(input.reasoningTokens === undefined ? {} : { reasoningTokens: input.reasoningTokens }),
       ...(input.cacheReadInputTokens === undefined
         ? {}

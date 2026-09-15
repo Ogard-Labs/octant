@@ -405,6 +405,8 @@ describe("ContextHarnessService integration", () => {
       requestShape: "code-turn",
       actualInputTokens: 110,
       actualOutputTokens: 20,
+      contextTokens: 125,
+      contextWindow: 200_000,
       currentVarianceReserve: 20,
       maxAdjustmentTokens: 50,
     });
@@ -423,7 +425,12 @@ describe("ContextHarnessService integration", () => {
     expect(restored.next.manifest.id).toBe(planned.next.manifest.id);
     expect(restored.next.plan.id).toBe(planned.next.plan.id);
     expect(restored.latestSent?.plan.id).toBe(planned.next.plan.id);
-    expect(restored.latestUsage).toMatchObject({ actualInputTokens: 110, varianceTokens: 10 });
+    expect(restored.latestUsage).toMatchObject({
+      actualInputTokens: 110,
+      varianceTokens: 10,
+      contextTokens: 125,
+      contextWindow: 200_000,
+    });
     expect(restored.sequence).toBe(3);
     restarted.connection.close();
   });

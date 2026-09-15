@@ -125,8 +125,10 @@ export function contextWindowModel(snapshot: ContextInspectorSnapshot): ContextW
   const usedTokens =
     snapshot.latestSent === undefined || snapshot.latestUsage === undefined
       ? planSnapshot.plan.plannedInputTokens
-      : snapshot.latestUsage.actualInputTokens;
-  const totalTokens = snapshot.modelLimits.contextWindow;
+      : (snapshot.latestUsage.contextTokens ?? snapshot.latestUsage.actualInputTokens);
+  const totalTokens =
+    (snapshot.latestSent === undefined ? undefined : snapshot.latestUsage?.contextWindow) ??
+    snapshot.modelLimits.contextWindow;
   const byCategory = new Map<
     ContextEntryCategory,
     {
