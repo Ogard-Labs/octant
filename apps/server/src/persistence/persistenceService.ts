@@ -104,6 +104,7 @@ import {
   readCodeFileReference,
   readCodeFileReferences,
   readCodeRuntimeWork,
+  readCodeRuntimeWorkAggregateVersion,
   readCodeRuntimeWorks,
   readCodeReviewFinding,
   readCodeReviewFindings,
@@ -215,6 +216,7 @@ export interface PersistenceService {
   readonly readCodeCheckouts: () => ReadonlyArray<CodeCheckoutIdentity>;
   readonly readCodeFileReference: (fileId: CodeFileId) => CodeFileReference | undefined;
   readonly readCodeFileReferences: (threadId: CodeThreadId) => ReadonlyArray<CodeFileReference>;
+  readonly readCodeRuntimeWorkAggregateVersion: (workId: CodeRuntimeWorkId) => number;
   readonly readCodeRuntimeWork: (workId: CodeRuntimeWorkId) => CodeRuntimeWork | undefined;
   readonly readCodeRuntimeWorks: (
     threadId: CodeThreadId,
@@ -445,6 +447,8 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readCodeCheckouts: () => readCodeCheckouts(connection),
       readCodeFileReference: (fileId) => readCodeFileReference(connection, fileId),
       readCodeFileReferences: (threadId) => readCodeFileReferences(connection, threadId),
+      readCodeRuntimeWorkAggregateVersion: (workId) =>
+        readCodeRuntimeWorkAggregateVersion(connection, workId),
       readCodeRuntimeWork: (workId) => readCodeRuntimeWork(connection, workId),
       readCodeRuntimeWorks: (threadId) => readCodeRuntimeWorks(connection, threadId),
       readCodeReviewFinding: (findingId) => readCodeReviewFinding(connection, findingId),

@@ -33,7 +33,11 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite } from "../persistence/sqlitePort";
-import { CodeProjection, readCodeRuntimeWorks } from "../persistence/codeProjection";
+import {
+  CodeProjection,
+  readCodeRuntimeWorks,
+  readCodeRuntimeWorkAggregateVersion,
+} from "../persistence/codeProjection";
 import { CODE_OPERATION_EVENT_RECORDED } from "./codeOperationEventStore";
 import { createCodeOperationRuntime } from "./codeOperationRuntime";
 import { CODE_RUNTIME_WORK_UPDATED } from "./codeRuntimeWorkRecorder";
@@ -1836,6 +1840,8 @@ function runtimeFixture(options: {
   const runtime = createCodeOperationRuntime({
     persistence: {
       journal,
+      readCodeRuntimeWorkAggregateVersion: (id) =>
+        readCodeRuntimeWorkAggregateVersion(connection, id),
       readCodeThread: (id) => (id === threadId ? activeThread : undefined),
       readCodeCheckout: (id) => (id === checkoutId ? checkout : undefined),
       readReviewFinding: () => undefined,

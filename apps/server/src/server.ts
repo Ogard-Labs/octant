@@ -3782,6 +3782,7 @@ export function startOctantServer(
           journal: persistence.journal,
           readCodeThread: persistence.readCodeThread,
           readCodeCheckout: persistence.readCodeCheckout,
+          readCodeRuntimeWorkAggregateVersion: persistence.readCodeRuntimeWorkAggregateVersion,
           readReviewFinding: persistence.readCodeReviewFinding,
           readReviewFindings: persistence.readCodeReviewFindings,
         },

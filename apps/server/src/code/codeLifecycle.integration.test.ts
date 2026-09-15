@@ -1,3 +1,4 @@
+import { CodeProjection, readCodeRuntimeWorkAggregateVersion } from "../persistence/codeProjection";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -110,7 +111,7 @@ describe("Code execution lifecycle", () => {
 
     const database = join(directory, "events.sqlite3");
     const first = openJournal(database);
-    const fixture = makeRuntime(first.journal, checkoutRoot, initialOid);
+    const fixture = makeRuntime(first, checkoutRoot, initialOid);
     const terminal = await fixture.runtime.execute(windowId, {
       kind: "start-terminal",
       operationId: operationId(10),
@@ -259,7 +260,7 @@ describe("Code execution lifecycle", () => {
     });
     first.connection.close();
     const second = openJournal(database);
-    const restarted = makeRuntime(second.journal, checkoutRoot, committed.head.oid);
+    const restarted = makeRuntime(second, checkoutRoot, committed.head.oid);
     const replay = await restarted.runtime.subscribe(
       windowId,
       threadId,
@@ -301,13 +302,19 @@ function openJournal(path: string) {
     registry: new EventRegistry()
       .register(CODE_OPERATION_EVENT_RECORDED, 1, CodeOperationEventFrame)
       .register(CODE_RUNTIME_WORK_UPDATED, 1, CodeRuntimeWorkUpdated),
-    projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+    projections: new ProjectionRegistry()
+      .register(new AggregateHeadsProjection())
+      .register(new CodeProjection()),
     clock: () => now,
   });
   return { connection, journal };
 }
 
-function makeRuntime(journal: Journal, checkoutRoot: string, headOid: string) {
+function makeRuntime(
+  { journal, connection }: ReturnType<typeof openJournal>,
+  checkoutRoot: string,
+  headOid: string,
+) {
   const thread = decodeCodeThread({
     id: threadId,
     projectId: "91000000-0000-4000-8000-000000000020",
@@ -356,6 +363,8 @@ function makeRuntime(journal: Journal, checkoutRoot: string, headOid: string) {
   const runtime = createCodeOperationRuntime({
     persistence: {
       journal,
+      readCodeRuntimeWorkAggregateVersion: (id) =>
+        readCodeRuntimeWorkAggregateVersion(connection, id),
       readCodeThread: (id) => (id === threadId ? thread : undefined),
       readCodeCheckout: (id) => (id === checkoutId ? checkout : undefined),
       readReviewFinding: () => undefined,
