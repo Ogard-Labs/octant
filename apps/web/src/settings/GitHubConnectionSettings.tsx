@@ -116,6 +116,7 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
   const { snapshot } = snapshotState;
   const account = snapshot.account;
   const connected = snapshot.state === "ready" || snapshot.state === "scope-limited";
+  const credentialRemovable = connected || snapshot.state === "insecure-storage";
 
   return (
     <section aria-label="GitHub" className="github-settings" id="settings-github">
@@ -234,7 +235,7 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
                   Enable Projects metadata
                 </OctantButton>
               ) : null}
-              {connected ? (
+              {credentialRemovable ? (
                 logoutArmed ? (
                   <OctantButton
                     disabled={commandBusy}
@@ -248,7 +249,9 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
                     type="button"
                     variant="destructive"
                   >
-                    Confirm local logout
+                    {snapshot.state === "insecure-storage"
+                      ? "Confirm credential removal"
+                      : "Confirm local logout"}
                   </OctantButton>
                 ) : (
                   <OctantButton
@@ -258,7 +261,9 @@ export function GitHubConnectionSettings({ client }: GitHubConnectionSettingsPro
                     type="button"
                     variant="secondary"
                   >
-                    Log out on this host
+                    {snapshot.state === "insecure-storage"
+                      ? "Remove insecure credential"
+                      : "Log out on this host"}
                   </OctantButton>
                 )
               ) : null}

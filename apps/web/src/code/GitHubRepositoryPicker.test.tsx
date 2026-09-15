@@ -197,6 +197,22 @@ describe("GitHubRepositoryPicker", () => {
     expect(await screen.findByText("octant/repo-1")).toBeInTheDocument();
   });
 
+  it("directs an insecure credential to the recoverable GitHub settings flow", async () => {
+    const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
+      if (request.kind === "recent-repositories") return recents;
+      return {
+        kind: "unavailable",
+        capability: "repository-catalogue",
+        reason: "insecure-storage",
+      } as GithubCatalogueReadResponse;
+    });
+    render(<GitHubRepositoryPicker client={makeClient({ readCatalogue })} onSelect={vi.fn()} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Open Settings → GitHub, remove the insecure credential, then set up GitHub again.",
+    );
+  });
+
   it("selects with the keyboard through listbox semantics and records the recent selection", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();

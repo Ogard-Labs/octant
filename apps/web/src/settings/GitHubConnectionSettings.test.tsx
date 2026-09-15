@@ -172,7 +172,8 @@ describe("GitHubConnectionSettings", () => {
     expect(screen.getByText("https")).toBeInTheDocument();
   });
 
-  it("shows a fail-closed storage posture with remediation and no setup control", async () => {
+  it("offers confirmed removal so an insecure credential can be set up again", async () => {
+    const executeAuthenticationCommand = vi.fn(async () => unauthorizedSnapshot);
     render(
       <GitHubConnectionSettings
         client={makeClient({
@@ -181,6 +182,7 @@ describe("GitHubConnectionSettings", () => {
             capabilities: [],
             remediation: "Configure an operating-system credential store, then reauthenticate.",
           }),
+          executeAuthenticationCommand,
         })}
       />,
     );
@@ -190,6 +192,18 @@ describe("GitHubConnectionSettings", () => {
       screen.getByText("Configure an operating-system credential store, then reauthenticate."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Set up GitHub" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove insecure credential" }));
+    expect(executeAuthenticationCommand).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm credential removal" }));
+
+    await waitFor(() =>
+      expect(executeAuthenticationCommand).toHaveBeenCalledWith({
+        kind: "logout",
+        confirmation: "confirm-github-local-logout",
+      }),
+    );
+    expect(await screen.findByRole("button", { name: "Set up GitHub" })).toBeInTheDocument();
   });
 
   it("reports a refused command without losing the current snapshot", async () => {
