@@ -1177,7 +1177,7 @@ function approvalPrompt(
         throw new TypeError("Unsupported Code approval effect.");
     }
   }
-  return { message, detail: boundApprovalDetail(`${scope}\n\n${effectDetail}`) };
+  return { message, detail: boundApprovalDetail(`${effectDetail}\n\n${scope}`) };
 }
 
 const APPROVAL_DETAIL_SUFFIX =

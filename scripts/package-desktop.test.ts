@@ -191,6 +191,7 @@ describe("desktop packaging boundary", () => {
     expect(REQUIRED_STAGED_PACKAGED_FILES).toEqual([
       "apps/desktop/dist/main.mjs",
       "apps/desktop/dist/preload.cjs",
+      "apps/desktop/dist/codeOperationApprovalViewPreload.cjs",
       "apps/desktop/node_modules/effect/package.json",
       "apps/desktop/resources/icon.icns",
       "apps/desktop/resources/icon.png",

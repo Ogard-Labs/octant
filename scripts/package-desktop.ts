@@ -18,7 +18,10 @@ import {
 import { existsSync } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DESKTOP_PRELOAD_FILENAME } from "../apps/desktop/src/runtimePaths";
+import {
+  CODE_APPROVAL_PRELOAD_FILENAME,
+  DESKTOP_PRELOAD_FILENAME,
+} from "../apps/desktop/src/runtimePaths";
 import { buildCodeFileHelper } from "./build-code-file-helper";
 import { buildKeychainHelper } from "./build-keychain-helper";
 import { prepareComputerUseDriver } from "./prepare-computer-use-driver";
@@ -176,6 +179,7 @@ export const PACKAGED_RUNTIME_IMPORTS = [
 export const REQUIRED_STAGED_PACKAGED_FILES = [
   "apps/desktop/dist/main.mjs",
   `apps/desktop/dist/${DESKTOP_PRELOAD_FILENAME}`,
+  `apps/desktop/dist/${CODE_APPROVAL_PRELOAD_FILENAME}`,
   "apps/desktop/node_modules/effect/package.json",
   "apps/desktop/resources/icon.icns",
   "apps/desktop/resources/icon.png",

@@ -17,6 +17,7 @@ export function createNativeCodeApprovalViewHost(
         webSecurity: true,
       },
     });
+    view.setBackgroundColor("#00000000");
     const contents = view.webContents;
     const id = contents.id;
     contents.setWindowOpenHandler(() => ({ action: "deny" }));

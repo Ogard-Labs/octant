@@ -29,6 +29,60 @@ function confinedOptions(
 }
 
 describe("RepositoryTestProcessPort", () => {
+  it("runs a discovered command name through confinement using the host executable path", async () => {
+    const cwd = temporaryDirectory();
+    const bin = temporaryDirectory();
+    symlinkSync(process.execPath, join(bin, "qa-test-runner"));
+    vi.stubEnv("PATH", bin);
+    const port = new RepositoryTestProcessPort(confinedOptions());
+    const result = await port.execute({
+      argv: ["qa-test-runner", "-e", "process.stdout.write('fixture passed')"],
+      cwd: realpathSync(cwd),
+      environment: {},
+      timeoutMs: 5000,
+    });
+    expect(result).toMatchObject({ termination: "exited", exitCode: 0 });
+    expect(new TextDecoder().decode(result.stdout)).toBe("fixture passed");
+  });
+
+  it("does not launch when cancelled while resolving a discovered command", async () => {
+    const cwd = temporaryDirectory();
+    const bin = temporaryDirectory();
+    symlinkSync(process.execPath, join(bin, "qa-test-runner"));
+    vi.stubEnv("PATH", bin);
+    const spawn = vi.fn();
+    const port = new RepositoryTestProcessPort(confinedOptions({ spawn }));
+    const controller = new AbortController();
+    const execution = port.execute(
+      {
+        argv: ["qa-test-runner"],
+        cwd: realpathSync(cwd),
+        environment: {},
+        timeoutMs: 5000,
+      },
+      controller.signal,
+    );
+    controller.abort();
+    expect((await execution).termination).toBe("cancelled");
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("does not resolve commands from relative host search-path entries", async () => {
+    const cwd = temporaryDirectory();
+    symlinkSync(process.execPath, join(cwd, "qa-relative-runner"));
+    vi.stubEnv("PATH", ".");
+    const spawn = vi.fn();
+    const port = new RepositoryTestProcessPort(confinedOptions({ spawn }));
+    const result = await port.execute({
+      argv: ["qa-relative-runner", "-e", "process.stdout.write('unexpected')"],
+      cwd: realpathSync(cwd),
+      environment: {},
+      timeoutMs: 5000,
+    });
+    expect(result.termination).toBe("unavailable");
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   it("executes structured argv without a shell at the exact cwd using a sanitized environment", async () => {
     const cwd = temporaryDirectory();
     vi.stubEnv("OCTANT_UNSCOPED_SECRET", "must-not-leak");

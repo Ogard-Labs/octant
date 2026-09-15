@@ -1,7 +1,7 @@
 import { spawn as nodeSpawn, type SpawnOptions } from "node:child_process";
 import { constants } from "node:fs";
-import { lstat, open, realpath } from "node:fs/promises";
-import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { access, lstat, open, realpath, stat } from "node:fs/promises";
+import { basename, delimiter, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import {
   MAX_REPOSITORY_TEST_ARTIFACT_BYTES,
   MAX_REPOSITORY_TEST_OUTPUT_BYTES,
@@ -144,9 +144,13 @@ export class RepositoryTestProcessPort {
 
     let launch: { readonly command: string; readonly args: readonly string[] };
     try {
-      const binaryDirectory = dirname(validated.executable);
+      const executable = isAbsolute(validated.executable)
+        ? validated.executable
+        : await resolveTestExecutable(validated.executable);
+      if (executable === undefined) return unavailable(false);
+      const binaryDirectory = dirname(executable);
       launch = this.#confinement.prepare({
-        executable: validated.executable,
+        executable,
         args: validated.args,
         boundRoot: input.cwd,
         temporaryDirectory: this.#temporaryDirectory,
@@ -158,6 +162,8 @@ export class RepositoryTestProcessPort {
       if (error instanceof SeatbeltConfinementError) return unavailable(false);
       return unavailable(false);
     }
+
+    if (signal?.aborted) return cancelledBeforeSpawn();
 
     let child: SpawnedProcess;
     try {
@@ -646,4 +652,20 @@ function cancelledBeforeSpawn(): RepositoryTestProcessResult {
 
 function isErrorCode(error: unknown, code: string): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === code;
+}
+
+async function resolveTestExecutable(command: string): Promise<string | undefined> {
+  if (basename(command) !== command) return undefined;
+  for (const directory of (process.env.PATH ?? "").split(delimiter)) {
+    if (!isAbsolute(directory)) continue;
+    try {
+      const executable = await realpath(resolve(directory, command));
+      if (!(await stat(executable)).isFile()) continue;
+      await access(executable, constants.X_OK);
+      return executable;
+    } catch {
+      // Missing candidates are normal while searching the host's executable path.
+    }
+  }
+  return undefined;
 }

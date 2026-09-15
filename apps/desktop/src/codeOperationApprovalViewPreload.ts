@@ -28,6 +28,8 @@ function send(decision: "approve" | "cancel"): void {
 
 function render(next: ApprovalChallengeView): void {
   challenge = next;
+  const approve = element("approve");
+  if (approve instanceof HTMLButtonElement) approve.disabled = false;
   const message = element("message");
   const detail = element("detail");
   const identity = element("identity");
