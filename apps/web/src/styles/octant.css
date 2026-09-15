@@ -3719,6 +3719,8 @@ input.switch:checked::after {
    the DOM and are clipped, so the accessible name of every item survives
    collapsing — hiding them with display:none would take the name with it. */
 .sidebar {
+  user-select: none;
+  -webkit-user-select: none;
   display: flex;
   flex-direction: column;
   gap: var(--oct-space-1);
@@ -3729,6 +3731,10 @@ input.switch:checked::after {
   overflow: hidden auto;
   scrollbar-width: thin;
   transition: none;
+}
+.sidebar :is(input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]) {
+  user-select: text;
+  -webkit-user-select: text;
 }
 .sidebar-head {
   display: flex;
