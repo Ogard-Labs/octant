@@ -10,6 +10,7 @@ import {
   type ProviderCapabilitySupport,
   type ProviderFailure,
   type ProviderInstanceId,
+  type ProviderModelOptionValues,
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
@@ -259,7 +260,10 @@ function normalizeModels(
       ? model.options.map((item) => ({ value: item.value, name: item.name }))
       : (models?.availableModels.map((item) => ({ value: item.modelId, name: item.name })) ?? []);
   if (selectable.length === 0) return [];
-  const reasoning = options.find((option) => option.id === profile.reasoningOptionId);
+  const reasoning = resolveReasoningOption(profile, options);
+  const reasoningValues = (reasoning?.options ?? [])
+    .map((choice) => choice.value.trim())
+    .filter((value) => value.length > 0);
   return selectable.map((item) => ({
     id: decodeProviderModelId(item.value),
     displayName: item.name,
@@ -267,14 +271,44 @@ function normalizeModels(
     verification: "verified" as const,
     reasoning: reasoning === undefined ? ("unavailable" as const) : ("supported" as const),
     inputModalities: textOnlyInputModalities,
-    // The agent reasons, and that capability is reported above. Choosing how
-    // hard is a different claim: this driver starts sessions with `model` and
-    // `mode` only and never sends `modelOptionValues` back, so declaring a
-    // selectable option would put a control in the composer that saves the
-    // user's choice and silently drops it on the next turn. Declaring nothing
-    // is the honest report until the value reaches the session.
-    options: [],
+    // The agent reasons, and that capability is reported above. A level is
+    // declared only because the session applies it: the driver sets the
+    // profile's reasoning option from `modelOptionValues` when it starts or
+    // resumes a session, so the control the composer draws is one the agent
+    // honours rather than a preference that is saved and dropped.
+    options:
+      reasoningValues.length === 0
+        ? []
+        : [
+            {
+              id: reasoning?.id ?? profile.reasoningOptionId,
+              displayName: reasoning?.name ?? "Reasoning",
+              kind: "selection" as const,
+              values: reasoningValues as [string, ...string[]],
+            },
+          ],
   }));
+}
+
+/**
+ * Find the session config option that carries the agent's reasoning level.
+ *
+ * The profile names the id its agent is known to use, and the agent's own
+ * `category` is the portable spelling of the same thing: the ACP spec's
+ * `thought_level`, or plain `thinking` as some agents write it. Matching only
+ * the profile's id read the installed Grok agent — which reports
+ * `reasoning_effort` under `category: "thought_level"` — as an agent that
+ * cannot reason at all, so the composer never offered a level.
+ */
+function resolveReasoningOption(
+  profile: AcpProviderProfile,
+  options: ReadonlyArray<AcpSessionConfigOption>,
+): AcpSessionConfigOption | undefined {
+  const byProfileId = options.find((option) => option.id === profile.reasoningOptionId);
+  if (byProfileId !== undefined) return byProfileId;
+  return options.find(
+    (option) => option.category === "thought_level" || option.category === "thinking",
+  );
 }
 
 function normalizeProbe(
@@ -287,9 +321,10 @@ function normalizeProbe(
   observedAt: string,
   credentialStatus?: "stored",
 ): ProviderProbeResult {
-  const reasoning = options.some((option) => option.id === profile.reasoningOptionId)
-    ? ("supported" as const)
-    : ("unavailable" as const);
+  const reasoning =
+    resolveReasoningOption(profile, options) !== undefined
+      ? ("supported" as const)
+      : ("unavailable" as const);
   const resume =
     initialized.agentCapabilities.loadSession === true ||
     initialized.agentCapabilities.sessionCapabilities?.resume !== undefined
@@ -873,6 +908,7 @@ function makeConnection(
       readonly sessionId: ProviderSessionId;
       readonly modelId: string;
       readonly executionPolicy: ProviderExecutionPolicy;
+      readonly modelOptionValues?: ProviderModelOptionValues;
       readonly sourceSessionId?: string;
       readonly tools: ReadonlyArray<ProviderToolDefinition>;
     }) =>
@@ -921,17 +957,41 @@ function makeConnection(
           // malformed success there would otherwise register a session whose
           // model and authority mode were never confirmed.
           const setModelCall = profile.setModelCall?.(source.sessionId, input.modelId);
+          // The agent's config options can change with the model selection, so
+          // the reply to each standard call carries the current set; keep the
+          // newest one rather than the session's original list.
+          let configOptions = source.configOptions ?? [];
           if (setModelCall === undefined) {
-            await client.setConfigOption(source.sessionId, "model", input.modelId);
+            const result = await client.setConfigOption(source.sessionId, "model", input.modelId);
+            configOptions = result.configOptions;
           } else {
             await client.call(setModelCall.method, setModelCall.params);
           }
           const modeValue = profile.sessionMode(mode, input.executionPolicy);
           const setModeCall = profile.setModeCall?.(source.sessionId, modeValue);
           if (setModeCall === undefined) {
-            await client.setConfigOption(source.sessionId, "mode", modeValue);
+            const result = await client.setConfigOption(source.sessionId, "mode", modeValue);
+            configOptions = result.configOptions;
           } else {
             await client.call(setModeCall.method, setModeCall.params);
+          }
+          // ACP reports the agent's reasoning control as a session config
+          // option, and a chat turn carries only the prompt, so the level the
+          // user chose for this model is applied here. A value the agent does
+          // not offer is left alone: the probe declares the option from the
+          // agent's own choices, which is the same check from the other side.
+          const reasoningOption = resolveReasoningOption(profile, configOptions);
+          const requestedReasoning =
+            reasoningOption === undefined
+              ? undefined
+              : input.modelOptionValues?.[reasoningOption.id];
+          if (
+            reasoningOption !== undefined &&
+            requestedReasoning !== undefined &&
+            requestedReasoning.trim().length > 0 &&
+            reasoningOption.options.some((choice) => choice.value === requestedReasoning)
+          ) {
+            await client.setConfigOption(source.sessionId, reasoningOption.id, requestedReasoning);
           }
           const state = await register(input, source, scope, client, managedTools, appManagedTools);
           stateRef.state = state;
@@ -973,6 +1033,9 @@ function makeConnection(
           executionPolicy: input.executionPolicy,
           sourceSessionId: input.resumeCursor.value,
           tools: identity.tools,
+          ...(input.modelOptionValues === undefined
+            ? {}
+            : { modelOptionValues: input.modelOptionValues }),
         }).pipe(
           Effect.map(() => ({ sessionId: input.sessionId, resumeCursor: input.resumeCursor })),
           Effect.mapError(() => failure("stale-resume", `${name} session could not be resumed.`)),

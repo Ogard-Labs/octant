@@ -375,6 +375,74 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     expect(result.models.every((model) => model.reasoning === "unavailable")).toBe(true);
   });
 
+  it("declares the agent's reasoning choices so the composer can offer a level", async () => {
+    const { driver } = fixture(profile);
+
+    const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+
+    expect(result.models[0]?.options).toEqual([
+      {
+        id: profile.reasoningOptionId,
+        displayName: "Reasoning",
+        kind: "selection",
+        values: ["off", "on"],
+      },
+    ]);
+  });
+
+  it("finds a reasoning option the agent names differently", async () => {
+    const { driver, client } = fixture(profile);
+    // The installed Grok agent reports `reasoning_effort` under
+    // `category: "thought_level"`; matching the profile's id alone read it as
+    // an agent that cannot reason.
+    const renamed = (sourceSessionId: string): AcpNewSessionResult => ({
+      sessionId: sourceSessionId,
+      configOptions: client.configOptions.map((option) =>
+        option.id === profile.reasoningOptionId
+          ? {
+              ...option,
+              id: "reasoning_effort",
+              name: "Reasoning Effort",
+              category: "thought_level",
+            }
+          : option,
+      ),
+    });
+    client.newSession.mockImplementationOnce(async () => {
+      client.emitCommands("agent-session-renamed");
+      return renamed("agent-session-renamed");
+    });
+
+    const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+
+    expect(result.capabilities.reasoning).toBe("supported");
+    expect(result.models[0]?.options).toEqual([
+      {
+        id: "reasoning_effort",
+        displayName: "Reasoning Effort",
+        kind: "selection",
+        values: ["off", "on"],
+      },
+    ]);
+  });
+
+  it("declares no selectable option when the agent exposes no reasoning control", async () => {
+    const { driver, client } = fixture(profile);
+    client.newSession.mockImplementationOnce(async () => {
+      client.emitCommands("agent-session-plain");
+      return {
+        sessionId: "agent-session-plain",
+        configOptions: client.configOptions.filter(
+          (option) => option.id !== profile.reasoningOptionId,
+        ),
+      };
+    });
+
+    const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+
+    expect(result.models.every((model) => model.options.length === 0)).toBe(true);
+  });
+
   // ACP lets an agent report its models either as a `model` config option or as
   // the session's own model state. An agent that only does the latter was read
   // as having none, so the picker offered nothing and no session could start.
@@ -697,6 +765,144 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       expect(registry.activeSessionCount(instanceId)).toBe(0);
     },
   );
+
+  it("applies the chosen reasoning level to the session it starts", async () => {
+    const { driver, client } = fixture(profile);
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            modelOptionValues: { [profile.reasoningOptionId]: "on" },
+          });
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+
+    expect(client.setConfigOption).toHaveBeenCalledWith(
+      "agent-session-1",
+      profile.reasoningOptionId,
+      "on",
+    );
+  });
+
+  it("applies a reasoning level the agent names differently", async () => {
+    const { driver, client } = fixture(profile);
+    const renamedOptions = client.configOptions.map((option) =>
+      option.id === profile.reasoningOptionId
+        ? {
+            ...option,
+            id: "reasoning_effort",
+            name: "Reasoning Effort",
+            category: "thought_level",
+          }
+        : option,
+    );
+    client.newSession.mockImplementationOnce(async () => {
+      client.emitCommands("agent-session-renamed");
+      return {
+        sessionId: "agent-session-renamed",
+        configOptions: renamedOptions,
+      };
+    });
+    client.setConfigOption.mockImplementation(async () => ({
+      configOptions: renamedOptions,
+    }));
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            modelOptionValues: { reasoning_effort: "on" },
+          });
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+
+    expect(client.setConfigOption).toHaveBeenCalledWith(
+      "agent-session-renamed",
+      "reasoning_effort",
+      "on",
+    );
+  });
+
+  it("leaves the agent's own level alone when the chosen value is not offered", async () => {
+    const { driver, client } = fixture(profile);
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            modelOptionValues: { [profile.reasoningOptionId]: "ultra" },
+          });
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+
+    // The session keeps the agent's own level: no call carries the option.
+    const reasoningCalls = client.setConfigOption.mock.calls.filter(
+      (call) => (call as ReadonlyArray<unknown>)[1] === profile.reasoningOptionId,
+    );
+    expect(reasoningCalls).toEqual([]);
+  });
+
+  it("applies a reasoning level the agent reports with the model selection", async () => {
+    const { driver, client } = fixture(profile);
+    // The agent omits its reasoning control until a model is selected, and the
+    // reply to the model selection carries it. Resolving the option from the
+    // session's original list would read it as absent and drop the choice.
+    // Profiles that set the model with a vendor-shaped call do not receive the
+    // updated options in a standard reply, so the refresh does not reach them.
+    if (profile.setModelCall !== undefined) return;
+    client.newSession.mockImplementationOnce(async () => {
+      client.emitCommands("agent-session-1");
+      return {
+        sessionId: "agent-session-1",
+        configOptions: client.configOptions.filter(
+          (option) => option.id !== profile.reasoningOptionId,
+        ),
+      };
+    });
+    client.setConfigOption.mockImplementationOnce(async () => ({
+      configOptions: client.configOptions,
+    }));
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            modelOptionValues: { [profile.reasoningOptionId]: "on" },
+          });
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+
+    expect(client.setConfigOption).toHaveBeenCalledWith(
+      "agent-session-1",
+      profile.reasoningOptionId,
+      "on",
+    );
+  });
 
   it("tells the user to sign in again when a turn is refused for a stale credential", async () => {
     // A managed home holding an expired credential passes the probe: the agent
