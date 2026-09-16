@@ -4521,6 +4521,7 @@ function LaunchedShell(
           title: prompt.length > 60 ? `${prompt.slice(0, 57)}…` : prompt,
           providerInstanceId,
           modelId,
+          ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
           hostId: destinationHostId,
           bindingRevisionId,
           workingDirectory: decodeThreadWorkingDirectory("."),

@@ -251,17 +251,19 @@ Chat also offers these levels on its start screen, before the first message.
 The chosen level is applied to the new thread before that message is sent.
 Changing the selected model starts with that model's default level.
 
-When a provider declares reasoning or effort levels, the model picker in Chat
-and Code shows the selected model's levels below the model list. Code offers
+When a provider declares reasoning or effort levels, the model picker in Chat, Work,
+and Code shows the selected model's levels below the model list. Work and Code offer
 this control both when creating a thread and in an existing thread's composer.
 **Default** uses the provider's own default. The choice is saved on the thread
 and passed to the provider when the next turn's session starts. Only values the
-selected model declares are accepted; changing the Code provider or model resets
+selected model declares are accepted; changing the Work or Code provider or model resets
 the choice to Default. Models without a declared reasoning option do not show
 this control.
 
 Chat also offers the model's other declared options, such as Codex **Service
-tier**, in its composer. Work does not yet expose per-model option controls.
+tier**, in its composer. Work validates saved options again before starting a
+turn; if the model no longer declares the selected level, choose a supported
+level or Default before sending.
 
 ## Readiness and capabilities
 

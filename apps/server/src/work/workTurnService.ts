@@ -1,5 +1,6 @@
 import type { ContextHarnessService } from "../context/contextHarnessService";
 import { observeWorkContext } from "./workContextInspection";
+import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
 import type { SelectedSkillContextResolver } from "../extensions/selectedSkillContext";
 import {
   ActorId,
@@ -383,6 +384,16 @@ export class WorkTurnService {
       throw this.#failure("unauthorized", "Work Project is unavailable for this window.");
     }
     if (thread !== undefined) {
+      const model = this.#persistence.readProviderModel?.(
+        thread.providerInstanceId,
+        thread.modelId,
+      );
+      if (unsupportedModelOptionValues(thread.modelOptionValues, model?.options ?? []).length > 0) {
+        throw this.#failure(
+          "invalid",
+          "Selected Work model no longer offers the saved model options. Choose a supported level or Default.",
+        );
+      }
       const policyProject = this.#persistence.readProject(thread.projectId);
       const policyProvider = this.#persistence.readProviderInstance(thread.providerInstanceId);
       if (policyProject?.type === "work" && policyProvider !== undefined) {
@@ -936,6 +947,9 @@ export class WorkTurnService {
       projectRoot: input.projectRoot,
       driver: input.driver,
       signal: input.signal,
+      ...(input.thread?.modelOptionValues === undefined
+        ? {}
+        : { modelOptionValues: input.thread.modelOptionValues }),
       ...(appManagedTools === undefined ? {} : { appManagedTools }),
       ...(input.attachments.length === 0 ? {} : { attachments: input.attachments }),
       ...(providerContext.length === 0 ? {} : { context: providerContext }),

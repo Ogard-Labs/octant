@@ -6376,6 +6376,7 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
    segmented recipe paints the buttons; this rule only places the row. */
 .composer-model-picker__level {
   display: flex;
+  flex-wrap: wrap;
   grid-column: 1 / -1;
   align-items: center;
   justify-content: space-between;
@@ -6391,7 +6392,9 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 }
 
 .composer-model-picker__level-group {
-  flex: 0 0 auto;
+  flex: 1 1 260px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .code-branch-selector__search {

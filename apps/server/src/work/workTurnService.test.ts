@@ -4,7 +4,11 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
-import { decodeProviderInstanceId, decodeProviderModelId } from "@octant/contracts";
+import {
+  decodeProviderInstanceId,
+  decodeProviderModel,
+  decodeProviderModelId,
+} from "@octant/contracts";
 import { unavailableProviderServiceLimits } from "@octant/provider-sdk/context-facts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -335,6 +339,29 @@ describe("WorkTurnService", () => {
     });
     expect(run).not.toHaveBeenCalled();
     expect(turnStarted).not.toHaveBeenCalled();
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("refuses a saved reasoning level that the model no longer declares before launching", async () => {
+    const model = decodeProviderModel({
+      id: "model-a",
+      displayName: "Model",
+      source: "discovered",
+      verification: "verified",
+      reasoning: "supported",
+      inputModalities: ["text"],
+      options: [{ kind: "selection", id: "effort", displayName: "Effort", values: ["low"] }],
+    });
+    const run = vi
+      .fn<WorkTurnRuntimePort["run"]>()
+      .mockResolvedValue({ kind: "completed", response: "unused" });
+    const fixture = serviceFixture({ readProviderModel: () => model, turnRuntime: { run } });
+    const current = await fixture.threads.read();
+    fixture.threads.read.mockResolvedValue({ ...current, modelOptionValues: { effort: "high" } });
+    await expect(fixture.service.startFirstTurn(ids.window, startCommand())).rejects.toMatchObject({
+      failure: { category: "invalid" },
+    });
+    expect(run).not.toHaveBeenCalled();
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
@@ -1169,6 +1196,7 @@ function serviceFixture(
     readonly nativeHarness?: WorkTurnServiceDependencies["nativeHarness"];
     readonly projectStatusFiles?: WorkProjectStatusFiles;
     readonly turnFileObserver?: WorkTurnServiceDependencies["turnFileObserver"];
+    readonly readProviderModel?: WorkTurnServiceDependencies["persistence"]["readProviderModel"];
   } = {},
 ) {
   const projection = new WorkTurnProjection();
@@ -1224,6 +1252,9 @@ function serviceFixture(
   const persistence = {
     status: () => ({ state: "current", integrity: "ok" }),
     readProject: vi.fn(() => options.project ?? workProject()),
+    ...(options.readProviderModel === undefined
+      ? {}
+      : { readProviderModel: options.readProviderModel }),
     readProviderInstance: vi.fn(() =>
       decodeProviderInstance({
         id: ids.provider,

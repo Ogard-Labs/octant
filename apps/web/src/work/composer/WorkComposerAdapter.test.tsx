@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { decodeProviderInstanceId, decodeProviderModelId } from "@octant/contracts/providers";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -14,6 +15,66 @@ const baseProps = {
 };
 
 describe("WorkComposerAdapter", () => {
+  it("submits the selected reasoning level with the first Work message", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    const group = visionProviderGroup();
+    const composer = (
+      <WorkComposerAdapter
+        {...baseProps}
+        projectId={"00000000-0000-0000-0000-000000000001" as ProjectId}
+        selectedProviderInstanceId={decodeProviderInstanceId(
+          "80000000-0000-4000-8000-0000000000a1",
+        )}
+        selectedModelId={decodeProviderModelId("model-one")}
+        providerGroups={[
+          {
+            ...group,
+            sections: group.sections.map((section) => ({
+              ...section,
+              models: section.models.map((entry) => ({
+                ...entry,
+                model: {
+                  ...entry.model,
+                  options: [
+                    {
+                      kind: "selection",
+                      id: "effort",
+                      displayName: "Effort",
+                      values: ["low", "high"],
+                    },
+                  ],
+                },
+              })),
+            })),
+          },
+        ]}
+        onCreateThread={onCreateThread}
+      />
+    );
+    const { rerender } = render(composer);
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await user.click(screen.getByRole("button", { name: "High" }));
+    await user.keyboard("{Escape}");
+    await user.type(screen.getByLabelText("First message"), "Draft the brief");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await waitFor(() =>
+      expect(onCreateThread).toHaveBeenCalledWith("Draft the brief", [], [], undefined, undefined, {
+        effort: "high",
+      }),
+    );
+    rerender(
+      <WorkComposerAdapter
+        {...composer.props}
+        selectedModelId={decodeProviderModelId("model-two")}
+      />,
+    );
+    rerender(composer);
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    expect(screen.getByRole("button", { name: "Default" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "High" })).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("renders with project folder context", () => {
     const html = renderToStaticMarkup(
       <WorkComposerAdapter

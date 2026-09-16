@@ -8,7 +8,12 @@ import { ThreadWorkingDirectory } from "./workingDirectory";
 import { ProjectId } from "./projects";
 import { BindingRevisionId } from "./projects";
 import { WorkStatusDatedItem } from "./workProjectStatus";
-import { ProviderInstanceId, ProviderModelId, ThreadProviderHandoff } from "./providers";
+import {
+  ProviderInstanceId,
+  ProviderModelId,
+  ProviderModelOptionValues,
+  ThreadProviderHandoff,
+} from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -32,6 +37,7 @@ export const WorkThread = Schema.Struct({
   completionEvidence: Schema.optional(WorkThreadCompletionEvidence),
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
+  modelOptionValues: Schema.optional(ProviderModelOptionValues),
   providerHandoff: Schema.optional(ThreadProviderHandoff),
   bindingRevisionId: Schema.optional(BindingRevisionId),
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
@@ -55,6 +61,7 @@ export const CreateWorkThreadCommand = Schema.Struct({
   title: Schema.NonEmptyTrimmedString,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
+  modelOptionValues: Schema.optional(ProviderModelOptionValues),
   hostId: HostId,
   /** Exact Project binding revision the renderer observed before create. */
   bindingRevisionId: BindingRevisionId,
@@ -130,6 +137,7 @@ export const ChangeWorkThreadProviderCommand = Schema.Struct({
   ...WorkThreadCommandFields,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
+  modelOptionValues: Schema.optional(ProviderModelOptionValues),
 }).annotations(strict);
 export type ChangeWorkThreadProviderCommand = typeof ChangeWorkThreadProviderCommand.Type;
 

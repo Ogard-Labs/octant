@@ -735,8 +735,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             threadMentionIds,
             computerUseSelection,
             extensionSelections,
+            modelOptionValues,
           ) =>
-            computerUseSelection !== undefined
+            modelOptionValues !== undefined
               ? props.onCreateThread(
                   prompt,
                   selectedProjectId,
@@ -747,8 +748,11 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                   linearIssueContext,
                   computerUseSelection,
                   extensionSelections,
+                  undefined,
+                  undefined,
+                  modelOptionValues,
                 )
-              : extensionSelections !== undefined && extensionSelections.length > 0
+              : computerUseSelection !== undefined
                 ? props.onCreateThread(
                     prompt,
                     selectedProjectId,
@@ -757,18 +761,11 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                     threadMentionIds,
                     issueContext,
                     linearIssueContext,
-                    undefined,
+                    computerUseSelection,
                     extensionSelections,
                   )
-                : issueContext === undefined && linearIssueContext === undefined
+                : extensionSelections !== undefined && extensionSelections.length > 0
                   ? props.onCreateThread(
-                      prompt,
-                      selectedProjectId,
-                      undefined,
-                      images,
-                      threadMentionIds,
-                    )
-                  : props.onCreateThread(
                       prompt,
                       selectedProjectId,
                       undefined,
@@ -776,7 +773,26 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                       threadMentionIds,
                       issueContext,
                       linearIssueContext,
+                      undefined,
+                      extensionSelections,
                     )
+                  : issueContext === undefined && linearIssueContext === undefined
+                    ? props.onCreateThread(
+                        prompt,
+                        selectedProjectId,
+                        undefined,
+                        images,
+                        threadMentionIds,
+                      )
+                    : props.onCreateThread(
+                        prompt,
+                        selectedProjectId,
+                        undefined,
+                        images,
+                        threadMentionIds,
+                        issueContext,
+                        linearIssueContext,
+                      )
           }
           onCancel={props.onCancel}
           {...(props.onCancelFirstTurn === undefined
