@@ -183,6 +183,7 @@ export interface WorkspaceViewProps {
   readonly onCreateChatProjectThread?: (
     projectId: ProjectId,
     draft: string,
+    modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
   ) => boolean | Promise<boolean>;
   readonly onOpenChatThread?: (
     threadId: ChatThreadId,
@@ -196,6 +197,7 @@ export interface WorkspaceViewProps {
     projectId: ProjectId,
     draft: string,
     images?: ReadonlyArray<File>,
+    modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
   ) => boolean | Promise<boolean>;
   readonly workOverviewClient?: WorkOverviewClient;
   readonly workResearchClient?: WorkResearchClient;
@@ -1498,8 +1500,9 @@ function renderNonCodeTab(
                   props.chatController.status === "ready" &&
                   props.onCreateChatProjectThread !== undefined
                     ? {
-                        onCreateThread: (draft: string) =>
-                          props.onCreateChatProjectThread?.(project.id, draft) ?? false,
+                        onCreateThread: (draft, modelOptionValues) =>
+                          props.onCreateChatProjectThread?.(project.id, draft, modelOptionValues) ??
+                          false,
                       }
                     : {})}
                   {...(props.onOpenChatThread === undefined
@@ -1642,10 +1645,13 @@ function renderNonCodeTab(
                     project.lifecycle === "active"
                   }
                   onReloadPromotion={props.workPromotionController.reload}
-                  onCreateThread={(draft, images) =>
-                    images === undefined
-                      ? (props.onCreateWorkThread?.(project.id, draft) ?? false)
-                      : (props.onCreateWorkThread?.(project.id, draft, images) ?? false)
+                  onCreateThread={(draft, images, modelOptionValues) =>
+                    modelOptionValues !== undefined
+                      ? (props.onCreateWorkThread?.(project.id, draft, images, modelOptionValues) ??
+                        false)
+                      : images === undefined
+                        ? (props.onCreateWorkThread?.(project.id, draft) ?? false)
+                        : (props.onCreateWorkThread?.(project.id, draft, images) ?? false)
                   }
                   {...(openProviderSettings === undefined
                     ? {}
@@ -2127,6 +2133,7 @@ function WorkProjectOverviewSlot(props: {
   readonly onCreateThread: (
     draft: string,
     images?: ReadonlyArray<File>,
+    modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
   ) => boolean | Promise<boolean>;
   readonly onOpenSettings?: () => void;
   readonly onOpenThread?: (threadId: string) => void;
@@ -2199,6 +2206,7 @@ function WorkProjectOverviewSlot(props: {
   );
   return (
     <WorkOverview
+      projectId={props.projectId}
       {...(props.researchClient === undefined
         ? {}
         : {

@@ -1,7 +1,11 @@
 import { ChatClientFailure, type ChatClient } from "@octant/client-runtime/chat-client";
 import { ProjectClientFailure, type ProjectClient } from "@octant/client-runtime/project-client";
 import type { ProjectId } from "@octant/contracts/projects";
-import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
+import type {
+  ProviderInstanceId,
+  ProviderModelId,
+  ProviderModelOptionValues,
+} from "@octant/contracts/providers";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
@@ -52,7 +56,10 @@ export interface ChatProjectOverviewProps {
   readonly client?: ChatClient;
   readonly controller?: ChatController;
   readonly model?: ChatProjectOverviewModel;
-  readonly onCreateThread?: (draft: string) => boolean | Promise<boolean>;
+  readonly onCreateThread?: (
+    draft: string,
+    modelOptionValues?: ProviderModelOptionValues,
+  ) => boolean | Promise<boolean>;
   readonly onOpenThread?: (threadId: string) => void;
   readonly onViewAllProjectThreads?: () => void;
   readonly onOpenSettings?: () => void;
@@ -96,6 +103,15 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
   const input = useRef<HTMLTextAreaElement>(null);
   const inputId = useId();
   const [draft, setDraft] = useState("");
+  const modelKey = `${props.projectId ?? ""}:${props.selectedProviderInstanceId ?? ""}:${props.selectedModelId ?? ""}`;
+  const [modelChoice, setModelChoice] = useState<{
+    readonly key: string;
+    readonly values: ProviderModelOptionValues;
+  }>({ key: modelKey, values: {} });
+  if (modelChoice.key !== modelKey) {
+    setModelChoice({ key: modelKey, values: {} });
+  }
+  const modelOptionValues = modelChoice.key === modelKey ? modelChoice.values : {};
   const [submitting, setSubmitting] = useState(false);
   const [restoreFocus, setRestoreFocus] = useState(false);
   const createAvailable = props.onCreateThread !== undefined;
@@ -114,7 +130,10 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
     if (!createAvailable || submitting || normalized === "") return;
     setSubmitting(true);
     try {
-      const created = await props.onCreateThread(normalized);
+      const created =
+        Object.keys(modelOptionValues).length === 0
+          ? await props.onCreateThread(normalized)
+          : await props.onCreateThread(normalized, modelOptionValues);
       if (created) setDraft("");
       else setRestoreFocus(true);
     } finally {
@@ -168,6 +187,16 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
                     disabled={!createAvailable || submitting}
                     groups={props.providerGroups ?? []}
                     menuSide="bottom"
+                    modelOptionValues={modelOptionValues}
+                    onModelOptionChange={(id, value) => {
+                      const rest = Object.fromEntries(
+                        Object.entries(modelOptionValues).filter(([key]) => key !== id),
+                      );
+                      setModelChoice({
+                        key: modelKey,
+                        values: value === undefined ? rest : { ...rest, [id]: value },
+                      });
+                    }}
                     onSelect={props.onSelectProvider ?? (() => undefined)}
                     {...(props.onOpenSettings === undefined
                       ? {}

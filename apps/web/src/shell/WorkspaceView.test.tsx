@@ -1849,7 +1849,11 @@ describe("WorkspaceView Chat surfaces", () => {
     fireEvent.click(within(quickStart).getByRole("button", { name: "Start thread" }));
 
     await waitFor(() =>
-      expect(onCreateChatProjectThread).toHaveBeenCalledWith(project.id, "Prepare launch brief"),
+      expect(onCreateChatProjectThread).toHaveBeenCalledWith(
+        project.id,
+        "Prepare launch brief",
+        undefined,
+      ),
     );
   });
 
