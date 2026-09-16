@@ -73,3 +73,6 @@ requests use state colors (open green, merged purple, closed red); their separat
 control opens Review without switching threads. Cmd-click or Ctrl-click opens
 GitHub when that destination is available. Hover details show the full cached
 PR list and its available destinations without refreshing GitHub.
+
+Long sidebar lists scroll above the account control, keeping the last Project and
+thread reachable when extra row properties are shown.
