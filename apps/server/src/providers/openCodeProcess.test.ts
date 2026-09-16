@@ -744,6 +744,23 @@ describe("OpenCodeProcessPort", () => {
     expect(observed.authorization).toMatch(/^Basic b3BlbmNvZGU6/);
   });
 
+  // The 2.0.x CLI declares both executable names and prints the bare one; the
+  // runtime contract behind it is the beta one, not the legacy v1 one.
+  it("accepts the bare banner the 2.0.x CLI prints and keeps the beta runtime contract", async () => {
+    const probe = probeWrapper("probe-v2-0-1");
+    await expect(Effect.runPromise(probeOpenCodeBinary(probe.binaryPath))).resolves.toEqual({
+      binaryPath: probe.binaryPath,
+      version: "opencode v2.0.1",
+    });
+
+    const server = probeWrapper("v2-0-1-ready");
+    const observed = await Effect.runPromise(
+      Effect.scoped(makePort().start({ binaryPath: server.binaryPath, cwd: server.root })),
+    );
+    expect(observed.runtime).toBe("beta");
+    expect(observed.version).toBe("opencode v2.0.1");
+  });
+
   it("retries the beta server on a fresh port when the first launch exits before readiness", async () => {
     const root = fixtureRoot("early-exit");
     const binaryPath = join(root, "opencode-retry-fixture");
