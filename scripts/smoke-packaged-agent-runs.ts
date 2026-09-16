@@ -3,7 +3,11 @@ import { resolve } from "node:path";
 import { decodeAgentRunId, type AgentRun } from "@octant/contracts/agent-run";
 import { AgentRunProcessSupervisor } from "../apps/server/src/agentRun/agentRunProcessSupervisor";
 import { createNodeAgentRunProcessPort } from "../apps/server/src/agentRun/nodeAgentRunProcessPort";
-import { runBoundedCommand, sanitizedPackagedEnvironment } from "./packaged-smoke-process";
+import {
+  runBoundedCommand,
+  sanitizedPackagedEnvironment,
+  stagePackagedAppBundle,
+} from "./packaged-smoke-process";
 
 export const PACKAGED_AGENT_RUN_SMOKE_STEPS = [
   "package",
@@ -27,7 +31,8 @@ export async function runPackagedAgentRunSmoke(
 }
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const packagedExecutable = resolve(repositoryRoot, "out/Octant.app/Contents/MacOS/Octant");
+const packagedBundle = stagePackagedAppBundle(resolve(repositoryRoot, "out/Octant.app"));
+const packagedExecutable = resolve(packagedBundle, "Contents/MacOS/Octant");
 
 async function main(): Promise<void> {
   if (process.env.OCTANT_PACKAGED_AGENT_RUN_SMOKE !== "1") {

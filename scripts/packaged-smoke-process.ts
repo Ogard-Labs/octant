@@ -1,4 +1,7 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { cpSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 
 export interface SmokeChildProcess {
   readonly exitCode: number | null;
@@ -14,6 +17,42 @@ export interface BoundedCommandHandle {
 }
 
 export const PACKAGED_SMOKE_SERVER_PORT = 13_773;
+/**
+ * Where a packaged smoke launches the app from: a copy outside the checkout.
+ *
+ * Node resolves a bare import by walking up from the importing file, so a
+ * bundle launched where it was built reaches the repository's own
+ * `node_modules` for anything the app neither bundles nor copies — the server
+ * starts, the smoke passes, and the app a person installs fails at the same
+ * import. Somebody who installs Octant runs it from outside any checkout, so
+ * the smokes run it from the same kind of place.
+ *
+ * A checkout with no built bundle is returned as it is: the smoke's own
+ * precondition then reports the missing app instead of this step.
+ */
+export function stagePackagedAppBundle(sourceBundle: string): string {
+  if (!existsSync(sourceBundle)) return sourceBundle;
+  const root = mkdtempSync(join(tmpdir(), "octant-packaged-app."));
+  const appBundle = join(root, basename(sourceBundle));
+  cloneBundle(sourceBundle, appBundle);
+  process.once("exit", () => rmSync(root, { recursive: true, force: true }));
+  return appBundle;
+}
+
+function cloneBundle(source: string, destination: string): void {
+  // An APFS clone stages half a gigabyte in milliseconds; anywhere else falls
+  // back to a recursive copy.
+  if (process.platform === "darwin") {
+    try {
+      execFileSync("/bin/cp", ["-cR", source, destination], { stdio: "ignore" });
+      return;
+    } catch {
+      rmSync(destination, { recursive: true, force: true });
+    }
+  }
+  cpSync(source, destination, { recursive: true, verbatimSymlinks: true });
+}
+
 export const PACKAGED_SMOKE_SERVER_URL = `http://127.0.0.1:${PACKAGED_SMOKE_SERVER_PORT}`;
 export const PACKAGED_SMOKE_PROCESS_PROBE_TIMEOUT_MS = 10_000;
 

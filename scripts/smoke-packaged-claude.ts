@@ -10,11 +10,12 @@ import {
   PACKAGED_SMOKE_SERVER_URL,
   cleanupPackagedProcess,
   packagedServerEnvironment,
+  stagePackagedAppBundle,
   type SmokeChildProcess,
 } from "./packaged-smoke-process";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const appBundle = resolve(repositoryRoot, "out/Octant.app");
+const appBundle = stagePackagedAppBundle(resolve(repositoryRoot, "out/Octant.app"));
 const executable = resolve(appBundle, "Contents/MacOS/Octant");
 const serverEntry = resolve(appBundle, "Contents/Resources/app/apps/server/dist/main.mjs");
 const helperPath = resolve(appBundle, "Contents/Resources/native/octant-keychain-helper");

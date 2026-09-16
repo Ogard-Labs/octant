@@ -15,11 +15,12 @@ import {
   runBoundedCommand,
   sanitizedPackagedEnvironment,
   waitForProcessCleanup,
+  stagePackagedAppBundle,
   type SmokeChildProcess,
 } from "./packaged-smoke-process";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const appBundle = resolve(repositoryRoot, "out/Octant.app");
+const appBundle = stagePackagedAppBundle(resolve(repositoryRoot, "out/Octant.app"));
 const executable = resolve(appBundle, "Contents/MacOS/Octant");
 const packagedRoot = resolve(appBundle, "Contents/Resources/app");
 const serverEntry = resolve(packagedRoot, "apps/server/dist/main.mjs");
