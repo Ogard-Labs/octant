@@ -6,6 +6,10 @@ description: Projects organize work across modes with scoped authority, memory, 
 
 Projects are the primary organizational unit in Octant. A Project determines the mode, authority, and workspace binding for every thread it contains. The mode is server-enforced and cannot be changed after creation.
 
+Open **Projects** in primary navigation to search and filter the Project list.
+Select a Project to open its overview in the same content area. Choose **Projects**
+again to return to the list. The main navigation sidebar stays the same width.
+
 ## Project types
 
 | Mode | Binding                      | Authority                             |
@@ -18,7 +22,7 @@ Chat Projects are virtual, memory-scoped containers with no implicit filesystem 
 
 ## Creating a Project
 
-1. Click **New Project** in the sidebar.
+1. Open **Projects** in primary navigation, then click **Add Project** in the directory.
 2. Select the mode (Chat, Work, or Code).
 3. For Work and Code, use the native picker to select a directory.
 4. Name the Project.

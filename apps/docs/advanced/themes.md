@@ -171,6 +171,11 @@ replay across restarts.
 - [Privacy and security](/advanced/privacy-and-security) for where appearance state lives
 - [Release compatibility](/advanced/release-compatibility) for preview boundaries
 
+The everywhere background also shows behind page surfaces such as Board, Inbox,
+Archive, and Pull requests. Reader pages and Project overviews soften it behind
+a translucent reading surface. Cards, menus, and controls keep their own
+surfaces.
+
 When an everywhere background covers the sidebar, separate sidebar decoration
 controls are suspended. Turn off **Cover the sidebar** to restore your saved
 sidebar background and overlay settings. Increased contrast keeps its existing

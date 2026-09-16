@@ -1546,6 +1546,7 @@ h6 {
   overflow: hidden;
 }
 
+.workspace[hidden],
 .primary-workspace-layer[hidden] {
   display: none;
 }
@@ -9778,4 +9779,21 @@ ul.board-col-body {
   flex: 0 0 auto;
   gap: 4px;
   padding: 4px;
+}
+
+.projects-page-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: auto;
+  background: var(--octant-app-background);
+}
+
+.projects-page-layer > .projects-directory {
+  width: min(100%, 920px);
+  min-height: 100%;
+  margin-inline: auto;
+  padding: 28px 24px;
+  border: 0;
+  background: transparent;
 }

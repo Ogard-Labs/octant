@@ -8,10 +8,10 @@ repository. It describes the shape of the system as it exists in code; the
 decision records under `docs/decisions/` explain why individual choices were
 made.
 
-The Projects directory accompanies the selected Project overview only while the
-workspace is visible. Global destinations such as Board, Inbox, and Pull requests
-hide the directory and restore the normal sidebar; returning to Projects restores
-its directory. The underlying Project selection remains intact.
+Projects opens its searchable directory in the main workspace. Selecting a Project
+replaces that directory with the Project overview; Projects in primary navigation
+returns to the directory. Neither view adds a second sidebar. Other destinations
+replace the directory while preserving the underlying Project selection.
 
 ## Repository test cancellation
 

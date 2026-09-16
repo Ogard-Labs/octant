@@ -3675,10 +3675,9 @@ describe("App", () => {
     await user.click(projectsDestination);
     const projectsDirectory = document.querySelector<HTMLElement>(".projects-directory");
     if (projectsDirectory === null) throw new Error("Expected the Projects directory.");
-    const projectsSidebar = within(sidebar).getByRole("region", { name: "Projects sidebar" });
-    expect(projectsSidebar).toContainElement(projectsDirectory);
-    expect(document.querySelector(".shell-frame")).toHaveClass("shell--projects-sidebar-open");
-    expect(projectsDirectory.closest(".workspace-layer")).toBeNull();
+    expect(within(sidebar).queryByRole("region", { name: "Projects sidebar" })).toBeNull();
+    expect(document.querySelector(".shell-frame")).not.toHaveClass("shell--projects-sidebar-open");
+    expect(projectsDirectory.closest(".workspace-layer")).not.toBeNull();
     expect(within(projectsDirectory).getByRole("button", { name: "Add Project" })).toBeVisible();
     expect(
       within(projectsDirectory).getByRole("searchbox", { name: "Search Projects" }),
@@ -3695,8 +3694,17 @@ describe("App", () => {
         "shell--projects-sidebar-open",
       );
       await user.click(within(sidebar).getByRole("button", { name: "Projects" }));
-      expect(within(sidebar).getByRole("region", { name: "Projects sidebar" })).toBeVisible();
+      expect(within(sidebar).queryByRole("region", { name: "Projects sidebar" })).toBeNull();
+      expect(screen.getByRole("searchbox", { name: "Search Projects" })).toBeVisible();
     }
+    // A mode switch is a navigation away from the Projects page, so the page
+    // must not keep sitting over the workspace it belongs to.
+    await user.click(screen.getByRole("button", { name: "Workspace mode, Code" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Chat" }));
+    expect(screen.queryByRole("searchbox", { name: "Search Projects" })).toBeNull();
+    expect(document.querySelector(".projects-page-layer")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Workspace mode, Chat" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Code" }));
     await act(async () => {
       codeBootstrap.resolve(readyCodeBootstrap);
       codeThread.resolve(readyCodeThread);
