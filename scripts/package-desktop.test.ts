@@ -32,6 +32,7 @@ import {
   createPackagerOptions,
   createQuitAppleScript,
   createServerRuntimeManifest,
+  createDesktopRuntimeManifest,
   linuxPackageDirectoryName,
   packagedBundlePath,
   packagedLinuxBundlePath,
@@ -710,6 +711,13 @@ describe("desktop packaging boundary", () => {
     const serializedConfiguration = `${rootPackage}\n${desktopPackage}`.toLowerCase();
     expect(serializedConfiguration).not.toMatch(
       /electron-builder|electron-updater|@electron\/osx-sign|@electron\/notarize/,
+    );
+  });
+
+  it("reports the packaged release version through the Electron runtime manifest", () => {
+    expect(createDesktopRuntimeManifest("0.1.0").version).toBe("0.1.0");
+    expect(createDesktopRuntimeManifest("0.1.0-preview.20260915.1").version).toBe(
+      "0.1.0-preview.20260915.1",
     );
   });
 

@@ -599,10 +599,22 @@ export function validateBundledInternalRuntime(entries: ReadonlyArray<PackagedPa
   }
 }
 
+export function createDesktopRuntimeManifest(version: string) {
+  return {
+    name: "@octant/desktop-runtime",
+    private: true,
+    type: "module",
+    version,
+    productName: DESKTOP_PACKAGE_IDENTITY.productName,
+    main: "apps/desktop/dist/main.mjs",
+  };
+}
+
 export async function stageDesktopRuntime(
   repositoryRoot: string,
   stageRoot: string,
   target: DesktopPackageTarget = DESKTOP_PACKAGE_TARGETS["darwin-arm64"],
+  version: string = resolveReleaseVersion(process.env),
 ): Promise<void> {
   await rm(stageRoot, { recursive: true, force: true });
   await mkdir(stageRoot, { recursive: true });
@@ -617,14 +629,7 @@ export async function stageDesktopRuntime(
   await copyBuiltDirectory(repositoryRoot, stageRoot, "apps/server/dist");
   await copyBuiltDirectory(repositoryRoot, stageRoot, "apps/web/dist");
 
-  await writeJson(join(stageRoot, "package.json"), {
-    name: "@octant/desktop-runtime",
-    private: true,
-    type: "module",
-    version: "0.0.0-dev",
-    productName: DESKTOP_PACKAGE_IDENTITY.productName,
-    main: "apps/desktop/dist/main.mjs",
-  });
+  await writeJson(join(stageRoot, "package.json"), createDesktopRuntimeManifest(version));
   await writeJson(join(stageRoot, "apps/server/package.json"), createServerRuntimeManifest());
 
   await stageExternalRuntimePackages(repositoryRoot, stageRoot);
@@ -745,12 +750,13 @@ async function packageDarwinDesktop(
   const finalApp = join(outRoot, `${DESKTOP_PACKAGE_IDENTITY.productName}.app`);
 
   await mkdir(outRoot, { recursive: true });
-  await stageDesktopRuntime(repositoryRoot, stageRoot, target);
+  const version = resolveReleaseVersion(process.env);
+  await stageDesktopRuntime(repositoryRoot, stageRoot, target, version);
   await rm(packagerRoot, { recursive: true, force: true });
   await rm(finalApp, { recursive: true, force: true });
 
   const packagedDirectories = await packager(
-    createPackagerOptions(stageRoot, packagerRoot, resolveReleaseVersion(process.env), target),
+    createPackagerOptions(stageRoot, packagerRoot, version, target),
   );
   if (packagedDirectories.length !== 1) {
     throw new Error(
@@ -829,7 +835,7 @@ async function packageLinuxDesktop(
   );
 
   await mkdir(outRoot, { recursive: true });
-  await stageDesktopRuntime(repositoryRoot, stageRoot, target);
+  await stageDesktopRuntime(repositoryRoot, stageRoot, target, version);
   await rm(packagerRoot, { recursive: true, force: true });
   await rm(finalPackageDir, { recursive: true, force: true });
   await rm(appImagePath, { force: true });

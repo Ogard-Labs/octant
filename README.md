@@ -151,6 +151,9 @@ also does not update itself — the updater installs a replacement only when it
 satisfies the running app's code signature. Signed releases carry that
 signature and update in place.
 
+Packaging uses the same release version in the native bundle and Electron runtime
+manifest, so the updater and What’s new identify the build on disk consistently.
+
 Local data lives in `~/Library/Application Support/Octant/` (override with
 `OCTANT_DATA_DIR`).
 
