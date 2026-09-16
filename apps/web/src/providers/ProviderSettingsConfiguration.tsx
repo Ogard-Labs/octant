@@ -889,7 +889,8 @@ export function ProviderCreateForm(
                   providerType === "gemini-native-image" ||
                   providerType === "bfl-image" ||
                   providerType === "ideogram-image") &&
-                  !props.credentialManagementAvailable)
+                  !props.credentialManagementAvailable) ||
+                (providerType === "fx" && !props.credentialManagementAvailable)
               }
               type="submit"
             >
@@ -1464,6 +1465,12 @@ function ApiKeyAcpConfigurationForm<
   readonly binaryLabel: string;
   readonly apiKeyLabel: string;
   readonly configuration: T;
+  /**
+   * Drivers whose contract carries exactly one authentication posture set this
+   * so the form draws no selector and always submits that literal. Offering a
+   * choice would build a configuration the server refuses to decode.
+   */
+  readonly fixedAuthentication?: T["authentication"];
   readonly onChange: (
     instanceId: ProviderInstance["id"],
     configuration: T,
@@ -1471,7 +1478,9 @@ function ApiKeyAcpConfigurationForm<
   ) => Promise<boolean>;
 }) {
   const credentialInput = useRef<HTMLInputElement>(null);
-  const [authentication, setAuthentication] = useState(props.configuration.authentication);
+  const [authentication, setAuthentication] = useState<T["authentication"]>(
+    props.fixedAuthentication ?? props.configuration.authentication,
+  );
   return (
     <form
       className="provider-card__edit"
@@ -1502,19 +1511,21 @@ function ApiKeyAcpConfigurationForm<
           required
         />
       </label>
-      <label>
-        <span>Authentication</span>
-        <OctantSelectField
-          aria-label={`Authentication for ${props.instance.displayName}`}
-          className="settings-view__select"
-          onValueChange={(value) => setAuthentication(value as typeof authentication)}
-          options={[
-            { id: "provider-owned", label: "Provider CLI login (recommended)" },
-            { id: "api-key", label: props.apiKeyLabel },
-          ]}
-          value={authentication}
-        />
-      </label>
+      {props.fixedAuthentication === undefined ? (
+        <label>
+          <span>Authentication</span>
+          <OctantSelectField
+            aria-label={`Authentication for ${props.instance.displayName}`}
+            className="settings-view__select"
+            onValueChange={(value) => setAuthentication(value as typeof authentication)}
+            options={[
+              { id: "provider-owned", label: "Provider CLI login (recommended)" },
+              { id: "api-key", label: props.apiKeyLabel },
+            ]}
+            value={authentication}
+          />
+        </label>
+      ) : null}
       {authentication === "api-key" ? (
         <label>
           <span>{props.apiKeyLabel} (leave blank to preserve)</span>
@@ -1622,6 +1633,7 @@ export function FxConfigurationForm(props: {
       credentialManagementAvailable={props.credentialManagementAvailable}
       disabled={props.disabled}
       driverLabel="fx"
+      fixedAuthentication="api-key"
       instance={props.instance}
       onChange={props.onChange}
     />

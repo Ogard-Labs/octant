@@ -654,6 +654,9 @@ describe.each(denyDefaultProfiles)("ACP deny-default confinement ($displayName)"
         expect(fullAccessProfile).toContain(
           `(deny file-read* (subpath "${join(target.canonicalRoot, entry)}"))`,
         );
+        expect(fullAccessProfile).toContain(
+          `(deny file-write* (subpath "${join(target.canonicalRoot, entry)}"))`,
+        );
       }
     }
     for (const file of profile.process.managedFiles({

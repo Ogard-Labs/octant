@@ -74,7 +74,7 @@ profile must obtain compatibility GO through the shared ACP stack before shippin
 - Some agents cannot meet the contract (no stable resume, no separable
   authentication, tools executing unconfined). Those stay reserved and
   unselectable rather than being approximated.
-- The eleven shipped ACP providers are profiles over one driver, process,
+- The thirteen shipped ACP providers are profiles over one driver, process,
   protocol, and event-mapper module; the conformance suite runs once per
   profile. Devin ACP shipped earlier on the same stack.
 - Strong next registry candidates, each still needing a live profile probe

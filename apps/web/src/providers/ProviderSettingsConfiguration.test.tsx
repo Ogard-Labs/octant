@@ -1,7 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { decodeProviderInstanceId, type ProviderInstance } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { ProviderCreateForm, type ProviderCreateFormProps } from "./ProviderSettingsConfiguration";
+import {
+  FxConfigurationForm,
+  ProviderCreateForm,
+  type ProviderCreateFormProps,
+} from "./ProviderSettingsConfiguration";
 
 function props(overrides: Partial<ProviderCreateFormProps> = {}): ProviderCreateFormProps {
   const callback = vi.fn(async () => true);
@@ -131,5 +136,76 @@ describe("ProviderCreateForm presentation limits", () => {
     expect(onCreateOpenAiImage).toHaveBeenCalledTimes(1);
     expect(name).toHaveValue("Unfinished image provider");
     expect(screen.getByLabelText("API key")).toHaveValue("secret");
+  });
+
+  it("keeps fx creation disabled when host credential storage is unavailable", async () => {
+    const user = userEvent.setup();
+    const onCreateFx = vi.fn(async () => true);
+    render(
+      <ProviderCreateForm
+        {...props({ onCreateFx, credentialManagementAvailable: false })}
+        allowedProviderTypes={["fx"]}
+        initialProviderType="fx"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add provider manually" }));
+
+    // fx has no provider-owned posture, so a host without credential storage
+    // can never complete the create form.
+    expect(screen.getByRole("button", { name: "Add fx" })).toBeDisabled();
+    expect(onCreateFx).not.toHaveBeenCalled();
+  });
+});
+
+describe("FxConfigurationForm", () => {
+  it("submits the api-key posture without offering a provider-owned login", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn(async () => true);
+    const instance: Extract<ProviderInstance, { driverKind: "fx" }> = {
+      id: decodeProviderInstanceId("80000000-0000-4000-8000-0000000000f1"),
+      displayName: "fx local",
+      driverKind: "fx",
+      configuration: {
+        kind: "fx-acp",
+        binaryPath: "/Users/example/.local/bin/fx",
+        authentication: "api-key",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1 as never,
+      createdAt: "2026-07-14T10:00:00.000Z" as never,
+      updatedAt: "2026-07-14T10:00:00.000Z" as never,
+    };
+
+    render(
+      <FxConfigurationForm
+        credentialManagementAvailable
+        disabled={false}
+        instance={instance}
+        onChange={onChange}
+      />,
+    );
+
+    // fx's configuration carries exactly one authentication literal, so the
+    // shared selector would submit a value the server refuses to decode.
+    expect(screen.queryByLabelText("Authentication for fx local")).toBeNull();
+    await user.clear(screen.getByLabelText("fx binary path for fx local"));
+    await user.type(screen.getByLabelText("fx binary path for fx local"), "/opt/homebrew/bin/fx");
+    await user.type(
+      screen.getByLabelText(/Vercel AI Gateway API key.*for fx local/),
+      "gateway-key",
+    );
+    await user.click(screen.getByRole("button", { name: "Save fx settings for fx local" }));
+
+    expect(onChange).toHaveBeenCalledWith(
+      instance.id,
+      {
+        kind: "fx-acp",
+        binaryPath: "/opt/homebrew/bin/fx",
+        authentication: "api-key",
+      },
+      expect.anything(),
+    );
   });
 });

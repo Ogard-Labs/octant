@@ -1040,7 +1040,14 @@ function makeConnection(
             : { modelOptionValues: input.modelOptionValues }),
         }).pipe(
           Effect.map(() => ({ sessionId: input.sessionId, resumeCursor: input.resumeCursor })),
-          Effect.mapError(() => failure("stale-resume", `${name} session could not be resumed.`)),
+          // A refusal outlives resume: fx still cannot serve Chat or Plan on an
+          // existing session, and reporting that as a stale cursor would hide
+          // the reason and invite a pointless retry.
+          Effect.mapError((error) =>
+            error.category === "incompatible"
+              ? error
+              : failure("stale-resume", `${name} session could not be resumed.`),
+          ),
         );
       },
       send: (input) =>
