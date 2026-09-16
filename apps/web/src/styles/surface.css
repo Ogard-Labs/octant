@@ -50,6 +50,8 @@
 
 .oct-section-label {
   margin: 0;
+  user-select: none;
+  -webkit-user-select: none;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
@@ -109,6 +111,11 @@
 }
 
 .surface-header {
+  /* Surface chrome is navigation, like the sidebar: a drag across the header,
+     its actions or a section label must not select words. Fields opt back in
+     below, so a search box stays usable. */
+  user-select: none;
+  -webkit-user-select: none;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
@@ -144,11 +151,21 @@
   align-items: center;
   gap: var(--oct-space-2);
   margin: 0 0 var(--oct-space-4);
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .surface-toolbar__search {
   flex: 1 1 240px;
   min-width: 200px;
+}
+
+/* A field inside that chrome keeps its own text selectable. */
+.surface-header :is(input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]),
+.surface-toolbar
+  :is(input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]) {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .surface-toolbar__spacer {
