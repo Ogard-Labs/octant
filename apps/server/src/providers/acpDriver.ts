@@ -10,6 +10,7 @@ import {
   type ProviderCapabilitySupport,
   type ProviderFailure,
   type ProviderInstanceId,
+  type ProviderModelOptionValues,
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
@@ -260,6 +261,9 @@ function normalizeModels(
       : (models?.availableModels.map((item) => ({ value: item.modelId, name: item.name })) ?? []);
   if (selectable.length === 0) return [];
   const reasoning = options.find((option) => option.id === profile.reasoningOptionId);
+  const reasoningValues = (reasoning?.options ?? [])
+    .map((choice) => choice.value.trim())
+    .filter((value) => value.length > 0);
   return selectable.map((item) => ({
     id: decodeProviderModelId(item.value),
     displayName: item.name,
@@ -267,13 +271,22 @@ function normalizeModels(
     verification: "verified" as const,
     reasoning: reasoning === undefined ? ("unavailable" as const) : ("supported" as const),
     inputModalities: textOnlyInputModalities,
-    // The agent reasons, and that capability is reported above. Choosing how
-    // hard is a different claim: this driver starts sessions with `model` and
-    // `mode` only and never sends `modelOptionValues` back, so declaring a
-    // selectable option would put a control in the composer that saves the
-    // user's choice and silently drops it on the next turn. Declaring nothing
-    // is the honest report until the value reaches the session.
-    options: [],
+    // The agent reasons, and that capability is reported above. A level is
+    // declared only because the session applies it: the driver sets the
+    // profile's reasoning option from `modelOptionValues` when it starts or
+    // resumes a session, so the control the composer draws is one the agent
+    // honours rather than a preference that is saved and dropped.
+    options:
+      reasoningValues.length === 0
+        ? []
+        : [
+            {
+              id: profile.reasoningOptionId,
+              displayName: reasoning?.name ?? "Reasoning",
+              kind: "selection" as const,
+              values: reasoningValues as [string, ...string[]],
+            },
+          ],
   }));
 }
 
@@ -873,6 +886,7 @@ function makeConnection(
       readonly sessionId: ProviderSessionId;
       readonly modelId: string;
       readonly executionPolicy: ProviderExecutionPolicy;
+      readonly modelOptionValues?: ProviderModelOptionValues;
       readonly sourceSessionId?: string;
       readonly tools: ReadonlyArray<ProviderToolDefinition>;
     }) =>
@@ -933,6 +947,26 @@ function makeConnection(
           } else {
             await client.call(setModeCall.method, setModeCall.params);
           }
+          // ACP reports the agent's reasoning control as a session config
+          // option, and a chat turn carries only the prompt, so the level the
+          // user chose for this model is applied here. A value the agent does
+          // not offer is left alone: the probe declares the option from the
+          // agent's own choices, which is the same check from the other side.
+          const requestedReasoning = input.modelOptionValues?.[profile.reasoningOptionId];
+          if (requestedReasoning !== undefined && requestedReasoning.trim().length > 0) {
+            const offered = source.configOptions?.find(
+              (option) => option.id === profile.reasoningOptionId,
+            );
+            const allowed =
+              offered?.options.some((choice) => choice.value === requestedReasoning) ?? false;
+            if (allowed) {
+              await client.setConfigOption(
+                source.sessionId,
+                profile.reasoningOptionId,
+                requestedReasoning,
+              );
+            }
+          }
           const state = await register(input, source, scope, client, managedTools, appManagedTools);
           stateRef.state = state;
           return state;
@@ -973,6 +1007,9 @@ function makeConnection(
           executionPolicy: input.executionPolicy,
           sourceSessionId: input.resumeCursor.value,
           tools: identity.tools,
+          ...(input.modelOptionValues === undefined
+            ? {}
+            : { modelOptionValues: input.modelOptionValues }),
         }).pipe(
           Effect.map(() => ({ sessionId: input.sessionId, resumeCursor: input.resumeCursor })),
           Effect.mapError(() => failure("stale-resume", `${name} session could not be resumed.`)),

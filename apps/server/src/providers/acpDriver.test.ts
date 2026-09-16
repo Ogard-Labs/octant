@@ -375,6 +375,38 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     expect(result.models.every((model) => model.reasoning === "unavailable")).toBe(true);
   });
 
+  it("declares the agent's reasoning choices so the composer can offer a level", async () => {
+    const { driver } = fixture(profile);
+
+    const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+
+    expect(result.models[0]?.options).toEqual([
+      {
+        id: profile.reasoningOptionId,
+        displayName: "Reasoning",
+        kind: "selection",
+        values: ["off", "on"],
+      },
+    ]);
+  });
+
+  it("declares no selectable option when the agent exposes no reasoning control", async () => {
+    const { driver, client } = fixture(profile);
+    client.newSession.mockImplementationOnce(async () => {
+      client.emitCommands("agent-session-plain");
+      return {
+        sessionId: "agent-session-plain",
+        configOptions: client.configOptions.filter(
+          (option) => option.id !== profile.reasoningOptionId,
+        ),
+      };
+    });
+
+    const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+
+    expect(result.models.every((model) => model.options.length === 0)).toBe(true);
+  });
+
   // ACP lets an agent report its models either as a `model` config option or as
   // the session's own model state. An agent that only does the latter was read
   // as having none, so the picker offered nothing and no session could start.
@@ -697,6 +729,56 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       expect(registry.activeSessionCount(instanceId)).toBe(0);
     },
   );
+
+  it("applies the chosen reasoning level to the session it starts", async () => {
+    const { driver, client } = fixture(profile);
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            modelOptionValues: { [profile.reasoningOptionId]: "on" },
+          });
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+
+    expect(client.setConfigOption).toHaveBeenCalledWith(
+      "agent-session-1",
+      profile.reasoningOptionId,
+      "on",
+    );
+  });
+
+  it("leaves the agent's own level alone when the chosen value is not offered", async () => {
+    const { driver, client } = fixture(profile);
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            modelOptionValues: { [profile.reasoningOptionId]: "ultra" },
+          });
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+
+    // The session keeps the agent's own level: no call carries the option.
+    const reasoningCalls = client.setConfigOption.mock.calls.filter(
+      (call) => (call as ReadonlyArray<unknown>)[1] === profile.reasoningOptionId,
+    );
+    expect(reasoningCalls).toEqual([]);
+  });
 
   it("tells the user to sign in again when a turn is refused for a stale credential", async () => {
     // A managed home holding an expired credential passes the probe: the agent
