@@ -65,6 +65,8 @@ The server does not retarget tools to a different Project or root.
 - [Chat](/guide/chat), [Work](/guide/work), and [Code](/guide/code) for mode-specific details
 
 Activity rows use the same thread-details hover card as the Projects tree.
+Thread rows grow to fit enabled properties in both views, keeping branch and
+Project details inside their own row rather than overlapping the next thread.
 When Branch is enabled, both existing repository checkouts and managed worktrees
 show their recorded branch. Plain folders have no branch label. Linked pull
 requests use state colors (open green, merged purple, closed red); their separate

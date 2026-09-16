@@ -666,8 +666,11 @@ html[data-octant-native-host="true"]
      not three controls, so they sit at glyph spacing. At list spacing the row
      spent 46px before the first letter of the title. */
   gap: var(--oct-space-1);
+  /* Visible properties add lines; the button recipe's fixed height would
+     let those lines overlap the next thread instead of growing this row. */
+  height: auto;
   min-height: var(--oct-nav-row-h);
-  padding-block: 0;
+  padding-block: 4px;
   padding-inline: 8px;
   color: var(--oct-muted);
   background: transparent;
