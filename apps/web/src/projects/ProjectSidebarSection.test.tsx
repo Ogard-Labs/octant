@@ -1731,6 +1731,29 @@ describe("ProjectSidebarSection row property visibility", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Property visibility" }));
   }
 
+  it("names an available fork parent in activity thread details", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProjectSidebarSection
+        {...sidebarProps()}
+        threads={[
+          codeThread,
+          {
+            ...codeThread,
+            threadId: "branch",
+            title: "Alternate plan",
+            lineageParentThreadId: codeThread.threadId,
+          },
+        ]}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+    await user.hover(screen.getByRole("button", { name: /Alternate plan/ }));
+    const details = await screen.findByRole("group", { name: "Thread details" });
+    expect(details).toHaveTextContent("Forked from Planning");
+    expect(details).not.toHaveTextContent("no longer available");
+  });
+
   it("shows thread details and opens a colored activity pull request without selecting the thread", async () => {
     const user = userEvent.setup();
     const onOpenPullRequest = vi.fn();

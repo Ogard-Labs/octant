@@ -110,6 +110,7 @@ import {
 import { IconButton } from "../shell/IconButton";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import { groupThreadsByProject } from "./projectThreadGrouping";
+import { lineageParentTitle } from "./threadLineage";
 import {
   ProjectThreadList,
   ThreadRowInfoPopup,
@@ -629,6 +630,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                 : {})}
               actions={props.threadActions ?? {}}
               groups={activity.groups}
+              lineageThreads={everyListedThread ?? []}
               onSelectThread={props.onSelectThread!}
             />
           </SidebarRowPropertiesContext.Provider>
@@ -1039,6 +1041,7 @@ function ActivityViewToggle(props: { readonly enabled: boolean; readonly onToggl
 }
 
 function ActivityThreadList(props: {
+  readonly lineageThreads: ReadonlyArray<ChatThreadNavigationItem>;
   readonly actions: ThreadRowActions;
   readonly activeThreadId?: string;
   readonly openThreadIds?: ReadonlyArray<string>;
@@ -1068,6 +1071,7 @@ function ActivityThreadList(props: {
                   ? {}
                   : { activeThreadId: props.activeThreadId })}
                 key={thread.navigationId}
+                lineageThreads={props.lineageThreads}
                 onSelectThread={props.onSelectThread}
                 thread={thread}
               />
@@ -1080,6 +1084,7 @@ function ActivityThreadList(props: {
 }
 
 function ActivityThreadButton(props: {
+  readonly lineageThreads: ReadonlyArray<ChatThreadNavigationItem>;
   readonly actions: ThreadRowActions;
   readonly activeThreadId?: string;
   readonly openThreadIds?: ReadonlyArray<string>;
@@ -1087,6 +1092,7 @@ function ActivityThreadButton(props: {
   readonly thread: SidebarActivityThread;
 }) {
   const shows = useSidebarRowProperties();
+  const parentTitle = lineageParentTitle(props.thread, props.lineageThreads);
   const selected = props.activeThreadId === props.thread.navigationId;
   const pullRequest = shows.pullRequest ? props.thread.pullRequests?.items[0] : undefined;
   const checkout = shows.branch ? props.thread.checkoutChip : undefined;
@@ -1159,6 +1165,7 @@ function ActivityThreadButton(props: {
   return (
     <div className="activity-nav__row">
       <ThreadRowInfoPopup
+        {...(parentTitle === undefined ? {} : { lineageParentTitle: parentTitle })}
         actions={props.actions}
         projectName={props.thread.projectName}
         thread={props.thread}
