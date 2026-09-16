@@ -59,16 +59,19 @@ export interface AcpClientPort {
   readonly newSession: (
     cwd: string,
     mcpServers?: ReadonlyArray<AcpMcpHttpServer>,
+    meta?: Readonly<Record<string, unknown>>,
   ) => Promise<AcpNewSessionResult>;
   readonly loadSession: (
     sessionId: string,
     cwd: string,
     mcpServers?: ReadonlyArray<AcpMcpHttpServer>,
+    meta?: Readonly<Record<string, unknown>>,
   ) => Promise<AcpNewSessionResult>;
   readonly resumeSession: (
     sessionId: string,
     cwd: string,
     mcpServers?: ReadonlyArray<AcpMcpHttpServer>,
+    meta?: Readonly<Record<string, unknown>>,
   ) => Promise<AcpNewSessionResult>;
   readonly closeSession: (sessionId: string) => Promise<void>;
   readonly prompt: (sessionId: string, prompt: string) => Promise<AcpPromptResult>;
@@ -264,30 +267,48 @@ function normalizeModels(
   const reasoningValues = (reasoning?.options ?? [])
     .map((choice) => choice.value.trim())
     .filter((value) => value.length > 0);
-  return selectable.map((item) => ({
-    id: decodeProviderModelId(item.value),
-    displayName: item.name,
-    source: "discovered" as const,
-    verification: "verified" as const,
-    reasoning: reasoning === undefined ? ("unavailable" as const) : ("supported" as const),
-    inputModalities: textOnlyInputModalities,
-    // The agent reasons, and that capability is reported above. A level is
-    // declared only because the session applies it: the driver sets the
-    // profile's reasoning option from `modelOptionValues` when it starts or
-    // resumes a session, so the control the composer draws is one the agent
-    // honours rather than a preference that is saved and dropped.
-    options:
-      reasoningValues.length === 0
-        ? []
-        : [
-            {
-              id: reasoning?.id ?? profile.reasoningOptionId,
-              displayName: reasoning?.name ?? "Reasoning",
-              kind: "selection" as const,
-              values: reasoningValues as [string, ...string[]],
-            },
-          ],
-  }));
+  const modelMeta = new Map(
+    (models?.availableModels ?? [])
+      .filter((item) => item._meta !== undefined)
+      .map((item) => [item.modelId, item._meta] as const),
+  );
+  return selectable.map((item) => {
+    // An agent may publish a model's levels in the model's own session
+    // metadata rather than a session config option, one set per model. Grok
+    // Build sends no config options at all, so reading only the option read
+    // every one of its models as unable to reason.
+    const declaredLevels =
+      profile.sessionMetaReasoning?.levelsOf(modelMeta.get(item.value) ?? {}) ?? [];
+    const levels = reasoningValues.length > 0 ? reasoningValues : declaredLevels;
+    return {
+      id: decodeProviderModelId(item.value),
+      displayName: item.name,
+      source: "discovered" as const,
+      verification: "verified" as const,
+      reasoning:
+        reasoning !== undefined || declaredLevels.length > 0
+          ? ("supported" as const)
+          : ("unavailable" as const),
+      inputModalities: textOnlyInputModalities,
+      // The agent reasons, and that capability is reported above. A level is
+      // declared only because the session applies it: the driver sets the
+      // profile's reasoning option, or carries it in the session metadata, when
+      // it starts or resumes a session, so the control the composer draws is
+      // one the agent honours rather than a preference that is saved and
+      // dropped.
+      options:
+        levels.length === 0
+          ? []
+          : [
+              {
+                id: reasoning?.id ?? profile.reasoningOptionId,
+                displayName: reasoning?.name ?? "Reasoning",
+                kind: "selection" as const,
+                values: levels as [string, ...string[]],
+              },
+            ],
+    };
+  });
 }
 
 /**
@@ -321,8 +342,10 @@ function normalizeProbe(
   observedAt: string,
   credentialStatus?: "stored",
 ): ProviderProbeResult {
+  const models = normalizeModels(profile, options, sessionModels);
   const reasoning =
-    resolveReasoningOption(profile, options) !== undefined
+    resolveReasoningOption(profile, options) !== undefined ||
+    models.some((model) => model.reasoning === "supported")
       ? ("supported" as const)
       : ("unavailable" as const);
   const resume =
@@ -330,7 +353,6 @@ function normalizeProbe(
     initialized.agentCapabilities.sessionCapabilities?.resume !== undefined
       ? ("supported" as const)
       : ("unsupported" as const);
-  const models = normalizeModels(profile, options, sessionModels);
   return decodeProviderProbeResult({
     instanceId,
     readiness: models.length === 0 ? "degraded" : "ready",
@@ -938,34 +960,67 @@ function makeConnection(
             );
           }
           const mcpServers = managedTools === undefined ? [] : [managedTools.bridge.server];
+          // A level the agent takes in the session metadata is applied with the
+          // session that selects the model: the agent's own model call resets a
+          // level it did not set, so applying the two separately would drop it.
+          // Nothing else changes shape: a session whose thread carries no level
+          // is opened exactly as the standard path opens it.
+          const requestedLevel = input.modelOptionValues?.[profile.reasoningOptionId];
+          const sessionMeta =
+            requestedLevel === undefined || requestedLevel.trim().length === 0
+              ? undefined
+              : profile.sessionMetaReasoning?.meta({
+                  modelId: input.modelId,
+                  level: requestedLevel,
+                });
+          const sourceSessionId = input.sourceSessionId;
           const source =
-            input.sourceSessionId === undefined
-              ? mcpServers.length === 0
-                ? await client.newSession(runtimeRoot)
-                : await client.newSession(runtimeRoot, mcpServers)
-              : profile.resumeMethod === "session/resume"
+            sourceSessionId === undefined
+              ? sessionMeta === undefined
                 ? mcpServers.length === 0
-                  ? await client.resumeSession(input.sourceSessionId, runtimeRoot)
-                  : await client.resumeSession(input.sourceSessionId, runtimeRoot, mcpServers)
-                : mcpServers.length === 0
-                  ? await client.loadSession(input.sourceSessionId, runtimeRoot)
-                  : await client.loadSession(input.sourceSessionId, runtimeRoot, mcpServers);
+                  ? await client.newSession(runtimeRoot)
+                  : await client.newSession(runtimeRoot, mcpServers)
+                : await client.newSession(runtimeRoot, mcpServers, sessionMeta)
+              : profile.resumeMethod === "session/resume"
+                ? sessionMeta === undefined
+                  ? mcpServers.length === 0
+                    ? await client.resumeSession(sourceSessionId, runtimeRoot)
+                    : await client.resumeSession(sourceSessionId, runtimeRoot, mcpServers)
+                  : await client.resumeSession(
+                      sourceSessionId,
+                      runtimeRoot,
+                      mcpServers,
+                      sessionMeta,
+                    )
+                : sessionMeta === undefined
+                  ? mcpServers.length === 0
+                    ? await client.loadSession(sourceSessionId, runtimeRoot)
+                    : await client.loadSession(sourceSessionId, runtimeRoot, mcpServers)
+                  : await client.loadSession(sourceSessionId, runtimeRoot, mcpServers, sessionMeta);
           if (managedTools !== undefined) await managedTools.bridge.attested;
           // A profile that supplies its own request shape is describing an agent
           // whose reply the standard result schema does not fit, so that reply is
           // taken as-is. Everything else is standard ACP and stays validated: a
           // malformed success there would otherwise register a session whose
           // model and authority mode were never confirmed.
+          // The reply names the model the session opened with, which is the
+          // same confirmation the standard selection would have acted on. A
+          // session that already opened the requested model is left alone,
+          // because switching it would reset the level it was opened with.
+          const modelOpenedWithSession =
+            sessionMeta !== undefined && source.models?.currentModelId === input.modelId;
           const setModelCall = profile.setModelCall?.(source.sessionId, input.modelId);
           // The agent's config options can change with the model selection, so
           // the reply to each standard call carries the current set; keep the
           // newest one rather than the session's original list.
           let configOptions = source.configOptions ?? [];
-          if (setModelCall === undefined) {
-            const result = await client.setConfigOption(source.sessionId, "model", input.modelId);
-            configOptions = result.configOptions;
-          } else {
-            await client.call(setModelCall.method, setModelCall.params);
+          if (!modelOpenedWithSession) {
+            if (setModelCall === undefined) {
+              const result = await client.setConfigOption(source.sessionId, "model", input.modelId);
+              configOptions = result.configOptions;
+            } else {
+              await client.call(setModelCall.method, setModelCall.params);
+            }
           }
           const modeValue = profile.sessionMode(mode, input.executionPolicy);
           const setModeCall = profile.setModeCall?.(source.sessionId, modeValue);

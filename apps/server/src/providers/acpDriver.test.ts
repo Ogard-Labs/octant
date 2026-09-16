@@ -904,6 +904,92 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     );
   });
 
+  // An agent may publish a model's reasoning levels in the session model state's
+  // own metadata and send no config options at all. Grok Build does this, so
+  // every one of its models was read as unable to reason, and the composer drew
+  // no reasoning control for a model that offers four levels.
+  it("declares the reasoning levels a model publishes in its own session metadata", async () => {
+    if (profile.sessionMetaReasoning === undefined) return;
+    const { driver, client } = fixture(profile);
+    client.newSession.mockImplementationOnce(async () => {
+      client.emitCommands("agent-session-meta");
+      return {
+        sessionId: "agent-session-meta",
+        models: {
+          currentModelId: "agent-k2",
+          availableModels: [
+            {
+              modelId: "agent-k2",
+              name: "Agent K2",
+              _meta: {
+                supportsReasoningEffort: true,
+                reasoningEfforts: [{ value: "xhigh" }, { value: "low" }],
+              },
+            },
+            { modelId: "agent-k2-plain", name: "Agent K2 Plain", _meta: {} },
+          ],
+        },
+      };
+    });
+
+    const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+
+    expect(result.capabilities.reasoning).toBe("supported");
+    expect(result.models).toMatchObject([
+      {
+        id: "agent-k2",
+        reasoning: "supported",
+        options: [{ id: profile.reasoningOptionId, kind: "selection", values: ["xhigh", "low"] }],
+      },
+      { id: "agent-k2-plain", reasoning: "unavailable", options: [] },
+    ]);
+  });
+
+  it("opens the session with the chosen level, because a model call resets it", async () => {
+    if (profile.sessionMetaReasoning === undefined) return;
+    const { driver, client } = fixture(profile);
+    client.newSession.mockImplementationOnce(async () => {
+      client.emitCommands("agent-session-level");
+      return {
+        sessionId: "agent-session-level",
+        models: {
+          currentModelId: modelId,
+          availableModels: [
+            {
+              modelId,
+              name: "Agent K2",
+              _meta: { supportsReasoningEffort: true, reasoningEfforts: [{ value: "low" }] },
+            },
+          ],
+        },
+      };
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            modelOptionValues: { [profile.reasoningOptionId]: "low" },
+          });
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+
+    expect(client.newSession).toHaveBeenCalledWith(projectRoot, [], {
+      modelId,
+      reasoningEffort: "low",
+    });
+    // The session already opened the requested model, so nothing switches it:
+    // the agent resets a level its own model call did not set.
+    expect(client.call).not.toHaveBeenCalledWith("session/set_model", expect.anything());
+    expect(client.setConfigOption).not.toHaveBeenCalled();
+  });
+
   it("tells the user to sign in again when a turn is refused for a stale credential", async () => {
     // A managed home holding an expired credential passes the probe: the agent
     // opens the session and reports its models, and only the turn is refused.

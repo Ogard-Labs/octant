@@ -103,11 +103,34 @@ export interface AcpProcessProfile {
   readonly confinement: AcpConfinementStrategy;
 }
 
+/**
+ * A reasoning control the agent publishes and takes outside a session config
+ * option.
+ *
+ * Grok Build is the known case: session/new returns no configOptions at all,
+ * each model states its own levels in its own session-metadata entry
+ * (availableModels[]._meta.reasoningEfforts), and the level is applied by
+ * sending _meta.reasoningEffort with session/new or session/load. The agent's
+ * own model call resets a level it did not set, so a level declared here
+ * travels with the session that selects the model.
+ */
+export interface AcpSessionMetaReasoning {
+  /** Levels this model advertises for itself, in the agent's own order. */
+  readonly levelsOf: (modelMeta: Readonly<Record<string, unknown>>) => ReadonlyArray<string>;
+  /** Session metadata that carries a thread's model and chosen level. */
+  readonly meta: (input: {
+    readonly modelId: string;
+    readonly level: string | undefined;
+  }) => Readonly<Record<string, unknown>>;
+}
+
 export interface AcpProviderProfile {
   readonly kind: AcpProviderKind;
   readonly displayName: string;
   /** Session config option that toggles reasoning, when the agent exposes one. */
   readonly reasoningOptionId: "effort" | "thinking";
+  /** Reasoning the agent publishes and takes in the session metadata instead. */
+  readonly sessionMetaReasoning?: AcpSessionMetaReasoning;
   /** ACP `mode` config value for a product mode and execution policy. */
   readonly sessionMode: (mode: AcpSessionMode, policy: ProviderExecutionPolicy) => string;
   /** Overrides the default `session/set_config_option` call for setting the model. */
@@ -487,10 +510,36 @@ const GROK_FEATURE_OVERLAY = {
   },
 } as const;
 
+/**
+ * Grok Build publishes each model's reasoning levels in the session metadata
+ * and takes the chosen one back as _meta.reasoningEffort when a session is
+ * created or loaded. Measured on grok 1.0.5 and 1.0.30: session/new reports no
+ * configOptions, the reply's model state confirms the level, session/set_mode
+ * leaves it alone, and session/set_model resets it to the new model's default.
+ */
+const grokSessionMetaReasoning: AcpSessionMetaReasoning = {
+  levelsOf: (modelMeta) => {
+    if (modelMeta["supportsReasoningEffort"] !== true) return [];
+    const levels = modelMeta["reasoningEfforts"];
+    if (!Array.isArray(levels)) return [];
+    return levels.flatMap((entry) => {
+      if (typeof entry !== "object" || entry === null) return [];
+      const record = entry as Readonly<Record<string, unknown>>;
+      const value = record["value"] ?? record["id"];
+      return typeof value === "string" && value.trim().length > 0 ? [value.trim()] : [];
+    });
+  },
+  meta: ({ modelId, level }) => ({
+    modelId,
+    ...(level === undefined ? {} : { reasoningEffort: level }),
+  }),
+};
+
 const grokProfile: AcpProviderProfile = {
   kind: "grok",
   displayName: "Grok Build",
   reasoningOptionId: "thinking",
+  sessionMetaReasoning: grokSessionMetaReasoning,
   sessionMode: (mode, policy) => {
     if (mode === "chat") return "default";
     if (policy === "plan") return "plan";
