@@ -8,6 +8,11 @@ repository. It describes the shape of the system as it exists in code; the
 decision records under `docs/decisions/` explain why individual choices were
 made.
 
+The Projects directory accompanies the selected Project overview only while the
+workspace is visible. Global destinations such as Board, Inbox, and Pull requests
+hide the directory and restore the normal sidebar; returning to Projects restores
+its directory. The underlying Project selection remains intact.
+
 ## Repository test cancellation
 
 An authorized repository test remains cancellable while the host rediscovers its
