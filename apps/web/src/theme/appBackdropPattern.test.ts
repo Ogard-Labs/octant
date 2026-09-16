@@ -8,6 +8,7 @@ import { startAppPattern } from "./appBackdropPattern";
  */
 function fakeWebGl() {
   const times: number[] = [];
+  const palettes: number[][] = [];
   const locations = { u_time: { name: "u_time" } };
   const gl = {
     VERTEX_SHADER: 1,
@@ -42,6 +43,8 @@ function fakeWebGl() {
     viewport: () => undefined,
     uniform2f: () => undefined,
     uniform3f: () => undefined,
+    uniform3fv: (_location: unknown, value: Float32Array) => palettes.push([...value]),
+    uniform1i: () => undefined,
     uniform1f: (location: { name: string }, value: number) => {
       if (location === locations.u_time) times.push(value);
     },
@@ -50,7 +53,7 @@ function fakeWebGl() {
     drawArrays: () => undefined,
     getExtension: () => null,
   };
-  return { gl, times };
+  return { gl, times, palettes };
 }
 
 function fakeCanvas(gl: unknown): HTMLCanvasElement {
@@ -134,6 +137,26 @@ describe("app backdrop pattern loop", () => {
     tick(50);
     tick(50);
     expect(times.length).toBe(drawn);
+    handle!.stop();
+  });
+
+  it("draws with a bounded multi-ink palette and updates it without restarting", () => {
+    const { gl, palettes } = fakeWebGl();
+    const handle = startAppPattern(fakeCanvas(gl), {
+      ink: [1, 0, 0],
+      palette: [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ],
+      animated: false,
+      speed: 1,
+      intensity: 0.6,
+    });
+
+    expect(palettes.at(-1)).toEqual([1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]);
+    handle!.setPalette([[1, 1, 1]]);
+    expect(palettes.at(-1)).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
     handle!.stop();
   });
 });

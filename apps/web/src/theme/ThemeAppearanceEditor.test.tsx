@@ -134,6 +134,8 @@ describe("ThemeAppearanceEditor", () => {
     expect(light).toHaveTextContent("System");
     await user.click(light);
     expect(await screen.findByRole("option", { name: "Brass" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "Pride" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "Norway" })).toBeVisible();
   });
 
   it("omits the Octant appearance pack when that plugin is not effective", async () => {

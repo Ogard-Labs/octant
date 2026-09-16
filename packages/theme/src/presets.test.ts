@@ -35,6 +35,8 @@ describe("built-in theme preset catalog", () => {
       "ash",
       "obsidian",
       "onyx",
+      "pride",
+      "norway",
     ]);
     expect(THEME_PRESETS.map((preset) => preset.id)).toEqual(BUILT_IN_THEME_PRESET_IDS);
     expect(THEME_PRESETS.map((preset) => preset.displayName)).toEqual([
@@ -60,6 +62,8 @@ describe("built-in theme preset catalog", () => {
       "Ash",
       "Obsidian",
       "Onyx",
+      "Pride",
+      "Norway",
     ]);
   });
 
@@ -122,7 +126,7 @@ describe("built-in theme preset catalog", () => {
     const tinted = THEME_PRESETS.filter(
       (preset) => !["system", "light", "dark", "octant"].includes(preset.id),
     );
-    expect(tinted).toHaveLength(18);
+    expect(tinted).toHaveLength(20);
     for (const preset of tinted) {
       for (const mode of ["light", "dark"] as const) {
         const tokens = preset.tokens[mode]!;
@@ -146,6 +150,18 @@ describe("built-in theme preset catalog", () => {
       expect(dark.sidebar).toBe("#000000");
     }
     expect(getThemePreset("moss")!.tokens.dark!["app-background"]).not.toBe("#000000");
+  });
+
+  it("gives Pride and Norway their own bounded application-ground art palettes", () => {
+    expect(getThemePreset("pride")?.patternPalette).toEqual([
+      "#e40303",
+      "#ff8c00",
+      "#ffed00",
+      "#008026",
+      "#24408e",
+      "#732982",
+    ]);
+    expect(getThemePreset("norway")?.patternPalette).toEqual(["#ba0c2f", "#ffffff", "#00205b"]);
   });
 
   it("returns undefined for an unknown id without throwing", () => {

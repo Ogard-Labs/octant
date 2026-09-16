@@ -47,12 +47,14 @@ replay across restarts.
 
 Theme mode is **System**, **Light**, or **Dark**. Built-in presets are
 **System** (follows the current system appearance), **Light**, **Dark**,
-**Octant** (the original charcoal-and-brass palette), and eighteen tinted
+**Octant** (the original charcoal-and-brass palette), and twenty tinted
 palettes that lean the whole page toward one hue and colour the accent, in
 light and dark: **Moss**, **Lagoon**, **Harbor**, **Iris**, **Rose**,
 **Ember**, **Coral**, **Clay**, **Sand**, **Olive**, **Mint**, **Sky**,
-**Slate**, **Plum**, **Ash**, and the true-black **Ink**, **Obsidian**, and
-**Onyx** for OLED screens. Every preset clears the same text and control
+**Slate**, **Plum**, **Ash**, the true-black **Ink**, **Obsidian**, and
+**Onyx** for OLED screens, plus **Pride** and **Norway**. Pride pairs softly
+violet surfaces with a six-colour spectrum; Norway pairs fjord-blue surfaces
+with a red accent. Every preset clears the same text and control
 contrast bars.
 Semantic token roles cover foundation, surface, control, border, text,
 focus, accent, status, and diff colors with contrast validation and safe
@@ -93,8 +95,10 @@ forces it off.
 ### Background
 
 The app sits on a ground of its own. **Theme pattern** (the default) is an
-ordered-dither cloud drawn in the theme's accent, so switching presets or
-overriding the accent recolours it at once. **Built-in** uses the same still or
+ordered-dither cloud drawn from the theme's bounded pattern palette. Most themes
+use the accent alone; Pride uses a six-colour spectrum and Norway uses red,
+white, and blue. The resolved accent remains the first ink, so switching presets
+or overriding the accent recolours the leading ink at once. **Built-in** uses the same still or
 animated first-party image catalog as Zen, with a preview tile for every
 choice. **Photo** prints a picture of yours through the same dither, with the
 cloud over it; upload a PNG, JPEG, or WebP up to 8 MiB and 4096×4096 pixels, or

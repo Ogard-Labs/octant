@@ -1,4 +1,4 @@
-import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
+import { decodeThemePresetId, DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ThemeSettingsProvider } from "./ThemeSettingsProvider";
@@ -64,5 +64,31 @@ describe("ThemeSettingsProvider", () => {
     expect(root.style.getPropertyValue("--octant-accent-text")).not.toBe("");
 
     result.unmount();
+  });
+
+  it("projects a preset's bounded art palette for the application ground", () => {
+    const result = render(
+      <ThemeSettingsProvider
+        settings={{
+          ...DEFAULT_THEME_SETTINGS,
+          mode: "dark",
+          darkPresetId: decodeThemePresetId("pride"),
+        }}
+      >
+        <div>Pride theme</div>
+      </ThemeSettingsProvider>,
+    );
+
+    const root = document.documentElement;
+    expect(root.dataset.octantPatternInkCount).toBe("6");
+    expect(root.style.getPropertyValue("--octant-pattern-ink-1")).toBe(
+      root.style.getPropertyValue("--octant-accent"),
+    );
+    expect(root.style.getPropertyValue("--octant-pattern-ink-2")).toBe("#ff8c00");
+    expect(root.style.getPropertyValue("--octant-pattern-ink-6")).toBe("#732982");
+
+    result.unmount();
+    expect(root.dataset.octantPatternInkCount).toBeUndefined();
+    expect(root.style.getPropertyValue("--octant-pattern-ink-6")).toBe("");
   });
 });

@@ -16,6 +16,8 @@ export interface ThemePreset {
   readonly description: string;
   readonly supportedModes: ReadonlyArray<ThemePresetMode>;
   readonly tokens: Readonly<Partial<Record<ThemePresetMode, Readonly<Record<string, string>>>>>;
+  /** Ordered inks used by the application-ground dither. One ink keeps the classic monochrome cloud. */
+  readonly patternPalette?: ReadonlyArray<string>;
 }
 
 export interface ThemePresetValidation {
@@ -46,8 +48,11 @@ export const BUILT_IN_THEME_PRESET_IDS = [
   "ash",
   "obsidian",
   "onyx",
+  "pride",
+  "norway",
 ] as const;
 export type BuiltInThemePresetId = (typeof BUILT_IN_THEME_PRESET_IDS)[number];
+export const MAX_THEME_PATTERN_INKS = 6;
 
 const LIGHT_OCTANT_TOKENS: Readonly<Record<string, string>> = {
   ...DEFAULT_LIGHT_TOKENS,
@@ -105,12 +110,16 @@ interface TintedPresetSpec {
   readonly description: string;
   /** OKLCH hue angle the whole palette is drawn from. */
   readonly hue: number;
+  /** Accent hue when the controls should contrast with the surface tint. */
+  readonly accentHue?: number;
   /** Accent chroma; most hues carry 0.13, a quieter one less. */
   readonly chroma?: number;
   /** True-black surfaces for OLED screens. */
   readonly ink?: boolean;
   /** How strongly the surfaces lean toward the hue; 1 is the usual faint tint. */
   readonly surface?: number;
+  /** A bounded palette for the application-ground artwork. */
+  readonly patternPalette?: ReadonlyArray<string>;
 }
 
 // A colour preset is one hue applied twice: faintly to every surface, so the
@@ -122,6 +131,7 @@ function tintedTokens(mode: ThemePresetMode, spec: TintedPresetSpec): Record<str
   const chroma = spec.chroma ?? 0.13;
   const lean = spec.surface ?? 1;
   const color = (l: number, c: number) => oklchToHex({ l, c, h: spec.hue });
+  const accent = (l: number) => oklchToHex({ l, c: chroma, h: spec.accentHue ?? spec.hue });
   if (mode === "light") {
     return {
       ...DEFAULT_LIGHT_TOKENS,
@@ -140,9 +150,9 @@ function tintedTokens(mode: ThemePresetMode, spec: TintedPresetSpec): Record<str
       "text-secondary": color(0.42, 0.015),
       "text-muted": color(0.52, 0.015),
       selection: color(0.93, 0.025),
-      accent: color(0.46, chroma),
-      "accent-text": color(0.46, chroma),
-      "focus-ring": color(0.46, chroma),
+      accent: accent(0.46),
+      "accent-text": accent(0.46),
+      "focus-ring": accent(0.46),
       "accent-foreground": "#ffffff",
       "primary-foreground": "#ffffff",
     };
@@ -200,9 +210,9 @@ function tintedTokens(mode: ThemePresetMode, spec: TintedPresetSpec): Record<str
     // meta text this role carries.
     "text-muted": color(0.67, 0.008),
     selection: color(l.selection, 0.025),
-    accent: color(0.76, chroma),
-    "accent-text": color(0.76, chroma),
-    "focus-ring": color(0.76, chroma),
+    accent: accent(0.76),
+    "accent-text": accent(0.76),
+    "focus-ring": accent(0.76),
     "accent-foreground": color(0.16, 0.02),
     "primary-foreground": color(0.16, 0.02),
   };
@@ -336,6 +346,26 @@ const TINTED_PRESETS: ReadonlyArray<TintedPresetSpec> = [
     chroma: 0.11,
     ink: true,
   },
+  {
+    id: "pride",
+    displayName: "Pride",
+    description: "Soft violet surfaces with a luminous full-spectrum Pride ground.",
+    hue: 305,
+    accentHue: 335,
+    chroma: 0.15,
+    surface: 1.35,
+    patternPalette: ["#e40303", "#ff8c00", "#ffed00", "#008026", "#24408e", "#732982"],
+  },
+  {
+    id: "norway",
+    displayName: "Norway",
+    description: "Deep fjord-blue surfaces with a red accent and flag-inspired ground.",
+    hue: 250,
+    accentHue: 25,
+    chroma: 0.17,
+    surface: 1.65,
+    patternPalette: ["#ba0c2f", "#ffffff", "#00205b"],
+  },
 ];
 
 const tintedPreset = (spec: TintedPresetSpec): ThemePreset => ({
@@ -344,6 +374,7 @@ const tintedPreset = (spec: TintedPresetSpec): ThemePreset => ({
   description: spec.description,
   supportedModes: ["light", "dark"],
   tokens: { light: tintedTokens("light", spec), dark: tintedTokens("dark", spec) },
+  ...(spec.patternPalette === undefined ? {} : { patternPalette: spec.patternPalette }),
 });
 
 const freezeTokens = (tokens: Readonly<Record<string, string>>) =>
@@ -352,6 +383,9 @@ const freezeTokens = (tokens: Readonly<Record<string, string>>) =>
 const makePreset = (preset: ThemePreset): ThemePreset =>
   Object.freeze({
     ...preset,
+    ...(preset.patternPalette === undefined
+      ? {}
+      : { patternPalette: Object.freeze([...preset.patternPalette]) }),
     supportedModes: Object.freeze([...preset.supportedModes]),
     tokens: Object.freeze(
       Object.fromEntries(
@@ -471,6 +505,24 @@ export function validateThemePreset(input: unknown): ThemePresetValidation {
   if (!Array.isArray(input.supportedModes) || input.supportedModes.length === 0) {
     errors.push("preset.supportedModes is required");
   }
+  if (input.patternPalette !== undefined) {
+    if (
+      !Array.isArray(input.patternPalette) ||
+      input.patternPalette.length === 0 ||
+      input.patternPalette.length > MAX_THEME_PATTERN_INKS
+    ) {
+      errors.push(`preset.patternPalette must contain 1-${String(MAX_THEME_PATTERN_INKS)} colors`);
+    } else {
+      for (const color of input.patternPalette) {
+        try {
+          if (typeof color !== "string") throw new Error("invalid color");
+          parseHexColor(color);
+        } catch {
+          errors.push("preset.patternPalette colors must be six-digit hex colors");
+        }
+      }
+    }
+  }
 
   const modes = Array.isArray(input.supportedModes) ? input.supportedModes : [];
   for (const mode of modes) {
@@ -507,6 +559,7 @@ export function serializeThemePresetCatalog(): string {
     displayName: preset.displayName,
     description: preset.description,
     supportedModes: [...preset.supportedModes],
+    ...(preset.patternPalette === undefined ? {} : { patternPalette: [...preset.patternPalette] }),
     tokens: Object.fromEntries(
       (["light", "dark"] as const)
         .filter((mode) => preset.tokens[mode] !== undefined)

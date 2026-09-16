@@ -270,6 +270,18 @@ const appearancePlugin = firstPartyManifest({
       label: "Obsidian",
     },
     { point: "appearance.preset", componentId: "appearance-pack", presetId: "onyx", label: "Onyx" },
+    {
+      point: "appearance.preset",
+      componentId: "appearance-pack",
+      presetId: "pride",
+      label: "Pride",
+    },
+    {
+      point: "appearance.preset",
+      componentId: "appearance-pack",
+      presetId: "norway",
+      label: "Norway",
+    },
   ],
 });
 

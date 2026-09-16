@@ -1,16 +1,18 @@
 /**
  * The welcome screen's ambient ground: an ordered-dither cloud in the theme's
- * accent, drawn by the GPU at one cell per three CSS pixels and scaled up with
+ * bounded ink palette, drawn by the GPU at one cell per three CSS pixels and scaled up with
  * nearest-neighbour sampling so the cells stay crisp instead of blurring.
  *
- * Nothing here knows a theme. The ink is whatever the theme provider painted
- * into `--octant-accent`; the caller pushes a new ink when that changes, and
- * tells the loop to hold still when reduced motion asks for it.
+ * Nothing here knows a theme. The inks are whatever the theme provider
+ * projected; the caller pushes a new palette when that changes, and tells the
+ * loop to hold still when reduced motion asks for it.
  */
 export type InkRgb = readonly [number, number, number];
 
 export interface AppPatternOptions {
   readonly ink: InkRgb;
+  /** One to six ordered inks. Omit to keep the classic monochrome cloud. */
+  readonly palette?: ReadonlyArray<InkRgb>;
   readonly animated: boolean;
   /** A multiplier on the base drift: 1 is the default pace, 0 holds still. */
   readonly speed: number;
@@ -20,6 +22,7 @@ export interface AppPatternOptions {
 
 export interface AppPatternHandle {
   readonly setInk: (ink: InkRgb) => void;
+  readonly setPalette: (palette: ReadonlyArray<InkRgb>) => void;
   readonly setAnimated: (animated: boolean) => void;
   readonly setSpeed: (speed: number) => void;
   readonly setIntensity: (intensity: number) => void;
@@ -28,6 +31,7 @@ export interface AppPatternHandle {
 
 /** One dither cell spans three CSS pixels: visibly a grid, never a haze. */
 export const PATTERN_CELL_PX = 3;
+const MAX_PATTERN_INKS = 6;
 /** The cloud drifts slowly; a full-rate loop would only warm the machine. */
 const FRAME_INTERVAL_MS = 1000 / 24;
 /** A tab hidden for an hour resumes where it left off, not an hour later. */
@@ -50,7 +54,8 @@ precision mediump float;
 uniform vec2 u_resolution;
 uniform float u_time;
 uniform float u_intensity;
-uniform vec3 u_ink;
+uniform vec3 u_palette[6];
+uniform int u_palette_size;
 out vec4 outColor;
 
 float hash21(vec2 p) {
@@ -97,7 +102,12 @@ void main() {
   // it reads as print rather than as a lit panel.
   float density = u_intensity * smoothstep(0.4, 0.95, n) * smoothstep(0.16, 0.8, height);
   float on = step(bayer8(ivec2(px)), density);
-  outColor = vec4(u_ink * on, on);
+  float ribbon = fract(uv.x * 0.72 + n * 0.2 + u_time * 0.012);
+  float paletteIndex = ribbon * float(max(u_palette_size - 1, 0));
+  int fromIndex = int(floor(paletteIndex));
+  int toIndex = min(fromIndex + 1, u_palette_size - 1);
+  vec3 ink = mix(u_palette[fromIndex], u_palette[toIndex], fract(paletteIndex));
+  outColor = vec4(ink * on, on);
 }
 `;
 
@@ -107,7 +117,8 @@ interface PatternProgram {
   readonly resolution: WebGLUniformLocation | null;
   readonly time: WebGLUniformLocation | null;
   readonly intensity: WebGLUniformLocation | null;
-  readonly ink: WebGLUniformLocation | null;
+  readonly palette: WebGLUniformLocation | null;
+  readonly paletteSize: WebGLUniformLocation | null;
 }
 
 function compileShader(
@@ -158,7 +169,8 @@ function buildProgram(gl: WebGL2RenderingContext): PatternProgram | null {
     resolution: gl.getUniformLocation(program, "u_resolution"),
     time: gl.getUniformLocation(program, "u_time"),
     intensity: gl.getUniformLocation(program, "u_intensity"),
-    ink: gl.getUniformLocation(program, "u_ink"),
+    palette: gl.getUniformLocation(program, "u_palette[0]"),
+    paletteSize: gl.getUniformLocation(program, "u_palette_size"),
   };
 }
 
@@ -182,7 +194,9 @@ export function startAppPattern(
   let resources = buildProgram(gl);
   if (resources === null) return null;
 
-  let ink = options.ink;
+  const boundedPalette = (next: ReadonlyArray<InkRgb>): ReadonlyArray<InkRgb> =>
+    (next.length === 0 ? [options.ink] : next).slice(0, MAX_PATTERN_INKS);
+  let palette = boundedPalette(options.palette ?? [options.ink]);
   let animated = options.animated;
   let speed = Math.max(0, options.speed);
   let intensity = Math.min(1, Math.max(0, options.intensity));
@@ -212,7 +226,10 @@ export function startAppPattern(
     gl.uniform2f(resources.resolution, canvas.width, canvas.height);
     gl.uniform1f(resources.time, elapsedMs / 1000);
     gl.uniform1f(resources.intensity, intensity);
-    gl.uniform3f(resources.ink, ink[0], ink[1], ink[2]);
+    const last = palette.at(-1) ?? options.ink;
+    const padded = Array.from({ length: MAX_PATTERN_INKS }, (_, index) => palette[index] ?? last);
+    gl.uniform3fv(resources.palette, new Float32Array(padded.flat()));
+    gl.uniform1i(resources.paletteSize, palette.length);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -284,7 +301,11 @@ export function startAppPattern(
 
   return {
     setInk(next) {
-      ink = next;
+      palette = [next, ...palette.slice(1)];
+      if (!running()) draw();
+    },
+    setPalette(next) {
+      palette = boundedPalette(next);
       if (!running()) draw();
     },
     setAnimated(next) {
