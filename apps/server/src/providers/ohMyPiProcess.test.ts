@@ -75,6 +75,40 @@ describe("Oh My Pi process probe", () => {
     expect(Exit.isFailure(exit)).toBe(true);
   });
 
+  it("reports the installed and supported versions when the version pin is incompatible", async () => {
+    const root = mkdtempSync(join(tmpdir(), "octant-omp-version-"));
+    const binaryPath = join(root, "omp");
+    writeFileSync(
+      binaryPath,
+      '#!/bin/sh\nif [ "${1:-}" = "--version" ]; then printf "18.0.10\\n"; exit 0; fi\nexit 1\n',
+    );
+    chmodSync(binaryPath, 0o755);
+    try {
+      const failure = await Effect.runPromise(
+        Effect.flip(
+          Effect.scoped(
+            makeOhMyPiProcessLive().startProbe({
+              binaryPath,
+              managedHome: root,
+              supportedVersion: "17.2.1",
+            }),
+          ),
+        ),
+      );
+      expect(failure).toMatchObject({
+        category: "incompatible",
+        diagnostic: {
+          stage: "version-check",
+          kind: "version-mismatch",
+          detectedVersion: "18.0.10",
+          supportedVersion: "17.2.1",
+        },
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("waits for ownership persistence before awaiting the ready frame", async () => {
     const root = mkdtempSync(join(tmpdir(), "octant-omp-"));
     const binaryPath = join(root, "omp");

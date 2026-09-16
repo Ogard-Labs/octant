@@ -123,7 +123,10 @@ update command. It runs that command against the same configured executable,
 when no active session is using it, and then reports whether the observed
 version changed, stayed the same, could not be compared, or the follow-up
 connection check failed. Exit zero is not treated as proof that the binary was
-replaced. Stop active sessions before updating. Unsupported or unverified
+replaced. When Settings is connected to another Octant host, the action runs
+on that selected host against its configured binary; no updater command or
+shell authority is sent to the renderer. Stop active sessions before updating.
+Unsupported or unverified
 commands stay unavailable. Octant never silently replaces a CLI or updates
 providers without an explicit action. On a headless
 host, use the provider's device/non-interactive login when available; no
@@ -134,6 +137,14 @@ pinned version and lists the models it reports, but Octant cannot start a turn
 on it yet, so the provider row stays **Unavailable** with that explanation and
 no Chat, Work, or Code picker offers its models. A saved default that points
 at it is kept and shown as unavailable rather than removed.
+
+Connection details distinguish the installed version from the version Octant
+supports. A failed check reports only bounded process facts such as the stage,
+exit code or signal, and a fixed safe diagnostic classification; raw provider
+output, arguments, paths, environment values, and credentials are never shown.
+An installed but unsupported Oh My Pi version is **Incompatible**, not an
+available update: use its supported-version fact to choose the provider-owned
+installation action outside Octant.
 
 The beta `opencode2` executable appears separately as **OpenCode 2 preview**.
 When both `opencode` and `opencode2` are installed, discovery and automatic

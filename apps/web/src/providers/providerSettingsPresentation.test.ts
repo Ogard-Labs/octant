@@ -16,7 +16,7 @@ describe("provider Settings presentation", () => {
 
   it("turns technical readiness states into compact next-action labels", () => {
     expect(providerRowReadinessLabel("unauthenticated", 0)).toBe("Sign in required");
-    expect(providerRowReadinessLabel("incompatible", 0)).toBe("Update required");
+    expect(providerRowReadinessLabel("incompatible", 0)).toBe("Incompatible");
     expect(providerRowReadinessLabel("degraded", 0)).toBe("Needs setup");
     expect(providerRowReadinessLabel("degraded", 4)).toBe("Limited");
     expect(providerRowReadinessLabel("ready", 4)).toBe("Ready");
@@ -64,6 +64,12 @@ describe("provider Settings presentation", () => {
         citations: "unavailable",
       },
       message: "Claude initialization version did not match the configured binary.",
+      diagnostic: {
+        stage: "initialization",
+        kind: "exited",
+        exitCode: 78,
+        stderrContext: "Provider process rejected its configured arguments.",
+      },
       observedAt: "2026-07-14T10:00:00.000Z",
     });
 
@@ -74,6 +80,12 @@ describe("provider Settings presentation", () => {
       },
       { label: "Binary", value: "/opt/homebrew/bin/claude" },
       { label: "Version", value: "2.1.211" },
+      { label: "Failure stage", value: "Initialization" },
+      { label: "Process result", value: "Exited with code 78" },
+      {
+        label: "Safe stderr context",
+        value: "Provider process rejected its configured arguments.",
+      },
       { label: "Authentication", value: "Claude subscription" },
       { label: "Capabilities", value: "Not confirmed" },
     ]);

@@ -160,6 +160,13 @@ export interface AcpServerRequest {
 }
 
 type FailureKind = "capacity" | "closed" | "protocol" | "remote" | "timeout";
+export type AcpRemoteFailureReason =
+  | "authentication"
+  | "configuration"
+  | "workspace"
+  | "model"
+  | "network"
+  | "unknown";
 
 export class AcpFailure extends Error {
   override readonly name = "AcpFailure";
@@ -167,9 +174,21 @@ export class AcpFailure extends Error {
   constructor(
     readonly kind: FailureKind,
     message: string,
+    readonly remoteReason?: AcpRemoteFailureReason,
   ) {
     super(message);
   }
+}
+
+function remoteFailureReason(error: AcpRemoteError): AcpRemoteFailureReason {
+  if (refusesForAuthentication(error)) return "authentication";
+  const detail = typeof error.data === "string" ? error.data : "";
+  const text = `${error.message ?? ""} ${detail}`.toLowerCase();
+  if (/config|setting|argument|option/.test(text)) return "configuration";
+  if (/workspace|working directory|cwd|trust/.test(text)) return "workspace";
+  if (/model|provider|deployment/.test(text)) return "model";
+  if (/network|connection|dns|resolve|tls|certificate/.test(text)) return "network";
+  return "unknown";
 }
 
 interface AcpRemoteError {
@@ -444,6 +463,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
           refusesForAuthentication(response.error)
             ? "ACP authentication is required."
             : "ACP request failed.",
+          remoteFailureReason(response.error),
         ),
       );
       return;

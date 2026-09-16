@@ -465,19 +465,30 @@ export class ProviderService implements ProviderServiceApi {
         try {
           const current = await this.probe(authenticatedWindowId, command.instanceId);
           const currentVersion = current.detectedVersion;
+          const probeFailed = current.readiness !== "ready" && current.readiness !== "degraded";
+          const diagnostic = postUpdateProbeDiagnostic(current.diagnostic);
           return decodeProviderRegistryCommandResult({
             kind: "provider-cli-updated",
             instanceId: command.instanceId,
-            status: classifyProviderCliUpdateStatus(previousVersion, currentVersion),
+            status: probeFailed
+              ? "probe-failed"
+              : classifyProviderCliUpdateStatus(previousVersion, currentVersion),
             ...(previousVersion === undefined ? {} : { previousVersion }),
             ...(currentVersion === undefined ? {} : { currentVersion }),
+            ...(diagnostic === undefined ? {} : { diagnostic }),
           });
-        } catch {
+        } catch (error) {
+          const failed = providerFailureOfError(error);
+          const observed = this.#runtime.observedState(command.instanceId);
+          const currentVersion = failed?.diagnostic?.detectedVersion ?? observed?.detectedVersion;
+          const diagnostic = postUpdateProbeDiagnostic(failed?.diagnostic ?? observed?.diagnostic);
           return decodeProviderRegistryCommandResult({
             kind: "provider-cli-updated",
             instanceId: command.instanceId,
             status: "probe-failed",
             ...(previousVersion === undefined ? {} : { previousVersion }),
+            ...(currentVersion === undefined ? {} : { currentVersion }),
+            ...(diagnostic === undefined ? {} : { diagnostic }),
           });
         }
       } catch (error) {
@@ -1365,15 +1376,20 @@ export class ProviderService implements ProviderServiceApi {
     if (error instanceof ProviderServiceError) return undefined;
     const failure = providerFailureOfError(error);
     const readiness = probeFailureReadiness(failure?.category ?? "provider-failed");
+    const diagnostic = failure?.diagnostic;
     return decodeProviderObservedState({
       instanceId,
       readiness,
       processState: "stopped",
+      ...(diagnostic?.detectedVersion === undefined
+        ? {}
+        : { detectedVersion: diagnostic.detectedVersion }),
       models: [],
       capabilities: unavailableCapabilities,
-      // Only the category crosses into the observed state: a driver's own
-      // sentence can quote provider output, and this state reaches every client.
-      message: probeFailureMessage(readiness),
+      // Free-form driver messages can quote provider output. Only the typed
+      // diagnostic and its contract-validated safe context cross to clients.
+      message: diagnostic?.stderrContext ?? probeFailureMessage(readiness),
+      ...(diagnostic === undefined ? {} : { diagnostic }),
       observedAt: decodeTimestamp(this.#clock()),
     });
   }
@@ -1758,6 +1774,12 @@ function classifyProviderCliUpdateStatus(
     return previousVersion === currentVersion ? "already-current" : "updated";
   }
   return "version-unknown";
+}
+
+function postUpdateProbeDiagnostic(
+  diagnostic: ProviderObservedState["diagnostic"] | undefined,
+): ProviderObservedState["diagnostic"] | undefined {
+  return diagnostic === undefined ? undefined : { ...diagnostic, stage: "post-update-probe" };
 }
 
 function providerBinaryPath(instance: ProviderInstance): string {

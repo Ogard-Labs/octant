@@ -770,8 +770,17 @@ describe("provider registry contracts", () => {
         instanceId: ids.instance,
         status: "probe-failed",
         previousVersion: "1.0.0",
+        currentVersion: "1.1.0",
+        diagnostic: {
+          stage: "post-update-probe",
+          kind: "protocol-failed",
+          stderrContext: "Provider process rejected its configured arguments.",
+        },
       }),
-    ).toMatchObject({ status: "probe-failed" });
+    ).toMatchObject({
+      status: "probe-failed",
+      diagnostic: { stage: "post-update-probe", kind: "protocol-failed" },
+    });
     expect(() =>
       decodeProviderRegistryCommandResult({
         kind: "provider-cli-updated",
@@ -2336,6 +2345,54 @@ describe("provider runtime contracts", () => {
       category,
       message: "Actionable failure",
     });
+  });
+
+  it("decodes bounded provider process diagnostics without accepting raw output", () => {
+    const diagnostic = {
+      stage: "version-check",
+      kind: "version-mismatch",
+      exitCode: 78,
+      signal: "SIGTERM",
+      detectedVersion: "18.0.10",
+      supportedVersion: "17.2.1",
+      stderrContext: "Provider reported an incompatible installed version.",
+    } as const;
+
+    expect(
+      decodeProviderFailure({
+        category: "incompatible",
+        message: "The installed provider version is incompatible.",
+        diagnostic,
+      }),
+    ).toMatchObject({ diagnostic });
+    expect(() =>
+      decodeProviderFailure({
+        category: "provider-failed",
+        message: "Provider failed.",
+        diagnostic: { ...diagnostic, rawStderr: "secret-token-value" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderFailure({
+        category: "provider-failed",
+        message: "Provider failed.",
+        diagnostic: { ...diagnostic, stderrContext: "/Users/example/private.txt" },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects arbitrary private prose in provider diagnostics", () => {
+    expect(() =>
+      decodeProviderFailure({
+        category: "provider-failed",
+        message: "Provider failed.",
+        diagnostic: {
+          stage: "update",
+          kind: "exited",
+          stderrContext: "Customer Alice private project Acme",
+        },
+      }),
+    ).toThrow();
   });
 
   it("decodes bounded retry timing only", () => {

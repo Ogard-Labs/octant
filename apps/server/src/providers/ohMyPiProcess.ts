@@ -269,12 +269,17 @@ export function makeOhMyPiProcessLive(options: OhMyPiProcessOptions = {}): OhMyP
             catch: () => failure("incompatible", "Oh My Pi version could not be verified."),
           });
           if (version !== input.supportedVersion) {
-            return yield* Effect.fail(
-              failure(
-                "incompatible",
-                `Oh My Pi version ${version} is not the pinned supported version ${input.supportedVersion}.`,
-              ),
-            );
+            return yield* Effect.fail({
+              category: "incompatible",
+              message: `Oh My Pi version ${version} is not the pinned supported version ${input.supportedVersion}.`,
+              diagnostic: {
+                stage: "version-check",
+                kind: "version-mismatch",
+                detectedVersion: version,
+                supportedVersion: input.supportedVersion,
+                stderrContext: "Provider reported an incompatible installed version.",
+              },
+            } satisfies ProviderFailure);
           }
           const child = yield* Effect.try({
             try: () =>

@@ -473,6 +473,54 @@ describe("shared Seatbelt profile builder", () => {
     expect(profile).not.toContain(seatbeltExecRule("/bin/sh"));
   });
 
+  it("keeps an env-resolved interpreter launcher readable without opening its sibling binaries", () => {
+    const root = temporaryRoot();
+    const boundRoot = join(root, "project");
+    const temporaryDirectory = join(root, "tmp");
+    const launcherDirectory = join(root, ".local/bin");
+    const runtimeDirectory = join(root, ".hermes/node/bin");
+    const packageDirectory = join(root, ".local/lib/provider");
+    const sandboxPath = join(root, "sandbox-exec");
+    const interpreter = join(runtimeDirectory, "node");
+    const launcher = join(launcherDirectory, "node");
+    const sibling = join(launcherDirectory, "npm");
+    const script = join(packageDirectory, "cli.js");
+    mkdirSync(boundRoot);
+    mkdirSync(temporaryDirectory);
+    mkdirSync(launcherDirectory, { recursive: true });
+    mkdirSync(runtimeDirectory, { recursive: true });
+    mkdirSync(packageDirectory, { recursive: true });
+    writeFileSync(sandboxPath, "#!/bin/sh\n", { mode: 0o700 });
+    writeFileSync(interpreter, "#!/bin/sh\n", { mode: 0o700 });
+    writeFileSync(sibling, "#!/bin/sh\n", { mode: 0o700 });
+    symlinkSync(interpreter, launcher);
+    writeFileSync(script, "#!/usr/bin/env node\nconsole.log(1)\n", { mode: 0o700 });
+
+    const launch = makeSeatbeltConfinementLive({
+      platform: "darwin",
+      sandboxPath,
+      homeDirectory: root,
+      usersDirectory: root,
+      interpreterSearchPath: launcherDirectory,
+    }).prepare({
+      executable: script,
+      args: [],
+      boundRoot,
+      temporaryDirectory,
+      networkEgress: "none",
+      allowFileReadStar: true,
+      allowProcessExec: false,
+      allowProcessFork: false,
+    });
+
+    const profile = launch.args[1];
+    expect(profile).toContain(seatbeltExecRule(launcher));
+    expect(profile).toContain(seatbeltExecRule(interpreter));
+    expect(profile).not.toContain(seatbeltDenyRule("file-read*", launcherDirectory));
+    expect(profile).not.toContain(seatbeltDenyRule("file-read*", launcher));
+    expect(profile).toContain(seatbeltDenyRule("file-read*", sibling));
+  });
+
   it("resolves the interpreter past env options and environment assignments", () => {
     const root = temporaryRoot();
     const boundRoot = join(root, "project");
