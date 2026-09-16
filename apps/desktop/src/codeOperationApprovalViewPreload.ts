@@ -13,7 +13,7 @@ function element(id: string): HTMLElement | undefined {
 
 let challenge: ApprovalChallengeView | undefined;
 
-function send(decision: "approve" | "cancel"): void {
+function send(decision: "approve" | "cancel" | "next" | "previous"): void {
   if (token === undefined || challenge === undefined) return;
   const approve = element("approve");
   const cancel = element("cancel");
@@ -63,7 +63,26 @@ ipcRenderer.on(CODE_OPERATION_APPROVAL_VIEW_CHANNELS.challenge, (_event, value: 
   if (next !== undefined) render(next);
 });
 
+ipcRenderer.on(CODE_OPERATION_APPROVAL_VIEW_CHANNELS.queue, (_event, value: unknown) => {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("count" in value) ||
+    typeof value.count !== "number" ||
+    !Number.isInteger(value.count) ||
+    value.count < 1 ||
+    value.count > 8
+  )
+    return;
+  const queue = element("queue");
+  const count = element("queue-count");
+  if (queue !== undefined) queue.hidden = value.count < 2;
+  if (count !== undefined) count.textContent = `${value.count} pending approvals`;
+});
+
 window.addEventListener("DOMContentLoaded", () => {
+  element("previous")?.addEventListener("click", () => send("previous"));
+  element("next")?.addEventListener("click", () => send("next"));
   element("approve")?.addEventListener("click", () => send("approve"));
   element("cancel")?.addEventListener("click", () => send("cancel"));
   // Escape cancels; Enter deliberately has no action so an accidental keypress

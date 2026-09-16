@@ -84,6 +84,7 @@ interface PendingApproval<TWindow> {
   readonly projectId: string;
   readonly threadId: string;
   readonly composerId: string | undefined;
+  readonly expiresAt: number;
   token: string;
   readonly resolve: (approvalId: CodeApprovalId | undefined) => void;
   anchorTimer: ReturnType<typeof setTimeout> | undefined;
@@ -99,6 +100,7 @@ interface PendingApproval<TWindow> {
 
 const DEFAULT_EXPIRY_MS = 5 * 60_000;
 const DEFAULT_ANCHOR_WAIT_MS = 1_000;
+const MAX_PENDING_APPROVALS_PER_WINDOW = 8;
 
 function threadAndProject(
   request: CodeOperationApprovalRequest,
@@ -166,9 +168,17 @@ export function createCodeOperationApprovalViewController<TWindow>(
 ) {
   const pendingByWindow = new Map<string, PendingApproval<TWindow>>();
   const anchorByWindow = new Map<string, CodeOperationApprovalAnchor>();
+  const queuedByWindow = new Map<string, Array<PendingApproval<TWindow>>>();
   const token = options.token ?? randomToken;
   const expiryMs = options.expiryMs ?? DEFAULT_EXPIRY_MS;
   const anchorWaitMs = options.anchorWaitMs ?? DEFAULT_ANCHOR_WAIT_MS;
+
+  const showQueueCount = (windowId: string) => {
+    const active = pendingByWindow.get(windowId);
+    active?.view?.webContents.send(CODE_OPERATION_APPROVAL_VIEW_CHANNELS.queue, {
+      count: 1 + (queuedByWindow.get(windowId)?.length ?? 0),
+    });
+  };
 
   const place = (pending: PendingApproval<TWindow>): void => {
     if (pending.view === undefined || pending.anchor === undefined) return;
@@ -182,7 +192,11 @@ export function createCodeOperationApprovalViewController<TWindow>(
     pending.finished = true;
     if (pending.anchorTimer !== undefined) clearTimeout(pending.anchorTimer);
     if (pending.expiryTimer !== undefined) clearTimeout(pending.expiryTimer);
-    if (pendingByWindow.get(pending.windowId) === pending) pendingByWindow.delete(pending.windowId);
+    const wasActive = pendingByWindow.get(pending.windowId) === pending;
+    if (wasActive) pendingByWindow.delete(pending.windowId);
+    const queued = queuedByWindow.get(pending.windowId);
+    const queuedIndex = queued?.indexOf(pending) ?? -1;
+    if (queued !== undefined && queuedIndex >= 0) queued.splice(queuedIndex, 1);
     if (pending.view !== undefined) {
       try {
         pending.view.setVisible(false);
@@ -207,10 +221,24 @@ export function createCodeOperationApprovalViewController<TWindow>(
         .catch(() => undefined);
     }
     pending.resolve(approvalId);
+    if (!wasActive) showQueueCount(pending.windowId);
+    if (wasActive) {
+      const next = queued?.shift();
+      if (queued?.length === 0) queuedByWindow.delete(pending.windowId);
+      if (next !== undefined) {
+        next.anchor = anchorByWindow.get(next.windowId);
+        pendingByWindow.set(next.windowId, next);
+        void begin(next);
+      }
+    }
   };
 
   const begin = async (pending: PendingApproval<TWindow>): Promise<void> => {
     if (pending.finished || pending.beginInFlight) return;
+    if (Date.now() >= pending.expiresAt) {
+      finish(pending, undefined);
+      return;
+    }
     pending.beginInFlight = true;
     const generation = ++pending.generation;
     if (options.host.isWindowDestroyed(pending.window)) {
@@ -268,12 +296,12 @@ export function createCodeOperationApprovalViewController<TWindow>(
       options.host.attach(pending.window, view);
       view.setBounds(bounds);
       view.setVisible(true);
-      pending.expiryTimer = setTimeout(() => finish(pending, undefined), expiryMs);
       await view.webContents.loadURL(
         "data:text/html;charset=utf-8," + encodeURIComponent(approvalViewHtml()),
       );
       if (pending.finished) return;
       view.webContents.send(CODE_OPERATION_APPROVAL_VIEW_CHANNELS.challenge, challenge);
+      showQueueCount(pending.windowId);
     } catch {
       finish(pending, undefined);
     } finally {
@@ -282,6 +310,9 @@ export function createCodeOperationApprovalViewController<TWindow>(
   };
 
   const cancel = (windowId: string): void => {
+    const queued = queuedByWindow.get(windowId) ?? [];
+    queuedByWindow.delete(windowId);
+    for (const pending of queued) finish(pending, undefined);
     const pending = pendingByWindow.get(windowId);
     if (pending !== undefined) finish(pending, undefined);
   };
@@ -294,14 +325,30 @@ export function createCodeOperationApprovalViewController<TWindow>(
       readonly request: CodeOperationApprovalRequest;
       readonly presentation?: { readonly projectId: string; readonly composerId: string };
     }): Promise<CodeApprovalId | undefined> => {
-      cancel(input.windowId);
       const identity = threadAndProject(input.request, input.presentation);
+      const active = pendingByWindow.get(input.windowId);
+      const queued = queuedByWindow.get(input.windowId) ?? [];
+      if (
+        active !== undefined &&
+        (active.window !== input.window ||
+          active.windowCapability !== input.windowCapability ||
+          active.threadId !== identity.threadId ||
+          active.composerId !== identity.composerId ||
+          (identity.projectId !== undefined &&
+            active.projectId !== "" &&
+            active.projectId !== identity.projectId) ||
+          queued.length + 1 >= MAX_PENDING_APPROVALS_PER_WINDOW)
+      )
+        return Promise.resolve(undefined);
       const anchor = anchorByWindow.get(input.windowId);
       let pending: PendingApproval<TWindow> | undefined;
       const promise = new Promise<CodeApprovalId | undefined>((resolve) => {
-        const anchorTimer = setTimeout(() => {
-          if (pending !== undefined) finish(pending, undefined);
-        }, anchorWaitMs);
+        const anchorTimer = setTimeout(
+          () => {
+            if (pending !== undefined) finish(pending, undefined);
+          },
+          active === undefined ? anchorWaitMs : expiryMs,
+        );
         const next: PendingApproval<TWindow> = {
           window: input.window,
           windowId: input.windowId,
@@ -310,6 +357,7 @@ export function createCodeOperationApprovalViewController<TWindow>(
           composerId: identity.composerId,
           projectId: identity.projectId ?? "",
           threadId: identity.threadId,
+          expiresAt: Date.now() + expiryMs,
           token: "",
           resolve,
           anchorTimer,
@@ -330,9 +378,16 @@ export function createCodeOperationApprovalViewController<TWindow>(
           finished: false,
         };
         pending = next;
-        pendingByWindow.set(input.windowId, next);
-        if (next.anchor !== undefined || options.host.fallbackBounds !== undefined) {
-          void begin(next);
+        next.expiryTimer = setTimeout(() => finish(next, undefined), expiryMs);
+        if (active !== undefined) {
+          queued.push(next);
+          queuedByWindow.set(input.windowId, queued);
+          showQueueCount(input.windowId);
+        } else {
+          pendingByWindow.set(input.windowId, next);
+          if (next.anchor !== undefined || options.host.fallbackBounds !== undefined) {
+            void begin(next);
+          }
         }
       });
       return promise;
@@ -354,7 +409,7 @@ export function createCodeOperationApprovalViewController<TWindow>(
         if (pending !== undefined) {
           // An already visible trusted view must not outlive its composer owner.
           // Clearing geometry alone still allowed that view to confirm a receipt.
-          finish(pending, undefined);
+          cancel(input.windowId);
         }
         return;
       }
@@ -366,7 +421,7 @@ export function createCodeOperationApprovalViewController<TWindow>(
       readonly senderId: number;
       readonly token: string;
       readonly challengeId: string;
-      readonly decision: "approve" | "cancel";
+      readonly decision: "approve" | "cancel" | "next" | "previous";
     }): Promise<CodeApprovalId | undefined> => {
       const pending = [...pendingByWindow.values()].find(
         (candidate) => candidate.view?.webContents.id === input.senderId,
@@ -379,6 +434,44 @@ export function createCodeOperationApprovalViewController<TWindow>(
         pending.decisionStarted ||
         pending.finished
       ) {
+        return undefined;
+      }
+      if (input.decision === "next" || input.decision === "previous") {
+        const queued = queuedByWindow.get(pending.windowId);
+        const next = input.decision === "next" ? queued?.shift() : queued?.pop();
+        if (next === undefined || queued === undefined) return undefined;
+        if (input.decision === "next") queued.push(pending);
+        else queued.unshift(pending);
+        pendingByWindow.set(pending.windowId, next);
+        const view = pending.view;
+        const challenge = pending.challenge;
+        pending.view = undefined;
+        pending.challenge = undefined;
+        pending.token = "";
+        pending.generation += 1;
+        if (options.cancel !== undefined) {
+          void options
+            .cancel({
+              challengeId: String(challenge.challengeId),
+              windowId: pending.windowId,
+              windowCapability: pending.windowCapability,
+            })
+            .catch(() => undefined);
+        }
+        try {
+          try {
+            view.setVisible(false);
+            options.host.detach(pending.window, view);
+          } finally {
+            if (!view.webContents.isDestroyed()) view.webContents.close();
+          }
+        } catch {
+          // Teardown can race navigation; none of this owner's requests survive it.
+          cancel(pending.windowId);
+          return undefined;
+        }
+        next.anchor = anchorByWindow.get(next.windowId);
+        void begin(next);
         return undefined;
       }
       if (input.decision === "cancel") {
@@ -426,7 +519,8 @@ h1{margin:0;font-size:14px;line-height:1.35;font-weight:500}p{margin:0;white-spa
 #detail{color:var(--approval-muted);overflow:auto;min-height:0;flex:1}
 details{color:var(--approval-muted);overflow:auto;max-height:45%;flex-shrink:0}summary{cursor:pointer;font-size:12px}
 #identity,#digests{padding-top:8px;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
+#queue:not([hidden]){display:flex;align-items:center;justify-content:space-between;gap:8px;flex-shrink:0}#queue-count{color:var(--approval-muted)}
 .actions{display:flex;justify-content:flex-end;gap:8px;flex-shrink:0;margin-top:auto}
 button{border:1px solid var(--approval-border);border-radius:8px;padding:6px 12px;min-height:32px;background:var(--approval-control);color:inherit;font:inherit;cursor:pointer}button:hover{background:var(--approval-hover)}:focus-visible{outline:none}button:focus-visible{filter:brightness(.9)}button:disabled{opacity:.5;cursor:default}#approve{border-color:transparent;background:var(--approval-primary);color:var(--approval-primary-fg)}
-</style></head><body><main id="approval" aria-live="polite"><h1 id="message">Preparing approval…</h1><p id="detail">Waiting for the host to describe this action.</p><details><summary>Show authority details</summary><p id="identity"></p><p id="digests"></p></details><div class="actions"><button id="cancel" type="button">Cancel</button><button id="approve" type="button" disabled>Approve once</button></div></main></body></html>`;
+</style></head><body><main id="approval" aria-live="polite"><h1 id="message">Preparing approval…</h1><p id="detail">Waiting for the host to describe this action.</p><details><summary>Show authority details</summary><p id="identity"></p><p id="digests"></p></details><nav id="queue" aria-label="Pending approvals" hidden><button id="previous" type="button">Previous</button><span id="queue-count" role="status"></span><button id="next" type="button">Next</button></nav><div class="actions"><button id="cancel" type="button">Cancel</button><button id="approve" type="button" disabled>Approve once</button></div></main></body></html>`;
 }

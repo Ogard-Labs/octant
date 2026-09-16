@@ -147,6 +147,203 @@ describe("Code operation approval view controller", () => {
     expect(fixture.view.webContents.close).toHaveBeenCalledOnce();
   });
 
+  it("expires a request even while the host is still preparing its challenge", async () => {
+    vi.useFakeTimers();
+    try {
+      const fixture = makeFixture();
+      fixture.prepare.mockImplementation(() => new Promise(() => undefined));
+      fixture.controller.updateAnchor({
+        window: fixture.window,
+        windowId: "window-1",
+        anchor: anchor(),
+      });
+      const settled = vi.fn();
+      void fixture.controller
+        .request({
+          window: fixture.window,
+          windowId: "window-1",
+          windowCapability: "window-capability",
+          request,
+        })
+        .then(settled);
+      await vi.advanceTimersByTimeAsync(101);
+      expect(settled).toHaveBeenCalledWith(undefined);
+      expect(fixture.host.createView).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not extend request expiry when navigating between approvals", async () => {
+    vi.useFakeTimers();
+    try {
+      const fixture = makeFixture();
+      fixture.controller.updateAnchor({
+        window: fixture.window,
+        windowId: "window-1",
+        anchor: anchor(),
+      });
+      const input = {
+        window: fixture.window,
+        windowId: "window-1",
+        windowCapability: "window-capability",
+        request,
+      };
+      const settled = vi.fn();
+      const first = fixture.controller.request(input).then(settled);
+      const second = fixture.controller.request(input).then(settled);
+      await vi.advanceTimersByTimeAsync(60);
+      await fixture.controller.decision({
+        senderId: 41,
+        token: "approval-view-token",
+        challengeId: ids.challenge,
+        decision: "next",
+      });
+      await vi.advanceTimersByTimeAsync(41);
+      expect(settled).toHaveBeenCalledTimes(2);
+      await Promise.all([first, second]);
+      expect(fixture.confirm).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps another request from the same composer queued until the first is decided", async () => {
+    const fixture = makeFixture();
+    fixture.controller.updateAnchor({
+      window: fixture.window,
+      windowId: "window-1",
+      anchor: anchor(),
+    });
+    const input = {
+      window: fixture.window,
+      windowId: "window-1",
+      windowCapability: "window-capability",
+      request,
+    };
+    const firstSettled = vi.fn();
+    const first = fixture.controller.request(input).then(firstSettled);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const second = fixture.controller.request(input);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(firstSettled).not.toHaveBeenCalled();
+    expect(fixture.prepare).toHaveBeenCalledTimes(1);
+    await fixture.controller.decision({
+      senderId: 41,
+      token: "approval-view-token",
+      challengeId: ids.challenge,
+      decision: "cancel",
+    });
+    await first;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fixture.prepare).toHaveBeenCalledTimes(2);
+    fixture.controller.closeWindow("window-1");
+    await expect(second).resolves.toBeUndefined();
+  });
+
+  it("navigates pending requests without granting and refuses a decision from the retired view", async () => {
+    const fixture = makeFixture();
+    fixture.host.createView.mockReturnValueOnce(fixture.view).mockReturnValue({
+      ...fixture.view,
+      webContents: { ...fixture.view.webContents, id: 42 },
+    });
+    fixture.controller.updateAnchor({
+      window: fixture.window,
+      windowId: "window-1",
+      anchor: anchor(),
+    });
+    const input = {
+      window: fixture.window,
+      windowId: "window-1",
+      windowCapability: "window-capability",
+      request,
+    };
+    const first = fixture.controller.request(input);
+    const second = fixture.controller.request(input);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await fixture.controller.decision({
+      senderId: 41,
+      token: "approval-view-token",
+      challengeId: ids.challenge,
+      decision: "next",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fixture.prepare).toHaveBeenCalledTimes(2);
+    expect(fixture.confirm).not.toHaveBeenCalled();
+    await expect(
+      fixture.controller.decision({
+        senderId: 41,
+        token: "approval-view-token",
+        challengeId: ids.challenge,
+        decision: "approve",
+      }),
+    ).resolves.toBeUndefined();
+    expect(fixture.confirm).not.toHaveBeenCalled();
+    fixture.controller.closeWindow("window-1");
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+  });
+
+  it("cancels queued approvals if the owner tears down while navigating", async () => {
+    const fixture = makeFixture();
+    fixture.controller.updateAnchor({
+      window: fixture.window,
+      windowId: "window-1",
+      anchor: anchor(),
+    });
+    const input = {
+      window: fixture.window,
+      windowId: "window-1",
+      windowCapability: "window-capability",
+      request,
+    };
+    const first = fixture.controller.request(input);
+    const second = fixture.controller.request(input);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fixture.host.detach.mockImplementation(() => {
+      throw new Error("Window is destroyed");
+    });
+    await expect(
+      fixture.controller.decision({
+        senderId: 41,
+        token: "approval-view-token",
+        challengeId: ids.challenge,
+        decision: "next",
+      }),
+    ).resolves.toBeUndefined();
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+    expect(fixture.cancel).toHaveBeenCalled();
+    expect(fixture.confirm).not.toHaveBeenCalled();
+    expect(fixture.prepare).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds the approval queue and cancels every retained request when its owner changes", async () => {
+    const fixture = makeFixture();
+    fixture.controller.updateAnchor({
+      window: fixture.window,
+      windowId: "window-1",
+      anchor: anchor(),
+    });
+    const input = {
+      window: fixture.window,
+      windowId: "window-1",
+      windowCapability: "window-capability",
+      request,
+    };
+    const retained = Array.from({ length: 8 }, () => fixture.controller.request(input));
+    await expect(fixture.controller.request(input)).resolves.toBeUndefined();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fixture.prepare).toHaveBeenCalledTimes(1);
+    fixture.controller.updateAnchor({
+      window: fixture.window,
+      windowId: "window-1",
+      anchor: { ...anchor(), threadId: "another-thread" },
+    });
+    expect(await Promise.all(retained)).toEqual(Array(8).fill(undefined));
+    expect(fixture.prepare).toHaveBeenCalledTimes(1);
+    expect(fixture.confirm).not.toHaveBeenCalled();
+    expect(fixture.cancel).toHaveBeenCalledTimes(1);
+  });
+
   it("cancels a server challenge that arrives after the owner closes during preparation", async () => {
     const fixture = makeFixture();
     let release: ((value: typeof challenge) => void) | undefined;
