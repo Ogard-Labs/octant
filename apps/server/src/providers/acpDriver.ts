@@ -307,8 +307,7 @@ function resolveReasoningOption(
   const byProfileId = options.find((option) => option.id === profile.reasoningOptionId);
   if (byProfileId !== undefined) return byProfileId;
   return options.find(
-    (option) =>
-      option.category === "thought_level" || option.category === "thinking",
+    (option) => option.category === "thought_level" || option.category === "thinking",
   );
 }
 
@@ -322,9 +321,10 @@ function normalizeProbe(
   observedAt: string,
   credentialStatus?: "stored",
 ): ProviderProbeResult {
-  const reasoning = resolveReasoningOption(profile, options) !== undefined
-    ? ("supported" as const)
-    : ("unavailable" as const);
+  const reasoning =
+    resolveReasoningOption(profile, options) !== undefined
+      ? ("supported" as const)
+      : ("unavailable" as const);
   const resume =
     initialized.agentCapabilities.loadSession === true ||
     initialized.agentCapabilities.sessionCapabilities?.resume !== undefined
