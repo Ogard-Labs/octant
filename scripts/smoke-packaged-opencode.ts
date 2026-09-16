@@ -334,7 +334,6 @@ async function processIdentities(): Promise<ReadonlyArray<ProcessIdentity>> {
     }));
 }
 
-
 /**
  * Discovery prefers the OpenCode 2 executable and the server routes on that
  * name: a smoke that resolves the bare `opencode` reaches the legacy driver,
