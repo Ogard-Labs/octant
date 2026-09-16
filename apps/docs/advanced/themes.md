@@ -166,3 +166,8 @@ replay across restarts.
 - [Keyboard workflows](/advanced/keyboard-workflows) for navigation and Zen
 - [Privacy and security](/advanced/privacy-and-security) for where appearance state lives
 - [Release compatibility](/advanced/release-compatibility) for preview boundaries
+
+When an everywhere background covers the sidebar, separate sidebar decoration
+controls are suspended. Turn off **Cover the sidebar** to restore your saved
+sidebar background and overlay settings. Increased contrast keeps its existing
+background suppression behavior.

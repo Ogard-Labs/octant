@@ -11,6 +11,33 @@ import { ShellSidebar } from "./ShellSidebar";
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
 
 describe("ShellSidebar", () => {
+  it("restores the saved sidebar decoration after workspace coverage ends", () => {
+    const props = {
+      projectSection: <nav aria-label="Project threads">Project threads</nav>,
+      onAddFolder: vi.fn(),
+      onOpenNavigator: vi.fn(),
+      onOpenSettings: vi.fn(),
+      onSelectMode: vi.fn(),
+      settings: defaultShellSettings(),
+      workspace: defaultWindowWorkspace(windowId),
+      backgroundFetcher: vi.fn(),
+      resolvedSidebarBackground: {
+        kind: "preset" as const,
+        backgroundCss: "linear-gradient(red, blue)",
+        backgroundId: null,
+        overlayColor: "#1a1a1c",
+        overlayOpacity: 50,
+        vibrancyMode: "off" as const,
+      },
+    };
+    const { container, rerender } = render(
+      <ShellSidebar {...props} backgroundCoveredByWorkspace />,
+    );
+    expect(container.querySelector("[data-octant-sidebar-background]")).toBeNull();
+    rerender(<ShellSidebar {...props} backgroundCoveredByWorkspace={false} />);
+    expect(container.querySelector("[data-octant-sidebar-background]")).not.toBeNull();
+  });
+
   it("renders the Projects collection as a dedicated sidebar pane", () => {
     const { container } = render(
       <ShellSidebar
