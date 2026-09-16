@@ -187,6 +187,9 @@ describe("the public-block visual language", () => {
     expect(system).toMatch(/\.turn-user \.bubble \{[^}]*box-shadow:\s*none/);
     expect(system).toMatch(/\.turn-user \{[^}]*justify-items:\s*end/);
     expect(system).not.toMatch(/\.turn-user \{[^}]*position:\s*sticky/);
+    expect(system).toMatch(/\.turn-agent \{[^}]*background:\s*var\(--oct-surface\)/);
+    expect(system).toMatch(/\.turn-agent \{[^}]*border:\s*1px solid var\(--oct-border\)/);
+    expect(system).toMatch(/\.turn-agent \{[^}]*border-radius:\s*var\(--oct-radius-md\)/);
     expect(system).toMatch(
       /\.composer-row button,\n\.composer-row \[role="button"\],\n\.composer-row \[role="combobox"\] \{\n  min-height: 28px;\n  height: 28px;/,
     );

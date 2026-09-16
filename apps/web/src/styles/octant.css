@@ -2468,10 +2468,15 @@ input.switch:checked::after {
   text-align: end;
 }
 
-/* the agent's turn: no avatar, no rail, no bubble — just the text */
+/* The agent's turn is the transcript's reading surface. The workspace ground
+   stays visible around it, while one theme-owned card contains prose, tool
+   output, and turn metadata without introducing a second glass material. */
 .turn-agent {
   min-width: 0;
-  padding: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
   color: var(--oct-fg);
   font-family: var(--oct-font-transcript);
   font-size: var(--oct-transcript-font-size);

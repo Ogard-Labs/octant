@@ -103,14 +103,14 @@ library, and a photo in use cannot be deleted. **None** keeps the plain page.
 
 **Show behind** puts the ground behind the start screens only, where it is
 masked away behind the composer and fades out below it, or behind everything,
-where the workspace and its pages turn translucent over it; **Cover the
-sidebar** extends an everything ground under the sidebar. **Show pattern** is
-the direct on/off switch for the cloud, while **Pattern opacity**, **Pattern
-speed**, and **Pattern intensity** remain its tuning dials. For a photo,
-**Dither photo** keeps or removes the ordered-dither print treatment and
-**Photo opacity** dims the image. Reduced motion holds the cloud still;
-Increased contrast turns the ground off; a browser without WebGL2 shows a
-photo but no cloud.
+where the workspace stays transparent over it and transcript responses carry
+their own reading cards; **Cover the sidebar** extends an everything ground
+under the sidebar. **Show pattern** is the direct on/off switch for the cloud,
+while **Pattern opacity**, **Pattern speed**, and **Pattern intensity** remain
+its tuning dials. For a photo, **Dither photo** keeps or removes the
+ordered-dither print treatment and **Photo opacity** dims the image. Reduced
+motion holds the cloud still; Increased contrast turns the ground off; a
+browser without WebGL2 shows a photo but no cloud.
 
 ### Zen backgrounds
 
