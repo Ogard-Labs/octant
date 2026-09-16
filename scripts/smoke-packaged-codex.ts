@@ -470,7 +470,12 @@ function signalGroupByPid(pid: number, signal: "SIGKILL" | "SIGTERM"): void {
 }
 
 function isManagedCodex(process: ProcessSnapshot): boolean {
-  return /(?:^|\/)codex app-server --listen stdio:\/\/(?:\s|$)/.test(process.command);
+  // The CLI can be reached through a wrapper that re-executes it with node, and
+  // then the command line names the wrapper's target rather than a `codex`
+  // binary (`node …/codex.opencodex-real app-server --listen stdio://`).
+  // Ownership is what this check is about: the app server run by a child of the
+  // packaged server in its own process group is that process either way.
+  return /(?:^|\s)app-server --listen stdio:\/\/(?:\s|$)/.test(process.command);
 }
 
 function processKey(process: ProcessSnapshot): string {

@@ -46,6 +46,42 @@ describe("packaged Codex process-group attribution", () => {
     ).toThrow("managed process group 70001");
   });
 
+  it("finds the managed Codex process when the CLI is launched through a wrapper", () => {
+    // `codex` on PATH can be a wrapper that re-executes the CLI through node,
+    // and then the command line names the wrapper's target rather than a
+    // `codex` binary. Ownership is unchanged: still a child of the packaged
+    // server, still its own process group.
+    const server = snapshot(50_001, 49_999, 49_999, "/package/apps/server/dist/main.mjs");
+    const wrapped = snapshot(
+      70_001,
+      server.pid,
+      70_001,
+      "node /Users/example/.local/bin/codex.opencodex-real app-server --listen stdio://",
+    );
+
+    expect(
+      findOwnedCodexProcessGroup(baseline, [...baseline, server, wrapped], {
+        serverCommand: "/package/apps/server/dist/main.mjs",
+      }),
+    ).toBe(70_001);
+  });
+
+  it("ignores a Codex child that is not the app server", () => {
+    const server = snapshot(50_001, 49_999, 49_999, "/package/apps/server/dist/main.mjs");
+    const loginStatus = snapshot(
+      70_001,
+      server.pid,
+      70_001,
+      "node /opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js login status",
+    );
+
+    expect(() =>
+      findOwnedCodexProcessGroup(baseline, [...baseline, server, loginStatus], {
+        serverCommand: "/package/apps/server/dist/main.mjs",
+      }),
+    ).toThrow("managed Codex identity");
+  });
+
   it("terminates every smoke-new Codex group when failure occurs before attribution", async () => {
     const firstUnattributed = snapshot(
       70_001,
