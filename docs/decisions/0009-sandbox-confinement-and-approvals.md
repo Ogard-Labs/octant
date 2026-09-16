@@ -22,7 +22,9 @@ approval categories that stay independent of which provider is running.
   scoped to provider home and temp, plus the bound root only for non-Plan,
   non-Chat sessions; the rest of the user's home is enumerated as denied.
   Missing `sandbox-exec` fails closed as `incompatible`; there is no
-  unconfined fallback.
+  unconfined fallback. The macOS system-shell selector at
+  `/private/var/select/sh` has an exact metadata-only read allowance so shell
+  startup can resolve it; this does not grant private file-content access.
 - Bound roots are exact: the Work Project folder, the Code checkout or
   worktree, or a Chat scratch area. Chat has no host filesystem, shell, or Git
   authority.

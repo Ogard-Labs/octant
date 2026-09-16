@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -39,6 +40,40 @@ function temporaryRoot(): string {
 }
 
 describe("shared Seatbelt profile builder", () => {
+  it.skipIf(process.platform !== "darwin")(
+    "starts the system shell without a shell-selection warning",
+    () => {
+      const root = temporaryRoot();
+      const profile = buildDenyDefaultSeatbeltProfile({
+        boundRoot: root,
+        temporaryDirectory: root,
+        networkEgress: "none",
+        allowFileReadStar: true,
+        privateHomeAllowPaths: [],
+      });
+      const result = spawnSync(
+        "/usr/bin/sandbox-exec",
+        ["-p", profile, "/bin/sh", "-c", "printf shell-ok"],
+        { encoding: "utf8" },
+      );
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("shell-ok");
+      expect(result.stderr).toBe("");
+      const unrelatedFile = join(temporaryRoot(), "private.txt");
+      writeFileSync(unrelatedFile, "must remain private");
+      const denied = spawnSync(
+        "/usr/bin/sandbox-exec",
+        ["-p", profile, "/bin/cat", unrelatedFile],
+        {
+          encoding: "utf8",
+        },
+      );
+      expect(denied.status).not.toBe(0);
+      expect(denied.stdout).toBe("");
+      expect(denied.stderr).toContain("Operation not permitted");
+    },
+  );
+
   it("builds a deny-default profile with exactly one bound root write plus private temp", () => {
     const root = temporaryRoot();
     const boundRoot = join(root, "project");

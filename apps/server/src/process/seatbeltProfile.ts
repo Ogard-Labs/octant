@@ -423,7 +423,7 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
   // left `allowFileReadStar` granting the Keychain and the rest of the private
   // system state. Callers extend the boundary through `additionalDenyReadPaths`
   // and never narrow it.
-  const denyReadPaths = [...DEFAULT_DENY_READ_PATHS, ...(input.additionalDenyReadPaths ?? [])];
+  const denyReadPaths = input.additionalDenyReadPaths ?? [];
   for (const path of input.additionalDenyReadPaths ?? [])
     assertAbsolute(path, "additional deny read path");
   const additionalDenyWritePaths = input.additionalDenyWritePaths ?? [];
@@ -470,6 +470,11 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
         ]
       : []),
     ...(input.allowFileReadStar === true ? ["(allow file-read*)"] : []),
+    ...DEFAULT_DENY_READ_PATHS.map((path) => seatbeltDenyRule("file-read*", path)),
+    // macOS /bin/sh resolves this system-owned selector before starting its
+    // shell. Denying the link metadata prints an error on every npm test run.
+    // Keep file contents and the rest of /private denied.
+    '(allow file-read-metadata (literal "/private/var/select/sh"))',
     ...denyReadPaths.map((path) => seatbeltDenyRule("file-read*", path)),
     ...privateRules,
     // The launch roots are re-allowed under every denial above, `file-read*`
