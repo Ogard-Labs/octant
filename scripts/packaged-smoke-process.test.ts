@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   PACKAGED_SMOKE_PROCESS_PROBE_TIMEOUT_MS,
@@ -7,9 +10,33 @@ import {
   packagedServerEnvironment,
   runBoundedCommand,
   sanitizedPackagedEnvironment,
+  stagePackagedAppBundle,
   waitForProcessCleanup,
   type BoundedCommandHandle,
 } from "./packaged-smoke-process";
+
+describe("stagePackagedAppBundle", () => {
+  it("copies the bundle outside the checkout it was built in", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-stage-source."));
+    const source = join(root, "Octant.app");
+    await mkdir(join(source, "Contents", "MacOS"), { recursive: true });
+    await writeFile(join(source, "Contents", "MacOS", "Octant"), "#!/bin/sh\n", "utf8");
+    await writeFile(join(source, "Contents", "Info.plist"), "<plist/>\n", "utf8");
+
+    const staged = stagePackagedAppBundle(source);
+
+    expect(staged).not.toBe(source);
+    expect(dirname(staged)).not.toBe(root);
+    expect(await readFile(join(staged, "Contents", "MacOS", "Octant"), "utf8")).toBe("#!/bin/sh\n");
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("leaves a checkout without a built bundle to the smoke's own precondition", () => {
+    expect(stagePackagedAppBundle("/tmp/octant-no-such-bundle/Octant.app")).toBe(
+      "/tmp/octant-no-such-bundle/Octant.app",
+    );
+  });
+});
 
 describe("sanitizedPackagedEnvironment", () => {
   it("keeps only portable host values and excludes Bun-specific environment", () => {

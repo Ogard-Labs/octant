@@ -1,4 +1,7 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { cpSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 
 export interface SmokeChildProcess {
   readonly exitCode: number | null;
@@ -14,6 +17,88 @@ export interface BoundedCommandHandle {
 }
 
 export const PACKAGED_SMOKE_SERVER_PORT = 13_773;
+/** What the app last wrote, for a poll that timed out before it could answer. */
+export function appOutputContext(outputTail: () => string): string {
+  const output = outputTail().replace(/\s+/g, " ").trim();
+  return output.length === 0 ? "" : ` The app last wrote: ${output.slice(-800)}`;
+}
+
+/**
+ * The last few kilobytes a packaged app wrote, for a failure that has to say
+ * why. A smoke that discards the app's output can report only the symptom it
+ * polls for — a bundle whose server dies on a missing import reads as "was not
+ * storage-ready" — and the line that names the import is gone with it.
+ */
+export function boundedOutputTail(maxBytes = 4_096): {
+  readonly append: (chunk: Buffer | string) => void;
+  readonly text: () => string;
+} {
+  let buffer = "";
+  return {
+    append(chunk) {
+      buffer = (buffer + chunk.toString()).slice(-maxBytes);
+    },
+    text() {
+      return buffer;
+    },
+  };
+}
+
+/**
+ * Launch the packaged app the way a smoke must: detached, with its output kept.
+ */
+export function spawnPackagedApplication(input: {
+  readonly executable: string;
+  readonly args?: ReadonlyArray<string>;
+  readonly env: NodeJS.ProcessEnv;
+}): { readonly child: ChildProcess; readonly outputTail: () => string } {
+  const child = spawn(input.executable, [...(input.args ?? [])], {
+    detached: true,
+    env: input.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const output = boundedOutputTail();
+  child.stdout?.on("data", (chunk: Buffer) => output.append(chunk));
+  child.stderr?.on("data", (chunk: Buffer) => output.append(chunk));
+  return { child, outputTail: output.text };
+}
+
+/**
+ * Where a packaged smoke launches the app from: a copy outside the checkout.
+ *
+ * Node resolves a bare import by walking up from the importing file, so a
+ * bundle launched where it was built reaches the repository's own
+ * `node_modules` for anything the app neither bundles nor copies — the server
+ * starts, the smoke passes, and the app a person installs fails at the same
+ * import. Somebody who installs Octant runs it from outside any checkout, so
+ * the smokes run it from the same kind of place.
+ *
+ * A checkout with no built bundle is returned as it is: the smoke's own
+ * precondition then reports the missing app instead of this step.
+ */
+export function stagePackagedAppBundle(sourceBundle: string): string {
+  if (!existsSync(sourceBundle)) return sourceBundle;
+  const root = mkdtempSync(join(tmpdir(), "octant-packaged-app."));
+  const appBundle = join(root, basename(sourceBundle));
+  cloneBundle(sourceBundle, appBundle);
+  process.once("exit", () => rmSync(root, { recursive: true, force: true }));
+  return appBundle;
+}
+
+function cloneBundle(source: string, destination: string): void {
+  // An APFS clone stages half a gigabyte in milliseconds; anywhere else falls
+  // back to a recursive copy.
+  if (process.platform === "darwin") {
+    try {
+      execFileSync("/bin/cp", ["-cR", source, destination], { stdio: "ignore" });
+      return;
+    } catch {
+      rmSync(destination, { recursive: true, force: true });
+    }
+  }
+  cpSync(source, destination, { recursive: true, verbatimSymlinks: true });
+}
+
 export const PACKAGED_SMOKE_SERVER_URL = `http://127.0.0.1:${PACKAGED_SMOKE_SERVER_PORT}`;
 export const PACKAGED_SMOKE_PROCESS_PROBE_TIMEOUT_MS = 10_000;
 

@@ -8,15 +8,18 @@ import { fileURLToPath } from "node:url";
 import { createQuitAppleScript, waitForChildExit } from "./package-desktop";
 import {
   PACKAGED_SMOKE_SERVER_URL,
+  appOutputContext,
   cleanupPackagedProcess,
   packagedServerEnvironment,
   waitForProcessCleanup,
+  spawnPackagedApplication,
+  stagePackagedAppBundle,
   type SmokeChildProcess,
   describeFailedResponse,
 } from "./packaged-smoke-process";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const appBundle = resolve(repositoryRoot, "out/Octant.app");
+const appBundle = stagePackagedAppBundle(resolve(repositoryRoot, "out/Octant.app"));
 const executable = resolve(appBundle, "Contents/MacOS/Octant");
 const serverEntry = resolve(appBundle, "Contents/Resources/app/apps/server/dist/main.mjs");
 const serverUrl = PACKAGED_SMOKE_SERVER_URL;
@@ -149,12 +152,14 @@ async function smokeLifecycle(
 ): Promise<void> {
   const dataDirectory = await mkdtemp(resolve(tmpdir(), `octant-codex-${shutdown}.`));
   const env = packagedServerEnvironment(process.env, dataDirectory);
-  const app = spawn(executable, [], { detached: true, env, stdio: "ignore" });
+  const { child: app, outputTail } = spawnPackagedApplication({ executable, env });
   let primaryFailure: unknown;
   let cleanupFailure: unknown;
   let ownedProcessGroup: number | undefined;
   try {
-    await runSmokeStage(shutdown, "storage readiness", () => waitForStorageReady(20_000));
+    await runSmokeStage(shutdown, "storage readiness", () =>
+      waitForStorageReady(20_000, outputTail),
+    );
     const capability = await runSmokeStage(shutdown, "window authority", () =>
       waitForWindowCapability(dataDirectory, 20_000),
     );
@@ -330,7 +335,7 @@ async function assertSmokePortAvailable(): Promise<void> {
   if (occupied) throw new Error("Packaged Codex smoke requires Octant port 13773 to be free.");
 }
 
-async function waitForStorageReady(timeoutMs: number): Promise<void> {
+async function waitForStorageReady(timeoutMs: number, outputTail: () => string): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
@@ -342,7 +347,9 @@ async function waitForStorageReady(timeoutMs: number): Promise<void> {
     }
     await delay(100);
   }
-  throw new Error(`Packaged Octant server was not storage-ready within ${timeoutMs}ms.`);
+  throw new Error(
+    `Packaged Octant server was not storage-ready within ${timeoutMs}ms.${appOutputContext(outputTail)}`,
+  );
 }
 
 async function waitForServerCleanup(timeoutMs: number): Promise<void> {
