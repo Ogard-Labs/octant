@@ -170,3 +170,12 @@ federation and hosted relay models are post-preview.
 - [Remote access](/advanced/remote-access) for the authenticated transport
 - [Recovery and troubleshooting](/advanced/recovery) for journal-based recovery
 - [Release compatibility](/advanced/release-compatibility) for preview boundaries
+
+### Pending desktop confirmations
+
+Desktop authority confirmations appear beside their owning composer. When more
+than one is waiting, use **Previous** and **Next** to inspect them; navigation
+does not approve a request. Up to eight requests can wait for the same composer.
+Each expires five minutes after it was requested, including time spent viewing
+other requests. Switching to another owner or closing the window cancels its
+pending confirmations.

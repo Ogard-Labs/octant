@@ -30,6 +30,13 @@ that renderer can request a desktop challenge but cannot confirm it itself.
 - Cancel is the default. Enter never grants authority. Expiry, cancellation,
   owner teardown, missing valid anchor, and late or duplicate decisions fail
   closed. No hidden or stale view can issue a receipt.
+- A window retains at most eight pending desktop authority confirmations for
+  the same composer owner. Previous and Next navigate these requests inside the
+  trusted view without granting them. Navigation retires the visible challenge;
+  returning to a request prepares a fresh challenge against current server
+  context. Navigation does not extend the request's original five-minute expiry.
+  Requests for another owner or beyond the bound are refused. Owner changes and
+  window teardown cancel the entire retained queue.
 - Non-authority notices may use the ordinary shared composer notice slot.
   They do not gain access to the trusted approval view's decision channel.
 - Existing provider and app-tool approvals retain their server-authoritative

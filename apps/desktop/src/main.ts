@@ -3087,7 +3087,7 @@ function decodeCodeOperationApprovalAnchor(value: unknown): CodeOperationApprova
 function decodeCodeOperationApprovalViewDecision(value: unknown): {
   readonly token: string;
   readonly challengeId: string;
-  readonly decision: "approve" | "cancel";
+  readonly decision: "approve" | "cancel" | "next" | "previous";
 } {
   if (!isStrictRecord(value, ["challengeId", "decision", "token"])) {
     throw new Error("Octant rejected invalid Code approval decision.");
@@ -3098,7 +3098,10 @@ function decodeCodeOperationApprovalViewDecision(value: unknown): {
     value.token.length > 128 ||
     typeof value.challengeId !== "string" ||
     !UUID_PATTERN.test(value.challengeId) ||
-    (value.decision !== "approve" && value.decision !== "cancel")
+    (value.decision !== "approve" &&
+      value.decision !== "cancel" &&
+      value.decision !== "next" &&
+      value.decision !== "previous")
   ) {
     throw new Error("Octant rejected invalid Code approval decision.");
   }
