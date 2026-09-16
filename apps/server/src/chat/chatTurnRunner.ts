@@ -390,6 +390,12 @@ export class ChatTurnRunner {
           mode: "chat",
         })
         .pipe(
+          // Acquisition can fail before the session finalizer owns the reservation.
+          Effect.onExit((exit) =>
+            exit._tag === "Failure"
+              ? Effect.sync(() => spendCeiling?.settle({ reservationId: spendReservationId }))
+              : Effect.void,
+          ),
           Effect.tapError(() =>
             Effect.sync(() =>
               capacityScheduler.recordTerminal({
