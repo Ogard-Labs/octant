@@ -6,6 +6,10 @@ description: Projects organize work across modes with scoped authority, memory, 
 
 Projects are the primary organizational unit in Octant. A Project determines the mode, authority, and workspace binding for every thread it contains. The mode is server-enforced and cannot be changed after creation.
 
+Open **Projects** in primary navigation to search and filter the Project list.
+Select a Project to open its overview in the same content area. Choose **Projects**
+again to return to the list. The main navigation sidebar stays the same width.
+
 ## Project types
 
 | Mode | Binding                      | Authority                             |

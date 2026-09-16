@@ -839,6 +839,7 @@ function LaunchedShell(
   // Deliberately not cleared on mode switch: what waits on the user spans
   // every mode, so the Inbox survives moving between them.
   const [inboxOpen, setInboxOpen] = useState(false);
+  const [projectsListOpen, setProjectsListOpen] = useState(false);
   const [githubIssuesOpen, setGithubIssuesOpen] = useState(false);
   const [pendingIssue, setPendingIssue] = useState<RepositoryIssueRow>();
   const [githubIssuesReadAvailable, setGithubIssuesReadAvailable] = useState(false);
@@ -3663,23 +3664,13 @@ function LaunchedShell(
 
   async function openSelectedProject(project: ProjectSummary) {
     closeThreadSearch();
+    closeWorkspaceReaders();
     await controller.openProject(project.id, project.type, project.name);
   }
 
   function openProjects() {
     closeWorkspaceReaders();
-    const selected = projectController.allProjects.find(
-      (project) => String(project.id) === String(activeProjectId),
-    );
-    const project =
-      selected ??
-      projectController.allProjects.find((candidate) => candidate.lifecycle === "active") ??
-      projectController.allProjects[0];
-    if (project === undefined) {
-      openProjectCreate();
-      return;
-    }
-    void openSelectedProject(project);
+    setProjectsListOpen(true);
   }
 
   function viewAllChatProjectThreads(projectId: ProjectId) {
@@ -3700,6 +3691,7 @@ function LaunchedShell(
   // is up the dock steps aside so the page gets the pane. With the dock kept
   // open the Board's four columns squeezed to about 90px each.
   const readerOpen =
+    projectsListOpen ||
     railPlaceholder !== undefined ||
     inboxOpen ||
     codeBoardOpen ||
@@ -3712,7 +3704,8 @@ function LaunchedShell(
     agentsCenterOpen ||
     artifactLibraryOpen ||
     imageLibraryOpen;
-  const projectsDirectoryVisible = selectedProjectTabId !== undefined && !readerOpen;
+  const projectsDestinationActive =
+    projectsListOpen || (selectedProjectTabId !== undefined && !readerOpen);
   // Readers hide unrelated thread tools. Selecting a pull request explicitly
   // opens its Review beside that list, so the detail must remain visible.
   const dockPresentedOpen =
@@ -3732,6 +3725,7 @@ function LaunchedShell(
   const bottomPanelPresentedOpen = bottomPanelOpen && !readerOpen;
 
   function closeWorkspaceReaders() {
+    setProjectsListOpen(false);
     setRailPlaceholder(undefined);
     setAutomationCenterOpen(false);
     setAgentsCenterOpen(false);
@@ -5034,14 +5028,13 @@ function LaunchedShell(
         }}
         onPreviewSidebarWidth={setPreviewSidebarWidth}
         sidebarCollapsed={sidebarCollapsed}
-        projectsSidebarOpen={projectsDirectoryVisible}
         sidebarVibrancyMode={presentedShellSettings?.sidebarBackground.vibrancyMode ?? "off"}
         showThreadProviderIcons={controller.settings.showThreadProviderIcons}
         transcriptTextSize={controller.settings.transcriptTextSize}
         transcriptWidth={controller.settings.transcriptWidth}
         sidebar={
           <ShellSidebar
-            {...(!projectsDirectoryVisible ? {} : { activeDestination: "projects" as const })}
+            {...(!projectsDestinationActive ? {} : { activeDestination: "projects" as const })}
             imageLibraryAvailable={imageGenerationClient !== undefined}
             {...(federatedHostStates.length < 2
               ? {}
@@ -5135,20 +5128,6 @@ function LaunchedShell(
             backgroundCoveredByWorkspace={shellBackdropCoversSidebar}
             resolvedSidebarBackground={resolvedSidebarBackground}
             backgroundFetcher={sidebarBackgroundFetcher}
-            {...(!projectsDirectoryVisible || activeProjectId === undefined
-              ? {}
-              : {
-                  projectsDirectory: (
-                    <ProjectsDirectory
-                      availabilityByProject={projectController.availabilityByProject}
-                      onAddProject={() => openProjectCreate()}
-                      onDismiss={() => setSidebarCollapsedPersistent(true)}
-                      onOpenProject={(project) => void openSelectedProject(project)}
-                      projects={projectController.allProjects}
-                      selectedProjectId={activeProjectId}
-                    />
-                  ),
-                })}
             projectSection={
               <>
                 {projectController.status === "loading" ? (
@@ -5304,6 +5283,19 @@ function LaunchedShell(
         workspace={
           <>
             <div className="primary-workspace-layer">
+              {projectsListOpen ? (
+                <div className="projects-page-layer">
+                  <ProjectsDirectory
+                    availabilityByProject={projectController.availabilityByProject}
+                    onAddProject={() => openProjectCreate()}
+                    onOpenProject={(project) => void openSelectedProject(project)}
+                    projects={projectController.allProjects}
+                    {...(activeProjectId === undefined
+                      ? {}
+                      : { selectedProjectId: activeProjectId })}
+                  />
+                </div>
+              ) : null}
               <WorkspaceRailLayers
                 {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
                 onDismissRailPlaceholder={() => setRailPlaceholder(undefined)}
@@ -5615,6 +5607,7 @@ function LaunchedShell(
                     githubCloneClient={githubCloneClient}
                     hostId={createHostId}
                     hidden={
+                      projectsListOpen ||
                       railPlaceholder !== undefined ||
                       codeBoardOpen ||
                       codePullRequestsOpen ||

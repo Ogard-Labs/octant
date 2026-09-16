@@ -559,6 +559,9 @@
   background: transparent;
 }
 
+.shell--app-backdrop.shell-frame .inbox-layer,
+.shell--app-backdrop.shell-frame .code-board-layer,
+.shell--app-backdrop.shell-frame .archive-layer,
 .shell--app-backdrop.shell-frame .workspace,
 .shell--app-backdrop.shell-frame .workspace-pane,
 .shell--app-backdrop.shell-frame .draft-thread,
@@ -568,6 +571,13 @@
 .shell--app-backdrop.shell-frame .code-delivery-pane,
 .shell--app-backdrop.shell-frame .code-diff-pane {
   background: transparent;
+}
+
+/* Reader pages place text directly on the page instead of on conversation
+   cards. Keep the selected ground visible without painting it through text. */
+.shell--app-backdrop.shell-frame .surface,
+.shell--app-backdrop.shell-frame .projects-workspace--detail-only {
+  background: color-mix(in srgb, var(--octant-app-background) 92%, transparent);
 }
 
 /* Conversation panes stay on the application ground. Assistant turns carry

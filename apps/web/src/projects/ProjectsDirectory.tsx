@@ -12,7 +12,7 @@ export interface ProjectsDirectoryProps {
   readonly onDismiss?: () => void;
   readonly onOpenProject: (project: ProjectSummary) => void;
   readonly projects: ReadonlyArray<ProjectSummary>;
-  readonly selectedProjectId: ProjectId;
+  readonly selectedProjectId?: ProjectId;
 }
 
 const MODE_FILTERS: ReadonlyArray<{ readonly id: ProjectModeFilter; readonly label: string }> = [
