@@ -625,6 +625,43 @@ describe("OpenCodeProcessPort", () => {
     expect(captured?.privateHomeAllowPaths).toContain(realpathSync(linkedBinary));
   });
 
+  // The agent is a loopback HTTP server, so the confinement has to let it
+  // listen on the port this launch reserved. Without the bind it exits before
+  // readiness in every mode whose egress policy is not "allow" - which is how
+  // a probe and a Work turn failed while a Code turn started.
+  it("lets the confined server listen on the port it reserved", async () => {
+    const fixture = profileRecordingWrapper("isolation-supported");
+    let captured: Parameters<SeatbeltConfinementPort["prepare"]>[0] | undefined;
+    const confinement: SeatbeltConfinementPort = {
+      prepare: (input) => {
+        captured = input;
+        return { command: input.executable, args: input.args };
+      },
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement,
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+        }).start({
+          binaryPath: fixture.binaryPath,
+          cwd: fixture.root,
+          mode: "work",
+          executionPolicy: "approval-gated",
+          loopbackPorts: [41_234],
+        }),
+      ),
+    );
+
+    const rules = captured?.extraRules ?? [];
+    expect(rules.find((rule) => rule.includes("network-bind"))).toMatch(
+      /^\(allow network-bind \(local ip "localhost:\d+"\)\)$/,
+    );
+    expect(rules.some((rule) => rule.includes("network-inbound"))).toBe(true);
+    expect(rules).toContain('(allow network-outbound (remote ip "localhost:41234"))');
+  });
+
   it("starts with a private config profile while withholding isolation without an OS receipt", async () => {
     const fixture = profileRecordingWrapper("isolation-supported");
     const inheritedEnvironment = {

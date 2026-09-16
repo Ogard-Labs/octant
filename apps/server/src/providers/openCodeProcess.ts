@@ -867,13 +867,17 @@ function prepareOpenCodeLaunch(
         allowProcessExec: !(executionPolicy === "plan" || mode === "chat"),
         allowProcessFork: !(executionPolicy === "plan" || mode === "chat"),
         allowFileReadStar: true,
-        ...(loopbackPorts.length === 0
-          ? {}
-          : {
-              extraRules: loopbackPorts.map(
-                (port) => `(allow network-outbound (remote ip "localhost:${port}"))`,
-              ),
-            }),
+        // The agent is a loopback HTTP server: the confinement has to let it
+        // listen on the port this launch reserved, not only reach the bridge.
+        // Without the bind it exits before readiness in every mode whose
+        // egress policy is not "allow", which is chat, work, and Plan.
+        extraRules: [
+          `(allow network-bind (local ip "localhost:${port}"))`,
+          `(allow network-inbound (local ip "localhost:${port}"))`,
+          ...loopbackPorts.map(
+            (bridgePort) => `(allow network-outbound (remote ip "localhost:${bridgePort}"))`,
+          ),
+        ],
       });
       return { ...launch, cwd: root, environment: profile.environment };
     },
