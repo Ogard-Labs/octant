@@ -175,6 +175,13 @@ function streamedEvents(
   return results;
 }
 
+function agentMessageSeparator(context: CodexEventContext, itemId: string): string {
+  if ((context.agentMessages.get(itemId)?.text.length ?? 0) > 0) return "";
+  // The normalized stream has no provider item IDs. Preserve paragraph boundaries
+  // between commentary and later answers before those items become one transcript.
+  return [...context.agentMessages.values()].some((item) => item.text.length > 0) ? "\n\n" : "";
+}
+
 function mapAgentMessageDelta(
   context: CodexEventContext,
   itemId: string,
@@ -185,11 +192,12 @@ function mapAgentMessageDelta(
     return protocolFailure("Provider streamed text for a completed agent message.");
   }
   if (delta.length === 0) return [{ kind: "ignored" }];
+  const separator = agentMessageSeparator(context, itemId);
   context.agentMessages.set(itemId, {
     lifecycle: "active",
     text: `${state?.text ?? ""}${delta}`,
   });
-  return streamedEvents(context, "text-delta", delta);
+  return streamedEvents(context, "text-delta", `${separator}${delta}`);
 }
 
 function mapAgentMessageCompletion(
@@ -204,8 +212,10 @@ function mapAgentMessageCompletion(
   if (!item.text.startsWith(streamed)) {
     return protocolFailure("Provider completed agent text that contradicted its streamed text.");
   }
+  const suffix = item.text.slice(streamed.length);
+  const separator = suffix.length === 0 ? "" : agentMessageSeparator(context, item.id);
   context.agentMessages.set(item.id, { lifecycle: "terminal", text: item.text });
-  return streamedEvents(context, "text-delta", item.text.slice(streamed.length));
+  return streamedEvents(context, "text-delta", `${separator}${suffix}`);
 }
 
 function correlationFailure(): ReadonlyArray<CodexMappedMessage> {
