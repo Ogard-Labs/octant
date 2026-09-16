@@ -13,7 +13,6 @@ import {
   Workflow,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { Fragment } from "react";
 import {
   buildSidebarNavigation,
   sidebarNavigationDescriptor,
@@ -30,8 +29,7 @@ export interface SidebarNavigationProps {
   readonly input: SidebarNavigationInput;
   /**
    * The More row that reveals the menu-only destinations, placed as the last
-   * destination row — before the Project tree whenever Projects closes the
-   * list.
+   * destination row, before the Project and thread lists.
    */
   readonly more?: ReactNode;
   readonly projectAction?: ReactNode;
@@ -49,13 +47,10 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
       ? buildSidebarNavigation(props.input)
       : props.rows.map((id) => sidebarNavigationDescriptor(id));
 
-  // The More row is the last destination row: it sits between the destination
-  // rows and the Project tree when Projects closes the list, and after the
-  // rows otherwise, so the reveal never drifts away from the rows it belongs
-  // with — however the person reordered or hid Projects.
-  const projectsLast = descriptors[descriptors.length - 1]?.id === "projects";
+  // Thread content follows all static destinations, including More, even when
+  // the Projects destination is reordered within the navigation group.
   const rows: ReactNode[] = [];
-  let morePending = props.more !== undefined;
+  let projectContent: ReactNode;
   for (const descriptor of descriptors) {
     if (descriptor.id === "projects") {
       const action = props.actions.projects;
@@ -76,22 +71,16 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
           </OctantButton>,
         );
         if (props.projectSection !== undefined && props.projectSection !== null) {
-          rows.push(
-            <div className="sidebar-navigation__project-threads" key="project-threads">
-              {props.projectSection}
-            </div>,
+          projectContent = (
+            <div className="sidebar-navigation__project-threads">{props.projectSection}</div>
           );
         }
       } else if (props.projectSection !== undefined && props.projectSection !== null) {
-        if (projectsLast && morePending) {
-          rows.push(<Fragment key="sidebar-more">{props.more}</Fragment>);
-          morePending = false;
-        }
-        rows.push(
-          <div className="sidebar-navigation__projects" key={descriptor.id}>
+        projectContent = (
+          <div className="sidebar-navigation__projects">
             {props.projectAction}
             {props.projectSection}
-          </div>,
+          </div>
         );
       }
       continue;
@@ -128,10 +117,13 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
       </OctantButton>,
     );
   }
-  if (morePending) {
-    rows.push(<Fragment key="sidebar-more">{props.more}</Fragment>);
-  }
-  return <div className="sidebar-navigation">{rows}</div>;
+  return (
+    <div className="sidebar-navigation">
+      {rows}
+      {props.more}
+      {projectContent}
+    </div>
+  );
 }
 
 export function navigationIcon(id: SidebarNavigationDescriptorId) {
