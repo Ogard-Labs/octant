@@ -190,6 +190,18 @@ export class ContextHarnessService {
       this.#persistence.connection,
       input.subject,
     )?.latestUsage;
+    const matchingUsage =
+      previousUsage !== undefined &&
+      String(previousUsage.providerInstanceId) === String(modelLimits.providerInstanceId) &&
+      String(previousUsage.modelId) === String(modelLimits.modelId) &&
+      previousUsage.requestShape === input.requestShape;
+    const reserves =
+      matchingUsage && previousUsage.nextVarianceReserve !== undefined
+        ? {
+            ...input.reserves,
+            variance: Math.max(input.reserves.variance, previousUsage.nextVarianceReserve),
+          }
+        : input.reserves;
     if (
       previousUsage?.contextWindow !== undefined &&
       String(previousUsage.providerInstanceId) === String(modelLimits.providerInstanceId) &&
@@ -255,7 +267,7 @@ export class ContextHarnessService {
       },
       modelLimits,
       serviceLimits: input.serviceLimits,
-      reserves: input.reserves,
+      reserves,
       watchHeadroomTokens: input.watchHeadroomTokens,
       timestamp,
     });
@@ -402,6 +414,7 @@ export class ContextHarnessService {
         ? {}
         : { providerExecutionDurationMs: input.providerExecutionDurationMs }),
       varianceTokens: variance.varianceTokens,
+      nextVarianceReserve: variance.nextVarianceReserve,
       observedAt: timestamp,
     });
     const committed = this.#persistence.journal.append({

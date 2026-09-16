@@ -404,8 +404,8 @@ describe("ContextHarnessService integration", () => {
     expect(reconciled.variance).toEqual({
       requestShape: "code-turn",
       varianceTokens: 40,
-      reserveAdjustmentTokens: 40,
-      nextVarianceReserve: 60,
+      reserveAdjustmentTokens: 20,
+      nextVarianceReserve: 40,
     });
     expect(reconciled.snapshot.latestSent).toEqual(planned.next);
     expect(reconciled.snapshot.latestUsage).toMatchObject({
@@ -428,6 +428,25 @@ describe("ContextHarnessService integration", () => {
         maxAdjustmentTokens: 50,
       }),
     ).toThrowError(expect.objectContaining({ category: "invalid" }));
+    const next = fixture.service.planTurn({
+      subject,
+      displayLabel: "Code Project",
+      requestShape: "code-turn",
+      modelLimitObservations: [modelLimits()],
+      serviceLimits: serviceLimits(),
+      entries: [requiredEntry(100)],
+      reserves: { response: 200, reasoning: 50, framing: 50, variance: 20, safety: 50 },
+      watchHeadroomTokens: 100,
+      capabilityCatalog: catalog([]),
+      capabilityRequest: {
+        providerInstanceId,
+        activeScope,
+        nativeToolSearch: "supported",
+        taskKeywords: [],
+        explicitSelections: [],
+      },
+    });
+    expect(next.next.plan.reserves.variance).toBe(40);
     fixture.connection.close();
   });
 
@@ -563,7 +582,7 @@ describe("ContextHarnessService integration", () => {
       subject,
       planId: planned.next.plan.id,
       requestShape: "code-turn",
-      actualInputTokens: 110,
+      actualInputTokens: 140,
       actualOutputTokens: 20,
       contextTokens: 125,
       contextWindow: 200_000,
@@ -578,16 +597,24 @@ describe("ContextHarnessService integration", () => {
     expect(restored.next.plan.id).toBe(planned.next.plan.id);
     expect(restored.latestSent?.plan.id).toBe(planned.next.plan.id);
     expect(restored.latestUsage).toMatchObject({
-      actualInputTokens: 110,
-      varianceTokens: 10,
+      actualInputTokens: 140,
+      varianceTokens: 40,
       contextTokens: 125,
       contextWindow: 200_000,
     });
     expect(restored.sequence).toBe(3);
     const next = restarted.service.planTurn(nextInput);
+    expect(next.next.plan.reserves.variance).toBe(40);
     expect(next.modelLimits.contextWindow).toBe(200_000);
     expect(next.modelLimits.source).toBe("runtime-reported");
     expect(next.modelLimits).not.toHaveProperty("maxOutput");
+    const differentShape = restarted.service.planTurn({ ...nextInput, requestShape: "work-turn" });
+    expect(differentShape.next.plan.reserves.variance).toBe(20);
+    const differentModel = restarted.service.planTurn({
+      ...nextInput,
+      modelLimitObservations: [decodeModelContextLimits({ ...modelLimits(), modelId: "model-b" })],
+    });
+    expect(differentModel.next.plan.reserves.variance).toBe(20);
     restarted.connection.close();
   });
 });

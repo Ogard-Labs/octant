@@ -475,6 +475,7 @@ export const UsageReconciliation = Schema.Struct({
   cacheWriteInputTokens: Schema.optional(NonNegativeInt),
   providerExecutionDurationMs: Schema.optional(NonNegativeInt),
   varianceTokens: Schema.Int,
+  nextVarianceReserve: Schema.optional(NonNegativeInt),
   observedAt: UtcTimestamp,
   imageUnits: Schema.optional(ImageUsageUnits),
 })

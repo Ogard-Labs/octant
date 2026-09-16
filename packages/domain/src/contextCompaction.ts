@@ -245,10 +245,13 @@ export function reconcileContextVariance(input: ContextVarianceInput): ContextVa
     );
   }
 
+  // Planned input excludes reserves: already covered overhead must not be
+  // added again on every turn with the same provider framing.
+  const uncoveredVariance = varianceTokens >= 0 ? varianceTokens - currentReserve : varianceTokens;
   const reserveAdjustmentTokens =
-    varianceTokens >= 0
-      ? Math.min(varianceTokens, maxAdjustment)
-      : -Math.min(Math.floor(Math.abs(varianceTokens) / 2), maxAdjustment, currentReserve);
+    uncoveredVariance >= 0
+      ? Math.min(uncoveredVariance, maxAdjustment)
+      : -Math.min(Math.floor(Math.abs(uncoveredVariance) / 2), maxAdjustment, currentReserve);
   const nextVarianceReserve = checkedAdd(
     currentReserve,
     reserveAdjustmentTokens,
