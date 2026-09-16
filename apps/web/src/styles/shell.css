@@ -2850,23 +2850,6 @@ form > .work-composer-adapter__attachments {
   white-space: nowrap;
 }
 
-/* The chip spends colour on the request's state: open in the accent, merged
-   in green, closed and draft in grey. */
-.pull-request-chip[data-tone="open"] {
-  color: var(--oct-accent-fg);
-  background: var(--oct-accent-soft);
-}
-
-.pull-request-chip[data-tone="closed"],
-.pull-request-chip[data-tone="draft"] {
-  color: var(--oct-muted);
-}
-
-.pull-request-chip[data-tone="merged"] {
-  color: var(--octant-success-text);
-  background: var(--octant-success-surface);
-}
-
 .pull-request-chip > svg {
   flex: 0 0 auto;
   color: inherit;
@@ -2931,14 +2914,23 @@ form > .work-composer-adapter__attachments {
   color: var(--oct-meta);
 }
 
+/* PR state carries the same meaning in navigation, boards, and pane headers. */
+.pull-request-chip[data-tone="draft"],
+.pull-request-chip[data-tone="unknown"] {
+  color: var(--oct-meta);
+}
+
+.pull-request-chip[data-tone="open"],
 .sidebar-navigation__thread-pr-mark[data-state="open"] {
   color: var(--octant-success-text);
 }
 
+.pull-request-chip[data-tone="merged"],
 .sidebar-navigation__thread-pr-mark[data-state="merged"] {
   color: var(--octant-palette-purple);
 }
 
+.pull-request-chip[data-tone="closed"],
 .sidebar-navigation__thread-pr-mark[data-state="closed"] {
   color: var(--octant-danger-text);
 }

@@ -42,6 +42,10 @@ resulting stack and the theme rules that make it Octant-owned.
   are for discrete objects; accent is scarce; status never relies on color
   alone; icons come from the selected icon library, never text glyphs or
   emoji.
+- Pull-request state uses the same semantic colors across sidebar marks and
+  shared chips: success for open, purple for merged, destructive for closed,
+  and muted for draft or unknown. State labels remain available independently
+  of color.
 - `packages/theme` owns the semantic theme schema, built-in System, Light,
   Dark, and original Octant presets, WCAG contrast validation, safe fallback
   for invalid or incomplete themes, import of a safe subset of interoperable
