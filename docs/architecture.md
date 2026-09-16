@@ -8,6 +8,13 @@ repository. It describes the shape of the system as it exists in code; the
 decision records under `docs/decisions/` explain why individual choices were
 made.
 
+## Repository test cancellation
+
+An authorized repository test remains cancellable while the host rediscovers its
+command definition. Cancellation during discovery prevents process launch; runtime
+shutdown also cancels pending discovery and waits for it to settle. Thread and
+checkout authority checks still precede both run and cancellation.
+
 ## Overview and principles
 
 Octant is one Electron application that hosts a Bun HTTP server, a React
