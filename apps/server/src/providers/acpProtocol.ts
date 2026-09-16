@@ -82,10 +82,14 @@ const SessionModelState = Schema.Struct({
       modelId: Schema.NonEmptyTrimmedString,
       name: Schema.NonEmptyTrimmedString,
       description: Schema.optional(Schema.String),
+      // Facts about a model that ACP names no standard field for — the model's
+      // own reasoning levels, for one — travel in the extension slot.
+      _meta: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
     }),
   ),
 });
 export type AcpSessionModelState = typeof SessionModelState.Type;
+export type AcpSessionModel = AcpSessionModelState["availableModels"][number];
 
 const NewSessionResult = Schema.Struct({
   sessionId: Schema.NonEmptyTrimmedString,
@@ -257,16 +261,19 @@ export interface AcpClient {
   newSession(
     cwd: string,
     mcpServers?: ReadonlyArray<AcpMcpHttpServer>,
+    meta?: Readonly<Record<string, unknown>>,
   ): Promise<AcpNewSessionResult>;
   loadSession(
     sessionId: string,
     cwd: string,
     mcpServers?: ReadonlyArray<AcpMcpHttpServer>,
+    meta?: Readonly<Record<string, unknown>>,
   ): Promise<AcpNewSessionResult>;
   resumeSession(
     sessionId: string,
     cwd: string,
     mcpServers?: ReadonlyArray<AcpMcpHttpServer>,
+    meta?: Readonly<Record<string, unknown>>,
   ): Promise<AcpNewSessionResult>;
   prompt(sessionId: string, prompt: string): Promise<AcpPromptResult>;
   setConfigOption(
@@ -649,12 +656,24 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
         { methodId: "browser-auth-delegated", action: "complete", attemptId },
         decode(DelegatedBrowserComplete),
       ).then(() => undefined),
-    newSession: (cwd, mcpServers = []) =>
-      request("session/new", { cwd, mcpServers }, decode(NewSessionResult)),
-    loadSession: (sessionId, cwd, mcpServers = []) =>
-      request("session/load", { sessionId, cwd, mcpServers }, decode(NewSessionResult)),
-    resumeSession: (sessionId, cwd, mcpServers = []) =>
-      request("session/resume", { sessionId, cwd, mcpServers }, decode(NewSessionResult)),
+    newSession: (cwd, mcpServers = [], meta) =>
+      request(
+        "session/new",
+        { cwd, mcpServers, ...(meta === undefined ? {} : { _meta: meta }) },
+        decode(NewSessionResult),
+      ),
+    loadSession: (sessionId, cwd, mcpServers = [], meta) =>
+      request(
+        "session/load",
+        { sessionId, cwd, mcpServers, ...(meta === undefined ? {} : { _meta: meta }) },
+        decode(NewSessionResult),
+      ),
+    resumeSession: (sessionId, cwd, mcpServers = [], meta) =>
+      request(
+        "session/resume",
+        { sessionId, cwd, mcpServers, ...(meta === undefined ? {} : { _meta: meta }) },
+        decode(NewSessionResult),
+      ),
     prompt: (sessionId, prompt) =>
       request(
         "session/prompt",
