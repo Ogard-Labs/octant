@@ -352,7 +352,7 @@ function LocalServerRow(props: {
         <p>
           Stop {listener.processName} on port {listener.port}
           {listener.workingDirectory === undefined ? "" : ` in ${listener.workingDirectory}`}?
-          Octant did not start this server.
+          Octant cannot verify that it still owns this server.
         </p>
         <OctantButton onClick={() => void props.onStop()} type="button" variant="ghost">
           <span>Stop this server</span>

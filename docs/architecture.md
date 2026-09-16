@@ -49,6 +49,11 @@ The design rests on a small set of invariants that every package obeys:
   those steps has been taken explicitly, and even then only within the mode,
   Project, thread, and provider policy that applies.
 
+Packaged macOS hosts use a restricted executable search path containing system
+utilities and standard package-manager locations. `/usr/sbin` is included so
+local-server discovery can invoke the system `lsof`; arbitrary inherited PATH
+entries are excluded.
+
 ## Process topology
 
 ```mermaid
@@ -538,6 +543,11 @@ Project Overview. Navigator is already one host-wide chat popover from the
 bottom-left profile and Settings control. Simulator placement is already
 [0043](decisions/0043-simulator-follows-the-active-thread.md). 0015 remains
 the Accepted implemented shell until 0041 and 0044 are accepted.
+
+Local-server stop authority recognizes live terminal descendants by a host process
+snapshot and the tracked shell's process identity. An exited shell, a reused PID,
+or missing ownership evidence leaves the listener classified as a leftover and
+requires confirmation. Editor provenance labels alone never grant stop authority.
 
 ## Persistence
 

@@ -54,6 +54,7 @@ export const LISTENER_ENRICHMENT_DEADLINE_MS = 3_000;
  */
 export interface ObservedLocalListener {
   readonly pid: number;
+  readonly ownedByOctant?: boolean;
   readonly port: number;
   /** Process or app name only — never a full command line. */
   readonly processName: string;
@@ -98,6 +99,7 @@ export type ListenerCommandExecutor = (
 ) => Promise<string>;
 
 export interface LiveLocalListenerPortOptions {
+  readonly ownedProcessRoots?: () => Promise<ReadonlySet<number>>;
   /** Injected so tests drive parsing without spawning a host process. */
   readonly execute?: ListenerCommandExecutor;
   readonly currentUid?: number;
@@ -185,11 +187,18 @@ export function createLiveLocalListenerPort(
         signal,
       );
 
+      let ownedRoots: ReadonlySet<number> = new Set();
+      try {
+        ownedRoots = (await options.ownedProcessRoots?.()) ?? ownedRoots;
+      } catch {
+        // Missing ownership evidence preserves leftover confirmation.
+      }
       const listeners = parsed.map((entry) => {
         const workingDirectory = workingDirectories.get(entry.pid);
         const lineage = walkLineage(processTable, entry.pid);
         return {
           ...entry,
+          ...(hasOwnedAncestor(processTable, entry.pid, ownedRoots) ? { ownedByOctant: true } : {}),
           ...(workingDirectory === undefined ? {} : { workingDirectory }),
           ...(lineage.length === 0 ? {} : { lineage }),
         };
@@ -505,4 +514,24 @@ function toPositiveInteger(value: string): number | undefined {
   if (!/^\d+$/.test(value.trim())) return undefined;
   const parsed = Number(value.trim());
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function hasOwnedAncestor(
+  table: ReadonlyMap<number, PsTableEntry>,
+  pid: number,
+  roots: ReadonlySet<number>,
+): boolean {
+  const visited = new Set<number>();
+  let current: number | undefined = pid;
+  while (
+    current !== undefined &&
+    current > 1 &&
+    !visited.has(current) &&
+    visited.size < MAX_LINEAGE_DEPTH
+  ) {
+    if (roots.has(current)) return true;
+    visited.add(current);
+    current = table.get(current)?.parentPid;
+  }
+  return false;
 }

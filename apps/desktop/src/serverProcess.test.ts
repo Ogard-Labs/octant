@@ -305,13 +305,13 @@ describe("serverSpawnSpec", () => {
     expect(spec.env.OCTANT_BROWSER_BROKER_URL).toBe("http://127.0.0.1:42000/");
   });
 
-  it("adds trusted macOS package-manager paths for packaged servers", () => {
+  it("keeps macOS listener inspection tools reachable without admitting arbitrary paths", () => {
     expect(
       resolvePackagedServerPath(
         "/tmp/user-bin:/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin:/opt/homebrew/bin",
         "darwin",
       ),
-    ).toBe("/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin");
+    ).toBe("/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin:/usr/sbin");
     expect(resolvePackagedServerPath("/usr/bin:/bin", "linux")).toBe("/usr/bin:/bin");
   });
 
@@ -354,7 +354,7 @@ describe("serverSpawnSpec", () => {
   it("uses the packaged Electron executable in Node mode without Bun", () => {
     const packagedPath =
       process.platform === "darwin"
-        ? "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin"
+        ? "/usr/bin:/bin:/usr/sbin:/opt/homebrew/bin:/usr/local/bin"
         : "/usr/bin:/bin";
     expect(
       serverSpawnSpec({

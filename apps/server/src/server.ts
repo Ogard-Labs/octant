@@ -3085,6 +3085,7 @@ export function startOctantServer(
     });
     projectPullRequestCadence.start();
     let codeOperationRuntime = options.codeOperationRuntime;
+    let terminalProcessPort: TerminalProcessPort | undefined;
     const providerDataDirectory = persistence.dataDirectory;
     const providerRuntimeRegistry =
       options.providerRuntimeRegistry ??
@@ -3738,7 +3739,7 @@ export function startOctantServer(
       windowAuthorityStore,
     });
     if (codeOperationRuntime === undefined && options.codeService === undefined) {
-      const terminalProcessPort = new TerminalProcessPort({
+      terminalProcessPort = new TerminalProcessPort({
         receiptDirectory: join(providerDataDirectory, "code", "terminal-receipts"),
         shellStateDirectory: join(providerDataDirectory, "code", "terminal-shell"),
       });
@@ -4291,13 +4292,14 @@ export function startOctantServer(
     });
     // Local servers. The scope resolver is what decides who may stop a
     // process, so it is bound to the same authoritative thread, checkout, and
-    // root resolution the Code workspace already uses. `ownedPids` is empty
-    // until an owned-process inventory is threaded through: that classifies
-    // every listener as a leftover, which is the conservative direction because
-    // a leftover stop always requires an explicit confirmation.
+    // root resolution the Code workspace already uses. The live observer verifies
+    // terminal roots and their descendants; unknown processes remain leftovers.
     const localServerRoutes = createLocalServerRouteHandler({
       service: new LocalServerService({
-        listeners: createLiveLocalListenerPort(),
+        listeners: createLiveLocalListenerPort({
+          ownedProcessRoots: async () =>
+            (await terminalProcessPort?.ownedProcessRoots()) ?? new Set<number>(),
+        }),
         health: createLiveLocalServerHealthProbe(),
         stopPort: createLiveLocalServerStopPort(),
         scopes: createCodeThreadLocalServerScopeResolver({

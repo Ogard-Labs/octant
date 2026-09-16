@@ -41,6 +41,8 @@ interface ServerSpawnSpecOptions {
 const trustedMacOsExecutablePaths = [
   "/usr/bin",
   "/bin",
+  // macOS ships lsof here; the Environment dock needs it to inspect listeners.
+  "/usr/sbin",
   "/opt/homebrew/bin",
   "/usr/local/bin",
 ] as const;

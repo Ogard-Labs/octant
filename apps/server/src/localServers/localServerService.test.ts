@@ -490,6 +490,19 @@ describe("LocalServerService open", () => {
 });
 
 describe("LocalServerService stop", () => {
+  it("stops a listener verified as a live terminal descendant without leftover confirmation", async () => {
+    const { service, stop } = build({ observed: [{ ...viteListener, ownedByOctant: true }] });
+    const result = await execute(
+      service,
+      command({
+        kind: "stop-local-server",
+        listenerId: deriveListenerId(threadId, viteListener),
+      } as Partial<LocalServerCommand>),
+    );
+    expect(result.kind).toBe("local-server-stopped");
+    expect(stop).toHaveBeenCalledWith({ pid: 4213 });
+  });
+
   it("stops an Octant-owned server without leftover confirmation", async () => {
     const { service, stop } = build({
       observed: [viteListener],
@@ -603,6 +616,35 @@ describe("LocalServerService stop", () => {
         },
       },
       scopes: { resolve: async () => scope({ ownedPids: new Set([viteListener.pid]) }) },
+      health: { probe: async () => ({ scheme: "http", host: "127.0.0.1", health: "listening" }) },
+      stopPort: { stop },
+      clock: () => "2026-08-14T08:00:00.000Z",
+    });
+    const result = await execute(
+      service,
+      command({
+        kind: "stop-local-server",
+        listenerId: deriveListenerId(threadId, viteListener),
+      } as Partial<LocalServerCommand>),
+    );
+    expect(result).toMatchObject({ failure: { category: "not-found" } });
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it("refuses a stop when verified terminal ownership disappears before signalling", async () => {
+    let call = 0;
+    const stop = vi.fn(async () => "stopped" as const);
+    const service = new LocalServerService({
+      listeners: {
+        observe: async () => {
+          call += 1;
+          return {
+            status: "observed",
+            listeners: [{ ...viteListener, ownedByOctant: call === 1 }],
+          };
+        },
+      },
+      scopes: { resolve: async () => scope() },
       health: { probe: async () => ({ scheme: "http", host: "127.0.0.1", health: "listening" }) },
       stopPort: { stop },
       clock: () => "2026-08-14T08:00:00.000Z",
