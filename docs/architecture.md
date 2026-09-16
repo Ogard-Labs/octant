@@ -49,6 +49,11 @@ The design rests on a small set of invariants that every package obeys:
   those steps has been taken explicitly, and even then only within the mode,
   Project, thread, and provider policy that applies.
 
+Packaged macOS hosts use a restricted executable search path containing system
+utilities and standard package-manager locations. `/usr/sbin` is included so
+local-server discovery can invoke the system `lsof`; arbitrary inherited PATH
+entries are excluded.
+
 ## Process topology
 
 ```mermaid
