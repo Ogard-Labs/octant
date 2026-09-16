@@ -1,3 +1,8 @@
+import {
+  decodeProviderInstance,
+  decodeProviderInstanceId,
+  decodeProviderModelId,
+} from "@octant/contracts";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -1115,5 +1120,99 @@ describe("DraftThreadWorkspace", () => {
       undefined,
       { id: "11111111-1111-4111-8111-111111111111" },
     );
+  });
+});
+
+describe("Chat draft reasoning", () => {
+  it("submits the reasoning level chosen before the first message", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    const providerId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000001");
+    const modelId = decodeProviderModelId("reasoning-model");
+    const { rerender } = render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        onCreateThread={onCreateThread}
+        selectedProviderInstanceId={providerId}
+        selectedModelId={modelId}
+        providerGroups={[
+          {
+            instance: decodeProviderInstance({
+              id: providerId,
+              displayName: "Codex",
+              driverKind: "codex",
+              configuration: { kind: "codex-cli", binaryPath: "/usr/local/bin/codex" },
+              enabled: true,
+              environmentPolicy: "inherit-host",
+              version: 1,
+              createdAt: "2026-09-16T00:00:00.000Z",
+              updatedAt: "2026-09-16T00:00:00.000Z",
+            }),
+            runtime: "provider",
+            readiness: "ready",
+            driverLabel: "Codex CLI",
+            endpointHost: undefined,
+            executionHost: "This computer",
+            sections: [
+              {
+                id: "all-models",
+                label: "Models",
+                models: [
+                  {
+                    badges: [],
+                    toolCapable: true,
+                    model: {
+                      id: modelId,
+                      displayName: "Reasoning model",
+                      source: "discovered",
+                      verification: "verified",
+                      reasoning: "supported",
+                      inputModalities: ["text"],
+                      options: [
+                        {
+                          kind: "selection",
+                          id: "effort",
+                          displayName: "Effort",
+                          values: ["low", "high"],
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await user.click(screen.getByRole("button", { name: "High" }));
+    await user.keyboard("{Escape}");
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Hello");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    expect(onCreateThread.mock.calls[0]?.[11]).toEqual({ effort: "high" });
+
+    onCreateThread.mockClear();
+    rerender(
+      <DraftThreadWorkspace
+        {...baseProps}
+        onCreateThread={onCreateThread}
+        selectedProviderInstanceId={providerId}
+        selectedModelId={decodeProviderModelId("other-model")}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    expect(onCreateThread).toHaveBeenCalledExactlyOnceWith("Hello");
+    onCreateThread.mockClear();
+    rerender(
+      <DraftThreadWorkspace
+        {...baseProps}
+        onCreateThread={onCreateThread}
+        selectedProviderInstanceId={providerId}
+        selectedModelId={modelId}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    expect(onCreateThread).toHaveBeenCalledExactlyOnceWith("Hello");
   });
 });
