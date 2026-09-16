@@ -586,15 +586,33 @@ export function createHostBridge(
       return decodeAppUpdateState(await ipc.invoke(IPC_CHANNELS.appUpdateRing, ring));
     },
     subscribeAppUpdateState: (listener: (state: AppUpdateState) => void) => {
+      let active = true;
+      let receivedLiveState = false;
       const receive: MaterialListener = (_event, value) => {
         try {
-          listener(decodeAppUpdateState(value));
+          const state = decodeAppUpdateState(value);
+          if (!active) return;
+          receivedLiveState = true;
+          listener(state);
         } catch {
           // Ignore malformed native state instead of widening the bridge.
         }
       };
       ipc.on(IPC_CHANNELS.appUpdateState, receive);
-      return () => ipc.removeListener(IPC_CHANNELS.appUpdateState, receive);
+      // Settings can mount long after the last broadcast. Read the local
+      // snapshot, but never let it overwrite a newer live update.
+      void ipc
+        .invoke(IPC_CHANNELS.appUpdateState)
+        .then((value) => {
+          if (active && !receivedLiveState) listener(decodeAppUpdateState(value));
+        })
+        .catch(() => {
+          // A refused or malformed snapshot leaves live subscription available.
+        });
+      return () => {
+        active = false;
+        ipc.removeListener(IPC_CHANNELS.appUpdateState, receive);
+      };
     },
     readBundledWhatsNew: async () =>
       decodeBundledWhatsNew(await ipc.invoke(IPC_CHANNELS.appUpdateWhatsNew)),

@@ -20,6 +20,64 @@ const projectWindowCapability = "C".repeat(43);
 const projectId = "00000000-0000-4000-8000-000000000203";
 
 describe("desktop preload bridge", () => {
+  it.each(["live update", "unsubscribe"] as const)(
+    "ignores a late update snapshot after %s",
+    async (action) => {
+      let resolve: ((value: unknown) => void) | undefined;
+      let receive: ((event: unknown, value: unknown) => void) | undefined;
+      const snapshot = new Promise<unknown>((done) => {
+        resolve = done;
+      });
+      const ipc: IpcRendererPort = {
+        invoke: vi.fn(() => snapshot),
+        on: vi.fn((_channel, listener) => {
+          receive = listener;
+        }),
+        removeListener: vi.fn(),
+      };
+      const listener = vi.fn();
+      const unsubscribe = createHostBridge(ipc, projectWindowCapability).subscribeAppUpdateState(
+        listener,
+      );
+      const state = {
+        status: "idle",
+        currentVersion: "0.1.0",
+        automaticChecks: false,
+        ring: "preview",
+      };
+      if (action === "live update") receive?.({}, state);
+      else unsubscribe();
+      resolve?.({ ...state, ring: "stable" });
+      await snapshot;
+      await Promise.resolve();
+      expect(listener).toHaveBeenCalledTimes(action === "live update" ? 1 : 0);
+      if (action === "live update") expect(listener).toHaveBeenCalledWith(state);
+      unsubscribe();
+    },
+  );
+
+  it("replays the current local update state when Settings subscribes without checking the feed", async () => {
+    const state = {
+      status: "idle",
+      currentVersion: "0.1.0",
+      automaticChecks: false,
+      ring: "preview",
+    };
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn().mockResolvedValue(state),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    };
+    const listener = vi.fn();
+    const unsubscribe = createHostBridge(ipc, projectWindowCapability).subscribeAppUpdateState(
+      listener,
+    );
+    await vi.waitFor(() => expect(listener).toHaveBeenCalledWith(state));
+    expect(ipc.invoke).toHaveBeenCalledWith(IPC_CHANNELS.appUpdateState);
+    expect(ipc.invoke).not.toHaveBeenCalledWith(IPC_CHANNELS.appUpdateCheck);
+    unsubscribe();
+  });
+
   it("keeps the sandboxed preload free of runtime package imports", () => {
     const source = readFileSync(fileURLToPath(new URL("./preload.ts", import.meta.url)), "utf8");
     expect(source).not.toMatch(/import\s*\{[^}]*\}\s*from ["']@octant\//);

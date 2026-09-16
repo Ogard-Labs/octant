@@ -2755,6 +2755,10 @@ function installIpcHandlers(): void {
       throw new Error("Computer use is unavailable for this host.");
     return computerUseService.checkUpdates();
   });
+  ipcMain.handle(IPC_CHANNELS.appUpdateState, (event) => {
+    ownedTopLevelWindowContext(event);
+    return appUpdates().state();
+  });
   ipcMain.handle(IPC_CHANNELS.appUpdateCheck, async (event) => {
     ownedTopLevelWindowContext(event);
     return await appUpdates().check();
