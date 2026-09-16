@@ -220,6 +220,19 @@ describe("work thread contracts", () => {
     });
   });
 
+  it("carries selected model options in a Work provider change", () => {
+    expect(
+      decodeWorkThreadCommand({
+        kind: "change-work-thread-provider",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        providerInstanceId: ids.provider,
+        modelId: "reasoning-model",
+        modelOptionValues: { effort: "high" },
+      }),
+    ).toMatchObject({ modelOptionValues: { effort: "high" } });
+  });
+
   it("requires a named delivery target and bounded satisfaction evidence for completion", () => {
     expect(
       decodeWorkThreadCommand({

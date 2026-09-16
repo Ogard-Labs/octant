@@ -20,7 +20,11 @@ import {
   ComposerSlashTypeahead,
 } from "../../composer/useComposerSlashCommands";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
-import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
+import type {
+  ProviderInstanceId,
+  ProviderModelId,
+  ProviderModelOptionValues,
+} from "@octant/contracts/providers";
 import type { CreateHostViewScope, PickerGroup } from "@octant/domain";
 import { FolderOpen, AlertTriangle } from "lucide-react";
 import {
@@ -76,6 +80,7 @@ export interface WorkComposerAdapterProps {
     threadMentionIds?: ReadonlyArray<MentionableThreadId>,
     computerUseSelection?: ExtensionSelection,
     extensionSelections?: ReadonlyArray<ExtensionSelection>,
+    modelOptionValues?: ProviderModelOptionValues,
   ) => boolean | void | Promise<boolean | void>;
   readonly extensionClient?: ExtensionClient;
   readonly browserAvailable?: boolean;
@@ -95,6 +100,14 @@ export interface WorkComposerAdapterProps {
 
 export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   const [prompt, setPrompt] = useNewTaskPrompt();
+  const modelKey = `${props.selectedProviderInstanceId ?? ""}:${props.selectedModelId ?? ""}`;
+  const [optionState, setOptionState] = useState<{
+    readonly key: string;
+    readonly values: ProviderModelOptionValues;
+  }>({ key: modelKey, values: {} });
+  if (optionState.key !== modelKey) setOptionState({ key: modelKey, values: {} });
+  const modelOptionValues = optionState.key === modelKey ? optionState.values : {};
+
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,
     draft: prompt,
@@ -177,15 +190,21 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     void threadMentions
       .resolveForSend()
       .then(async (threadMentionIds) => {
-        const created = await props.onCreateThread(
-          trimmed,
-          staged,
-          threadMentionIds,
-          ...(computerUseSelection === undefined
-            ? ([] as const)
-            : ([computerUseSelection] as const)),
-          ...(extensionSelections.length === 0 ? ([] as const) : ([extensionSelections] as const)),
-        );
+        const options: [
+          (ExtensionSelection | undefined)?,
+          (ReadonlyArray<ExtensionSelection> | undefined)?,
+          (ProviderModelOptionValues | undefined)?,
+        ] = [];
+        if (
+          computerUseSelection !== undefined ||
+          extensionSelections.length > 0 ||
+          Object.keys(modelOptionValues).length > 0
+        )
+          options[0] = computerUseSelection;
+        if (extensionSelections.length > 0 || Object.keys(modelOptionValues).length > 0)
+          options[1] = extensionSelections.length === 0 ? undefined : extensionSelections;
+        if (Object.keys(modelOptionValues).length > 0) options[2] = modelOptionValues;
+        const created = await props.onCreateThread(trimmed, staged, threadMentionIds, ...options);
         if (created !== false) {
           images.clearAfterAccepted();
           computer.consume(computerUseSelection);
@@ -195,7 +214,16 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
       .finally(() => {
         setSubmitting(false);
       });
-  }, [canSubmit, computer, extensionDraft, images, props, threadMentions, trimmed]);
+  }, [
+    canSubmit,
+    computer,
+    extensionDraft,
+    images,
+    modelOptionValues,
+    props,
+    threadMentions,
+    trimmed,
+  ]);
 
   function attachFromTransfer(items: DataTransfer | null): boolean {
     if (items === null) return false;
@@ -425,6 +453,14 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                     ariaLabel="Provider and model"
                     groups={props.providerGroups}
                     menuSide="bottom"
+                    disabled={props.creating === true || submitting}
+                    modelOptionValues={modelOptionValues}
+                    onModelOptionChange={(optionId, value) => {
+                      const values = { ...modelOptionValues };
+                      if (value === undefined) delete values[optionId];
+                      else values[optionId] = value;
+                      setOptionState({ key: modelKey, values });
+                    }}
                     onSelect={props.onSelectProvider}
                     {...(props.selectedModelId === undefined
                       ? {}

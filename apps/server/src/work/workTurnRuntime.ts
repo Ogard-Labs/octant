@@ -3,6 +3,7 @@ import {
   MAX_PROVIDER_CONTEXT_BLOCKS,
   MAX_WORK_TURN_RESPONSE_BYTES,
   type ProviderAttachmentInput,
+  type ProviderModelOptionValues,
   type ProviderContextBlock,
   type ProviderFailure,
   type ProviderRuntimeEvent,
@@ -46,6 +47,7 @@ export interface WorkTurnRuntimePort {
     readonly signal: AbortSignal;
     readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
     readonly context?: ReadonlyArray<ProviderContextBlock>;
+    readonly modelOptionValues?: ProviderModelOptionValues;
     readonly appManagedTools?: AppManagedToolSet;
     readonly onUsage?: (usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>) => void;
     readonly onDelta?: (response: string) => void;
@@ -79,6 +81,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
     readonly signal: AbortSignal;
     readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
     readonly context?: ReadonlyArray<ProviderContextBlock>;
+    readonly modelOptionValues?: ProviderModelOptionValues;
     readonly appManagedTools?: AppManagedToolSet;
     readonly onUsage?: (usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>) => void;
     readonly onDelta?: (response: string) => void;
@@ -126,6 +129,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       readonly signal: AbortSignal;
       readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
       readonly context?: ReadonlyArray<ProviderContextBlock>;
+      readonly modelOptionValues?: ProviderModelOptionValues;
       readonly appManagedTools?: AppManagedToolSet;
       readonly onUsage?: (usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>) => void;
       readonly onDelta?: (response: string) => void;
@@ -163,6 +167,9 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       yield* connection.start({
         sessionId: input.providerSessionId,
         modelId: input.command.authority.modelId,
+        ...(input.modelOptionValues === undefined
+          ? {}
+          : { modelOptionValues: input.modelOptionValues }),
         executionPolicy: "approval-gated",
         tools: input.appManagedTools?.definitions ?? [],
       });

@@ -19,6 +19,7 @@ import {
   type ProjectId,
   type ProviderInstance,
   type ProviderModelId,
+  type ProviderModelOptionValues,
   type ProviderModel,
   type ProviderProbeResult,
   type WorkStatusDatedItem,
@@ -26,6 +27,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { Schema } from "effect";
+import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
 import {
   assertProviderAllowedByProjectPolicy,
   hasWorkToolAuthority,
@@ -313,7 +315,12 @@ export class WorkThreadService {
           authenticatedWindowId,
           command.projectId,
         );
-        await this.#requireProviderModel(command.providerInstanceId, command.modelId, project);
+        await this.#requireProviderModel(
+          command.providerInstanceId,
+          command.modelId,
+          project,
+          command.modelOptionValues,
+        );
         const latestBinding = project.bindingHistory.at(-1);
         if (
           latestBinding === undefined ||
@@ -368,6 +375,9 @@ export class WorkThreadService {
           lifecycle: "active",
           providerInstanceId: command.providerInstanceId,
           modelId: command.modelId,
+          ...(command.modelOptionValues === undefined
+            ? {}
+            : { modelOptionValues: command.modelOptionValues }),
           bindingRevisionId: command.bindingRevisionId,
           workingDirectory,
           version: 1,
@@ -456,7 +466,12 @@ export class WorkThreadService {
         return { kind: "thread-completion-confirmed", thread: confirmed };
       }
       if (command.kind === "change-work-thread-provider") {
-        await this.#requireProviderModel(command.providerInstanceId, command.modelId, project);
+        await this.#requireProviderModel(
+          command.providerInstanceId,
+          command.modelId,
+          project,
+          command.modelOptionValues,
+        );
       } else if (command.kind === "change-work-thread-working-directory") {
         try {
           await this.#workingDirectories.resolve(
@@ -497,6 +512,7 @@ export class WorkThreadService {
           throw this.#failure("invalid", WORK_SNOOZE_REFUSALS[decision.reason]);
         }
       }
+      const { modelOptionValues: _previousModelOptions, ...withoutModelOptions } = current;
       const updated = decodeWorkThread(
         command.kind === "rename-work-thread"
           ? {
@@ -542,16 +558,25 @@ export class WorkThreadService {
                     }
                   : command.kind === "change-work-thread-provider"
                     ? {
-                        ...current,
+                        ...withoutModelOptions,
+                        ...(command.modelOptionValues === undefined
+                          ? {}
+                          : { modelOptionValues: command.modelOptionValues }),
                         providerInstanceId: command.providerInstanceId,
                         modelId: command.modelId,
-                        providerHandoff: {
-                          previousProviderInstanceId: current.providerInstanceId,
-                          previousModelId: current.modelId,
-                          nextProviderInstanceId: command.providerInstanceId,
-                          nextModelId: command.modelId,
-                          changedAt: updatedAt,
-                        },
+                        ...(String(command.providerInstanceId) ===
+                          String(current.providerInstanceId) &&
+                        String(command.modelId) === String(current.modelId)
+                          ? {}
+                          : {
+                              providerHandoff: {
+                                previousProviderInstanceId: current.providerInstanceId,
+                                previousModelId: current.modelId,
+                                nextProviderInstanceId: command.providerInstanceId,
+                                nextModelId: command.modelId,
+                                changedAt: updatedAt,
+                              },
+                            }),
                         version: command.expectedVersion + 1,
                         updatedAt,
                       }
@@ -652,6 +677,7 @@ export class WorkThreadService {
     providerInstanceId: WorkThread["providerInstanceId"],
     modelId: ProviderModelId,
     project: Project,
+    modelOptionValues?: ProviderModelOptionValues,
   ): Promise<void> {
     const provider = this.#persistence.readProviderInstance(providerInstanceId);
     if (provider === undefined || !provider.enabled) {
@@ -672,7 +698,15 @@ export class WorkThreadService {
       }
       throw error;
     }
-    if (this.#probeProvider === undefined) return;
+    const validateOptions = (model: ProviderModel | undefined) => {
+      if (unsupportedModelOptionValues(modelOptionValues, model?.options ?? []).length > 0) {
+        throw this.#failure("invalid", "Selected Work model does not offer those model options.");
+      }
+    };
+    if (this.#probeProvider === undefined) {
+      validateOptions(this.#readProviderModel?.(providerInstanceId, modelId));
+      return;
+    }
     let probe: ProviderProbeResult;
     try {
       probe = await this.#probeProvider(providerInstanceId);
@@ -681,6 +715,7 @@ export class WorkThreadService {
     }
     const selectedModel = probe.models.find((model) => String(model.id) === String(modelId));
     const modelAvailable = selectedModel !== undefined;
+    validateOptions(selectedModel);
     if (probe.readiness !== "ready" && !(probe.readiness === "degraded" && modelAvailable)) {
       throw this.#failure(
         probe.readiness === "unauthenticated"

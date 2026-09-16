@@ -15,6 +15,7 @@ import {
   decodeWorkTurnId,
   decodeWorkTurnRequestId,
   type MentionableThreadId,
+  type ProviderModelOptionValues,
   type WorkAttachmentId,
   type WorkRequest,
   type WorkThread,
@@ -780,12 +781,14 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     async (selection: {
       readonly providerInstanceId: WorkThread["providerInstanceId"];
       readonly modelId: WorkThread["modelId"];
+      readonly modelOptionValues?: ProviderModelOptionValues;
     }) => {
       if (
         thread === undefined ||
         thread.completionConfirmed === true ||
         providerChanging ||
-        (selection.providerInstanceId === thread.providerInstanceId &&
+        (selection.modelOptionValues === undefined &&
+          selection.providerInstanceId === thread.providerInstanceId &&
           selection.modelId === thread.modelId)
       ) {
         return;
@@ -800,6 +803,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           expectedVersion: thread.version,
           providerInstanceId: selection.providerInstanceId,
           modelId: selection.modelId,
+          ...(selection.modelOptionValues === undefined
+            ? {}
+            : { modelOptionValues: selection.modelOptionValues }),
         });
         if (!("kind" in result) || result.kind !== "thread-updated") {
           setErrorMessage("The selected Work provider could not be applied.");
@@ -807,7 +813,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         }
         setThread(result.thread);
         props.onThreadUpdated?.(result.thread);
-        setStatus("Provider handoff ready for the next Work turn.");
+        setStatus(
+          selection.modelOptionValues === undefined
+            ? "Provider handoff ready for the next Work turn."
+            : "Model options saved for the next Work turn.",
+        );
       } catch {
         setErrorMessage(
           "The selected Work provider could not be applied. Choose a ready provider and model.",
@@ -1531,6 +1541,19 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                     ariaLabel="Provider and model"
                     disabled={providerChanging || creating || completionLocked}
                     groups={props.providerGroups ?? []}
+                    {...(thread.modelOptionValues === undefined
+                      ? {}
+                      : { modelOptionValues: thread.modelOptionValues })}
+                    onModelOptionChange={(optionId, value) => {
+                      const values = { ...thread.modelOptionValues };
+                      if (value === undefined) delete values[optionId];
+                      else values[optionId] = value;
+                      void changeProvider({
+                        providerInstanceId: thread.providerInstanceId,
+                        modelId: thread.modelId,
+                        modelOptionValues: values,
+                      });
+                    }}
                     onSelect={(selection) => void changeProvider(selection)}
                     {...(props.onOpenSettings === undefined
                       ? {}

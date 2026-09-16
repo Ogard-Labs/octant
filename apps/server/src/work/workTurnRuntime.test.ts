@@ -32,6 +32,7 @@ const ids = {
 describe("WorkTurnRuntime", () => {
   it("acquires Work project-backed authority with request projection context and streams a reply", async () => {
     const acquireInputs: unknown[] = [];
+    const start = vi.fn((_input: Parameters<ProviderConnection["start"]>[0]) => Effect.void);
     const deltas: string[] = [];
     const usage = vi.fn();
     const events: ProviderRuntimeEvent[] = [
@@ -72,7 +73,7 @@ describe("WorkTurnRuntime", () => {
         acquireInputs.push(input);
         return Effect.succeed({
           subscribe: Effect.succeed(Stream.fromIterable(events)),
-          start: () => Effect.void,
+          start,
           send: () => Effect.void,
           resume: () => Effect.void,
           interrupt: () => Effect.void,
@@ -108,8 +109,12 @@ describe("WorkTurnRuntime", () => {
       signal: new AbortController().signal,
       onDelta: (text) => deltas.push(text),
       onUsage: usage,
+      modelOptionValues: { effort: "high" },
     });
 
+    expect(start).toHaveBeenCalledWith(
+      expect.objectContaining({ modelOptionValues: { effort: "high" } }),
+    );
     expect(acquireInputs[0]).toMatchObject({
       mode: "work",
       projectRoot: "/tmp/work-project",

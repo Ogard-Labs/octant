@@ -59,6 +59,74 @@ describe("WorkThreadWorkspace", () => {
     expect(screen.getByRole("group", { name: "Browser origin approval" })).toBeInTheDocument();
   });
 
+  it("saves reasoning for the current Work model and restores its default", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn<WorkThreadClient["execute"]>(async (command) => ({
+      kind: "thread-updated",
+      thread: workThread({
+        modelOptionValues: "modelOptionValues" in command ? command.modelOptionValues : {},
+        version: 2,
+      }),
+    }));
+    const group = providerGroup();
+    render(
+      <WorkThreadWorkspace
+        providerGroups={[
+          {
+            ...group,
+            sections: group.sections.map((section) => ({
+              ...section,
+              models: section.models.map((entry) => ({
+                ...entry,
+                model: {
+                  ...entry.model,
+                  options: [
+                    {
+                      kind: "selection",
+                      id: "effort",
+                      displayName: "Effort",
+                      values: ["low", "high"],
+                    },
+                  ],
+                },
+              })),
+            })),
+          },
+        ]}
+        threadClient={{
+          bootstrap: vi.fn(async () => ({ threads: [workThread()], runtime: [] })),
+          navigation: vi.fn(),
+          queryBoard: vi.fn(),
+          execute,
+        }}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    await screen.findByLabelText("Bound provider and model");
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const levels = await screen.findByRole("group", { name: "Effort level" });
+    await user.click(within(levels).getByRole("button", { name: "High" }));
+    await waitFor(() =>
+      expect(execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "change-work-thread-provider",
+          providerInstanceId: providerId,
+          modelId,
+          modelOptionValues: { effort: "high" },
+        }),
+      ),
+    );
+    expect(within(levels).getByRole("button", { name: "High" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await user.click(within(levels).getByRole("button", { name: "Default" }));
+    await waitFor(() =>
+      expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ modelOptionValues: {} })),
+    );
+  });
+
   it("changes provider and model through the authoritative Work command", async () => {
     const user = userEvent.setup();
     const execute = vi.fn(async () => ({

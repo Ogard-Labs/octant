@@ -2,6 +2,7 @@ import {
   type AggregateVersion,
   type UtcTimestamp,
   decodeWorkThread,
+  decodeProviderModel,
   decodeWorkThreadBootstrap,
   decodeWorkThreadId,
   decodeProjectId,
@@ -760,6 +761,63 @@ describe("WorkThreadService", () => {
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
+  it("refuses undeclared Work reasoning and saves a declared selection", async () => {
+    const model = decodeProviderModel({
+      id: "model-a",
+      displayName: "Reasoning model",
+      source: "discovered",
+      verification: "verified",
+      reasoning: "supported",
+      inputModalities: ["text"],
+      options: [
+        { kind: "selection", id: "effort", displayName: "Effort", values: ["low", "high"] },
+      ],
+    });
+    const fixture = serviceFixture({ readProviderModel: () => model });
+    const command = {
+      kind: "change-work-thread-provider",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+    };
+    await expect(
+      fixture.service.execute(ids.window, { ...command, modelOptionValues: { effort: "max" } }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    await fixture.service.execute(ids.window, {
+      ...command,
+      modelOptionValues: { effort: "high" },
+    });
+    expect(fixture.projection.read(ids.thread)?.modelOptionValues).toEqual({ effort: "high" });
+    expect(fixture.projection.read(ids.thread)?.providerHandoff).toBeUndefined();
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            payload: expect.objectContaining({
+              thread: expect.objectContaining({ modelOptionValues: { effort: "high" } }),
+            }),
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("resets reasoning when changing the Work model", async () => {
+    const fixture = serviceFixture({
+      threads: [thread({ modelOptionValues: { effort: "high" } })],
+    });
+    await fixture.service.execute(ids.window, {
+      kind: "change-work-thread-provider",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      providerInstanceId: ids.provider,
+      modelId: "model-b",
+    });
+    expect(fixture.projection.read(ids.thread)).not.toHaveProperty("modelOptionValues");
+  });
+
   it("changes provider/model without changing Work authority or losing the handoff event", async () => {
     const current = thread({
       workingDirectory: "research/brief" as never,
@@ -884,6 +942,7 @@ function serviceFixture(
     readonly providerEnabled?: boolean;
     readonly providerDriverKind?: "openai-compatible" | "azure-foundry" | "codex";
     readonly probeProvider?: WorkThreadServiceDependencies["probeProvider"];
+    readonly readProviderModel?: WorkThreadServiceDependencies["readProviderModel"];
     readonly project?: Project;
     readonly events?: ReadonlyArray<EventEnvelope>;
     readonly issueContext?: WorkThreadServiceDependencies["issueContext"];
@@ -963,6 +1022,9 @@ function serviceFixture(
     workingDirectories,
     onWorkingDirectoryChanged,
     ...(options.probeProvider === undefined ? {} : { probeProvider: options.probeProvider }),
+    ...(options.readProviderModel === undefined
+      ? {}
+      : { readProviderModel: options.readProviderModel }),
     ...(options.issueContext === undefined ? {} : { issueContext: options.issueContext }),
     ...(options.linearIssueContext === undefined
       ? {}
